@@ -2,3 +2,6 @@
 name = "term-core"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+portable-pty = "0.9"
