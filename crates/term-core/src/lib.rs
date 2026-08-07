@@ -46,12 +46,18 @@ pub struct Pty {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     reader: Option<JoinHandle<()>>,
-    output: Receiver<Vec<u8>>,
 }
 
 impl Pty {
-    /// Abre un pseudoterminal y lanza `program` dentro.
-    pub fn spawn(program: &str, args: &[&str], size: Size) -> Result<Self> {
+    /// Abre un pseudoterminal, lanza `program` dentro y devuelve el canal de su salida.
+    ///
+    /// El canal se entrega aparte, no colgado del `Pty`, porque quien lo consume puede querer
+    /// hacerlo desde otro hilo — y un `Receiver` prestado no cruza de hilo, aunque movido sí. Que
+    /// salga por el constructor evita además que existan dos formas de llegar a él.
+    ///
+    /// Al hijo se le fija `TERM` y `COLORTERM`: sin ellos, un programa a pantalla completa no sabe
+    /// qué secuencias puede emitir y se queda en un terminal tonto, sin color.
+    pub fn spawn(program: &str, args: &[&str], size: Size) -> Result<(Self, Receiver<Vec<u8>>)> {
         let pair = native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
@@ -61,6 +67,8 @@ impl Pty {
 
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
         let child = pair.slave.spawn_command(cmd)?;
 
         // El extremo esclavo solo lo necesita el hijo. Soltarlo aquí es lo que hace que la lectura
@@ -87,23 +95,18 @@ impl Pty {
             }
         });
 
-        Ok(Self {
-            child,
-            // El maestro se conserva para poder redimensionar. Mantenerlo abierto no impide el fin
-            // de fichero del hilo lector: ese depende de que nadie tenga abierto el extremo
-            // esclavo, y el único que lo tiene es el hijo.
-            master: pair.master,
-            writer,
-            reader: Some(reader),
+        Ok((
+            Self {
+                child,
+                // El maestro se conserva para poder redimensionar. Mantenerlo abierto no impide el
+                // fin de fichero del hilo lector: ese depende de que nadie tenga abierto el extremo
+                // esclavo, y el único que lo tiene es el hijo.
+                master: pair.master,
+                writer,
+                reader: Some(reader),
+            },
             output,
-        })
-    }
-
-    /// Canal por el que llega la salida cruda del programa.
-    ///
-    /// Se desconecta cuando el programa termina.
-    pub fn output(&self) -> &Receiver<Vec<u8>> {
-        &self.output
+        ))
     }
 
     /// Comunica al programa que el terminal ha cambiado de tamaño.
@@ -156,10 +159,10 @@ mod tests {
     ///
     /// Con plazo a propósito: un `recv()` sin plazo convertiría el fallo que estos tests buscan
     /// —un hilo lector que no termina— en un cuelgue eterno en vez de en un test en rojo.
-    fn consumir_hasta_el_cierre(pty: &Pty) -> Vec<u8> {
+    fn consumir_hasta_el_cierre(salida_del_pty: &Receiver<Vec<u8>>) -> Vec<u8> {
         let mut salida = Vec::new();
         loop {
-            match pty.output().recv_timeout(PLAZO) {
+            match salida_del_pty.recv_timeout(PLAZO) {
                 Ok(bytes) => salida.extend_from_slice(&bytes),
                 Err(RecvTimeoutError::Disconnected) => return salida,
                 Err(RecvTimeoutError::Timeout) => {
@@ -169,11 +172,20 @@ mod tests {
         }
     }
 
+    fn contiene(salida: &[u8], texto: &str) -> bool {
+        String::from_utf8_lossy(salida).contains(texto)
+    }
+
+    // Ojo con el `_pty` de los tests: no es una variable sobrante. Mientras viva, el hijo vive;
+    // sustituirlo por `_` lo suelta en el acto, y `Drop` mata al programa antes de que le dé tiempo
+    // a escribir. El test no fallaría siempre — fallaría a veces, que es peor.
+
     #[test]
     fn el_canal_se_cierra_cuando_el_programa_termina() {
-        let pty = Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("lanzar sh");
+        let (_pty, salida) =
+            Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("lanzar sh");
 
-        consumir_hasta_el_cierre(&pty);
+        consumir_hasta_el_cierre(&salida);
     }
 
     #[test]
@@ -188,13 +200,30 @@ mod tests {
 
     #[test]
     fn lo_que_escribe_el_programa_llega_por_el_canal() {
-        let pty = Pty::spawn("sh", &["-c", "printf hola"], Size::default()).expect("lanzar sh");
+        let (_pty, canal) =
+            Pty::spawn("sh", &["-c", "printf hola"], Size::default()).expect("lanzar sh");
 
-        let salida = consumir_hasta_el_cierre(&pty);
+        let salida = consumir_hasta_el_cierre(&canal);
 
         assert!(
-            salida.windows(4).any(|v| v == b"hola"),
+            contiene(&salida, "hola"),
             "no llegó la salida del programa: {salida:?}"
+        );
+    }
+
+    #[test]
+    fn el_programa_recibe_el_tipo_de_terminal() {
+        // Sin esto, un programa a pantalla completa se cree en un terminal tonto y no emite ni
+        // color ni las secuencias que la rejilla necesita interpretar.
+        let (_pty, canal) =
+            Pty::spawn("sh", &["-c", "printf %s \"$TERM\""], Size::default()).expect("lanzar sh");
+
+        let salida = consumir_hasta_el_cierre(&canal);
+
+        assert!(
+            contiene(&salida, "xterm-256color"),
+            "el hijo no vio TERM: {:?}",
+            String::from_utf8_lossy(&salida)
         );
     }
 }

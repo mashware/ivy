@@ -11,6 +11,7 @@
 //!
 //! A los 2 segundos redimensiona a 30×100 y vuelve a volcar, que es como se comprueba el reflujo.
 
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use term_core::{Pty, Screen, Size};
@@ -28,10 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let inicial = Size { rows: 24, cols: 80 };
 
-    let mut pty = Pty::spawn(&programa, &args, inicial)?;
+    let (mut pty, salida_del_pty) = Pty::spawn(&programa, &args, inicial)?;
     let mut pantalla = Screen::new(inicial);
 
-    bombear(&pty, &mut pantalla, Duration::from_secs(2));
+    bombear(&salida_del_pty, &mut pantalla, Duration::from_secs(2));
     println!("── rejilla {}×{} ──", inicial.rows, inicial.cols);
     println!("{}", pantalla.to_text());
 
@@ -46,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     pantalla.resize(nuevo);
     pty.resize(nuevo)?;
 
-    bombear(&pty, &mut pantalla, Duration::from_secs(2));
+    bombear(&salida_del_pty, &mut pantalla, Duration::from_secs(2));
     println!(
         "\n── rejilla {}×{} tras redimensionar ──",
         nuevo.rows, nuevo.cols
@@ -58,12 +59,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 /// Pasa lo que haya en el canal a la rejilla durante un rato.
 ///
-/// Este bucle es justo el trabajo que en F1.3 hará el bucle de pintado, y por eso `advance` se
-/// llama desde aquí en vez de desde un hilo: quien consume decide cuánto procesa por pasada.
-fn bombear(pty: &Pty, pantalla: &mut Screen, durante: Duration) {
+/// `advance` se llama desde aquí y no desde un hilo: quien consume decide cuánto procesa por
+/// pasada. Ojo, esto **no** es ascendible tal cual al bucle de pintado: `recv_timeout` bloquea y se
+/// queda con el hilo hasta agotar el plazo, y un frame es una llamada que tiene que devolver el
+/// control. Lo que se hereda es la forma, no el código.
+fn bombear(salida_del_pty: &Receiver<Vec<u8>>, pantalla: &mut Screen, durante: Duration) {
     let hasta = Instant::now() + durante;
     while Instant::now() < hasta {
-        match pty.output().recv_timeout(Duration::from_millis(50)) {
+        match salida_del_pty.recv_timeout(Duration::from_millis(50)) {
             Ok(bytes) => pantalla.advance(&bytes),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,

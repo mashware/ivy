@@ -112,9 +112,16 @@ Comprobado en la máquina de desarrollo (2026-08-07):
 
 | | |
 |---|---|
-| `rustc` / `cargo` | 1.94.0 — **listo, no hay nada que instalar** |
+| `rustc` / `cargo` | **1.97.1** — actualizado al empezar F1.3 (ver abajo) |
 | `git` | 2.53.0 |
 | `inotify-tools` | no instalado — y ya no hace falta (ver F1.6) |
+
+> **Corregido el 2026-08-07, al arrancar F1.3.** Esta tabla decía «1.94.0 — listo, no hay nada que
+> instalar», y era incompatible con la versión de `eframe` fijada abajo: `eframe 0.36.1` exige
+> `rustc 1.95`. Se comprobó con `cargo check` sobre un crate de prueba, y no había forma de escribir
+> una línea del crate `app` sin resolverlo. Se subió el toolchain a 1.97.1 —lo que `rustup` ofrecía—
+> en vez de bajar `eframe` a 0.35: la versión del framework la elige el proyecto y el toolchain es
+> lo barato de mover. Tras la subida, `clippy` y los 8 tests del workspace siguen limpios.
 
 Versiones de los crates resueltas hoy contra crates.io:
 

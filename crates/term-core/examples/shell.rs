@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use term_core::{Pty, Size};
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut pty = Pty::spawn("zsh", &["-l"], Size::default())?;
+    let (mut pty, salida_del_pty) = Pty::spawn("zsh", &["-l"], Size::default())?;
     pty.write(b"ls\n")?;
 
     // El shell sigue vivo esperando más órdenes, así que el canal no se va a cerrar solo: se lee
@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let salida = io::stdout();
     let mut salida = salida.lock();
     while Instant::now() < hasta {
-        match pty.output().recv_timeout(Duration::from_millis(100)) {
+        match salida_del_pty.recv_timeout(Duration::from_millis(100)) {
             Ok(bytes) => {
                 salida.write_all(&bytes)?;
                 salida.flush()?;
