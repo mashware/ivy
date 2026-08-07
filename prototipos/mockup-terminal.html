@@ -1,0 +1,602 @@
+<title>Maqueta — terminal con paneles de tarea</title>
+<style>
+  /* ---- Tokens: marco de la página (se adapta al tema del lector) ---- */
+  :root {
+    --page-bg: #F1F2F4;
+    --page-surface: #FFFFFF;
+    --page-ink: #1C1F24;
+    --page-ink-soft: #5A6069;
+    --page-line: #D8DBE0;
+    --page-accent: #4E6B96;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page-bg: #15171A;
+      --page-surface: #1C1F23;
+      --page-ink: #C9CDD3;
+      --page-ink-soft: #838A93;
+      --page-line: #2B2F35;
+      --page-accent: #7587A6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page-bg: #15171A;
+    --page-surface: #1C1F23;
+    --page-ink: #C9CDD3;
+    --page-ink-soft: #838A93;
+    --page-line: #2B2F35;
+    --page-accent: #7587A6;
+  }
+
+  /* ---- Tokens: la app. Paleta Twilight, la del terminal real ---- */
+  :root {
+    --t-bg: #1E1E1E;
+    --t-chrome: #262626;
+    --t-chrome-2: #2E2E2E;
+    --t-panel: #212121;
+    --t-fg: #A7A7A7;
+    --t-dim: #5F5A60;
+    --t-orange: #CF6A4C;
+    --t-green: #8F9D6A;
+    --t-yellow: #F9EE98;
+    --t-blue: #7587A6;
+    --t-purple: #9B859D;
+    --t-white: #FFFFFF;
+    --mono: "Ubuntu Sans Mono", ui-monospace, "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, "Ubuntu", "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page-bg);
+    color: var(--page-ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 40px 24px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  /* ---- Intro ---- */
+  .intro { display: flex; flex-direction: column; gap: 10px; max-width: 68ch; }
+  .eyebrow {
+    font-size: 11px; letter-spacing: 0.13em; text-transform: uppercase;
+    color: var(--page-accent); font-weight: 600;
+  }
+  h1 {
+    margin: 0; font-size: clamp(24px, 3.4vw, 34px); line-height: 1.15;
+    text-wrap: balance; font-weight: 620; letter-spacing: -0.015em;
+  }
+  .intro p { margin: 0; color: var(--page-ink-soft); font-size: 15px; }
+
+  /* ---- Controles ---- */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 20px 32px; align-items: flex-end;
+    padding: 16px 18px; border: 1px solid var(--page-line); border-radius: 10px;
+    background: var(--page-surface);
+  }
+  .ctl { display: flex; flex-direction: column; gap: 7px; }
+  .ctl > span {
+    font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--page-ink-soft); font-weight: 600;
+  }
+  .seg { display: flex; gap: 4px; }
+  .seg button {
+    font: inherit; font-size: 13px; padding: 5px 13px; cursor: pointer;
+    background: transparent; color: var(--page-ink);
+    border: 1px solid var(--page-line); border-radius: 7px;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  .seg button:hover { border-color: var(--page-accent); }
+  .seg button[aria-pressed="true"] {
+    background: var(--page-accent); border-color: var(--page-accent); color: #fff;
+  }
+  .seg button:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 2px; }
+
+  /* ---- La ventana de la app ---- */
+  .stage { container-type: inline-size; }
+  .win {
+    background: var(--t-bg);
+    border-radius: 9px;
+    overflow: hidden;
+    box-shadow: 0 18px 44px -14px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
+    font-family: var(--mono);
+    display: flex; flex-direction: column;
+    min-height: 560px;
+  }
+
+  .titlebar {
+    background: var(--t-chrome); display: flex; align-items: center;
+    padding: 0 12px; height: 38px; gap: 12px; flex: none;
+    border-bottom: 1px solid #000;
+  }
+  .titlebar .name {
+    flex: 1; text-align: center; font-family: var(--sans); font-size: 13px;
+    color: var(--t-fg); font-weight: 600;
+  }
+  .wbtns { display: flex; gap: 8px; }
+  .wbtn { width: 13px; height: 13px; border-radius: 50%; background: #4A4A4A; }
+  .wbtn.c { background: #C4544A; }
+
+  .tabs { display: flex; background: var(--t-chrome); flex: none; padding: 0 6px; gap: 2px; }
+  .tab {
+    font-size: 12.5px; padding: 7px 15px; color: var(--t-dim); cursor: pointer;
+    border-radius: 7px 7px 0 0; display: flex; align-items: center; gap: 8px;
+    border: none; background: transparent; font-family: var(--mono);
+  }
+  .tab .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .55; }
+  .tab[aria-selected="true"] { background: var(--t-bg); color: var(--t-fg); }
+  .tab:focus-visible { outline: 2px solid var(--t-blue); outline-offset: -2px; }
+  .tab.add { color: var(--t-dim); padding: 7px 12px; }
+
+  /* ---- Rejilla de divisiones ---- */
+  .grid { flex: 1; display: grid; gap: 2px; background: var(--t-blue); padding: 2px 0 0; }
+  .grid[data-n="1"] { grid-template-columns: 1fr; }
+  .grid[data-n="2"] { grid-template-columns: 1fr 1fr; }
+  .grid[data-n="3"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+  .grid[data-n="3"] .split:first-child { grid-row: span 2; }
+  .grid[data-n="4"] { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+  /* ---- Una división: terminal + su panel ---- */
+  .split { background: var(--t-bg); display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+  .split[data-pos="bottom"] { flex-direction: column; }
+
+  .term {
+    flex: 1; min-width: 0; min-height: 0; padding: 9px 11px;
+    font-size: 12px; line-height: 1.5; color: var(--t-fg);
+    overflow: hidden; display: flex; flex-direction: column; gap: 1px;
+  }
+  .term .prompt { color: var(--t-green); }
+  .term .path { color: var(--t-blue); }
+  .term .muted { color: var(--t-dim); }
+  .term .warn { color: var(--t-orange); }
+  .term .caret {
+    display: inline-block; width: 7px; height: 14px; background: var(--t-fg);
+    vertical-align: -2px; animation: blink 1.15s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+
+  /* ---- El panel de tarea ---- */
+  .panel {
+    flex: none; background: var(--t-panel); border-left: 1px solid #000;
+    padding: 9px 10px; font-size: 11.5px; line-height: 1.5;
+    display: flex; flex-direction: column; gap: 7px; overflow: hidden;
+    color: var(--t-fg);
+  }
+  .split[data-pos="bottom"] > .panel { border-left: none; border-top: 1px solid #000; }
+  .split[data-w="narrow"] > .panel { width: 210px; }
+  .split[data-w="mid"] > .panel    { width: 270px; }
+  .split[data-w="wide"] > .panel   { width: 340px; }
+  .split[data-pos="bottom"] > .panel { width: auto; height: 168px; }
+  .split[data-hide="1"] > .panel { display: none; }
+
+  .p-head { display: flex; align-items: baseline; gap: 7px; flex: none; }
+  .p-tick { color: var(--t-yellow); font-weight: 700; }
+  .p-meta { color: var(--t-dim); font-size: 10.5px; }
+  .p-phase { color: var(--t-orange); }
+  .p-ago { margin-left: auto; color: var(--t-dim); font-size: 10.5px; }
+  .p-title { color: var(--t-fg); flex: none; }
+
+  .p-rows { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 12px auto 1fr auto; gap: 6px; align-items: baseline; }
+  .row .mk { text-align: center; }
+  .row .ref { color: inherit; opacity: .9; }
+  .row .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row a.lnk { color: var(--t-dim); text-decoration: none; border-bottom: 1px dotted currentColor; }
+  .row a.lnk:hover { color: var(--t-blue); }
+  .row.done { color: var(--t-green); }
+  .row.current { color: var(--t-orange); font-weight: 600; }
+  .row.pending { color: var(--t-dim); }
+  .row.wait { color: var(--t-purple); }
+  .row.block { color: var(--t-orange); }
+  .row.info { color: var(--t-fg); }
+
+  .p-sep { height: 1px; background: #000; opacity: .5; flex: none; }
+
+  /* Indicador de actividad: trabajando vs esperándote */
+  .p-live { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .p-live.busy { background: var(--t-green); animation: pulse 1.6s ease-in-out infinite; }
+  .p-live.idle { background: var(--t-dim); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .p-live.busy { animation: none; } }
+
+  /* Contexto y coste — lo único que solo el agente sabe */
+  .p-ctx { display: flex; flex-direction: column; gap: 3px; flex: none; }
+  .p-ctx .row2 { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; }
+  .p-ctx .lbl { color: var(--t-dim); }
+  .p-ctx .val { color: var(--t-fg); font-variant-numeric: tabular-nums; }
+  .p-bar { height: 3px; background: #000; border-radius: 2px; overflow: hidden; }
+  .p-bar i { display: block; height: 100%; background: var(--t-green); }
+  .p-bar.warn i { background: var(--t-yellow); }
+  .p-bar.hot i { background: var(--t-orange); }
+
+  /* Salud de conexiones */
+  .p-conns { display: flex; flex-wrap: wrap; gap: 4px 9px; font-size: 10.5px; flex: none; }
+  .p-conn { display: flex; align-items: center; gap: 4px; color: var(--t-dim); }
+  .p-conn i { width: 5px; height: 5px; border-radius: 50%; background: var(--t-green); }
+  .p-conn.down { color: var(--t-orange); }
+  .p-conn.down i { background: var(--t-orange); }
+
+  /* Plegado del panel */
+  .p-fold {
+    background: none; border: none; cursor: pointer; flex: none;
+    color: var(--t-dim); font-family: var(--mono); font-size: 12px; padding: 0 0 0 4px;
+  }
+  .p-fold:hover { color: var(--t-fg); }
+  .p-fold:focus-visible { outline: 2px solid var(--t-blue); outline-offset: 1px; }
+  .split[data-fold="1"] > .panel {
+    width: 30px; padding: 9px 4px; align-items: center; gap: 9px;
+  }
+  .split[data-fold="1"] > .panel > *:not(.p-mini) { display: none; }
+  .p-mini { display: none; flex-direction: column; align-items: center; gap: 8px; }
+  .split[data-fold="1"] > .panel > .p-mini { display: flex; }
+  .split[data-pos="bottom"][data-fold="1"] > .panel {
+    width: auto; height: 30px; flex-direction: row; padding: 4px 9px;
+  }
+  .split[data-pos="bottom"][data-fold="1"] > .panel > .p-mini { flex-direction: row; }
+
+  .p-acts { display: flex; flex-wrap: wrap; gap: 5px; flex: none; margin-top: auto; }
+  .act {
+    font-family: var(--mono); font-size: 10.5px; padding: 3px 9px; cursor: pointer;
+    background: var(--t-chrome-2); color: var(--t-fg);
+    border: 1px solid #3A3A3A; border-radius: 5px;
+    transition: border-color .12s, color .12s, background .12s;
+  }
+  .act:hover { border-color: var(--t-blue); color: var(--t-white); }
+  .act:focus-visible { outline: 2px solid var(--t-blue); outline-offset: 1px; }
+  .act.go { border-color: #4A5D45; color: var(--t-green); }
+  .act.go:hover { background: #2A3327; }
+
+  /* ---- Notas ---- */
+  .notes { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .note {
+    padding: 15px 17px; border: 1px solid var(--page-line); border-radius: 10px;
+    background: var(--page-surface);
+  }
+  .note h3 {
+    margin: 0 0 6px; font-size: 13px; letter-spacing: .02em;
+    color: var(--page-ink);
+  }
+  .note p { margin: 0; font-size: 13.5px; color: var(--page-ink-soft); }
+  .note code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: color-mix(in srgb, var(--page-accent) 12%, transparent);
+    padding: 1px 5px; border-radius: 4px; color: var(--page-ink);
+  }
+
+  @container (max-width: 720px) {
+    .grid[data-n="2"], .grid[data-n="3"], .grid[data-n="4"] {
+      grid-template-columns: 1fr; grid-template-rows: none;
+    }
+    .grid[data-n="3"] .split:first-child { grid-row: auto; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <span class="eyebrow">Maqueta · datos de mentira</span>
+    <h1>Una pestaña, varias divisiones, cada una con su panel</h1>
+    <p>
+      No es la app: es su forma, para juzgar proporciones antes de escribir Rust.
+      Mueve los controles y mira dónde se rompe — cuánto sitio le queda al terminal,
+      si el panel sigue leyéndose con cuatro divisiones, si los botones estorban.
+    </p>
+  </header>
+
+  <section class="controls" aria-label="Controles de la maqueta">
+    <div class="ctl">
+      <span>Divisiones</span>
+      <div class="seg" id="segN" role="group">
+        <button data-v="1" aria-pressed="false">1</button>
+        <button data-v="2" aria-pressed="false">2</button>
+        <button data-v="3" aria-pressed="true">3</button>
+        <button data-v="4" aria-pressed="false">4</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Panel</span>
+      <div class="seg" id="segPos" role="group">
+        <button data-v="right" aria-pressed="true">A la derecha</button>
+        <button data-v="bottom" aria-pressed="false">Debajo</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Ancho del panel</span>
+      <div class="seg" id="segW" role="group">
+        <button data-v="narrow" aria-pressed="false">Estrecho</button>
+        <button data-v="mid" aria-pressed="true">Medio</button>
+        <button data-v="wide" aria-pressed="false">Ancho</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Botones de acción</span>
+      <div class="seg" id="segAct" role="group">
+        <button data-v="1" aria-pressed="true">Con</button>
+        <button data-v="0" aria-pressed="false">Sin</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Paneles</span>
+      <div class="seg" id="segHide" role="group">
+        <button data-v="0" aria-pressed="true">Ver</button>
+        <button data-v="1" aria-pressed="false">Ocultar</button>
+      </div>
+    </div>
+    <div class="ctl">
+      <span>Contexto y conexiones</span>
+      <div class="seg" id="segMeta" role="group">
+        <button data-v="1" aria-pressed="true">Con</button>
+        <button data-v="0" aria-pressed="false">Sin</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="stage">
+    <div class="win">
+      <div class="titlebar">
+        <div class="wbtns"><span class="wbtn"></span><span class="wbtn"></span><span class="wbtn c"></span></div>
+        <div class="name">backend — 3 divisiones</div>
+        <div style="width:53px"></div>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true"><span class="dot" style="color:#CF6A4C"></span>backend</button>
+        <button class="tab" role="tab" aria-selected="false"><span class="dot" style="color:#8F9D6A"></span>mailsuite-mcp</button>
+        <button class="tab" role="tab" aria-selected="false"><span class="dot" style="color:#5F5A60"></span>spam-checker</button>
+        <button class="tab add" role="tab" aria-selected="false">+</button>
+      </div>
+
+      <div class="grid" id="grid" data-n="3"></div>
+    </div>
+  </div>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Qué mirar en el panel</h3>
+      <p>La columna de marcas a la izquierda es lo que permite escanear en vertical sin leer. Con cuatro divisiones y panel estrecho, comprueba si sigue funcionando o si hay que recortar líneas.</p>
+    </div>
+    <div class="note">
+      <h3>Contexto, coste y conexiones</h3>
+      <p>Lo único que solo el agente puede saber. La barra se vuelve ámbar al 50% y naranja al 75%, para ver de un vistazo a cuál le queda poco antes de compactar. <code>MT-15863</code> va al 76% y tiene GitLab caído.</p>
+    </div>
+    <div class="note">
+      <h3>Trabajando o esperándote</h3>
+      <p>El punto junto al ticket late cuando el agente está trabajando y se apaga cuando te espera. Con cuatro divisiones es lo que dice dónde mirar sin leer nada.</p>
+    </div>
+    <div class="note">
+      <h3>Plegar por división</h3>
+      <p>El <code>▸</code> de cada panel lo reduce a una franja con solo el indicador. Prueba a plegar dos y dejar uno abierto: es el modo real cuando trabajas en uno y vigilas el resto.</p>
+    </div>
+    <div class="note">
+      <h3>Los botones son la parte nueva</h3>
+      <p>Cada uno escribe en el terminal de <em>su</em> división. El productor los declara en el fichero de estado con <code>send</code>; la app solo los pinta y los dispara.</p>
+    </div>
+    <div class="note">
+      <h3>Lo que aún no se ve</h3>
+      <p>Arrastrar divisiones para recolocarlas, guardar y restaurar la disposición, y el supervisor. Primero conviene que esta forma convenza.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+  const WORKS = [
+    {
+      tick: "MT-15865", meta: "feat·M", phase: "validate", ago: "ahora",
+      title: "Exponer estado y eventos de tracking de un hilo",
+      busy: true,
+      ctx: { tokens: "35.392", pct: 18, cost: "0,62" },
+      conns: [{ n: "domain-memory", ok: true }, { n: "intelephense", ok: true }],
+      rows: [
+        { m: "✓", k: "done",    r: "#1", t: "las dos fuentes de lectura por lote", l: "!9977" },
+        { m: "✓", k: "done",    r: "#2", t: "contadores por tipo de evento",       l: "!9984" },
+        { m: "▶", k: "current", r: "#3", t: "el mapeo a la forma del canal" },
+        { m: "·", k: "pending", r: "#4", t: "caso de uso · #5 documento · #6 ruta" },
+        { m: "",  k: "",        r: "",   t: "" },
+        { m: "›", k: "info",    r: "Ahora",   t: "corriendo la suite funcional" },
+        { m: "·", k: "pending", r: "Después", t: "review y ship de la #3" },
+        { m: "⏸", k: "wait",    r: "Decide",  t: "confirmar alcance de la #3" }
+      ],
+      acts: [["Ver salida", ""], ["Continuar", "go"]],
+      term: [
+        ["prompt", "→ backend git:(MT-15865) "],
+        ["", "● Ejecutando tests de ThreadTrackingEndpoint…"],
+        ["muted", "  PHPUnit 11.4 · 6 de 41 completados"],
+        ["", ""],
+        ["muted", "  ✓ devuelve 400 si falta message_ids"],
+        ["muted", "  ✓ tope de 50 identificadores"],
+        ["warn",  "  ✗ agrupa aperturas por destinatario"],
+        ["muted", "    esperado 3, recibido 2"],
+        ["", ""],
+        ["prompt", "→ "], ["caret", ""]
+      ]
+    },
+    {
+      tick: "MT-15863", meta: "feat·M", phase: "ship", ago: "hace 4 min",
+      title: "El agente no sabe qué campo rechazó la validación",
+      busy: true,
+      ctx: { tokens: "148.900", pct: 76, cost: "2,15" },
+      conns: [{ n: "domain-memory", ok: true }, { n: "gitlab", ok: false }],
+      rows: [
+        { m: "✓", k: "done",    r: "#1", t: "piezas compartidas", l: "!9951" },
+        { m: "✓", k: "done",    r: "#2", t: "mapa de códigos de error", l: "!9962" },
+        { m: "▶", k: "current", r: "#3", t: "detalle en la respuesta", l: "!9970" },
+        { m: "",  k: "",        r: "",   t: "" },
+        { m: "›", k: "info",    r: "Ahora",   t: "esperando la pipeline" },
+        { m: "⚠", k: "block",   r: "Bloqueo", t: "mailsuite-mcp sin contrato" }
+      ],
+      acts: [["Ver pipeline", ""], ["Reintentar", ""]],
+      term: [
+        ["prompt", "→ backend git:(MT-15863) "],
+        ["", "● Esperando la pipeline de !9970"],
+        ["muted", "  build      ✓ 1m 12s"],
+        ["muted", "  phpstan    ✓ 48s"],
+        ["", "  phpunit    ⣾ corriendo…"],
+        ["muted", "  deploy     · pendiente"],
+        ["", ""],
+        ["prompt", "→ "], ["caret", ""]
+      ]
+    },
+    {
+      tick: "MT-15849", meta: "feat·M", phase: "context", ago: "hace 2 h",
+      title: "Recordatorios: la única escritura sin cuota ni límite",
+      busy: false,
+      ctx: { tokens: "8.240", pct: 4, cost: "0,11" },
+      conns: [{ n: "domain-memory", ok: true }],
+      rows: [
+        { m: "▶", k: "current", r: "Ahora",   t: "leyendo el endpoint actual" },
+        { m: "·", k: "pending", r: "Después", t: "diseño y plan de MRs" },
+        { m: "",  k: "",        r: "",   t: "" },
+        { m: "⏸", k: "wait",    r: "Decide", t: "¿cuota por canal o global?" }
+      ],
+      acts: [["Abrir ticket", ""], ["Diseñar", "go"]],
+      term: [
+        ["prompt", "→ backend git:(master) "],
+        ["", "● Leyendo ReminderController"],
+        ["muted", "  4 ficheros · 612 líneas"],
+        ["", ""],
+        ["muted", "  Sin QuotaGuard en la ruta de escritura."],
+        ["muted", "  El resto del canal sí lo aplica."],
+        ["", ""],
+        ["prompt", "→ "], ["caret", ""]
+      ]
+    },
+    {
+      tick: "MT-15847", meta: "bug·S", phase: "done", ago: "hace 1 d",
+      title: "El gate de plan del seguimiento por destinatario",
+      busy: false,
+      ctx: { tokens: "61.030", pct: 31, cost: "1,40" },
+      conns: [{ n: "domain-memory", ok: true }],
+      rows: [
+        { m: "✓", k: "done", r: "", t: "cerrado y archivado" },
+        { m: "✓", k: "done", r: "#1", t: "fix del gate", l: "!9942" }
+      ],
+      acts: [["Archivar", ""]],
+      term: [
+        ["prompt", "→ backend git:(master) "],
+        ["muted", "  trabajo cerrado"],
+        ["", ""],
+        ["prompt", "→ "], ["caret", ""]
+      ]
+    }
+  ];
+
+  const state = { n: 3, pos: "right", w: "mid", act: 1, hide: 0, meta: 1 };
+  const folded = new Set();   // índices de divisiones con el panel plegado
+  const grid = document.getElementById("grid");
+  const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+  function panelHTML(work) {
+    const rows = work.rows.map(r => {
+      if (!r.t && !r.r) return '<div class="row" aria-hidden="true">&nbsp;</div>';
+      const link = r.l ? `<a class="lnk" href="#" onclick="return false">${esc(r.l)} ↗</a>` : "";
+      return `<div class="row ${r.k}">
+                <span class="mk">${esc(r.m)}</span>
+                <span class="ref">${esc(r.r)}</span>
+                <span class="tx">${esc(r.t)}</span>
+                ${link}
+              </div>`;
+    }).join("");
+
+    const acts = state.act
+      ? `<div class="p-acts">${work.acts.map(([label, cls]) =>
+          `<button class="act ${cls}">${esc(label)}</button>`).join("")}</div>`
+      : "";
+
+    const phaseColour = work.phase === "done" ? "var(--t-green)" : "var(--t-orange)";
+
+    // Contexto y coste: lo que solo el agente puede saber
+    const heat = work.ctx.pct >= 75 ? "hot" : work.ctx.pct >= 50 ? "warn" : "";
+    const meta = state.meta ? `
+      <div class="p-ctx">
+        <div class="row2">
+          <span class="lbl">contexto</span>
+          <span class="val">${esc(work.ctx.tokens)} · ${work.ctx.pct}%</span>
+        </div>
+        <div class="p-bar ${heat}"><i style="width:${work.ctx.pct}%"></i></div>
+        <div class="row2">
+          <span class="lbl">gastado</span>
+          <span class="val">${esc(work.ctx.cost)} €</span>
+        </div>
+      </div>
+      <div class="p-conns">${work.conns.map(c =>
+        `<span class="p-conn ${c.ok ? "" : "down"}"><i></i>${esc(c.n)}</span>`).join("")}</div>
+      <div class="p-sep"></div>` : "";
+
+    return `<aside class="panel">
+      <div class="p-mini" aria-hidden="true">
+        <span class="p-live ${work.busy ? "busy" : "idle"}"></span>
+        <button class="p-fold" title="Desplegar">◂</button>
+      </div>
+      <div class="p-head">
+        <span class="p-live ${work.busy ? "busy" : "idle"}"
+              title="${work.busy ? "Trabajando" : "Esperándote"}"></span>
+        <span class="p-tick">${esc(work.tick)}</span>
+        <span class="p-meta">${esc(work.meta)}</span>
+        <span class="p-phase" style="color:${phaseColour}">⏵ ${esc(work.phase)}</span>
+        <span class="p-ago">${esc(work.ago)}</span>
+        <button class="p-fold" title="Plegar el panel">▸</button>
+      </div>
+      <div class="p-title">${esc(work.title)}</div>
+      <div class="p-sep"></div>
+      ${meta}
+      <div class="p-rows">${rows}</div>
+      ${acts}
+    </aside>`;
+  }
+
+  function termHTML(work) {
+    return `<div class="term">${work.term.map(([cls, txt]) =>
+      cls === "caret" ? '<div><span class="caret"></span></div>'
+                      : `<div class="${cls}">${esc(txt) || "&nbsp;"}</div>`).join("")}</div>`;
+  }
+
+  function render() {
+    grid.dataset.n = state.n;
+    grid.innerHTML = WORKS.slice(0, state.n).map((w, i) =>
+      `<section class="split" data-pos="${state.pos}" data-w="${state.w}"
+                data-hide="${state.hide}" data-fold="${folded.has(i) ? 1 : 0}" data-i="${i}">
+         ${termHTML(w)}${panelHTML(w)}
+       </section>`).join("");
+    document.querySelector(".name").textContent =
+      `backend — ${state.n} ${state.n === 1 ? "división" : "divisiones"}`;
+  }
+
+  function wire(id, key, cast) {
+    document.getElementById(id).addEventListener("click", e => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      [...e.currentTarget.children].forEach(b =>
+        b.setAttribute("aria-pressed", String(b === btn)));
+      state[key] = cast ? cast(btn.dataset.v) : btn.dataset.v;
+      render();
+    });
+  }
+
+  wire("segN", "n", Number);
+  wire("segPos", "pos");
+  wire("segW", "w");
+  wire("segAct", "act", Number);
+  wire("segHide", "hide", Number);
+  wire("segMeta", "meta", Number);
+
+  // Plegar / desplegar el panel de una división concreta
+  grid.addEventListener("click", e => {
+    const btn = e.target.closest(".p-fold");
+    if (!btn) return;
+    const i = Number(btn.closest(".split").dataset.i);
+    folded.has(i) ? folded.delete(i) : folded.add(i);
+    render();
+  });
+
+  render();
+</script>

@@ -1,0 +1,887 @@
+#!/usr/bin/env python3
+"""Panel de estado en vivo para los trabajos de flow.
+
+Lee .claude/work/<trabajo>/meta.json y repinta cuando algo cambia.
+No necesita hooks ni cambios en flow: los comandos de flow ya escriben
+meta.json en cada paso, y este panel solo observa el disco.
+
+Dos modos:
+
+  flow-panel [ruta]            lista todos los trabajos abiertos del repo
+  flow-panel --focus [ruta]    solo el trabajo de la rama actual, con detalle
+
+El modo --focus está pensado para vivir como subdivisión del panel donde
+corre un agente: detecta la rama del directorio en el que se abre y muestra
+esa tarea y solo esa. Como flow crea un worktree por trabajo, cada agente
+acaba en un directorio distinto y cada subdivisión se sintoniza sola.
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import unicodedata
+
+# Paleta Twilight, la misma del terminal
+DIM = "\033[38;2;95;90;96m"
+FG = "\033[38;2;167;167;167m"
+ORANGE = "\033[38;2;207;106;76m"
+GREEN = "\033[38;2;143;157;106m"
+YELLOW = "\033[38;2;249;238;152m"
+BLUE = "\033[38;2;117;135;166m"
+PURPLE = "\033[38;2;155;133;157m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+CLEAR = "\033[H\033[2J\033[3J"
+
+# Secuencia de fases por tipo de trabajo, según los comandos de flow
+PHASES = {
+    "feat": ["context", "brainstorm", "design", "plan", "build",
+             "validate", "review", "ship"],
+    "bug": ["context", "diagnose", "investigate", "fix",
+            "validate", "review", "ship", "postmortem"],
+}
+
+TERMINAL_PHASES = {"done", "abandoned"}
+
+
+# ─── utilidades de texto ──────────────────────────────────────────────────
+
+def vis(text):
+    """Ancho visual: los símbolos anchos ocupan dos celdas."""
+    n = 0
+    for ch in text:
+        if unicodedata.combining(ch):
+            continue
+        n += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return n
+
+
+def cut(text, width):
+    text = " ".join(str(text).split())
+    if vis(text) <= width:
+        return text
+    out, n = "", 0
+    for ch in text:
+        step = vis(ch)
+        if n + step > width - 1:
+            break
+        out, n = out + ch, n + step
+    return out + "…"
+
+
+def wrap(text, width, max_lines):
+    """Parte el texto por palabras. La última línea se trunca si no cabe."""
+    words = " ".join(str(text).split()).split(" ")
+    lines, cur = [], ""
+    for word in words:
+        candidate = f"{cur} {word}".strip()
+        if vis(candidate) <= width:
+            cur = candidate
+            continue
+        if cur:
+            lines.append(cur)
+        if len(lines) == max_lines:
+            # no queda sitio: lo pendiente se resume en la última línea
+            rest = " ".join(words[words.index(word):]) if word in words else word
+            lines[-1] = cut(f"{lines[-1]} {rest}", width)
+            return lines
+        cur = word if vis(word) <= width else cut(word, width)
+    if cur:
+        lines.append(cur)
+    return lines[:max_lines] or [""]
+
+
+def ago(iso):
+    """'hace 2 h' a partir de una fecha ISO8601."""
+    if not iso:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        then = datetime.fromisoformat(iso)
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        secs = (datetime.now(timezone.utc) - then).total_seconds()
+    except ValueError:
+        return ""
+    if secs < 90:
+        return "ahora"
+    if secs < 5400:
+        return f"hace {int(secs // 60)} min"
+    if secs < 172800:
+        return f"hace {int(secs // 3600)} h"
+    return f"hace {int(secs // 86400)} d"
+
+
+# ─── localizar repo y trabajo ─────────────────────────────────────────────
+
+def git(cwd, *args):
+    try:
+        out = subprocess.run(("git", "-C", cwd) + args, capture_output=True,
+                             text=True, timeout=3)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def find_repo(start):
+    """El checkout principal del repo.
+
+    Desde un worktree hay que volver al principal: .claude/work está
+    ignorado por git, así que solo existe allí.
+    """
+    start = os.path.abspath(start)
+    common = git(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common:
+        return os.path.dirname(common)
+
+    # sin git: subimos buscando .claude/work
+    path = start
+    while True:
+        if os.path.isdir(os.path.join(path, ".claude", "work")):
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return start
+        path = parent
+
+
+def current_branch(start):
+    return git(os.path.abspath(start), "branch", "--show-current")
+
+
+def work_dirs(repo):
+    """Carpetas de trabajo activas, ignorando el archivo histórico."""
+    base = os.path.join(repo, ".claude", "work")
+    if not os.path.isdir(base):
+        return []
+    out = []
+    for name in sorted(os.listdir(base)):
+        if name.startswith("_"):
+            continue
+        path = os.path.join(base, name)
+        if os.path.isfile(os.path.join(path, "meta.json")):
+            out.append(path)
+    return out
+
+
+def read_meta(path):
+    try:
+        with open(os.path.join(path, "meta.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def pick_work(repo, branch, wanted=None):
+    """Qué trabajo mostrar en modo foco, por orden de fiabilidad.
+
+    1. El que se pide explícitamente (--work o FLOW_WORK). Es el caso normal
+       cuando se trabaja desde el checkout principal, donde todos los paneles
+       comparten directorio y no hay nada que los distinga.
+    2. El de la rama actual, si coincide. Sirve cuando cada agente vive en
+       su propio worktree.
+    3. El tocado más recientemente, como último recurso.
+    """
+    wanted = (wanted or os.environ.get("FLOW_WORK", "")).strip()
+    found = []
+    for path in work_dirs(repo):
+        meta = read_meta(path)
+        if meta:
+            found.append((path, meta))
+
+    if wanted:
+        for path, meta in found:
+            if wanted in (meta.get("ticket"), meta.get("slug")):
+                return path, meta
+        return None, None          # se pidió uno concreto y no existe
+
+    if branch:
+        for path, meta in found:
+            if meta.get("branch") == branch:
+                return path, meta
+
+    active = [(p, m) for p, m in found
+              if m.get("phase") not in TERMINAL_PHASES]
+    if active:
+        return max(active, key=lambda pm: pm[1].get("updated_at", ""))
+    return None, None
+
+
+def list_json(repo):
+    """Los trabajos abiertos, para que el selector de WezTerm los ofrezca."""
+    out = []
+    for path in work_dirs(repo):
+        meta = read_meta(path)
+        if not meta or meta.get("phase") in TERMINAL_PHASES:
+            continue
+        out.append({
+            "ticket": meta.get("ticket", "?"),
+            "title": meta.get("title", ""),
+            "phase": meta.get("phase", "?"),
+            "type": meta.get("type", ""),
+            "updated_at": meta.get("updated_at", ""),
+        })
+    out.sort(key=lambda w: w["updated_at"], reverse=True)
+    return json.dumps(out, ensure_ascii=False)
+
+
+def fingerprint(repo):
+    """Huella barata del estado en disco: si no cambia, no repintamos."""
+    marks = []
+    for path in work_dirs(repo):
+        for f in ("meta.json", "panel.md", "panel.json"):
+            p = os.path.join(path, f)
+            try:
+                marks.append((p, os.stat(p).st_mtime_ns))
+            except OSError:
+                pass
+    return tuple(marks)
+
+
+# ─── piezas de render ─────────────────────────────────────────────────────
+
+def phase_track(meta, width, upto=None):
+    """Los pasos del flujo, adaptados al ancho disponible.
+
+    En un panel estrecho no caben ocho nombres de fase, así que degradamos
+    en tres niveles: nombres completos → puntos + fase actual → contador.
+
+    `upto` recorta la secuencia en esa fase (inclusive): con tren de MRs,
+    de ahí en adelante manda el recorrido de cada MR, no el del trabajo.
+    """
+    sequence, done, current = phase_sequence(meta)
+
+    if upto and upto in sequence:
+        sequence = sequence[:sequence.index(upto) + 1]
+        if current not in sequence:
+            current = ""            # la fase actual vive ya en el tren
+
+    finished = current in TERMINAL_PHASES
+
+    parts = []
+    for p in sequence:
+        if p == current:
+            parts.append(f"{ORANGE}{BOLD}▶{p}{RESET}")
+        elif p in done:
+            parts.append(f"{GREEN}●{DIM}{p}{RESET}")
+        else:
+            parts.append(f"{DIM}○{p}{RESET}")
+
+    plain = " ".join(("▶" if p == current else "●") + p for p in sequence)
+    if vis(plain) <= width:
+        return " ".join(parts)
+
+    dots = "".join(
+        f"{ORANGE}{BOLD}▶{RESET}" if p == current
+        else (f"{GREEN}●{RESET}" if p in done else f"{DIM}○{RESET}")
+        for p in sequence
+    )
+    label = "done" if finished else current
+    if len(sequence) + 1 + vis(label) <= width:
+        colour = GREEN if finished else ORANGE
+        return f"{dots} {colour}{label}{RESET}"
+
+    idx = len(sequence) if finished else (
+        sequence.index(current) + 1 if current in sequence else len(done))
+    return f"{DIM}{idx}/{len(sequence)}{RESET} {ORANGE}{cut(label, width - 6)}{RESET}"
+
+
+def live_phase(meta, panel):
+    """La fase que se está ejecutando ahora, para mostrarla como texto.
+
+    meta.json va una fase por detrás: flow solo avanza `phase` cuando la fase
+    cierra, así que mientras corre validate el fichero aún dice build. Si el
+    resumen trae su propia `phase`, esa es la buena para el texto.
+    """
+    return (panel or {}).get("phase") or meta.get("phase", "?")
+
+
+def is_terminal(meta):
+    """Si el trabajo está cerrado. Siempre según meta: es estado real.
+
+    La fase del resumen dice qué se ejecuta, no si el trabajo terminó, y
+    puede traer valores fuera del ciclo (watch escribe "watching").
+    """
+    return meta.get("phase") in TERMINAL_PHASES
+
+
+def phase_sequence(meta, panel=None):
+    """Las fases de este trabajo, sin las opcionales que no se usaron."""
+    done = set(meta.get("phases_done") or [])
+    sequence = PHASES.get(meta.get("type"), PHASES["feat"])
+
+    # el ▶ marca la que corre; si el resumen trae una que no es del ciclo,
+    # se ignora y mandamos la de meta en vez de no marcar ninguna
+    current = live_phase(meta, panel)
+    if current not in sequence:
+        current = meta.get("phase", "")
+
+    if "brainstorm" in sequence and "brainstorm" not in done and current != "brainstorm":
+        sequence = [p for p in sequence if p != "brainstorm"]
+    return sequence, done, current
+
+
+def phase_track_vertical(meta, width):
+    """Una fase por línea, con su nombre.
+
+    Cuando los nombres no caben en horizontal, gastar altura es mejor que
+    dejar al usuario adivinando qué significa cada círculo.
+    """
+    sequence, done, current = phase_sequence(meta)
+    out = []
+    for phase in sequence:
+        if phase == current:
+            out.append(f"  {ORANGE}{BOLD}▶ {phase}{RESET}")
+        elif phase in done:
+            out.append(f"  {GREEN}●{RESET} {DIM}{phase}{RESET}")
+        else:
+            out.append(f"  {DIM}○ {phase}{RESET}")
+    return out
+
+
+def head_line(meta, width, panel=None):
+    """Cabecera del trabajo: ticket, tipo, fase y cuándo se tocó.
+
+    El texto de la fase sale del resumen si lo trae (va al día); el color,
+    siempre de meta, que es quien sabe si el trabajo está cerrado.
+    """
+    phase = live_phase(meta, panel)
+    colour = GREEN if is_terminal(meta) else ORANGE
+    ticket, typ, size = (meta.get("ticket", "?"), meta.get("type", ""),
+                         meta.get("size", ""))
+    head = (f"{BOLD}{YELLOW}{ticket}{RESET} {DIM}{typ}·{size}{RESET} "
+            f"{colour}⏵ {phase}{RESET}")
+    stamp = ago(meta.get("updated_at"))
+    used = vis(f"{ticket} {typ}·{size} ⏵ {phase}")
+
+    if used + 1 + vis(stamp) <= width:
+        return [head + " " * (width - used - vis(stamp)) + f"{DIM}{stamp}{RESET}"]
+    if used <= width:
+        return [head, f"{DIM}{cut(stamp, width)}{RESET}"]
+    out = [f"{BOLD}{YELLOW}{cut(ticket, width)}{RESET}"]
+    tail = f"⏵ {phase}"
+    if vis(tail) + 1 + vis(stamp) <= width:
+        out.append(f"{colour}{tail}{RESET}"
+                   + " " * (width - vis(tail) - vis(stamp))
+                   + f"{DIM}{stamp}{RESET}")
+    else:
+        out.append(f"{colour}{cut(tail, width)}{RESET}")
+    return out
+
+
+# Fases por las que pasa cada MR del tren (las del trabajo, de build en
+# adelante). Un trabajo con tren repite este ciclo una vez por MR.
+MR_PHASES = ["build", "validate", "review", "ship"]
+
+
+def mr_state(meta):
+    """Estado del tren de MRs, o None si el trabajo no tiene.
+
+    Una MR cuenta como cerrada si está marcada `merged` o si recorrió hasta
+    `ship`: en la práctica flow deja el estado en `in_progress` hasta que se
+    confirma el merge, y sin esto un tren medio hecho aparece como 0/N.
+    """
+    mrs = meta.get("mrs") or []
+    if not mrs:
+        return None
+
+    def st(m):
+        return m.get("status") or m.get("state") or ""
+
+    def is_closed(m):
+        return st(m) == "merged" or "ship" in (m.get("phases_done") or [])
+
+    pending = [m for m in mrs if not is_closed(m)]
+    current = next((m for m in pending if st(m) in ("in_progress", "opened")),
+                   pending[0] if pending else None)
+    return {
+        "total": len(mrs),
+        "closed": len(mrs) - len(pending),
+        "current": current,
+        "mrs": mrs,
+        "is_closed": is_closed,
+    }
+
+
+def mr_lines(meta, width, vertical):
+    """El tren: cuántas van, cuál se está haciendo y por dónde va esa."""
+    train = mr_state(meta)
+    if not train:
+        return []
+
+    dots = "".join(
+        f"{GREEN}●{RESET}" if train["is_closed"](m)
+        else (f"{ORANGE}{BOLD}▶{RESET}" if m is train["current"] else f"{DIM}○{RESET}")
+        for m in train["mrs"]
+    )
+    head = f"{train['closed']}/{train['total']}"
+    out = [f"  {DIM}tren{RESET} {dots} {PURPLE}{head}{RESET}"]
+
+    cur = train["current"]
+    if not cur:
+        return out
+
+    n = cur.get("n", "?")
+    for i, l in enumerate(wrap(cur.get("title", ""), width - 6, 2)):
+        prefix = f"  {PURPLE}#{n}{RESET} " if i == 0 else "      "
+        out.append(prefix + f"{FG}{l}{RESET}")
+
+    done = set(cur.get("phases_done") or [])
+    phase = meta.get("phase", "")
+    marks = []
+    for p in MR_PHASES:
+        if p in done:
+            marks.append((f"{GREEN}●{RESET}", p, DIM))
+        elif p == phase:
+            marks.append((f"{ORANGE}{BOLD}▶{RESET}", p, ORANGE + BOLD))
+        else:
+            marks.append((f"{DIM}○{RESET}", p, DIM))
+
+    plain = " ".join("●" + p for p in MR_PHASES)
+    if not vertical and vis(plain) <= width - 6:
+        out.append("      " + " ".join(f"{m}{c}{p}{RESET}" for m, p, c in marks))
+    else:
+        out.extend(f"      {m} {c}{p}{RESET}" for m, p, c in marks)
+
+    real, est = cur.get("lines_real"), cur.get("lines_est")
+    if real and est:
+        pct = round(100 * real / est)
+        warn = " ⚠" if pct > 150 else ""
+        out.append(f"      {DIM}{real}/{est} líneas ({pct}%){warn}{RESET}")
+    return out
+
+
+def repos_line(meta, width):
+    pending = [r for r in (meta.get("related_repos") or [])
+               if r.get("status") != "done"]
+    if not pending:
+        return []
+    names = ", ".join(r.get("repo", "?") for r in pending)
+    prefix = vis("  ⚠ otros repos: ")
+    return [f"  {ORANGE}⚠{RESET} {DIM}otros repos:{RESET} "
+            f"{cut(names, width - prefix)}"]
+
+
+# Estilos que puede pedir el JSON de presentación. Nombres semánticos, no
+# colores: así el panel sigue mandando sobre la paleta y el ancho.
+STYLES = {
+    "normal": FG,
+    "dim": DIM,
+    "title": BOLD + YELLOW,
+    "accent": PURPLE,
+    "ok": GREEN,
+    "warn": ORANGE,
+    "error": BOLD + ORANGE,
+}
+
+
+URL_RE = re.compile(r"https?://[^\s<>\"]+")
+
+
+def url_label(url):
+    """Etiqueta corta para una URL, conservando lo que identifica al recurso."""
+    for pattern, mark in ((r"/merge_requests/(\d+)", "!"),
+                          (r"/pull/(\d+)", "#"),
+                          (r"/issues/(\d+)", "#"),
+                          (r"/-/pipelines/(\d+)", "pipeline ")):
+        m = re.search(pattern, url)
+        if m:
+            return f"{mark}{m.group(1)} ↗"
+    tail = url.rstrip("/").rsplit("/", 1)[-1]
+    host = re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
+    return f"{host}/…/{tail[:12]} ↗" if tail else f"{host} ↗"
+
+
+def linkify(text):
+    """Sustituye URLs por etiquetas cortas y devuelve el mapa para enlazarlas.
+
+    Una URL de GitLab son ~60 caracteres que en un panel estrecho envuelven a
+    tres líneas ilegibles. Mostramos `!9977 ↗` y dejamos la URL detrás, como
+    hipervínculo real del terminal (OSC 8): se ve corto y se abre con un clic.
+    """
+    links = {}
+
+    def swap(m):
+        url = m.group(0)
+        label = url_label(url)
+        # si dos URLs comparten etiqueta, desambiguamos con un sufijo invisible
+        while label in links and links[label] != url:
+            label += " "
+        links[label] = url
+        return label
+
+    return URL_RE.sub(swap, text), links
+
+
+def apply_links(line, links):
+    """Envuelve las etiquetas ya colocadas en secuencias OSC 8 clicables."""
+    for label, url in links.items():
+        if label in line:
+            link = f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+            line = line.replace(label, link)
+    return line
+
+
+def read_panel_json(path):
+    """El resumen que escribe flow, si existe.
+
+    Contrato: .claude/work/<trabajo>/panel.json
+      {
+        "updated_at": "<ISO8601>",          opcional pero recomendable
+        "header": true,                     opcional (por defecto true)
+        "lines": [
+          "texto suelto",                   → estilo normal
+          {"text": "…", "style": "warn"},   → estilo con nombre
+          {"text": "…", "indent": 2}        → sangría opcional
+        ]
+      }
+    """
+    f = os.path.join(path, "panel.json")
+    if not os.path.isfile(f):
+        return None
+    try:
+        with open(f, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) and data.get("lines") else None
+
+
+# Marcas semánticas: quien escribe dice qué es cada línea, el panel decide
+# con qué símbolo se pinta y cómo se alinea la columna.
+MARKS = {
+    "done":    ("✓", GREEN),
+    "current": ("▶", ORANGE + BOLD),
+    "pending": ("·", DIM),
+    "wait":    ("⏸", PURPLE),
+    "block":   ("⚠", ORANGE),
+    "info":    ("›", FG),
+}
+
+
+def panel_json_lines(data, width, max_lines):
+    """Pinta las líneas del JSON, envolviéndolas al ancho del panel.
+
+    Las líneas con `mark` forman una columna: símbolo, referencia alineada
+    y, si cabe, su enlace pegado a la derecha. Las que no lo llevan se
+    comportan como siempre, así que el formato viejo sigue valiendo.
+    """
+    items = []
+    for item in data.get("lines", []):
+        if isinstance(item, str):
+            items.append({"text": item})
+        elif isinstance(item, dict):
+            items.append(item)
+
+    # Ancho de la columna de referencias, calculado por bloque (los bloques
+    # los separan las líneas en blanco). Así el tren de MRs alinea con el
+    # tren, y las etiquetas de abajo entre ellas, sin arrastrarse unas a otras.
+    ref_widths, block = {}, []
+    for idx, i in enumerate(items):
+        if not str(i.get("text", "")).strip() and not i.get("link"):
+            block = []
+            continue
+        block.append(idx)
+        w = max((vis(str(items[j].get("ref", ""))) for j in block), default=0)
+        for j in block:
+            ref_widths[j] = w
+
+    out = []
+    for pos, item in enumerate(items):
+        if len(out) >= max_lines:
+            break
+
+        text = str(item.get("text", ""))
+        mark = item.get("mark")
+        style = item.get("style")
+        indent = int(item.get("indent", 0) or 0)
+        link = item.get("link")
+
+        if not text.strip() and not link:
+            out.append("")
+            continue
+
+        if mark in MARKS:
+            symbol, mark_colour = MARKS[mark]
+            colour = STYLES.get(style, mark_colour)
+            ref = str(item.get("ref", ""))
+            ref_w = ref_widths.get(pos, 0)
+            head = f" {symbol} " + (f"{ref:<{ref_w}}  " if ref_w else "")
+            body_indent = vis(head)
+            prefix_first = f"{DIM if mark == 'pending' else mark_colour}{head}{RESET}"
+        else:
+            colour = STYLES.get(style or "normal", FG)
+            head, body_indent = " " * indent, indent
+            prefix_first = head
+
+        text, links = linkify(text)
+        room = max(8, width - body_indent)
+        wrapped = wrap(text, room, max_lines - len(out)) if text.strip() else [""]
+
+        # el enlace se pega a la derecha de la primera línea si hay hueco
+        label = url_label(link) if link else None
+        if label and vis(wrapped[0]) + 2 + vis(label) <= room:
+            gap = " " * (room - vis(wrapped[0]) - vis(label))
+            first = (f"{colour}{apply_links(wrapped[0], links)}{RESET}"
+                     f"{gap}{DIM}\033]8;;{link}\033\\{label}\033]8;;\033\\{RESET}")
+            label = None
+        else:
+            first = f"{colour}{apply_links(wrapped[0], links)}{RESET}"
+
+        out.append(prefix_first + first)
+        for l in wrapped[1:]:
+            out.append(" " * body_indent + f"{colour}{apply_links(l, links)}{RESET}")
+        if label:                       # no cabía al lado: cuelga debajo
+            out.append(" " * body_indent
+                       + f"{DIM}\033]8;;{link}\033\\{label}\033]8;;\033\\{RESET}")
+    return out[:max_lines]
+
+
+def staleness(data, meta):
+    """Aviso si el resumen lleva mucho sin refrescarse.
+
+    Es la salvaguarda del modelo: flow escribe *antes* de cada tramo largo,
+    así que si muere a mitad el fichero sigue diciendo qué estaba haciendo y
+    es la antigüedad la que delata que ya no es verdad.
+
+    Dos matices:
+    - En un trabajo cerrado (done/abandoned) un resumen viejo es correcto,
+      no sospechoso: no se va a mover nunca más.
+    - El umbral lo puede subir el propio resumen con `stale_after_minutes`,
+      para tramos que se sabe que van a durar (sondeo de CI, suites largas).
+    """
+    if (meta or {}).get("phase") in TERMINAL_PHASES:
+        return None
+    stamp = data.get("updated_at")
+    if not stamp:
+        return None
+    try:
+        from datetime import datetime, timezone
+        then = datetime.fromisoformat(stamp)
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        mins = (datetime.now(timezone.utc) - then).total_seconds() / 60
+    except ValueError:
+        return None
+    limit = data.get("stale_after_minutes") or 30
+    try:
+        limit = float(limit)
+    except (TypeError, ValueError):
+        limit = 30
+    return ago(stamp) if mins > limit else None
+
+
+def notes_lines(path, width, limit):
+    """Hueco libre: lo que el agente quiera contar va aquí."""
+    note = os.path.join(path, "panel.md")
+    if not os.path.isfile(note):
+        return []
+    try:
+        with open(note, encoding="utf-8") as fh:
+            body = [l.rstrip() for l in fh if l.strip()][-limit:]
+    except OSError:
+        return []
+    if not body:
+        return []
+    out = [f"  {DIM}┄┄┄{RESET}"]
+    out.extend(f"  {FG}{cut(l, width - 2)}{RESET}" for l in body)
+    return out
+
+
+def work_block(path, meta, width, notes=6, title_lines=2, phases_vertical=False,
+               body_lines=40):
+    lines = [""]
+
+    # Si flow ha dejado un resumen, manda él: conoce la semántica real del
+    # trabajo y no hay que deducirla desde fuera.
+    data = read_panel_json(path)
+    if data:
+        if data.get("header", True):
+            lines.extend(head_line(meta, width, data))
+        old = staleness(data, meta)
+        if old:
+            lines.append(f"{ORANGE}⚠ resumen sin refrescar · {old}{RESET}")
+        lines.extend(panel_json_lines(data, width, body_lines))
+        return lines
+
+    lines.extend(head_line(meta, width))
+    for l in wrap(meta.get("title", ""), width, title_lines):
+        lines.append(f"{FG}{l}{RESET}")
+    train = mr_state(meta)
+    if train:
+        # Con tren, las fases del trabajo se quedan en la preparación: de
+        # build en adelante el recorrido lo repite cada MR, y mezclarlas
+        # pinta en verde fases que esta MR aún no ha visto.
+        lines.append("  " + phase_track(meta, width - 2, upto="plan"))
+    elif phases_vertical:
+        lines.extend(phase_track_vertical(meta, width))
+    else:
+        lines.append("  " + phase_track(meta, width - 2))
+    lines.extend(mr_lines(meta, width, phases_vertical))
+    lines.extend(repos_line(meta, width))
+    lines.extend(notes_lines(path, width, notes))
+    return lines
+
+
+def compact_line(meta, width, panel=None):
+    """Una sola línea: para los trabajos que no caben con detalle."""
+    phase = live_phase(meta, panel)
+    colour = GREEN if is_terminal(meta) else ORANGE
+    stamp = ago(meta.get("updated_at"))
+    ticket, typ = meta.get("ticket", "?"), meta.get("type", "")
+    left = f"{ticket} {typ} ⏵ {phase}"
+    if vis(left) + 1 + vis(stamp) <= width:
+        gap = " " * (width - vis(left) - vis(stamp))
+        return (f"{YELLOW}{ticket}{RESET} {DIM}{typ}{RESET} "
+                f"{colour}⏵ {phase}{RESET}{gap}{DIM}{stamp}{RESET}")
+    return f"{YELLOW}{cut(left, width)}{RESET}"
+
+
+def assemble(head_lines, blocks, height):
+    """Encaja los trabajos en el alto disponible.
+
+    Los más recientes van con detalle completo; el resto se reduce a una
+    línea. Así lo importante queda arriba y nada se sale por el borde
+    superior, que es lo que pasaba cuando el terminal hacía scroll solo.
+    """
+    budget = height - len(head_lines)
+    n = len(blocks)
+
+    def cost(detailed):
+        c = sum(len(b[0]) if i < detailed else 1 for i, b in enumerate(blocks))
+        return c + (1 if detailed < n else 0)
+
+    detailed = next((k for k in range(n, -1, -1) if cost(k) <= budget), 0)
+
+    out = list(head_lines)
+    for i, (full, compact) in enumerate(blocks):
+        if i < detailed:
+            out.extend(full)
+        else:
+            if i == detailed:
+                out.append("")
+            if len(out) >= height:
+                out.append(f"{DIM}+{n - i} más{RESET}")
+                break
+            out.append(compact)
+    return out[:height]
+
+
+# ─── los dos modos ────────────────────────────────────────────────────────
+
+def render_list(repo, width, height):
+    """Todos los trabajos abiertos del repo."""
+    name = os.path.basename(os.path.abspath(repo))
+    head_lines = [
+        f"{BOLD}{BLUE}FLOW{RESET} {DIM}·{RESET} {FG}{name}{RESET}",
+        f"{DIM}{'─' * width}{RESET}",
+    ]
+
+    dirs = work_dirs(repo)
+    if not dirs:
+        return head_lines + [
+            "",
+            f"{DIM}Sin trabajos activos en .claude/work/{RESET}",
+            f"{DIM}Empieza uno con /flow:feat:start{RESET}",
+        ]
+
+    works = []
+    for path in dirs:
+        meta = read_meta(path)
+        works.append((meta.get("updated_at", "") if meta else "", path, meta))
+    works.sort(key=lambda w: w[0], reverse=True)
+
+    blocks = []
+    for _, path, meta in works:
+        if meta is None:
+            bad = f"{ORANGE}⚠ {cut(os.path.basename(path), width - 2)}{RESET}"
+            blocks.append((["", bad, f"{DIM}meta.json ilegible{RESET}"], bad))
+        else:
+            panel = read_panel_json(path)
+            blocks.append((work_block(path, meta, width),
+                           compact_line(meta, width, panel)))
+    return assemble(head_lines, blocks, height)
+
+
+def render_focus(repo, width, height, cwd, wanted=None):
+    """Un solo trabajo, con todo el detalle que quepa."""
+    branch = current_branch(cwd)
+    path, meta = pick_work(repo, branch, wanted)
+
+    if meta is None:
+        name = os.path.basename(os.path.abspath(repo))
+        out = [f"{BOLD}{BLUE}FLOW{RESET} {DIM}·{RESET} {FG}{name}{RESET}",
+               f"{DIM}{'─' * width}{RESET}", ""]
+        if wanted:
+            out.append(f"{DIM}No hay ningún trabajo{RESET}")
+            out.append(f"{FG}{cut(wanted, width)}{RESET}")
+        else:
+            out.append(f"{DIM}Sin trabajos abiertos{RESET}")
+            out.append(f"{DIM}en .claude/work/{RESET}")
+        return out[:height]
+
+    # sin cabecera propia: el bloque ya trae el ticket, y en una subdivisión
+    # pequeña cada línea cuenta. En foco hay espacio: el título entero, las
+    # fases con su nombre si no caben a lo ancho, y las notas llenando el resto.
+    sequence, _, _ = phase_sequence(meta)
+    horizontal = vis(" ".join("●" + p for p in sequence)) <= width - 2
+    vertical = not horizontal and height >= len(sequence) + 6
+
+    def build(notes):
+        return work_block(path, meta, width, notes=notes, title_lines=6,
+                          phases_vertical=vertical, body_lines=height - 2)
+
+    room = max(1, height - (len(build(0)) - 1))
+    return build(room)[1:][:height]
+
+
+def main():
+    args = sys.argv[1:]
+    focus = "--focus" in args
+    wanted = None
+    if "--work" in args:
+        i = args.index("--work")
+        if i + 1 < len(args):
+            wanted, focus = args[i + 1], True
+        args = args[:i] + args[i + 2:]
+
+    paths = [a for a in args if not a.startswith("--")]
+    cwd = os.path.abspath(paths[0]) if paths else os.getcwd()
+    repo = find_repo(cwd)
+
+    # modo consulta: el selector de WezTerm pregunta qué trabajos hay
+    if "--json" in sys.argv[1:]:
+        print(list_json(repo))
+        return
+
+    last = None
+    sys.stdout.write("\033[?25l")          # ocultar cursor
+    try:
+        while True:
+            size = shutil.get_terminal_size()
+            state = (fingerprint(repo), size.columns, size.lines,
+                     current_branch(cwd) if focus and not wanted else "")
+            if state != last:
+                # un margen por lado: evita que el terminal parta líneas o
+                # haga scroll, que es lo que empujaba el contenido hacia arriba
+                width = max(20, size.columns - 1)
+                height = max(6, size.lines - 1)
+                lines = (render_focus(repo, width, height, cwd, wanted) if focus
+                         else render_list(repo, width, height))
+                sys.stdout.write(CLEAR + "\n".join(lines))
+                sys.stdout.flush()
+                last = state
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stdout.write("\033[?25h")      # restaurar cursor
+        sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,9 @@
+# Config personal de las herramientas (no de equipo)
+CLAUDE.md
+FLOW.md
+
+# Almacén local del MCP domain-memory (SQLite + WAL, se regenera)
+.domain-memory/
+
+# Rust (llega en F1.0)
+/target
