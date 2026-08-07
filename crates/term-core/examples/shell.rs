@@ -5,6 +5,7 @@
 //! otra capa, y verlas en crudo aquí es justamente la prueba de que llegan enteras.
 
 use std::io::{self, Write};
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use term_core::{Pty, Size};
@@ -24,7 +25,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 salida.write_all(&bytes)?;
                 salida.flush()?;
             }
-            Err(_) => continue,
+            // El shell murió por su cuenta (un `exit`, un fallo al arrancar): no hay nada más que
+            // leer y seguir esperando al plazo solo alargaría la salida sin motivo.
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => continue,
         }
     }
 

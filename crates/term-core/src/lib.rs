@@ -121,14 +121,35 @@ impl Drop for Pty {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::time::Duration;
+
+    /// Margen holgado: lo que se comprueba es que el canal acabe cerrándose, no lo rápido que lo
+    /// hace. Cualquier espera acotada sirve mientras no sea infinita.
+    const PLAZO: Duration = Duration::from_secs(10);
+
+    /// Consume el canal hasta que se cierre y devuelve todo lo recibido.
+    ///
+    /// Con plazo a propósito: un `recv()` sin plazo convertiría el fallo que estos tests buscan
+    /// —un hilo lector que no termina— en un cuelgue eterno en vez de en un test en rojo.
+    fn consumir_hasta_el_cierre(pty: &Pty) -> Vec<u8> {
+        let mut salida = Vec::new();
+        loop {
+            match pty.output().recv_timeout(PLAZO) {
+                Ok(bytes) => salida.extend_from_slice(&bytes),
+                Err(RecvTimeoutError::Disconnected) => return salida,
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!("el canal seguía abierto tras {PLAZO:?}: el hilo lector no terminó")
+                }
+            }
+        }
+    }
 
     #[test]
     fn el_canal_se_cierra_cuando_el_programa_termina() {
         let pty = Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("lanzar sh");
 
-        // Consumir hasta la desconexión. Si el hilo lector no terminara al morir el hijo, este
-        // bucle no acabaría nunca y el test se colgaría — que es justo lo que se quiere detectar.
-        while pty.output().recv().is_ok() {}
+        consumir_hasta_el_cierre(&pty);
     }
 
     #[test]
@@ -145,10 +166,7 @@ mod tests {
     fn lo_que_escribe_el_programa_llega_por_el_canal() {
         let pty = Pty::spawn("sh", &["-c", "printf hola"], Size::default()).expect("lanzar sh");
 
-        let mut salida = Vec::new();
-        while let Ok(bytes) = pty.output().recv() {
-            salida.extend_from_slice(&bytes);
-        }
+        let salida = consumir_hasta_el_cierre(&pty);
 
         assert!(
             salida.windows(4).any(|v| v == b"hola"),
