@@ -1,0 +1,4 @@
+[package]
+name = "panel-contract"
+version.workspace = true
+edition.workspace = true
