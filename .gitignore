@@ -1,9 +1,18 @@
 # Config personal de las herramientas (no de equipo)
 CLAUDE.md
 FLOW.md
-
-# Almacén local del MCP domain-memory (SQLite + WAL, se regenera)
-.domain-memory/
+.claude/
 
 # Rust (llega en F1.0)
 /target
+
+# domain-memory (per-developer)
+.domain-memory/config.json
+.mcp.json
+
+# domain-memory runtime state
+.domain-memory/staging/
+.domain-memory/index.sqlite
+.domain-memory/index.sqlite-*
+.domain-memory/errors.log
+.domain-memory/*.consolidated-*
