@@ -6,7 +6,11 @@ use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
 
-use portable_pty::{Child, CommandBuilder, native_pty_system};
+use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
+
+mod screen;
+
+pub use screen::Screen;
 
 /// Error de cualquier operación sobre el pseudoterminal.
 ///
@@ -39,6 +43,7 @@ impl Default for Size {
 /// trabajo de otra capa.
 pub struct Pty {
     child: Box<dyn Child + Send + Sync>,
+    master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     reader: Option<JoinHandle<()>>,
     output: Receiver<Vec<u8>>,
@@ -84,6 +89,10 @@ impl Pty {
 
         Ok(Self {
             child,
+            // El maestro se conserva para poder redimensionar. Mantenerlo abierto no impide el fin
+            // de fichero del hilo lector: ese depende de que nadie tenga abierto el extremo
+            // esclavo, y el único que lo tiene es el hijo.
+            master: pair.master,
             writer,
             reader: Some(reader),
             output,
@@ -95,6 +104,21 @@ impl Pty {
     /// Se desconecta cuando el programa termina.
     pub fn output(&self) -> &Receiver<Vec<u8>> {
         &self.output
+    }
+
+    /// Comunica al programa que el terminal ha cambiado de tamaño.
+    ///
+    /// Es la mitad que hace que el programa de dentro se entere y repinte. La otra mitad —refluir
+    /// la rejilla— la hace [`Screen::resize`], y **hacen falta las dos**: solo con esta, la rejilla
+    /// se queda con el tamaño viejo; solo con la otra, `vim` sigue pintando como si nada.
+    pub fn resize(&mut self, size: Size) -> Result<()> {
+        self.master.resize(portable_pty::PtySize {
+            rows: size.rows,
+            cols: size.cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+        Ok(())
     }
 
     /// Escribe bytes al programa, como si se hubieran tecleado.
