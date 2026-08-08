@@ -50,6 +50,58 @@ tiene un techo justo en nuestro caso de uso. Del propio issue de xterm.js
 Eso describe exactamente «varios agentes escribiendo a la vez». VS Code no sufre porque ahí
 sueles tener uno o dos terminales activos, no ocho.
 
+### Medido — 8 agosto 2026
+
+El issue de xterm.js era razonamiento prestado. Ahora hay medida propia, contra
+[Orca](https://github.com/stablyai/orca) (Electron + xterm.js con WebGL, el producto más maduro
+de esta categoría) y WezTerm como referencia nativa. Misma máquina, Wayland, GPU por hardware
+confirmada en Orca (`--ozone-platform=wayland`, `--render-node-override=/dev/dri/renderD128`, sin
+rastro de SwiftShader). Carga: 22,7 MiB de salida tipo TUI —color, negrita y repintado de barra de
+estado con movimiento de cursor cada 50 líneas— volcada de golpe. Se mide lo que el terminal tarda
+en vaciar el PTY.
+
+| | WezTerm | Orca |
+|---|---|---|
+| 1 división | 0,80 s · 28,4 MiB/s | 2,63 s · 8,6 MiB/s |
+| 4 divisiones visibles | 0,98 / 0,98 / 1,01 / 1,06 s | 8,44 / 12,50 / 12,72 / 12,64 s |
+| Caída de 1 → 4 | ×1,26 | ×4,4 |
+| Agregado con 4 | 85,7 MiB/s | 7,1 MiB/s |
+
+**Lo que decide no es el 12× de diferencia, es el signo:** Orca con cuatro divisiones mueve *menos*
+trabajo total que con una (7,1 frente a 8,6 MiB/s). Escala negativo. WezTerm pasa de 28,4 a 85,7,
+o sea ×3. Es la firma del hilo principal compartido.
+
+El método juega a favor: mide el vaciado del PTY, así que un terminal que bufferea y descarta
+frames saldría bien aquí y mal a la vista. Orca sale mal ya en el vaciado.
+
+**Lo que esta medida prueba y lo que no.** Prueba que el techo existe y dónde está. **No** prueba
+que la carga de un agente lo toque: la prosa de un agente son decenas de bytes por segundo, y un
+`cargo build` son unos cientos de KB, que incluso a los 1,8 MiB/s degradados de Orca se vacían en
+0,2 s. Vender el 12× como justificación del terminal propio sería tramposo.
+
+**El régimen donde sí muerde es el uso real, no el sintético.** Cinco o seis divisiones visibles:
+cuatro con agentes y **una o dos siguiendo logs** de un worktree que se está probando. Un `tail -f`
+sobre un servidor de desarrollo es un productor **sostenido**, no una ráfaga, y convive con el
+repintado continuo del panel de cada división. Esa combinación —uno o dos productores sostenidos
+más N paneles pintando— es la carga que hay que medir, y es justo la que el escalado negativo dice
+que este stack no aguanta. Orca no la tiene: sus paneles están quietos mientras el agente piensa.
+
+**Consecuencia para el producto:** Orca esquiva el techo porque su producto es otro — abanica
+agentes en worktrees y solo monta los terminales del worktree activo (montaje perezoso
+documentado), así que mira uno cada vez. Aquí las divisiones son visibles a la vez por definición,
+así que no se puede esquivar igual.
+
+**Criterio de aceptación, pendiente de verificar:** con N divisiones visibles produciendo a la vez,
+el rendimiento agregado tiene que **subir** con N, no bajar. Hoy solo está medido contra carga
+sintética; falta repetirlo contra carga real —agentes trabajando, un `tail -f` vivo y los paneles
+pintando— en cuanto la Fase 1 pinte divisiones. Si con carga real el techo no se toca, la
+justificación honesta del terminal propio deja de ser el rendimiento y pasa a ser el control del
+compositado y el panel integrado.
+
+**También descarta forkear Orca**, por dos motivos independientes: heredaría este techo, y su
+extensibilidad va toda hacia el agente (skills, MCP) — no hay API de plugins para su interfaz, que
+es justo donde tendría que vivir el panel.
+
 **Descartado — GTK4 + VTE.** Técnicamente el más cómodo en Linux (barra de título, botones,
 arrastrar paneles gratis) pero incompatible con D1.
 
