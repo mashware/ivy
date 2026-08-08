@@ -91,12 +91,31 @@ agentes en worktrees y solo monta los terminales del worktree activo (montaje pe
 documentado), así que mira uno cada vez. Aquí las divisiones son visibles a la vez por definición,
 así que no se puede esquivar igual.
 
-**Criterio de aceptación, pendiente de verificar:** con N divisiones visibles produciendo a la vez,
-el rendimiento agregado tiene que **subir** con N, no bajar. Hoy solo está medido contra carga
-sintética; falta repetirlo contra carga real —agentes trabajando, un `tail -f` vivo y los paneles
-pintando— en cuanto la Fase 1 pinte divisiones. Si con carga real el techo no se toca, la
-justificación honesta del terminal propio deja de ser el rendimiento y pasa a ser el control del
-compositado y el panel integrado.
+**Criterio de aceptación:** con N divisiones visibles produciendo a la vez, el rendimiento agregado
+tiene que **subir** con N, no bajar. La herramienta que lo mide vive en el repo: `crates/host-load`,
+y su documentación lleva el protocolo y estos números como referencia.
+
+**Contra quién decide ese criterio, y contra quién no.** Decide **contra terminales ajenos**: Orca
+falló ya en el vaciado, así que no hizo falta ver el pintado para descartarlo. **No decide contra el
+nuestro**, y la razón es estructural, no un matiz — conviene leerla antes de dar el criterio por
+cerrado con una medida de `host-load`:
+
+- El instrumento mide lo que el terminal **vacía del PTY**, no lo que **pinta**.
+- La mitigación que esta misma fase planifica para F1.3 es *«repintar solo cuando el PTY produzca
+  cambios»* (ver los riesgos de la Fase 1 en [05-roadmap.md](05-roadmap.md)), o sea **coalescer
+  frames**. Nuestra app aprobaría la prueba **por construcción**, midiendo bien precisamente por
+  hacer lo que la prueba no mira.
+- Y el pintado es **inobservable desde el proceso que produce la carga**: ningún protocolo de
+  terminal reporta un frame presentado, y el ida y vuelta de `ESC[6n` solo demuestra *consumido y
+  parseado*.
+
+**Pendiente, por tanto:** los contadores que sí lo verían —bytes procesados por frame, frames
+presentados, retraso del último respecto a la última entrada— viven **dentro de `app`** y no se
+pueden construir antes que el bucle de pintado. Es trabajo de F1.3/F1.4, y es lo que cierra de
+verdad el segundo síntoma que el roadmap pide medir.
+
+Si con carga real el techo no se toca, la justificación honesta del terminal propio deja de ser el
+rendimiento y pasa a ser el control del compositado y el panel integrado.
 
 **También descarta forkear Orca**, por dos motivos independientes: heredaría este techo, y su
 extensibilidad va toda hacia el agente (skills, MCP) — no hay API de plugins para su interfaz, que
