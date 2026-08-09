@@ -86,6 +86,7 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
             fg,
             bg,
             width,
+            inverse,
             bold,
             dim,
             italic,
@@ -98,7 +99,7 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
         assert!(!describir(bg).is_empty());
         assert!(!describir_ancho(width).is_empty());
         assert!(!describir_subrayado(underline).is_empty());
-        let _ = (c, bold, dim, italic, strikeout, hidden);
+        let _ = (c, inverse, bold, dim, italic, strikeout, hidden);
     }
 
     assert!(!describir_cursor(vista.cursor().shape).is_empty());

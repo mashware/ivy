@@ -1,0 +1,205 @@
+//! Dibuja la rejilla del terminal: fondos, glifos y cursor.
+//!
+//! **Es a propósito el pintor más ingenuo que funciona**: una celda cada vez, sin caché y sin
+//! seguimiento de lo que cambió. No es descuido ni un primer borrador — optimizar antes de medir
+//! escondería el síntoma que este hito existe para observar, y el modo de fallo de una caché de
+//! glifos son celdas fantasma, que es de los que no se ven hasta que ya llevas semanas encima.
+//!
+//! **La medida de la celda se pregunta, no se inventa.** El ancho sale del glifo de referencia de
+//! la fuente y el alto de su altura de línea. Calcularlo a ojo es lo que descuadra las filas.
+
+use crate::tema::Tema;
+use eframe::egui::{
+    Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, vec2,
+};
+use term_core::{CellWidth, CursorShape, TermColor, View, ViewCell};
+
+/// Cuánto ocupa una celda en pantalla.
+#[derive(Debug, Clone)]
+pub struct Metrica {
+    /// Privados juntos: el ancho y el alto son medidas **de esta fuente**. Con los tres campos
+    /// abiertos, cambiar uno solo deja una métrica que mide una fuente y pinta con otra, y la
+    /// rejilla se descuadra sin que nada falle — el mismo motivo por el que la vista de celdas
+    /// guarda su tamaño en privado.
+    ancho: f32,
+    alto: f32,
+    fuente: FontId,
+}
+
+impl Metrica {
+    /// Pregunta a la fuente cuánto mide una celda.
+    ///
+    /// El ancho se toma de un glifo cualquiera **de ancho fijo**: en una fuente monoespaciada todos
+    /// miden lo mismo, así que preguntar por uno vale por todos. Si algún día se admite una fuente
+    /// que no lo sea, este es el sitio donde se romperá — y romperse aquí es mejor que descuadrarse
+    /// en pantalla sin avisar.
+    ///
+    /// **Se pregunta en cada pasada, no se guarda.** Al cambiar el aumento del escritorio la fuente
+    /// cambia de tamaño, y una medida guardada descuadraría la rejilla entera sin avisar.
+    pub fn medir(ctx: &Context, fuente: FontId) -> Self {
+        let (ancho, alto) = ctx.fonts_mut(|fuentes| {
+            (
+                fuentes.glyph_width(&fuente, 'M'),
+                fuentes.row_height(&fuente),
+            )
+        });
+        Self {
+            ancho,
+            alto,
+            fuente,
+        }
+    }
+
+    /// El rectángulo que ocupa la celda de una fila y columna, desde el origen dado.
+    fn celda(&self, origen: Pos2, fila: u16, columna: u16) -> Rect {
+        let esquina = origen + vec2(columna as f32 * self.ancho, fila as f32 * self.alto);
+        Rect::from_min_size(esquina, vec2(self.ancho, self.alto))
+    }
+}
+
+/// Pinta la vista entera en el sitio indicado.
+///
+/// **Precondición: la superficie ya tiene que estar pintada con el fondo del tema.** Las celdas
+/// que llevan ese mismo fondo no se pintan —serían casi dos mil rectángulos por pasada para no
+/// cambiar nada, y con el antialias activo, una frontera por celda donde puede aparecer costura—,
+/// así que sobre una superficie sin limpiar saldría el hueco de la ventana entre las letras.
+///
+/// El orden importa y es siempre el mismo: **primero todos los fondos, después todos los glifos y
+/// el cursor al final**. Pintar cada celda entera de una vez dejaría el fondo de una celda encima
+/// del glifo de la anterior en cuanto un glifo se saliera de su hueco — que es precisamente lo que
+/// aquí no se recorta, para poder verlo.
+pub fn pintar(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica, origen: Pos2) {
+    let tamano = vista.size();
+    // El fondo por defecto es el mismo para toda la pantalla: preguntarlo una vez por celda serían
+    // casi dos mil consultas por pasada para obtener siempre lo mismo.
+    let fondo_de_la_ventana = tema.fondo();
+
+    // Se recorre la rejilla entera en trozos de una fila. La vista es densa por contrato —hay
+    // exactamente filas por columnas celdas— así que esto no puede dejarse ninguna fuera, y no hay
+    // ningún caso imposible que fingir que se trata.
+    let ancho = tamano.cols as usize;
+    for (fila, celdas) in vista.cells().chunks_exact(ancho).enumerate() {
+        let fila = fila as u16;
+        for (columna, celda) in celdas.iter().enumerate() {
+            let (_, fondo) = colores_de(celda, tema);
+            // El fondo por defecto ya lo pinta la ventana entera: repetirlo celda a celda es
+            // trabajo por nada y, con el antialias activo, una costura por cada frontera.
+            if fondo != fondo_de_la_ventana {
+                painter.rect_filled(metrica.celda(origen, fila, columna as u16), 0.0, fondo);
+            }
+        }
+    }
+
+    for (fila, celdas) in vista.cells().chunks_exact(ancho).enumerate() {
+        let fila = fila as u16;
+        for (columna, celda) in celdas.iter().enumerate() {
+            let hueco = metrica.celda(origen, fila, columna as u16);
+            pintar_glifo(painter, celda, tema, metrica, hueco);
+        }
+    }
+
+    pintar_cursor(painter, vista, tema, metrica, origen);
+}
+
+/// Los dos colores de una celda, ya con la intensidad aplicada donde corresponde.
+///
+/// **La negrita y el atenuado describen el color que el programa declaró como primer plano**, y con
+/// vídeo inverso ese color es el que viaja en el fondo — el motor lo entrega intercambiado y marca
+/// que lo está. Aplicar la intensidad siempre al primer plano parece lo natural y es el error:
+/// atenúa un color que ya no se ve y deja el otro a plena intensidad.
+fn colores_de(celda: &ViewCell, tema: &Tema) -> (Color32, Color32) {
+    if celda.inverse {
+        (
+            tema.color(celda.fg),
+            tema.con_atributos(celda.bg, celda.bold, celda.dim),
+        )
+    } else {
+        (
+            tema.con_atributos(celda.fg, celda.bold, celda.dim),
+            tema.color(celda.bg),
+        )
+    }
+}
+
+fn pintar_glifo(painter: &Painter, celda: &ViewCell, tema: &Tema, metrica: &Metrica, hueco: Rect) {
+    // El acompañante de un carácter ancho **no pinta nada**. El glifo entero lo dibuja su primera
+    // columna y se sale sobre esta; volver a pintarlo aquí lo duplicaría, medio encima del otro.
+    // Y el hueco que deja un ancho que no cabía al final de la fila tampoco es un espacio: es un
+    // sitio donde no hay carácter.
+    if matches!(celda.width, CellWidth::WideTail | CellWidth::WrapFiller) {
+        return;
+    }
+    // Un espacio no tiene nada que dibujar, y son la mayor parte de una pantalla de terminal.
+    if celda.c == ' ' || celda.hidden {
+        return;
+    }
+
+    let (color, _) = colores_de(celda, tema);
+    // **No se recorta el glifo a su celda.** Si la fuente pinta más ancho de lo que el parser
+    // reservó, tiene que verse: es el dato que decide si hay que embarcar una fuente propia.
+    // Recortarlo escondería el desajuste y lo convertiría en una sorpresa mucho más cara.
+    painter.text(
+        hueco.left_top(),
+        Align2::LEFT_TOP,
+        celda.c,
+        metrica.fuente.clone(),
+        color,
+    );
+}
+
+fn pintar_cursor(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica, origen: Pos2) {
+    let cursor = vista.cursor();
+    if cursor.shape == CursorShape::Hidden {
+        return;
+    }
+    // Fuera de la rejilla no se pinta nada. Hoy no puede pasar —la caja recorta— pero cuando la
+    // Fase 2 traiga historial el cursor sí caerá fuera de lo visible, y dibujarlo recortado sería
+    // ponerlo en un sitio donde no está.
+    let Some(debajo) = vista.cell(cursor.row, cursor.col) else {
+        return;
+    };
+    let mut hueco = metrica.celda(origen, cursor.row, cursor.col);
+    // Sobre un carácter ancho, el cursor cubre **las dos columnas** que ese carácter ocupa. Cubrir
+    // solo una deja media letra tapada y la otra media no, que se lee como un error de dibujo.
+    if debajo.width == CellWidth::WideHead {
+        hueco.max.x += metrica.ancho;
+    }
+    let color = tema.color(TermColor::Cursor);
+    // Sin parpadeo, y no por falta de tiempo: un cursor que parpadea es un temporizador, y un
+    // temporizador es trabajo en reposo — justo lo que este hito mide y no puede permitirse
+    // contaminar.
+    match cursor.shape {
+        CursorShape::Block => {
+            painter.rect_filled(hueco, 0.0, color);
+            // El bloque es opaco y va después de los glifos, así que se come el carácter que hay
+            // debajo. Se repinta encima, en el color del fondo: es lo que hace un terminal, y sin
+            // esto el cursor **borra** la letra sobre la que está en vez de resaltarla.
+            if debajo.c != ' ' && !debajo.hidden {
+                painter.text(
+                    hueco.left_top(),
+                    Align2::LEFT_TOP,
+                    debajo.c,
+                    metrica.fuente.clone(),
+                    colores_de(debajo, tema).1,
+                );
+            }
+        }
+        CursorShape::HollowBlock => {
+            painter.rect_stroke(hueco, 0.0, Stroke::new(1.0, color), StrokeKind::Inside);
+        }
+        CursorShape::Underline => {
+            let alto = (metrica.alto * 0.1).max(1.0);
+            let barra = Rect::from_min_size(
+                hueco.left_bottom() - vec2(0.0, alto),
+                vec2(metrica.ancho, alto),
+            );
+            painter.rect_filled(barra, 0.0, color);
+        }
+        CursorShape::Beam => {
+            let ancho = (metrica.ancho * 0.15).max(1.0);
+            let barra = Rect::from_min_size(hueco.left_top(), vec2(ancho, metrica.alto));
+            painter.rect_filled(barra, 0.0, color);
+        }
+        CursorShape::Hidden => {}
+    }
+}

@@ -123,6 +123,11 @@ impl Tema {
         }
     }
 
+    /// El fondo por defecto, que es también el de la ventana entera.
+    pub fn fondo(&self) -> Color32 {
+        self.fondo
+    }
+
     /// Acerca un color al fondo. Es lo que aquí significa «atenuado».
     fn apagar(&self, c: Color32) -> Color32 {
         mezclar(c, self.fondo, ATENUACION)

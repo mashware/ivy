@@ -96,6 +96,14 @@ pub struct ViewCell {
     /// Color del fondo, con el vídeo inverso ya aplicado igual que en `fg`.
     pub bg: TermColor,
     pub width: CellWidth,
+    /// Los dos colores **ya vienen intercambiados**; esto dice que lo están.
+    ///
+    /// No es información redundante ni una invitación a rehacer el intercambio. Hace falta porque
+    /// la intensidad —negrita y atenuado— describe el color que el programa declaró como **primer
+    /// plano**, y con vídeo inverso ese color es el que ahora viaja en `bg`. Sin este dato, quien
+    /// pinta aplica la intensidad al campo equivocado: con `\x1b[2;31;7m` atenúa un color que ya no
+    /// se ve y deja el rojo a plena intensidad. Lo comprobó una revisión del pintor, no la teoría.
+    pub inverse: bool,
     /// Negrita. **No se resuelve aquí**: «negrita = brillante» es decisión de tema, no de lectura.
     ///
     /// **Ojo con el vídeo inverso.** La intensidad describe el color que el programa declaró como
@@ -119,6 +127,7 @@ impl Default for ViewCell {
             fg: TermColor::Foreground,
             bg: TermColor::Background,
             width: CellWidth::Single,
+            inverse: false,
             bold: false,
             dim: false,
             italic: false,
@@ -339,6 +348,7 @@ pub(crate) fn celda_desde(celda: &Cell) -> ViewCell {
             fg,
             bg,
             width,
+            inverse: banderas.contains(Flags::INVERSE),
             bold: banderas.contains(Flags::BOLD),
             dim: banderas.contains(Flags::DIM),
             italic: banderas.contains(Flags::ITALIC),

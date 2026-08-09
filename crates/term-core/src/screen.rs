@@ -405,6 +405,11 @@ mod tests {
             "el rojo pasa a ser el fondo"
         );
         assert!(celda.dim, "y es el rojo lo que está atenuado, no el fg");
+        assert!(
+            celda.inverse,
+            "y hay que decirlo: sin esta marca, quien pinta no puede saber a cuál de los dos \
+             colores se refiere la intensidad, y la aplica al que ya no se ve"
+        );
     }
 
     #[test]
