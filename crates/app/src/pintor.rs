@@ -60,6 +60,20 @@ impl Metrica {
         }
     }
 
+    /// Lo que ocupa una celda de ancho.
+    ///
+    /// Se puede leer, pero no fijar: quien mide una rejilla necesita este número —para colocar dos
+    /// consolas seguidas, o para saber si caben en la ventana— y calcularlo por su cuenta sería
+    /// justo lo que esta caja evita, medir con una fuente y pintar con otra.
+    pub fn ancho(&self) -> f32 {
+        self.ancho
+    }
+
+    /// Lo que ocupa una celda de alto. Se lee por lo mismo que [`Metrica::ancho`].
+    pub fn alto(&self) -> f32 {
+        self.alto
+    }
+
     /// Cuántas celdas enteras caben en el espacio dado.
     ///
     /// **Nunca menos de una fila y una columna, y nunca más de [`MAXIMO`].** El suelo está porque
