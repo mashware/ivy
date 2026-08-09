@@ -9,6 +9,8 @@
 //! Por ahora la ventana abre vacía. Lo que va llegando después: la tabla de color, la traducción
 //! de teclado, el puente con el pseudoterminal, el pintor y los cronómetros.
 
+pub mod tema;
+
 use eframe::egui;
 
 /// El nombre con el que la ventana se presenta al escritorio.

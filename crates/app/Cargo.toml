@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 eframe.workspace = true
+term-core = { path = "../term-core" }
 
 # No se usa desde el código: está solo para reponer una feature que se cayó al quitar los defaults
 # de eframe. Sin ella, en Wayland la ventana la decora el marco de reserva de SCTK —que su propio
