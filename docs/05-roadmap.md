@@ -149,6 +149,12 @@ D3 dejaba GPUI para el producto y egui como *opción* para prototipar. Para la F
 **Cuándo saltar a GPUI:** cuando egui deje de dar el rendimiento o el control necesario, y no
 antes. Los dos síntomas concretos a vigilar están en los riesgos de F1.3.
 
+> **Medidos en F1.3, ago 2026: ninguno de los dos aparece.** El repintado completo escala lineal
+> —dos consolas cuestan 1,96× una y el fotograma gasta el 36 % de su hueco— y escribir cuesta 36 µs.
+> El salto no toca. Lo que queda por comprobar es la carga que estos números **no** cubren: cuatro
+> divisiones y los paneles pintando a la vez, o sea F1.4 y F1.6. Los números, con lo que prueban y
+> lo que no, están en el anexo «Medido — 9 agosto» de [D3](02-decisiones.md).
+
 ### Estructura
 
 ```
@@ -178,10 +184,10 @@ Tamaño: **S** = una sentada · **M** = varias · **L** = va a doler.
 
 | Hito | Qué se construye | Cómo se comprueba | Tamaño |
 |---|---|---|---|
-| **F1.0** | `git init` y el workspace con las tres cajas vacías | `cargo build` limpio | S |
-| **F1.1** | `term-core`: `portable-pty` lanza el shell, hilo lector, escritura al PTY | Un binario de prueba lanza `zsh -l`, escribe `ls\n`, imprime la salida cruda | S |
-| **F1.2** | `term-core`: los bytes entran en `alacritty_terminal::Term`; volcar la rejilla a texto | `vim` y `htop` producen una rejilla coherente; al redimensionar, refluye | M |
-| **F1.3** | `app`: pintar la rejilla en egui — fuente monoespaciada, colores ANSI, cursor. Teclado → PTY | Se puede usar `ls`, `vim` y **`claude`** dentro de la ventana | L |
+| **F1.0** ✅ | `git init` y el workspace con las tres cajas vacías | `cargo build` limpio | S |
+| **F1.1** ✅ | `term-core`: `portable-pty` lanza el shell, hilo lector, escritura al PTY | Un binario de prueba lanza `zsh -l`, escribe `ls\n`, imprime la salida cruda | S |
+| **F1.2** ✅ | `term-core`: los bytes entran en `alacritty_terminal::Term`; volcar la rejilla a texto | `vim` y `htop` producen una rejilla coherente; al redimensionar, refluye | M |
+| **F1.3** ✅ | `app`: pintar la rejilla en egui — fuente monoespaciada, colores ANSI, cursor. Teclado → PTY | Se puede usar `ls`, `vim` y **`claude`** dentro de la ventana | L |
 | **F1.4** | Dos divisiones lado a lado, foco por clic, divisor arrastrable | Dos shells vivos a la vez sin que se pisen | M |
 | **F1.5** | `PANEL_ID` / `PANEL_DIR` inyectados al lanzar cada shell; el directorio se crea y se limpia al cerrar | `echo $PANEL_ID` da valores distintos en cada división | S |
 | **F1.6** | `panel-contract` + `notify`: panel a la derecha de cada división, repintado al cambiar el fichero | `flow` escribe en una división y solo esa repinta | M |
@@ -197,8 +203,8 @@ un prototipo de una semana en uno de tres meses y no responde mejor la pregunta.
 | Riesgo | Dónde aparece | Qué hacer |
 |---|---|---|
 | **Ancho de glifo** — CJK, emoji y caracteres combinantes descolocan la rejilla | F1.3 | **No hay nada que portar** (corregido, ago 2026): el parser ya resuelve el ancho y marca la celda acompañante, y el lector de `term-core` lo expone como `CellWidth`. Lo que le queda a quien pinta es **respetar** las dos columnas, no calcularlas |
-| **Repintado completo** — egui es modo inmediato: repinta todo cada frame | F1.3 | Repintar solo cuando el PTY produzca cambios. **Si con dos divisiones activas no aguanta, ese es el síntoma para revisar GPUI** |
-| **Latencia de tecla** — un terminal que se nota lento al escribir es inservible | F1.3 | Medir tecla→pixel. **Segundo síntoma para revisar GPUI** |
+| **Repintado completo** — egui es modo inmediato: repinta todo cada frame | F1.3 | **RESPONDIDO (ago 2026): el síntoma no aparece.** Dos consolas cuestan 1,96× una —escala lineal— y el fotograma gasta el 36 % de su hueco con el pintor más ingenuo posible. Se repinta solo cuando el PTY produce cambios, como estaba previsto. **Aviso para F1.4:** extrapolando, cuatro consolas rozarían el presupuesto; con la segunda división de verdad hay que volver a medir. Números en el anexo «Medido — 9 agosto» de [D3](02-decisiones.md) |
+| **Latencia de tecla** — un terminal que se nota lento al escribir es inservible | F1.3 | **RESPONDIDO (ago 2026): 36 µs** de la tecla en el fotograma al byte en el programa. **No existe un número «tecla→píxel»**: los eventos de egui no traen sello propio y el reloj de su entrada es «relativo a lo que sea», así que ese tramo no es medible desde el proceso — publicarlo con ese nombre habría sido inventarlo. Lo que sí se mide, y con desglose, está en [D3](02-decisiones.md) |
 | **Teclas muertas e IME** | F1.3 | Aceptar que quede regular en el prototipo; es Fase 2 |
 | **Rendimiento del volcado masivo** (`cat` de un fichero grande) | F1.2 | Acotar cuántos bytes se procesan por frame |
 | **Windows** — ConPTY se comporta distinto | fuera de Fase 1 | No se toca hasta la Fase 2. `portable-pty` lo abstrae, pero abstraer no es probar |

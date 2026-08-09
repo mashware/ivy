@@ -124,6 +124,113 @@ es justo donde tendría que vivir el panel.
 **Descartado — GTK4 + VTE.** Técnicamente el más cómodo en Linux (barra de título, botones,
 arrastrar paneles gratis) pero incompatible con D1.
 
+### Medido — 9 agosto 2026: egui bajo carga, desde dentro
+
+Esto **construye** los contadores que la medida anterior dejó pendientes: los que ven el **pintado**
+—y no solo el vaciado del pseudoterminal— ya existen dentro de `app`, porque ya existe el bucle de
+pintado. No cierra el criterio entero de aquella medida: *«con N divisiones visibles produciendo a
+la vez, el agregado tiene que subir con N»* sigue sin comprobarse, porque la Fase 1 todavía no tiene
+dos divisiones — llega en F1.4. Todos los números son de la misma máquina (Wayland, pantalla de 120 Hz), en `--release`,
+con el pintor **más ingenuo posible**: una celda cada vez, sin caché y sin seguimiento de lo que
+cambió.
+
+**El primer síntoma que el roadmap pedía vigilar — el repintado completo con más de una división:**
+
+| Consolas sintéticas de 24×80 | 1 (1 920 celdas) | 2 (3 840 celdas) |
+|---|---|---|
+| CPU por fotograma | 1,52 ms (peor 2,96) | **2,98 ms** (peor 5,73) |
+
+Dos consolas cuestan **1,96×** lo que cuesta una: escala lineal, no super-lineal. Con dos, el
+fotograma gasta el **36 %** de su hueco de 8,4 ms —y su **peor** fotograma, el 68 %—. Medido con
+pantallas **llenas** —cada celda con fondo propio, que obliga a dibujar un rectángulo por celda
+además del glifo— y en repintado continuo, que es el techo y no el uso normal. El instrumento es
+`cargo run --release --example barrido -p app`, y llama al pintor de verdad, no a una copia.
+
+**El tamaño de esas consolas importa y hay que decirlo antes de leer el número:** son de 24×80 cada
+una, así que las dos juntas suman 3 840 celdas — **menos que las 6 954 de una sola ventana real** de
+esta máquina (61×114), que es donde se tomó la latencia de más abajo. El banco no mide «dos
+divisiones»; mide **dos rejillas independientes** de tamaño clásico. Los fotogramas por segundo de
+esa tanda (119,6 y 119,2) se omiten a propósito de la tabla: están topados por la sincronía
+vertical, así que solo demuestran que el fotograma cabe en su hueco, no cuánto margen sobra — para
+eso está el porcentaje.
+
+**El segundo síntoma — la latencia:**
+
+Tomada dentro de la aplicación, en una ventana de 61×114 celdas:
+
+| | uso normal (13 teclas, 32 fotogramas) | volcado de 13,5 MB (111 fotogramas) |
+|---|---|---|
+| tecla en el fotograma → byte en el programa | **36 µs** (72 el 95 %) | — |
+| byte disponible → fotograma pagado | **3,27 ms** (9,8 el 95 %) | **377 ms** (671 el 95 %) |
+| … esperando turno | 2,61 ms | 373 ms |
+| … interpretar + encolar + el resto | 0,65 ms | 4,1 ms |
+
+La muestra de «uso normal» es pequeña —trece pulsaciones— y sirve para lo que se usa aquí: fijar el
+orden de magnitud, que son microsegundos. Para afirmar más haría falta más.
+
+**Lo que estas dos tablas dicen junto es el veredicto: el trabajo de verdad nunca pasa de unos
+pocos milisegundos.** Lo que se percibe como retraso es, en los dos regímenes, **esperar turno** — y
+son dos esperas distintas, ninguna imputable al framework: en uso normal son los 2,6 ms del hueco
+entre fotogramas de una pantalla de 120 Hz, o sea sincronía vertical; en el volcado son los 373 ms
+del **presupuesto de 128 KiB por fotograma**, que es el precio elegido a conciencia para que la
+ventana no se congele.
+
+**Respuesta a los dos síntomas: ninguno aparece.** El repintado completo escala lineal y deja dos
+tercios del fotograma libres con dos rejillas llenas; la latencia de escritura es de microsegundos.
+Ninguno de los dos justifica revisar el framework hoy.
+
+Y un dato que confirma que el presupuesto está bien puesto: **interpretar 128 KiB cuesta 1,67 ms
+medidos**, contra los ~1,94 ms que predecía la absorción de 64,5 MiB/s calculada en F1.2. La
+estimación de entonces era buena.
+
+**La escalera de escape del pintado no se activa.** Estaba escrita como celda a celda → tramos por
+fila → malla con el atlas de fuentes, y ejecutable **solo si el número la pedía**. No lo pide: el
+peldaño más ingenuo deja el 64 % del fotograma libre con dos consolas. Queda escrita para cuando
+haga falta, sin tocar.
+
+**Qué NO prueban estos números, dicho antes de que alguien los cite de más:**
+
+- **Una máquina, una pantalla, un compositor.** Los números son de este equipo con Wayland y 120 Hz.
+- **Dos rejillas de 24×80, no dos divisiones de la ventana real.** Es la reserva más importante de
+  todas: 3 840 celdas contra las 6 954 de la ventana donde se midió la latencia. En F1.4 dos
+  divisiones **se reparten** la ventana en vez de duplicarla, así que el área total no crece — lo
+  que crece es el número de rejillas, de lecturas y de llamadas al pintor. Ese caso **no está
+  medido**, y es exactamente el que F1.4 tiene que volver a pasar por el banco, con la ventana de
+  verdad partida.
+- **Cuatro y ocho consolas tampoco están medidas.** El síntoma del roadmap se redacta con dos y ahí
+  se midió. Extrapolando la escala lineal, cuatro rondarían los 6 ms de media y su peor fotograma se
+  saldría del hueco: **el margen no da para todo**.
+- **El peor fotograma con dos rejillas ya gasta el 68 %** del hueco. La media dice que sobra sitio;
+  el peor dice cuánto margen hay realmente, y es la mitad de lo que sugiere la media.
+- **Nada de esto mide el compositado ni el panel**, que es lo que la Fase 1 no tiene todavía.
+- **Hay coste que hoy se atribuye a egui sin ser suyo.** Leer la rejilla materializa todas sus
+  celdas en cada pase —288 KiB por pase en una ventana de 60×240, que a 60 fotogramas son 17 MiB/s—
+  y eso se lo llevará puesto cualquier framework. Y el aviso de repintado se pide **una vez por cada
+  trozo de 8 KiB** que llega del pseudoterminal, unos 34 000 por segundo en un volcado, cada uno
+  tomando un candado que el hilo de interfaz también usa; egui además convierte cada petición en
+  **dos** pases. Ninguna de las tres cosas se aisló en estas medidas. Si un día el número sale raro,
+  este párrafo es el primer sitio donde mirar.
+
+**Dos cosas que sí muerden y no son de rendimiento.** Van aquí porque un veredicto que solo mirase
+los milisegundos daría una impresión falsa de «esto está listo»:
+
+1. **egui no usa las fuentes del sistema.** Embarca cuatro y ninguna cubre CJK ni el Área de Uso
+   Privado, así que el japonés y los iconos de un `ls` moderno salen como cuadros vacíos, aunque la
+   máquina tenga esas fuentes instaladas. El pintor hace lo correcto —reserva el hueco y pide el
+   glifo—; quien no lo tiene es la fuente. Registrar fuentes del sistema al arrancar es trabajo
+   pendiente, y es lo que separa esto de ser usable a diario.
+2. **La cola de salida no tiene techo** ([#20](https://github.com/mashware/agent-terminal/issues/20)):
+   un programa que escribe sin parar —`yes`, `cat /dev/urandom`— agota la memoria. El único freno
+   real es dejar de leer el pseudoterminal, y eso vive en `term-core`.
+
+**Qué significa para esta decisión.** D3 sigue como está: **egui aguanta de sobra lo que la Fase 1
+necesita**, que es exactamente el papel que esta decisión le daba. Lo que estos números añaden es
+una pregunta que antes no se podía ni formular con datos —si el margen es este, ¿qué aporta GPUI que
+justifique su coste?— y que **no se responde aquí**: se responde cuando F1.4 tenga dos divisiones de
+verdad y F1.6 los paneles pintando a la vez, que es la carga que D3 dice que hay que medir. Cambiar
+la decisión de fondo en un anexo, con dos consolas sintéticas de una sola máquina, sería justo el
+tipo de atajo que esta decisión se tomó para evitar.
+
 ---
 
 ## D4 — Control por consola, no por API
