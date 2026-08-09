@@ -9,6 +9,7 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::Processor;
 
 use crate::Size;
+use crate::view::{self, Cursor, View, ViewCell};
 
 /// Dimensiones en el vocabulario de `alacritty_terminal`.
 ///
@@ -104,6 +105,65 @@ impl Screen {
         }
     }
 
+    /// Una foto de la rejilla visible: todas las celdas y el cursor.
+    ///
+    /// Es el lector que usa quien pinta, y **no toca la pantalla**: a diferencia de consultar los
+    /// daños, se puede llamar tantas veces como haga falta y siempre devuelve lo mismo mientras no
+    /// entren bytes nuevos. Eso es lo que permite pintar dos veces el mismo frame sin que la
+    /// segunda salga en blanco.
+    ///
+    /// Convive con [`to_text`](Screen::to_text) en vez de sustituirlo: son dos contratos distintos
+    /// —uno da texto legible, el otro celdas con atributos— y fusionarlos no lo pide nadie.
+    pub fn view(&self) -> View {
+        let size = self.size();
+        let columnas = size.cols as usize;
+        let mut celdas = vec![ViewCell::default(); size.rows as usize * columnas];
+
+        let contenido = self.term.renderable_content();
+        // Las coordenadas del iterador y las del cursor van en el mismo sistema, que cuenta desde
+        // el principio del historial. Sumar el desplazamiento las lleva a coordenadas visibles, que
+        // son con las que quien pinta puede indexar. Hoy vale siempre 0 —esta caja se crea sin
+        // historial— y para las **celdas** esta cuenta seguirá valiendo cuando lo haya. Para el
+        // **cursor** no: ver más abajo.
+        let desplazamiento = contenido.display_offset as i32;
+
+        for indexada in contenido.display_iter {
+            let fila = indexada.point.line.0 + desplazamiento;
+            let columna = indexada.point.column.0;
+            // El iterador no sale de lo visible —comprobado contra su fuente—, así que esto no
+            // debería dispararse nunca. Se queda como aserción y no como salto silencioso: si una
+            // versión futura cambiara el rango, saltaría en los tests en vez de dejar filas en
+            // blanco que nadie sabría explicar.
+            debug_assert!(
+                fila >= 0 && fila < size.rows as i32 && columna < columnas,
+                "el iterador salió de lo visible: fila {fila}, columna {columna}"
+            );
+            if fila < 0 || fila >= size.rows as i32 || columna >= columnas {
+                continue;
+            }
+            celdas[fila as usize * columnas + columna] = view::celda_desde(indexada.cell);
+        }
+
+        // Hoy el cursor siempre cae dentro de lo visible, porque esta caja se crea sin historial.
+        // El recorte es red de seguridad para que la vista no pueda salir con un índice fuera de
+        // rango, pero **no es una solución**: cuando la Fase 2 traiga scrollback y se pueda subir
+        // por el historial, el cursor caerá de verdad fuera de la pantalla y recortarlo lo dibujaría
+        // en la última fila, que es un sitio donde no está. La aserción es lo que hará que eso salte
+        // en un test en vez de aparecer como un cursor fantasma.
+        let fila_cursor = contenido.cursor.point.line.0 + desplazamiento;
+        debug_assert!(
+            (0..size.rows as i32).contains(&fila_cursor),
+            "el cursor cayó fuera de lo visible ({fila_cursor}): con historial hay que decir que no se ve, no recortarlo"
+        );
+        let cursor = Cursor {
+            row: fila_cursor.clamp(0, size.rows.saturating_sub(1) as i32) as u16,
+            col: (contenido.cursor.point.column.0 as u16).min(size.cols.saturating_sub(1)),
+            shape: view::forma_desde(contenido.cursor.shape),
+        };
+
+        View::new(size, celdas, cursor)
+    }
+
     /// Vuelca la pantalla visible a texto.
     ///
     /// Recorta los espacios finales de cada línea, descarta las líneas vacías del final y une con
@@ -144,6 +204,7 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{CellWidth, CursorShape, TermColor, Underline};
 
     #[test]
     fn una_pantalla_recien_creada_no_tiene_contenido() {
@@ -200,6 +261,185 @@ mod tests {
             "el contenido no sobrevivió al redimensionado: {:?}",
             pantalla.to_text()
         );
+    }
+
+    #[test]
+    fn la_vista_es_densa_y_del_tamano_de_la_rejilla() {
+        let pantalla = Screen::new(Size { rows: 3, cols: 10 });
+
+        let vista = pantalla.view();
+
+        assert_eq!(vista.size(), Size { rows: 3, cols: 10 });
+        assert_eq!(vista.cells().len(), 30);
+        assert_eq!(vista.row(2).expect("falta la última fila").len(), 10);
+        assert!(vista.row(3).is_none(), "no debería haber una cuarta fila");
+        assert!(vista.cell(0, 10).is_none(), "no debería haber columna 10");
+    }
+
+    #[test]
+    fn un_caracter_ancho_ocupa_dos_columnas_y_la_segunda_guarda_su_hueco() {
+        // Es la razón de que la vista sea densa: si el acompañante se omitiera, quien pinta tendría
+        // que llevar la cuenta del desplazamiento, y ahí es donde se descoloca una fila con CJK.
+        let mut pantalla = Screen::new(Size::default());
+        pantalla.advance("漢a".as_bytes());
+
+        let vista = pantalla.view();
+
+        let primera = vista.cell(0, 0).expect("falta la celda 0");
+        assert_eq!(primera.c, '漢');
+        assert_eq!(primera.width, CellWidth::WideHead);
+
+        let acompanante = vista.cell(0, 1).expect("falta el acompañante");
+        assert_eq!(
+            acompanante.width,
+            CellWidth::WideTail,
+            "la segunda columna del carácter ancho tiene que estar en la vista"
+        );
+
+        // Y la letra siguiente cae en la columna 2, no en la 1: el ancho no descolocó la fila.
+        let siguiente = vista.cell(0, 2).expect("falta la celda 2");
+        assert_eq!(siguiente.c, 'a');
+        assert_eq!(siguiente.width, CellWidth::Single);
+    }
+
+    #[test]
+    fn el_hueco_que_deja_un_ancho_que_no_cabe_se_distingue_de_un_espacio() {
+        // Cuatro columnas: «abc» llena tres y el carácter ancho necesita dos. No cabe, así que el
+        // terminal deja la última en blanco y lo baja entero. Ese blanco no lo escribió el
+        // programa, y es la única señal de que la fila no acaba donde parece.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 4 });
+        pantalla.advance("abc漢".as_bytes());
+
+        let vista = pantalla.view();
+
+        assert_eq!(
+            vista.cell(0, 3).expect("falta la última columna").width,
+            CellWidth::WrapFiller,
+            "el hueco de arrastre tiene que distinguirse de un espacio normal"
+        );
+        assert_eq!(vista.cell(1, 0).expect("falta la fila 1").c, '漢');
+        assert_eq!(
+            vista.cell(1, 0).expect("falta la fila 1").width,
+            CellWidth::WideHead
+        );
+    }
+
+    #[test]
+    fn el_video_inverso_llega_ya_resuelto() {
+        let mut normal = Screen::new(Size::default());
+        normal.advance(b"X");
+        let normal = *normal.view().cell(0, 0).expect("falta la celda");
+
+        let mut inversa = Screen::new(Size::default());
+        inversa.advance(b"\x1b[7mX");
+        let inversa = *inversa.view().cell(0, 0).expect("falta la celda");
+
+        assert_eq!(
+            (inversa.fg, inversa.bg),
+            (normal.bg, normal.fg),
+            "el vídeo inverso tiene que llegar con los colores ya intercambiados"
+        );
+    }
+
+    #[test]
+    fn los_atributos_y_el_color_llegan_sin_resolver() {
+        let mut pantalla = Screen::new(Size::default());
+        // Rojo con nombre, negrita, atenuado, cursiva, subrayado y tachado a la vez.
+        pantalla.advance(b"\x1b[31;1;2;3;4;9mX");
+
+        let celda = *pantalla.view().cell(0, 0).expect("falta la celda");
+
+        assert_eq!(
+            celda.fg,
+            TermColor::Indexed(1),
+            "el rojo con nombre es la entrada 1 de la paleta"
+        );
+        assert!(celda.bold && celda.dim && celda.italic && celda.strikeout);
+        assert_eq!(celda.underline, Underline::Single);
+    }
+
+    #[test]
+    fn los_cinco_subrayados_se_distinguen() {
+        // Con un booleano, un diagnóstico de LSP en `nvim` —que es ondulado— llegaba a la vista sin
+        // ninguna marca y no había forma de recuperarlo.
+        let casos = [
+            (&b"\x1b[4m"[..], Underline::Single),
+            // El doble es `4:2`, no el `21` que se lee por ahí: para este parser `21` es cancelar
+            // la negrita. Comprobado en su tabla de atributos, no supuesto.
+            (&b"\x1b[4:2m"[..], Underline::Double),
+            (&b"\x1b[4:3m"[..], Underline::Curl),
+            (&b"\x1b[4:4m"[..], Underline::Dotted),
+            (&b"\x1b[4:5m"[..], Underline::Dashed),
+            (&b"\x1b[24m"[..], Underline::None),
+        ];
+
+        for (secuencia, esperado) in casos {
+            let mut pantalla = Screen::new(Size::default());
+            pantalla.advance(secuencia);
+            pantalla.advance(b"X");
+
+            let celda = *pantalla.view().cell(0, 0).expect("falta la celda");
+            assert_eq!(
+                celda.underline,
+                esperado,
+                "con la secuencia {:?}",
+                String::from_utf8_lossy(secuencia)
+            );
+        }
+    }
+
+    #[test]
+    fn con_video_inverso_la_intensidad_se_refiere_al_color_que_pasa_a_ser_fondo() {
+        // Fija el filo que hereda quien resuelva el tema: la intensidad describe el primer plano
+        // **declarado**, y con vídeo inverso ese color acaba en `bg`. Aquí lo que hay que atenuar es
+        // el rojo, no el fondo del tema. Si esto cambia, que cambie con este test delante.
+        let mut pantalla = Screen::new(Size::default());
+        pantalla.advance(b"\x1b[2;31;7mX");
+
+        let celda = *pantalla.view().cell(0, 0).expect("falta la celda");
+
+        assert_eq!(celda.fg, TermColor::Background);
+        assert_eq!(
+            celda.bg,
+            TermColor::Indexed(1),
+            "el rojo pasa a ser el fondo"
+        );
+        assert!(celda.dim, "y es el rojo lo que está atenuado, no el fg");
+    }
+
+    #[test]
+    fn el_cursor_sale_en_coordenadas_visibles() {
+        let mut pantalla = Screen::new(Size::default());
+        pantalla.advance(b"hola");
+
+        let cursor = pantalla.view().cursor();
+
+        assert_eq!((cursor.row, cursor.col), (0, 4));
+        assert_eq!(cursor.shape, CursorShape::Block);
+    }
+
+    #[test]
+    fn un_cursor_apagado_se_dice_como_tal() {
+        let mut pantalla = Screen::new(Size::default());
+        pantalla.advance(b"\x1b[?25l");
+
+        assert_eq!(pantalla.view().cursor().shape, CursorShape::Hidden);
+    }
+
+    #[test]
+    fn leer_la_vista_no_gasta_la_pantalla() {
+        // A diferencia de consultar los daños, este lector no es destructivo. Si lo fuera, el
+        // segundo frame de un repintado saldría en blanco.
+        let mut pantalla = Screen::new(Size::default());
+        pantalla.advance(b"hola");
+
+        let primera = pantalla.view();
+        let segunda = pantalla.view();
+
+        // Comprobar solo que las dos son iguales no bastaría: si el lector devolviera una vista
+        // vacía las dos veces, el test pasaría igual. Hay que ver primero que hay algo que perder.
+        assert_eq!(primera.cell(0, 0).expect("falta la celda").c, 'h');
+        assert_eq!(primera, segunda);
     }
 
     #[test]

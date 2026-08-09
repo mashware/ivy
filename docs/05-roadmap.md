@@ -196,7 +196,7 @@ un prototipo de una semana en uno de tres meses y no responde mejor la pregunta.
 
 | Riesgo | Dónde aparece | Qué hacer |
 |---|---|---|
-| **Ancho de glifo** — CJK, emoji y caracteres combinantes descolocan la rejilla | F1.3 | Ya está resuelto en `prototipos/flow-panel` (`vis()` con `east_asian_width`); portar esa lógica |
+| **Ancho de glifo** — CJK, emoji y caracteres combinantes descolocan la rejilla | F1.3 | **No hay nada que portar** (corregido, ago 2026): el parser ya resuelve el ancho y marca la celda acompañante, y el lector de `term-core` lo expone como `CellWidth`. Lo que le queda a quien pinta es **respetar** las dos columnas, no calcularlas |
 | **Repintado completo** — egui es modo inmediato: repinta todo cada frame | F1.3 | Repintar solo cuando el PTY produzca cambios. **Si con dos divisiones activas no aguanta, ese es el síntoma para revisar GPUI** |
 | **Latencia de tecla** — un terminal que se nota lento al escribir es inservible | F1.3 | Medir tecla→pixel. **Segundo síntoma para revisar GPUI** |
 | **Teclas muertas e IME** | F1.3 | Aceptar que quede regular en el prototipo; es Fase 2 |
