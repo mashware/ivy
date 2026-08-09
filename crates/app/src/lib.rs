@@ -10,6 +10,7 @@
 //! necesitando. Lo que falta por llegar: el puente con el pseudoterminal, el pintor, el bucle y los
 //! cronómetros.
 
+pub mod puente;
 pub mod teclado;
 
 pub mod tema;
