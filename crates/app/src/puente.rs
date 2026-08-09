@@ -12,9 +12,28 @@
 //! porque alguien se acuerde de levantar una bandera.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Instant;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+/// Cuánto se guarda por adelantado antes de dejar de recoger del canal.
+///
+/// **Es la otra mitad del freno**, y sin ella la de abajo no sirve de nada: el canal de
+/// `term-core` tiene techo, pero un hilo que lo vacíe en cuanto llega algo hace que ese techo no
+/// se alcance nunca, y entonces nada frena al programa. Medido: acotar solo el canal deja el
+/// consumo de memoria exactamente igual que antes.
+///
+/// Un megabyte son ocho fotogramas de trabajo por delante con el presupuesto actual: suficiente
+/// para que el pintado nunca se quede esperando bytes, y poco para que retenerlo dé igual. Lo que
+/// no cabe no se pierde: se queda en el programa que lo escribió, que espera.
+const TECHO: usize = 1024 * 1024;
+
+/// Cada cuánto se despierta el hilo a comprobar por su cuenta si ya hay sitio.
+///
+/// La señal de quien recoge es lo que despierta normalmente; este plazo solo existe para que una
+/// señal perdida cueste un milisegundo y no un cuelgue.
+const REVISION: Duration = Duration::from_millis(1);
 
 /// Lo que hay en la cola: los bytes y cuándo llegó cada tanda.
 #[derive(Default)]
@@ -46,6 +65,17 @@ pub struct Puente {
     /// volcado en marcha eso serían megabytes copiados en cada fotograma, y ese coste acabaría
     /// dentro del número que este hito existe para medir.
     cola: Arc<Mutex<Cola>>,
+    /// Avisa al hilo de que se ha hecho sitio en la cola y puede volver a recoger del canal.
+    ///
+    /// Va aparte del candado y no dentro de `Cola` porque quien espera y quien avisa son hilos
+    /// distintos y ninguno de los dos es dueño del otro.
+    hay_sitio: Arc<Condvar>,
+    /// Saca al hilo de la espera por sitio cuando este objeto deja de existir.
+    ///
+    /// Esperar sitio es lo único que el hilo hace **sin** mirar el canal, así que ahí no se entera
+    /// de que el programa ha muerto ni de que ya nadie va a recoger. Sin esta bandera, un puente
+    /// destruido con la cola en el techo deja su hilo girando para siempre.
+    parar: Arc<AtomicBool>,
     /// No transporta nada: lo que importa es **cuándo se cierra**, que es cuando el hilo termina.
     /// El tipo vacío deja escrito en la firma que por aquí no va a llegar ningún valor.
     defuncion: Receiver<std::convert::Infallible>,
@@ -68,13 +98,17 @@ impl Puente {
     /// de debajo rompería al enviar, dejaría de vaciar el pseudoterminal y el programa acabaría
     /// bloqueado al escribir.
     ///
-    /// **El hilo vive mientras viva el pseudoterminal, no mientras viva este objeto.** Termina
-    /// cuando se cierra el canal de salida, que es cuando se destruye el `Pty`. Destruir el puente
-    /// y conservar el `Pty` deja un hilo y una cola sin dueño, creciendo. Quien los tenga, que los
-    /// tenga juntos.
+    /// **El hilo termina con lo que ocurra primero:** que se cierre el canal de salida —o sea, que
+    /// muera el programa— o que se destruya este objeto. Lo segundo hace falta porque esperar sitio
+    /// es lo único que el hilo hace sin mirar el canal, y ahí no se enteraría de ninguna de las dos
+    /// cosas. Aun así conviene tenerlo junto al `Pty`: separarlos deja una cola sin dueño.
     pub fn nuevo(salida: Receiver<Vec<u8>>, despertar: impl Fn() + Send + 'static) -> Self {
         let cola = Arc::new(Mutex::new(Cola::default()));
         let cola_del_hilo = Arc::clone(&cola);
+        let hay_sitio = Arc::new(Condvar::new());
+        let hay_sitio_del_hilo = Arc::clone(&hay_sitio);
+        let parar = Arc::new(AtomicBool::new(false));
+        let parar_del_hilo = Arc::clone(&parar);
         let (defuncion_emisor, defuncion) = channel();
 
         std::thread::spawn(move || {
@@ -83,8 +117,8 @@ impl Puente {
             // ver el comentario de ahí.
             let defuncion_emisor = defuncion_emisor;
             // `for` sobre el canal termina exactamente cuando el otro extremo se cierra, que es
-            // cuando el programa muere. No hay condición de parada que mantener aparte.
-            for trozo in salida {
+            // cuando el programa muere. La etiqueta es para la otra salida, la de más abajo.
+            'recogida: for trozo in salida {
                 // El sello se toma **antes** de pedir el candado: si el fotograma lo tuviera
                 // tomado, esperar por él se contaría como tiempo de llegada y la espera que se
                 // publica saldría inflada por la contención, que no es lo que se quiere medir.
@@ -96,6 +130,23 @@ impl Puente {
                 // hubo fue un pánico en otro sitio. Recuperarlo es lo correcto; descartar en
                 // silencio dejaría la ventana congelada sin que nada lo explicara.
                 let mut cola = cola_del_hilo.lock().unwrap_or_else(PoisonError::into_inner);
+                // **Aquí es donde este hilo deja de recoger, y por eso el programa se frena.**
+                // Mientras se espera, el canal de la caja de abajo se llena, su hilo lector deja de
+                // vaciar el pseudoterminal, el búfer del núcleo se llena y el programa se bloquea al
+                // escribir. Se espera con el trozo ya en la mano —recibido pero sin encolar—, que es
+                // lo que hace que el canal note el atasco.
+                while cola.bytes.len() >= TECHO {
+                    // Quien recoge es quien hace sitio, así que si este objeto ya no existe, el
+                    // sitio no va a llegar nunca. Se sale por el epílogo de abajo y no con un
+                    // `return` para no saltarse el orden entre publicar la muerte y avisar.
+                    if parar_del_hilo.load(Ordering::Relaxed) {
+                        break 'recogida;
+                    }
+                    let (siguiente, _) = hay_sitio_del_hilo
+                        .wait_timeout(cola, REVISION)
+                        .unwrap_or_else(PoisonError::into_inner);
+                    cola = siguiente;
+                }
                 cola.bytes.extend(&trozo);
                 let hasta = cola.recogidos + cola.bytes.len() as u64;
                 cola.llegadas.push_back((hasta, llegada));
@@ -111,7 +162,12 @@ impl Puente {
             despertar();
         });
 
-        Self { cola, defuncion }
+        Self {
+            cola,
+            hay_sitio,
+            parar,
+            defuncion,
+        }
     }
 
     /// Se lleva hasta `maximo` bytes de lo acumulado. Devuelve si ha quedado algo sin recoger.
@@ -121,10 +177,10 @@ impl Puente {
     /// entera en el búfer de quien llama solo mueve el montón de sitio y lo duplica mientras dura.
     /// Con el tope, el búfer de quien llama no crece nunca más allá de lo que va a interpretar.
     ///
-    /// **Lo que esto no arregla, dicho claro:** la cola de aquí dentro **sigue sin techo**. Si el
-    /// programa escribe más deprisa de lo que se recoge —`yes`, `cat /dev/urandom`— crece hasta
-    /// donde llegue la memoria. Ponerle techo de verdad es dejar de leer del pseudoterminal para
-    /// que el programa se bloquee al escribir, y eso se decide en la caja de debajo, no aquí.
+    /// **El máximo no es el techo de la cola**, y conviene no confundirlos: este acota el trabajo
+    /// de un fotograma, y el techo ([`TECHO`]) acota la memoria. Recoger es además lo que hace
+    /// sitio, así que dejar de llamar a esto acaba frenando al programa de dentro — que es
+    /// justamente lo que se quiere cuando el pintado no da abasto.
     ///
     /// Recibe el destino en vez de devolver uno nuevo para que el fotograma pueda reutilizar
     /// siempre el mismo y no reservar memoria una vez por fotograma.
@@ -156,10 +212,15 @@ impl Puente {
         let recogidos = cola.recogidos;
         cola.llegadas.retain(|(hasta, _)| *hasta > recogidos);
 
-        Recogida {
+        let recogida = Recogida {
             queda_cola: !cola.bytes.is_empty(),
             esperando_desde,
-        }
+        };
+        // Se suelta el candado **antes** de avisar: si no, el hilo despierta y lo primero que hace
+        // es esperar a que lo soltemos.
+        drop(cola);
+        self.hay_sitio.notify_one();
+        recogida
     }
 
     /// Si el programa de dentro sigue vivo.
@@ -167,6 +228,17 @@ impl Puente {
     /// Deja de serlo en cuanto el hilo termina, que es cuando su canal de salida se cierra.
     pub fn sigue_vivo(&self) -> bool {
         !matches!(self.defuncion.try_recv(), Err(TryRecvError::Disconnected))
+    }
+}
+
+impl Drop for Puente {
+    fn drop(&mut self) {
+        // No se espera al hilo: puede estar dentro de una lectura del canal que tarde lo que tarde
+        // el programa en escribir, y bloquear el cierre de la ventana por eso sería cambiar un
+        // cuelgue por otro. Basta con que deje de esperar sitio, que es lo único de lo que no
+        // saldría solo.
+        self.parar.store(true, Ordering::Relaxed);
+        self.hay_sitio.notify_all();
     }
 }
 
@@ -521,5 +593,117 @@ mod tests {
             destino.len() > b"antes".len()
         }));
         assert!(destino.starts_with(b"antes"), "se perdió lo que ya había");
+    }
+
+    #[test]
+    fn la_cola_del_puente_no_crece_sin_limite() {
+        // Antes del arreglo, un programa que escribe sin parar y al que nadie recoge hacía
+        // crecer esta cola sin freno: con `cat /dev/zero` se midieron cientos de MiB por
+        // segundo en el diagnóstico. Aquí se deja el programa escribiendo y **no se llama a
+        // `recoger` en ningún momento** durante la espera: llamarlo aunque fuera una vez le
+        // haría sitio al hilo y este seguiría recogiendo, con lo que se mediría el drenaje y no
+        // el techo.
+        let (pty, salida) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
+            .expect("no se pudo abrir el pseudoterminal");
+        let puente = Puente::nuevo(salida, || {});
+
+        // A los cientos de MiB/s medidos, medio segundo de margen basta de sobra para que la
+        // cola alcance el techo si el freno funciona, y para que se dispare muy por encima de
+        // la cota si no lo hace.
+        std::thread::sleep(Duration::from_millis(500));
+
+        // Se mira el tamaño de la cola con el candado, directamente, y no con `recoger`:
+        // `recoger(destino, usize::MAX)` se llevaría la cola entera y le haría sitio al hilo,
+        // así que solo serviría para medir una vez — y esta comprobación necesita ver la cola
+        // mientras el hilo sigue bloqueado esperando, no después de haberla vaciado.
+        let acumulados = puente
+            .cola
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .bytes
+            .len();
+
+        // Cota superior: por encima del techo del puente (1 MiB) hay margen que el freno de
+        // aquí no controla directamente, y hay que contar con él para no perseguir un número
+        // exacto. De más cerca a más lejos en la cadena: el trozo que este mismo hilo tiene «en
+        // la mano» mientras espera, sin encolar todavía (hasta 8 KiB, el tamaño de una lectura
+        // de `term-core`); el `sync_channel(8)` de la caja de abajo, con hasta ocho lecturas de
+        // 8 KiB en tránsito (64 KiB); el trozo que el hilo lector de `term-core` tiene a su vez
+        // en la mano intentando entregarlo (otros 8 KiB); y el búfer del núcleo del
+        // pseudoterminal, del orden de 20 KiB según lo medido en la investigación de este fallo.
+        // Sumado, algo por encima de 1,1 MiB. Se deja hasta 4 MiB para no depender de
+        // temporización fina, y con eso de sobra: a los ritmos medidos en el diagnóstico, sin
+        // freno los mismos 500 ms habrían acumulado varias decenas de MiB, no unos pocos.
+        const COTA_SUPERIOR: usize = 4 * 1024 * 1024;
+
+        assert!(
+            acumulados >= TECHO,
+            "la cola no llegó ni al techo ({TECHO} bytes) en 500 ms: solo {acumulados} bytes; \
+             la prueba no está sometiendo el puente a presión de verdad"
+        );
+        assert!(
+            acumulados <= COTA_SUPERIOR,
+            "la cola creció muy por encima del techo y su margen: {acumulados} bytes \
+             acumulados en 500 ms, cota {COTA_SUPERIOR} bytes — el freno que impide que esta \
+             cola crezca sin límite no está actuando"
+        );
+
+        // Se cierra el pseudoterminal para que el programa deje de escribir, y se sigue recogiendo
+        // hasta que el hilo lo note y termine: así la comprobación de la muerte, que es de lo que
+        // vive el resto del módulo, se hace sobre un puente que ha salido de la espera por las
+        // buenas y no por la parada de emergencia del test siguiente.
+        drop(pty);
+        let mut resto = Vec::new();
+        assert!(esperar_a(|| {
+            puente.recoger(&mut resto, usize::MAX);
+            !puente.sigue_vivo()
+        }));
+    }
+
+    /// El hilo de este módulo tiene **dos** formas de quedarse quieto, y solo una la resuelve el
+    /// canal: leyendo, se entera de que el programa ha muerto porque el canal se cierra; esperando
+    /// sitio, no mira el canal en absoluto. Como el sitio solo lo hace quien recoge, un puente
+    /// destruido con la cola en el techo dejaría su hilo girando para siempre — una fuga por cada
+    /// división que se cierre en ese instante, invisible hoy solo porque el proceso muere entero
+    /// detrás.
+    ///
+    /// Se observa con un testigo capturado por el despertador en vez de contando hilos: el
+    /// despertador se destruye **con** el hilo, así que su cuenta de referencias bajando a uno
+    /// demuestra que el hilo terminó de verdad. Contar hilos del proceso mediría de rebote los del
+    /// resto de la suite.
+    #[test]
+    fn destruir_el_puente_con_la_cola_llena_termina_su_hilo() {
+        let testigo = Arc::new(());
+        let del_hilo = Arc::clone(&testigo);
+
+        // El `Pty` se mantiene vivo a propósito durante toda la prueba: si se cerrara, el hilo
+        // saldría por el camino de siempre y esto pasaría aunque la parada no existiera.
+        let (_pty, salida) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
+            .expect("no se pudo abrir el pseudoterminal");
+        let puente = Puente::nuevo(salida, move || {
+            let _ = &del_hilo;
+        });
+
+        // Sin recoger ni una vez: la cola llega al techo y el hilo se queda esperando sitio.
+        assert!(
+            esperar_a(|| {
+                puente
+                    .cola
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .bytes
+                    .len()
+                    >= TECHO
+            }),
+            "la cola no llegó al techo: la prueba no está dejando al hilo donde tiene que estar"
+        );
+
+        drop(puente);
+
+        assert!(
+            esperar_a(|| Arc::strong_count(&testigo) == 1),
+            "el hilo sigue vivo después de destruir el puente: se quedó esperando un sitio que ya \
+             nadie le va a hacer"
+        );
     }
 }

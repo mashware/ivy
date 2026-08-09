@@ -303,3 +303,57 @@ busca en `.claude/work/`, que es específico de `flow`).
 
 **También es el límite de seguridad de MCP:** el servidor da al agente acceso a *su* división y
 no a las demás. Sin identidad, cuatro agentes se pisan.
+
+---
+
+## D8 — El terminal frena al programa: se deja de leer, no se descarta
+
+**Decidido.** Cuando lo que un programa escribe entra más deprisa de lo que la pantalla lo
+interpreta, la aplicación **deja de leer el pseudoterminal**. Eso llena el búfer del núcleo y el
+programa se bloquea al escribir, como en cualquier terminal. Lo retenido tiene un techo en dos
+sitios, y hacen falta los dos:
+
+| Dónde | Cuánto | Qué pasa al llenarse |
+|---|---|---|
+| El canal de `Pty::spawn`, en `term-core` | 8 lecturas de 8 KiB (64 KiB) | El hilo lector deja de leer del pseudoterminal |
+| La cola del puente, en `app` | 1 MiB | El hilo deja de recoger del canal, y así el canal se llena |
+
+**Por qué:** sin esto, un programa que escribe sin parar —`cat /dev/zero`, `cat /dev/urandom`—
+agota la memoria de la máquina. Medido antes del arreglo: **+343 MiB/s de crecimiento lineal**, 512
+MiB en 1,6 s, sin el menor asomo de estabilizarse. Con el arreglo, la misma carga se queda en
+**2,7 MiB durante 30 s** sin perder velocidad de drenaje.
+
+**Por qué en dos sitios y no en uno.** Está medido: acotar solo el canal de `term-core` **no frena
+nada**. Un consumidor que vacía el canal en cuanto llega algo hace que ese techo no se alcance
+nunca, y los bytes se acumulan igual, solo que un poco más allá. La regla, que vale para cualquier
+cola futura de este proyecto:
+
+> Un techo solo frena si quien consume esa cola deja de vaciarla.
+
+**Descartado — descartar bytes al llegar al tope.** Es la salida fácil y la peor: un terminal que
+pierde salida en silencio miente sobre lo que el programa escribió, y este proyecto trata el fallo
+silencioso como el peor resultado posible. Con el freno no se pierde nada: lo que no cabe se queda
+en el programa que lo escribió, esperando.
+
+**Descartado — dejar que lo resuelva quien pinta.** Un presupuesto por fotograma acota el *trabajo*
+de un fotograma, no la memoria, y confundir las dos cosas fue el error que llevó a este fallo. El
+freno vive en `term-core`, la caja que sobrevive a un cambio de framework de interfaz (D3), y se
+expresa en bytes, nunca en fotogramas.
+
+**Consecuencia sobre el cierre, en los dos hilos.** Un hilo que espera sitio no está bloqueado
+leyendo, así que no se entera de nada de lo que normalmente lo despertaría. Cada uno necesita su
+bandera de parada, y por motivos distintos:
+
+- En `term-core`, `Drop` la levanta **antes** del `kill`, porque el `join` que viene después espera
+  a ese hilo: sin ella, **cerrar la ventana se cuelga**.
+- En el puente, `Drop` la levanta porque quien hace sitio es quien recoge, y un puente destruido ya
+  no va a recoger nunca: sin ella el hilo **gira para siempre**. No cuelga el cierre —nadie lo
+  espera— pero deja una fuga por cada división que se cierre en ese instante, que hoy tapa el que
+  el proceso muera entero detrás y que dejará de taparse en cuanto haya más de una división.
+
+Las dos comprobadas, no temidas: quitando cualquiera de las dos, su prueba se pone en rojo.
+
+**Por qué no estaba decidido antes.** No se descartó: no se miró. El canal viene de F1.1, donde la
+elección fue *«`mpsc` de la biblioteca estándar frente a `crossbeam-channel` frente a un callback»*
+con el criterio de no añadir dependencias; acotado frente a sin acotar no llegó a plantearse, y lo
+ilimitado es el valor por defecto de `mpsc::channel()`.

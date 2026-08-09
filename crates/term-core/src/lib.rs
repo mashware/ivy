@@ -3,8 +3,11 @@
 //! No depende de nada visual: si la capa de pintado se reescribe, esta caja sigue sirviendo.
 
 use std::io::{Read, Write};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
@@ -48,7 +51,33 @@ pub struct Pty {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     reader: Option<JoinHandle<()>>,
+    /// Lo que saca al hilo lector de una espera por sitio en el canal cuando hay que cerrar.
+    ///
+    /// Sin esto, destruir el `Pty` mientras el canal está lleno **cuelga el cierre**: el hilo espera
+    /// un hueco que solo aparecería si alguien recogiera, y el `join` de más abajo espera al hilo.
+    parar: Arc<AtomicBool>,
 }
+
+/// Cuántas lecturas caben en el canal antes de que el hilo lector deje de leer.
+///
+/// **Este número es el freno del terminal, no un ajuste de rendimiento.** Mientras el canal tenga
+/// sitio, el hilo lector vacía el pseudoterminal; cuando se llena, deja de leer, el búfer del
+/// núcleo se llena a su vez —cabe muy poco: unos 20 KiB medidos en Linux— y el programa de dentro
+/// **se bloquea al escribir**, que es el único freno que un terminal tiene de verdad.
+///
+/// Ocho lecturas de 8 KiB son 64 KiB: bastante para que una ráfaga normal no toque el techo, y
+/// poco para que lo retenido no importe. Quien consume puede acumular por su cuenta todo lo que
+/// quiera, pero si lo hace sin límite anula este freno — el techo solo frena si quien recoge deja
+/// de recoger.
+const LECTURAS_EN_VUELO: usize = 8;
+
+/// Cada cuánto se vuelve a intentar entregar cuando el canal está lleno.
+///
+/// Se sondea en vez de esperar bloqueado porque la biblioteca estándar no ofrece un envío con
+/// plazo estable, y hace falta poder abandonar la espera para cerrar. Con el canal lleno quien
+/// manda es el ritmo de quien recoge —del orden de un fotograma—, así que este intervalo no añade
+/// retraso perceptible.
+const REINTENTO: Duration = Duration::from_millis(1);
 
 impl Pty {
     /// Abre un pseudoterminal, lanza `program` dentro y devuelve el canal de su salida.
@@ -59,6 +88,10 @@ impl Pty {
     ///
     /// Al hijo se le fija `TERM` y `COLORTERM`: sin ellos, un programa a pantalla completa no sabe
     /// qué secuencias puede emitir y se queda en un terminal tonto, sin color.
+    ///
+    /// **El canal tiene techo, y eso es lo que frena al programa de dentro.** Ver
+    /// [`LECTURAS_EN_VUELO`]. Quien recoja del canal sin parar nunca —un `for` sobre él, sin
+    /// ritmo ni límite propio— deja el techo sin efecto y devuelve el problema a donde estaba.
     pub fn spawn(program: &str, args: &[&str], size: Size) -> Result<(Self, Receiver<Vec<u8>>)> {
         let pair = native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
@@ -81,14 +114,16 @@ impl Pty {
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
 
-        let (tx, output) = mpsc::channel();
+        let (tx, output) = sync_channel(LECTURAS_EN_VUELO);
+        let parar = Arc::new(AtomicBool::new(false));
+        let parar_del_hilo = Arc::clone(&parar);
         let reader = thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if tx.send(buf[..n].to_vec()).is_err() {
+                        if entregar(&tx, buf[..n].to_vec(), &parar_del_hilo).is_err() {
                             break;
                         }
                     }
@@ -106,6 +141,7 @@ impl Pty {
                 master: pair.master,
                 writer,
                 reader: Some(reader),
+                parar,
             },
             output,
         ))
@@ -134,11 +170,47 @@ impl Pty {
     }
 }
 
+/// Deja un trozo en el canal, esperando a que haya sitio, y abandona si hay que cerrar.
+///
+/// Devolver `Err` significa «no hay a quién entregar»: el canal se cerró o se está cerrando. Quien
+/// llama termina el bucle de lectura.
+///
+/// **La espera es el freno.** Mientras dura, este hilo no lee del pseudoterminal, así que el búfer
+/// del núcleo se llena y el programa de dentro se bloquea al escribir. No se descarta nada: los
+/// bytes se quedan donde ya estaban, en el programa que los escribió.
+fn entregar(
+    canal: &SyncSender<Vec<u8>>,
+    trozo: Vec<u8>,
+    parar: &AtomicBool,
+) -> std::result::Result<(), ()> {
+    let mut pendiente = trozo;
+    loop {
+        // Se comprueba antes de intentar y no solo después de fallar: si el cierre llega justo
+        // cuando el canal tiene sitio, entregar un trozo más no rompe nada, pero comprobar primero
+        // hace que la salida del bucle no dependa del estado del canal.
+        if parar.load(Ordering::Relaxed) {
+            return Err(());
+        }
+        match canal.try_send(pendiente) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Full(devuelto)) => {
+                pendiente = devuelto;
+                thread::sleep(REINTENTO);
+            }
+            Err(TrySendError::Disconnected(_)) => return Err(()),
+        }
+    }
+}
+
 impl Drop for Pty {
     fn drop(&mut self) {
-        // El orden importa: matar al hijo es lo que cierra su extremo del pseudoterminal y provoca
-        // el fin de fichero en el hilo lector. Esperar al hilo antes de eso lo colgaría, porque
-        // seguiría bloqueado dentro de `read`.
+        // Primero la bandera: con el canal lleno, el hilo no está dentro de `read` sino esperando
+        // sitio, y ni matar al hijo ni cerrar el pseudoterminal lo sacan de ahí. Sin esto, el
+        // `join` de más abajo espera para siempre y **cerrar la ventana se cuelga** — comprobado.
+        self.parar.store(true, Ordering::Relaxed);
+        // Y después el orden de siempre: matar al hijo es lo que cierra su extremo del
+        // pseudoterminal y provoca el fin de fichero en el hilo lector. Esperar al hilo antes de
+        // eso lo colgaría, porque seguiría bloqueado dentro de `read`.
         let _ = self.child.kill();
         let _ = self.child.wait();
         if let Some(reader) = self.reader.take() {
@@ -227,5 +299,86 @@ mod tests {
             "el hijo no vio TERM: {:?}",
             String::from_utf8_lossy(&salida)
         );
+    }
+
+    /// Antes de la corrección el canal era `mpsc::channel()`, sin límite: un programa que escribe
+    /// sin parar y nadie que recoja hacía crecer lo acumulado sin techo mientras durara la espera.
+    /// Este test reproduce justo eso —`cat /dev/zero` sin consumir el canal— y comprueba que lo
+    /// que llega a acumularse tiene un techo, no que el techo sea el nominal exacto (eso ya lo
+    /// fija [`LECTURAS_EN_VUELO`]).
+    ///
+    /// El límite de la comprobación no es arbitrario: ocho lecturas de 8 KiB son 64 KiB de canal,
+    /// más lo que quepa en el búfer del núcleo del pseudoterminal —~20 KiB medidos en Linux—, más
+    /// como mucho una lectura ya sacada del maestro y todavía sin sitio en el canal. Eso da un
+    /// techo real del orden de 90-100 KiB. Se deja el margen en 1 MiB —diez veces ese techo, para
+    /// no depender de la holgura exacta del búfer del núcleo de esta máquina— y muy por debajo de
+    /// lo que un canal sin límite acumularía en la misma espera: `cat /dev/zero` entrega del orden
+    /// de cientos de MiB por segundo, así que en 200 ms un canal ilimitado ya habría superado
+    /// varias veces ese margen. Es justo esa distancia la que el test tiene que cazar.
+    #[test]
+    fn sin_consumir_lo_que_llega_esta_acotado() {
+        let (_pty, salida) =
+            Pty::spawn("cat", &["/dev/zero"], Size::default()).expect("lanzar cat");
+
+        // Sin tocar el canal: da tiempo a que el hilo lector lo llene, se quede esperando sitio y
+        // el `cat` de dentro se bloquee al escribir. Es el estado que hay que medir.
+        thread::sleep(Duration::from_millis(200));
+
+        let mut recibido = 0usize;
+        while let Ok(trozo) = salida.try_recv() {
+            recibido += trozo.len();
+        }
+
+        const MARGEN_HOLGADO: usize = 1024 * 1024; // 1 MiB — ver comentario de la función.
+        assert!(
+            recibido > 0,
+            "no llegó nada de \"cat /dev/zero\" en 200 ms: el canal no se está alimentando"
+        );
+        assert!(
+            recibido <= MARGEN_HOLGADO,
+            "se acumularon {recibido} bytes sin consumir el canal: el freno no está actuando"
+        );
+    }
+
+    /// El cuelgue que este test cubre está demostrado, no es hipotético: con el canal lleno, el
+    /// hilo lector no está dentro de `read` sino esperando sitio en [`entregar`], y `Drop for Pty`
+    /// hace `kill` → `wait` → `join`. Sin la bandera `parar` que el `Drop` levanta antes de matar
+    /// al hijo, nada saca a ese hilo de su espera —ni el `kill` ni el fin de fichero le llegan
+    /// mientras está bloqueado ahí— y el `join` no vuelve nunca: cerrar la ventana se cuelga.
+    ///
+    /// La comprobación corre en un hilo aparte y usa `recv_timeout` para esperar su aviso de fin,
+    /// no un `join` directo del hilo del test: si el cuelgue vuelve, este test tiene que caer en
+    /// rojo con un mensaje, no quedarse esperando para siempre junto con él.
+    #[test]
+    fn cerrar_con_el_canal_lleno_no_se_cuelga() {
+        use std::sync::mpsc;
+
+        let (pty, salida) = Pty::spawn("cat", &["/dev/zero"], Size::default()).expect("lanzar cat");
+
+        // Mismo motivo que en el test anterior: dar tiempo a que el canal se llene de verdad. No
+        // se toca `salida` a partir de aquí — el canal tiene que seguir lleno mientras se destruye
+        // `pty`, que es justo la condición del cuelgue.
+        thread::sleep(Duration::from_millis(200));
+
+        let (aviso_tx, aviso_rx) = mpsc::channel();
+        let hilo_del_drop = thread::spawn(move || {
+            drop(pty);
+            // Si el drop se cuelga, este envío no llega nunca; el `recv_timeout` de abajo es lo
+            // que convierte eso en un test en rojo en vez de en un cuelgue del propio test.
+            let _ = aviso_tx.send(());
+        });
+
+        const PLAZO_DE_CIERRE: Duration = Duration::from_secs(5);
+        if aviso_rx.recv_timeout(PLAZO_DE_CIERRE).is_err() {
+            panic!(
+                "destruir el Pty con el canal lleno no terminó en {PLAZO_DE_CIERRE:?}: \
+                 el cierre se cuelga"
+            );
+        }
+
+        // El drop ya terminó, así que este join es inmediato; está aquí por higiene, no porque
+        // haga falta para que el test sea correcto.
+        let _ = hilo_del_drop.join();
+        drop(salida);
     }
 }
