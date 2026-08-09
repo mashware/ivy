@@ -11,12 +11,17 @@
 //! nunca y lo suelta al terminar, así que el cierre llega al otro lado **por construcción**, no
 //! porque alguien se acuerde de levantar una bandera.
 
+use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// Lo que el programa ha escrito y todavía no se ha recogido, más la señal de si sigue vivo.
 pub struct Puente {
-    cola: Arc<Mutex<Vec<u8>>>,
+    /// Una cola por los dos extremos y no un vector: se añade por el final y se saca por el
+    /// principio, y sacar del principio de un vector copia todo lo que queda detrás. Con un
+    /// volcado en marcha eso serían megabytes copiados en cada fotograma, y ese coste acabaría
+    /// dentro del número que este hito existe para medir.
+    cola: Arc<Mutex<VecDeque<u8>>>,
     /// No transporta nada: lo que importa es **cuándo se cierra**, que es cuando el hilo termina.
     /// El tipo vacío deja escrito en la firma que por aquí no va a llegar ningún valor.
     defuncion: Receiver<std::convert::Infallible>,
@@ -44,7 +49,7 @@ impl Puente {
     /// y conservar el `Pty` deja un hilo y una cola sin dueño, creciendo. Quien los tenga, que los
     /// tenga juntos.
     pub fn nuevo(salida: Receiver<Vec<u8>>, despertar: impl Fn() + Send + 'static) -> Self {
-        let cola = Arc::new(Mutex::new(Vec::new()));
+        let cola = Arc::new(Mutex::new(VecDeque::new()));
         let cola_del_hilo = Arc::clone(&cola);
         let (defuncion_emisor, defuncion) = channel();
 
@@ -63,7 +68,7 @@ impl Puente {
                 // hubo fue un pánico en otro sitio. Recuperarlo es lo correcto; descartar en
                 // silencio dejaría la ventana congelada sin que nada lo explicara.
                 let mut cola = cola_del_hilo.lock().unwrap_or_else(PoisonError::into_inner);
-                cola.extend_from_slice(&trozo);
+                cola.extend(&trozo);
                 drop(cola);
                 despertar();
             }
@@ -79,13 +84,34 @@ impl Puente {
         Self { cola, defuncion }
     }
 
-    /// Se lleva lo acumulado al búfer de quien llama, y deja la cola vacía.
+    /// Se lleva hasta `maximo` bytes de lo acumulado. Devuelve si ha quedado algo sin recoger.
+    ///
+    /// **El máximo no es un adorno y llevárselo todo no era una opción.** Un volcado entrega dos
+    /// órdenes de magnitud más rápido de lo que la rejilla interpreta, así que vaciar la cola
+    /// entera en el búfer de quien llama solo mueve el montón de sitio y lo duplica mientras dura.
+    /// Con el tope, el búfer de quien llama no crece nunca más allá de lo que va a interpretar.
+    ///
+    /// **Lo que esto no arregla, dicho claro:** la cola de aquí dentro **sigue sin techo**. Si el
+    /// programa escribe más deprisa de lo que se recoge —`yes`, `cat /dev/urandom`— crece hasta
+    /// donde llegue la memoria. Ponerle techo de verdad es dejar de leer del pseudoterminal para
+    /// que el programa se bloquee al escribir, y eso se decide en la caja de debajo, no aquí.
     ///
     /// Recibe el destino en vez de devolver uno nuevo para que el fotograma pueda reutilizar
     /// siempre el mismo y no reservar memoria una vez por fotograma.
-    pub fn recoger(&self, destino: &mut Vec<u8>) {
+    pub fn recoger(&self, destino: &mut Vec<u8>, maximo: usize) -> bool {
         let mut cola = self.cola.lock().unwrap_or_else(PoisonError::into_inner);
-        destino.append(&mut cola);
+
+        // La cola guarda sus bytes en dos tramos —da la vuelta al llegar al final—, así que hay
+        // que copiar de los dos. Copiar de las rebanadas y no del iterador es lo que hace que esto
+        // cueste lo que se lleva y no lo que se queda.
+        let trozo = cola.len().min(maximo);
+        let (primero, segundo) = cola.as_slices();
+        let del_primero = primero.len().min(trozo);
+        destino.extend_from_slice(&primero[..del_primero]);
+        destino.extend_from_slice(&segundo[..trozo - del_primero]);
+        cola.drain(..trozo);
+
+        !cola.is_empty()
     }
 
     /// Si el programa de dentro sigue vivo.
@@ -124,7 +150,7 @@ mod tests {
 
         let mut recogido = Vec::new();
         let llego = esperar_a(|| {
-            puente.recoger(&mut recogido);
+            puente.recoger(&mut recogido, usize::MAX);
             recogido.windows(4).any(|v| v == b"hola")
         });
 
@@ -211,7 +237,7 @@ mod tests {
 
         let mut recogido = Vec::new();
         assert!(esperar_a(|| {
-            puente.recoger(&mut recogido);
+            puente.recoger(&mut recogido, usize::MAX);
             !recogido.is_empty()
         }));
         assert!(
@@ -232,14 +258,126 @@ mod tests {
         assert!(esperar_a(|| !puente.sigue_vivo()));
 
         let mut primera = Vec::new();
-        puente.recoger(&mut primera);
+        puente.recoger(&mut primera, usize::MAX);
         assert!(!primera.is_empty(), "no llegó nada que recoger");
 
         // Lo ya recogido no se vuelve a entregar: si se repitiera, la pantalla mostraría el mismo
         // texto dos veces sin que el programa lo hubiera escrito dos veces.
         let mut segunda = Vec::new();
-        puente.recoger(&mut segunda);
+        puente.recoger(&mut segunda, usize::MAX);
         assert!(segunda.is_empty(), "la cola devolvió lo mismo dos veces");
+    }
+
+    #[test]
+    fn el_maximo_se_respeta_y_lo_que_sobra_se_queda_para_la_proxima() {
+        // Sin el máximo, quien recoge se lleva la cola entera: en un volcado eso es duplicar
+        // megabytes en el búfer de quien pinta, y el presupuesto por fotograma no acota nada
+        // porque el gasto ya se hizo antes de llegar a él.
+        let (_pty, salida) = Pty::spawn(
+            "sh",
+            &["-c", "printf 0123456789"],
+            Size { rows: 24, cols: 80 },
+        )
+        .expect("no se pudo abrir el pseudoterminal");
+        let puente = Puente::nuevo(salida, || {});
+        assert!(esperar_a(|| !puente.sigue_vivo()));
+
+        let mut primeros = Vec::new();
+        let queda = puente.recoger(&mut primeros, 4);
+        assert_eq!(primeros, b"0123", "no se respetó el máximo");
+        assert!(queda, "quedaban bytes y dijo que no");
+
+        // Y lo que sobró sigue ahí, en su orden, sin haberse perdido ni repetido: es lo que hace
+        // que un volcado se vea entero aunque tarde varios fotogramas.
+        let mut resto = Vec::new();
+        let queda = puente.recoger(&mut resto, usize::MAX);
+        assert_eq!(resto, b"456789", "lo que sobró no salió entero ni en orden");
+        assert!(!queda, "la cola quedó vacía y dijo que no");
+    }
+
+    /// Deja una cola cuyo contenido está **partido en dos tramos**: el anillo da la vuelta y sus
+    /// dos rebanadas son las dos mitades de `contenido`, con `en_el_primero` bytes en la de
+    /// delante.
+    ///
+    /// Se monta a mano, y no llenando el puente por su canal, porque desde fuera no hay forma de
+    /// forzarlo: la cola solo da la vuelta si le queda hueco libre detrás de la cabeza, y en cuanto
+    /// no le queda crece y se recoloca de una pieza. Un test que lo intentara desde el canal
+    /// pasaría casi siempre **sin haber probado nunca el caso**, que es peor que no tenerlo. Por
+    /// eso las dos comprobaciones del final: si un día la biblioteca cambia de política y esto deja
+    /// de dar la vuelta, el test falla aquí en vez de volverse verde para siempre.
+    fn cola_partida_en_dos(contenido: &[u8], en_el_primero: usize) -> VecDeque<u8> {
+        let mut cola: VecDeque<u8> = VecDeque::with_capacity(contenido.len() * 2);
+        let capacidad = cola.capacity();
+
+        // Se llena hasta el borde y se vacía todo menos el primer tramo: la cabeza queda pegada al
+        // final del anillo, así que lo siguiente que entre tiene que dar la vuelta.
+        let relleno = capacidad - en_el_primero;
+        cola.extend(std::iter::repeat_n(b'.', relleno));
+        cola.extend(&contenido[..en_el_primero]);
+        cola.drain(..relleno);
+        cola.extend(&contenido[en_el_primero..]);
+
+        assert_eq!(cola.capacity(), capacidad, "la cola creció y se recolocó");
+        assert!(!cola.as_slices().1.is_empty(), "la cola no dio la vuelta");
+        cola
+    }
+
+    /// Un puente sin programa detrás, con la cola puesta a mano.
+    ///
+    /// El emisor se devuelve y hay que conservarlo vivo: soltarlo cierra el canal, y eso el puente
+    /// lo lee como que el programa ha muerto.
+    fn puente_con_cola(cola: VecDeque<u8>) -> (std::sync::mpsc::Sender<Vec<u8>>, Puente) {
+        let (emisor, salida) = channel();
+        let puente = Puente::nuevo(salida, || {});
+        *puente.cola.lock().unwrap_or_else(PoisonError::into_inner) = cola;
+        (emisor, puente)
+    }
+
+    #[test]
+    fn recoger_junta_los_dos_tramos_cuando_la_cola_ha_dado_la_vuelta() {
+        // La cola guarda sus bytes en dos trozos en cuanto da la vuelta. Quien copie solo el
+        // primero se deja la mitad del volcado en silencio, y quien los junte al revés escribe en
+        // la pantalla lo que el programa mandó después antes que lo que mandó primero.
+        let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
+
+        let mut destino = Vec::new();
+        let queda = puente.recoger(&mut destino, usize::MAX);
+
+        assert_eq!(
+            destino, b"0123456789",
+            "los dos tramos no salieron en orden"
+        );
+        assert!(!queda, "se llevó la cola entera y dijo que quedaba algo");
+    }
+
+    #[test]
+    fn el_maximo_que_cae_dentro_del_primer_tramo_no_toca_el_segundo() {
+        let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
+
+        let mut destino = Vec::new();
+        assert!(puente.recoger(&mut destino, 4), "quedaban seis bytes");
+        assert_eq!(destino, b"0123", "no se respetó el máximo");
+
+        // Y lo que quedó sigue estando a caballo de la vuelta, entero y en su orden.
+        let mut resto = Vec::new();
+        assert!(!puente.recoger(&mut resto, usize::MAX));
+        assert_eq!(resto, b"456789");
+    }
+
+    #[test]
+    fn el_maximo_que_cae_pasada_la_vuelta_se_lleva_de_los_dos_tramos() {
+        let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
+
+        let mut destino = Vec::new();
+        assert!(puente.recoger(&mut destino, 8), "quedaban dos bytes");
+
+        // Seis del primer tramo y dos del segundo: el corte cae dentro del segundo, que es donde
+        // una cuenta mal hecha se sale de rango o se deja bytes por el camino.
+        assert_eq!(destino, b"01234567");
+
+        let mut resto = Vec::new();
+        assert!(!puente.recoger(&mut resto, usize::MAX));
+        assert_eq!(resto, b"89");
     }
 
     #[test]
@@ -252,7 +390,7 @@ mod tests {
 
         let mut destino = b"antes".to_vec();
         assert!(esperar_a(|| {
-            puente.recoger(&mut destino);
+            puente.recoger(&mut destino, usize::MAX);
             destino.len() > b"antes".len()
         }));
         assert!(destino.starts_with(b"antes"), "se perdió lo que ya había");

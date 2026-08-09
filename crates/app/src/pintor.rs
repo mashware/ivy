@@ -10,9 +10,19 @@
 
 use crate::tema::Tema;
 use eframe::egui::{
-    Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, vec2,
+    Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, vec2,
 };
-use term_core::{CellWidth, CursorShape, TermColor, View, ViewCell};
+use term_core::{CellWidth, CursorShape, Size, TermColor, View, ViewCell};
+
+/// El tamaño más grande que se acepta para una rejilla.
+///
+/// Holgado a propósito: un monitor de 4K con la letra más pequeña que se puede leer no pasa de
+/// unas 300 columnas. No es un límite de producto, es el filtro que impide que un rectángulo que
+/// no corresponde a ninguna ventana se convierta en una rejilla de cientos de miles de celdas.
+const MAXIMO: Size = Size {
+    rows: 300,
+    cols: 1000,
+};
 
 /// Cuánto ocupa una celda en pantalla.
 #[derive(Debug, Clone)]
@@ -47,6 +57,24 @@ impl Metrica {
             ancho,
             alto,
             fuente,
+        }
+    }
+
+    /// Cuántas celdas enteras caben en el espacio dado.
+    ///
+    /// **Nunca menos de una fila y una columna, y nunca más de [`MAXIMO`].** El suelo está porque
+    /// `Screen::resize` entra en pánico con cero columnas: sin él, arrastrar el borde de la ventana
+    /// hasta hacerla estrecha mataría la aplicación. El techo está porque el espacio disponible no
+    /// siempre es el de una ventana de verdad — mientras el escritorio no ha dicho todavía cuánto
+    /// mide, egui responde con su rectángulo de reserva, que son diez mil puntos de lado. Sin
+    /// techo, eso son cientos de miles de celdas reservadas y un aviso de tamaño absurdo al
+    /// programa de dentro.
+    pub fn celdas_en(&self, espacio: Vec2) -> Size {
+        // Los tamaños imposibles —negativos, o sin número mientras la ventana se crea— caen en
+        // cero al convertirse a entero, y el suelo los sube a uno.
+        Size {
+            rows: ((espacio.y / self.alto) as u16).clamp(1, MAXIMO.rows),
+            cols: ((espacio.x / self.ancho) as u16).clamp(1, MAXIMO.cols),
         }
     }
 
@@ -201,5 +229,75 @@ fn pintar_cursor(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica
             painter.rect_filled(barra, 0.0, color);
         }
         CursorShape::Hidden => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use term_core::Screen;
+
+    /// Una métrica de medidas redondas, para que las cuentas del test se lean solas. No pasa por
+    /// la fuente a propósito: preguntarle exige una ventana, y lo que aquí se prueba es la cuenta.
+    fn metrica(ancho: f32, alto: f32) -> Metrica {
+        Metrica {
+            ancho,
+            alto,
+            fuente: FontId::monospace(14.0),
+        }
+    }
+
+    #[test]
+    fn el_espacio_se_reparte_en_celdas_enteras() {
+        let rejilla = metrica(10.0, 20.0).celdas_en(vec2(805.0, 419.0));
+
+        // Las celdas que no caben enteras no cuentan: media columna pintada al borde sería medio
+        // carácter cortado.
+        assert_eq!(rejilla, Size { rows: 20, cols: 80 });
+    }
+
+    #[test]
+    fn una_ventana_mas_estrecha_que_una_celda_sigue_dando_una_columna() {
+        let rejilla = metrica(10.0, 20.0).celdas_en(vec2(3.0, 4.0));
+
+        assert_eq!(rejilla, Size { rows: 1, cols: 1 });
+    }
+
+    #[test]
+    fn el_rectangulo_de_reserva_de_egui_no_produce_una_rejilla_descomunal() {
+        // Diez mil puntos de lado es lo que egui responde mientras el escritorio no ha dicho
+        // cuánto mide la ventana. Sin techo eso son 743 000 celdas reservadas y un aviso de tamaño
+        // absurdo al programa de dentro.
+        let rejilla = metrica(8.4, 16.0).celdas_en(vec2(10_000.0, 10_000.0));
+
+        assert_eq!(rejilla, MAXIMO);
+    }
+
+    #[test]
+    fn ningun_espacio_produce_una_rejilla_que_la_pantalla_rechace() {
+        // Este es el test que ata las dos piezas: si alguien quita el suelo, revienta aquí y no en
+        // la mano del usuario mientras arrastra la ventana.
+        let mut pantalla = Screen::new(Size { rows: 24, cols: 80 });
+
+        for espacio in [
+            vec2(0.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(-50.0, -50.0),
+            vec2(f32::NAN, f32::NAN),
+            vec2(f32::INFINITY, f32::INFINITY),
+            vec2(1e9, 1e9),
+        ] {
+            let rejilla = metrica(10.0, 20.0).celdas_en(espacio);
+
+            assert!(
+                rejilla.rows >= 1 && rejilla.cols >= 1,
+                "{espacio:?} produjo una rejilla que hace estallar la pantalla: {rejilla:?}"
+            );
+            assert!(
+                rejilla.rows <= MAXIMO.rows && rejilla.cols <= MAXIMO.cols,
+                "{espacio:?} se saltó el techo: {rejilla:?}"
+            );
+            pantalla.resize(rejilla);
+        }
     }
 }
