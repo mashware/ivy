@@ -2,3 +2,14 @@
 name = "app"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+eframe.workspace = true
+
+# No se usa desde el código: está solo para reponer una feature que se cayó al quitar los defaults
+# de eframe. Sin ella, en Wayland la ventana la decora el marco de reserva de SCTK —que su propio
+# autor llama «el marco feo por defecto»— y este hito existe para juzgar cómo pinta egui, así que
+# un marco degradado ensucia justo lo que hay que mirar.
+# La versión tiene que seguir a la que arrastre eframe: si se desincronizan, aparece un segundo
+# winit en el árbol y esta línea deja de surtir efecto en silencio.
+winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }

@@ -1,6 +1,5 @@
-//! Ventana, divisiones y pintado.
-//!
-//! La única caja atada al framework de interfaz. Si se cambia de framework, se reescribe esta y
-//! las otras dos siguen tal cual.
+//! Arranque. Todo el trabajo vive en la librería, que es lo que el banco de barrido consume.
 
-fn main() {}
+fn main() -> eframe::Result {
+    app::arrancar()
+}

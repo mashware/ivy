@@ -5,3 +5,21 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+
+[workspace.dependencies]
+# Sin las features de serie, que multiplican los paquetes y con ellos el tiempo de
+# `clippy --workspace --all-targets`, que este hito corre continuamente. Lo que se queda fuera no
+# es solo `wgpu` y la accesibilidad: también `links` (abrir URLs, que un terminal querrá el día que
+# soporte OSC 8), el lector de pantalla web y `winit/default` — de ahí la dependencia de `winit`
+# que `crates/app` declara para reponer una de las que ese default traía.
+# Las tres últimas de aquí no son opcionales: sin `default_fonts` no hay con qué pintar texto y sin
+# los dos backends de ventana no hay ventana en Linux.
+# Cuidado al recortar más: hoy `libwayland` se carga en tiempo de ejecución porque la feature
+# `dlopen` llega de rebote por el portapapeles. Quitar el portapapeles la tumbaría, y entonces
+# compilar exigiría libwayland y el binario dejaría de arrancar en una máquina X11 sin ella.
+eframe = { version = "0.36", default-features = false, features = [
+    "glow",
+    "default_fonts",
+    "x11",
+    "wayland",
+] }
