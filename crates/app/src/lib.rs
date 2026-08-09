@@ -6,8 +6,11 @@
 //! Es librería además de binario a propósito: el banco de barrido que mide el repintado tiene que
 //! llamar al pintor de verdad, y si lo duplicara su número dejaría de ser el del producto.
 //!
-//! Por ahora la ventana abre vacía. Lo que va llegando después: la tabla de color, la traducción
-//! de teclado, el puente con el pseudoterminal, el pintor y los cronómetros.
+//! La ventana todavía abre vacía: lo que hay dentro de la caja son las piezas que el pintor irá
+//! necesitando. Lo que falta por llegar: el puente con el pseudoterminal, el pintor, el bucle y los
+//! cronómetros.
+
+pub mod teclado;
 
 pub mod tema;
 
