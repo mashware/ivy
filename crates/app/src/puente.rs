@@ -14,6 +14,30 @@
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
+
+/// Lo que hay en la cola: los bytes y cuándo llegó cada tanda.
+#[derive(Default)]
+struct Cola {
+    bytes: VecDeque<u8>,
+    /// Cuándo llegó cada tanda y hasta qué byte llega, contando desde el principio de todo lo que
+    /// ha pasado por aquí. Existe para poder responder **cuánto lleva esperando** lo que se recoge:
+    /// en un volcado esa espera es el tramo que domina el retraso visual —más de un segundo, frente
+    /// a los microsegundos de todo lo demás— y sin sellarla el número diría que la aplicación es
+    /// instantánea justo cuando no lo es.
+    llegadas: VecDeque<(u64, Instant)>,
+    /// Cuántos bytes se han recogido ya en total. Es el origen contra el que se leen las llegadas.
+    recogidos: u64,
+}
+
+/// El resultado de una recogida: si queda cola, y desde cuándo esperaba lo que se ha llevado.
+pub struct Recogida {
+    /// El presupuesto cortó el bombeo y queda cola por tragar.
+    pub queda_cola: bool,
+    /// Cuándo llegó el más antiguo de los bytes recogidos, o nada si no se recogió ninguno. Es el
+    /// principio del tramo que el usuario ve como retraso.
+    pub esperando_desde: Option<Instant>,
+}
 
 /// Lo que el programa ha escrito y todavía no se ha recogido, más la señal de si sigue vivo.
 pub struct Puente {
@@ -21,7 +45,7 @@ pub struct Puente {
     /// principio, y sacar del principio de un vector copia todo lo que queda detrás. Con un
     /// volcado en marcha eso serían megabytes copiados en cada fotograma, y ese coste acabaría
     /// dentro del número que este hito existe para medir.
-    cola: Arc<Mutex<VecDeque<u8>>>,
+    cola: Arc<Mutex<Cola>>,
     /// No transporta nada: lo que importa es **cuándo se cierra**, que es cuando el hilo termina.
     /// El tipo vacío deja escrito en la firma que por aquí no va a llegar ningún valor.
     defuncion: Receiver<std::convert::Infallible>,
@@ -49,7 +73,7 @@ impl Puente {
     /// y conservar el `Pty` deja un hilo y una cola sin dueño, creciendo. Quien los tenga, que los
     /// tenga juntos.
     pub fn nuevo(salida: Receiver<Vec<u8>>, despertar: impl Fn() + Send + 'static) -> Self {
-        let cola = Arc::new(Mutex::new(VecDeque::new()));
+        let cola = Arc::new(Mutex::new(Cola::default()));
         let cola_del_hilo = Arc::clone(&cola);
         let (defuncion_emisor, defuncion) = channel();
 
@@ -61,6 +85,10 @@ impl Puente {
             // `for` sobre el canal termina exactamente cuando el otro extremo se cierra, que es
             // cuando el programa muere. No hay condición de parada que mantener aparte.
             for trozo in salida {
+                // El sello se toma **antes** de pedir el candado: si el fotograma lo tuviera
+                // tomado, esperar por él se contaría como tiempo de llegada y la espera que se
+                // publica saldría inflada por la contención, que no es lo que se quiere medir.
+                let llegada = Instant::now();
                 // El candado se toma y se suelta en cada trozo: el fotograma también lo quiere, y
                 // retenerlo mientras se espera al siguiente trozo sería bloquear el pintado
                 // justamente durante la espera que este hilo existe para evitar.
@@ -68,7 +96,9 @@ impl Puente {
                 // hubo fue un pánico en otro sitio. Recuperarlo es lo correcto; descartar en
                 // silencio dejaría la ventana congelada sin que nada lo explicara.
                 let mut cola = cola_del_hilo.lock().unwrap_or_else(PoisonError::into_inner);
-                cola.extend(&trozo);
+                cola.bytes.extend(&trozo);
+                let hasta = cola.recogidos + cola.bytes.len() as u64;
+                cola.llegadas.push_back((hasta, llegada));
                 drop(cola);
                 despertar();
             }
@@ -98,20 +128,38 @@ impl Puente {
     ///
     /// Recibe el destino en vez de devolver uno nuevo para que el fotograma pueda reutilizar
     /// siempre el mismo y no reservar memoria una vez por fotograma.
-    pub fn recoger(&self, destino: &mut Vec<u8>, maximo: usize) -> bool {
+    pub fn recoger(&self, destino: &mut Vec<u8>, maximo: usize) -> Recogida {
         let mut cola = self.cola.lock().unwrap_or_else(PoisonError::into_inner);
 
         // La cola guarda sus bytes en dos tramos —da la vuelta al llegar al final—, así que hay
         // que copiar de los dos. Copiar de las rebanadas y no del iterador es lo que hace que esto
         // cueste lo que se lleva y no lo que se queda.
-        let trozo = cola.len().min(maximo);
-        let (primero, segundo) = cola.as_slices();
+        let trozo = cola.bytes.len().min(maximo);
+        let (primero, segundo) = cola.bytes.as_slices();
         let del_primero = primero.len().min(trozo);
         destino.extend_from_slice(&primero[..del_primero]);
         destino.extend_from_slice(&segundo[..trozo - del_primero]);
-        cola.drain(..trozo);
+        cola.bytes.drain(..trozo);
 
-        !cola.is_empty()
+        // Cuándo llegó el primero de los bytes que se acaban de llevar: la tanda cuyo último byte
+        // cae más allá de lo ya recogido. Es el más antiguo de los que van en esta entrega, así que
+        // la espera que mide es la peor de las que se resuelven en este fotograma — la que se ve.
+        let esperando_desde = cola
+            .llegadas
+            .iter()
+            .find(|(hasta, _)| *hasta > cola.recogidos)
+            .map(|(_, cuando)| *cuando);
+
+        cola.recogidos += trozo as u64;
+        // Las tandas ya servidas enteras dejan de importar. Sin esta purga la lista crecería para
+        // siempre durante un volcado, que es justo cuando no puede permitírselo.
+        let recogidos = cola.recogidos;
+        cola.llegadas.retain(|(hasta, _)| *hasta > recogidos);
+
+        Recogida {
+            queda_cola: !cola.bytes.is_empty(),
+            esperando_desde,
+        }
     }
 
     /// Si el programa de dentro sigue vivo.
@@ -283,16 +331,16 @@ mod tests {
         assert!(esperar_a(|| !puente.sigue_vivo()));
 
         let mut primeros = Vec::new();
-        let queda = puente.recoger(&mut primeros, 4);
+        let recogida = puente.recoger(&mut primeros, 4);
         assert_eq!(primeros, b"0123", "no se respetó el máximo");
-        assert!(queda, "quedaban bytes y dijo que no");
+        assert!(recogida.queda_cola, "quedaban bytes y dijo que no");
 
         // Y lo que sobró sigue ahí, en su orden, sin haberse perdido ni repetido: es lo que hace
         // que un volcado se vea entero aunque tarde varios fotogramas.
         let mut resto = Vec::new();
-        let queda = puente.recoger(&mut resto, usize::MAX);
+        let recogida = puente.recoger(&mut resto, usize::MAX);
         assert_eq!(resto, b"456789", "lo que sobró no salió entero ni en orden");
-        assert!(!queda, "la cola quedó vacía y dijo que no");
+        assert!(!recogida.queda_cola, "la cola quedó vacía y dijo que no");
     }
 
     /// Deja una cola cuyo contenido está **partido en dos tramos**: el anillo da la vuelta y sus
@@ -326,10 +374,16 @@ mod tests {
     ///
     /// El emisor se devuelve y hay que conservarlo vivo: soltarlo cierra el canal, y eso el puente
     /// lo lee como que el programa ha muerto.
-    fn puente_con_cola(cola: VecDeque<u8>) -> (std::sync::mpsc::Sender<Vec<u8>>, Puente) {
+    fn puente_con_cola(bytes: VecDeque<u8>) -> (std::sync::mpsc::Sender<Vec<u8>>, Puente) {
         let (emisor, salida) = channel();
         let puente = Puente::nuevo(salida, || {});
-        *puente.cola.lock().unwrap_or_else(PoisonError::into_inner) = cola;
+        let mut cola = puente.cola.lock().unwrap_or_else(PoisonError::into_inner);
+        // Una sola llegada que cubre todo lo puesto a mano: sin ella, recoger no sabría desde
+        // cuándo esperaba y devolvería que no hay nada que esperar, que es distinto de cero.
+        cola.llegadas
+            .push_back((bytes.len() as u64, Instant::now()));
+        cola.bytes = bytes;
+        drop(cola);
         (emisor, puente)
     }
 
@@ -341,13 +395,16 @@ mod tests {
         let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
 
         let mut destino = Vec::new();
-        let queda = puente.recoger(&mut destino, usize::MAX);
+        let recogida = puente.recoger(&mut destino, usize::MAX);
 
         assert_eq!(
             destino, b"0123456789",
             "los dos tramos no salieron en orden"
         );
-        assert!(!queda, "se llevó la cola entera y dijo que quedaba algo");
+        assert!(
+            !recogida.queda_cola,
+            "se llevó la cola entera y dijo que quedaba algo"
+        );
     }
 
     #[test]
@@ -355,12 +412,15 @@ mod tests {
         let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
 
         let mut destino = Vec::new();
-        assert!(puente.recoger(&mut destino, 4), "quedaban seis bytes");
+        assert!(
+            puente.recoger(&mut destino, 4).queda_cola,
+            "quedaban seis bytes"
+        );
         assert_eq!(destino, b"0123", "no se respetó el máximo");
 
         // Y lo que quedó sigue estando a caballo de la vuelta, entero y en su orden.
         let mut resto = Vec::new();
-        assert!(!puente.recoger(&mut resto, usize::MAX));
+        assert!(!puente.recoger(&mut resto, usize::MAX).queda_cola);
         assert_eq!(resto, b"456789");
     }
 
@@ -369,15 +429,82 @@ mod tests {
         let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
 
         let mut destino = Vec::new();
-        assert!(puente.recoger(&mut destino, 8), "quedaban dos bytes");
+        assert!(
+            puente.recoger(&mut destino, 8).queda_cola,
+            "quedaban dos bytes"
+        );
 
         // Seis del primer tramo y dos del segundo: el corte cae dentro del segundo, que es donde
         // una cuenta mal hecha se sale de rango o se deja bytes por el camino.
         assert_eq!(destino, b"01234567");
 
         let mut resto = Vec::new();
-        assert!(!puente.recoger(&mut resto, usize::MAX));
+        assert!(!puente.recoger(&mut resto, usize::MAX).queda_cola);
         assert_eq!(resto, b"89");
+    }
+
+    #[test]
+    fn lo_recogido_dice_desde_cuando_esperaba() {
+        // Es el sello del que cuelga el número que este hito publica como retraso visual. Sin él,
+        // la espera —que en un volcado es más de un segundo— no se puede medir, y el resto de
+        // tramos son microsegundos: el número diría que la aplicación va instantánea justo cuando
+        // se la ve ir por detrás.
+        let (_pty, salida) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
+            .expect("no se pudo abrir el pseudoterminal");
+        let puente = Puente::nuevo(salida, || {});
+        assert!(esperar_a(|| !puente.sigue_vivo()));
+
+        std::thread::sleep(Duration::from_millis(50));
+        let mut destino = Vec::new();
+        let recogida = puente.recoger(&mut destino, usize::MAX);
+
+        let esperando = recogida
+            .esperando_desde
+            .expect("se recogieron bytes y no dijo desde cuándo esperaban");
+        assert!(
+            esperando.elapsed() >= Duration::from_millis(50),
+            "la espera salió más corta de lo que el test durmió"
+        );
+    }
+
+    #[test]
+    fn una_recogida_en_vacio_no_inventa_una_espera_de_cero() {
+        // Un fotograma sin salida no es una espera instantánea: es que no hubo nada que esperar.
+        // Devolver cero metería un cero en la serie y bajaría la media publicada por fotogramas en
+        // los que no pasó nada.
+        let (_pty, salida) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
+            .expect("no se pudo abrir el pseudoterminal");
+        let puente = Puente::nuevo(salida, || {});
+
+        let mut destino = Vec::new();
+        let recogida = puente.recoger(&mut destino, usize::MAX);
+
+        assert!(destino.is_empty());
+        assert!(recogida.esperando_desde.is_none());
+    }
+
+    #[test]
+    fn las_llegadas_ya_servidas_no_se_acumulan() {
+        // Durante un volcado entran miles de tandas. Si las marcas no se purgaran al servirlas, la
+        // lista crecería sin parar y buscar en ella se haría más caro cada fotograma — dentro del
+        // candado que el hilo del programa también necesita.
+        let (emisor, puente) = puente_con_cola(VecDeque::new());
+        for _ in 0..50 {
+            emisor.send(b"abcd".to_vec()).expect("el puente sigue vivo");
+        }
+
+        let mut destino = Vec::new();
+        assert!(esperar_a(|| {
+            puente.recoger(&mut destino, usize::MAX);
+            destino.len() == 200
+        }));
+
+        let cola = puente.cola.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(
+            cola.llegadas.is_empty(),
+            "quedaron {} marcas de tandas ya servidas",
+            cola.llegadas.len()
+        );
     }
 
     #[test]

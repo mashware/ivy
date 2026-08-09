@@ -17,6 +17,7 @@
 //! `logic` ve es la del último pase mostrado, así que leer el teclado ahí reenviaría la última
 //! tecla pulsada miles de veces por segundo durante un volcado.
 
+pub mod medida;
 pub mod pintor;
 pub mod puente;
 pub mod teclado;
@@ -24,8 +25,10 @@ pub mod teclado;
 pub mod tema;
 
 use eframe::egui;
+use medida::Medida;
 use pintor::Metrica;
 use puente::Puente;
+use std::time::Instant;
 use tema::Tema;
 use term_core::{Pty, Screen, Size};
 
@@ -89,6 +92,16 @@ struct Ventana {
     /// que llega siempre con un fotograma de retraso. No se nota: entre dos fotogramas de un
     /// arrastre no da tiempo a ver la rejilla vieja.
     medido: Size,
+    medida: Medida,
+    /// Lo que la primera mitad del fotograma ya sabe de la vuelta —desde cuándo esperaba lo
+    /// recogido, cuándo se recogió y lo que costó interpretarlo—, a la espera de que la pasada de
+    /// interfaz añada lo que cuesta encolar el pintado.
+    pendiente_de_medir: Option<(Option<Instant>, Instant, std::time::Duration)>,
+    /// Cuándo empezó el fotograma en curso, que es donde arranca el cronómetro de la ida.
+    empezo_el_fotograma: Instant,
+    /// El último fotograma cuyo coste ya se anotó, para no contarlo dos veces si egui repite la
+    /// pasada sobre la misma entrada.
+    ultimo_fotograma_cerrado: u64,
 }
 
 impl Ventana {
@@ -124,6 +137,10 @@ impl Ventana {
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
+            medida: Medida::default(),
+            pendiente_de_medir: None,
+            empezo_el_fotograma: Instant::now(),
+            ultimo_fotograma_cerrado: 0,
         })
     }
 
@@ -152,13 +169,25 @@ impl Ventana {
     /// Devuelve si el presupuesto cortó el bombeo y quedó cola por tragar.
     fn bombear(&mut self) -> bool {
         self.recibido.clear();
-        let queda_cola = self.puente.recoger(&mut self.recibido, PRESUPUESTO);
+        let recogida = self.puente.recoger(&mut self.recibido, PRESUPUESTO);
+        let recogido_en = Instant::now();
+
+        let antes = Instant::now();
         self.pantalla.advance(&self.recibido);
-        queda_cola
+        let interpretado = antes.elapsed();
+
+        // El encolado del pintado se mide en la pasada de interfaz, que viene después; aquí se
+        // apunta lo que ya se sabe y allí se completa.
+        self.pendiente_de_medir = Some((recogida.esperando_desde, recogido_en, interpretado));
+        recogida.queda_cola
     }
 
-    /// Manda al programa lo que se ha tecleado en este pase.
-    fn teclear(&mut self, ctx: &egui::Context) {
+    /// Manda al programa lo que se ha tecleado en este pase, y mide cuánto se tarda.
+    ///
+    /// El cronómetro arranca **al empezar el fotograma**, no al pulsar la tecla: el evento ya estaba
+    /// esperando cuando el fotograma empezó y no trae sello propio, así que ese trecho no se puede
+    /// ver desde aquí. El número lleva escrita esa frontera.
+    fn teclear(&mut self, ctx: &egui::Context, empezo_el_fotograma: Instant) {
         self.pulsaciones.clear();
         // Los eventos que van al programa **se consumen**, no se leen y se dejan. Un fotograma
         // puede correr más de un pase sobre la misma entrada —egui lo hace cuando algo pide
@@ -181,12 +210,36 @@ impl Ventana {
             // Lo que se acaba de teclear no ha llegado. Una tecla que se pierde en silencio es de
             // los fallos que más tardan en entenderse desde el otro lado de la pantalla.
             eprintln!("no se pudo enviar lo tecleado al programa: {fallo}");
+            // Un envío que falló no es una ida rápida: no se anota, o el número mediría el fallo.
+            return;
         }
+        self.medida.anotar_ida(empezo_el_fotograma.elapsed());
     }
 }
 
 impl eframe::App for Ventana {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // **El cronómetro de la ida arranca aquí y no en la pasada de interfaz**, porque `logic`
+        // corre antes dentro del mismo fotograma y lo que hace —tragar y meter en la rejilla— llega
+        // a costar milisegundos durante un volcado. La tecla ya estaba esperando desde antes: si el
+        // cronómetro empezara después de ese trabajo, el número saldría corto justamente en el
+        // momento en que se nota.
+        self.empezo_el_fotograma = Instant::now();
+
+        // Lo que costó el fotograma anterior, entero. Llega con un fotograma de retraso porque es
+        // lo que tarda en saberse: cuando se tesela y se dibuja, la pasada ya ha terminado. Se
+        // cierra **una vez por fotograma y no por pase**: egui puede repetir la pasada sobre la
+        // misma entrada, y entonces el segundo cierre emparejaría los tramos de este fotograma con
+        // el total del anterior — una muestra inventada, y el total de verdad perdido.
+        let pase = ctx.cumulative_pass_nr();
+        if pase != self.ultimo_fotograma_cerrado
+            && let Some(segundos) = frame.info().cpu_usage
+        {
+            self.ultimo_fotograma_cerrado = pase;
+            self.medida
+                .cerrar_fotograma(std::time::Duration::from_secs_f32(segundos));
+        }
+
         // Primero se interpreta lo pendiente y después se cambia de tamaño: esos bytes los escribió
         // el programa para las dimensiones que todavía no sabe que han cambiado.
         let queda_cola = self.bombear();
@@ -211,11 +264,12 @@ impl eframe::App for Ventana {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
 
-        self.teclear(ui.ctx());
+        self.teclear(ui.ctx(), self.empezo_el_fotograma);
 
         let superficie = ui.max_rect();
         self.medido = metrica.celdas_en(superficie.size());
 
+        let antes = Instant::now();
         pintor::pintar(
             ui.painter(),
             &self.pantalla.view(),
@@ -223,6 +277,21 @@ impl eframe::App for Ventana {
             &metrica,
             superficie.left_top(),
         );
+        let encolado = antes.elapsed();
+
+        if let Some((esperando_desde, recogido_en, interpretado)) = self.pendiente_de_medir.take() {
+            self.medida
+                .anotar_vuelta(esperando_desde, recogido_en, interpretado, encolado);
+        }
+    }
+
+    /// Los números se publican al apagar, y **aquí y no al ver morir el programa**, por dos razones
+    /// que se descubrieron mirando la salida: pedir el cierre no cierra en el acto, así que ese
+    /// camino imprimía el informe una vez por cada fotograma que aún llegaba; y cerrar la ventana a
+    /// mano —que es como se sale la mitad de las veces— no pasa por ahí, así que la sesión se
+    /// perdía entera sin publicar nada.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.medida.publicar(self.pantalla.size());
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -253,6 +322,10 @@ mod tests {
             puente: Puente::nuevo(salida, || {}),
             pantalla: Screen::new(REJILLA_INICIAL),
             tema: Tema::default(),
+            medida: Medida::default(),
+            pendiente_de_medir: None,
+            empezo_el_fotograma: Instant::now(),
+            ultimo_fotograma_cerrado: 0,
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
@@ -357,10 +430,10 @@ mod tests {
             entrada.events.push(egui::Event::WindowFocused(true));
         });
 
-        ventana.teclear(&ctx);
+        ventana.teclear(&ctx, Instant::now());
         assert_eq!(ventana.pulsaciones, b"a", "no se envió lo tecleado");
 
-        ventana.teclear(&ctx);
+        ventana.teclear(&ctx, Instant::now());
         assert!(
             ventana.pulsaciones.is_empty(),
             "la misma tecla se envió en el segundo pase"
