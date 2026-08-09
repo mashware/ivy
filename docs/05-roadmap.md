@@ -273,3 +273,37 @@ el mismo canal. Si nunca se hace, no se ha perdido nada.
 ~~Instalar `inotify-tools`~~ — cae con F1.6: el crate `notify` hace lo mismo y además en macOS
 y Windows. Mientras el panel siga corriendo sobre WezTerm, el sondeo por `mtime` cada segundo
 funciona y no molesta.
+
+---
+
+## Ideas sin fase
+
+Cosas que gustan y **no tienen fase asignada**. No son deuda ni compromiso: están escritas para no
+perderlas y para que nadie las cuele en una fase «ya que estamos». Si alguna entra algún día, será
+por la puerta de delante — con su hueco en la Parte I y su decisión en `02-decisiones.md`.
+
+### Tareas y tablero
+
+**La idea.** Que una tarea sea una cosa con nombre propio, no solo «lo que hay corriendo en esa
+división»: se crea antes de tener consola, se encola, se enlaza con otra («cuando termine esta,
+arranca esa»), y se ve en un tablero por columnas. Es lo que hace Cline Kanban, y la parte de las
+**cadenas de dependencias** es genuinamente buena — resuelve encadenar trabajo sin escribir un
+script.
+
+**Por qué no entra ahora.** Choca de frente con la forma de las fases 1–3, y el choque es de
+fondo, no de calendario:
+
+- Aquí la unidad es **la división** — una consola viva, con su `PANEL_ID` y su `panel.json`
+  (D7). Una tarea encolada todavía no tiene consola, así que no tiene división, así que no tiene
+  dónde publicar. Meter tareas obliga a inventar una segunda unidad por encima de la división, y
+  eso es un modelo de datos nuevo, no una pantalla nueva.
+- «Cuando termine esta, arranca esa» exige que la app **sepa** que algo terminó. Eso solo puede
+  venir del contrato, publicado por quien trabaja — nunca deducido (D6). Antes de la Fase 3
+  rodada no hay estado en el que confiar para disparar nada, y disparar procesos con una señal
+  poco fiable es peor que no disparar.
+- La Fase 4 ya cubre el 80% del valor sin nada de esto: **ordenar por lo que te reclama** es más
+  útil que un tablero, y no necesita modelo de tareas — solo el estado que ya llega.
+
+**Qué la haría entrar.** Que después de usar la Fase 4 un tiempo siga faltando algo, y ese algo
+sea concreto: encolar trabajo que aún no tiene consola, o encadenar sin script. Si lo que falta se
+puede resolver ordenando mejor la lista de la Fase 4, no hace falta un tablero.

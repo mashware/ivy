@@ -86,6 +86,41 @@ Presentan tablero o dashboard; la consola queda debajo.
 | **Conductor** | App de escritorio: agentes Claude Code / Codex / Cursor en paralelo, cada uno en su worktree, con panel visual y revisión de diffs | **Solo macOS y propietario** |
 | **Crystal → Nimbalyst** | Electron; varias sesiones de Claude Code en worktrees, seguimiento de conversación, operaciones git integradas | Crystal es el nombre antiguo |
 | **Vibe Kanban** | CLI + web, tablero kanban; cada tarea en su worktree; soporta Claude Code, Codex, Amp, Cursor CLI, Gemini | **La empresa detrás cerró en abril de 2026**; sigue como open source comunitario |
+| **Cline Kanban** | Servidor local + tablero en el navegador; cada tarjeta es una tarea con su worktree efímero y su terminal. Agnóstico de agente (Claude Code, Codex, opencode, Cline CLI). Cadenas de dependencias, cron, hooks de aprobación, headless en CI | **El más cercano de toda la lista.** Ver abajo |
+
+### Cline merece párrafo aparte
+
+Son dos productos y solo uno nos toca. **Cline IDE** es un agente dentro del editor: no compite,
+compite con Claude Code. Es un *productor* potencial de `panel.json` — y el ejemplo de siempre de
+panel cerrado, porque su estado solo lo sabe Cline.
+
+**Cline Kanban** sí es competencia, y llegó a dos de nuestras conclusiones por su cuenta:
+
+- **Diagnostica lo mismo**: que el cuello de botella ya no es el agente sino el humano que no
+  sabe por cuál de sus ocho terminales va cada cosa.
+- **Confirma D4 desde fuera**: construyeron la orquestación lanzando los binarios oficiales de
+  cada agente en un proceso, no llamando a modelos por API. Es la única vía que preserva la
+  suscripción, y la tomó una empresa con dinero encima. *(Pendiente de verificar en la política
+  oficial: en abril de 2026 las cuotas de suscripción habrían dejado de cubrir herramientas de
+  terceros. Si es cierto, refuerza D4 y deja fuera a Cline IDE.)*
+
+Y dejan el hueco por escrito: *«We're not trying to replace your terminal.»* Son una capa encima.
+Nosotros somos la capa de abajo. Las tres diferencias que quedan, y que son la razón de ser del
+proyecto:
+
+1. **Su terminal está dentro del navegador.** El tablero es un servidor local que abres en una
+   pestaña. Sea cual sea el emulador que embeban, no es una consola con divisiones, ratón y
+   rendimiento medido: es un visor dentro de una tarjeta.
+2. **El estado lo define Cline, no el que trabaja.** Muestran «estado de la tarjeta + última
+   salida del agente»: un vocabulario cerrado, uno por runtime soportado. Un CI, un despliegue o
+   un script tuyo no tiene dónde publicar «me quedan 12k de contexto» o «estoy bloqueado
+   esperando aprobación» — justo lo que no se deduce desde fuera (D6).
+3. **Es tarea-céntrico, no sesión-céntrico.** El modelo es «suelta la tarjeta, dale al play». No
+   cabe ahí una sesión larga de exploración, ni un shell normal al lado de un agente.
+
+**El riesgo, dicho claro:** si Cline publica un formato abierto para que cualquier proceso escriba
+en su tarjeta, se lleva nuestro diferenciador de contrato en una release. Lo que no pueden copiar
+barato es el terminal nativo de debajo: el navegador es una decisión estructural suya.
 
 ### E2 — Los que mantienen el terminal en el centro
 
@@ -110,17 +145,25 @@ lo construyen *sobre tmux*, heredando lo que tmux no da (ratón decente, botones
 paneles). Ninguno es el anfitrión que hospeda agentes **como terminal de primera clase**, ni
 define un contrato abierto para que cualquiera publique estado.
 
-**3. Conductor deja un hueco explícito**: es el más pulido del grupo y es **macOS y propietario**.
-Multiplataforma y abierto es un espacio real.
+**3. El hueco de Conductor sigue ahí, pero más estrecho.** Era el más pulido del grupo y es
+**macOS y propietario**, así que multiplataforma y abierto era un espacio libre. Cline Kanban lo
+ha tapado en parte: es abierto, multiplataforma y agnóstico de agente. Lo que queda sin ocupar no
+es «abierto y multiplataforma» — es **el terminal como ciudadano de primera**.
 
 **4. Aviso serio: el espacio está lleno y con rotación.** Hay comparativas de doce herramientas,
 Crystal ha tenido que renombrarse, y la empresa de Vibe Kanban cerró. Que haya demanda no
 significa que sea fácil monetizar. Entra sabiéndolo: para uso propio esto es inversión segura;
 como producto, la diferenciación tiene que ser evidente en treinta segundos.
 
-**5. La diferenciación en una frase.** No es «otro orquestador» ni «otro terminal»:
-**es el anfitrión donde cualquier herramienta puede publicar estado y pedir acciones, con el
-terminal como ciudadano de primera y sin obligar a pagar API sobre lo que ya pagas por suscripción.**
+**5. La diferenciación en una frase.** «El anfitrión donde cualquiera publica estado» ya no se
+distingue en treinta segundos de «tablero agnóstico de agentes» — Cline Kanban dice algo
+parecido. La distinción que sí aguanta es más dura:
+
+**Ellos organizan tareas por encima de tu terminal. Nosotros somos el terminal — y el estado lo
+escribe quien hace el trabajo, no nosotros.**
+
+Debajo de esa frase siguen valiendo las tres patas de siempre: contrato abierto para cualquier
+productor, terminal de primera clase, y sin pagar API sobre lo que ya pagas por suscripción.
 
 ---
 
@@ -137,3 +180,4 @@ terminal como ciudadano de primera y sin obligar a pagar API sobre lo que ya pag
 | **Ghostty** | Separar núcleo de interfaz para poder ir a Mac y Windows sin rehacer el motor |
 | **opencode** | Bloque de contexto y coste; indicador de sesión ocupada en otro sitio |
 | **Conductor / Vibe Kanban** | Revisión de diffs antes de fusionar como parte del flujo, no como paso aparte |
+| **Cline Kanban** | Cadenas de dependencias entre tareas: al terminar una arranca sola la siguiente, sin escribir un script (ver «Ideas sin fase» en [05-roadmap.md](05-roadmap.md)) |
