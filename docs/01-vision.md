@@ -27,14 +27,21 @@ Gente que trabaja con varios agentes de terminal en paralelo y necesita saber, d
 
 ## Qué lo diferencia
 
-**El contrato es abierto.** El panel de opencode solo sabe de opencode: sus sesiones, sus
-tokens, sus herramientas. Es un buen panel cerrado. Aquí el panel recibe lo mismo de quien sea,
-lo que permite tener cuatro divisiones con cuatro productores distintos y una vista global
-que los resume.
+Contrastado contra seis competidores en agosto de 2026
+([07-panorama.md](07-panorama.md) → «En qué nos diferenciamos»). Queda **una** cosa, no varias:
 
-**Preserva las suscripciones.** Cualquier integración por API ata a un proveedor y factura
-tokens aparte. El terminal es el único punto donde todos los agentes convergen ya autenticados
-con lo que el usuario paga. Ver [02-decisiones.md](02-decisiones.md) → Control por consola.
+**El cuerpo del panel lo decide quien trabaja, y es estado estructurado y persistente.** Los
+orquestadores completos —Xirp, Superset, Conductor, Warp— tienen estado rico, pero con un vocabulario
+que elige la app: tres constantes, cuatro eventos, cinco estados, unas métricas. cmux sí abre el canal
+—cualquier proceso le emite OSC 777/99— pero por ahí solo caben un título y un cuerpo que **se borran
+al leerse**. Nadie tiene lo de en medio: una lista con marcas, referencias y enlaces, escrita en el
+vocabulario del productor, que sigue ahí cuando vuelves y que sabe caducar. Eso es lo que permite
+cuatro divisiones con cuatro productores distintos y una vista global que los resume.
+
+**Lo que ya NO diferencia, y estaba escrito aquí: preservar las suscripciones.** Lo hacen los seis
+—todos lanzan el binario oficial del agente y ninguno cobra API aparte—. Sigue siendo la decisión
+correcta ([02-decisiones.md](02-decisiones.md) → D4) y una condición para que esto se adopte, pero no
+es un argumento que distinga nada.
 
 ## Qué NO es
 
@@ -47,5 +54,86 @@ con lo que el usuario paga. Ver [02-decisiones.md](02-decisiones.md) → Control
 1. **La app no sabe de dominios.** No conoce `flow`, ni git, ni tickets. Solo el contrato.
 2. **Quien hace el trabajo publica el estado.** La app nunca deduce ni parsea para adivinar.
 3. **Que funcione sin el panel.** Si nadie publica nada, sigue siendo un terminal correcto.
-4. **La información que no se puede deducir desde fuera vale más que la que sí.** Contexto
-   restante, coste, bloqueos: eso solo lo sabe el agente, y es lo que hay que facilitarle publicar.
+4. **La información que no se puede deducir desde fuera vale más que la que sí.** Por qué paso va la
+   tarea, qué la tiene bloqueada, y lo que el usuario de esa división quiera publicar jugando con su
+   agente: eso solo lo sabe quien trabaja. Las métricas de la IA —contexto restante, coste— son un
+   **caso de uso** de esto, no su definición; ver la regla del cuerpo libre en
+   [04-contrato-panel.md](04-contrato-panel.md).
+
+---
+
+## ¿Merece la pena? — valoración de agosto de 2026
+
+Escrita después de analizar seis competidores. Se guarda porque la pregunta va a volver, y porque
+tiene dos mitades con respuestas distintas que conviene no confundir.
+
+### Cuánto tardarían en copiarlo: días
+
+Leer un JSON de un directorio conocido y pintar una lista con marcas no tiene dificultad técnica
+ninguna. Cualquiera de los seis lo tiene funcionando en una tarde y pulido en una semana. **No hay
+foso técnico, y creerse lo contrario sería el peor error de este proyecto.**
+
+### Por qué ninguno lo ha hecho ya
+
+Los seis han tenido la oportunidad. Warp lleva años y su lista de agentes está **compilada en el
+binario** como un `enum`. Conductor no tiene ni una vía de vuelta. cmux, que es el que más cerca
+está, abrió el canal y lo dejó en título, subtítulo y cuerpo. No es incapacidad: es que su producto
+empuja al contrario.
+
+1. **Un contrato abierto degrada su propuesta.** Los seis venden lo mismo: *«nosotros entendemos a tu
+   agente»*. Un formato donde cualquiera publica lo que quiera los convierte en **un visor de ficheros
+   ajenos**. Lo primero se vende; lo segundo es infraestructura, y la infraestructura la regala quien
+   no tiene que monetizarla.
+2. **Un contrato es un compromiso, no una feature.** Hay que versionarlo y no romperlo nunca. Un
+   equipo que itera cada semana huye de eso — por eso Warp eligió un `enum` en el binario antes que una
+   superficie estable, y no es descuido: es elección.
+3. **Obliga a renunciar a ser dueño de la semántica.** Si el productor escribe mal, la app se ve mal.
+   Ningún equipo de producto acepta que la calidad de su interfaz dependa de terceros, salvo que eso
+   sea precisamente su tesis.
+
+**La ventaja no es que no puedan: es que no quieren.** Eso aguanta más que una ventaja técnica, y
+mucho menos que una patente.
+
+### El riesgo real, y no es el copiado
+
+Que la necesidad **se resuelva por otro camino**: que los harnesses publiquen progreso estructurado
+de forma nativa. Si Claude Code, Codex y compañía empiezan a emitir paso actual, plan y bloqueo por
+sus propios hooks, los seis tendrán el 80 % del contenido gratis por el stream, y este contrato queda
+para el 20 % restante — el CI, el despliegue, el script propio.
+
+Ese escenario es **más probable** que «Warp lee `panel.json`». Y la defensa no es técnica: es tener
+productores escribiendo antes de que ocurra.
+
+### Las dos preguntas
+
+**Para uso propio: sí, con margen.** Los seis productos completos no hacen esto —verificado producto
+a producto, no intuido— y tres de ellos ni corren en Linux. F1.0 a F1.3 están cerrados, el terminal se
+usa y el prototipo del panel funciona: queda menos por delante de lo que ya se lleva hecho.
+
+**Como producto: frágil, y hay que decirlo.** Competir con Warp —multiplataforma, open source, 64k
+estrellas— apoyándose en una decisión de diseño copiable en una tarde no es imposible, pero no es un
+plan de negocio. Que la diferenciación tenga que ser evidente en treinta segundos ya estaba escrito en
+el panorama antes de esta ronda de análisis; sigue valiendo, y ahora con menos margen.
+
+### Lo único que puede convertirse en foso
+
+**Que el formato tenga productores.** Sin adopción es un fichero JSON; con adopción es un estándar, y
+entonces el valor deja de estar en la app — es la jugada del LSP y de Backstage: quien define el
+protocolo que otros implementan gana aunque su cliente no sea el mejor.
+
+Aquí ya hay uno real: **`flow` publica hoy**, en el prototipo. Warp tiene cinco agentes integrados a
+mano; esto tiene uno que publica por su voluntad. Es poco, pero es de otra naturaleza.
+
+### La prueba que queda pendiente, y es la que decide
+
+No más análisis de competencia — con seis está contestado. **Usar el panel con contenido real una
+semana de trabajo y ver si cambia el día.** No una demostración: uso propio, con `flow` publicando.
+
+- Si lo cambia, la prioridad pasa a que escriban más productores, no a pulir el terminal.
+- Si no lo cambia, se ha averiguado con dos hitos de trabajo en vez de con diez, y queda un terminal
+  que funciona.
+
+Lo que **no** vale es seguir puliendo el terminal esperando que el diferenciador se aclare solo. No se
+va a aclarar más de lo que está hoy, y cada mes que pasa es un mes en que la idea puede aparecérsele a
+otro — que es exactamente lo que ha ocurrido seis veces en agosto de 2026 con otras piezas de esta
+propuesta.
