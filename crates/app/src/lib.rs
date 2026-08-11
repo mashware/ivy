@@ -25,7 +25,7 @@ pub mod teclado;
 pub mod tema;
 
 use eframe::egui;
-use medida::Medida;
+use medida::{Medida, RestoDelFotograma};
 use pintor::Metrica;
 use puente::Puente;
 use std::time::Instant;
@@ -71,15 +71,17 @@ pub fn arrancar() -> eframe::Result {
     )
 }
 
-/// La ventana raíz: una consola y todo lo que hace falta para sostenerla.
-struct Ventana {
+/// Una consola y todo lo que hace falta para sostenerla.
+///
+/// Cada campo de aquí era un campo de [`Ventana`] cuando solo había una consola. Agruparlos es lo que
+/// permite instanciar el conjunto entero más de una vez sin escribir cada operación dos veces.
+struct Division {
     /// El pseudoterminal y su cola van juntos a propósito. El hilo del puente vive mientras viva
     /// el pseudoterminal, no mientras viva el puente: separarlos dejaría un hilo y una cola sin
     /// dueño, creciendo.
     pty: Pty,
     puente: Puente,
     pantalla: Screen,
-    tema: Tema,
     /// Lo que se recoge del puente en un fotograma, reutilizado entre ellos para no reservar
     /// memoria en cada uno. Nunca crece más allá del presupuesto: se pide con tope y se
     /// interpreta entero.
@@ -92,19 +94,17 @@ struct Ventana {
     /// que llega siempre con un fotograma de retraso. No se nota: entre dos fotogramas de un
     /// arrastre no da tiempo a ver la rejilla vieja.
     medido: Size,
+    /// Los cronómetros de esta consola, y no de la ventana: así sus tramos siguen comparando con las
+    /// tablas de D3 haya una división o cuatro.
     medida: Medida,
     /// Lo que la primera mitad del fotograma ya sabe de la vuelta —desde cuándo esperaba lo
     /// recogido, cuándo se recogió y lo que costó interpretarlo—, a la espera de que la pasada de
     /// interfaz añada lo que cuesta encolar el pintado.
     pendiente_de_medir: Option<(Option<Instant>, Instant, std::time::Duration)>,
-    /// Cuándo empezó el fotograma en curso, que es donde arranca el cronómetro de la ida.
-    empezo_el_fotograma: Instant,
-    /// El último fotograma cuyo coste ya se anotó, para no contarlo dos veces si egui repite la
-    /// pasada sobre la misma entrada.
-    ultimo_fotograma_cerrado: u64,
 }
 
-impl Ventana {
+impl Division {
+    /// Lanza el programa de esta división y la deja lista para el primer fotograma.
     fn nueva(ctx: &egui::Context) -> term_core::Result<Self> {
         // El shell sale del entorno de quien lanza la aplicación, que es lo que hace un terminal:
         // sin esto se abre un shell sin prompt ni historial, y este hito existe para mirar lo que
@@ -133,14 +133,11 @@ impl Ventana {
             pty,
             puente,
             pantalla: Screen::new(REJILLA_INICIAL),
-            tema: Tema::default(),
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
             medida: Medida::default(),
             pendiente_de_medir: None,
-            empezo_el_fotograma: Instant::now(),
-            ultimo_fotograma_cerrado: 0,
         })
     }
 
@@ -215,6 +212,53 @@ impl Ventana {
         }
         self.medida.anotar_ida(empezo_el_fotograma.elapsed());
     }
+
+    /// Si el programa terminó y no queda nada suyo por mostrar.
+    ///
+    /// **Se espera a que la cola esté vacía**: morir no borra lo que el programa escribió antes de
+    /// hacerlo, y dar la división por terminada con cola pendiente se comería justo el final, que es
+    /// la parte que se estaba mirando.
+    fn terminada(&self, queda_cola: bool) -> bool {
+        !self.puente.sigue_vivo() && !queda_cola
+    }
+}
+
+/// La ventana raíz: la consola, y lo que es de la ventana y no de ella.
+struct Ventana {
+    /// Una sola. La segunda llega en el hito siguiente, y con ella la lista, el índice de foco y el
+    /// reparto del área: **no se adelantan aquí**. Un contenedor de un elemento no ahorra el trabajo
+    /// de ese hito y sí obliga a escribir ramas para el caso vacío que hoy no puede ocurrir.
+    division: Division,
+    tema: Tema,
+    /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
+    resto_del_fotograma: RestoDelFotograma,
+    /// Cuándo empezó el fotograma en curso, que es donde arranca el cronómetro de la ida.
+    empezo_el_fotograma: Instant,
+    /// El último fotograma cuyo coste ya se anotó, para no contarlo dos veces si egui repite la
+    /// pasada sobre la misma entrada.
+    ultimo_fotograma_cerrado: u64,
+}
+
+impl Ventana {
+    fn nueva(ctx: &egui::Context) -> term_core::Result<Self> {
+        Ok(Self {
+            division: Division::nueva(ctx)?,
+            tema: Tema::default(),
+            resto_del_fotograma: RestoDelFotograma::default(),
+            empezo_el_fotograma: Instant::now(),
+            ultimo_fotograma_cerrado: 0,
+        })
+    }
+
+    /// Cierra el fotograma anterior: la división cierra sus tramos y la ventana se queda con lo que
+    /// nadie cronometró.
+    fn cerrar_fotograma(&mut self, coste_cpu: std::time::Duration) {
+        // Sin tramos no hay resto que anotar: el fotograma entero se contaría como resto y la serie
+        // acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
+        if let Some(cronometrado) = self.division.medida.cerrar_fotograma(coste_cpu) {
+            self.resto_del_fotograma.anotar(coste_cpu, cronometrado);
+        }
+    }
 }
 
 impl eframe::App for Ventana {
@@ -236,14 +280,13 @@ impl eframe::App for Ventana {
             && let Some(segundos) = frame.info().cpu_usage
         {
             self.ultimo_fotograma_cerrado = pase;
-            self.medida
-                .cerrar_fotograma(std::time::Duration::from_secs_f32(segundos));
+            self.cerrar_fotograma(std::time::Duration::from_secs_f32(segundos));
         }
 
         // Primero se interpreta lo pendiente y después se cambia de tamaño: esos bytes los escribió
         // el programa para las dimensiones que todavía no sabe que han cambiado.
-        let queda_cola = self.bombear();
-        self.redimensionar();
+        let queda_cola = self.division.bombear();
+        self.division.redimensionar();
 
         if queda_cola {
             // El presupuesto cortó el bombeo. Sin pedir otro fotograma, lo que falta se quedaría
@@ -253,10 +296,8 @@ impl eframe::App for Ventana {
         }
 
         // El programa de dentro ha terminado —un `exit`, o el agente que se cierra— y una consola
-        // sin nada corriendo no es una consola. **Se espera a que la cola esté vacía**: morir no
-        // borra lo que escribió antes de hacerlo, y cerrar con cola pendiente se comería justo el
-        // final, que es la parte que se estaba mirando.
-        if !self.puente.sigue_vivo() && !queda_cola {
+        // sin nada corriendo no es una consola.
+        if self.division.terminada(queda_cola) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -264,24 +305,33 @@ impl eframe::App for Ventana {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
 
-        self.teclear(ui.ctx(), self.empezo_el_fotograma);
+        // El teclado va antes de medir la superficie **y ese orden importa para el número, no para el
+        // comportamiento**: el cronómetro de la ida se cierra dentro de `teclear`, así que cualquier
+        // trabajo que se cuele por delante —aunque sea leer un rectángulo— se le suma.
+        self.division.teclear(ui.ctx(), self.empezo_el_fotograma);
 
         let superficie = ui.max_rect();
-        self.medido = metrica.celdas_en(superficie.size());
+        self.division.medido = metrica.celdas_en(superficie.size());
 
         let antes = Instant::now();
         pintor::pintar(
             ui.painter(),
-            &self.pantalla.view(),
+            &self.division.pantalla.view(),
             &self.tema,
             &metrica,
             superficie.left_top(),
         );
         let encolado = antes.elapsed();
 
-        if let Some((esperando_desde, recogido_en, interpretado)) = self.pendiente_de_medir.take() {
-            self.medida
-                .anotar_vuelta(esperando_desde, recogido_en, interpretado, encolado);
+        if let Some((esperando_desde, recogido_en, interpretado)) =
+            self.division.pendiente_de_medir.take()
+        {
+            self.division.medida.anotar_vuelta(
+                esperando_desde,
+                recogido_en,
+                interpretado,
+                encolado,
+            );
         }
     }
 
@@ -291,7 +341,13 @@ impl eframe::App for Ventana {
     /// mano —que es como se sale la mitad de las veces— no pasa por ahí, así que la sesión se
     /// perdía entera sin publicar nada.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.medida.publicar(self.pantalla.size());
+        if !self.division.medida.hay_algo() {
+            return;
+        }
+
+        medida::cabecera(self.division.pantalla.size());
+        self.division.medida.publicar_tramos();
+        self.resto_del_fotograma.publicar();
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -308,24 +364,21 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    /// Monta una ventana con un programa dentro, sin framework de interfaz de por medio.
+    /// Monta una división con un programa dentro, sin framework de interfaz de por medio.
     ///
     /// Las dos mitades del fotograma que aquí se prueban —bombear y redimensionar— no tocan la
     /// ventana del escritorio, así que no hace falta abrir ninguna: se arma el struct a mano con
-    /// las mismas piezas que [`Ventana::nueva`].
-    fn ventana_con(programa: &str) -> Ventana {
+    /// las mismas piezas que [`Division::nueva`].
+    fn division_con(programa: &str) -> Division {
         let (pty, salida) = Pty::spawn("sh", &["-c", programa], REJILLA_INICIAL)
             .expect("no se pudo abrir el pseudoterminal");
 
-        Ventana {
+        Division {
             pty,
             puente: Puente::nuevo(salida, || {}),
             pantalla: Screen::new(REJILLA_INICIAL),
-            tema: Tema::default(),
             medida: Medida::default(),
             pendiente_de_medir: None,
-            empezo_el_fotograma: Instant::now(),
-            ultimo_fotograma_cerrado: 0,
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
@@ -336,9 +389,9 @@ mod tests {
     /// que todo lo que escribió está ya en la cola: el hilo del puente publica la muerte después de
     /// haber entregado el último trozo. Sin esta espera, cuánto hay recogido depende de en qué
     /// trozos parta el pseudoterminal la salida, y el test daría un número distinto cada vez.
-    fn esperar_a_que_muera(ventana: &Ventana) {
+    fn esperar_a_que_muera(division: &Division) {
         let limite = Instant::now() + Duration::from_secs(5);
-        while ventana.puente.sigue_vivo() {
+        while division.puente.sigue_vivo() {
             assert!(Instant::now() < limite, "el programa no terminó");
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -346,18 +399,18 @@ mod tests {
 
     #[test]
     fn lo_que_el_programa_escribe_acaba_en_la_rejilla_una_sola_vez() {
-        let mut ventana = ventana_con("printf hola");
-        esperar_a_que_muera(&ventana);
+        let mut division = division_con("printf hola");
+        esperar_a_que_muera(&division);
 
-        assert!(!ventana.bombear(), "cuatro bytes no agotan el presupuesto");
-        assert!(ventana.pantalla.to_text().contains("hola"));
+        assert!(!division.bombear(), "cuatro bytes no agotan el presupuesto");
+        assert!(division.pantalla.to_text().contains("hola"));
 
         // Un fotograma sin nada nuevo no puede volver a interpretar lo del anterior. Si el búfer
         // no se vaciara al empezar, la pantalla mostraría dos veces algo que el programa escribió
         // una — y sería el usuario quien lo descubriera.
-        ventana.bombear();
+        division.bombear();
         assert_eq!(
-            ventana.pantalla.to_text().matches("hola").count(),
+            division.pantalla.to_text().matches("hola").count(),
             1,
             "lo ya interpretado volvió a entrar en la rejilla"
         );
@@ -368,29 +421,29 @@ mod tests {
         // Tres presupuestos y pico: bastante para que ningún fotograma pueda con todo, y poco para
         // que el test siga tardando milisegundos.
         const VOLCADO: usize = 400_000;
-        let mut ventana = ventana_con(&format!(
+        let mut division = division_con(&format!(
             "head -c {VOLCADO} /dev/zero | tr '\\0' a; printf '\\r\\nFIN'"
         ));
-        esperar_a_que_muera(&ventana);
+        esperar_a_que_muera(&division);
 
-        let mut queda = ventana.bombear();
+        let mut queda = division.bombear();
 
         // Este es el presupuesto haciendo su trabajo: sin él, el fotograma se traga los 400 KiB de
         // una vez y la ventana se queda quieta mientras tanto, que es justo lo que no puede pasar.
         assert!(queda, "un volcado de {VOLCADO} bytes cupo en un fotograma");
         assert!(
-            ventana.recibido.len() <= PRESUPUESTO,
+            division.recibido.len() <= PRESUPUESTO,
             "el búfer del fotograma creció por encima del presupuesto: {}",
-            ventana.recibido.len()
+            division.recibido.len()
         );
         // Y esta es la premisa de la que depende cerrar la ventana solo cuando además no queda
         // cola: el programa ya ha muerto y todavía tiene salida sin mostrar. Cerrar aquí se comería
         // el final, que es la parte que se estaba mirando.
-        assert!(!ventana.puente.sigue_vivo());
+        assert!(!division.puente.sigue_vivo());
 
         let mut fotogramas = 1;
         while queda {
-            queda = ventana.bombear();
+            queda = division.bombear();
             fotogramas += 1;
             assert!(fotogramas < 100, "el bombeo no avanza");
         }
@@ -402,20 +455,20 @@ mod tests {
         // Lo que el programa escribió al final está en la pantalla: el volcado se tragó entero, sin
         // perder por el camino ni el último trozo ni los cortes entre fotograma y fotograma.
         assert!(
-            ventana.pantalla.to_text().contains("FIN"),
+            division.pantalla.to_text().contains("FIN"),
             "se perdió el final del volcado"
         );
     }
 
     #[test]
     fn la_rejilla_toma_el_tamano_que_midio_el_pase_anterior() {
-        let mut ventana = ventana_con("sleep 30");
+        let mut division = division_con("sleep 30");
         let nuevo = Size { rows: 10, cols: 40 };
 
-        ventana.medido = nuevo;
-        ventana.redimensionar();
+        division.medido = nuevo;
+        division.redimensionar();
 
-        assert_eq!(ventana.pantalla.size(), nuevo);
+        assert_eq!(division.pantalla.size(), nuevo);
     }
 
     #[test]
@@ -423,19 +476,19 @@ mod tests {
         // egui puede correr la pasada de interfaz dos veces sobre la misma entrada. Los eventos que
         // van al programa se consumen por eso: leerlos y dejarlos escribiría la misma tecla dos
         // veces al pseudoterminal, y el programa de dentro no tiene forma de saber que sobra una.
-        let mut ventana = ventana_con("sleep 30");
+        let mut division = division_con("sleep 30");
         let ctx = egui::Context::default();
         ctx.input_mut(|entrada| {
             entrada.events.push(egui::Event::Text("a".to_owned()));
             entrada.events.push(egui::Event::WindowFocused(true));
         });
 
-        ventana.teclear(&ctx, Instant::now());
-        assert_eq!(ventana.pulsaciones, b"a", "no se envió lo tecleado");
+        division.teclear(&ctx, Instant::now());
+        assert_eq!(division.pulsaciones, b"a", "no se envió lo tecleado");
 
-        ventana.teclear(&ctx, Instant::now());
+        division.teclear(&ctx, Instant::now());
         assert!(
-            ventana.pulsaciones.is_empty(),
+            division.pulsaciones.is_empty(),
             "la misma tecla se envió en el segundo pase"
         );
 

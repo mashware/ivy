@@ -27,6 +27,13 @@
 //!
 //! El total lo publica `eframe`, que es quien puede: cuando se tesela, la pasada ya ha terminado.
 //!
+//! **Los tres primeros tramos son de una división; el cuarto es de la ventana.** Esa frontera no es
+//! organizativa, la impone el instrumento: esperar, interpretar y encolar se cronometran alrededor de
+//! *una* consola, y así siguen siendo comparables con las tablas de D3 haya una división o cuatro.
+//! El consumo de CPU, en cambio, lo publica el framework **una sola vez por pasada**: no viene
+//! separado por división y partirlo sería inventar un reparto que nadie ha medido. Por eso el resto
+//! se calcula una vez, restando al total la suma de lo cronometrado por **todas** las divisiones.
+//!
 //! Los cuatro tramos se guardan **del mismo fotograma**. El coste total llega con uno de retraso
 //! —`eframe` lo publica del anterior—, así que se retienen los tramos hasta que su total aparece;
 //! restar tramos de un fotograma al total de otro daría un número que parece bueno y no lo es.
@@ -108,14 +115,17 @@ struct Tramos {
     encolado: Duration,
 }
 
-/// Los dos cronómetros del hito y lo que llevan medido.
+/// Los cronómetros **de una división** y lo que llevan medido.
+///
+/// Todo lo de aquí se cronometra alrededor de una consola concreta, así que sus números comparan
+/// directamente con las tablas de D3 haya una división o cuatro. El cuarto tramo no cabe aquí: ver
+/// [`RestoDelFotograma`].
 #[derive(Default)]
 pub struct Medida {
     ida: Serie,
     esperar: Serie,
     interpretar: Serie,
     encolar: Serie,
-    resto_del_fotograma: Serie,
     vuelta: Serie,
     /// Los tramos del fotograma anterior, esperando a que `eframe` publique lo que costó.
     pendiente: Option<Tramos>,
@@ -150,46 +160,34 @@ impl Medida {
         });
     }
 
-    /// Cierra el fotograma anterior con lo que `eframe` dice que costó de CPU.
+    /// Cierra el fotograma anterior de esta división con lo que `eframe` dice que costó de CPU.
     ///
-    /// Aquí se completa la vuelta: lo que no estaba cronometrado es lo que queda del total al
-    /// quitarle los dos tramos que sí lo estaban.
-    pub fn cerrar_fotograma(&mut self, coste_cpu: Duration) {
-        let Some(tramos) = self.pendiente.take() else {
-            return;
-        };
-        // El total puede salir por debajo de los tramos medidos: son de fotogramas contiguos pero
-        // no idénticos, y el reloj de `eframe` no es el mismo que el de aquí. Cuando pasa, el resto
-        // es cero en vez de un número negativo con pinta de dato.
-        let resto = coste_cpu.saturating_sub(tramos.interpretado + tramos.encolado);
+    /// Devuelve **lo que esta división tenía cronometrado** —interpretar más encolar—, para que la
+    /// ventana pueda restar de una vez lo de todas y sacar el resto. `None` cuando esta división no
+    /// tenía nada pendiente: un fotograma en el que no llegó salida no es una vuelta rapidísima, es
+    /// una vuelta que no ocurrió, y devolver cero aquí haría que la ventana anotara un resto que en
+    /// realidad es el fotograma entero.
+    pub fn cerrar_fotograma(&mut self, coste_cpu: Duration) -> Option<Duration> {
+        let tramos = self.pendiente.take()?;
 
         self.esperar.anotar(tramos.esperado);
         self.interpretar.anotar(tramos.interpretado);
         self.encolar.anotar(tramos.encolado);
-        self.resto_del_fotograma.anotar(resto);
         self.vuelta.anotar(tramos.esperado + coste_cpu);
+
+        Some(tramos.interpretado + tramos.encolado)
     }
 
-    /// Publica los dos números por la salida estándar, con lo que hace falta para leerlos.
+    /// Si esta división llegó a medir algo, para no publicar el informe de una consola en blanco.
+    pub fn hay_algo(&self) -> bool {
+        self.ida.hay() || self.vuelta.hay()
+    }
+
+    /// Publica los números **de esta división** por la salida estándar.
     ///
     /// Se imprime al cerrar y no durante: la ventana es el terminal, así que no hay sitio dentro
     /// donde enseñarlos sin taparle la pantalla al programa.
-    pub fn publicar(&self, rejilla: term_core::Size) {
-        if !self.ida.hay() && !self.vuelta.hay() {
-            return;
-        }
-
-        let perfil = if cfg!(debug_assertions) {
-            "depuración — el número que vale es el de --release"
-        } else {
-            "release"
-        };
-        println!("\n── latencia ──");
-        println!("rejilla:      {}×{}", rejilla.rows, rejilla.cols);
-        println!("renderizador: glow");
-        println!("perfil:       {perfil}");
-        println!("máquina:      {}", maquina());
-
+    pub fn publicar_tramos(&self) {
         if self.ida.hay() {
             println!(
                 "\ntecla en el fotograma → byte en el programa   ({} pulsaciones)",
@@ -210,13 +208,59 @@ impl Medida {
             println!("  esperando en la cola:   {}", self.esperar);
             println!("  interpretando:          {}", self.interpretar);
             println!("  encolando el pintado:   {}", self.encolar);
-            println!("  el resto del fotograma: {}", self.resto_del_fotograma);
-            println!(
-                "  «el resto» es teselar, dibujar y el armazón de egui: desde dentro no se pueden\n  \
-                 separar, y llamarlo «teselado» sería publicar como medido algo que no lo está"
-            );
         }
     }
+}
+
+/// El resto del fotograma: lo que costó la pasada y nadie cronometró.
+///
+/// **Vive en la ventana y no en la división, y no es una elección de estilo.** El framework publica
+/// un único consumo de CPU por pasada, sin separar por división; repartirlo entre las divisiones
+/// sería inventarse un reparto que nadie ha medido, y anotarlo una vez por división contaría el mismo
+/// coste tantas veces como consolas haya abiertas.
+#[derive(Default)]
+pub struct RestoDelFotograma {
+    serie: Serie,
+}
+
+impl RestoDelFotograma {
+    /// Anota el resto de este fotograma: lo que costó entero menos lo que cronometraron **todas** las
+    /// divisiones.
+    pub fn anotar(&mut self, coste_cpu: Duration, cronometrado: Duration) {
+        // El total puede salir por debajo de los tramos medidos: son de fotogramas contiguos pero no
+        // idénticos, y el reloj de `eframe` no es el mismo que el de aquí. Cuando pasa, el resto es
+        // cero en vez de un número negativo con pinta de dato.
+        self.serie.anotar(coste_cpu.saturating_sub(cronometrado));
+    }
+
+    pub fn publicar(&self) {
+        if !self.serie.hay() {
+            return;
+        }
+        println!(
+            "\nel resto del fotograma   ({} fotogramas)",
+            self.serie.total
+        );
+        println!("  {}", self.serie);
+        println!(
+            "  es teselar, dibujar y el armazón de egui: desde dentro no se pueden separar, y\n  \
+             llamarlo «teselado» sería publicar como medido algo que no lo está"
+        );
+    }
+}
+
+/// La cabecera del informe: dónde y cómo se midió.
+pub fn cabecera(rejilla: term_core::Size) {
+    let perfil = if cfg!(debug_assertions) {
+        "depuración — el número que vale es el de --release"
+    } else {
+        "release"
+    };
+    println!("\n── latencia ──");
+    println!("rejilla:      {}×{}", rejilla.rows, rejilla.cols);
+    println!("renderizador: glow");
+    println!("perfil:       {perfil}");
+    println!("máquina:      {}", maquina());
 }
 
 /// Cómo se llama esta máquina, o «desconocida» si no hay forma de saberlo.
@@ -251,16 +295,47 @@ mod tests {
         // Es la propiedad que hace que el desglose sirva para atribuir: si los tramos no suman, el
         // veredicto tendría que explicar un hueco, y quien lo lea no sabría a qué culpar.
         let mut medida = Medida::default();
+        let mut resto = RestoDelFotograma::default();
         let ahora = Instant::now();
 
         medida.anotar_vuelta(Some(ahora - ms(100)), ahora, ms(2), ms(3));
-        medida.cerrar_fotograma(ms(10));
+        let cronometrado = medida
+            .cerrar_fotograma(ms(10))
+            .expect("había tramos pendientes que cerrar");
+        resto.anotar(ms(10), cronometrado);
 
         assert_eq!(medida.esperar.media(), ms(100));
         assert_eq!(medida.interpretar.media(), ms(2));
         assert_eq!(medida.encolar.media(), ms(3));
-        assert_eq!(medida.resto_del_fotograma.media(), ms(5), "10 menos 2 y 3");
+        assert_eq!(resto.serie.media(), ms(5), "10 menos 2 y 3");
         assert_eq!(medida.vuelta.media(), ms(110), "la espera más el fotograma");
+    }
+
+    #[test]
+    fn el_resto_descuenta_lo_cronometrado_por_todas_las_divisiones() {
+        // La razón de que el resto viva en la ventana: el consumo de CPU llega una sola vez por
+        // pasada. Descontándole solo los tramos de una división, la otra se contaría como resto —y el
+        // resto es justo el número que dice si el pintado aguanta.
+        let mut izquierda = Medida::default();
+        let mut derecha = Medida::default();
+        let mut resto = RestoDelFotograma::default();
+        let ahora = Instant::now();
+
+        izquierda.anotar_vuelta(Some(ahora), ahora, ms(2), ms(1));
+        derecha.anotar_vuelta(Some(ahora), ahora, ms(3), ms(1));
+
+        let cronometrado: Duration = [
+            izquierda.cerrar_fotograma(ms(10)),
+            derecha.cerrar_fotograma(ms(10)),
+        ]
+        .into_iter()
+        .flatten()
+        .sum();
+
+        resto.anotar(ms(10), cronometrado);
+
+        assert_eq!(cronometrado, ms(7), "2+1 de una y 3+1 de la otra");
+        assert_eq!(resto.serie.media(), ms(3), "10 menos las dos divisiones");
     }
 
     #[test]
@@ -270,8 +345,11 @@ mod tests {
         let mut medida = Medida::default();
 
         medida.anotar_vuelta(None, Instant::now(), ms(2), ms(3));
-        medida.cerrar_fotograma(ms(10));
 
+        assert!(
+            medida.cerrar_fotograma(ms(10)).is_none(),
+            "una división sin tramos dijo haber cronometrado algo, y la ventana se lo restaría"
+        );
         assert!(!medida.vuelta.hay(), "se anotó una vuelta que no ocurrió");
     }
 
@@ -280,13 +358,11 @@ mod tests {
         // Los tramos y el total vienen de fotogramas contiguos y de relojes distintos, así que el
         // total puede quedarse corto. Antes de restar sin más, un resto negativo saldría publicado
         // como un número enorme y con toda la pinta de ser real.
-        let mut medida = Medida::default();
-        let ahora = Instant::now();
+        let mut resto = RestoDelFotograma::default();
 
-        medida.anotar_vuelta(Some(ahora), ahora, ms(8), ms(8));
-        medida.cerrar_fotograma(ms(1));
+        resto.anotar(ms(1), ms(16));
 
-        assert_eq!(medida.resto_del_fotograma.media(), Duration::ZERO);
+        assert_eq!(resto.serie.media(), Duration::ZERO);
     }
 
     #[test]
