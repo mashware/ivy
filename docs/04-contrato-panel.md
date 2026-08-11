@@ -73,11 +73,28 @@ por líneas vacías) y recorta al alto. Los espacios múltiples se colapsan: no 
   perfectamente válido.
 - **Aviso de rancio**: si pasa `stale_after_minutes` sin refrescarse, la app lo señala — salvo
   que el trabajo esté cerrado, donde un resumen viejo es correcto.
+- **El cuerpo es libre por diseño: no hay campos de métrica, y no se añaden.** Tokens, coste o
+  contexto restante se escriben como una línea más —`{"text": "35.392 tokens · 18% · 0,62 €",
+  "mark": "info", "ref": "Contexto"}`— nunca como campos del formato. La razón: en cuanto el
+  contrato nombra una métrica, la app pasa a ser dueña de qué merece verse, y el productor pierde lo
+  único que lo hace valioso aquí — poder publicar **lo que su tarea necesite**, incluido lo que al
+  usuario de esa división se le ocurra pedirle a su agente, sin esperar una versión nueva del
+  formato. La app solo entiende de marcas, estilos y alineación; el vocabulario es de quien trabaja.
+  Las métricas de la IA son un caso de uso del contrato, no su razón de ser
+  ([07-panorama.md](07-panorama.md) → Conductor, que las enseña y sigue sin tener este panel).
 
 ## Pendiente
 
 - [ ] `actions` — botones declarados: `{"label": "Lanzar tests", "send": "npm test\n"}` /
       `{"label": "Ver MR", "open": "https://…"}`. Ver riesgos en
       [03-arquitectura.md](03-arquitectura.md) → Seguridad
+- [ ] **El cambio de estado como evento, no solo como pintura.** El contrato ya sabe expresar
+      «esperando» y «bloqueado» (`mark: wait`, `mark: block`), pero la app se limita a dibujarlos:
+      quien no está mirando esa división no se entera. Xirp resuelve «a qué división voy ahora»
+      **notificando** al pasar a *esperando entrada*, sin necesidad de tener las cuatro a la vista
+      ([07-panorama.md](07-panorama.md) → E3). Falta decidir qué transición dispara aviso —
+      la aparición de un `wait`/`block`, o un campo explícito del productor— y que lo decida **el
+      productor**, no la app interpretando el cuerpo del resumen
+      ([02-decisiones.md](02-decisiones.md) → D6). Sin esto, el panel solo sirve mientras se mira
 - [ ] Descubrimiento por `PANEL_DIR` en lugar de convención de `flow`
 - [ ] Que `header: false` no dependa de que exista un `meta.json` al lado

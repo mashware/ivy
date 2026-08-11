@@ -12,6 +12,12 @@ para descartarla.
 **Consecuencia:** descarta GTK4 + VTE, que era la opción técnicamente más cómoda en Linux
 (ver D3).
 
+**Confirmado por el panorama, agosto 2026.** De los cuatro competidores analizados, tres son **solo
+macOS** (Xirp, Conductor, y Superset salvo un AppImage experimental). El único que corre en las tres
+plataformas es Warp — y es también el único que cumple todas las demás condiciones
+([07-panorama.md](07-panorama.md) → E5). Que la multiplataforma sea rara en esta categoría no
+debilita D1: la señala como lo que efectivamente distingue al rival más fuerte del resto.
+
 ---
 
 ## D2 — El motor de terminal se consume como librería
@@ -38,6 +44,26 @@ tres plataformas), y Rust es donde vive el ecosistema de esta pieza concreta.
 
 **Riesgo asumido:** GPUI tiene API inestable y poca documentación fuera de Zed. Si se hace
 cuesta arriba, egui o Iced.
+
+**Candidato nuevo, no decidido — `warpui`, agosto 2026.** Warp liberó su cliente el 30 de abril de
+2026 y **el reparto de licencias no es uniforme**; textual de su README:
+
+> Warp's UI framework (the `warpui_core` and `warpui` crates) are licensed under the **MIT license**.
+> The rest of the code in this repository is licensed under the **AGPL v3**.
+
+Verificado en el `Cargo.toml` de los dos crates (`license = "MIT"`). Eso pone sobre la mesa un
+framework de interfaz en Rust, con GPU, licencia permisiva y **ya probado en un terminal
+multiplataforma de verdad** — exactamente el hueco que el riesgo de arriba describe para GPUI.
+
+**No cambia la decisión, y no debe cambiarla nadie sin medir.** Esta decisión se toma con números
+—así se tomó el descarte de Electron y así se juzgó egui— y aquí no hay ninguno todavía. Dos cosas
+hay que comprobar antes de que esto sea siquiera una opción:
+
+1. **Que `warpui` se pueda usar suelto.** Está en el mismo repositorio que el código AGPL y puede
+   arrastrar dependencias de esos crates; si las arrastra, la licencia MIT del crate no sirve de nada.
+2. **Que del resto no se copie nada.** El resto del repositorio es AGPLv3 y este proyecto no lo es.
+
+Ver [07-panorama.md](07-panorama.md) → E5 para el contexto de producto.
 
 **Descartado — Electron/Tauri + xterm.js.** Era lo más barato en esfuerzo (stack conocido), pero
 tiene un techo justo en nuestro caso de uso. Del propio issue de xterm.js
@@ -242,6 +268,11 @@ la API del proveedor.
 del cliente oficial de cada proveedor. Llamar a la API se factura por tokens aparte. Una
 herramienta que obligue a pagar API por lo que el usuario ya paga por suscripción no se adopta.
 
+**Confirmado desde fuera, dos veces.** Cline Kanban orquesta lanzando los binarios oficiales de cada
+agente en un proceso, no llamando a modelos por API; y Xirp autentica cada agente *«through its
+native CLI»* — con miles de ingenieros y factura de empresa detrás, que es justo donde pagar API
+aparte habría costado menos justificar. Ver [07-panorama.md](07-panorama.md) → E1 y E3.
+
 **Consecuencia de diseño:** la app **nunca** debe definir `ANTHROPIC_API_KEY` (ni equivalentes)
 al lanzar un panel. Esa variable tiene prioridad sobre la sesión de la suscripción y cambiaría
 la facturación del usuario sin que se entere.
@@ -285,6 +316,60 @@ semántica solo la conoce quien hace el trabajo.
 **Consecuencia:** el contrato lleva `updated_at` y la app avisa si el resumen se queda rancio.
 Un resumen que solo se escribe al terminar un paso miente si el proceso muere a mitad; la marca
 de tiempo lo delata.
+
+### Validación externa — Xirp, agosto 2026
+
+Spotify abrió **Xirp** en beta pública el 10 de agosto de 2026: app de escritorio que hospeda
+sesiones de Claude Code, Codex y Gemini CLI, salida de más de 36.000 sesiones internas. Es la
+confirmación más fuerte que ha tenido esta decisión, y a la vez el aviso más preciso sobre dónde
+está de verdad el diferenciador.
+
+**Lo que confirma:** no deducen el estado leyendo la pantalla. Se lo declaran, por *session hooks*
+del propio harness — «Session hooks let Xirp detect when an agent is working, idle, or waiting for
+input». Quien ha montado esto a escala de miles de ingenieros llegó a lo mismo que D6: el estado se
+pide, no se adivina.
+
+**Lo que separa las dos cosas: que el estado sea declarado no basta, importa quién lo declara.**
+Hay tres niveles y solo el tercero contesta «por dónde va la tarea»:
+
+| Nivel | Quién declara | Vocabulario | Qué contesta |
+|---|---|---|---|
+| 1 — inferido | la app, mirando el pintado o el PTY | el que la app se invente | nada fiable: es el error de los tres fallos de arriba |
+| 2 — ciclo de vida | el *harness* (Claude Code, Codex), por hooks | fijo: `working` / `idle` / `waiting for input` | si el programa corre o espera |
+| 3 — publicado | quien hace el trabajo, en `panel.json` | el suyo, texto libre | en qué paso va, cuánto queda, qué lo bloquea |
+
+**Por qué el nivel 2 no puede crecer hasta el 3.** No es un hueco de implementación que se tape con
+más hooks: el harness **no conoce** esa información. Claude Code sabe que ejecutó una herramienta y
+que se detuvo; no sabe que un ciclo de trabajo va por el paso `build`, que lleva dos de tres
+entregas, ni que está parado esperando que se apruebe un diseño. Con el nivel 2 los siete pasos de
+un ciclo se ven idénticos: `Working`. Y un CI, un despliegue o un script propio —que no tienen
+harness— no tienen dónde publicar nada.
+
+Fuente: [Get started with Xirp](https://backstage.spotify.com/docs/xirp/getting-started). El resto
+de la comparación, en [07-panorama.md](07-panorama.md) → E3.
+
+### El nivel 2 reinterpretado falla igual que adivinar — con datos ajenos
+
+**Superset** ([07-panorama.md](07-panorama.md) → E4) hace lo mismo que Xirp pero con cuatro eventos
+en vez de tres: `Start`, `Stop`, `PermissionRequest`, `PendingQuestion`. Y como su código es
+consultable, se puede ver el fallo entero en vez de razonarlo.
+
+Su bug [#5259](https://github.com/superset-sh/superset/issues/5259), abierto: la notificación de
+«Task complete» salta **en cada turno del modelo**. Una tarea con 63 turnos produjo **63 avisos**. La
+causa, literal: el hook `stop` de Cursor Agent significa *«acabé este turno»*, y la app lo leyó como
+*«acabé la tarea»*. Ya les había pasado (#1785) y el arreglo por *debounce* (#1786) se cerró sin
+fusionar.
+
+> **Un evento declarado no basta si la app le pone encima una semántica que el harness no tenía.**
+> Falla exactamente igual que adivinar mirando la pantalla, porque es lo mismo con más pasos.
+
+Y no se arregla con un *debounce*: el dato que distingue «turno» de «tarea» **no está en ninguna
+parte del sistema**, porque nadie lo publicó. Solo lo sabe quien hace el trabajo.
+
+**Lo que esto añade a la tabla de arriba:** el nivel 2 no es un escalón intermedio seguro. Usado
+para lo que es —«el programa arrancó, paró, pide permiso»— es correcto y útil. Traducido a
+progreso de tarea, es el nivel 1 con un disfraz. La frontera no está en si el dato viene declarado,
+sino en si **quien lo declaró conocía la pregunta que se le está haciendo.**
 
 ---
 
