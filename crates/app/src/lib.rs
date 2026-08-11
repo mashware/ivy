@@ -64,9 +64,24 @@ const REJILLA_INICIAL: Size = Size { rows: 24, cols: 80 };
 
 /// Cuántos puntos de ancho se lleva la línea que separa las dos consolas.
 ///
-/// Dos y no uno: con uno la línea se ve, pero el hito siguiente le añade el arrastre y una zona de
-/// agarre de un punto es imposible de atrapar con el ratón.
+/// Dos y no uno: con uno la línea se ve, pero también es la zona de agarre del arrastre, y un punto
+/// es imposible de atrapar con el ratón.
+///
+/// **La zona de agarre es exactamente esta línea, sin ensanchar**, y lo que eso compra es que no haya
+/// superficie sensible invisible: se agarra donde se ve. Si dos puntos resultan pocos con la ventana
+/// delante, lo que se sube es esta constante, y la línea se ve más gruesa en consecuencia.
+///
+/// **Lo que no compra —y una versión anterior de este comentario decía que sí— es evitar que el mismo
+/// gesto cambie el foco.** El borde del divisor *es* el borde de la consola de al lado, y egui cuenta un
+/// punto sobre el borde como acierto directo del rectángulo (`Rect::distance_sq_to_pos` da cero ahí), así
+/// que en las dos columnas frontera se acierta a los dos widgets: el divisor recibe el arrastre y la
+/// consola recibe el clic. No se corrige porque no es un defecto — quien pulsa en el borde izquierdo de la
+/// línea ha pulsado en el borde derecho de la consola izquierda, y darle el foco a esa es lo que cabe
+/// esperar—; se escribe para que nadie lo lea como una garantía que no existe.
 const GROSOR_DEL_DIVISOR: f32 = 2.0;
+
+/// Con qué reparto abre la ventana: las dos consolas iguales.
+const FRACCION_INICIAL: f32 = 0.5;
 
 /// Lo que el fotograma necesita saber después de bombear todas las consolas.
 struct Bombeo {
@@ -84,23 +99,39 @@ struct Reparto {
     derecha: egui::Rect,
 }
 
-/// Reparte el ancho del área entre las dos consolas, mitad y mitad.
+/// Reparte el ancho del área entre las dos consolas según la fracción, sin dejar a ninguna sin sitio.
 ///
 /// **El grosor del divisor se descuenta primero y se reparte lo que queda.** Si se partiera el área
 /// entera y luego se restara la línea, la consola de la que se restase saldría más estrecha que la otra
 /// sin que nadie hubiera pedido eso.
 ///
-/// **Reparte a la mitad y no acepta una fracción, a propósito.** El reparto variable llega con el
-/// divisor arrastrable, y solo entonces hace falta un suelo por consola: una fracción que solo puede
-/// valer un medio no puede dejar a nadie sin sitio, así que el recorte que lo evitaría sería hoy una
-/// rama que ninguna llamada puede alcanzar.
+/// **La fracción es de lo repartible, no del área**, y es lo que hace que la proporción sobreviva al
+/// redimensionado de la ventana: al cambiar el área se recalculan los dos anchos desde la misma
+/// fracción, en vez de que uno conserve sus puntos y el otro se coma toda la diferencia.
 ///
-/// El área no puede quedar más estrecha que el divisor: `max` con cero mantiene los tres rectángulos
-/// bien formados incluso con una ventana de un punto de ancho, donde lo que se ve ya no importa pero un
-/// rectángulo invertido sí sería un error.
-fn repartir(area: egui::Rect) -> Reparto {
+/// **Lo que compra el suelo de `ancho_minimo` por consola es modesto, y conviene no exagerarlo.** No
+/// evita ningún pánico —el de `Screen::resize` con cero columnas lo cubre el mínimo de 1×1 de
+/// [`Metrica::celdas_en`]— y tampoco salva la rejilla: con cero píxeles esa misma función ya da una
+/// columna, exactamente la que da con el suelo puesto. Y **el asa no es la consola, es el divisor**, que
+/// sigue en pantalla y sigue agarrable con la fracción a cero, así que una consola colapsada se recupera
+/// con el mismo gesto que la colapsó. Lo que el suelo consigue es que la consola colapsada **siga
+/// mostrando su columna** en vez de nada, para que el colapso se lea como algo que se ha hecho y no como
+/// un fallo de pintado, y que el asa no acabe pegada al borde de la ventana.
+///
+/// **El suelo se rebaja a la mitad de lo repartible cuando no cabe dos veces.** Así el divisor termina en
+/// el centro y las dos quedan iguales —por debajo del mínimo, que es lo único posible ahí— sin necesidad de
+/// una rama aparte. Y no es solo brevedad: `f32::clamp` **entra en pánico si el mínimo supera al máximo**,
+/// y rebajar el suelo hace que eso no pueda ocurrir por construcción, en vez de depender de que una guarda
+/// cubra todos los casos.
+///
+/// El `max` con cero sobre `util` mantiene los tres rectángulos bien formados con una ventana más estrecha
+/// que el propio divisor. Ahí las dos consolas llegan a cero puntos: no hay reparto posible, y lo que se
+/// conserva es que ningún rectángulo salga invertido.
+fn repartir(area: egui::Rect, fraccion: f32, ancho_minimo: f32) -> Reparto {
     let util = (area.width() - GROSOR_DEL_DIVISOR).max(0.0);
-    let corte = area.left() + util / 2.0;
+    let suelo = ancho_minimo.min(util / 2.0);
+    let izquierda = (fraccion * util).clamp(suelo, util - suelo);
+    let corte = area.left() + izquierda;
     let tras_el_divisor = corte + GROSOR_DEL_DIVISOR;
 
     Reparto {
@@ -292,6 +323,19 @@ struct Ventana {
     /// controles; esto es geográfico y lo decide la aplicación. Confundirlos deja el teclado en manos
     /// de quien no lo enruta.
     foco: usize,
+    /// Qué parte del ancho repartible se lleva la consola de la izquierda.
+    ///
+    /// **Una fracción y no dos anchos en puntos**: es lo que hace que el reparto sobreviva al
+    /// redimensionado de la ventana. Guardar puntos es lo que hacen los paneles de egui, y por eso se
+    /// descartaron en el diseño — al ensanchar la ventana el panel conserva su ancho y toda la diferencia
+    /// cae en el otro lado.
+    ///
+    /// **Se guarda la proporción que se pidió, no la que cupo.** El suelo por consola lo aplica
+    /// [`repartir`] contra el área de cada fotograma, y no al guardar: recortarla antes hornearía el ancho
+    /// actual de la ventana dentro del estado, así que una consola arrastrada al borde con la ventana
+    /// estrecha seguiría pegada al borde después de ensancharla. Es el mismo argumento que descarta los
+    /// paneles de egui, aplicado al estado en vez de a la geometría.
+    fraccion: f32,
     tema: Tema,
     /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
     resto_del_fotograma: RestoDelFotograma,
@@ -307,6 +351,7 @@ impl Ventana {
         Ok(Self {
             divisiones: [Division::nueva(ctx)?, Division::nueva(ctx)?],
             foco: 0,
+            fraccion: FRACCION_INICIAL,
             tema: Tema::default(),
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
@@ -370,6 +415,74 @@ impl Ventana {
                 self.foco = cual;
             }
         }
+    }
+
+    /// Mueve el divisor con el puntero, y devuelve si la fracción ha cambiado en este pase.
+    ///
+    /// Vive aparte del pintado por lo mismo que [`Self::atender_clics`]: es la decisión que este PR
+    /// entrega, y dentro de la pasada de interfaz no se puede comprobar sin abrir una ventana.
+    ///
+    /// **La fracción sale de la posición absoluta del puntero, no de su desplazamiento.** Con el
+    /// desplazamiento, cada trocito que el recorte del suelo descarta se perdería para siempre: el
+    /// puntero seguiría avanzando y la fracción se quedaría atrás, así que al volver el divisor no
+    /// estaría donde está el ratón. Con la posición absoluta, el divisor persigue al puntero y el
+    /// recorte solo decide dónde se planta.
+    ///
+    /// Y hay una segunda razón que se descubrió después, más grave que la precisión: **la pasada de
+    /// interfaz puede correr dos veces sobre la misma entrada**, y con el desplazamiento el segundo pase
+    /// lo aplicaría otra vez, moviendo el divisor al doble. Con la posición absoluta el segundo pase
+    /// calcula lo mismo y no cambia nada. Es la misma trampa que obligó a consumir los eventos del
+    /// teclado en vez de leerlos.
+    fn arrastrar_el_divisor(
+        &mut self,
+        ui: &egui::Ui,
+        divisor: egui::Rect,
+        area: egui::Rect,
+    ) -> bool {
+        // `Sense::DRAG` y no `Sense::drag()`: el segundo añade `FOCUSABLE`, o sea que el divisor pediría
+        // el foco de teclado de egui y competiría con el enrutado geográfico de la aplicación. Es la
+        // misma trampa que ya costó un caso con el clic.
+        let id = ui.id().with("divisor");
+        let respuesta = ui
+            .interact(divisor, id, egui::Sense::DRAG)
+            // Se mantiene el cursor **también mientras se arrastra**. No es por que el puntero se salga de
+            // la línea —egui da por «encima» al widget que se está arrastrando, esté el puntero donde
+            // esté—: es por el fotograma en que se suelta, donde el arrastre ya ha terminado y el puntero
+            // puede haber quedado fuera. Con `on_hover_cursor` ahí el cursor parpadea a flecha justo al
+            // acabar la maniobra.
+            .on_hover_and_drag_cursor(egui::CursorIcon::ResizeHorizontal);
+
+        let Some(puntero) = respuesta.interact_pointer_pos() else {
+            return false;
+        };
+
+        let util = area.width() - GROSOR_DEL_DIVISOR;
+        // Sin nada que repartir no hay fracción que elegir, y con `util` **negativo** la división cambia de
+        // signo: el divisor iría hacia el lado contrario al ratón. Se deja la fracción como la dejó el
+        // último arrastre de verdad, que es lo que el usuario pidió la última vez que la petición tenía
+        // sentido.
+        if util <= 0.0 {
+            return false;
+        }
+
+        // El recorte a `0..1` **no es para la geometría** —de eso se encarga [`repartir`] en cada
+        // fotograma, con su propio suelo— sino para el estado: sin él, arrastrar más allá del borde
+        // guardaría una fracción de 5, que el informe de salida publicaría como «al 500 %» y que obligaría
+        // a recorrer el camino de vuelta antes de que el divisor se moviera.
+        let nueva = ((puntero.x - area.left()) / util).clamp(0.0, 1.0);
+        // La guarda de arriba deja pasar un `util` **sin número**, porque `NaN <= 0.0` es falso, y de ahí
+        // sale una fracción NaN que el recorte tampoco atrapa: un `clamp` sobre un NaN devuelve NaN. Y un
+        // NaN guardado aquí no se va nunca — la ventana dejaría de pintar y ni ensancharla ni volver a
+        // arrastrar la recuperaría. El área sin número no es hipotética: es el caso que
+        // [`Metrica::celdas_en`] ya documenta, mientras el escritorio no ha dicho todavía cuánto mide la
+        // ventana.
+        if !nueva.is_finite() {
+            return false;
+        }
+
+        let anterior = self.fraccion;
+        self.fraccion = nueva;
+        self.fraccion != anterior
     }
 
     /// Manda lo que se ha tecleado en este pase a **una sola** consola, la que tiene el foco.
@@ -471,7 +584,16 @@ impl eframe::App for Ventana {
         // trabajo que se cuele por delante —aunque sea leer un rectángulo— se le suma.
         self.teclear_la_del_foco(ui.ctx());
 
-        let reparto = repartir(ui.max_rect());
+        let area = ui.max_rect();
+        let mut reparto = repartir(area, self.fraccion, metrica.ancho());
+
+        // El arrastre se atiende **antes de pintar y se vuelve a repartir en el mismo pase**: pintar con
+        // el reparto de antes dejaría al divisor un fotograma por detrás del ratón, que es justo lo que se
+        // nota en un arrastre.
+        if self.arrastrar_el_divisor(ui, reparto.divisor, area) {
+            reparto = repartir(area, self.fraccion, metrica.ancho());
+        }
+
         let rectangulos = [reparto.izquierda, reparto.derecha];
 
         // El divisor se pinta antes que las consolas: si el glifo del borde de una se saliera, el
@@ -511,7 +633,18 @@ impl eframe::App for Ventana {
         }
 
         medida::cabecera(self.divisiones.each_ref().map(|d| d.pantalla.size()));
-        println!("reparto:      mitad y mitad, con {GROSOR_DEL_DIVISOR} puntos de divisor");
+        // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo pueden
+        // venir de dos consolas de anchos muy distintos, y una tabla de tramos sin saber con qué reparto
+        // se tomó no compara con nada.
+        //
+        // **Se publica la fracción pedida, no los anchos resultantes.** Los anchos de verdad están arriba,
+        // en la rejilla de cada consola, que es lo que se usó para interpretar; repetirlos aquí a partir de
+        // la fracción los haría discrepar en el único caso en que el suelo actúa.
+        println!(
+            "divisor:      al {:.0} % del ancho repartible al salir, y son {GROSOR_DEL_DIVISOR} puntos \
+             de ancho. Si se arrastró durante la sesión, los tramos de abajo mezclan repartos",
+            self.fraccion * 100.0
+        );
         println!(
             "foco al salir: consola {} ({})",
             self.foco,
@@ -573,6 +706,7 @@ mod tests {
         Ventana {
             divisiones: [division_con(izquierda), division_con(derecha)],
             foco: 0,
+            fraccion: FRACCION_INICIAL,
             tema: Tema::default(),
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
@@ -664,6 +798,51 @@ mod tests {
         division.redimensionar();
 
         assert_eq!(division.pantalla.size(), nuevo);
+    }
+
+    #[test]
+    fn al_redimensionar_el_programa_de_dentro_se_entera_del_tamano_nuevo() {
+        // La **otra** mitad de AC5, y la que no estaba probada: el test de arriba solo comprueba la
+        // rejilla, así que sustituir `Pty::resize` por un `Ok(())` dejaba la suite entera en verde. Y esa
+        // mitad es la que hace que `vim` repinte: sin ella la rejilla mide bien y el programa pinta como si
+        // nada, que es el fallo que el arrastre del divisor puede provocar cada vez que se mueve el ratón.
+        //
+        // Se prueba con un programa de verdad porque no hay otra forma: el tamaño vive en el núcleo, del
+        // lado del esclavo, y desde este proceso no se puede leer. Quien puede contarlo es el programa de
+        // dentro, y `stty size` es preguntárselo.
+        let nuevo = Size { rows: 10, cols: 40 };
+        let mut division = division_con("while :; do stty size; sleep 0.05; done");
+
+        // Primero se comprueba que el programa informa del tamaño de arranque. Sin esto, un `stty` que no
+        // existiera o que fallara daría el mismo resultado que un redimensionado que no llega: pantalla sin
+        // el número esperado, y el test culparía al redimensionado.
+        let arranque = format!("{} {}", REJILLA_INICIAL.rows, REJILLA_INICIAL.cols);
+        esperar_a_que_la_pantalla_diga(&mut division, &arranque);
+
+        division.medido = nuevo;
+        division.redimensionar();
+
+        esperar_a_que_la_pantalla_diga(&mut division, &format!("{} {}", nuevo.rows, nuevo.cols));
+    }
+
+    /// Bombea hasta que el programa de dentro haya escrito el texto pedido, o se rinde.
+    ///
+    /// La rejilla se limpia antes de esperar: lo que el programa escribió **antes** del redimensionado
+    /// sigue en pantalla, y sin limpiar, buscar el tamaño nuevo encontraría el viejo de la vuelta anterior
+    /// y daría por bueno un redimensionado que no ocurrió.
+    fn esperar_a_que_la_pantalla_diga(division: &mut Division, texto: &str) {
+        division.pantalla = Screen::new(division.pantalla.size());
+
+        let limite = Instant::now() + Duration::from_secs(5);
+        while !division.pantalla.to_text().contains(texto) {
+            assert!(
+                Instant::now() < limite,
+                "el programa no llegó a escribir «{texto}»; en pantalla hay: {:?}",
+                division.pantalla.to_text()
+            );
+            division.bombear();
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -880,23 +1059,276 @@ mod tests {
     }
 
     #[test]
+    fn arrastrar_el_divisor_mueve_la_fraccion_a_donde_esta_el_puntero() {
+        // AC5, la mitad que se puede comprobar sin ventana: el gesto llega hasta la fracción. Se prueba con
+        // un `Ui` de verdad porque lo que hay que comprobar es la traducción de un arrastre del escritorio,
+        // y eso solo lo sabe egui.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let area = area_de(400.0 + GROSOR_DEL_DIVISOR);
+        let reparto = repartir(area, FRACCION_INICIAL, ANCHO_DE_CELDA);
+        let agarre = reparto.divisor.center();
+        // **El puntero se pasa del borde derecho y luego vuelve**, y ese ida y vuelta es lo que hace que la
+        // prueba distinga entre seguir al puntero y acumular su desplazamiento. Con un solo salto las dos
+        // implementaciones dan casi lo mismo y la prueba pasaría con la que el doc dice haber descartado;
+        // con el exceso de por medio, la que acumula pierde para siempre lo que el recorte se comió y acaba
+        // en 0,245 en vez de 0,75.
+        let fuera = egui::pos2(area.right() + 200.0, agarre.y);
+        // Tres cuartos del ancho repartible: un sitio al que la fracción inicial no llega sola.
+        let suelta = egui::pos2(area.left() + 300.0, agarre.y);
+
+        let ctx = egui::Context::default();
+
+        // **Tres pasadas para empezar a arrastrar, y las tres hacen falta.** egui resuelve la interacción
+        // contra las regiones de la pasada anterior, así que en la primera no hay a quién dar nada. Y el
+        // botón tiene que bajar en una pasada distinta del movimiento: el candidato a arrastrarse sale de
+        // **dónde estaba el puntero al pulsar** (`interaction.rs:169-171`), así que un pulsar y mover en la
+        // misma pasada busca al candidato en el destino, donde el divisor ya no está.
+        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, mover(agarre));
+        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, pulsar(agarre));
+        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, mover(fuera));
+        assert_eq!(
+            ventana.fraccion, 1.0,
+            "pasarse del borde derecho no dejó la fracción pegada al tope"
+        );
+
+        let movio = pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, mover(suelta));
+
+        assert!(movio, "el arrastre no movió la fracción");
+        // Exacto y no aproximado: 300 de 400 repartibles es 0,75 sin resto, así que una tolerancia solo
+        // serviría para dejar pasar una implementación que casi acierta.
+        assert_eq!(
+            ventana.fraccion, 0.75,
+            "el divisor no siguió al puntero después de volver de fuera"
+        );
+    }
+
+    #[test]
+    fn un_arrastre_donde_no_hay_nada_que_repartir_deja_la_fraccion_como_estaba() {
+        // Los dos bordes de `arrastrar_el_divisor`, que existen porque la fracción es **estado**: una vez
+        // guardada, una fracción absurda no se corrige sola. Con el área más estrecha que el divisor, `util`
+        // es negativo y la división cambiaría de signo; con el área sin número —el caso que la métrica ya
+        // documenta mientras el escritorio no ha dicho cuánto mide la ventana— saldría un no-número, y ese sí
+        // no se va nunca: la ventana dejaría de pintar y ni ensancharla la recuperaría.
+        for area in [area_de(1.0), area_de(f32::NAN)] {
+            let mut ventana = ventana_con("sleep 30", "sleep 30");
+            let divisor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2.0, 300.0));
+            let agarre = divisor.center();
+            let ctx = egui::Context::default();
+
+            pasada_de_arrastre(&mut ventana, &ctx, divisor, area, mover(agarre));
+            pasada_de_arrastre(&mut ventana, &ctx, divisor, area, pulsar(agarre));
+            // Al borde izquierdo, que es donde el numerador también se hace cero: es la única posición que
+            // produce el cero partido por cero del que sale el no-número.
+            pasada_de_arrastre(
+                &mut ventana,
+                &ctx,
+                divisor,
+                area,
+                mover(egui::pos2(area.left(), agarre.y)),
+            );
+
+            assert_eq!(
+                ventana.fraccion,
+                FRACCION_INICIAL,
+                "con un área de {} puntos el arrastre movió la fracción",
+                area.width()
+            );
+        }
+    }
+
+    #[test]
+    fn cada_consola_mide_su_rejilla_por_su_propio_rectangulo_y_no_por_el_de_la_otra() {
+        // **El eslabón que faltaba de AC5.** Que el arrastre mueva la fracción está probado, y que un cambio
+        // de tamaño dispare las dos mitades también, pero entre las dos cosas hay un paso sin el cual el
+        // arrastre no redimensionaría nada: es el pintado el que mide cada consola contra **su** rectángulo y
+        // deja el resultado para que el fotograma siguiente lo aplique. Borrar esa línea no rompía ninguna
+        // prueba, porque las dos mitades solo se probaban poniendo el tamaño a mano.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        // Un cuarto y tres cuartos: con mitades, una consola midiendo el rectángulo de la otra daría el mismo
+        // número y la prueba no vería nada.
+        let reparto = repartir(area_de(802.0), 0.25, ANCHO_DE_CELDA);
+        let rectangulos = [reparto.izquierda, reparto.derecha];
+
+        let ctx = egui::Context::default();
+        let mut esperado = [REJILLA_INICIAL; 2];
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+            for (cual, (division, rect)) in
+                ventana.divisiones.iter_mut().zip(rectangulos).enumerate()
+            {
+                Ventana::pintar_division(ui, division, rect, &Tema::default(), &metrica);
+                esperado[cual] = metrica.celdas_en(rect.size());
+            }
+        })
+        .drop_without_applying_deltas();
+
+        assert_eq!(
+            ventana.divisiones[0].medido, esperado[0],
+            "la consola izquierda no midió su propio rectángulo"
+        );
+        assert_eq!(
+            ventana.divisiones[1].medido, esperado[1],
+            "la consola derecha no midió su propio rectángulo"
+        );
+        // Y la comprobación que hace que las dos de arriba no puedan ser ciertas por casualidad: con este
+        // reparto los dos anchos **tienen** que salir distintos.
+        assert_ne!(
+            ventana.divisiones[0].medido.cols, ventana.divisiones[1].medido.cols,
+            "las dos consolas midieron el mismo ancho con un reparto de un cuarto"
+        );
+    }
+
+    /// Una pasada de interfaz que solo atiende el arrastre del divisor, y lo que este dijo.
+    ///
+    /// Es una función y no un cierre a propósito: un cierre que escriba en la ventana la tiene prestada
+    /// mientras exista, y entonces no se puede mirar la fracción entre pasada y pasada — que es justo lo que
+    /// hace falta para comprobar un arrastre de varios tramos.
+    fn pasada_de_arrastre(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        divisor: egui::Rect,
+        area: egui::Rect,
+        entrada: egui::RawInput,
+    ) -> bool {
+        let mut movio = false;
+        ctx.run_ui(entrada, |ui| {
+            movio = ventana.arrastrar_el_divisor(ui, divisor, area);
+        })
+        .drop_without_applying_deltas();
+        movio
+    }
+
+    /// Una pasada de interfaz **entera**: la del rasgo de `eframe`, con la ventana del tamaño pedido.
+    ///
+    /// **`ui` sí se puede correr desde un test, y esto es lo que lo permite.** `eframe` publica un
+    /// constructor de `Frame` vacío para sus propias pruebas —`Frame::_new_kittest`,
+    /// `eframe-0.36.1/src/epi.rs:720`— y `ui` no toca el `Frame` para nada: quien lo mira es `logic`, por
+    /// el consumo de CPU. El área sale de `screen_rect`, que es exactamente lo que `run_ui` le da al `Ui`
+    /// raíz como `max_rect` (`egui-0.36.1/src/context.rs:801-807`), así que la pasada recorre el mismo
+    /// camino que en la aplicación en vez de una imitación suya.
+    ///
+    /// **El guion bajo del nombre es una advertencia y se acepta a sabiendas**: es un nombre que `eframe`
+    /// se reserva para su propio uso, así que puede desaparecer en una versión menor sin que eso cuente
+    /// como ruptura. Se asume porque el precio de perderlo es un error de compilación **en las pruebas**,
+    /// nunca en lo que se entrega, y lo que compra es lo único que prueba que las piezas están conectadas:
+    /// sin esto, cada decisión estaba probada por separado y la línea que las une, con nada.
+    ///
+    /// La pasada corre **una sola vez** por llamada: `run_ui` repite solo si alguien pide descartar
+    /// (`context.rs:863-865`), y aquí nadie lo pide. Importa porque los eventos del teclado se consumen:
+    /// una segunda vuelta no vería la tecla.
+    fn pasada_de_interfaz(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        mut entrada: egui::RawInput,
+    ) {
+        entrada.screen_rect = Some(area);
+        let mut frame = eframe::Frame::_new_kittest();
+        ctx.run_ui(entrada, |ui| eframe::App::ui(ventana, ui, &mut frame))
+            .drop_without_applying_deltas();
+    }
+
+    /// La entrada de un puntero que se mueve a un sitio.
+    fn mover(a: egui::Pos2) -> egui::RawInput {
+        egui::RawInput {
+            events: vec![egui::Event::PointerMoved(a)],
+            ..Default::default()
+        }
+    }
+
+    /// La entrada de un botón que baja, sin soltarse.
+    fn pulsar(en: egui::Pos2) -> egui::RawInput {
+        egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: en,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    /// Lo que mide una celda de ancho en los tests del reparto.
+    ///
+    /// En la aplicación este número lo da la métrica de la fuente; aquí se fija para que el suelo por
+    /// consola sea un número redondo y los fallos se lean sin calcular nada.
+    const ANCHO_DE_CELDA: f32 = 8.0;
+
+    /// Un área de la anchura pedida, con la altura que haga falta para que sea un rectángulo válido.
+    fn area_de(ancho: f32) -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(ancho, 300.0))
+    }
+
+    #[test]
     fn el_reparto_conserva_la_proporcion_al_cambiar_el_ancho_de_la_ventana() {
         // AC6. Es la razón por la que el área se reparte a mano en vez de con los paneles
         // redimensionables de egui: aquellos trabajan en puntos, así que al ensanchar la ventana el
         // panel mantendría su ancho y toda la diferencia caería en el otro lado.
-        let estrecha = repartir(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(402.0, 300.0),
-        ));
-        let ancha = repartir(egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(802.0, 300.0),
-        ));
+        //
+        // **Se prueba con un cuarto y no con la mitad**: con la mitad, un reparto que ignorase la
+        // fracción por completo daría exactamente el mismo resultado y el test pasaría igual.
+        const UN_CUARTO: f32 = 0.25;
+        let estrecha = repartir(
+            area_de(400.0 + GROSOR_DEL_DIVISOR),
+            UN_CUARTO,
+            ANCHO_DE_CELDA,
+        );
+        let ancha = repartir(
+            area_de(800.0 + GROSOR_DEL_DIVISOR),
+            UN_CUARTO,
+            ANCHO_DE_CELDA,
+        );
 
-        assert_eq!(estrecha.izquierda.width(), 200.0);
-        assert_eq!(estrecha.derecha.width(), 200.0);
-        assert_eq!(ancha.izquierda.width(), 400.0);
-        assert_eq!(ancha.derecha.width(), 400.0);
+        assert_eq!(estrecha.izquierda.width(), 100.0);
+        assert_eq!(estrecha.derecha.width(), 300.0);
+        // Al doblar el ancho de la ventana, los dos anchos se doblan: la diferencia se reparte, no cae
+        // entera en un lado.
+        assert_eq!(ancha.izquierda.width(), 200.0);
+        assert_eq!(ancha.derecha.width(), 600.0);
+    }
+
+    #[test]
+    fn arrastrar_el_divisor_hasta_el_borde_no_deja_a_ninguna_consola_sin_ancho() {
+        // El suelo por consola: arrastrado hasta el borde, el lado que se colapsa se queda en un ancho de
+        // celda y no en cero, así que sigue mostrando su columna.
+        //
+        // Lo que esto **no** evita, y conviene no atribuírselo: el pánico de `Screen::resize` con cero
+        // columnas —de eso se encarga el mínimo de 1×1 de la métrica— ni que la consola desaparezca del
+        // todo, porque el asa es el divisor y sigue en pantalla con la fracción a cero.
+        const UTIL: f32 = 500.0 - GROSOR_DEL_DIVISOR;
+        // **Los dos anchos exactos y ninguna desigualdad.** Un `>=` contra el suelo lo cumple también el
+        // lado ancho, que mide sesenta veces más, así que la aserción pasaría sin que el suelo existiera.
+        for (fraccion, izquierda, derecha) in [
+            (0.0_f32, ANCHO_DE_CELDA, UTIL - ANCHO_DE_CELDA),
+            (1.0_f32, UTIL - ANCHO_DE_CELDA, ANCHO_DE_CELDA),
+        ] {
+            let reparto = repartir(area_de(500.0), fraccion, ANCHO_DE_CELDA);
+
+            assert_eq!(
+                reparto.izquierda.width(),
+                izquierda,
+                "con la fracción a {fraccion} la consola izquierda no respetó el suelo"
+            );
+            assert_eq!(
+                reparto.derecha.width(),
+                derecha,
+                "con la fracción a {fraccion} la consola derecha no respetó el suelo"
+            );
+        }
+    }
+
+    #[test]
+    fn cuando_no_caben_dos_anchos_minimos_el_divisor_se_planta_en_el_centro() {
+        // El caso en que el suelo no se puede respetar, porque no hay sitio para dos. Recortar contra un
+        // mínimo que no cabe daría un mínimo mayor que el máximo, o sea un rectángulo invertido. Lo que se
+        // conserva es lo único que se puede: que ninguna de las dos desaparezca.
+        let util = ANCHO_DE_CELDA * 2.0 - 1.0;
+        let reparto = repartir(area_de(util + GROSOR_DEL_DIVISOR), 0.0, ANCHO_DE_CELDA);
+
+        assert_eq!(reparto.izquierda.width(), reparto.derecha.width());
+        assert!(reparto.izquierda.width() > 0.0, "la izquierda desapareció");
+        assert!(reparto.derecha.width() > 0.0, "la derecha desapareció");
     }
 
     #[test]
@@ -904,7 +1336,7 @@ mod tests {
         // Las tres piezas tienen que cubrir el área exactamente: si el divisor se restara después de
         // repartir, una consola perdería ancho sin que nadie hubiera movido nada.
         let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
-        let reparto = repartir(area);
+        let reparto = repartir(area, 0.4, ANCHO_DE_CELDA);
 
         assert_eq!(reparto.divisor.width(), GROSOR_DEL_DIVISOR);
         assert_eq!(reparto.izquierda.right(), reparto.divisor.left());
@@ -919,21 +1351,235 @@ mod tests {
         // pero un rectángulo con el mínimo mayor que el máximo sí: es un valor imposible viajando por
         // el código, y aquí acabaría llegando al pintor y a `celdas_en`. No hay gestor de ventanas que
         // lo produzca a mano, pero eframe no fija ancho mínimo, así que no depende de nosotros.
+        // Y se prueba con las fracciones de los dos extremos además de una del medio: el recorte contra el
+        // suelo es justo donde un mínimo mayor que el máximo aparecería.
         for ancho in [0.0_f32, 1.0, 2.0, 3.0, 20.0] {
-            let reparto = repartir(egui::Rect::from_min_size(
-                egui::pos2(0.0, 0.0),
-                egui::vec2(ancho, 300.0),
-            ));
-            for (nombre, rect) in [
-                ("izquierda", reparto.izquierda),
-                ("divisor", reparto.divisor),
-                ("derecha", reparto.derecha),
-            ] {
-                assert!(
-                    rect.width() >= 0.0,
-                    "con {ancho} puntos de ancho, el rectángulo de la {nombre} salió invertido"
-                );
+            for fraccion in [0.0_f32, 0.5, 1.0] {
+                let reparto = repartir(area_de(ancho), fraccion, ANCHO_DE_CELDA);
+                for (nombre, rect) in [
+                    ("izquierda", reparto.izquierda),
+                    ("divisor", reparto.divisor),
+                    ("derecha", reparto.derecha),
+                ] {
+                    assert!(
+                        rect.width() >= 0.0,
+                        "con {ancho} puntos de ancho y la fracción a {fraccion}, \
+                         el rectángulo de la {nombre} salió invertido"
+                    );
+                }
             }
         }
+    }
+
+    #[test]
+    fn la_pasada_de_interfaz_reparte_la_ventana_con_la_fraccion_del_estado() {
+        // **El cableado de la pasada de interfaz**, que es lo que une las piezas y hasta ahora no lo
+        // probaba nada: repartir con `FRACCION_INICIAL` en vez de con la fracción del estado —o sea, un
+        // arrastre sin ningún efecto visible— dejaba la suite entera en verde. Cada pieza estaba probada
+        // por separado; lo que faltaba era la línea que las junta.
+        //
+        // **Y con esto AC6 se recorre entero.** La prueba de `repartir` con dos anchos comprueba el
+        // mecanismo, pero no quién le pasa el área ni con qué fracción; aquí la ventana se ensancha al
+        // doble entre dos pasadas de la aplicación de verdad y lo que se mira es la rejilla con la que
+        // acabó cada consola, que es lo que el programa de dentro va a recibir.
+        const UN_CUARTO: f32 = 0.25;
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.fraccion = UN_CUARTO;
+        let ctx = egui::Context::default();
+
+        for ancho in [400.0 + GROSOR_DEL_DIVISOR, 800.0 + GROSOR_DEL_DIVISOR] {
+            let area = area_de(ancho);
+            pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+            // La métrica se le pregunta a la misma fuente que usó la pasada, y se puede preguntar desde
+            // fuera de ella porque las fuentes existen desde la primera (`context.rs:1120`).
+            let metrica = Metrica::medir(&ctx, egui::FontId::monospace(CUERPO));
+            let reparto = repartir(area, UN_CUARTO, metrica.ancho());
+
+            assert_eq!(
+                ventana.divisiones[0].medido,
+                metrica.celdas_en(reparto.izquierda.size()),
+                "con la ventana a {ancho} puntos, la consola izquierda no midió su cuarto"
+            );
+            assert_eq!(
+                ventana.divisiones[1].medido,
+                metrica.celdas_en(reparto.derecha.size()),
+                "con la ventana a {ancho} puntos, la consola derecha no midió sus tres cuartos"
+            );
+            // Un cuarto y no la mitad, por lo mismo que en la prueba de `repartir`: con la mitad, una
+            // pasada que ignorase la fracción daría estos mismos dos números.
+            assert_ne!(
+                ventana.divisiones[0].medido.cols, ventana.divisiones[1].medido.cols,
+                "las dos consolas midieron el mismo ancho con un reparto de un cuarto"
+            );
+        }
+
+        // La fracción sigue siendo la que se pidió: **redimensionar la ventana no la toca**. Es la otra
+        // mitad de AC6 —«la fracción no se rompe sola»— y es lo que se vería roto si algún día la pasada
+        // guardara aquí lo que cupo en vez de lo que se pidió.
+        assert_eq!(
+            ventana.fraccion, UN_CUARTO,
+            "ensanchar la ventana movió la fracción"
+        );
+    }
+
+    #[test]
+    fn la_rejilla_de_cada_consola_acaba_siendo_la_que_midio_su_trozo_de_ventana() {
+        // **El último eslabón de AC6, y estaba sin probar.** Que la proporción se conserve no sirve de nada
+        // si no llega hasta la rejilla contra la que se interpretan los bytes: la pasada de interfaz mide,
+        // y es `logic` quien lo aplica en el fotograma siguiente. Esa unión no la miraba nada — las dos
+        // mitades del redimensionado se prueban poniendo `medido` a mano, y las pruebas de `bombear_todas`
+        // corren con la rejilla de arranque, donde redimensionar es un no-op—, así que borrar
+        // `division.redimensionar()` del bucle, o el bucle entero de `logic`, dejaba la suite en verde con
+        // las dos consolas clavadas en 24×80 por grande que fuera la ventana.
+        const UN_CUARTO: f32 = 0.25;
+        let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.fraccion = UN_CUARTO;
+        let ctx = egui::Context::default();
+        // El `Frame` de pruebas de `eframe` viene sin consumo de CPU (`cpu_usage: None`, `epi.rs:931`), así
+        // que `logic` se salta el cierre del fotograma anterior: aquí lo que se mira es el bombeo.
+        let mut frame = eframe::Frame::_new_kittest();
+
+        pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+        eframe::App::logic(&mut ventana, &ctx, &mut frame);
+
+        let metrica = Metrica::medir(&ctx, egui::FontId::monospace(CUERPO));
+        let reparto = repartir(area, UN_CUARTO, metrica.ancho());
+        let rectangulos = [reparto.izquierda, reparto.derecha];
+        for (cual, (division, rect)) in ventana.divisiones.iter().zip(rectangulos).enumerate() {
+            let esperado = metrica.celdas_en(rect.size());
+            // Que el tamaño esperado **no** sea el de arranque es lo que hace que la aserción de abajo
+            // signifique algo: si coincidieran, pasaría igual con un redimensionado que no ocurrió.
+            assert_ne!(
+                esperado, REJILLA_INICIAL,
+                "el trozo de ventana de la consola {cual} mide justo la rejilla de arranque"
+            );
+            assert_eq!(
+                division.pantalla.size(),
+                esperado,
+                "la consola {cual} interpreta contra una rejilla que no es la de su trozo de ventana"
+            );
+        }
+    }
+
+    #[test]
+    fn la_pasada_de_interfaz_atiende_el_clic_con_los_rectangulos_del_reparto() {
+        // La tercera línea del cableado: que la pasada **llame** al clic, y que le pase los rectángulos
+        // que salieron del reparto. Borrar esa llamada dejaba la suite en verde —el foco por clic se prueba
+        // con rectángulos escritos a mano— y el foco quedaba clavado en la izquierda para siempre.
+        //
+        // **El punto donde se pulsa es el que hace la prueba exacta**: con la fracción a un cuarto, 300
+        // cae en la consola derecha; con la mitad —la fracción que la pasada usaría si ignorase el
+        // estado— cae en la izquierda y el foco no se movería. Así una sola aserción cubre las dos cosas.
+        const UN_CUARTO: f32 = 0.25;
+        let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
+        let dentro_de_la_derecha = egui::pos2(area.left() + 300.0, area.center().y);
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.fraccion = UN_CUARTO;
+        let ctx = egui::Context::default();
+
+        // Dos pasadas, como en la prueba de `atender_clics`: egui resuelve la interacción contra las
+        // regiones de la pasada anterior, así que un clic en la primera no encontraría a quién dárselo.
+        pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area,
+            egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(dentro_de_la_derecha),
+                    egui::Event::PointerButton {
+                        pos: dentro_de_la_derecha,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                    egui::Event::PointerButton {
+                        pos: dentro_de_la_derecha,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            ventana.foco, 1,
+            "el clic en la consola derecha no le dio el foco dentro de la pasada de interfaz"
+        );
+    }
+
+    #[test]
+    fn la_pasada_de_interfaz_manda_lo_tecleado_a_la_consola_con_el_foco() {
+        // La otra línea del cableado que nadie miraba: que la pasada **llame** al teclado. El enrutado se
+        // prueba llamándolo a mano, así que borrar esa llamada de `ui` deja la suite en verde y la ventana
+        // muda — no llegaría una sola tecla a ningún programa.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.foco = 1;
+        let ctx = egui::Context::default();
+
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(800.0 + GROSOR_DEL_DIVISOR),
+            egui::RawInput {
+                events: vec![egui::Event::Text("a".to_owned())],
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            ventana.divisiones[1].pulsaciones, b"a",
+            "la pasada de interfaz no mandó la tecla a la consola con el foco"
+        );
+    }
+
+    #[test]
+    fn el_arrastre_redimensiona_las_consolas_en_el_mismo_pase_en_que_mueve_el_divisor() {
+        // El reparto se hace **dos veces** en la misma pasada cuando el arrastre movió la fracción, y sin
+        // esa segunda vez todo lo que viene después —el divisor pintado y la rejilla que mide cada
+        // consola— se queda con el reparto de antes: un fotograma por detrás del ratón, que es justo lo
+        // que se nota arrastrando. Quitar ese segundo reparto no rompía ninguna prueba, porque el arrastre
+        // se probaba sin pintar y el pintado sin arrastrar.
+        let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
+        // El centro del divisor con la fracción inicial: la mitad de lo repartible, donde el suelo por
+        // consola no llega a morder, así que el agarre no depende del ancho de la fuente.
+        let agarre = egui::pos2(
+            area.left() + 400.0 + GROSOR_DEL_DIVISOR / 2.0,
+            area.center().y,
+        );
+        // Tres cuartos de lo repartible: un sitio al que la fracción inicial no llega sola.
+        let suelta = egui::pos2(area.left() + 600.0, agarre.y);
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+
+        // Las tres pasadas del arrastre, por lo mismo que en la prueba de `arrastrar_el_divisor`: egui
+        // resuelve la interacción contra las regiones de la pasada anterior, y el candidato a arrastrarse
+        // sale de dónde estaba el puntero **al pulsar**.
+        pasada_de_interfaz(&mut ventana, &ctx, area, mover(agarre));
+        pasada_de_interfaz(&mut ventana, &ctx, area, pulsar(agarre));
+        pasada_de_interfaz(&mut ventana, &ctx, area, mover(suelta));
+
+        // 600 de 800 repartibles es 0,75 sin resto, así que aquí tampoco hace falta tolerancia.
+        assert_eq!(
+            ventana.fraccion, 0.75,
+            "el arrastre no llevó la fracción hasta el puntero"
+        );
+
+        let metrica = Metrica::medir(&ctx, egui::FontId::monospace(CUERPO));
+        let reparto = repartir(area, 0.75, metrica.ancho());
+        assert_eq!(
+            ventana.divisiones[0].medido,
+            metrica.celdas_en(reparto.izquierda.size()),
+            "la consola izquierda se midió con el reparto de antes del arrastre"
+        );
+        assert_eq!(
+            ventana.divisiones[1].medido,
+            metrica.celdas_en(reparto.derecha.size()),
+            "la consola derecha se midió con el reparto de antes del arrastre"
+        );
     }
 }

@@ -257,6 +257,102 @@ verdad y F1.6 los paneles pintando a la vez, que es la carga que D3 dice que hay
 la decisión de fondo en un anexo, con dos consolas sintéticas de una sola máquina, sería justo el
 tipo de atajo que esta decisión se tomó para evitar.
 
+### Medido — 11 agosto 2026: dos consolas de verdad, dentro de la aplicación
+
+Esto es lo que el anexo anterior dejó pendiente: **las divisiones ya no son sintéticas**. Son las dos
+consolas de F1.4, cada una con su pseudoterminal, su rejilla y su programa, medidas **dentro de la
+aplicación** y no en un banco. Misma máquina que las medidas anteriores, `--release`, pantalla de 120 Hz,
+rejilla **61×57 por consola** (ventana maximizada, repartida a mitades).
+
+La carga es un volcado tipo TUI —color, negrita y repintado de barra de estado con movimiento de
+cursor—. **La tanda que se publica es la de 400.000 líneas por consola**, que da entre **376 y 382
+fotogramas con salida** por corrida: dos corridas del caso simétrico. El asimétrico son dos corridas de
+120.000 líneas (105-120 fotogramas). Los números son la media de las medias.
+
+| Tramo del fotograma | Una volcando, la otra quieta | **Las dos volcando a la vez** |
+|---|---|---|
+| Interpretar (las dos consolas) | 1,92 ms | **3,35 ms** |
+| Encolar el pintado (las dos) | 0,87 ms | **1,83 ms** |
+| El resto del fotograma (teselar, dibujar, armazón) | 0,61 ms | **0,74 ms** |
+| **Coste del fotograma** | **3,39 ms** | **5,92 ms** |
+| Del hueco de 120 Hz (8,33 ms) | 41 % | **71 %** |
+| Del hueco de 60 Hz (16,67 ms) | 20 % | 36 % |
+| **Tecla en el fotograma → byte en el programa** | no medido | **3,42 ms de media, 5,00 ms el p95** (28 pulsaciones) |
+
+**Una tanda más corta da peor número, y el porqué importa.** Tres corridas de 120.000 líneas
+(105-120 fotogramas) dieron **7,00 ms**, el 84 % del hueco. La diferencia no es ruido: con el triple de
+fotogramas, el coste del arranque —abrir la ventana, subir texturas, medir la fuente por primera vez—
+pesa un tercio en la media. **El número que vale es el de la tanda larga**, y la corta queda aquí escrita
+para que nadie la encuentre después y crea que hay una contradicción.
+
+**Lo que estos números prueban:**
+
+- Con dos consolas de verdad **volcando a la vez**, el fotograma cuesta **5,92 ms de media y cabe en el
+  hueco de 120 Hz**, con el 29 % de margen. Es la primera vez que ese número se toma sobre divisiones
+  reales y no simuladas.
+- **El grueso del fotograma no lo gasta el framework de interfaz: lo gasta interpretar.** 3,35 de los
+  5,92 ms son `alacritty_terminal` tragando los 128 KiB por fotograma **de cada consola** — trabajo del
+  terminal, y exactamente lo que el presupuesto por fotograma existe para acotar. Lo que queda para
+  dibujar son 2,57 ms, el **31 %** del hueco.
+- **La ventana sigue respondiendo al teclado mientras dura el volcado doble, y ahora con cifra:** de la
+  tecla en el fotograma al byte escrito en el programa, **3,42 ms de media y 5,00 ms el percentil 95**,
+  sobre 28 pulsaciones tecleadas a mano durante la caída. En F1.3, sin volcado, ese tramo daba **36 µs**:
+  sube casi ×100, y **la causa está identificada, no es un misterio** — el cronómetro arranca al empezar
+  el fotograma y por delante de escribir la tecla corre interpretar, que son esos mismos 3,35 ms. La
+  tecla espera a que el fotograma acabe de tragar. Sigue siendo imperceptible: 5 ms en el peor caso es
+  menos que un fotograma de 60 Hz.
+- **El instrumento reparte bien.** El resto del fotograma descuenta también el pintado de una consola que
+  no recibió salida en ese fotograma, que era un fallo de atribución encontrado en revisión. Se ve en el
+  propio informe: los fotogramas contados en «el resto» (105-120) igualan o superan los de la consola con
+  salida (107-115), porque incluyen aquellos en que solo se pintó la quieta.
+
+**Lo que NO prueban. Esta lista es la mitad del valor del anexo, y es larga a propósito:**
+
+- **Este 31 % NO confirma el 36 % del banco del 9 de agosto, porque no miden lo mismo.** Aquel medía
+  **pantallas llenas y repintado continuo** —un techo, y así lo decía— sobre 3.840 celdas. Este mide un
+  volcado tipo TUI con repintado a demanda sobre **6.954 celdas**, casi el doble, y en un régimen donde
+  el pintor se salta la mayoría de las celdas por llevar el fondo por defecto. Que los dos porcentajes
+  salgan parecidos es **coincidencia de dos efectos opuestos** —casi el doble de celdas contra un relleno
+  mucho más barato—, no una confirmación. El aviso que el propio instrumento lleva escrito
+  (`crates/app/src/medida.rs`) dice justamente esto: comparar tramos entre medidas exige mirar la rejilla,
+  no solo el tramo.
+- **No hay línea base de una consola dentro de la aplicación**, así que **no se puede afirmar cómo escala
+  el pintado** de una a dos. Y no es un descuido evitable: desde F1.4 la ventana abre **siempre dos**
+  consolas, así que la comparación 1 contra 2 dejó de ser medible desde dentro. El instrumento que la
+  daría es el banco con reparto real, que está sin hacer
+  ([#33](https://github.com/mashware/agent-terminal/issues/33)).
+- **«Encolar» no es coste de egui: es el pintor de este proyecto**, que sigue siendo el más ingenuo
+  posible —una celda cada vez, sin caché ni seguimiento de lo que cambió— llamando a `rect_filled` y
+  `text`. De los 3,21 ms de dibujo, lo único atribuible al framework sin discusión es **el resto del
+  fotograma: 0,74 ms, el 9 % del hueco**. Decir «el framework gasta el 31 %» sería cargarle código propio
+  que se reescribiría igual con cualquier otro.
+- **El peor caso no se ha remedido con dos divisiones.** Este escenario es exigente pero no es el techo:
+  el techo son pantallas llenas y repintado continuo, que es lo que medía el banco. Así que este anexo
+  **no cierra** el criterio de aceptación que pedía medir el peor caso con divisiones de verdad.
+- **El percentil 95 del caso simétrico se sale del hueco de 120 Hz** (~9,4 ms sumando los p95 de la
+  tanda larga; y sumar percentiles de tramos no da el percentil del fotograma, así que ese número es
+  indicativo, no una medida). Cabe en el de 60 Hz con holgura. Hay tirones ocasionales durante un volcado
+  doble.
+- **Nada sobre cuatro consolas.** Multiplicar por dos da 11,8 ms, pero eso **contradice el propio modelo
+  de este anexo**: si con cuatro cada rejilla es más estrecha, encolar por consola baja y solo interpretar
+  escala lineal, con lo que saldría algo más cerca de 9 ms. Las dos cuentas son aritmética, no medida, y
+  por eso el aviso del roadmap sigue en pie.
+- **Nada del panel pintando a la vez**, que es F1.6 y la otra mitad de la carga que esta decisión dice
+  que hay que medir.
+- **La serie «byte disponible → fotograma pagado» solo es interpretable en el caso simétrico.** Incluye
+  el fotograma entero —se presenta indivisible— así que en el asimétrico la de la consola tranquila se
+  degrada por el volcado de la vecina y no la describe. Ahí valen los tramos propios, no ese total.
+
+**Qué significa para esta decisión.** **D3 no cambia, y sigue sin poder cerrarse.** Lo que este anexo
+aporta no es la confirmación que parecía: es un **orden de magnitud tomado sobre divisiones reales** —el
+fotograma cabe en el hueco de 120 Hz con dos consolas volcando— y, sobre todo, **un cambio de sospechoso**.
+El framework de interfaz se lleva **0,74 ms demostrables de 8,33**; el resto lo gastan el parser del
+terminal y un pintor propio que nadie ha optimizado todavía. Antes de reabrir si GPUI compensa su coste, hay dos
+cosas que costarían menos y darían más margen: **escribir un pintor que no repinte cada celda cada
+fotograma**, y probar los turnos rotatorios del presupuesto que el diseño de F1.4 dejó anotados. Y para
+cerrar el criterio de verdad faltan tres medidas que no están: el peor caso con dos divisiones, la línea
+base de una sola dentro de la aplicación, y F1.6 con los paneles encima.
+
 ---
 
 ## D4 — Control por consola, no por API
