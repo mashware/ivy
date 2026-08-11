@@ -3,14 +3,14 @@ id: asp_la-api-ajena-se-lee-no-se-supone_hnvyp8
 slug: la-api-ajena-se-lee-no-se-supone
 name: >-
   La API ajena se lee, no se supone: en este proyecto suponerla ha costado ya
-  doce veces
+  catorce veces
 type: aspect
 status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-08-09T20:07:25.783Z'
-updated_at: '2026-08-11T16:27:43.138Z'
-last_verified: '2026-08-11T16:27:43.138Z'
+updated_at: '2026-08-11T19:50:20.710Z'
+last_verified: '2026-08-11T19:50:20.710Z'
 file_paths:
   - crates/app/src/lib.rs
   - crates/app/src/medida.rs
@@ -23,8 +23,10 @@ symbols:
   - 'Pty::spawn'
   - 'Sense::click'
   - 'Context::run_ui'
+  - 'Rect::distance_sq_to_pos'
+  - 'Frame::_new_kittest'
 content_hashes:
-  crates/app/src/lib.rs: 'sha256:bcf3ddb3e7b0c70d3d8b306bd58930520777e0baa28afa408bd8eb0b12ccd2ad'
+  crates/app/src/lib.rs: 'sha256:c7f2d67be30a71cbe392f9c446013656f0c3443fb6f7d7035e8575837d3f7a1c'
   crates/app/src/medida.rs: 'sha256:b55a4357bfb9ee09793b07a352ac7f74bdcfbbd12c25527fe829182eaadcec3c'
   crates/app/src/pintor.rs: 'sha256:531c8fb585188fd0f14e2bfb6fe0d70a2a2be51c64f5cc5d8848f293ccb18ef8'
   crates/term-core/src/lib.rs: 'sha256:efa66ec48f1e9c4ba5f5d05657492ca563960b543264d613c06cd094b0818c73'
@@ -40,7 +42,7 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-**El patrón, con su cuenta.** Doce veces en este proyecto una librería de terceros ha hecho algo distinto de lo que su nombre prometía, y **las doce se resolvieron leyendo su código fuente**, nunca razonando sobre él. No es mala suerte: es lo que pasa cuando se construye un terminal sobre un motor de VT, un pseudoterminal y un framework de interfaz de modo inmediato, tres capas cuyas abstracciones fueron diseñadas para otra cosa.
+**El patrón, con su cuenta.** Catorce veces en este proyecto una librería de terceros ha hecho algo distinto de lo que su nombre prometía, y **las catorce se resolvieron leyendo su código fuente**, nunca razonando sobre él. No es mala suerte: es lo que pasa cuando se construye un terminal sobre un motor de VT, un pseudoterminal y un framework de interfaz de modo inmediato, tres capas cuyas abstracciones fueron diseñadas para otra cosa.
 
 **Los casos, para que la cuenta no sea una impresión:**
 
@@ -54,17 +56,23 @@ feature_id: feat_term-core_nx0g1r
 8. `egui-winit` convierte Ctrl+C en un evento de «copiar» **antes** de emitir la tecla. Sin recogerlo por esa puerta, **Ctrl+C no interrumpe**, que es lo más básico de un terminal.
 9. `portable-pty` copia el entorno entero del padre al hijo, y no tiene parámetro para evitarlo.
 10. Alimentar el parser con un solo carácter repetido recorre su camino rápido y **da un número que miente** — el mismo aprendizaje, dos veces, en dos instrumentos distintos.
-11. **`Sense::click()` incluye `FOCUSABLE`** (`sense.rs:60`), o sea que el widget *pide* el foco de teclado de egui. En una aplicación cuyo enrutado de teclado es **geográfico y propio**, ese foco compite con el de la aplicación. El propio fuente lo dice: *«Use `Sense::CLICK` if you don't want the widget to be focusable»* (`sense.rs:58`). Cazado **antes** de escribir, leyendo la fuente — el único de los doce que no costó nada.
+11. **`Sense::click()` incluye `FOCUSABLE`** (`sense.rs:60`), o sea que el widget *pide* el foco de teclado de egui. En una aplicación cuyo enrutado de teclado es **geográfico y propio**, ese foco compite con el de la aplicación. El propio fuente lo dice: *«Use `Sense::CLICK` if you don't want the widget to be focusable»* (`sense.rs:58`). Cazado **antes** de escribir, leyendo la fuente.
 12. **`Context::run` no existe en 0.36.1: es `run_ui`** (`context.rs:793`), y entrega directamente un `&mut Ui`, sin necesidad de montar un panel. Cazado por el compilador, que fue barato; pero el mismo despiste sobre un método que **sí** existiera con otra semántica habría sido del tipo 4 o 5.
+13. **`Rect::distance_sq_to_pos` da cero para un punto *sobre* el borde**, no solo dentro. Así que **dos rectángulos que se tocan reciben los dos el acierto directo**: `hit_test.rs:205-211` los busca con radio 0,0 y `find_closest_within` compara con `<=` (`hit_test.rs:414-433`). Consecuencia real: en las dos columnas frontera del divisor arrastrable, un mismo gesto **arrastra el divisor y da el foco a la consola de al lado** — `hit_test.rs:377-386` devuelve los dos aciertos a propósito. Un comentario del código afirmaba que no ensanchar la zona de agarre evitaba eso; era falso, y lo destapó la revisión leyendo la fuente. El comportamiento se dejó (pulsar en el borde de una consola y darle el foco es lo esperable); lo que se quitó fue la garantía inventada.
+14. **`eframe::Frame` sí se puede construir en un test: `Frame::_new_kittest()`** (`epi.rs:720`), público, sin ninguna condición de compilación, y con la documentación diciendo que existe para probar aplicaciones. Y `App::ui` **no toca el `Frame`** — su parámetro se llama `_frame`. Este caso es distinto de los doce primeros y por eso es el más incómodo: **no se supuso lo que hacía una llamada, se supuso que la llamada no existía**, y se escribió en un artefacto de revisión que probar la pasada de interfaz era «una limitación real del framework». Cinco pruebas que tapaban mutilaciones capaces de dejar la ventana muda estuvieron sin escribir por eso.
 
 **Dónde salta la alarma.** El caso caro no es el que no compila: es aquel en que **la etiqueta de un número describe lo que uno cree que hace la llamada**. Los casos 4 y 5 son el mismo error con signos opuestos — llamar «pintar» a encolar, y llamar «teselar» a un residuo— y los dos publicaban un número optimista con toda la apariencia de ser el bueno, en el hito cuyo producto **es** el número. Ninguno de los dos lo habría detectado un test: los dos números eran internamente coherentes.
 
-**Y hay un patrón nuevo en los casos 11 y 12, que conviene ver junto:** los dos son **funciones de conveniencia que empaquetan una decisión**. `Sense::click()` no es «sensar clics», es «sensar clics *y además* pedir foco»; `run` no era el nombre. La regla que dejan: cuando una API ofrece un constructor corto y otro explícito, **el corto lleva dentro una elección que alguien tomó para otro caso de uso** — mirar qué es antes de aceptarla.
+**Tres patrones, y el tercero es nuevo:**
 
-**Qué hacer, en concreto.** Las fuentes están en `~/.cargo/registry/src/index.crates.io-*/<caja>-<versión>/`, y leerlas cuesta una búsqueda. Se leen **antes** de apoyarse en el comportamiento, no después de que el número salga raro, siempre que: un número que se va a publicar dependa de cuándo ocurre algo; un contrato dependa de qué hace exactamente una llamada; se esté a punto de escribir en un comentario «esto hace X» sobre código ajeno; o se vaya a usar un **constructor de conveniencia** de una API que también ofrece la versión explícita.
+- **Constructores de conveniencia que empaquetan una decisión** (casos 11 y 12). `Sense::click()` no es «sensar clics», es «sensar clics *y además* pedir foco». Cuando una API ofrece un constructor corto y otro explícito, **el corto lleva dentro una elección que alguien tomó para otro caso de uso** — mirar qué es antes de aceptarla. Se repitió con `Sense::drag()`, que es `DRAG | FOCUSABLE` (`sense.rs:68`), aunque esa vez ya se sabía qué buscar.
+- **Geometría que no se comporta como la intuición** (caso 13). Un borde compartido no es una frontera que separe: para el motor de aciertos pertenece a los dos lados.
+- **Suponer una ausencia, no una semántica** (caso 14). «Esto no se puede hacer» es una afirmación sobre código ajeno igual que «esto hace X», y necesita la misma prueba. Un límite declarado con honestidad vale más que una prueba retorcida — pero solo si antes se ha comprobado que es un límite.
 
-**Y quién lo caza cuando se escapa:** en cuatro de los doce casos lo destapó una revisión que fue a leer la fuente en vez de opinar sobre el diff. Es el argumento más fuerte a favor de pedirle a quien revisa que **verifique contra el código de la librería**, no contra el razonamiento del autor.
+**Qué hacer, en concreto.** Las fuentes están en `~/.cargo/registry/src/index.crates.io-*/<caja>-<versión>/`, y leerlas cuesta una búsqueda. Se leen **antes** de apoyarse en el comportamiento, no después de que el número salga raro, siempre que: un número que se va a publicar dependa de cuándo ocurre algo; un contrato dependa de qué hace exactamente una llamada; se esté a punto de escribir en un comentario «esto hace X» sobre código ajeno; se vaya a usar un **constructor de conveniencia** de una API que también ofrece la versión explícita; o se esté a punto de **declarar que algo no se puede hacer**.
+
+**Y quién lo caza cuando se escapa:** en cinco de los catorce casos lo destapó una revisión que fue a leer la fuente en vez de opinar sobre el diff. Es el argumento más fuerte a favor de pedirle a quien revisa que **verifique contra el código de la librería**, no contra el razonamiento del autor.
 
 ## Where it lives
 
-Los casos vividos están repartidos por `crates/app/` —`lib.rs` (el bucle, el teclado, el foco por clic), `medida.rs` (los cronómetros), `pintor.rs` (la medida de la rejilla)— y `crates/term-core/src/lib.rs` (el pseudoterminal y su canal). Los casos 1 a 10 salieron en F1.3; el 11 y el 12 en F1.4, al poner dos consolas con foco por clic. El relato de cada uno, con la línea de fuente que lo demuestra, está en los registros de revisión de esos hitos.
+Los casos vividos están repartidos por `crates/app/` —`lib.rs` (el bucle, el teclado, el foco por clic, el divisor arrastrable y las pruebas de la pasada de interfaz), `medida.rs` (los cronómetros), `pintor.rs` (la medida de la rejilla)— y `crates/term-core/src/lib.rs` (el pseudoterminal y su canal). Los casos 1 a 10 salieron en F1.3; del 11 al 14 en F1.4, al poner dos consolas con foco por clic y divisor arrastrable. El relato de cada uno, con la línea de fuente que lo demuestra, está en los registros de revisión de esos hitos.
