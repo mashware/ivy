@@ -62,6 +62,60 @@ const PRESUPUESTO: usize = 128 * 1024;
 /// pasa a medirse desde él.
 const REJILLA_INICIAL: Size = Size { rows: 24, cols: 80 };
 
+/// Cuántos puntos de ancho se lleva la línea que separa las dos consolas.
+///
+/// Dos y no uno: con uno la línea se ve, pero el hito siguiente le añade el arrastre y una zona de
+/// agarre de un punto es imposible de atrapar con el ratón.
+const GROSOR_DEL_DIVISOR: f32 = 2.0;
+
+/// Lo que el fotograma necesita saber después de bombear todas las consolas.
+struct Bombeo {
+    /// A alguna le cortó el presupuesto y le queda salida por tragar, así que hace falta otro
+    /// fotograma.
+    alguna_dejo_cola: bool,
+    /// Todas han muerto y ninguna tiene cola: **solo entonces** se cierra la ventana.
+    todas_terminadas: bool,
+}
+
+/// Los rectángulos que ocupan las dos consolas y la línea que las separa.
+struct Reparto {
+    izquierda: egui::Rect,
+    divisor: egui::Rect,
+    derecha: egui::Rect,
+}
+
+/// Reparte el ancho del área entre las dos consolas, mitad y mitad.
+///
+/// **El grosor del divisor se descuenta primero y se reparte lo que queda.** Si se partiera el área
+/// entera y luego se restara la línea, la consola de la que se restase saldría más estrecha que la otra
+/// sin que nadie hubiera pedido eso.
+///
+/// **Reparte a la mitad y no acepta una fracción, a propósito.** El reparto variable llega con el
+/// divisor arrastrable, y solo entonces hace falta un suelo por consola: una fracción que solo puede
+/// valer un medio no puede dejar a nadie sin sitio, así que el recorte que lo evitaría sería hoy una
+/// rama que ninguna llamada puede alcanzar.
+///
+/// El área no puede quedar más estrecha que el divisor: `max` con cero mantiene los tres rectángulos
+/// bien formados incluso con una ventana de un punto de ancho, donde lo que se ve ya no importa pero un
+/// rectángulo invertido sí sería un error.
+fn repartir(area: egui::Rect) -> Reparto {
+    let util = (area.width() - GROSOR_DEL_DIVISOR).max(0.0);
+    let corte = area.left() + util / 2.0;
+    let tras_el_divisor = corte + GROSOR_DEL_DIVISOR;
+
+    Reparto {
+        izquierda: egui::Rect::from_min_max(area.left_top(), egui::pos2(corte, area.bottom())),
+        divisor: egui::Rect::from_min_max(
+            egui::pos2(corte, area.top()),
+            egui::pos2(tras_el_divisor, area.bottom()),
+        ),
+        derecha: egui::Rect::from_min_max(
+            egui::pos2(tras_el_divisor, area.top()),
+            egui::pos2(area.right().max(tras_el_divisor), area.bottom()),
+        ),
+    }
+}
+
 /// Abre la ventana y no vuelve hasta que se cierra.
 pub fn arrancar() -> eframe::Result {
     eframe::run_native(
@@ -223,12 +277,21 @@ impl Division {
     }
 }
 
-/// La ventana raíz: la consola, y lo que es de la ventana y no de ella.
+/// La ventana raíz: las consolas, y lo que es de la ventana y no de ninguna.
 struct Ventana {
-    /// Una sola. La segunda llega en el hito siguiente, y con ella la lista, el índice de foco y el
-    /// reparto del área: **no se adelantan aquí**. Un contenedor de un elemento no ahorra el trabajo
-    /// de ese hito y sí obliga a escribir ramas para el caso vacío que hoy no puede ocurrir.
-    division: Division,
+    /// Las dos consolas, de izquierda a derecha.
+    ///
+    /// **Un array de dos y no una lista**: el número está fijado por el hito —el árbol de divisiones
+    /// arbitrarias es Fase 2— y decirlo en el tipo es lo que permite indexar sin escribir ramas para un
+    /// caso vacío que no existe. Una lista obligaría a preguntar en cada acceso si hay alguien ahí.
+    divisiones: [Division; 2],
+    /// A cuál va el teclado. Arranca en `0` —la izquierda— porque teclear antes del primer clic ocurre
+    /// siempre al abrir la ventana, y con un foco nulo esas teclas se perderían.
+    ///
+    /// **No es el foco de egui.** El del framework es foco de teclado por widget, para tabular entre
+    /// controles; esto es geográfico y lo decide la aplicación. Confundirlos deja el teclado en manos
+    /// de quien no lo enruta.
+    foco: usize,
     tema: Tema,
     /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
     resto_del_fotograma: RestoDelFotograma,
@@ -242,7 +305,8 @@ struct Ventana {
 impl Ventana {
     fn nueva(ctx: &egui::Context) -> term_core::Result<Self> {
         Ok(Self {
-            division: Division::nueva(ctx)?,
+            divisiones: [Division::nueva(ctx)?, Division::nueva(ctx)?],
+            foco: 0,
             tema: Tema::default(),
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
@@ -250,13 +314,107 @@ impl Ventana {
         })
     }
 
-    /// Cierra el fotograma anterior: la división cierra sus tramos y la ventana se queda con lo que
-    /// nadie cronometró.
+    /// Cierra el fotograma anterior: cada consola cierra sus tramos y la ventana se queda con lo que
+    /// ninguna cronometró.
     fn cerrar_fotograma(&mut self, coste_cpu: std::time::Duration) {
-        // Sin tramos no hay resto que anotar: el fotograma entero se contaría como resto y la serie
-        // acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
-        if let Some(cronometrado) = self.division.medida.cerrar_fotograma(coste_cpu) {
+        let cronometrado = self
+            .divisiones
+            .iter_mut()
+            .filter_map(|division| division.medida.cerrar_fotograma(coste_cpu))
+            .reduce(|una, otra| una + otra);
+
+        // Sin tramos de nadie no hay resto que anotar: el fotograma entero se contaría como resto y la
+        // serie acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
+        if let Some(cronometrado) = cronometrado {
             self.resto_del_fotograma.anotar(coste_cpu, cronometrado);
+        }
+    }
+
+    /// Bombea las dos consolas y las redimensiona, y resume lo que el fotograma tiene que decidir con
+    /// eso.
+    ///
+    /// Vive aparte del bucle del framework para que las dos decisiones que salen de aquí —pedir otro
+    /// fotograma y cerrar la ventana— se puedan comprobar sin abrir ninguna. Es la única forma de
+    /// probar que **una consola muerta no cierra la ventana**, que es lo que este hito promete y lo que
+    /// un fallo aquí se llevaría por delante sin que ningún test se enterara.
+    fn bombear_todas(&mut self) -> Bombeo {
+        let mut bombeo = Bombeo {
+            alguna_dejo_cola: false,
+            todas_terminadas: true,
+        };
+
+        for division in &mut self.divisiones {
+            // Primero se interpreta lo pendiente y después se cambia de tamaño: esos bytes los
+            // escribió el programa para las dimensiones que todavía no sabe que han cambiado.
+            let queda_cola = division.bombear();
+            division.redimensionar();
+
+            bombeo.alguna_dejo_cola |= queda_cola;
+            bombeo.todas_terminadas &= division.terminada(queda_cola);
+        }
+
+        bombeo
+    }
+
+    /// Da el foco a la consola sobre la que se ha hecho clic.
+    ///
+    /// Vive aparte del pintado para poder comprobarse con un `Ui` de prueba, sin abrir ventana.
+    fn atender_clics(&mut self, ui: &egui::Ui, rectangulos: &[egui::Rect]) {
+        for (cual, rect) in rectangulos.iter().enumerate() {
+            // El clic se detecta con `interact` y no mirando la posición del puntero a pelo, porque así
+            // respeta capas y orden de pintado. Y con `Sense::CLICK` en vez de `Sense::click()`: el
+            // segundo incluye `FOCUSABLE`, o sea que el widget **pediría el foco de teclado de egui** y
+            // competiría con el enrutado que hace la aplicación — que es geográfico y no por widget.
+            let id = ui.id().with(("division", cual));
+            if ui.interact(*rect, id, egui::Sense::CLICK).clicked() {
+                self.foco = cual;
+            }
+        }
+    }
+
+    /// Manda lo que se ha tecleado en este pase a **una sola** consola, la que tiene el foco.
+    ///
+    /// Vive aparte del pintado por lo mismo que [`Self::atender_clics`]: mandarlo a las dos escribiría
+    /// la misma tecla en dos programas, que es exactamente lo que «sin que se pisen» prohíbe, y dentro
+    /// de la pasada de interfaz esa decisión no se puede comprobar sin abrir una ventana.
+    fn teclear_la_del_foco(&mut self, ctx: &egui::Context) {
+        let empezo = self.empezo_el_fotograma;
+        self.divisiones[self.foco].teclear(ctx, empezo);
+    }
+
+    /// Pinta una consola recortada a su rectángulo, y devuelve lo que costó encolar el pintado.
+    ///
+    /// **El recorte no es cosmético.** El pintor no recorta los glifos a propósito —para que un carácter
+    /// más ancho que su celda se vea salir— y sin recortar por consola ese glifo del borde derecho
+    /// aparecería dentro de la consola vecina, pintado por un programa que no es el suyo.
+    fn pintar_division(
+        ui: &egui::Ui,
+        division: &mut Division,
+        rect: egui::Rect,
+        tema: &Tema,
+        metrica: &Metrica,
+    ) {
+        division.medido = metrica.celdas_en(rect.size());
+
+        let antes = Instant::now();
+        pintor::pintar(
+            &ui.painter_at(rect),
+            &division.pantalla.view(),
+            tema,
+            metrica,
+            rect.left_top(),
+        );
+        let encolado = antes.elapsed();
+
+        // El cierre de la vuelta va aquí y no en el bucle de arriba porque **el encolado hay que
+        // declararlo siempre**, también cuando a esta consola no le llegó salida: se pintó igual, y su
+        // coste tiene que salir del «resto del fotograma» de la ventana.
+        if let Some((esperando_desde, recogido_en, interpretado)) =
+            division.pendiente_de_medir.take()
+        {
+            division
+                .medida
+                .anotar_vuelta(esperando_desde, recogido_en, interpretado, encolado);
         }
     }
 }
@@ -283,21 +441,24 @@ impl eframe::App for Ventana {
             self.cerrar_fotograma(std::time::Duration::from_secs_f32(segundos));
         }
 
-        // Primero se interpreta lo pendiente y después se cambia de tamaño: esos bytes los escribió
-        // el programa para las dimensiones que todavía no sabe que han cambiado.
-        let queda_cola = self.division.bombear();
-        self.division.redimensionar();
+        let Bombeo {
+            alguna_dejo_cola,
+            todas_terminadas,
+        } = self.bombear_todas();
 
-        if queda_cola {
+        if alguna_dejo_cola {
             // El presupuesto cortó el bombeo. Sin pedir otro fotograma, lo que falta se quedaría
             // esperando a que el programa escriba otra vez —o a que el usuario mueva el ratón— y
-            // un volcado se vería a trozos, deteniéndose.
+            // un volcado se vería a trozos, deteniéndose. **Basta con que una lo pida**: el fotograma
+            // es de la ventana, así que el repintado que pide una sirve también a la otra.
             ctx.request_repaint();
         }
 
-        // El programa de dentro ha terminado —un `exit`, o el agente que se cierra— y una consola
-        // sin nada corriendo no es una consola.
-        if self.division.terminada(queda_cola) {
+        // **La ventana se cierra solo cuando han muerto todas.** Con una consola trabajando y la otra
+        // acabada, cerrar se llevaría por delante el trabajo de la que sigue viva — y la que murió se
+        // queda con su último contenido en pantalla, que es lo que uno quiere leer justo después de que
+        // un programa termine.
+        if todas_terminadas {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -305,34 +466,34 @@ impl eframe::App for Ventana {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
 
-        // El teclado va antes de medir la superficie **y ese orden importa para el número, no para el
+        // El teclado va antes de todo lo demás **y ese orden importa para el número, no para el
         // comportamiento**: el cronómetro de la ida se cierra dentro de `teclear`, así que cualquier
         // trabajo que se cuele por delante —aunque sea leer un rectángulo— se le suma.
-        self.division.teclear(ui.ctx(), self.empezo_el_fotograma);
+        self.teclear_la_del_foco(ui.ctx());
 
-        let superficie = ui.max_rect();
-        self.division.medido = metrica.celdas_en(superficie.size());
+        let reparto = repartir(ui.max_rect());
+        let rectangulos = [reparto.izquierda, reparto.derecha];
 
-        let antes = Instant::now();
-        pintor::pintar(
-            ui.painter(),
-            &self.division.pantalla.view(),
-            &self.tema,
-            &metrica,
-            superficie.left_top(),
-        );
-        let encolado = antes.elapsed();
+        // El divisor se pinta antes que las consolas: si el glifo del borde de una se saliera, el
+        // recorte ya lo corta, y así la línea nunca queda por encima de una letra.
+        ui.painter()
+            .rect_filled(reparto.divisor, 0.0, self.tema.divisor());
 
-        if let Some((esperando_desde, recogido_en, interpretado)) =
-            self.division.pendiente_de_medir.take()
-        {
-            self.division.medida.anotar_vuelta(
-                esperando_desde,
-                recogido_en,
-                interpretado,
-                encolado,
-            );
+        self.atender_clics(ui, &rectangulos);
+
+        for (division, rect) in self.divisiones.iter_mut().zip(rectangulos) {
+            Self::pintar_division(ui, division, rect, &self.tema, &metrica);
         }
+
+        // El realce va al final para que quede por encima del contenido: un borde tapado a medias por
+        // un glifo del borde no dice nada. `StrokeKind::Inside` lo mantiene dentro del rectángulo, así
+        // que no invade la consola vecina ni el divisor.
+        ui.painter().rect_stroke(
+            rectangulos[self.foco],
+            0.0,
+            egui::Stroke::new(1.0, self.tema.foco()),
+            egui::StrokeKind::Inside,
+        );
     }
 
     /// Los números se publican al apagar, y **aquí y no al ver morir el programa**, por dos razones
@@ -341,12 +502,30 @@ impl eframe::App for Ventana {
     /// mano —que es como se sale la mitad de las veces— no pasa por ahí, así que la sesión se
     /// perdía entera sin publicar nada.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        if !self.division.medida.hay_algo() {
+        if !self
+            .divisiones
+            .iter()
+            .any(|division| division.medida.hay_algo())
+        {
             return;
         }
 
-        medida::cabecera(self.division.pantalla.size());
-        self.division.medida.publicar_tramos();
+        medida::cabecera(self.divisiones.each_ref().map(|d| d.pantalla.size()));
+        println!("reparto:      mitad y mitad, con {GROSOR_DEL_DIVISOR} puntos de divisor");
+        println!(
+            "foco al salir: consola {} ({})",
+            self.foco,
+            medida::NOMBRE_DE_CONSOLA[self.foco]
+        );
+
+        for (cual, division) in self.divisiones.iter().enumerate() {
+            println!(
+                "\n── consola {cual} ({}) ──",
+                medida::NOMBRE_DE_CONSOLA[cual]
+            );
+            division.medida.publicar_tramos();
+        }
+
         self.resto_del_fotograma.publicar();
     }
 
@@ -382,6 +561,22 @@ mod tests {
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
+        }
+    }
+
+    /// Monta una ventana con dos consolas, cada una con su programa, sin abrir ninguna ventana de
+    /// verdad.
+    ///
+    /// Lo que aquí se prueba —bombear, decidir el cierre, enrutar el teclado— no toca el escritorio,
+    /// así que se arma el struct a mano con las mismas piezas que [`Ventana::nueva`].
+    fn ventana_con(izquierda: &str, derecha: &str) -> Ventana {
+        Ventana {
+            divisiones: [division_con(izquierda), division_con(derecha)],
+            foco: 0,
+            tema: Tema::default(),
+            resto_del_fotograma: RestoDelFotograma::default(),
+            empezo_el_fotograma: Instant::now(),
+            ultimo_fotograma_cerrado: 0,
         }
     }
 
@@ -501,5 +696,244 @@ mod tests {
                 "el bucle se llevó eventos que no eran suyos"
             );
         });
+    }
+
+    #[test]
+    fn la_ventana_abre_dos_consolas_con_su_programa_vivo_cada_una() {
+        // AC1. Dos programas distintos a la vez, y cada rejilla con lo suyo: es la comprobación de que
+        // no comparten ni pseudoterminal ni pantalla, que es lo que «sin que se pisen» significa.
+        let mut ventana = ventana_con("printf izquierda", "printf derecha");
+        for division in &ventana.divisiones {
+            esperar_a_que_muera(division);
+        }
+        ventana.bombear_todas();
+
+        let [izquierda, derecha] = &ventana.divisiones;
+        assert!(izquierda.pantalla.to_text().contains("izquierda"));
+        assert!(derecha.pantalla.to_text().contains("derecha"));
+        assert!(
+            !izquierda.pantalla.to_text().contains("derecha"),
+            "lo que escribió una consola apareció en la otra"
+        );
+    }
+
+    #[test]
+    fn el_foco_arranca_en_la_izquierda_en_una_ventana_recien_abierta() {
+        // AC4, contra el constructor de verdad. El test de arriba lo comprueba sobre una ventana armada
+        // a mano, que se fija el foco ella misma: seguiría verde si `Ventana::nueva` arrancara apuntando
+        // a la derecha, o a un índice que no existe. Teclear antes del primer clic ocurre siempre al
+        // abrir, y esas teclas no pueden perderse.
+        let ventana = Ventana::nueva(&egui::Context::default())
+            .expect("no se pudo abrir la ventana con sus dos consolas");
+
+        assert_eq!(
+            ventana.foco, 0,
+            "el foco no arranca en la consola izquierda"
+        );
+    }
+
+    #[test]
+    fn el_teclado_lo_enruta_la_ventana_a_la_del_foco_y_no_a_la_primera() {
+        // AC2 sobre el enrutado que hace la aplicación, no sobre el que elige el test. El de arriba
+        // indexa él mismo la consola destino, así que seguiría verde con el fallo que de verdad importa:
+        // escribir en las dos, o en la izquierda fija. Con el foco en la derecha, los dos salen en rojo.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.foco = 1;
+
+        let ctx = egui::Context::default();
+        ctx.input_mut(|entrada| entrada.events.push(egui::Event::Text("a".to_owned())));
+        ventana.teclear_la_del_foco(&ctx);
+
+        assert_eq!(
+            ventana.divisiones[1].pulsaciones, b"a",
+            "la consola con el foco no recibió lo tecleado"
+        );
+        assert!(
+            ventana.divisiones[0].pulsaciones.is_empty(),
+            "la tecla acabó también en la consola sin foco"
+        );
+    }
+
+    #[test]
+    fn que_muera_una_consola_no_cierra_la_ventana() {
+        // AC8, y es el criterio que da sentido al hito: con dos agentes trabajando, que uno termine no
+        // puede llevarse por delante la ventana del otro. La condición ingenua —«si una murió, cierra»—
+        // es justo la que este test pone en rojo.
+        let mut ventana = ventana_con("printf ya", "sleep 30");
+        esperar_a_que_muera(&ventana.divisiones[0]);
+
+        let bombeo = ventana.bombear_todas();
+
+        assert!(
+            !ventana.divisiones[0].puente.sigue_vivo(),
+            "la primera consola debería haber muerto ya"
+        );
+        assert!(
+            !bombeo.todas_terminadas,
+            "una consola muerta y otra viva pidieron cerrar la ventana"
+        );
+    }
+
+    #[test]
+    fn la_ventana_se_cierra_cuando_han_muerto_las_dos_y_no_queda_cola() {
+        // AC9. Y el «sin cola» no es un adorno: morir no borra lo que el programa escribió antes de
+        // hacerlo, y cerrar con salida pendiente se comería el final, que es la parte que se mira.
+        let mut ventana = ventana_con("printf una", "printf otra");
+        for division in &ventana.divisiones {
+            esperar_a_que_muera(division);
+        }
+
+        let bombeo = ventana.bombear_todas();
+
+        assert!(
+            bombeo.todas_terminadas,
+            "las dos murieron y la ventana no se cerró"
+        );
+        assert!(ventana.divisiones[0].pantalla.to_text().contains("una"));
+        assert!(ventana.divisiones[1].pantalla.to_text().contains("otra"));
+    }
+
+    #[test]
+    fn un_volcado_en_una_consola_no_frena_ni_ensucia_a_la_otra() {
+        // AC10. El freno del terminal es **por consola**: con una volcando, la otra sigue entregando lo
+        // suyo en el mismo fotograma. Si el presupuesto fuera común, la parada se quedaría esperando
+        // detrás del volcado y la ventana daría la sensación de estar colgada.
+        const VOLCADO: usize = 400_000;
+        let mut ventana = ventana_con(
+            &format!("head -c {VOLCADO} /dev/zero | tr '\\0' a"),
+            "printf tranquila",
+        );
+        for division in &ventana.divisiones {
+            esperar_a_que_muera(division);
+        }
+
+        let bombeo = ventana.bombear_todas();
+
+        assert!(
+            bombeo.alguna_dejo_cola,
+            "el volcado cupo entero en un fotograma"
+        );
+        // La de al lado entregó lo suyo en ese mismo fotograma, sin esperar a que el volcado acabe.
+        assert!(
+            ventana.divisiones[1]
+                .pantalla
+                .to_text()
+                .contains("tranquila"),
+            "la consola tranquila se quedó esperando detrás del volcado"
+        );
+        // Y lo retenido sigue acotado por consola: ninguna se pasa del presupuesto.
+        for (cual, division) in ventana.divisiones.iter().enumerate() {
+            assert!(
+                division.recibido.len() <= PRESUPUESTO,
+                "la consola {cual} se pasó del presupuesto: {}",
+                division.recibido.len()
+            );
+        }
+    }
+
+    #[test]
+    fn un_clic_en_la_consola_derecha_le_da_el_foco() {
+        // AC3, y es el criterio que hace usable el hito: sin poder elegir dónde escribe uno, dos
+        // consolas son una curiosidad. Se prueba con un `Ui` de verdad porque lo que hay que comprobar
+        // es la traducción de un clic del escritorio a nuestro foco, y eso solo lo sabe egui.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let dentro_de_la_derecha = egui::pos2(300.0, 150.0);
+
+        let ctx = egui::Context::default();
+        // Dos pasadas: en la primera se registran las regiones, y en la segunda llega el clic. egui
+        // resuelve la interacción contra lo que había en la pasada anterior, así que un clic en la
+        // primera no encontraría a nadie a quien dárselo.
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ventana.atender_clics(ui, &[izquierda, derecha]);
+        })
+        .drop_without_applying_deltas();
+
+        let entrada = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(dentro_de_la_derecha),
+                egui::Event::PointerButton {
+                    pos: dentro_de_la_derecha,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+                egui::Event::PointerButton {
+                    pos: dentro_de_la_derecha,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+            ..Default::default()
+        };
+        ctx.run_ui(entrada, |ui| {
+            ventana.atender_clics(ui, &[izquierda, derecha]);
+        })
+        .drop_without_applying_deltas();
+
+        assert_eq!(
+            ventana.foco, 1,
+            "el clic en la consola derecha no le dio el foco"
+        );
+    }
+
+    #[test]
+    fn el_reparto_conserva_la_proporcion_al_cambiar_el_ancho_de_la_ventana() {
+        // AC6. Es la razón por la que el área se reparte a mano en vez de con los paneles
+        // redimensionables de egui: aquellos trabajan en puntos, así que al ensanchar la ventana el
+        // panel mantendría su ancho y toda la diferencia caería en el otro lado.
+        let estrecha = repartir(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(402.0, 300.0),
+        ));
+        let ancha = repartir(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(802.0, 300.0),
+        ));
+
+        assert_eq!(estrecha.izquierda.width(), 200.0);
+        assert_eq!(estrecha.derecha.width(), 200.0);
+        assert_eq!(ancha.izquierda.width(), 400.0);
+        assert_eq!(ancha.derecha.width(), 400.0);
+    }
+
+    #[test]
+    fn el_divisor_se_descuenta_antes_de_repartir_y_no_deja_huecos() {
+        // Las tres piezas tienen que cubrir el área exactamente: si el divisor se restara después de
+        // repartir, una consola perdería ancho sin que nadie hubiera movido nada.
+        let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
+        let reparto = repartir(area);
+
+        assert_eq!(reparto.divisor.width(), GROSOR_DEL_DIVISOR);
+        assert_eq!(reparto.izquierda.right(), reparto.divisor.left());
+        assert_eq!(reparto.divisor.right(), reparto.derecha.left());
+        assert_eq!(reparto.izquierda.left(), area.left());
+        assert_eq!(reparto.derecha.right(), area.right());
+    }
+
+    #[test]
+    fn una_ventana_mas_estrecha_que_el_divisor_no_produce_rectangulos_invertidos() {
+        // El borde de verdad de esta función. Nada de lo que se vea con dos puntos de ancho importa,
+        // pero un rectángulo con el mínimo mayor que el máximo sí: es un valor imposible viajando por
+        // el código, y aquí acabaría llegando al pintor y a `celdas_en`. No hay gestor de ventanas que
+        // lo produzca a mano, pero eframe no fija ancho mínimo, así que no depende de nosotros.
+        for ancho in [0.0_f32, 1.0, 2.0, 3.0, 20.0] {
+            let reparto = repartir(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(ancho, 300.0),
+            ));
+            for (nombre, rect) in [
+                ("izquierda", reparto.izquierda),
+                ("divisor", reparto.divisor),
+                ("derecha", reparto.derecha),
+            ] {
+                assert!(
+                    rect.width() >= 0.0,
+                    "con {ancho} puntos de ancho, el rectángulo de la {nombre} salió invertido"
+                );
+            }
+        }
     }
 }

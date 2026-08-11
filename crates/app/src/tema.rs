@@ -31,6 +31,14 @@ pub struct Tema {
     fondo: Color32,
     primer_plano: Color32,
     cursor: Color32,
+    /// La línea que separa dos consolas.
+    divisor: Color32,
+    /// Con qué se señala la consola a la que va el teclado.
+    ///
+    /// **Es un color de la aplicación, no de la paleta del terminal**, y esa distinción importa: la
+    /// paleta la pide el programa de dentro y describe *su* contenido. Esto describe el estado de la
+    /// aplicación, así que un programa no puede reclamarlo ni cambiarlo.
+    foco: Color32,
 }
 
 impl Default for Tema {
@@ -67,6 +75,14 @@ impl Default for Tema {
             fondo: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             primer_plano: Color32::from_rgb(0xA7, 0xA7, 0xA7),
             cursor: Color32::from_rgb(0xA7, 0xA7, 0xA7),
+            // El gris apagado del prototipo, que es el negro brillante de la paleta: se ve contra el
+            // fondo sin llamar la atención. Un divisor no es contenido, así que competir con las letras
+            // sería exactamente lo que no debe hacer.
+            divisor: Color32::from_rgb(0x5F, 0x5A, 0x60),
+            // El azul de la familia, un paso por encima del divisor en presencia. Tiene que
+            // distinguirse **del divisor** a simple vista, porque los dos se pintan pegados y si se
+            // parecieran no habría forma de saber qué consola escucha el teclado.
+            foco: Color32::from_rgb(0x75, 0x87, 0xA6),
         }
     }
 }
@@ -126,6 +142,16 @@ impl Tema {
     /// El fondo por defecto, que es también el de la ventana entera.
     pub fn fondo(&self) -> Color32 {
         self.fondo
+    }
+
+    /// El color de la línea que separa dos consolas.
+    pub fn divisor(&self) -> Color32 {
+        self.divisor
+    }
+
+    /// El color con el que se señala la consola a la que va el teclado.
+    pub fn foco(&self) -> Color32 {
+        self.foco
     }
 
     /// Acerca un color al fondo. Es lo que aquí significa «atenuado».
@@ -199,6 +225,22 @@ mod tests {
         assert_eq!(
             t.color(TermColor::Cursor),
             Color32::from_rgb(0xA7, 0xA7, 0xA7)
+        );
+    }
+
+    #[test]
+    fn el_divisor_y_el_foco_se_ven_y_se_distinguen_entre_si() {
+        let t = tema();
+        // Tres desigualdades, y cada una cubre una forma distinta de que esto quede inservible sin que
+        // nada falle: un divisor del color del fondo es un divisor invisible —dos consolas pegadas que
+        // se leen como una—, y un realce igual al divisor deja la ventana sin decir a cuál de las dos
+        // va el teclado, que es justo lo que el realce existe para decir.
+        assert_ne!(t.divisor(), t.fondo(), "el divisor no se vería");
+        assert_ne!(t.foco(), t.fondo(), "el realce del foco no se vería");
+        assert_ne!(
+            t.foco(),
+            t.divisor(),
+            "el realce no se distingue del divisor y van pegados"
         );
     }
 

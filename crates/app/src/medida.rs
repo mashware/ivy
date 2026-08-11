@@ -110,16 +110,30 @@ impl fmt::Display for Serie {
 /// Los tramos de un fotograma, a la espera de que llegue su coste total.
 #[derive(Clone, Copy)]
 struct Tramos {
-    esperado: Duration,
+    /// Cuánto esperó en la cola el byte más antiguo, o `None` si a esta consola no le llegó nada en
+    /// este fotograma.
+    ///
+    /// **Que sea opcional es lo que separa dos cosas que no son la misma:** si no llegó salida, no hay
+    /// *vuelta* que medir —un fotograma en reposo no es una vuelta rapidísima—, pero la consola **sí se
+    /// pintó**, y ese trabajo hay que devolverlo para que la ventana lo descuente del total. Cuando esto
+    /// era un `Duration` a secas, el fotograma sin salida se descartaba entero y su pintado acababa
+    /// publicado como «el resto del fotograma».
+    esperado: Option<Duration>,
     interpretado: Duration,
     encolado: Duration,
 }
 
 /// Los cronómetros **de una división** y lo que llevan medido.
 ///
-/// Todo lo de aquí se cronometra alrededor de una consola concreta, así que sus números comparan
-/// directamente con las tablas de D3 haya una división o cuatro. El cuarto tramo no cabe aquí: ver
+/// Todo lo de aquí se cronometra alrededor de una consola concreta. El cuarto tramo no cabe aquí: ver
 /// [`RestoDelFotograma`].
+///
+/// **Comparar estos números con los de una medida anterior exige mirar la rejilla, no solo el tramo.**
+/// `encolar` es proporcional al número de celdas y `interpretar` depende de la anchura sobre la que
+/// envuelve el texto, así que una consola que ocupa media ventana los da más bajos que una a pantalla
+/// completa **sin que nada haya mejorado**. Por eso la cabecera del informe publica la rejilla de cada
+/// consola: leer «encolar bajó» como «el framework aguanta mejor» es el error que este aviso existe
+/// para evitar. El único tramo cuya definición no cambia con el reparto es `esperar`.
 #[derive(Default)]
 pub struct Medida {
     ida: Serie,
@@ -149,12 +163,11 @@ impl Medida {
         interpretado: Duration,
         encolado: Duration,
     ) {
-        let Some(desde) = esperando_desde else {
-            self.pendiente = None;
-            return;
-        };
+        // **Se guarda siempre, también sin salida.** Lo que decide si hubo vuelta es que `esperado` sea
+        // `Some`; el trabajo de pintar ocurrió en los dos casos y la ventana tiene que poder
+        // descontarlo.
         self.pendiente = Some(Tramos {
-            esperado: recogido_en.saturating_duration_since(desde),
+            esperado: esperando_desde.map(|desde| recogido_en.saturating_duration_since(desde)),
             interpretado,
             encolado,
         });
@@ -163,17 +176,23 @@ impl Medida {
     /// Cierra el fotograma anterior de esta división con lo que `eframe` dice que costó de CPU.
     ///
     /// Devuelve **lo que esta división tenía cronometrado** —interpretar más encolar—, para que la
-    /// ventana pueda restar de una vez lo de todas y sacar el resto. `None` cuando esta división no
-    /// tenía nada pendiente: un fotograma en el que no llegó salida no es una vuelta rapidísima, es
-    /// una vuelta que no ocurrió, y devolver cero aquí haría que la ventana anotara un resto que en
-    /// realidad es el fotograma entero.
+    /// ventana pueda restar de una vez lo de todas y sacar el resto. Lo devuelve **haya habido salida o
+    /// no**: pintar ocurre en todos los fotogramas, y si esta consola no lo declarase, su pintado
+    /// aparecería publicado como «el resto del fotograma», que es el número que decide si el framework
+    /// de interfaz aguanta. `None` solo cuando no hubo ni pasada de interfaz que medir.
+    ///
+    /// **Las cuatro series, en cambio, solo cuentan cuando llegó salida**: un fotograma en reposo no es
+    /// una vuelta rapidísima, es una vuelta que no ocurrió, y meterlo en la media diría que la
+    /// aplicación responde al instante justamente por no haber hecho nada.
     pub fn cerrar_fotograma(&mut self, coste_cpu: Duration) -> Option<Duration> {
         let tramos = self.pendiente.take()?;
 
-        self.esperar.anotar(tramos.esperado);
-        self.interpretar.anotar(tramos.interpretado);
-        self.encolar.anotar(tramos.encolado);
-        self.vuelta.anotar(tramos.esperado + coste_cpu);
+        if let Some(esperado) = tramos.esperado {
+            self.esperar.anotar(esperado);
+            self.interpretar.anotar(tramos.interpretado);
+            self.encolar.anotar(tramos.encolado);
+            self.vuelta.anotar(esperado + coste_cpu);
+        }
 
         Some(tramos.interpretado + tramos.encolado)
     }
@@ -208,6 +227,10 @@ impl Medida {
             println!("  esperando en la cola:   {}", self.esperar);
             println!("  interpretando:          {}", self.interpretar);
             println!("  encolando el pintado:   {}", self.encolar);
+            println!(
+                "  incluye el fotograma entero, también el pintado de las otras consolas: un\n  \
+                 fotograma se presenta indivisible. Por eso dos de estos números NO se suman"
+            );
         }
     }
 }
@@ -238,7 +261,7 @@ impl RestoDelFotograma {
             return;
         }
         println!(
-            "\nel resto del fotograma   ({} fotogramas)",
+            "\nel resto del fotograma — de la ventana, común a las dos consolas   ({} fotogramas)",
             self.serie.total
         );
         println!("  {}", self.serie);
@@ -246,22 +269,45 @@ impl RestoDelFotograma {
             "  es teselar, dibujar y el armazón de egui: desde dentro no se pueden separar, y\n  \
              llamarlo «teselado» sería publicar como medido algo que no lo está"
         );
+        println!(
+            "  ya tiene descontado lo que cronometraron las dos consolas, también el pintado de una\n  \
+             que no recibiera salida en ese fotograma"
+        );
     }
 }
 
 /// La cabecera del informe: dónde y cómo se midió.
-pub fn cabecera(rejilla: term_core::Size) {
+///
+/// Las rejillas van una por consola **y con su nombre**, porque el reparto del ancho las deja
+/// distintas y ningún tramo se entiende sin saber sobre cuántas celdas se tomó. Es el dato que hace
+/// falta para comparar con una medida antigua de una sola consola a pantalla completa: sin él, un
+/// «encolar» más bajo se lee como que el framework va más rápido, cuando lo que pasa es que hay la
+/// mitad de columnas.
+pub fn cabecera(rejillas: [term_core::Size; 2]) {
     let perfil = if cfg!(debug_assertions) {
         "depuración — el número que vale es el de --release"
     } else {
         "release"
     };
     println!("\n── latencia ──");
-    println!("rejilla:      {}×{}", rejilla.rows, rejilla.cols);
+    for (cual, rejilla) in rejillas.iter().enumerate() {
+        println!(
+            "{:<13} {}×{}  ({})",
+            format!("consola {cual}:"),
+            rejilla.rows,
+            rejilla.cols,
+            NOMBRE_DE_CONSOLA[cual]
+        );
+    }
     println!("renderizador: glow");
     println!("perfil:       {perfil}");
     println!("máquina:      {}", maquina());
 }
+
+/// Cómo se llama cada consola en el informe, por su sitio en la ventana.
+///
+/// Un número suelto obliga a adivinar de qué lado es, y el reparto del ancho hace que el lado importe.
+pub const NOMBRE_DE_CONSOLA: [&str; 2] = ["izquierda", "derecha"];
 
 /// Cómo se llama esta máquina, o «desconocida» si no hay forma de saberlo.
 ///
@@ -345,12 +391,34 @@ mod tests {
         let mut medida = Medida::default();
 
         medida.anotar_vuelta(None, Instant::now(), ms(2), ms(3));
+        medida.cerrar_fotograma(ms(10));
 
-        assert!(
-            medida.cerrar_fotograma(ms(10)).is_none(),
-            "una división sin tramos dijo haber cronometrado algo, y la ventana se lo restaría"
-        );
         assert!(!medida.vuelta.hay(), "se anotó una vuelta que no ocurrió");
+        assert!(!medida.esperar.hay(), "se anotó una espera que no ocurrió");
+    }
+
+    #[test]
+    fn una_consola_sin_salida_declara_igualmente_lo_que_costo_pintarla() {
+        // **El fallo que este test existe para cazar es de atribución, y era invisible.** Con dos
+        // consolas, el caso normal es una recibiendo salida y la otra quieta en su prompt. La quieta se
+        // pinta igual cada fotograma, así que su encolado es trabajo real; si no lo declarase, la
+        // ventana no lo restaría del total y ese tiempo saldría publicado como «el resto del fotograma»
+        // — el número que decide si el framework de interfaz aguanta varias consolas.
+        let mut medida = Medida::default();
+        let mut resto = RestoDelFotograma::default();
+
+        medida.anotar_vuelta(None, Instant::now(), ms(0), ms(4));
+        let cronometrado = medida
+            .cerrar_fotograma(ms(10))
+            .expect("una consola pintada tiene que declarar lo que costó pintarla");
+        resto.anotar(ms(10), cronometrado);
+
+        assert_eq!(cronometrado, ms(4), "el encolado de la consola quieta");
+        assert_eq!(
+            resto.serie.media(),
+            ms(6),
+            "el resto se quedó con el pintado de la consola quieta"
+        );
     }
 
     #[test]
