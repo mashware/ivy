@@ -11,7 +11,7 @@
 //! relativo a lo que sea». Un número llamado «tecla → píxel» sería un número inventado.
 //!
 //! **Lo que se mide de la vuelta:** desde que el byte estaba disponible para recogerlo hasta que el
-//! fotograma que lo muestra está pagado, en **cuatro tramos que suman el total**:
+//! fotograma que lo muestra está pagado, en **cinco tramos que suman el total**:
 //!
 //! 1. **Esperar** — en la cola, hasta que el bucle lo recoge. En un volcado es el tramo que domina,
 //!    y con diferencia: el presupuesto por fotograma deja pasar 128 KiB cada vez, así que lo que no
@@ -19,22 +19,27 @@
 //! 2. **Interpretar** — meterlo en la rejilla del terminal.
 //! 3. **Encolar** — la llamada al pintor. Se llama así porque eso es lo que hace: apila formas y
 //!    vuelve.
-//! 4. **El resto del fotograma** — teselar esas formas, dibujarlas, y todo el armazón que egui
-//!    monta alrededor: recoger la entrada del escritorio, abrir y cerrar la pasada, medir la
-//!    fuente, subir texturas. Es lo que queda del coste total al quitarle los dos tramos
-//!    anteriores, y **se llama «el resto» a propósito**: desde dentro no hay forma de aislar la
-//!    teselación, así que ponerle ese nombre sería publicar como medido algo que no lo está.
+//! 4. **El panel de estado** — mirar si su fichero cambió, leerlo e interpretarlo cuando cambia, y
+//!    encolar su pintado. Va aparte del tramo anterior aunque los dos sean trabajo del mismo
+//!    fotograma: **agruparlos daría la misma resta con una etiqueta falsa**, y aquí eso ya costó una
+//!    medida entera.
+//! 5. **El resto del fotograma** — teselar esas formas —**las de las consolas y las de los
+//!    paneles**—, dibujarlas, y todo el armazón que egui monta alrededor: recoger la entrada del
+//!    escritorio, abrir y cerrar la pasada, medir la fuente, subir texturas. Es lo que queda del
+//!    coste total al quitarle los tramos anteriores, y **se llama «el resto» a propósito**: desde
+//!    dentro no hay forma de aislar la teselación, así que ponerle ese nombre sería publicar como
+//!    medido algo que no lo está. El tramo del panel cubre **encolar** su pintado, no teselarlo.
 //!
 //! El total lo publica `eframe`, que es quien puede: cuando se tesela, la pasada ya ha terminado.
 //!
-//! **Los tres primeros tramos son de una división; el cuarto es de la ventana.** Esa frontera no es
-//! organizativa, la impone el instrumento: esperar, interpretar y encolar se cronometran alrededor de
+//! **Los cuatro primeros tramos son de una división; el quinto es de la ventana.** Esa frontera no es
+//! organizativa, la impone el instrumento: los cuatro se cronometran alrededor de
 //! *una* consola, y así siguen siendo comparables con las tablas de D3 haya una división o cuatro.
 //! El consumo de CPU, en cambio, lo publica el framework **una sola vez por pasada**: no viene
 //! separado por división y partirlo sería inventar un reparto que nadie ha medido. Por eso el resto
 //! se calcula una vez, restando al total la suma de lo cronometrado por **todas** las divisiones.
 //!
-//! Los cuatro tramos se guardan **del mismo fotograma**. El coste total llega con uno de retraso
+//! Los cinco tramos se guardan **del mismo fotograma**. El coste total llega con uno de retraso
 //! —`eframe` lo publica del anterior—, así que se retienen los tramos hasta que su total aparece;
 //! restar tramos de un fotograma al total de otro daría un número que parece bueno y no lo es.
 
@@ -108,8 +113,13 @@ impl fmt::Display for Serie {
 }
 
 /// Los tramos de un fotograma, a la espera de que llegue su coste total.
+///
+/// **Es público y se construye con nombres a propósito.** Cuando esto se pasaba como tres duraciones
+/// posicionales seguidas, intercambiar dos compilaba sin una queja y publicaba un informe mentiroso —
+/// justo el fallo que la separación de tramos existe para impedir. Un tramo que se puede confundir con
+/// otro en la llamada no está separado de nada.
 #[derive(Clone, Copy)]
-struct Tramos {
+pub struct Tramos {
     /// Cuánto esperó en la cola el byte más antiguo, o `None` si a esta consola no le llegó nada en
     /// este fotograma.
     ///
@@ -121,6 +131,37 @@ struct Tramos {
     esperado: Option<Duration>,
     interpretado: Duration,
     encolado: Duration,
+    /// Lo que costó mirar si el `panel.json` de esta consola cambió y, si cambió, leerlo e
+    /// interpretarlo.
+    ///
+    /// **Va aparte y no sumado a `encolado`, y esa separación es el motivo de que exista el campo.**
+    /// Los dos ocurren dentro del fotograma y los dos hay que devolverlos, así que para la resta daría
+    /// igual. Pero un tramo llamado «encolando el pintado» que además incluyera leer un fichero de
+    /// disco sería un número con la etiqueta cambiada, y aquí eso ya costó una medida entera: el coste
+    /// que no se nombra bien acaba atribuido a quien no lo hizo.
+    panel: Duration,
+}
+
+impl Tramos {
+    /// Los tramos de una vuelta, con cada duración puesta por su nombre.
+    ///
+    /// `esperando_desde` es cuándo llegó el byte más antiguo de los recogidos; sin bytes en este
+    /// fotograma no hay nada que medir de la vuelta — un fotograma en reposo no es una vuelta
+    /// rapidísima, es una vuelta que no ocurrió.
+    pub fn de_una_vuelta(
+        esperando_desde: Option<Instant>,
+        recogido_en: Instant,
+        interpretado: Duration,
+        encolado: Duration,
+        panel: Duration,
+    ) -> Self {
+        Self {
+            esperado: esperando_desde.map(|desde| recogido_en.saturating_duration_since(desde)),
+            interpretado,
+            encolado,
+            panel,
+        }
+    }
 }
 
 /// Los cronómetros **de una división** y lo que llevan medido.
@@ -140,6 +181,8 @@ pub struct Medida {
     esperar: Serie,
     interpretar: Serie,
     encolar: Serie,
+    /// Mirar la fecha del `panel.json` y, cuando ha cambiado, leerlo e interpretarlo.
+    panel: Serie,
     vuelta: Serie,
     /// Los tramos del fotograma anterior, esperando a que `eframe` publique lo que costó.
     pendiente: Option<Tramos>,
@@ -153,24 +196,10 @@ impl Medida {
 
     /// Anota los tramos de este fotograma. Quedan pendientes hasta que se sepa lo que costó entero.
     ///
-    /// `esperando_desde` es cuándo llegó el byte más antiguo de los recogidos; sin bytes en este
-    /// fotograma no hay nada que medir de la vuelta, y no se anota nada — un fotograma en reposo no
-    /// es una vuelta rapidísima, es una vuelta que no ocurrió.
-    pub fn anotar_vuelta(
-        &mut self,
-        esperando_desde: Option<Instant>,
-        recogido_en: Instant,
-        interpretado: Duration,
-        encolado: Duration,
-    ) {
-        // **Se guarda siempre, también sin salida.** Lo que decide si hubo vuelta es que `esperado` sea
-        // `Some`; el trabajo de pintar ocurrió en los dos casos y la ventana tiene que poder
-        // descontarlo.
-        self.pendiente = Some(Tramos {
-            esperado: esperando_desde.map(|desde| recogido_en.saturating_duration_since(desde)),
-            interpretado,
-            encolado,
-        });
+    /// **Se guarda siempre, también sin salida.** Lo que decide si hubo vuelta es que la espera sea
+    /// `Some`; el trabajo de pintar ocurrió en los dos casos y la ventana tiene que poder descontarlo.
+    pub fn anotar_vuelta(&mut self, tramos: Tramos) {
+        self.pendiente = Some(tramos);
     }
 
     /// Cierra el fotograma anterior de esta división con lo que `eframe` dice que costó de CPU.
@@ -191,10 +220,21 @@ impl Medida {
             self.esperar.anotar(esperado);
             self.interpretar.anotar(tramos.interpretado);
             self.encolar.anotar(tramos.encolado);
+            self.panel.anotar(tramos.panel);
             self.vuelta.anotar(esperado + coste_cpu);
         }
 
-        Some(tramos.interpretado + tramos.encolado)
+        Some(tramos.interpretado + tramos.encolado + tramos.panel)
+    }
+
+    /// Lo que esta división lleva anotado del tramo del panel.
+    ///
+    /// Existe para que una prueba pueda afirmar que **el camino real declara ese tramo**, y no solo
+    /// que la anotación funciona cuando se la llama a mano. Sin esto, dejar el coste del panel en cero
+    /// dentro de la pasada de interfaz no rompía nada.
+    #[cfg(test)]
+    pub fn panel_anotado(&self) -> Option<Duration> {
+        self.panel.hay().then(|| self.panel.media())
     }
 
     /// Si esta división llegó a medir algo, para no publicar el informe de una consola en blanco.
@@ -227,6 +267,16 @@ impl Medida {
             println!("  esperando en la cola:   {}", self.esperar);
             println!("  interpretando:          {}", self.interpretar);
             println!("  encolando el pintado:   {}", self.encolar);
+            println!("  el panel de estado:     {}", self.panel);
+            // **La media de este tramo mezcla dos poblaciones y hay que decirlo.** Casi todos los
+            // fotogramas solo miran la fecha del fichero —menos de un microsegundo—; los pocos en que
+            // el productor ha publicado cuestan leer e interpretar, que es tres órdenes de magnitud
+            // más. La media sale pegada al caso barato, así que el número que describe el caso caro es
+            // el 95, no ella.
+            println!(
+                "    mezcla mirar la fecha (casi todos) con leer e interpretar (los de\n    \
+                 publicación): la media describe el primero, el 95 % el segundo"
+            );
             println!(
                 "  incluye el fotograma entero, también el pintado de las otras consolas: un\n  \
                  fotograma se presenta indivisible. Por eso dos de estos números NO se suman"
@@ -337,14 +387,24 @@ mod tests {
     }
 
     #[test]
-    fn los_cuatro_tramos_suman_el_total_del_fotograma() {
+    fn los_cinco_tramos_suman_el_total_del_fotograma() {
         // Es la propiedad que hace que el desglose sirva para atribuir: si los tramos no suman, el
         // veredicto tendría que explicar un hueco, y quien lo lea no sabría a qué culpar.
+        //
+        // **El quinto tramo es el panel**, y entró aquí en cuanto empezó a pintarse: un trabajo que
+        // ocurre dentro del fotograma y no se declara se lo lleva el resto, que es precisamente el
+        // número que decide si el framework de interfaz aguanta.
         let mut medida = Medida::default();
         let mut resto = RestoDelFotograma::default();
         let ahora = Instant::now();
 
-        medida.anotar_vuelta(Some(ahora - ms(100)), ahora, ms(2), ms(3));
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(ahora - ms(100)),
+            ahora,
+            ms(2),
+            ms(3),
+            ms(1),
+        ));
         let cronometrado = medida
             .cerrar_fotograma(ms(10))
             .expect("había tramos pendientes que cerrar");
@@ -353,8 +413,35 @@ mod tests {
         assert_eq!(medida.esperar.media(), ms(100));
         assert_eq!(medida.interpretar.media(), ms(2));
         assert_eq!(medida.encolar.media(), ms(3));
-        assert_eq!(resto.serie.media(), ms(5), "10 menos 2 y 3");
+        assert_eq!(medida.panel.media(), ms(1));
+        assert_eq!(resto.serie.media(), ms(4), "10 menos 2, 3 y 1");
         assert_eq!(medida.vuelta.media(), ms(110), "la espera más el fotograma");
+    }
+
+    /// **Lo que el panel le quita al resto, y por qué esta prueba existe aparte.** La de arriba pasaría
+    /// igual sumando el tramo del panel dentro de `encolar`: los dos se descuentan y el resto sale el
+    /// mismo. Lo que se rompería es la *etiqueta* —«encolando el pintado» incluyendo leer un fichero de
+    /// disco—, y una etiqueta cambiada es el error que ya invalidó una medida entera en este proyecto.
+    #[test]
+    fn el_tramo_del_panel_no_se_le_suma_al_del_pintado() {
+        let mut medida = Medida::default();
+        let ahora = Instant::now();
+
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(ahora),
+            ahora,
+            ms(2),
+            ms(3),
+            ms(4),
+        ));
+        medida.cerrar_fotograma(ms(10));
+
+        assert_eq!(
+            medida.encolar.media(),
+            ms(3),
+            "el coste del panel se coló en el tramo del pintado"
+        );
+        assert_eq!(medida.panel.media(), ms(4));
     }
 
     #[test]
@@ -367,8 +454,20 @@ mod tests {
         let mut resto = RestoDelFotograma::default();
         let ahora = Instant::now();
 
-        izquierda.anotar_vuelta(Some(ahora), ahora, ms(2), ms(1));
-        derecha.anotar_vuelta(Some(ahora), ahora, ms(3), ms(1));
+        izquierda.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(ahora),
+            ahora,
+            ms(2),
+            ms(1),
+            Duration::ZERO,
+        ));
+        derecha.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(ahora),
+            ahora,
+            ms(3),
+            ms(1),
+            Duration::ZERO,
+        ));
 
         let cronometrado: Duration = [
             izquierda.cerrar_fotograma(ms(10)),
@@ -390,11 +489,18 @@ mod tests {
         // que la aplicación responde al instante justamente por no haber hecho nada.
         let mut medida = Medida::default();
 
-        medida.anotar_vuelta(None, Instant::now(), ms(2), ms(3));
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            None,
+            Instant::now(),
+            ms(2),
+            ms(3),
+            ms(1),
+        ));
         medida.cerrar_fotograma(ms(10));
 
         assert!(!medida.vuelta.hay(), "se anotó una vuelta que no ocurrió");
         assert!(!medida.esperar.hay(), "se anotó una espera que no ocurrió");
+        assert!(!medida.panel.hay(), "tampoco el tramo del panel");
     }
 
     #[test]
@@ -407,16 +513,28 @@ mod tests {
         let mut medida = Medida::default();
         let mut resto = RestoDelFotograma::default();
 
-        medida.anotar_vuelta(None, Instant::now(), ms(0), ms(4));
+        // Y su panel también se mira cada fotograma, aunque su productor esté callado: el `ms(1)` es
+        // lo que cuesta preguntar la fecha del fichero, que se paga igual que el pintado.
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            None,
+            Instant::now(),
+            ms(0),
+            ms(4),
+            ms(1),
+        ));
         let cronometrado = medida
             .cerrar_fotograma(ms(10))
             .expect("una consola pintada tiene que declarar lo que costó pintarla");
         resto.anotar(ms(10), cronometrado);
 
-        assert_eq!(cronometrado, ms(4), "el encolado de la consola quieta");
+        assert_eq!(
+            cronometrado,
+            ms(5),
+            "el encolado de la consola quieta más el vistazo a su panel"
+        );
         assert_eq!(
             resto.serie.media(),
-            ms(6),
+            ms(5),
             "el resto se quedó con el pintado de la consola quieta"
         );
     }

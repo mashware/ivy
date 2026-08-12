@@ -13,9 +13,20 @@ use std::fs::DirBuilder;
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod panel;
+
+pub use panel::{
+    Line, MAX_BYTES, MAX_INDENT, Mark, Panel, Problem, STALE_AFTER, Style, read, read_if_newer,
+};
+
 /// El único fichero que el contrato pone dentro del directorio. Lo escribe quien hace el trabajo,
 /// no esta caja.
-const FICHERO_DEL_PANEL: &str = "panel.json";
+///
+/// **Público porque hace falta fuera.** El vigilante que llega con F1.6 corre en la aplicación y
+/// tiene que descartar los avisos de cualquier otra ruta, así que necesita nombrar este fichero; sin
+/// exportarlo, la cadena se volvería a escribir a mano en cada sitio y el contrato dejaría de vivir
+/// en uno solo.
+pub const FICHERO_DEL_PANEL: &str = "panel.json";
 
 /// Los nombres de las dos variables del contrato, en un solo sitio.
 ///

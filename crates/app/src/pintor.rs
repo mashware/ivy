@@ -74,6 +74,15 @@ impl Metrica {
         self.alto
     }
 
+    /// La fuente con la que se midió, para quien pinte texto que tenga que cuadrar con esta rejilla.
+    ///
+    /// Se clona en vez de prestarse porque `Painter::text` la consume, y un `FontId` son dos campos.
+    /// Sigue sin poder fijarse: medir con una y pintar con otra es lo que esta caja existe para
+    /// impedir.
+    pub fn fuente(&self) -> FontId {
+        self.fuente.clone()
+    }
+
     /// Cuántas celdas enteras caben en el espacio dado.
     ///
     /// **Nunca menos de una fila y una columna, y nunca más de [`MAXIMO`].** El suelo está porque

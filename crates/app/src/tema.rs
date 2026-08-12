@@ -6,6 +6,7 @@
 //! secuencias de escape, y una aplicación que resuelva por ahí sale en negro.
 
 use eframe::egui::Color32;
+use panel_contract::{Mark, Style};
 use term_core::TermColor;
 
 /// Cuánto se acerca al fondo un color atenuado.
@@ -39,6 +40,8 @@ pub struct Tema {
     /// paleta la pide el programa de dentro y describe *su* contenido. Esto describe el estado de la
     /// aplicación, así que un programa no puede reclamarlo ni cambiarlo.
     foco: Color32,
+    /// El fondo del panel de estado, que es lo que lo separa visualmente de su consola sin una línea.
+    fondo_del_panel: Color32,
 }
 
 impl Default for Tema {
@@ -83,6 +86,73 @@ impl Default for Tema {
             // distinguirse **del divisor** a simple vista, porque los dos se pintan pegados y si se
             // parecieran no habría forma de saber qué consola escucha el teclado.
             foco: Color32::from_rgb(0x75, 0x87, 0xA6),
+            // Un paso por debajo del fondo de la consola, no por encima: el panel es el margen y la
+            // consola es el contenido, así que lo que tiene que retroceder es el panel. Subirlo —hacerlo
+            // más claro— convertiría cada división en dos bloques compitiendo, y con dos divisiones
+            // serían cuatro.
+            fondo_del_panel: Color32::from_rgb(0x18, 0x18, 0x18),
+        }
+    }
+}
+
+/// Los colores con los que se pinta el panel de estado.
+///
+/// **Salen de la paleta del terminal a propósito, no de una segunda familia.** Los dos se ven a la vez
+/// y a un palmo el uno del otro; con dos juegos de verdes o de rojos distintos, la pantalla se leería
+/// como dos aplicaciones pegadas. Lo que cambia respecto a la consola es *quién* elige el color: aquí
+/// lo elige el vocabulario del contrato, no el programa de dentro.
+impl Tema {
+    /// El fondo del panel de estado.
+    pub fn fondo_del_panel(&self) -> Color32 {
+        self.fondo_del_panel
+    }
+
+    /// El color de una línea del panel, según lo que el productor haya dicho de ella.
+    ///
+    /// **`style` manda sobre `mark` cuando vienen los dos**, y esa precedencia es del contrato: dos de
+    /// los nueve ficheros reales del repo los combinan a propósito, para decir «esta línea es
+    /// información, y su color *es* el dato». Si `mark` ganara, ese color se perdería.
+    ///
+    /// Sin ninguno de los dos, el color del texto normal de la consola: una línea sin adjetivos no es
+    /// una línea apagada.
+    pub fn color_del_panel(&self, marca: Option<Mark>, estilo: Option<Style>) -> Color32 {
+        match (estilo, marca) {
+            (Some(estilo), _) => self.por_estilo(estilo),
+            (None, Some(marca)) => self.por_marca(marca),
+            (None, None) => self.primer_plano,
+        }
+    }
+
+    /// Los siete estilos del contrato.
+    fn por_estilo(&self, estilo: Style) -> Color32 {
+        match estilo {
+            Style::Normal => self.primer_plano,
+            // Apagado es «esto está aquí por si acaso»: el mismo gesto que el atenuado del terminal,
+            // que ya significa eso mismo para el programa de dentro.
+            Style::Dim => self.apagar(self.primer_plano),
+            // El título es lo único que se pinta más claro que el texto normal. No lleva color propio:
+            // un título de color competiría con las marcas, que sí lo usan para decir algo.
+            Style::Title => self.paleta[15],
+            Style::Accent => self.paleta[4],
+            Style::Ok => self.paleta[2],
+            Style::Warn => self.paleta[3],
+            Style::Error => self.paleta[1],
+        }
+    }
+
+    /// Las seis marcas del contrato.
+    ///
+    /// **`done` y `pending` van apagadas, y las dos por la misma razón**: lo terminado y lo que ni ha
+    /// empezado son los dos estados en los que no hay nada que hacer. Lo que tiene que saltar a la vista
+    /// es `current` —dónde va la cosa— y `block` —qué la para—.
+    fn por_marca(&self, marca: Mark) -> Color32 {
+        match marca {
+            Mark::Done => self.apagar(self.paleta[2]),
+            Mark::Current => self.paleta[4],
+            Mark::Pending => self.apagar(self.primer_plano),
+            Mark::Wait => self.paleta[3],
+            Mark::Block => self.paleta[1],
+            Mark::Info => self.primer_plano,
         }
     }
 }
@@ -209,6 +279,77 @@ mod tests {
 
     fn tema() -> Tema {
         Tema::default()
+    }
+
+    /// **La regla del contrato que es fácil leer al revés.** Su tabla describe `style` como algo «para
+    /// líneas sin `mark`», pero dos de los nueve ficheros reales del repo los combinan a propósito: la
+    /// marca dice qué **es** la línea y el estilo dice que su color *es* el dato. Si la marca ganara,
+    /// ese color se perdería sin que nadie se enterase.
+    #[test]
+    fn el_estilo_manda_sobre_la_marca_cuando_vienen_los_dos() {
+        let t = tema();
+
+        assert_eq!(
+            t.color_del_panel(Some(Mark::Info), Some(Style::Ok)),
+            t.color_del_panel(None, Some(Style::Ok)),
+            "el color tiene que salir del estilo, no de la marca"
+        );
+        assert_ne!(
+            t.color_del_panel(Some(Mark::Info), Some(Style::Ok)),
+            t.color_del_panel(Some(Mark::Info), None),
+            "con estilo y sin él no puede verse igual"
+        );
+    }
+
+    #[test]
+    fn una_linea_sin_marca_ni_estilo_se_pinta_como_el_texto_normal() {
+        assert_eq!(tema().color_del_panel(None, None), tema().primer_plano);
+    }
+
+    /// Los trece nombres del contrato, cada uno con su color. Sin esto, devolver el mismo para todos
+    /// dejaría la suite verde y el panel en un solo tono.
+    #[test]
+    fn las_seis_marcas_y_los_siete_estilos_no_se_pintan_todos_igual() {
+        let t = tema();
+        let marcas = [
+            Mark::Done,
+            Mark::Current,
+            Mark::Pending,
+            Mark::Wait,
+            Mark::Block,
+            Mark::Info,
+        ];
+        let estilos = [
+            Style::Normal,
+            Style::Dim,
+            Style::Title,
+            Style::Accent,
+            Style::Ok,
+            Style::Warn,
+            Style::Error,
+        ];
+
+        // Se cuentan los colores **distintos** dentro de cada juego, y no se comparan entre juegos:
+        // `normal` y `info` valen el mismo a propósito —los dos son «texto sin adjetivos»— y exigir
+        // trece colores obligaría a inventar una diferencia que no significa nada.
+        let de_marcas: std::collections::HashSet<_> =
+            marcas.iter().map(|m| t.por_marca(*m)).collect();
+        let de_estilos: std::collections::HashSet<_> =
+            estilos.iter().map(|e| t.por_estilo(*e)).collect();
+
+        assert_eq!(de_marcas.len(), 6, "las seis marcas son distintas entre sí");
+        assert_eq!(de_estilos.len(), 7, "los siete estilos son distintos");
+        assert_ne!(
+            t.por_marca(Mark::Current),
+            t.por_marca(Mark::Block),
+            "«en marcha» y «bloqueado» son lo que hay que distinguir de un vistazo"
+        );
+    }
+
+    #[test]
+    fn el_fondo_del_panel_se_distingue_del_de_la_consola() {
+        let t = tema();
+        assert_ne!(t.fondo_del_panel(), t.fondo());
     }
 
     #[test]

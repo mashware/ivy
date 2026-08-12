@@ -18,6 +18,7 @@
 //! tecla pulsada miles de veces por segundo durante un volcado.
 
 pub mod medida;
+pub mod panel;
 pub mod pintor;
 pub mod puente;
 pub mod teclado;
@@ -176,10 +177,10 @@ struct Division {
     /// variables, se le quitan las que hubiera heredado, y se comporta como antes de que existiera
     /// este hito.
     ///
-    /// Nadie lo lee fuera de las pruebas, y eso es correcto: **está aquí por lo que hace al morir**.
-    /// El día que la aplicación lea el fichero del panel —otro hito— pasará a leerse.
-    #[allow(dead_code)]
+    /// Se lee **también en vida** desde F1.6: es de donde sale el panel de estado de esta consola.
     panel: Option<PanelDir>,
+    /// Lo que se sabe del panel de esta consola: su último contenido bueno y cuándo se leyó.
+    estado_del_panel: panel::Estado,
     pantalla: Screen,
     /// Lo que se recoge del puente en un fotograma, reutilizado entre ellos para no reservar
     /// memoria en cada uno. Nunca crece más allá del presupuesto: se pide con tope y se
@@ -291,6 +292,7 @@ impl Division {
             pty,
             puente,
             panel,
+            estado_del_panel: panel::Estado::default(),
             pantalla: Screen::new(REJILLA_INICIAL),
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
@@ -336,6 +338,25 @@ impl Division {
         // apunta lo que ya se sabe y allí se completa.
         self.pendiente_de_medir = Some((recogida.esperando_desde, recogido_en, interpretado));
         recogida.queda_cola
+    }
+
+    /// Vuelve a leer el `panel.json` de esta consola si ha cambiado.
+    ///
+    /// Sin directorio no hay nada que leer: es el caso de la consola que no pudo crear el suyo, que
+    /// tiene que seguir viéndose como antes de que existiera el panel.
+    fn refrescar_su_panel(&mut self) {
+        if let Some(dir) = self.panel.as_ref() {
+            self.estado_del_panel.refrescar(dir.path());
+        }
+    }
+
+    /// Parte el rectángulo de esta división entre su consola y su panel.
+    fn repartir_con_su_panel(&self, rect: egui::Rect, ancho_de_celda: f32) -> panel::Hueco {
+        panel::apartar(
+            rect,
+            ancho_de_celda,
+            self.estado_del_panel.a_pintar().is_some(),
+        )
     }
 
     /// Manda al programa lo que se ha tecleado en este pase, y mide cuánto se tarda.
@@ -581,17 +602,43 @@ impl Ventana {
         tema: &Tema,
         metrica: &Metrica,
     ) {
-        division.medido = metrica.celdas_en(rect.size());
+        // **El panel se cronometra aparte del encolado de la consola, y con un solo reloj alrededor de
+        // leer y pintar.** Para la resta del fotograma daría igual sumarlo todo —lo que importa ahí es
+        // que se declare—, pero un tramo llamado «encolando el pintado» que además incluyera leer un
+        // fichero de disco es un número con la etiqueta cambiada, y en este proyecto eso ya invalidó
+        // una medida entera.
+        //
+        // **Releer va antes de repartir**, porque de que haya panel o no depende cuánto ancho le queda
+        // a la consola: una consola cuyo productor acaba de publicar por primera vez se estrecha en
+        // este mismo fotograma, no en el siguiente.
+        let antes_del_panel = Instant::now();
+        division.refrescar_su_panel();
+        let hueco = division.repartir_con_su_panel(rect, metrica.ancho());
+        let coste_de_leer = antes_del_panel.elapsed();
+
+        division.medido = metrica.celdas_en(hueco.consola.size());
 
         let antes = Instant::now();
         pintor::pintar(
-            &ui.painter_at(rect),
+            &ui.painter_at(hueco.consola),
             &division.pantalla.view(),
             tema,
             metrica,
-            rect.left_top(),
+            hueco.consola.left_top(),
         );
         let encolado = antes.elapsed();
+
+        let antes_de_pintarlo = Instant::now();
+        if let (Some(sitio), Some(dir)) = (hueco.panel, division.panel.as_ref()) {
+            panel::pintar(
+                &ui.painter_at(sitio),
+                &mut division.estado_del_panel,
+                dir.id(),
+                tema,
+                metrica,
+            );
+        }
+        let coste_del_panel = coste_de_leer + antes_de_pintarlo.elapsed();
 
         // El cierre de la vuelta va aquí y no en el bucle de arriba porque **el encolado hay que
         // declararlo siempre**, también cuando a esta consola no le llegó salida: se pintó igual, y su
@@ -599,9 +646,13 @@ impl Ventana {
         if let Some((esperando_desde, recogido_en, interpretado)) =
             division.pendiente_de_medir.take()
         {
-            division
-                .medida
-                .anotar_vuelta(esperando_desde, recogido_en, interpretado, encolado);
+            division.medida.anotar_vuelta(medida::Tramos::de_una_vuelta(
+                esperando_desde,
+                recogido_en,
+                interpretado,
+                encolado,
+                coste_del_panel,
+            ));
         }
     }
 }
@@ -763,6 +814,7 @@ mod tests {
             pty,
             puente: Puente::nuevo(salida, || {}),
             panel: None,
+            estado_del_panel: panel::Estado::default(),
             pantalla: Screen::new(REJILLA_INICIAL),
             medida: Medida::default(),
             pendiente_de_medir: None,
@@ -1028,7 +1080,7 @@ mod tests {
                 .as_ref()
                 .expect("la consola tiene que arrancar con su directorio")
                 .path()
-                .join("panel.json");
+                .join(panel_contract::FICHERO_DEL_PANEL);
 
             division
                 .pty
@@ -1540,6 +1592,230 @@ mod tests {
     /// Un área de la anchura pedida, con la altura que haga falta para que sea un rectángulo válido.
     fn area_de(ancho: f32) -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(ancho, 300.0))
+    }
+
+    /// Monta una división con su directorio de verdad y un `panel.json` ya publicado.
+    ///
+    /// Hace falta el directorio real y no un doble: lo que estas pruebas comprueban es la cadena
+    /// entera —el fichero en disco, la lectura del contrato y el reparto que sale de ella— y con un
+    /// panel puesto a mano se probaría el reparto contra un estado que nadie ha leído nunca.
+    fn division_con_panel(contenido: &str) -> Division {
+        let mut division = division_con("sleep 30");
+        let dir = PanelDir::create().expect("crear el directorio de la división");
+        std::fs::write(
+            dir.path().join(panel_contract::FICHERO_DEL_PANEL),
+            contenido,
+        )
+        .expect("publicar el panel");
+        division.panel = Some(dir);
+        division.refrescar_su_panel();
+        division
+    }
+
+    /// **Que la pasada de interfaz relee de verdad.** Sin esto, quitar la llamada al refresco dejaba la
+    /// suite entera en verde: las pruebas del lector afirmaban sobre el lector, y nadie ataba que el
+    /// fotograma lo llamara. Un panel publicado después de abrir la consola no aparecería jamás.
+    #[test]
+    fn el_fotograma_recoge_un_panel_publicado_despues_de_abrir_la_consola() {
+        let mut division = division_con("sleep 30");
+        let dir = PanelDir::create().expect("crear el directorio");
+        division.panel = Some(dir);
+        assert!(
+            division.estado_del_panel.a_pintar().is_none(),
+            "todavía no hay nada publicado"
+        );
+
+        std::fs::write(
+            division
+                .panel
+                .as_ref()
+                .expect("hay directorio")
+                .path()
+                .join(panel_contract::FICHERO_DEL_PANEL),
+            r#"{"lines":["llegó tarde"]}"#,
+        )
+        .expect("publicar el panel");
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+            Ventana::pintar_division(
+                ui,
+                &mut division,
+                area_de(800.0),
+                &Tema::default(),
+                &metrica,
+            );
+        })
+        .drop_without_applying_deltas();
+
+        assert_eq!(
+            division
+                .estado_del_panel
+                .a_pintar()
+                .expect("el fotograma tenía que haberlo recogido")
+                .lines[0]
+                .text,
+            "llegó tarde"
+        );
+    }
+
+    /// **Que el tramo del panel se declare desde el camino real, y no solo cuando se anota a mano.**
+    /// Dejarlo en cero dentro de la pasada de interfaz no rompía nada, y ese tiempo acabaría publicado
+    /// como coste del framework — el número que decide si egui aguanta.
+    #[test]
+    fn la_pasada_de_interfaz_declara_lo_que_costo_el_panel() {
+        let mut division = division_con_panel(r#"{"lines":["algo publicado"]}"#);
+        // Con salida en este fotograma, que es cuando las series se anotan: sin ella hay pintado que
+        // declarar pero no hay *vuelta* que medir, y eso ya tiene su propia prueba en la medida.
+        let ahora = Instant::now();
+        division.pendiente_de_medir = Some((Some(ahora), ahora, Duration::from_millis(1)));
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+            Ventana::pintar_division(
+                ui,
+                &mut division,
+                area_de(800.0),
+                &Tema::default(),
+                &metrica,
+            );
+        })
+        .drop_without_applying_deltas();
+        division.medida.cerrar_fotograma(Duration::from_millis(10));
+
+        let anotado = division
+            .medida
+            .panel_anotado()
+            .expect("el tramo del panel tiene que llegar a la serie");
+        assert!(
+            anotado > Duration::ZERO,
+            "se declaró un cero: el coste del panel se lo queda el framework por resta"
+        );
+    }
+
+    /// **La garantía de este PR.** Una consola cuyo productor no ha publicado nada se ve exactamente
+    /// como antes de que existiera el panel: sin ancho descontado y sin segundo rectángulo.
+    #[test]
+    fn una_consola_sin_panel_publicado_se_queda_con_todo_su_rectangulo() {
+        let division = division_con("sleep 30");
+        let entera = area_de(800.0);
+
+        let hueco = division.repartir_con_su_panel(entera, ANCHO_DE_CELDA);
+
+        assert_eq!(hueco.consola, entera, "sin panel no se descuenta nada");
+        assert!(hueco.panel.is_none());
+    }
+
+    /// **El criterio que hace que el descuento sirva de algo.** Que el rectángulo se parta no basta: si
+    /// la rejilla se midiera contra la división entera, el programa de dentro creería tener columnas
+    /// que el panel le ha quitado y escribiría debajo de él.
+    #[test]
+    fn la_rejilla_de_una_consola_con_panel_mide_solo_el_hueco_que_le_queda() {
+        let mut division = division_con_panel(r#"{"lines":["algo publicado"]}"#);
+        let entera = area_de(800.0);
+
+        let ctx = egui::Context::default();
+        let (mut con_panel, mut sin_descontar) = (REJILLA_INICIAL, REJILLA_INICIAL);
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+            Ventana::pintar_division(ui, &mut division, entera, &Tema::default(), &metrica);
+            con_panel = division.medido;
+            sin_descontar = metrica.celdas_en(entera.size());
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            con_panel.cols < sin_descontar.cols,
+            "midió {} columnas, las mismas que sin panel",
+            con_panel.cols
+        );
+        assert_eq!(
+            con_panel.rows, sin_descontar.rows,
+            "el panel quita ancho, no alto"
+        );
+    }
+
+    /// **El paso que une el reparto con el pintado, y que no ataba nada.** El reparto tiene sus pruebas
+    /// y lo que se pinta las suyas, pero entre los dos está pasarle al panel **el rectángulo que le
+    /// tocó**: con el de la consola, el panel se pintaría encima del programa —tapándolo con su fondo,
+    /// que es opaco— y la suite seguía verde porque el texto y los colores salen iguales.
+    #[test]
+    fn el_panel_se_pinta_en_su_franja_y_no_encima_de_la_consola() {
+        let mut division = division_con_panel(r#"{"header":false,"lines":["algo publicado"]}"#);
+        let entera = area_de(800.0);
+
+        let ctx = egui::Context::default();
+        let mut corte = 0.0;
+        let mut salida = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+            Ventana::pintar_division(ui, &mut division, entera, &Tema::default(), &metrica);
+            corte = division
+                .repartir_con_su_panel(entera, metrica.ancho())
+                .consola
+                .right();
+        });
+        let formas = std::mem::take(&mut salida.shapes);
+        salida.drop_without_applying_deltas();
+
+        let donde = formas
+            .iter()
+            .find_map(|recortada| match &recortada.shape {
+                egui::Shape::Text(texto) if texto.galley.text().contains("algo publicado") => {
+                    Some(texto.pos)
+                }
+                _ => None,
+            })
+            .expect("la línea del panel tenía que quedar encolada");
+        assert!(
+            donde.x >= corte,
+            "el panel se pintó dentro de la consola: {} está a la izquierda de {corte}",
+            donde.x
+        );
+    }
+
+    /// **El caso normal con dos consolas: una con su productor publicando y la otra esperando en su
+    /// prompt** — y la de al lado tiene su directorio hecho, que es como nace toda consola. Ahí está lo
+    /// que las otras pruebas no tocan: las que comprueban que sin panel no se descuenta nada usan una
+    /// división **sin directorio**, que en la aplicación solo pasa cuando crearlo falló. Lo que decide
+    /// si se cede ancho es que el productor **haya publicado**, no que exista el sitio donde publicar;
+    /// con lo segundo, toda consola perdería sus treinta y seis columnas desde el arranque.
+    #[test]
+    fn una_consola_cede_ancho_cuando_su_productor_publica_y_no_por_tener_donde() {
+        // La mitad justa para cada una, que es el reparto de arranque: así la única diferencia entre
+        // las dos medidas es el panel.
+        let area = area_de(1200.0);
+
+        // La referencia es la ventana de antes de este hito: ninguna consola con nada.
+        let mut ninguna = ventana_con("sleep 30", "sleep 30");
+        pasada_de_interfaz(
+            &mut ninguna,
+            &egui::Context::default(),
+            area,
+            egui::RawInput::default(),
+        );
+        let como_antes = ninguna.divisiones[1].medido;
+
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.divisiones[0] = division_con_panel(r#"{"lines":["algo publicado"]}"#);
+        ventana.divisiones[1].panel = Some(PanelDir::create().expect("crear el directorio"));
+        pasada_de_interfaz(
+            &mut ventana,
+            &egui::Context::default(),
+            area,
+            egui::RawInput::default(),
+        );
+
+        assert!(
+            ventana.divisiones[0].medido.cols < como_antes.cols,
+            "la consola cuyo productor publicó no cedió ancho: midió {} columnas",
+            ventana.divisiones[0].medido.cols
+        );
+        assert_eq!(
+            ventana.divisiones[1].medido, como_antes,
+            "la consola con el directorio vacío se estrechó sin que nadie hubiera publicado"
+        );
     }
 
     #[test]

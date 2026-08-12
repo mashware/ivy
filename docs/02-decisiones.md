@@ -587,3 +587,51 @@ Las dos comprobadas, no temidas: quitando cualquiera de las dos, su prueba se po
 elección fue *«`mpsc` de la biblioteca estándar frente a `crossbeam-channel` frente a un callback»*
 con el criterio de no añadir dependencias; acotado frente a sin acotar no llegó a plantearse, y lo
 ilimitado es el valor por defecto de `mpsc::channel()`.
+
+---
+
+## D9 — Los símbolos del panel se eligen midiendo la fuente, no de memoria
+
+**Decisión.** Las seis marcas del contrato se pintan con `●` (`done`), `▶` (`current`), `·`
+(`pending`), `…` (`wait`), `×` (`block`) y `›` (`info`). No es el juego del prototipo, y la diferencia
+no es estética: **es el único juego de seis que la fuente monoespaciada tiene y que mide lo que mide
+una celda**.
+
+**Lo medido**, sobre las fuentes por defecto de egui 0.36.1 y a cuerpo 14, donde una celda son 8,43
+puntos:
+
+| Símbolo | Ancho | Veredicto |
+|---|---|---|
+| `✓` U+2713, `✗` U+2717 | **0,00** | no están en la fuente |
+| `⏸` U+23F8 | 14,00 | solo en la de emoji |
+| `⚠` U+26A0, `✔` U+2714 | 17,77 | solo en la de emoji |
+| `✱` U+2731 | 13,00 | solo en la de emoji |
+| `▶` `·` `›` `→` `»` `…` `─` `●` `◆` `■` `▪` `◦` `▸` `∙` `∘` | 8,43 | están, y monoespaciados |
+
+**Por qué el ancho y no `has_glyphs`.** Porque ese predicado **no responde lo que su nombre promete**:
+por dentro es `resolve_face(c) != replacement_face_key` (`epaint-0.36.1/src/text/font.rs:719`), y con
+la familia monoespaciada **la cara base es la de reemplazo**, así que devuelve `false` para todo lo que
+la fuente sí tiene — comprobado con la letra `A` de control. Solo devuelve `true` para lo que cae a las
+fuentes de emoji, o sea justo para lo que **no** sirve. La primera medida de este hito se tomó con él y
+salió invertida: daba por ausentes tres símbolos que están, y por buenos dos que descuadran la columna.
+
+**Lo que se descartó, y por qué.**
+
+- **Portar el juego del prototipo tal cual.** Dos de sus seis no están y dos vienen de la fuente de
+  emoji. Un panel con cuadros en su primera columna es exactamente lo que el veredicto sobre egui no
+  puede permitirse, porque los cuadros estarían en cada línea.
+- **Cambiar a la familia proporcional.** No tiene el ancho fijo del que depende la alineación de la
+  columna, así que arreglaría los glifos rompiendo lo que los glifos sirven para construir.
+- **Usar los de emoji igualmente.** Miden entre 1,5 y 2 celdas: la columna se descuadra, y eso se lee
+  peor que un cuadro — un cuadro parece un fallo de fuente, una columna torcida parece un panel mal
+  hecho.
+
+**La salida si el juego se queda corto** de expresividad al verlo en uso: pintar las marcas como forma
+—un rectángulo, un círculo— en vez de como carácter. Está fuera del hito a propósito y es su propio
+trabajo.
+
+**Cuándo dejaría de valer.** Si cambia la versión de egui o si algún día se embarca una fuente propia
+—que es la otra cosa conocida que muerde, porque CJK y los iconos de un `ls` moderno salen como
+cuadros—. La comprobación está atada por una prueba que pregunta a la fuente y falla si algún símbolo
+deja de medir una celda, así que el día que cambie se enterará quien corra la suite y no quien mire la
+pantalla.

@@ -8,3 +8,11 @@ edition.workspace = true
 # features**: pedirle alguna más lo obligaría a recompilarse. La única que haría falta es la que
 # convierte su error a `io::Error`, y eso se hace a mano en dos líneas.
 getrandom = "0.3"
+
+# El contrato tiene siete campos opcionales y líneas que son cadena **o** objeto, y hay que tolerar
+# por campo lo que no se entienda: escribir eso a mano sería reescribir un intérprete de JSON con más
+# fallos.
+# **No es gratis y conviene saberlo**: aunque `serde` ya estaba en el árbol por rebote del motor de
+# terminal, esto añade cuatro paquetes que no estaban — `serde_json`, `serde_core`, `itoa` y `zmij`.
+# Se paga porque leer un fichero ajeno con tolerancia es justo lo que esta caja existe para hacer.
+serde_json = "1"
