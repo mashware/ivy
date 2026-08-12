@@ -24,6 +24,7 @@ pub mod puente;
 pub mod teclado;
 
 pub mod tema;
+pub mod vigilante;
 
 use eframe::egui;
 use medida::{Medida, RestoDelFotograma};
@@ -33,6 +34,7 @@ use puente::Puente;
 use std::time::Instant;
 use tema::Tema;
 use term_core::{Pty, Screen, Size};
+use vigilante::{Bandera, Vigilante};
 
 /// El nombre con el que la ventana se presenta al escritorio.
 const NOMBRE: &str = "agent-terminal";
@@ -84,6 +86,13 @@ const GROSOR_DEL_DIVISOR: f32 = 2.0;
 
 /// Con qué reparto abre la ventana: las dos consolas iguales.
 const FRACCION_INICIAL: f32 = 0.5;
+
+/// Cada cuánto vuelve a mirar la ventana cuando se ha quedado sin quien la avise.
+///
+/// Medio segundo es lo que se tarda en notar que un panel va con retraso sin que la ventana esté
+/// despierta todo el rato. **Solo corre en el modo degradado**: mientras el vigilante funcione, la
+/// ventana duerme hasta que alguien publica.
+const RESPIRO_SIN_VIGILANTE: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Lo que el fotograma necesita saber después de bombear todas las consolas.
 struct Bombeo {
@@ -181,6 +190,13 @@ struct Division {
     panel: Option<PanelDir>,
     /// Lo que se sabe del panel de esta consola: su último contenido bueno y cuándo se leyó.
     estado_del_panel: panel::Estado,
+    /// Si hay que volver a leer el `panel.json` de esta consola. La levanta el vigilante y la recoge
+    /// el fotograma.
+    ///
+    /// **Es de la división y no del vigilante** porque es lo que hace que un aviso despierte a una
+    /// consola y no a las dos: el vigilante es uno para todas y lo único que las distingue es a qué
+    /// bandera llega su aviso.
+    por_releer: Bandera,
     pantalla: Screen,
     /// Lo que se recoge del puente en un fotograma, reutilizado entre ellos para no reservar
     /// memoria en cada uno. Nunca crece más allá del presupuesto: se pide con tope y se
@@ -293,6 +309,7 @@ impl Division {
             puente,
             panel,
             estado_del_panel: panel::Estado::default(),
+            por_releer: Bandera::levantada(),
             pantalla: Screen::new(REJILLA_INICIAL),
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
@@ -340,11 +357,19 @@ impl Division {
         recogida.queda_cola
     }
 
-    /// Vuelve a leer el `panel.json` de esta consola si ha cambiado.
+    /// Vuelve a leer el `panel.json` de esta consola **si alguien ha avisado** de que cambió.
+    ///
+    /// La bandera se recoge siempre, haya directorio o no: dejarla levantada porque esta consola no
+    /// tiene dónde leer haría que la recogiera la lectura de otro fotograma, y entonces el aviso que
+    /// se guardó no sería de nadie.
     ///
     /// Sin directorio no hay nada que leer: es el caso de la consola que no pudo crear el suyo, que
     /// tiene que seguir viéndose como antes de que existiera el panel.
     fn refrescar_su_panel(&mut self) {
+        if !self.por_releer.recoger() {
+            return;
+        }
+
         if let Some(dir) = self.panel.as_ref() {
             self.estado_del_panel.refrescar(dir.path());
         }
@@ -431,6 +456,9 @@ struct Ventana {
     /// estrecha seguiría pegada al borde después de ensancharla. Es el mismo argumento que descarta los
     /// paneles de egui, aplicado al estado en vez de a la geometría.
     fraccion: f32,
+    /// Quien avisa de que un productor ha publicado. Vive con la ventana porque sus rutas son las de
+    /// las consolas que la ventana tiene abiertas, y es la ventana quien sabe a quién despertar.
+    vigilante: Vigilante,
     tema: Tema,
     /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
     resto_del_fotograma: RestoDelFotograma,
@@ -443,8 +471,11 @@ struct Ventana {
 
 impl Ventana {
     fn nueva(ctx: &egui::Context) -> term_core::Result<Self> {
+        let divisiones = [Division::nueva(ctx)?, Division::nueva(ctx)?];
+
         Ok(Self {
-            divisiones: [Division::nueva(ctx)?, Division::nueva(ctx)?],
+            vigilante: Self::vigilar(ctx, &divisiones),
+            divisiones,
             foco: 0,
             fraccion: FRACCION_INICIAL,
             tema: Tema::default(),
@@ -452,6 +483,27 @@ impl Ventana {
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
         })
+    }
+
+    /// Arma el vigilante sobre los directorios de las consolas que tienen uno.
+    ///
+    /// Una consola sin directorio no se vigila porque no hay nada que vigilar: nadie puede publicarle
+    /// un panel. Su bandera se queda como esté y su lectura no encuentra dónde mirar.
+    fn vigilar(ctx: &egui::Context, divisiones: &[Division]) -> Vigilante {
+        let consolas: Vec<_> = divisiones
+            .iter()
+            .filter_map(|division| {
+                let dir = division.panel.as_ref()?;
+                Some((dir.path(), division.por_releer.clone()))
+            })
+            .collect();
+
+        // Lo único que el vigilante necesita de la ventana es cómo despertarla, igual que el puente:
+        // así su módulo no depende del framework de interfaz, que es lo que se va a reescribir. Pedir
+        // el repintado no entra en pánico, que es la condición de quien lo llama desde otro hilo.
+        let despertador = ctx.clone();
+
+        Vigilante::nuevo(move || despertador.request_repaint(), &consolas)
     }
 
     /// Cierra el fotograma anterior: cada consola cierra sus tramos y la ventana se queda con lo que
@@ -679,6 +731,23 @@ impl eframe::App for Ventana {
             self.cerrar_fotograma(std::time::Duration::from_secs_f32(segundos));
         }
 
+        // **Sin quien avise se vuelve a mirar en cada fotograma**, que es como se hacía antes de que
+        // hubiera vigilante. No es prudencia: cuando se pierde el seguimiento —el usuario borra desde
+        // su propia consola el directorio que se vigilaba, o el vigilante entrega un fallo— nadie
+        // levanta ninguna bandera, y un panel congelado en silencio es peor que uno que se releía de
+        // más.
+        //
+        // **Y hay que pedir el fotograma, o el respaldo no llega a correr**: con la ventana en reposo
+        // y la consola callada —un agente esperando respuesta, que es justo cuando su panel dice lo
+        // más valioso— no hay ninguna vuelta donde recoger la bandera. Medio segundo de latencia, y
+        // solo en el modo degradado.
+        if self.vigilante.esta_ciego() {
+            for division in &self.divisiones {
+                division.por_releer.levantar();
+            }
+            ctx.request_repaint_after(RESPIRO_SIN_VIGILANTE);
+        }
+
         let Bombeo {
             alguna_dejo_cola,
             todas_terminadas,
@@ -815,6 +884,7 @@ mod tests {
             puente: Puente::nuevo(salida, || {}),
             panel: None,
             estado_del_panel: panel::Estado::default(),
+            por_releer: Bandera::levantada(),
             pantalla: Screen::new(REJILLA_INICIAL),
             medida: Medida::default(),
             pendiente_de_medir: None,
@@ -830,8 +900,14 @@ mod tests {
     /// Lo que aquí se prueba —bombear, decidir el cierre, enrutar el teclado— no toca el escritorio,
     /// así que se arma el struct a mano con las mismas piezas que [`Ventana::nueva`].
     fn ventana_con(izquierda: &str, derecha: &str) -> Ventana {
+        let divisiones = [division_con(izquierda), division_con(derecha)];
+
         Ventana {
-            divisiones: [division_con(izquierda), division_con(derecha)],
+            // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
+            // arma igual —sobre una lista vacía— para que la ventana de las pruebas no se declare
+            // ciega y active el respaldo, que es un camino con su propia prueba.
+            vigilante: Ventana::vigilar(&egui::Context::default(), &divisiones),
+            divisiones,
             foco: 0,
             fraccion: FRACCION_INICIAL,
             tema: Tema::default(),
@@ -1059,6 +1135,80 @@ mod tests {
             izquierda.path(),
             derecha.path(),
             "las dos consolas comparten directorio, así que se pisarían el estado"
+        );
+    }
+
+    /// **Que la ventana de verdad arranque con quien la avise, y sobre los directorios de sus
+    /// consolas.** Todo lo demás de este mecanismo se prueba montando el vigilante a mano, y eso deja
+    /// sin atar justo lo que no se puede montar a mano: lo que `Ventana::nueva` le pasa. Cambiar ahí
+    /// las divisiones por una lista vacía deja el vigilante **armado** —así que el respaldo tampoco
+    /// entra— y ningún panel se volvería a mover en toda la sesión, en silencio.
+    ///
+    /// **Y hay una prueba por sentido, con su ventana cada una**, porque publicar siempre en la misma
+    /// consola solo ata la mitad: atar las dos rutas a la bandera de la primera pasaría igual, y en
+    /// producto eso es publicar en la derecha y releer la izquierda. Las dos publicaciones no caben en
+    /// la misma ventana: una escritura produce varios avisos y el crate no promete cuántos, así que un
+    /// aviso rezagado del primer fichero volvería a levantar una bandera ya recogida.
+    #[test]
+    fn la_ventana_recien_abierta_se_entera_de_lo_que_publica_su_primera_consola() {
+        solo_la_consola_que_publica_vuelve_a_mirar(0);
+    }
+
+    #[test]
+    fn la_ventana_recien_abierta_se_entera_de_lo_que_publica_su_segunda_consola() {
+        solo_la_consola_que_publica_vuelve_a_mirar(1);
+    }
+
+    fn solo_la_consola_que_publica_vuelve_a_mirar(cual: usize) {
+        let ventana = Ventana::nueva(&egui::Context::default())
+            .expect("no se pudo abrir la ventana con sus dos consolas");
+        assert!(
+            !ventana.vigilante.esta_ciego(),
+            "la ventana abrió sin nadie que la avise"
+        );
+        for division in &ventana.divisiones {
+            division.por_releer.recoger();
+        }
+
+        publicar_en(&ventana.divisiones[cual], r#"{"lines":["ya estoy"]}"#);
+
+        esperar_la_bandera(
+            &ventana.divisiones[cual].por_releer,
+            "la ventana no vigila el directorio de esa consola",
+        );
+        assert!(
+            !ventana.divisiones[1 - cual].por_releer.recoger(),
+            "publicar en una consola hizo releer a la otra"
+        );
+    }
+
+    /// **Que a una consola le falte su directorio no puede apagar el vigilante de la que sí lo tiene.**
+    /// Sin esto, un contenedor de solo lectura o un disco lleno en **una** consola dejaría a las dos
+    /// releyendo en cada fotograma y a la ventana despertándose cada medio segundo para siempre: la
+    /// economía entera de este PR perdida, y nada en pantalla que lo explique.
+    #[test]
+    fn una_consola_sin_directorio_no_deja_ciega_a_la_ventana() {
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.divisiones[0].panel = Some(PanelDir::create().expect("crear el directorio"));
+        assert!(
+            ventana.divisiones[1].panel.is_none(),
+            "esta prueba necesita una consola sin directorio"
+        );
+
+        ventana.vigilante = Ventana::vigilar(&ctx, &ventana.divisiones);
+
+        assert!(
+            !ventana.vigilante.esta_ciego(),
+            "una consola sin sitio donde publicar apagó el vigilante de la que sí lo tiene"
+        );
+        for division in &ventana.divisiones {
+            division.por_releer.recoger();
+        }
+        publicar_en(&ventana.divisiones[0], r#"{"lines":["aquí sí"]}"#);
+        esperar_la_bandera(
+            &ventana.divisiones[0].por_releer,
+            "la consola con directorio dejó de estar vigilada",
         );
     }
 
@@ -1601,15 +1751,101 @@ mod tests {
     /// panel puesto a mano se probaría el reparto contra un estado que nadie ha leído nunca.
     fn division_con_panel(contenido: &str) -> Division {
         let mut division = division_con("sleep 30");
-        let dir = PanelDir::create().expect("crear el directorio de la división");
+        division.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
+        publicar_en(&division, contenido);
+        division.refrescar_su_panel();
+        division
+    }
+
+    /// Publica un contenido en el `panel.json` de una división que ya tiene directorio.
+    fn publicar_en(division: &Division, contenido: &str) {
         std::fs::write(
-            dir.path().join(panel_contract::FICHERO_DEL_PANEL),
+            division
+                .panel
+                .as_ref()
+                .expect("la división tiene directorio")
+                .path()
+                .join(panel_contract::FICHERO_DEL_PANEL),
             contenido,
         )
         .expect("publicar el panel");
-        division.panel = Some(dir);
-        division.refrescar_su_panel();
-        division
+    }
+
+    /// Corre una pasada de interfaz que pinta esta división, que es donde ocurre el refresco.
+    fn un_fotograma_sobre(division: &mut Division) {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+            Ventana::pintar_division(ui, division, area_de(800.0), &Tema::default(), &metrica);
+        })
+        .drop_without_applying_deltas();
+    }
+
+    /// Lo que se está enseñando en el panel de esta división.
+    fn lo_que_se_ve(division: &Division) -> &str {
+        &division
+            .estado_del_panel
+            .a_pintar()
+            .expect("hay panel que pintar")
+            .lines[0]
+            .text
+    }
+
+    /// Espera a que el aviso del sistema de ficheros llegue de verdad hasta la bandera.
+    ///
+    /// El límite es generoso —cinco segundos— porque lo que mide no es cuánto tarda el núcleo sino si
+    /// llega: en la práctica llega en milisegundos.
+    fn esperar_la_bandera(bandera: &Bandera, si_no_llega: &str) {
+        let limite = Instant::now() + Duration::from_secs(5);
+        while !bandera.recoger() {
+            assert!(Instant::now() < limite, "{si_no_llega}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// **Que publicar saque a la ventana del reposo**, que es la mitad del hito que no se ve en ninguna
+    /// bandera. El vigilante recibe *cómo* despertar, y quien se lo da es la ventana: cambiar ahí ese
+    /// «cómo» por una función que no hace nada deja todas las banderas funcionando —y la suite en
+    /// verde— mientras la ventana dormida no vuelve a pintar jamás, que es justo el caso que este PR
+    /// viene a resolver.
+    ///
+    /// Las consolas son `sleep 30` y su puente no despierta a nadie, así que el único que puede sacar
+    /// al contexto del reposo es el vigilante.
+    #[test]
+    fn publicar_saca_a_la_ventana_del_reposo() {
+        let ctx = egui::Context::default();
+        let mut divisiones = [division_con("sleep 30"), division_con("sleep 30")];
+        for division in &mut divisiones {
+            division.panel = Some(PanelDir::create().expect("crear el directorio"));
+        }
+        let _vigilante = Ventana::vigilar(&ctx, &divisiones);
+        dormir_la_ventana(&ctx);
+
+        publicar_en(&divisiones[0], r#"{"lines":["despierta"]}"#);
+
+        let limite = Instant::now() + Duration::from_secs(5);
+        while !ctx.has_requested_repaint() {
+            assert!(
+                Instant::now() < limite,
+                "se publicó y nadie pidió fotograma: con la ventana en reposo el panel no se movería"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Deja el contexto sin repintados pendientes, que es como está una ventana en reposo.
+    ///
+    /// Un contexto recién hecho pide fotograma por su cuenta —tiene su propia interfaz que componer—,
+    /// así que sin esto la aserción de que el aviso lo despierta pasaría igual sin aviso.
+    fn dormir_la_ventana(ctx: &egui::Context) {
+        for _ in 0..4 {
+            ctx.run_ui(egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
+        }
+        assert!(
+            !ctx.has_requested_repaint(),
+            "el contexto de la prueba no llega a estar en reposo"
+        );
     }
 
     /// **Que la pasada de interfaz relee de verdad.** Sin esto, quitar la llamada al refresco dejaba la
@@ -1618,45 +1854,93 @@ mod tests {
     #[test]
     fn el_fotograma_recoge_un_panel_publicado_despues_de_abrir_la_consola() {
         let mut division = division_con("sleep 30");
-        let dir = PanelDir::create().expect("crear el directorio");
-        division.panel = Some(dir);
+        division.panel = Some(PanelDir::create().expect("crear el directorio"));
         assert!(
             division.estado_del_panel.a_pintar().is_none(),
             "todavía no hay nada publicado"
         );
 
-        std::fs::write(
-            division
-                .panel
-                .as_ref()
-                .expect("hay directorio")
-                .path()
-                .join(panel_contract::FICHERO_DEL_PANEL),
-            r#"{"lines":["llegó tarde"]}"#,
-        )
-        .expect("publicar el panel");
-
-        let ctx = egui::Context::default();
-        ctx.run_ui(egui::RawInput::default(), |ui| {
-            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
-            Ventana::pintar_division(
-                ui,
-                &mut division,
-                area_de(800.0),
-                &Tema::default(),
-                &metrica,
-            );
-        })
-        .drop_without_applying_deltas();
+        publicar_en(&division, r#"{"lines":["llegó tarde"]}"#);
+        un_fotograma_sobre(&mut division);
 
         assert_eq!(
-            division
-                .estado_del_panel
-                .a_pintar()
-                .expect("el fotograma tenía que haberlo recogido")
-                .lines[0]
-                .text,
-            "llegó tarde"
+            lo_que_se_ve(&division),
+            "llegó tarde",
+            "el fotograma tenía que haberlo recogido"
+        );
+    }
+
+    /// **La economía que este PR entrega, y la mitad que se rompería sin ruido.** Hasta ahora cada
+    /// consola le preguntaba al disco por la fecha de su fichero en cada fotograma —sesenta veces por
+    /// segundo mientras haya volcado—; a partir de aquí solo mira cuando le avisan. Sin esta prueba,
+    /// quitar la bandera de en medio dejaría la suite entera en verde, porque leer de más se ve igual
+    /// que leer a tiempo.
+    #[test]
+    fn sin_aviso_el_fotograma_no_vuelve_a_mirar_el_fichero() {
+        let mut division = division_con_panel(r#"{"lines":["lo primero"]}"#);
+
+        publicar_en(&division, r#"{"lines":["lo segundo"]}"#);
+        un_fotograma_sobre(&mut division);
+
+        assert_eq!(
+            lo_que_se_ve(&division),
+            "lo primero",
+            "el fotograma leyó el fichero sin que nadie le hubiera avisado"
+        );
+    }
+
+    /// Y la otra mitad: la bandera es una puerta, no un muro. Con ella levantada el fotograma relee, y
+    /// eso es lo que ata el trabajo del vigilante con lo que se acaba viendo.
+    #[test]
+    fn con_la_bandera_levantada_el_fotograma_vuelve_a_leer() {
+        let mut division = division_con_panel(r#"{"lines":["lo primero"]}"#);
+
+        publicar_en(&division, r#"{"lines":["lo segundo"]}"#);
+        division.por_releer.levantar();
+        un_fotograma_sobre(&mut division);
+
+        assert_eq!(
+            lo_que_se_ve(&division),
+            "lo segundo",
+            "avisaron de que había cambiado y el fotograma siguió enseñando lo viejo"
+        );
+    }
+
+    /// **El respaldo, y no es prudencia.** Cuando se pierde el seguimiento —el usuario borra el
+    /// directorio desde su propia consola, o el vigilante entrega un fallo— nadie levanta ninguna
+    /// bandera. Sin esto, este PR *empeoraría* lo que había: hasta ahora el panel se releía de más y
+    /// nunca se quedaba atrás; con un vigilante ciego se quedaría clavado para siempre y en silencio.
+    ///
+    /// La ruta que no se puede vigilar cuelga de un directorio recién creado **a propósito**: una ruta
+    /// fija dentro del temporal del sistema sería una apuesta a que nadie la haya creado nunca en esta
+    /// máquina, y el día que alguien lo hiciera esta prueba fallaría para siempre señalando al código.
+    #[test]
+    fn sin_vigilante_la_ventana_vuelve_a_mirar_en_cada_fotograma() {
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let dir = PanelDir::create().expect("crear el directorio");
+        let sin_armar = dir.path().join("no-existe");
+        ventana.vigilante = Vigilante::nuevo(|| {}, &[(sin_armar.as_path(), Bandera::levantada())]);
+        assert!(ventana.vigilante.esta_ciego(), "el respaldo no está activo");
+        for division in &ventana.divisiones {
+            division.por_releer.recoger();
+        }
+        // **Dormirla primero, o la aserción de abajo es vacía**: un contexto recién hecho ya pide
+        // repintado por su cuenta, así que sin esto pasaría igual con el respaldo sin pedir nada.
+        dormir_la_ventana(&ctx);
+
+        eframe::App::logic(&mut ventana, &ctx, &mut eframe::Frame::_new_kittest());
+
+        for (cual, division) in ventana.divisiones.iter().enumerate() {
+            assert!(
+                division.por_releer.recoger(),
+                "sin nadie que avise, el panel de la consola {cual} se queda congelado"
+            );
+        }
+        assert!(
+            ctx.has_requested_repaint(),
+            "el respaldo mira «en cada fotograma» y nadie pide ninguno: con la consola callada no \
+             habría vuelta donde recogerlo"
         );
     }
 

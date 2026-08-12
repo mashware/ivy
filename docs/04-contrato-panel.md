@@ -79,6 +79,13 @@ Quien quiera dos líneas, que publique dos elementos en `lines`.
   descarta y lo dice. Quedarse con el último panel bueno mientras el fichero no se entienda es lo que
   falta por hacer — hasta entonces lo que se ve puede parpadear, y esta recomendación es lo que se lo
   evita a quien tenga código propio: un CI, un script, un servidor MCP.
+- **Publica de una vez.** Desde F1.6 la app se entera de que has publicado por los avisos del sistema
+  de ficheros, y **cada escritura suelta es un aviso**: un productor que construye su `panel.json` a
+  trozos —lo natural con `>>` en un bucle de shell— hace que la app lo lea a medio escribir una y otra
+  vez. **Medido**: unas **42 lecturas y otros tantos fotogramas por publicación**, contra **uno** si se
+  escribe de una vez o con el temporal-y-renombre de arriba. No se ve en pantalla —lo que no se
+  entiende se descarta y se conserva el último panel bueno— así que **el derroche es invisible desde
+  fuera**, y por eso está escrito aquí.
 - **Un fichero de más de 256 KiB no se lee entero.** El techo acota lo que un fichero de fuera puede
   hacer reservar al interpretarse, y de paso cuántas líneas y de qué largo tiene sentido publicar.
   **Un aviso para quien publique mucho, con las cifras medidas**: un fichero justo en el techo cuesta
