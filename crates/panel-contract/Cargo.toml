@@ -2,3 +2,9 @@
 name = "panel-contract"
 version.workspace = true
 edition.workspace = true
+
+[dependencies]
+# Ya está compilado en el árbol por rebote de egui (a través de `ahash`), y **con estas mismas
+# features**: pedirle alguna más lo obligaría a recompilarse. La única que haría falta es la que
+# convierte su error a `io::Error`, y eso se hace a mano en dos líneas.
+getrandom = "0.3"

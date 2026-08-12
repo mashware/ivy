@@ -26,6 +26,7 @@ pub mod tema;
 
 use eframe::egui;
 use medida::{Medida, RestoDelFotograma};
+use panel_contract::PanelDir;
 use pintor::Metrica;
 use puente::Puente;
 use std::time::Instant;
@@ -166,6 +167,19 @@ struct Division {
     /// dueño, creciendo.
     pty: Pty,
     puente: Puente,
+    /// El directorio donde el programa de esta consola publica su estado, y el identificador con el
+    /// que se le conoce. Se borra al soltar la consola porque el tipo lo borra al morir.
+    ///
+    /// **Es opcional porque puede faltar de verdad**, no por prudencia: un directorio de ejecución
+    /// de solo lectura en un contenedor, el disco lleno, o la variable del entorno apuntando a algo
+    /// donde no se puede escribir. Cuando falta, el programa de dentro no ve ninguna de las dos
+    /// variables, se le quitan las que hubiera heredado, y se comporta como antes de que existiera
+    /// este hito.
+    ///
+    /// Nadie lo lee fuera de las pruebas, y eso es correcto: **está aquí por lo que hace al morir**.
+    /// El día que la aplicación lea el fichero del panel —otro hito— pasará a leerse.
+    #[allow(dead_code)]
+    panel: Option<PanelDir>,
     pantalla: Screen,
     /// Lo que se recoge del puente en un fotograma, reutilizado entre ellos para no reservar
     /// memoria en cada uno. Nunca crece más allá del presupuesto: se pide con tope y se
@@ -188,8 +202,40 @@ struct Division {
     pendiente_de_medir: Option<(Option<Instant>, Instant, std::time::Duration)>,
 }
 
+/// Un directorio que no se pudo crear **no impide abrir la consola**.
+///
+/// Es la misma decisión que el respaldo a otro shell cuando el del usuario no se puede lanzar, y con
+/// más motivo: sin panel, una consola sigue siendo un terminal completo. Está como función para poder
+/// afirmarlo — desde una prueba no se puede hacer fallar la creación de verdad sin tocar el entorno
+/// del proceso entero.
+fn panel_o_ninguno(creado: std::io::Result<PanelDir>) -> Option<PanelDir> {
+    match creado {
+        Ok(panel) => Some(panel),
+        Err(fallo) => {
+            eprintln!("esta consola va sin panel: no se pudo crear su directorio ({fallo})");
+            None
+        }
+    }
+}
+
+/// Qué se hace con las dos variables del panel al lanzar el programa de una consola.
+///
+/// **Sin directorio se quitan, y quitarlas no es lo mismo que no ponerlas.** El programa hereda el
+/// entorno de esta aplicación, así que si la aplicación corre dentro de una consola de sí misma —lo
+/// que pasa en cuanto se usa para trabajar— la consola hija recibiría la identidad de la madre: su
+/// productor publicaría en el buzón de la madre y dos divisiones compartirían identificador, que es
+/// exactamente lo que la identidad viene a evitar.
+///
+/// Son siempre dos, con directorio o sin él: es lo que hace imposible el caso de media identidad.
+fn identidad_de(panel: Option<&PanelDir>) -> [(&'static str, Option<&std::ffi::OsStr>); 2] {
+    match panel {
+        Some(panel) => panel.env().map(|(nombre, valor)| (nombre, Some(valor))),
+        None => panel_contract::ENV_NAMES.map(|nombre| (nombre, None)),
+    }
+}
+
 impl Division {
-    /// Lanza el programa de esta división y la deja lista para el primer fotograma.
+    /// Lanza el shell de esta división y la deja lista para el primer fotograma.
     fn nueva(ctx: &egui::Context) -> term_core::Result<Self> {
         // El shell sale del entorno de quien lanza la aplicación, que es lo que hace un terminal:
         // sin esto se abre un shell sin prompt ni historial, y este hito existe para mirar lo que
@@ -197,14 +243,41 @@ impl Division {
         // pero el día en que el programa venga de configuración o de un `panel.json` de fuera,
         // esta línea pasa a ser superficie sensible y hay que revisarla como tal.
         let shell = std::env::var("SHELL").unwrap_or_else(|_| SHELL_DE_RESPALDO.to_owned());
+
+        Self::lanzando(ctx, &shell)
+    }
+
+    /// Lo mismo, con el programa dicho a mano.
+    ///
+    /// Existe porque el programa que elige [`Division::nueva`] es el del usuario, y una prueba que
+    /// dependa de él no prueba este código: prueba la configuración de quien la corre.
+    fn lanzando(ctx: &egui::Context, programa: &str) -> term_core::Result<Self> {
+        // El directorio se crea **antes** de lanzar, porque el programa puede publicar en su primer
+        // segundo y la variable que le decimos tiene que apuntar a algo que ya existe. Si lanzar
+        // falla después, el directorio se borra solo: el valor muere por el camino de error.
+        Self::con_panel(ctx, programa, panel_o_ninguno(PanelDir::create()))
+    }
+
+    /// Y lo mismo con el directorio ya resuelto, incluido el caso de que no haya podido crearse.
+    ///
+    /// Ese caso no se puede provocar desde una prueba sin tocar el entorno del proceso entero, y es
+    /// justo el que tiene que quedar demostrado: que la consola arranca igual y que su programa no se
+    /// queda con una identidad heredada.
+    fn con_panel(
+        ctx: &egui::Context,
+        programa: &str,
+        panel: Option<PanelDir>,
+    ) -> term_core::Result<Self> {
+        let identidad = identidad_de(panel.as_ref());
+
         // Si lo que dice el entorno ya no existe —un perfil borrado, un shell desinstalado—, se
         // cae al de respaldo en vez de no abrir. Quedarse sin ventana teniendo `/bin/sh` a mano, y
         // con un error que nadie va a entender, es el peor de los dos resultados.
-        let (pty, salida) = match Pty::spawn(&shell, &[], REJILLA_INICIAL) {
+        let (pty, salida) = match Pty::spawn_with_env(programa, &[], REJILLA_INICIAL, &identidad) {
             Ok(abierto) => abierto,
             Err(fallo) => {
-                eprintln!("no se pudo lanzar «{shell}» ({fallo}); se abre {SHELL_DE_RESPALDO}");
-                Pty::spawn(SHELL_DE_RESPALDO, &[], REJILLA_INICIAL)?
+                eprintln!("no se pudo lanzar «{programa}» ({fallo}); se abre {SHELL_DE_RESPALDO}");
+                Pty::spawn_with_env(SHELL_DE_RESPALDO, &[], REJILLA_INICIAL, &identidad)?
             }
         };
 
@@ -217,6 +290,7 @@ impl Division {
         Ok(Self {
             pty,
             puente,
+            panel,
             pantalla: Screen::new(REJILLA_INICIAL),
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
@@ -688,6 +762,7 @@ mod tests {
         Division {
             pty,
             puente: Puente::nuevo(salida, || {}),
+            panel: None,
             pantalla: Screen::new(REJILLA_INICIAL),
             medida: Medida::default(),
             pendiente_de_medir: None,
@@ -909,6 +984,213 @@ mod tests {
             ventana.foco, 0,
             "el foco no arranca en la consola izquierda"
         );
+    }
+
+    #[test]
+    fn cada_consola_tiene_su_propia_identidad_y_su_propio_directorio() {
+        let ventana = Ventana::nueva(&egui::Context::default())
+            .expect("no se pudo abrir la ventana con sus dos consolas");
+
+        let [izquierda, derecha] = ventana.divisiones.each_ref().map(|division| {
+            division
+                .panel
+                .as_ref()
+                .expect("la consola tiene que arrancar con su directorio")
+        });
+
+        assert_ne!(
+            izquierda.id(),
+            derecha.id(),
+            "las dos consolas comparten identificador"
+        );
+        assert_ne!(
+            izquierda.path(),
+            derecha.path(),
+            "las dos consolas comparten directorio, así que se pisarían el estado"
+        );
+    }
+
+    /// El criterio de punta a punta: el programa de dentro **hereda** la variable y **puede escribir**
+    /// donde dice. Se teclea al pseudoterminal de verdad en vez de armar el entorno a mano, porque lo
+    /// que se prueba es justo la cadena que va del constructor al programa.
+    ///
+    /// Con `sh` y no con el shell del usuario: se teclea sintaxis POSIX, y con un shell que redirija
+    /// de otra forma —nushell, PowerShell— este test fallaría por la configuración de quien lo corre
+    /// en vez de por el código.
+    #[test]
+    fn el_programa_de_dentro_publica_en_el_directorio_que_le_dijeron() {
+        let mut division = Division::lanzando(&egui::Context::default(), "sh")
+            .expect("no se pudo abrir la consola");
+
+        let publicado = {
+            let esperado = division
+                .panel
+                .as_ref()
+                .expect("la consola tiene que arrancar con su directorio")
+                .path()
+                .join("panel.json");
+
+            division
+                .pty
+                .write(b"printf '{}' > \"$PANEL_DIR/panel.json\"\n")
+                .expect("escribir al pseudoterminal");
+
+            esperado
+        };
+
+        // El shell tarda lo que tarda en arrancar y leer su configuración, así que se sondea con
+        // límite en vez de dormir una cifra fija.
+        let limite = Instant::now() + Duration::from_secs(10);
+        while !publicado.exists() && Instant::now() < limite {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        assert!(
+            publicado.is_file(),
+            "el programa de dentro no pudo publicar en {}",
+            publicado.display()
+        );
+    }
+
+    /// La lista completa de lo que la aplicación mete en el entorno del programa de un usuario, en un
+    /// solo sitio y con una igualdad, no con una pertenencia. Falla el día que alguien añada una
+    /// quinta variable, sea cual sea — que es exactamente lo que se quiere, porque el peligro no es un
+    /// nombre concreto, es «una variable más que nadie revisó».
+    /// La lista completa de lo que la aplicación mete en el entorno del programa de un usuario,
+    /// **mirando lo que el programa ve de verdad** y no las constantes que se encadenan para
+    /// construirlo. La diferencia no es teórica: con la versión que comparaba constantes, meter a mano
+    /// un `cmd.env("ANTHROPIC_API_KEY", …)` en el lanzador dejaba la suite entera en verde — o sea, el
+    /// test no protegía la única regla del proyecto que existe para eso.
+    ///
+    /// Se lanza `env` y no un shell **a propósito**: un shell añade las suyas —`PWD`, `SHLVL`, `_`— y
+    /// la diferencia dejaría de ser la de la aplicación. `SHELL` se descuenta porque la pone
+    /// `portable-pty` por su cuenta, leída de la base de datos de usuarios, no esta aplicación.
+    #[test]
+    fn el_programa_no_ve_ninguna_variable_mas_que_las_cuatro() {
+        let panel = PanelDir::create().expect("crear un directorio de panel");
+        let (_pty, canal) =
+            Pty::spawn_with_env("env", &[], REJILLA_INICIAL, &identidad_de(Some(&panel)))
+                .expect("lanzar env");
+
+        let salida = recoger_hasta_el_cierre(&canal);
+        let del_hijo: std::collections::HashMap<&str, &str> = salida
+            .lines()
+            .filter_map(|linea| linea.split_once('='))
+            .collect();
+
+        // Las cuatro están, y con su valor.
+        assert_eq!(del_hijo.get("TERM"), Some(&"xterm-256color"));
+        assert_eq!(del_hijo.get("COLORTERM"), Some(&"truecolor"));
+        assert_eq!(del_hijo.get("PANEL_ID"), Some(&panel.id()));
+        assert_eq!(
+            del_hijo.get("PANEL_DIR").map(std::path::Path::new),
+            Some(panel.path())
+        );
+
+        // Y ninguna más cambia respecto a lo que este proceso ya tenía. La comparación es por par
+        // completo, así que caza tanto una variable nueva como una con el valor pisado.
+        let esperadas = ["TERM", "COLORTERM", "SHELL"]
+            .into_iter()
+            .chain(panel_contract::ENV_NAMES);
+        let esperadas: std::collections::HashSet<&str> = esperadas.collect();
+        let del_padre: std::collections::HashMap<String, String> = std::env::vars().collect();
+        let mut inesperadas: Vec<&str> = del_hijo
+            .iter()
+            .filter(|(nombre, valor)| del_padre.get(**nombre).map(String::as_str) != Some(**valor))
+            .map(|(nombre, _)| *nombre)
+            .filter(|nombre| !esperadas.contains(nombre))
+            .collect();
+        inesperadas.sort();
+
+        assert!(
+            inesperadas.is_empty(),
+            "la aplicación mete en el entorno del programa algo que nadie ha declarado: {inesperadas:?}"
+        );
+    }
+
+    /// Recoge la salida de un programa hasta que muere y la devuelve como texto.
+    fn recoger_hasta_el_cierre(canal: &std::sync::mpsc::Receiver<Vec<u8>>) -> String {
+        let mut bytes = Vec::new();
+        while let Ok(trozo) = canal.recv_timeout(Duration::from_secs(10)) {
+            bytes.extend_from_slice(&trozo);
+        }
+        String::from_utf8_lossy(&bytes).replace('\r', "")
+    }
+
+    /// Sin directorio las dos variables no se dejan de poner: **se quitan**. La diferencia importa
+    /// porque el programa hereda el entorno de esta aplicación, así que al lanzarla dentro de una de
+    /// sus propias consolas, «no ponerlas» dejaría a la consola hija con la identidad de la madre.
+    #[test]
+    fn una_consola_sin_directorio_manda_quitar_las_dos_variables() {
+        let identidad = identidad_de(None);
+
+        assert_eq!(
+            identidad,
+            [("PANEL_ID", None), ("PANEL_DIR", None)],
+            "sin directorio hay que quitar las dos, no dejarlas al azar de lo heredado"
+        );
+    }
+
+    #[test]
+    fn un_directorio_que_no_se_pudo_crear_no_impide_abrir_la_consola() {
+        let sin_directorio = panel_o_ninguno(Err(std::io::Error::other("disco lleno")));
+
+        assert!(
+            sin_directorio.is_none(),
+            "un fallo al crear el directorio no puede impedir que la consola abra"
+        );
+    }
+
+    /// El camino de error entero: sin directorio la consola **arranca igual** —una consola sin panel
+    /// sigue siendo un terminal completo— y su programa no ve ninguna de las dos variables.
+    ///
+    /// Se mira lo que llega por el puente y **no la rejilla**, porque `env` escribe más líneas que las
+    /// 24 de la rejilla inicial y lo que se va por arriba no se guarda en ninguna parte. Comprobado
+    /// mutando el lanzador para que fijara las dos variables sin directorio: con la aserción sobre la
+    /// rejilla el test seguía en verde, porque los dos nombres habían salido de la pantalla.
+    #[test]
+    fn una_consola_sin_directorio_arranca_igual_y_su_programa_no_ve_la_identidad() {
+        let mut division = Division::con_panel(&egui::Context::default(), "env", None)
+            .expect("una consola sin panel tiene que abrir igual");
+        esperar_a_que_muera(&division);
+
+        let mut recibido = Vec::new();
+        loop {
+            let queda_cola = division.bombear();
+            recibido.extend_from_slice(&division.recibido);
+            if !queda_cola {
+                break;
+            }
+        }
+        let salida = String::from_utf8_lossy(&recibido);
+
+        for nombre in panel_contract::ENV_NAMES {
+            assert!(
+                !salida.contains(&format!("{nombre}=")),
+                "el programa vio {nombre} sin que su consola tenga directorio:\n{salida}"
+            );
+        }
+    }
+
+    #[test]
+    fn al_cerrar_la_ventana_no_quedan_directorios_de_panel() {
+        let rutas = {
+            let ventana = Ventana::nueva(&egui::Context::default())
+                .expect("no se pudo abrir la ventana con sus dos consolas");
+
+            ventana.divisiones.each_ref().map(|division| {
+                division
+                    .panel
+                    .as_ref()
+                    .expect("la consola tiene que arrancar con su directorio")
+                    .path()
+                    .to_path_buf()
+            })
+        };
+
+        for ruta in rutas {
+            assert!(!ruta.exists(), "quedó el directorio {}", ruta.display());
+        }
     }
 
     #[test]

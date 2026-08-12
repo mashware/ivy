@@ -485,6 +485,55 @@ busca en `.claude/work/`, que es específico de `flow`).
 **También es el límite de seguridad de MCP:** el servidor da al agente acceso a *su* división y
 no a las demás. Sin identidad, cuatro agentes se pisan.
 
+### Construido — 11 agosto: la forma exacta, y en qué se separa del ejemplo de arriba
+
+Implementado en F1.5. La decisión no cambia; lo que sigue concreta lo que el ejemplo dejaba abierto,
+y **se separa de él en dos cosas**, cada una con su razón.
+
+```
+PANEL_ID=3f2a9c14   PANEL_DIR=/run/user/1000/agent-terminal-3f2a9c14
+```
+
+| | Lo elegido | Por qué |
+|---|---|---|
+| Dónde | `$XDG_RUNTIME_DIR`, y el temporal del sistema cuando esa variable no está | El directorio de ejecución del usuario es suyo y solo suyo, vive en memoria y **el sistema lo vacía al cerrar la sesión**. Falta en macOS y en una sesión de Linux sin gestor, y ahí el temporal es la única alternativa que existe en todas partes |
+| **Sin el tramo `panels/`** | Un solo componente nuevo: `agent-terminal-<id>` | Un tramo intermedio hay que crearlo —y es el único trozo de la ruta con **nombre fijo**, o sea el único que otro usuario puede dejar preparado de antemano en un temporal compartido, donde el modo del directorio de la hoja ya no protege de un padre ajeno. Sin él, las dos cosas desaparecen |
+| **Ocho dígitos y no cuatro** | 32 bits de `getrandom` | Cuatro dígitos son 65.536 nombres. La creación **falla si el nombre ya existe** —así la unicidad no se comprueba, se obtiene— y a ese tamaño una colisión dejaría a una división sin identidad. Ensancharlo cuesta lo mismo |
+| Permisos | `0700` explícito | Medido: sin fijarlo el modo sale de la máscara de la sesión, `0775` en la máquina de referencia. Bajo el directorio de ejecución no se alcanzaría, pero el respaldo puede ser un temporal compartido, y ahí va a vivir un fichero que cuenta en qué anda el usuario |
+| Quién borra | El propio valor, al morir | Cubre tres caminos que un barrido al apagar no cubre: el error a medio construir de quien lanza la consola, el **pánico** —donde el framework de interfaz no ejecuta su gancho de apagado, comprobado en su fuente, pero los destructores sí corren— y cerrar una división sin cerrar la ventana, que llega en la Fase 2 |
+| Cómo borra | El fichero del contrato y después el directorio; **nunca en recursivo** | El directorio es de la aplicación, pero **su contenido es del productor**. Un borrado recursivo se llevaría lo que hubiera dejado ahí y convertiría cualquier ruta mal construida en pérdida de datos en vez de en un error. Si queda algo que no es del contrato, el directorio sobrevive y se dice por dónde |
+
+**Lo que la app fija gana sobre lo que el hijo hereda, y sin directorio se quitan.** No es un detalle
+de implementación: el pseudoterminal copia el entorno del proceso padre, así que **lanzar la aplicación
+desde dentro de una de sus propias consolas** —lo que va a pasar en cuanto se use a diario— le pasaría
+a la consola hija la identidad de la madre, y las dos escribirían en el mismo sitio.
+
+Con directorio se fijan, y eso ya pisa lo heredado. **Sin directorio hay que quitarlas, que no es lo
+mismo que no ponerlas**: lo que no se toca se hereda, así que una consola sin panel se quedaría con la
+identidad de quien la lanzó, su productor publicaría en el buzón ajeno y el destructor de la madre
+borraría el fichero del hijo. Nunca se lee de vuelta el valor heredado; se fija o se borra.
+
+**Quién pone el techo de lo que se inyecta.** La caja del pseudoterminal acepta una lista abierta de
+pares, porque no tiene por qué saber qué es un panel; el techo está en que **lo único que se le pasa
+sale del contrato**, en forma de dos pares exactos. Así, añadir una variable al entorno del usuario
+exige cambiar la caja del contrato, no un sitio de llamada. Es lo que hace comprobable la regla de
+[D4](#d4--el-control-de-agentes-va-por-consola-no-por-api): la lista completa de lo que la aplicación
+define son cuatro nombres, y hay una prueba que falla si aparece un quinto.
+
+**Si el directorio no se puede crear, la ventana abre igual y no se inyecta ninguna de las dos
+variables.** Mismo criterio que el respaldo del shell, y con más motivo: nada dentro de la aplicación
+las consume todavía, así que una consola sin directorio sigue siendo un terminal completo. Y **media
+identidad le mentiría** a un productor que lea `PANEL_ID` como «me hospeda la app»: publicaría en un
+sitio que nadie mira.
+
+**Lo que este hito deja sin hacer, a propósito:** nadie lee el fichero —eso es F1.6, y hasta entonces
+el pendiente «descubrimiento por `PANEL_DIR`» del [contrato](04-contrato-panel.md) sigue abierto— y no
+hay barrido de directorios huérfanos: un barrido borra por descubrimiento en vez de por «esto lo hice
+yo», que es la variedad peligrosa de borrado.
+
+**Un aviso para la Fase 2:** si `PANEL_ID` pasa a ser el testigo con el que el servidor MCP autoriza,
+32 bits **no bastan** y habrá que ensancharlo ahí. Aquí no es un testigo: es un nombre.
+
 ---
 
 ## D8 — El terminal frena al programa: se deja de leer, no se descarta

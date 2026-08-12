@@ -116,6 +116,7 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "panel-contract",
  "term-core",
  "winit",
 ]
@@ -1713,6 +1714,9 @@ dependencies = [
 [[package]]
 name = "panel-contract"
 version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+]
 
 [[package]]
 name = "parking_lot"

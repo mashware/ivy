@@ -2,6 +2,7 @@
 //!
 //! No depende de nada visual: si la capa de pintado se reescribe, esta caja sigue sirviendo.
 
+use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -79,6 +80,16 @@ const LECTURAS_EN_VUELO: usize = 8;
 /// retraso perceptible.
 const REINTENTO: Duration = Duration::from_millis(1);
 
+/// Lo que esta caja fija en el entorno del hijo por su cuenta, además de lo que le pasen.
+///
+/// Está como valor y no repartido en llamadas para que se pueda **leer de un vistazo y afirmar en
+/// una prueba**: quien inyecta entorno en el programa de un usuario tiene que poder enseñar la lista
+/// completa de lo que inyecta.
+///
+/// Sin el tipo de terminal y el aviso de color verdadero, un programa a pantalla completa se cree en
+/// un terminal tonto y no emite ni color ni las secuencias que la rejilla necesita interpretar.
+pub const FIXED_ENV: [(&str, &str); 2] = [("TERM", "xterm-256color"), ("COLORTERM", "truecolor")];
+
 impl Pty {
     /// Abre un pseudoterminal, lanza `program` dentro y devuelve el canal de su salida.
     ///
@@ -86,13 +97,34 @@ impl Pty {
     /// hacerlo desde otro hilo — y un `Receiver` prestado no cruza de hilo, aunque movido sí. Que
     /// salga por el constructor evita además que existan dos formas de llegar a él.
     ///
-    /// Al hijo se le fija `TERM` y `COLORTERM`: sin ellos, un programa a pantalla completa no sabe
-    /// qué secuencias puede emitir y se queda en un terminal tonto, sin color.
+    /// Al hijo se le fija lo que dice [`ENTORNO_FIJADO`].
     ///
     /// **El canal tiene techo, y eso es lo que frena al programa de dentro.** Ver
     /// [`LECTURAS_EN_VUELO`]. Quien recoja del canal sin parar nunca —un `for` sobre él, sin
     /// ritmo ni límite propio— deja el techo sin efecto y devuelve el problema a donde estaba.
     pub fn spawn(program: &str, args: &[&str], size: Size) -> Result<(Self, Receiver<Vec<u8>>)> {
+        Self::spawn_with_env(program, args, size, &[])
+    }
+
+    /// Como [`Pty::spawn`], y además decide en el hijo las variables de entorno de `env`: un valor
+    /// las fija, `None` **las quita**.
+    ///
+    /// **Quitar tiene que ser posible, y no es lo mismo que no fijar.** `portable-pty` arranca
+    /// copiando el entorno de este proceso, así que lo que no se toca **se hereda**: una variable que
+    /// quien llama considera suya y esta vez no tiene valor seguiría ahí con el valor del padre. Con
+    /// `None` se borra de la copia, y entonces el hijo no la ve venga de donde venga.
+    ///
+    /// Se aplica **después** de [`FIXED_ENV`], y encima del entorno heredado: fijar sustituye la
+    /// entrada copiada, porque el `CommandBuilder` de `portable-pty` las guarda en un mapa por clave.
+    ///
+    /// Los valores son `OsStr` porque una ruta no está garantizada como UTF-8 y esta caja no tiene
+    /// por qué ser la que lo descubra.
+    pub fn spawn_with_env(
+        program: &str,
+        args: &[&str],
+        size: Size,
+        env: &[(&str, Option<&OsStr>)],
+    ) -> Result<(Self, Receiver<Vec<u8>>)> {
         let pair = native_pty_system().openpty(portable_pty::PtySize {
             rows: size.rows,
             cols: size.cols,
@@ -102,8 +134,15 @@ impl Pty {
 
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
+        for (nombre, valor) in FIXED_ENV {
+            cmd.env(nombre, valor);
+        }
+        for (nombre, valor) in env {
+            match valor {
+                Some(valor) => cmd.env(nombre, valor),
+                None => cmd.env_remove(nombre),
+            }
+        }
         let child = pair.slave.spawn_command(cmd)?;
 
         // El extremo esclavo solo lo necesita el hijo. Soltarlo aquí es lo que hace que la lectura
@@ -297,6 +336,76 @@ mod tests {
         assert!(
             contiene(&salida, "xterm-256color"),
             "el hijo no vio TERM: {:?}",
+            String::from_utf8_lossy(&salida)
+        );
+    }
+
+    /// La mitad que hace que la identidad de una consola **llegue de verdad** al programa de dentro.
+    /// Sin este test, una implementación que se guardara los pares y no los fijara dejaría la suite
+    /// entera en verde.
+    #[test]
+    fn el_programa_recibe_las_variables_que_se_le_pasan() {
+        let (_pty, canal) = Pty::spawn_with_env(
+            "sh",
+            &["-c", "printf %s \"$VARIABLE_DE_PRUEBA\""],
+            Size::default(),
+            &[("VARIABLE_DE_PRUEBA", Some(OsStr::new("3f2a9c14")))],
+        )
+        .expect("lanzar sh");
+
+        let salida = consumir_hasta_el_cierre(&canal);
+
+        assert!(
+            contiene(&salida, "3f2a9c14"),
+            "el hijo no vio la variable: {:?}",
+            String::from_utf8_lossy(&salida)
+        );
+    }
+
+    /// La cara B: lo que no se pasa, no aparece.
+    ///
+    /// El nombre es de este test a propósito. Con uno que alguien pudiera tener definido —`PANEL_ID`,
+    /// por ejemplo— el test **hereda** ese valor y se pone rojo por el entorno de quien lo corre, no
+    /// por el código: comprobado, pasa al correr la suite dentro de una consola de esta aplicación.
+    #[test]
+    fn sin_pasar_nada_la_variable_no_esta_definida() {
+        let (_pty, canal) = Pty::spawn(
+            "sh",
+            &["-c", "printf %s \"${VARIABLE_DE_PRUEBA-sin definir}\""],
+            Size::default(),
+        )
+        .expect("lanzar sh");
+
+        let salida = consumir_hasta_el_cierre(&canal);
+
+        assert!(
+            contiene(&salida, "sin definir"),
+            "la variable estaba definida sin que nadie la pasara: {:?}",
+            String::from_utf8_lossy(&salida)
+        );
+    }
+
+    /// **Quitar no es no fijar**, y esta es la diferencia que sostiene que una consola sin directorio
+    /// no se quede con la identidad heredada de la aplicación que la lanzó.
+    ///
+    /// Se prueba contra `TERM`, que esta caja fija siempre: si `None` no quitara, el hijo la vería con
+    /// el valor de [`FIXED_ENV`]. Así el test no necesita que el entorno de quien lo corre tenga nada
+    /// en particular.
+    #[test]
+    fn con_ninguno_por_valor_la_variable_se_quita_aunque_la_caja_la_fije() {
+        let (_pty, canal) = Pty::spawn_with_env(
+            "sh",
+            &["-c", "printf %s \"${TERM-quitada}\""],
+            Size::default(),
+            &[("TERM", None)],
+        )
+        .expect("lanzar sh");
+
+        let salida = consumir_hasta_el_cierre(&canal);
+
+        assert!(
+            contiene(&salida, "quitada"),
+            "TERM siguió definida: {:?}",
             String::from_utf8_lossy(&salida)
         );
     }
