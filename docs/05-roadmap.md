@@ -194,7 +194,7 @@ Tamaño: **S** = una sentada · **M** = varias · **L** = va a doler.
 
 ### Lo que la Fase 1 deja fuera a propósito
 
-Scrollback largo, selección con ratón, copiar/pegar, búsqueda, ligaduras de fuente, protocolo
+Scrollback largo, selección con ratón, copiar, búsqueda, ligaduras de fuente, protocolo
 gráfico de Kitty, pestañas, botones, MCP. Todo eso es Fase 2 o posterior. Meterlo aquí convierte
 un prototipo de una semana en uno de tres meses y no responde mejor la pregunta.
 
@@ -222,7 +222,7 @@ Lo que convierte el prototipo en algo que se usa a diario.
 | **F2.3** | **Arrastrar divisiones con el ratón** para recolocarlas — lo que ningún terminal actual da |
 | **F2.4** | Plegar el panel por división, y **estrechar su ancho arrastrando** — el mismo gesto sobre la misma frontera, así que van juntos ([02-decisiones.md](02-decisiones.md) → D10) |
 | **F2.5** | Guardar y restaurar la disposición al abrir |
-| **F2.6** | Scrollback, selección, copiar y pegar |
+| **F2.6** | Scrollback, selección y **copiar** — pegar se adelantó fuera de fase ([#46](https://github.com/mashware/agent-terminal/issues/46)), porque no necesita nada de lo demás y su ausencia hacía que la aplicación se sintiera rota. Ver D11 |
 | **F2.7** | Primera compilación y prueba real en **macOS y Windows** |
 
 F2.3 es la razón de ser de la fase: es la carencia que llevó a plantearse esto, y es la que

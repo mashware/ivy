@@ -60,6 +60,13 @@ const CUERPO: f32 = 14.0;
 /// pierde ni un byte por el camino.
 const PRESUPUESTO: usize = 128 * 1024;
 
+/// Hasta dónde se le deja crecer al vector de lo tecleado antes de devolverle la memoria.
+///
+/// Tecleando nunca se acerca —son unos pocos bytes por fotograma—, así que esto solo actúa después de
+/// un pegado. El valor no es crítico: basta con que sea holgado para el uso normal y pequeño frente a
+/// un portapapeles de verdad.
+const HOLGURA_DE_PULSACIONES: usize = 8 * 1024;
+
 /// El tamaño con el que arranca la rejilla, antes de que exista una ventana que medir.
 ///
 /// Vive lo que tarda el primer pase de interfaz: en cuanto hay un rectángulo de verdad, la rejilla
@@ -394,20 +401,78 @@ impl Division {
     /// El cronómetro arranca **al empezar el fotograma**, no al pulsar la tecla: el evento ya estaba
     /// esperando cuando el fotograma empezó y no trae sello propio, así que ese trecho no se puede
     /// ver desde aquí. El número lleva escrita esa frontera.
-    fn teclear(&mut self, ctx: &egui::Context, empezo_el_fotograma: Instant) {
+    fn teclear(
+        &mut self,
+        ctx: &egui::Context,
+        empezo_el_fotograma: Instant,
+        modificadores: &mut egui::Modifiers,
+    ) {
         self.pulsaciones.clear();
+        // Se pregunta una vez y no por evento porque **el modo no puede cambiar a mitad de pase**:
+        // lo pone el programa de dentro con lo que escribe, y lo que escribe se interpreta en la otra
+        // mitad del fotograma. (Preguntarlo dentro del cierre también compilaría —los dos campos son
+        // préstamos disjuntos—, así que esto es una elección, no una pared.)
+        let marcado = self.pantalla.pegado_marcado();
+        let mut pegado = false;
+
         // Los eventos que van al programa **se consumen**, no se leen y se dejan. Un fotograma
         // puede correr más de un pase sobre la misma entrada —egui lo hace cuando algo pide
         // recomponerse—, y entonces la misma tecla se escribiría dos veces al pseudoterminal. Los
         // que no se traducen se quedan donde estaban, para quien los quiera después.
         ctx.input_mut(|estado| {
-            estado.events.retain(|evento| match teclado::bytes(evento) {
-                Some(bytes) => {
-                    self.pulsaciones.extend_from_slice(&bytes);
-                    false
+            // **Los modificadores se reconstruyen aquí, evento a evento, y no se leen de
+            // `estado.modifiers`.** Ese campo es uno solo por pase: egui recorre el lote y se queda
+            // con el último aviso de cambio, así que describe cómo estaban las teclas **al final**,
+            // no cuando llegó el pegado. Con el acorde soltado antes de que se recoja el fotograma
+            // valdría «ninguno» y se mandaría el byte de control; pulsando Mayúsculas después de
+            // pegar, al revés. Reconstruirlos en orden es lo que hace el propio egui por dentro, y
+            // es exacto.
+            let mut acorde = *modificadores;
+            let mut pego = false;
+
+            estado.events.retain(|evento| {
+                if let egui::Event::ModifiersChanged(nuevos) = evento {
+                    acorde = *nuevos;
+                    // Se queda en la cola: no es nuestro, y quien lo mire después lo necesita.
+                    return true;
                 }
-                None => true,
+
+                // **Perder el foco borra el acorde, y esto no es prudencia: es la misma salvaguarda
+                // que egui tiene en su propio bucle**, con su razón escrita ahí — al salir la ventana
+                // no llega el aviso de que se soltaron las teclas. Sin esto, quien mantenga
+                // Ctrl+Mayúsculas, se vaya con un atajo del escritorio y suelte fuera, vuelve con las
+                // Mayúsculas pegadas para siempre: el siguiente Ctrl+V pegaría en vez de mandar su
+                // byte, que es la confusión que este trabajo existe para evitar, y en la dirección
+                // que además vuelca el portapapeles en el programa.
+                if matches!(evento, egui::Event::WindowFocused(false)) {
+                    acorde = egui::Modifiers::NONE;
+                    return true;
+                }
+
+                // **El escritorio manda el mismo evento para Ctrl+V y para Ctrl+Mayúsculas+V**, sin
+                // decir cuál fue, y se traga la tecla. Ésta es la única puerta donde se pueden
+                // separar, y separarlas es lo que hace que Ctrl+V le siga llegando al programa de
+                // dentro: para vim es el bloque visual, y para un shell «lo siguiente, literal».
+                if let egui::Event::Paste(texto) = evento
+                    && acorde.shift
+                {
+                    self.pulsaciones
+                        .extend_from_slice(&teclado::pegar(texto, marcado));
+                    pego = true;
+                    return false;
+                }
+
+                match teclado::bytes(evento) {
+                    Some(bytes) => {
+                        self.pulsaciones.extend_from_slice(&bytes);
+                        false
+                    }
+                    None => true,
+                }
             });
+
+            *modificadores = acorde;
+            pegado = pego;
         });
 
         if self.pulsaciones.is_empty() {
@@ -420,7 +485,25 @@ impl Division {
             // Un envío que falló no es una ida rápida: no se anota, o el número mediría el fallo.
             return;
         }
-        self.medida.anotar_ida(empezo_el_fotograma.elapsed());
+
+        // **Un pegado no entra en esta serie, y no es un detalle de limpieza.** Lo que este número
+        // mide es el trecho de una tecla al byte, y D3 lo publica: 36 µs en reposo, 3,42 ms con las
+        // dos consolas volcando. Un portapapeles de un mega escrito de una vez añade ahí una muestra
+        // de cientos de milisegundos —y sin techo si el programa no lee, ver el issue #50—, que
+        // movería el percentil que esa decisión usa para juzgar el framework de interfaz. Es
+        // exactamente el fallo del tramo con la etiqueta cambiada que este fichero ya documenta
+        // haber pagado una vez.
+        if !pegado {
+            self.medida.anotar_ida(empezo_el_fotograma.elapsed());
+        }
+
+        // **La memoria de un pegado grande no se queda para siempre.** Este vector se reutiliza entre
+        // fotogramas y vaciarlo no devuelve su capacidad: sin esto, pegar cincuenta megas los deja
+        // reservados mientras viva el proceso, y por división. Es la simetría que el vector hermano
+        // —lo que se recoge del programa— ya tenía con su presupuesto.
+        if self.pulsaciones.capacity() > HOLGURA_DE_PULSACIONES {
+            self.pulsaciones.shrink_to(HOLGURA_DE_PULSACIONES);
+        }
     }
 
     /// Si el programa terminó y no queda nada suyo por mostrar.
@@ -448,6 +531,14 @@ struct Ventana {
     /// controles; esto es geográfico y lo decide la aplicación. Confundirlos deja el teclado en manos
     /// de quien no lo enruta.
     foco: usize,
+    /// Cómo estaban las teclas muertas al acabar el pase anterior.
+    ///
+    /// **Vive aquí y no en la división porque son del teclado, no de una consola.** Hace falta
+    /// guardarlas porque un acorde puede empezar en un fotograma y usarse en el siguiente: si se
+    /// mantienen Ctrl+Mayúsculas pulsadas y se suelta la V un fotograma después, el aviso de que se
+    /// pulsaron llegó en el lote anterior y ya no está en éste. Y guardarlas en la ventana es lo que
+    /// hace que cambiar de consola con el acorde puesto no lo pierda.
+    modificadores: egui::Modifiers,
     /// Qué parte del ancho repartible se lleva la consola de la izquierda.
     ///
     /// **Una fracción y no dos anchos en puntos**: es lo que hace que el reparto sobreviva al
@@ -482,6 +573,7 @@ impl Ventana {
             vigilante: Self::vigilar(ctx, &divisiones),
             divisiones,
             foco: 0,
+            modificadores: egui::Modifiers::NONE,
             fraccion: FRACCION_INICIAL,
             tema: Tema::default(),
             resto_del_fotograma: RestoDelFotograma::default(),
@@ -674,7 +766,11 @@ impl Ventana {
     /// de la pasada de interfaz esa decisión no se puede comprobar sin abrir una ventana.
     fn teclear_la_del_foco(&mut self, ctx: &egui::Context) {
         let empezo = self.empezo_el_fotograma;
-        self.divisiones[self.foco].teclear(ctx, empezo);
+        // La semilla se saca y se vuelve a meter porque la división y el campo son dos préstamos
+        // del mismo dueño, y el compilador no deja tener los dos a la vez.
+        let mut modificadores = self.modificadores;
+        self.divisiones[self.foco].teclear(ctx, empezo, &mut modificadores);
+        self.modificadores = modificadores;
     }
 
     /// Pinta una consola recortada a su rectángulo, y devuelve lo que costó encolar el pintado.
@@ -924,11 +1020,239 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    fn encolar(ctx: &egui::Context, eventos: Vec<egui::Event>) {
+        ctx.input_mut(|entrada| {
+            entrada.events.clear();
+            entrada.events.extend(eventos);
+        });
+    }
+
+    fn con_mayusculas() -> egui::Modifiers {
+        egui::Modifiers {
+            shift: true,
+            ctrl: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn con_mayusculas_se_pega_el_texto_y_sin_ellas_va_el_byte_de_control() {
+        // Los dos atajos llegan como el MISMO evento y sin modificadores: el escritorio los resuelve
+        // antes y se traga la tecla. Separarlos aquí es lo que hace que Ctrl+V le siga llegando al
+        // programa de dentro, que es quien decide si para él significa pegar (Claude) o bloque
+        // visual (vim).
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
+        let mut modificadores = egui::Modifiers::NONE;
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(con_mayusculas()),
+                egui::Event::Paste("hola".to_owned()),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(division.pulsaciones, b"hola", "con Mayúsculas no se pegó");
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                egui::Event::Paste("hola".to_owned()),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(
+            division.pulsaciones, b"\x16",
+            "sin Mayúsculas tiene que llegar el byte de control, no el texto"
+        );
+    }
+
+    #[test]
+    fn el_modo_que_pide_el_programa_llega_hasta_lo_que_se_pega() {
+        // **Es el único cable de este trabajo que no estaba atado**, y la lección es la misma que el
+        // diseño invoca para los modificadores: probar la función pura demuestra que compone bien la
+        // marca, no que alguien le pase el modo de verdad. Poniendo `false` a pelo en el bucle, las
+        // 298 seguían verdes y pegar varias líneas volvía a ejecutarlas una a una.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        let mut modificadores = egui::Modifiers::NONE;
+
+        // Sin que el programa lo pida, el texto va desnudo.
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(con_mayusculas()),
+                egui::Event::Paste("ls\n".to_owned()),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(division.pulsaciones, b"ls\r", "llegó marcado sin pedirlo");
+
+        // Y en cuanto lo pide, la marca aparece — sin tocar nada más que la pantalla.
+        division.pantalla.advance(b"\x1b[?2004h");
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(con_mayusculas()),
+                egui::Event::Paste("ls\n".to_owned()),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(
+            division.pulsaciones, b"\x1b[200~ls\n\x1b[201~",
+            "el programa pidió el pegado marcado y el bucle no se enteró"
+        );
+    }
+
+    #[test]
+    fn los_modificadores_se_leen_del_momento_del_pegado_y_no_del_final_del_lote() {
+        // **Ésta es la prueba que separa el mecanismo bueno del que lo parecía.** El campo que egui
+        // publica —`InputState::modifiers`— es uno solo por pase: recorre el lote y se queda con el
+        // último aviso de cambio. Leerlo describiría cómo estaban las teclas al FINAL, no cuando
+        // llegó el pegado.
+        //
+        // Las dos secuencias de abajo tienen el mismo conjunto de eventos y orden distinto, y con
+        // ese campo darían el resultado cambiado en las dos.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
+        let mut modificadores = egui::Modifiers::NONE;
+
+        // Se pega y se suelta el acorde antes de que se recoja el fotograma: el final del lote dice
+        // «ninguno», pero cuando llegó el pegado sí estaban.
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(con_mayusculas()),
+                egui::Event::Paste("bueno".to_owned()),
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(
+            division.pulsaciones, b"bueno",
+            "soltar el acorde después de pegar impidió el pegado: se leyó el final del lote"
+        );
+
+        // Y al revés: se pega sin Mayúsculas y se pulsan después. El final del lote dice que sí.
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                egui::Event::Paste("malo".to_owned()),
+                egui::Event::ModifiersChanged(con_mayusculas()),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(
+            division.pulsaciones, b"\x16",
+            "pulsar Mayúsculas después del pegado lo convirtió en pegado: se leyó el final del lote"
+        );
+    }
+
+    #[test]
+    fn salir_de_la_ventana_borra_el_acorde_para_que_no_se_quede_pegado() {
+        // **El escenario es un atajo del escritorio, y termina volcando el portapapeles.** Con
+        // Ctrl+Mayúsculas pulsadas se cambia de ventana con una combinación global; las teclas se
+        // sueltan fuera y el aviso de que se soltaron no llega nunca. Sin borrar el acorde al salir,
+        // las Mayúsculas se quedan puestas para siempre y el siguiente Ctrl+V —que el usuario espera
+        // que entre en bloque visual— vuelca el portapapeles en el programa.
+        //
+        // Es la misma salvaguarda que egui tiene en su propio bucle de entrada, con su razón escrita
+        // ahí; esta reconstrucción la había olvidado.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        let mut modificadores = egui::Modifiers::NONE;
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(con_mayusculas()),
+                egui::Event::WindowFocused(false),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+
+        encolar(
+            &ctx,
+            vec![egui::Event::Paste("no deberías verme".to_owned())],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(
+            division.pulsaciones, b"\x16",
+            "las Mayúsculas se quedaron pegadas al salir de la ventana, y el pegado se coló"
+        );
+    }
+
+    #[test]
+    fn un_acorde_que_empezo_en_el_fotograma_anterior_sigue_valiendo() {
+        // Mantener las teclas pulsadas y soltar la V un fotograma después es lo normal al pegar: el
+        // aviso de que se pulsaron llegó en el lote anterior y ya no está en éste. Sin recordar cómo
+        // se cerró el pase, ese pegado se leería como si no hubiera Mayúsculas.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
+        let mut modificadores = egui::Modifiers::NONE;
+
+        encolar(&ctx, vec![egui::Event::ModifiersChanged(con_mayusculas())]);
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+
+        // **Vaciar la cola es lo que convierte esto en dos fotogramas de verdad.** egui rehace la
+        // lista de eventos en cada uno, así que el aviso de que se pulsaron las teclas no sigue ahí
+        // al siguiente. Sin este vaciado la prueba se aprobaría sola: volvería a leer el mismo aviso
+        // que dejó el pase anterior, y no ejercitaría la semilla en absoluto.
+        ctx.input_mut(|entrada| entrada.events.clear());
+
+        encolar(&ctx, vec![egui::Event::Paste("tarde".to_owned())]);
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
+        assert_eq!(
+            division.pulsaciones, b"tarde",
+            "el acorde del fotograma anterior se perdió"
+        );
+    }
+
+    #[test]
+    fn interrumpir_sigue_interrumpiendo_con_y_sin_mayusculas() {
+        // Es lo que más fácil se rompe al traer el portapapeles: copiar en un terminal es
+        // Ctrl+Mayúsculas+C, y si esa combinación dejara de interrumpir, un programa colgado se
+        // queda colgado.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
+        let mut modificadores = egui::Modifiers::NONE;
+
+        for acorde in [egui::Modifiers::CTRL, con_mayusculas()] {
+            encolar(
+                &ctx,
+                vec![egui::Event::ModifiersChanged(acorde), egui::Event::Copy],
+            );
+            division.teclear(&ctx, Instant::now(), &mut modificadores);
+            assert_eq!(division.pulsaciones, b"\x03", "dejó de interrumpir");
+
+            encolar(
+                &ctx,
+                vec![egui::Event::ModifiersChanged(acorde), egui::Event::Cut],
+            );
+            division.teclear(&ctx, Instant::now(), &mut modificadores);
+            assert_eq!(division.pulsaciones, b"\x18", "cortar cambió de byte");
+        }
+    }
+
     /// Monta una división con un programa dentro, sin framework de interfaz de por medio.
     ///
     /// Las dos mitades del fotograma que aquí se prueban —bombear y redimensionar— no tocan la
     /// ventana del escritorio, así que no hace falta abrir ninguna: se arma el struct a mano con
     /// las mismas piezas que [`Division::nueva`].
+    /// Deja en la cola de la ventana exactamente estos eventos, en este orden.
+    ///
+    /// **Vacía lo que hubiera antes, y esa es la mitad del ayudante.** Los avisos de cambio de
+    /// modificadores se dejan a propósito en la cola cuando se procesan, así que sin vaciar, una
+    /// segunda llamada correría contra los suyos **más los del tramo anterior** — y la prueba estaría
+    /// afirmando sobre una secuencia que no es la que escribió. Un fotograma de verdad rehace la
+    /// lista entera; esto hace lo mismo.
     fn division_con(programa: &str) -> Division {
         let (pty, salida) = Pty::spawn("sh", &["-c", programa], REJILLA_INICIAL)
             .expect("no se pudo abrir el pseudoterminal");
@@ -963,6 +1287,7 @@ mod tests {
             vigilante: Ventana::vigilar(&egui::Context::default(), &divisiones),
             divisiones,
             foco: 0,
+            modificadores: egui::Modifiers::NONE,
             fraccion: FRACCION_INICIAL,
             tema: Tema::default(),
             resto_del_fotograma: RestoDelFotograma::default(),
@@ -1109,15 +1434,16 @@ mod tests {
         // veces al pseudoterminal, y el programa de dentro no tiene forma de saber que sobra una.
         let mut division = division_con("sleep 30");
         let ctx = egui::Context::default();
+        let mut modificadores = egui::Modifiers::NONE;
         ctx.input_mut(|entrada| {
             entrada.events.push(egui::Event::Text("a".to_owned()));
             entrada.events.push(egui::Event::WindowFocused(true));
         });
 
-        division.teclear(&ctx, Instant::now());
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
         assert_eq!(division.pulsaciones, b"a", "no se envió lo tecleado");
 
-        division.teclear(&ctx, Instant::now());
+        division.teclear(&ctx, Instant::now(), &mut modificadores);
         assert!(
             division.pulsaciones.is_empty(),
             "la misma tecla se envió en el segundo pase"

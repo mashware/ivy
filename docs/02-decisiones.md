@@ -321,6 +321,81 @@ para que nadie la encuentre después y crea que hay una contradicción.
   consolas, así que la comparación 1 contra 2 dejó de ser medible desde dentro. El instrumento que la
   daría es el banco con reparto real, que está sin hacer
   ([#33](https://github.com/mashware/agent-terminal/issues/33)).
+
+---
+
+## D11 — Pegar es del terminal, `Ctrl+V` es del programa, y lo pegado va sin controles
+
+**Decidido.** `Ctrl+Mayúsculas+V` pega: el terminal escribe el texto del portapapeles en el programa
+de dentro. `Ctrl+V` **no pega** — le entrega al programa el byte de control que le corresponde, y él
+decide qué significa. Y a todo lo que se pega **se le quitan los caracteres de control**, menos el
+tabulador y los saltos de línea.
+
+**Por qué el reparto de los dos atajos, y no uno solo.** Son capas distintas atendiendo cada tecla, y
+eso se comprobó mirando qué hace un terminal de verdad: en Tilix `Ctrl+V` no pega, pero **dentro de
+esa misma ventana** Claude sí pega con `Ctrl+V`, porque recibe el byte y ha decidido que para él eso
+significa pegar. Vim recibe el mismo byte y entra en bloque visual; un shell lo usa para
+*quoted-insert*. **Quién pega con `Ctrl+V` no es decisión del terminal**, y quedárselo rompería el
+bloque visual sin que nadie lo pidiera.
+
+**El apaño técnico que hace falta para conseguirlo**, porque no es gratis: el escritorio emite el
+**mismo evento** para los dos atajos —comprobado en la fuente de `egui-winit`: la condición es
+«mandato + V» y no mira Mayúsculas— y **se traga el evento de tecla**. Distinguirlos exige
+reconstruir el estado de las teclas muertas recorriendo los eventos en orden. Leer el campo que el
+framework publica **no vale**: es uno solo por pase y describe cómo estaban al **final** del lote, no
+cuando llegó el pegado.
+
+**Por qué se filtran los controles, y son dos razones distintas.**
+
+1. **La marca de pegado se puede cerrar desde dentro.** Un portapapeles que traiga su secuencia de
+   cierre la cierra por su cuenta, y lo que venga detrás entra como tecleado — **ejecutándose sin
+   Enter**. Quitar solo esa secuencia **no basta**: un ataque comprobado la reconstruye aprovechando
+   que buscar-y-borrar no vuelve a mirar lo que deja.
+2. **Y el envoltorio no protege del núcleo.** Los caracteres de control los procesa la disciplina de
+   línea, que ve los bytes **antes** que el programa: un `0x03` interrumpe, un `0x1a` suspende el
+   shell, un `0x1c` provoca un volcado, un `0x04` cierra la entrada — y con las dos consolas cerradas,
+   la ventana. Marcar el pegado no cambia nada de eso. Es la razón por la que `xterm` y `VTE` filtran
+   los controles del pegado desde hace años.
+
+**Un salto de línea sale distinto según haya marca o no, y equivocarse se ve en pantalla.** Sin
+marca hay que imitar la tecla, y Enter manda **retorno de carro**. Con marca el salto va **tal cual**:
+el programa sabe que es un pegado y decide él. Mandarle un retorno de carro dentro de la marca es
+meterle un carácter de control en medio de un texto, y lo inserta literal — sale un cuadro en la orden
+y el shell lo imprime al ejecutar. Se descubrió pegando dos líneas y mirando.
+
+**Lo que cuesta, y se acepta.** Un texto con secuencias de color pierde sus escapes y el resto queda
+como texto corriente: pegar un volcado coloreado deja `[32mok[0m` en la línea. Es lo mismo que hace
+`xterm` por defecto. Desde el terminal **no hay forma de distinguir el control que el usuario quería
+del que le colaron**, y uno cuyo pegado puede ejecutar o suspender es peor que uno que pega en texto
+plano.
+
+**Lo que se descartó, y por qué.**
+
+- **Que pegar sea también `Ctrl+V`.** Más simple y quita el mecanismo más delicado — pero se lleva por
+  delante el bloque visual de vim y el *quoted-insert* del shell, que se usan a diario.
+- **Leer los modificadores del campo del framework.** No distingue los dos atajos: ver arriba.
+- **Quitar solo la secuencia de cierre.** Se escapa, comprobado.
+- **Repetir el borrado hasta que no quede ninguna.** Cerraría *ese* agujero y ninguno de los del
+  núcleo.
+- **El clic central** (la selección primaria del escritorio). `egui` no la expone: su portapapeles
+  solo sabe leer y escribir el normal, y la pieza de debajo que sí la tiene es privada.
+- **Copiar.** Arrastra selección con el ratón y, en la práctica, scrollback. Sigue en F2.6.
+
+**Lo que hay que saber para no llevarse un susto.**
+
+- **El programa de dentro puede pedir que lo pegado le llegue marcado**, y el terminal se lo pregunta
+  al motor. Ese accesor devuelve un `bool` y no el tipo del motor, para que la caja del terminal
+  siga sin dejar asomar sus dependencias.
+- **Con el portapapeles vacío, `Ctrl+V` no manda nada.** El escritorio se traga la tecla y no emite
+  ningún evento cuando no hay qué pegar, así que el byte de control tampoco sale. Se nota poco —un
+  portapapeles vacío es raro— pero significa que el bloque visual de vim no se abre en una sesión
+  recién arrancada sin haber copiado nada. No se puede arreglar desde aquí.
+- **En macOS los dos atajos se comportan distinto** y esta regla los rompería: allí el «mandato» es ⌘,
+  así que ⌘+V daría el byte de control mientras `Ctrl+V` llega como tecla. La primera compilación en
+  ese sistema es F2.7 y tendrá que revisarlo.
+- **Pegar puede colgar la ventana** mientras el programa de dentro no lea su entrada. No es de pegar:
+  es que escribir al pseudoterminal bloquea sin techo
+  ([#50](https://github.com/mashware/agent-terminal/issues/50)). Pegar solo lo hace alcanzable.
 - **«Encolar» no es coste de egui: es el pintor de este proyecto**, que sigue siendo el más ingenuo
   posible —una celda cada vez, sin caché ni seguimiento de lo que cambió— llamando a `rect_filled` y
   `text`. De los 3,21 ms de dibujo, lo único atribuible al framework sin discusión es **el resto del

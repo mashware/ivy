@@ -5,6 +5,7 @@ use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::Config;
+use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::Processor;
 
@@ -103,6 +104,19 @@ impl Screen {
             rows: grid.screen_lines() as u16,
             cols: grid.columns() as u16,
         }
+    }
+
+    /// Si el programa de dentro ha pedido que lo pegado le llegue **marcado como pegado**.
+    ///
+    /// Un shell que lo pide no ejecuta lo que reciba así aunque traiga saltos de línea: lo deja
+    /// escrito para que se revise antes de darle a Enter. Sin la pregunta, quien pega varias líneas
+    /// las ejecuta una a una sin haberlas visto, que es lo que este accesor existe para evitar.
+    ///
+    /// **Devuelve `bool` y no el tipo del motor a propósito.** Esta caja existe para sobrevivir a que
+    /// la interfaz se reescriba, y lo consigue no dejando asomar los tipos de sus dependencias por su
+    /// API pública: quien la use no tiene que conocerlos ni migrar con ellos.
+    pub fn pegado_marcado(&self) -> bool {
+        self.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 
     /// Una foto de la rejilla visible: todas las celdas y el cursor.
@@ -205,6 +219,24 @@ impl Screen {
 mod tests {
     use super::*;
     use crate::{CellWidth, CursorShape, TermColor, Underline};
+
+    #[test]
+    fn el_programa_puede_pedir_y_retirar_que_lo_pegado_le_llegue_marcado() {
+        // De este modo depende que pegar varias líneas se deje escrito en vez de ejecutarse línea a
+        // línea, así que hay que poder preguntarlo — y que la respuesta siga al programa, que lo
+        // pone al arrancar un shell interactivo y lo quita al ceder el terminal a otra cosa.
+        let mut pantalla = Screen::new(Size::default());
+        assert!(
+            !pantalla.pegado_marcado(),
+            "nadie lo ha pedido y ya está puesto"
+        );
+
+        pantalla.advance(b"\x1b[?2004h");
+        assert!(pantalla.pegado_marcado(), "se pidió y no se enteró");
+
+        pantalla.advance(b"\x1b[?2004l");
+        assert!(!pantalla.pegado_marcado(), "se retiró y siguió puesto");
+    }
 
     #[test]
     fn una_pantalla_recien_creada_no_tiene_contenido() {
