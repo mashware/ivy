@@ -245,6 +245,16 @@ impl Medida {
         self.panel.hay().then(|| self.panel.media())
     }
 
+    /// Si alguna de las cuatro medias tiene muestras.
+    ///
+    /// Existe por lo mismo que [`Medida::panel_anotado`]: una prueba puede afirmar sobre el camino
+    /// real que una consola **que no se pintó** no ensucia ninguna media. Comprobarlo llamando a mano
+    /// a la anotación demuestra que la anotación funciona, no que quien la llama le pase lo correcto.
+    #[cfg(test)]
+    pub fn hay_medias(&self) -> bool {
+        self.esperar.hay() || self.interpretar.hay() || self.encolar.hay() || self.panel.hay()
+    }
+
     /// Si esta división llegó a medir algo, para no publicar el informe de una consola en blanco.
     pub fn hay_algo(&self) -> bool {
         self.ida.hay() || self.vuelta.hay()
@@ -353,7 +363,7 @@ impl RestoDelFotograma {
             return;
         }
         println!(
-            "\nel resto del fotograma — de la ventana, común a las dos consolas   ({} fotogramas)",
+            "\nel resto del fotograma — de la ventana, común a todas las consolas   ({} fotogramas)",
             self.serie.total
         );
         println!("  {}", self.serie);
@@ -362,8 +372,9 @@ impl RestoDelFotograma {
              llamarlo «teselado» sería publicar como medido algo que no lo está"
         );
         println!(
-            "  ya tiene descontado lo que cronometraron las dos consolas, también el pintado de una\n  \
-             que no recibiera salida en ese fotograma"
+            "  ya tiene descontado lo que cronometraron todas las consolas de todas las pestañas:\n  \
+             también el pintado de una que no recibiera salida, y lo que interpretó una que no se\n  \
+             llegó a pintar por estar en una pestaña de fondo"
         );
     }
 }
@@ -627,6 +638,43 @@ mod tests {
             ms(5),
             "el resto se quedó con el pintado de la consola quieta"
         );
+    }
+
+    #[test]
+    fn una_consola_que_interpreta_y_no_se_pinta_declara_lo_interpretado_sin_tocar_las_medias() {
+        // **El caso nuevo, y el más caro de los tres**: una consola que interpreta y no se pinta.
+        // Aquí se ata lo que hace que no haga falta ninguna serie para ello — **las cuatro medias no
+        // se mueven**, porque meter un cero de encolado en su media diría que pintar sale más barato
+        // justamente en los fotogramas en los que no se pintó nada— y que lo interpretado **sí** se
+        // devuelve para restarlo.
+        let mut medida = Medida::default();
+        let mut resto = RestoDelFotograma::default();
+
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            None,
+            Instant::now(),
+            ms(2),
+            Duration::ZERO,
+            Duration::ZERO,
+        ));
+        let cronometrado = medida
+            .cerrar_fotograma(ms(10))
+            .expect("lo interpretado tiene que declararse aunque no se haya pintado");
+        resto.anotar(ms(10), cronometrado);
+
+        assert_eq!(cronometrado, ms(2), "lo que interpretó, y nada más");
+        assert_eq!(
+            resto.serie.media(),
+            ms(8),
+            "el resto se quedó con lo que interpretó una consola que no se pintó"
+        );
+        assert!(!medida.encolar.hay(), "se ensució la media de encolar");
+        assert!(
+            !medida.interpretar.hay(),
+            "se ensució la media de interpretar"
+        );
+        assert!(!medida.vuelta.hay(), "se anotó una vuelta que no ocurrió");
+        assert!(!medida.panel.hay(), "se ensució el tramo del panel");
     }
 
     #[test]

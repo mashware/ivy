@@ -720,13 +720,49 @@ impl Ventana {
         }
     }
 
+    /// Cierra la vuelta de las consolas que **interpretaron y no se pintaron**, para que su trabajo no
+    /// acabe publicado como coste del framework de interfaz.
+    ///
+    /// **El sesgo que esto evita es grande y silencioso.** El coste del fotograma se reparte por
+    /// resta: cada consola declara lo suyo y lo que sobra se le atribuye al framework. Una consola de
+    /// una pestaña que no se ve interpreta bytes igual que las demás, pero no pasa por el pintado, que
+    /// es el único sitio que cerraba su vuelta — así que su tiempo se le regalaba al resto, y con una
+    /// sola pestaña de fondo volcando lo multiplicaría **varias veces**. Y no dejaba rastro: el bombeo
+    /// del fotograma siguiente sobrescribe lo pendiente, así que la muestra no se doblaba, **se
+    /// perdía**.
+    ///
+    /// **Encolado y panel a cero es la verdad, no un relleno**: esa consola no encoló nada ni pintó
+    /// ningún panel. Y **la espera se declara a `None` a propósito**, que es lo que hace que las
+    /// cuatro medias no se toquen —ver [`medida::Medida::cerrar_fotograma`]—; lo único que se conserva
+    /// es lo interpretado, que es justo lo que la resta necesita. Por eso esto **no lleva ninguna
+    /// serie nueva**.
+    ///
+    /// **Va al final de la pasada de interfaz y no tras bombear**, porque hasta que no se ha pintado
+    /// no se sabe qué se pintó: un atajo puede cambiar la pestaña visible en ese mismo fotograma.
+    ///
+    /// Con la ventana minimizada u ocluida no hay pasada de interfaz, así que esto no corre y nadie
+    /// declara nada. **No es un agujero**: entonces tampoco declara la consola visible, así que
+    /// [`Ventana::cerrar_fotograma`] no encuentra nada que restar y no anota resto — el fotograma se
+    /// queda sin medir, que es lo correcto, en vez de medido de menos.
+    fn cerrar_las_vueltas_no_pintadas(&mut self) {
+        for division in self.todas_las_divisiones_mut() {
+            if let Some((_, recogido_en, interpretado)) = division.pendiente_de_medir.take() {
+                division.medida.anotar_vuelta(medida::Tramos::de_una_vuelta(
+                    None,
+                    recogido_en,
+                    interpretado,
+                    std::time::Duration::ZERO,
+                    std::time::Duration::ZERO,
+                ));
+            }
+        }
+    }
+
     /// Cierra el fotograma anterior: cada consola cierra sus tramos y la ventana se queda con lo que
     /// ninguna cronometró.
     fn cerrar_fotograma(&mut self, coste_cpu: std::time::Duration) {
         let cronometrado = self
-            .activa_mut()
-            .divisiones
-            .iter_mut()
+            .todas_las_divisiones_mut()
             .filter_map(|division| division.medida.cerrar_fotograma(coste_cpu))
             .reduce(|una, otra| una + otra);
 
@@ -1063,6 +1099,9 @@ impl eframe::App for Ventana {
             egui::Stroke::new(1.0, self.tema.foco()),
             egui::StrokeKind::Inside,
         );
+
+        // Ya se ha pintado, así que lo que siga pendiente es de una consola que no se pintó.
+        self.cerrar_las_vueltas_no_pintadas();
 
         // **Y ahora sí, con los paneles ya releídos.** Ver [`Ventana::poner_el_despertador`]: la mitad
         // lógica lo pide con el estado de antes de leer, así que el fotograma en que un panel aparece
@@ -2191,6 +2230,155 @@ mod tests {
             se_encolo_el_texto(&al_volver, "sin noticias"),
             "se vuelve a la pestaña y su panel no dice que lleva callado: el aviso que el despertador \
              no fue a buscar tampoco aparece al mirarlo"
+        );
+    }
+
+    #[test]
+    fn lo_que_interpreta_una_consola_que_no_se_pinta_se_declara_igual() {
+        // **El camino real, no el ayudante.** Que `Medida` sepa cerrar una vuelta sin pintado ya lo ata
+        // una prueba unitaria; lo que aquí se comprueba es que **alguien la llama** para las consolas
+        // que se quedan fuera del pintado, y que la ventana recoge lo declarado. Por qué importa, en
+        // el doc de `Ventana::cerrar_las_vueltas_no_pintadas`.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["printf de-fondo", "sleep 30"]]);
+        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+
+        // El bombeo deja pendiente lo que interpretó cada consola; el pintado solo recoge el de la
+        // pestaña visible.
+        ventana.bombear_todas();
+        // Que hubo algo que interpretar de verdad. Preguntar si quedó medida pendiente **no** vale
+        // como guardián: el bombeo la deja puesta siempre, haya llegado un byte o no.
+        assert!(
+            ventana.pestañas[1].divisiones[0]
+                .pantalla
+                .to_text()
+                .contains("de-fondo"),
+            "la consola de fondo no llegó a interpretar nada: la prueba no está midiendo lo que cree"
+        );
+
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        assert!(
+            ventana.pestañas[1].divisiones[0]
+                .pendiente_de_medir
+                .is_none(),
+            "la vuelta de la consola de fondo se quedó sin cerrar"
+        );
+        // **Lo primero que hay que afirmar es que declaró algo, no que ya no quede nada pendiente.**
+        // Es justo el fallo que hay que impedir: un barrido que se limitara a **tirar** lo pendiente
+        // deja la medida vacía —sin nada pendiente, sin medias sucias y sin nada por recoger, o sea
+        // verde— mientras el tiempo de esa consola se sigue publicando como coste del framework.
+        // Comprobado mutándolo: sin esta afirmación, ese barrido pasaba.
+        let declarado = ventana.pestañas[1].divisiones[0]
+            .medida
+            .cerrar_fotograma(std::time::Duration::from_millis(10))
+            .expect("la consola de fondo no declaró nada de lo que interpretó");
+        assert!(
+            !declarado.is_zero(),
+            "declaró cero: lo que interpretó se perdió por el camino"
+        );
+        assert!(
+            !ventana.pestañas[1].divisiones[0].medida.hay_medias(),
+            "la consola de fondo ensució alguna media: no hubo vuelta que medir, solo algo que restar"
+        );
+
+        // Y la otra mitad, en un segundo fotograma porque el primero ya se consumió arriba: **la
+        // ventana tiene que recogerlo**. Declarar sin que nadie reste deja el número igual de mal, y
+        // con una sola pestaña no se nota.
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
+        assert!(
+            ventana.pestañas[1].divisiones[0]
+                .medida
+                .cerrar_fotograma(std::time::Duration::from_millis(10))
+                .is_none(),
+            "lo que declaró la consola de fondo seguía ahí sin recoger"
+        );
+    }
+
+    #[test]
+    fn la_consola_que_no_se_pinta_declara_lo_interpretado_y_ni_un_tramo_mas() {
+        // Que declare **algo** ya lo ata la prueba de arriba; lo que falta es que ese algo sea
+        // **exactamente lo que interpretó**. Poner cualquier otra cosa donde van los ceros —el
+        // encolado, el tramo del panel— sale verde y no se ve por ninguna parte: lo declarado se
+        // resta del coste del fotograma, así que un tramo inventado en una consola que no se pintó
+        // le baja el resto al framework de interfaz, que es justo la cifra que decide D3.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["printf de-fondo", "sleep 30"]]);
+        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+
+        ventana.bombear_todas();
+        let (_, _, interpretado) = ventana.pestañas[1].divisiones[0]
+            .pendiente_de_medir
+            .expect("el bombeo tiene que dejar pendiente lo que interpretó la consola de fondo");
+        // Con un cero aquí la comparación de abajo la cumpliría también un barrido que declarase
+        // ceros por todas partes, que es lo contrario de lo que esta prueba dice comprobar.
+        assert!(
+            !interpretado.is_zero(),
+            "interpretar la salida no costó nada medible: la prueba no está midiendo lo que cree"
+        );
+
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        // Se cierra sobre la medida de esa consola y no sobre la ventana **a propósito**: por la
+        // ventana lo declarado sale ya sumado con lo de las otras tres y deja de poderse afirmar
+        // sobre este número. Que la ventana lo recoge lo ata la prueba de arriba.
+        assert_eq!(
+            ventana.pestañas[1].divisiones[0]
+                .medida
+                .cerrar_fotograma(std::time::Duration::from_millis(10)),
+            Some(interpretado),
+            "la consola de fondo declaró un tramo que no gastó: ese tiempo se le descuenta al \
+             framework sin que nadie lo haya medido"
+        );
+    }
+
+    #[test]
+    fn el_barrido_de_lo_no_pintado_va_despues_del_pintado_y_no_antes() {
+        // **El orden dentro de la pasada de interfaz, que no es indiferente.** Barrer lo pendiente
+        // antes de pintar —recién bombeado, que es donde parece que va— se lleva por delante lo de
+        // la consola que **sí** se ve: llega al pintado sin nada que cerrar, así que su vuelta se
+        // declara sin espera y **ninguna de las cuatro medias vuelve a recibir una muestra en toda
+        // la sesión**, mientras su encolado y su panel se publican como coste del framework. Ni da
+        // error ni se nota en pantalla: el informe sale con las series en blanco.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["printf delante", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        // Las medias se llenan al cerrar el fotograma, no al pintar: preguntar antes daría un vacío
+        // que no dice nada.
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
+
+        assert!(
+            ventana.pestañas[0].divisiones[0].medida.hay_medias(),
+            "la consola que se ve se quedó sin una sola muestra: su vuelta se cerró antes de \
+             pintarla, así que se declaró como si no le hubiera llegado nada"
         );
     }
 
