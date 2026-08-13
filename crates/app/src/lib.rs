@@ -689,8 +689,10 @@ impl Ventana {
         tema: &Tema,
         metrica: &Metrica,
     ) {
-        // **El panel se cronometra aparte del encolado de la consola, y con un solo reloj alrededor de
-        // leer y pintar.** Para la resta del fotograma daría igual sumarlo todo —lo que importa ahí es
+        // **El panel se cronometra aparte del encolado de la consola, con dos relojes que se suman:
+        // uno alrededor de leer y repartir, y otro alrededor de pintarlo.** Son dos y no uno porque el
+        // pintado de la consola queda justo en medio y tiene su propio tramo. Para la resta del
+        // fotograma daría igual sumarlo todo —lo que importa ahí es
         // que se declare—, pero un tramo llamado «encolando el pintado» que además incluyera leer un
         // fichero de disco es un número con la etiqueta cambiada, y en este proyecto eso ya invalidó
         // una medida entera.
@@ -874,6 +876,7 @@ impl eframe::App for Ventana {
             return;
         }
 
+        let mut salida = std::io::stdout().lock();
         medida::cabecera(self.divisiones.each_ref().map(|d| d.pantalla.size()));
         // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo pueden
         // venir de dos consolas de anchos muy distintos, y una tabla de tramos sin saber con qué reparto
@@ -898,7 +901,10 @@ impl eframe::App for Ventana {
                 "\n── consola {cual} ({}) ──",
                 medida::NOMBRE_DE_CONSOLA[cual]
             );
-            division.medida.publicar_tramos();
+            division
+                .medida
+                .publicar_tramos(&mut salida)
+                .expect("escribir el informe por la salida estándar");
         }
 
         self.resto_del_fotograma.publicar();

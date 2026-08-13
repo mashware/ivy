@@ -131,8 +131,16 @@ pub struct Tramos {
     esperado: Option<Duration>,
     interpretado: Duration,
     encolado: Duration,
-    /// Lo que costó mirar si el `panel.json` de esta consola cambió y, si cambió, leerlo e
-    /// interpretarlo.
+    /// Lo que costó mirar si el `panel.json` de esta consola cambió, leerlo e interpretarlo si
+    /// cambió, **y pintarlo**.
+    ///
+    /// **Las tres cosas, y decirlo entero importa.** El número lo componen **dos tramos disjuntos** de
+    /// `Ventana::pintar_division`, sumados: uno antes de pintar la consola —mirar la fecha, leer si
+    /// cambió, y repartir el ancho— y otro después —pintar el panel—. Lo que queda **en medio**, que es
+    /// encolar el pintado de la consola, tiene su propio campo y no entra aquí. Describir el conjunto
+    /// como «leer» dejaría el pintado del panel sin dueño declarado, y un tramo sin dueño se lo lleva
+    /// el que se calcula restando — que aquí es el framework de interfaz, o sea justo la cifra sobre
+    /// la que D3 tiene que decidir.
     ///
     /// **Va aparte y no sumado a `encolado`, y esa separación es el motivo de que exista el campo.**
     /// Los dos ocurren dentro del fotograma y los dos hay que devolverlos, así que para la resta daría
@@ -181,7 +189,7 @@ pub struct Medida {
     esperar: Serie,
     interpretar: Serie,
     encolar: Serie,
-    /// Mirar la fecha del `panel.json` y, cuando ha cambiado, leerlo e interpretarlo.
+    /// Mirar la fecha del `panel.json`, leerlo e interpretarlo cuando ha cambiado, **y pintarlo**.
     panel: Serie,
     vuelta: Serie,
     /// Los tramos del fotograma anterior, esperando a que `eframe` publique lo que costó.
@@ -242,48 +250,82 @@ impl Medida {
         self.ida.hay() || self.vuelta.hay()
     }
 
-    /// Publica los números **de esta división** por la salida estándar.
+    /// Publica los números **de esta división** al destino que se le dé.
     ///
-    /// Se imprime al cerrar y no durante: la ventana es el terminal, así que no hay sitio dentro
-    /// donde enseñarlos sin taparle la pantalla al programa.
-    pub fn publicar_tramos(&self) {
+    /// Se publica al cerrar y no durante: la ventana es el terminal, así que no hay sitio dentro
+    /// donde enseñar esto sin taparle la pantalla al programa.
+    ///
+    /// **El destino se recibe, y no es una comodidad: es lo que hace la prueba honesta.** La propiedad
+    /// que hay que atar es que el texto publicado **mencione que el tramo del panel incluye pintarlo**,
+    /// porque de eso depende que quien copie el número a un documento no se lo atribuya a otro. Con un
+    /// `println!` dentro no hay forma de leer lo que sale, y la alternativa —afirmar sobre la constante—
+    /// demostraría que la constante está bien redactada, no que alguien la imprima.
+    ///
+    /// **Y por eso esto no tiene envoltorio.** La primera versión dejaba un `publicar_tramos()` sin
+    /// argumentos que llamaba a esta función con la salida estándar, y la prueba entraba por aquí:
+    /// vaciar el envoltorio dejaba la suite **verde**, que es la novena vez que este proyecto ata al
+    /// ayudante en vez de al camino real. Ahora la puerta de producción y la que se prueba son la
+    /// misma, y lo único que aporta quien llama es a dónde escribir.
+    pub fn publicar_tramos(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
         if self.ida.hay() {
-            println!(
+            writeln!(
+                a,
                 "\ntecla en el fotograma → byte en el programa   ({} pulsaciones)",
                 self.ida.total
-            );
-            println!("  {}", self.ida);
-            println!(
+            )?;
+            writeln!(a, "  {}", self.ida)?;
+            writeln!(
+                a,
                 "  no incluye el trecho de la pulsación al fotograma: no es medible desde aquí"
-            );
+            )?;
         }
 
         if self.vuelta.hay() {
-            println!(
+            writeln!(
+                a,
                 "\nbyte disponible → fotograma pagado   ({} fotogramas con salida)",
                 self.vuelta.total
-            );
-            println!("  {}", self.vuelta);
-            println!("  esperando en la cola:   {}", self.esperar);
-            println!("  interpretando:          {}", self.interpretar);
-            println!("  encolando el pintado:   {}", self.encolar);
-            println!("  el panel de estado:     {}", self.panel);
+            )?;
+            writeln!(a, "  {}", self.vuelta)?;
+            writeln!(a, "  esperando en la cola:   {}", self.esperar)?;
+            writeln!(a, "  interpretando:          {}", self.interpretar)?;
+            writeln!(a, "  encolando el pintado:   {}", self.encolar)?;
+            writeln!(a, "  el panel de estado:     {}", self.panel)?;
             // **La media de este tramo mezcla dos poblaciones y hay que decirlo.** Casi todos los
-            // fotogramas solo miran la fecha del fichero —menos de un microsegundo—; los pocos en que
-            // el productor ha publicado cuestan leer e interpretar, que es tres órdenes de magnitud
-            // más. La media sale pegada al caso barato, así que el número que describe el caso caro es
-            // el 95, no ella.
-            println!(
-                "    mezcla mirar la fecha (casi todos) con leer e interpretar (los de\n    \
-                 publicación): la media describe el primero, el 95 % el segundo"
-            );
-            println!(
+            // fotogramas solo miran la fecha del fichero y pintan lo ya maquetado; los pocos en que el
+            // productor ha publicado cuestan además leer, interpretar y rehacer la maqueta, que es
+            // tres órdenes de magnitud más. La media sale pegada al caso barato, así que el número que
+            // describe el caso caro es el 95, no ella.
+            //
+            // **Y el tramo incluye pintar**, no solo leer: el reloj va desde antes de mirar la fecha
+            // hasta después de pintar la última fila. Decirlo aquí es lo que impide que quien copie
+            // este número a un documento se lo atribuya a otro.
+            writeln!(a, "{EXPLICACION_DEL_PANEL}")?;
+            writeln!(
+                a,
                 "  incluye el fotograma entero, también el pintado de las otras consolas: un\n  \
                  fotograma se presenta indivisible. Por eso dos de estos números NO se suman"
-            );
+            )?;
         }
+
+        Ok(())
     }
 }
+
+/// Lo que el informe dice debajo de la línea del tramo del panel.
+///
+/// **Las dos frases están por razones distintas y ninguna es adorno.** La primera avisa de que la
+/// media y el 95 describen poblaciones distintas, así que quien cite «la media» estará citando el
+/// caso en que no hubo publicación. La segunda dice **qué abarca el tramo**, y existe porque durante
+/// todo el hito F1.6 este número se describió como «leer el panel» cuando el reloj incluye pintarlo:
+/// un tramo mal nombrado acaba atribuido a quien no lo hizo, y aquí el que se lleva lo que nadie
+/// declara es el framework de interfaz, que es justo la cifra que decide D3.
+const EXPLICACION_DEL_PANEL: &str = "\
+    \x20   mezcla mirar la fecha y pintar lo ya maquetado (casi todos los fotogramas) con\n\
+    \x20   leer, interpretar y rehacer la maqueta (los de publicación): la media describe\n\
+    \x20   el primero, el 95 % el segundo\n\
+    \x20   son dos relojes, uno antes y otro después del pintado de la consola —que queda\n\
+    \x20   fuera—: este tramo INCLUYE pintar el panel, no solo leerlo";
 
 /// El resto del fotograma: lo que costó la pasada y nadie cronometró.
 ///
@@ -384,6 +426,54 @@ mod tests {
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    /// Lo que el informe publica de verdad, leído del mismo camino que escribe por pantalla.
+    fn informe_de(medida: &Medida) -> String {
+        let mut salida = Vec::new();
+        medida
+            .publicar_tramos(&mut salida)
+            .expect("escribir a memoria no falla");
+        String::from_utf8(salida).expect("el informe es texto")
+    }
+
+    /// Una medida con un fotograma anotado, que es lo mínimo para que el informe hable.
+    fn con_un_fotograma() -> Medida {
+        let mut medida = Medida::default();
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(Instant::now()),
+            Instant::now(),
+            ms(2),
+            ms(1),
+            ms(3),
+        ));
+        medida.cerrar_fotograma(ms(7));
+        medida
+    }
+
+    #[test]
+    fn el_informe_dice_que_el_tramo_del_panel_incluye_pintarlo() {
+        // **Durante todo el hito F1.6 este tramo se describió como «leer el panel»** —en sus dos
+        // campos y en el texto que el informe imprime— cuando el reloj que lo produce abarca desde
+        // antes de mirar la fecha hasta después de pintar la última fila. El anexo «Medido» de D3 se
+        // apoya en este número, así que un lector que lo copie creyendo que solo mide leer le
+        // atribuiría el pintado a quien se calcula restando: el framework de interfaz, o sea la cifra
+        // sobre la que D3 decide.
+        //
+        // **Se afirma sobre lo que el informe escribe, no sobre la constante.** Comprobar la
+        // constante demostraría que la constante está bien redactada, no que alguien la imprima —
+        // que es el fallo que en este proyecto ha dejado pasar ocho cosas con la suite en verde.
+        let informe = informe_de(&con_un_fotograma());
+
+        assert!(
+            informe.contains("el panel de estado:"),
+            "el informe no publica el tramo del panel:\n{informe}"
+        );
+        assert!(
+            informe.contains("INCLUYE pintar el panel"),
+            "el informe publica el tramo del panel sin decir que incluye pintarlo, que es lo que \
+             hace que el número se pueda copiar mal:\n{informe}"
+        );
     }
 
     #[test]

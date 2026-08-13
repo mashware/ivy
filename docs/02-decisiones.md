@@ -353,6 +353,150 @@ fotograma**, y probar los turnos rotatorios del presupuesto que el diseño de F1
 cerrar el criterio de verdad faltan tres medidas que no están: el peor caso con dos divisiones, la línea
 base de una sola dentro de la aplicación, y F1.6 con los paneles encima.
 
+### Medido — 13 agosto 2026: con los dos paneles pintando
+
+La tercera de esas tres. Misma máquina y mismo `--release`, rejilla de **61 filas** por consola y
+ventana sin tocar; la carga es el volcado determinista de `host-load` —color, negrita y repintado de
+barra de estado con movimiento de cursor—, **44 MiB por consola**, arrancadas a la vez con su
+alineación al reloj de pared. Cada tanda son **dos corridas** y los números son la media de las
+medias, sobre **357-358 fotogramas con salida por consola** en las cuatro. Se toma con
+`scripts/medir-fotograma.sh`, que va en el repo: la tanda del 11 de agosto no dejó guion y
+reconstruirla costó más que tomarla.
+
+**Tres regímenes, y el primero es el que hace legible a los otros dos:**
+
+| | **A** sin panel | **B** panel quieto | **C** panel publicándose 1×s |
+|---|---|---|---|
+| Columnas por consola | **57** | **21** | **21** |
+| Interpretar (las dos) | 4,35 ms | 4,51 ms | 4,35 ms |
+| Encolar el pintado (las dos) | 1,80 ms | 0,75 ms | 0,74 ms |
+| **El panel (las dos)** | **0,77 µs** | **12,8 µs** | **13,6 µs** |
+| El resto del fotograma | 0,86 ms | 0,50 ms | 0,46 ms |
+| **Coste del fotograma** | **7,01 ms** | **5,78 ms** | **5,56 ms** |
+| Del hueco de 120 Hz | 84 % | 69 % | 67 % |
+| Fotogramas de la ventana | 368 y 369 | 372 y 371 | **472 y 471** |
+
+> **Con los paneles pintando el fotograma sale más barato, y eso NO significa que los paneles salgan
+> gratis.** El panel se lleva **36 de las 57 columnas** de su consola, así que la consola pinta un
+> 63 % menos de celdas. **El tramo que baja por esa causa es `encolar`** —1,80 a 0,75 ms, un −58 %—,
+> y baja porque hay menos celdas que apilar, no porque nada haya mejorado. Lo que la tabla enseña es
+> un intercambio —menos consola a cambio de un panel—, no una ganancia. **Leer «−18 % de coste» como
+> una mejora es el error que esta tanda de control existe para impedir**, y sin la columna A el anexo
+> lo habría cometido.
+
+**Y una que sale al revés de lo esperado: envolver no se nota.** A 57 columnas las líneas de la carga
+—~50 caracteres visibles— no envuelven; a 21 envuelven en tres filas. Cabía esperar que interpretar se
+encareciera, porque el ancho de envoltura es justamente de lo que depende. **No pasa**: 4,35 / 4,51 /
+4,35 ms, plano dentro del ruido entre corridas. El coste de meter bytes en la rejilla lo domina la
+cantidad de bytes, no la forma en que se reparten en filas.
+
+**Lo que sí es del panel, aislado.** La resta que sí vale es la del **tramo del panel**, porque su
+suelo es el mismo en las tres columnas: en A ese tramo no es cero —el directorio se crea siempre, así
+que hay que recoger la bandera, pedir la hora y repartir el ancho— y mide **0,77 µs**. Sobre ese
+suelo:
+
+| | Media (las dos) | El 95 %, consola izquierda |
+|---|---|---|
+| A — sin panel | 0,77 µs | 1,4 µs |
+| B — panel quieto | **12,8 µs** | 19,3 µs |
+| C — panel publicándose | **13,6 µs** | 21,4 µs |
+
+Leer y pintar dos paneles cuesta **unos 13 µs por fotograma**, el **0,2 % del fotograma** y el
+**0,15 % del hueco de 120 Hz**. El panel, como coste por fotograma, **no se nota**.
+
+**Lo que publicar añade no se puede separar del ruido, y decirlo importa.** La tabla enseña 12,8 µs
+quieto y 13,6 publicándose, o sea 0,8 de diferencia. Pero **la tanda D es una réplica válida de C**
+—una vez demostrado abajo que dónde cae el temporal no influye—, y las cuatro corridas del régimen
+«publicándose» se reparten entre **13,5 y 15,3 µs**: la variación **dentro** del mismo régimen dobla
+el efecto que se le atribuye a publicar. Con dos corridas parecía separado; con las cuatro
+comparables, no lo está. Lo que sí aguanta es lo cualitativo: **publicar una vez por segundo no se
+nota**.
+
+**Lo que sí se nota del panel hablador son los fotogramas, no su coste.** Cada consola produce en
+357-358 fotogramas en las cuatro tandas, y sin embargo la ventana cuenta **368-369 en A** y **471-472
+en C**. La unión crece con los sumandos iguales, así que **hay menos solape**: en A las dos consolas
+producen casi siempre en el mismo fotograma —358 + 357 − 368 = **347 compartidos**, el 97 %— y en C
+bastante menos: 358 + 357 − 472 = **243**, el 68 %. El mismo trabajo se reparte entre un **28 % más de fotogramas**, cada uno más
+barato. Por eso **el «coste del fotograma» de C no se compara con el de B**: son fotogramas que llevan
+dentro cantidades distintas de trabajo.
+
+> **La aritmética del solape está en los datos; la causa es interpretación y así hay que leerla.**
+> Que sean los despertares del vigilante los que desincronizan las dos consolas **no está medido**: el
+> informe no publica ni la duración de la corrida ni cuántas veces despertó, así que no se puede
+> contrastar que las publicaciones expliquen los ~104 fotogramas de más. Lo único que apunta en esa
+> dirección es que B —con vigilante armado pero sin nadie publicando— se queda en 371.
+
+**Dónde cae el fichero temporal no influye, y no por casualidad.** Parecía la explicación obvia de
+esos 100 fotogramas —un temporal escrito dentro del directorio vigilado despertando a la ventana por
+su cuenta—, así que se tomó una cuarta tanda idéntica a C pero con el temporal **fuera**: 473 y 466
+fotogramas, contra 472 y 471. Y el código explica por qué tenía que salir igual: el vigilante
+**filtra por ruta exacta** y solo levanta la bandera cuando el aviso trae `<dir>/panel.json`
+(`crates/app/src/vigilante.rs`), así que cualquier otro fichero del directorio le es invisible. La
+hipótesis se cayó dos veces, midiendo y leyendo, y queda escrita para que nadie la vuelva a levantar.
+
+**Dos huecos de atribución, los dos con su número:**
+
+1. **Armar el despertador es trabajo del panel que hoy se publica como coste de egui.** Calcular
+   cuándo tocará avisar de que un panel está viejo se hace **dos veces por fotograma** y **fuera** de
+   los tres relojes de la división, así que cae en «el resto del fotograma». Medido con sonda en dos
+   corridas —784 y 860 ns—: **822 ns por llamada, 1,64 µs por fotograma**, el **0,4 %** de ese tramo y
+   un **12 % del coste propio del panel**. El sesgo es pequeño pero va en la dirección que más daño
+   hace, porque infla justo la cifra sobre la que esta decisión tiene que decidir.
+2. **Enterarse no aparece en ninguna parte.** El vigilante de ficheros corre en **su propio hilo**, y
+   el cronómetro de `eframe` es un reloj de pared sobre la pasada del hilo de interfaz. Su coste no
+   infla «el resto» —o sea que no se le carga a egui, que era el riesgo— pero **tampoco está en el
+   número**: lo que aquí se publica es lo que cuesta leer y pintar el panel, no lo que cuesta saber
+   que cambió.
+
+**Lo que estos números NO prueban. Como en los dos anexos anteriores, esta lista es la mitad del
+valor:**
+
+- **No comparan con el 11 de agosto, y la propia tanda A lo demuestra.** Aquella publicó 5,92 ms sin
+  paneles; ésta, en la misma configuración, da **7,01 ms**. Otro día, otra carga, otra máquina en otro
+  estado. **La única comparación válida es dentro de esta tabla**, que es para lo que se tomaron las
+  tres el mismo día y en la misma ventana.
+- **El total de B y C no se resta contra el de A.** Solo la resta del tramo del panel es honesta,
+  porque es el único cuyo suelo no cambia con la rejilla.
+- **El 95 % del tramo del panel se toma solo sobre fotogramas en que esa consola recibió salida.** Las
+  series solo se anotan cuando llegó algo, mientras que el tramo se descuenta del total siempre. Un
+  fotograma que el vigilante despierta sin salida de consola no entra en ese percentil.
+- **El coste del fotograma es reloj de pared, no CPU**, pese a que el campo del framework se llame
+  así. Con la máquina cargada, la contención de otros procesos entra en el número.
+- **Toda corrida imprime «el directorio que se vigilaba ha dejado de existir», y no afecta a los
+  números.** Los directorios de panel se borran cuando **la aplicación** termina, no cuando muere el
+  programa de una consola: la ventana espera a las dos y solo entonces se cierra. Así que ese aviso
+  sale durante el apagado, después de medir. Se deja dicho porque quien repita la tanda lo verá y
+  pensará que ha roto algo.
+- **La consola izquierda cuesta sistemáticamente más que la derecha, y no se sabe por qué.** En las
+  ocho corridas, sin excepción: en la tanda del panel hablador su tramo de panel es ~8,4 µs frente a
+  ~5,2 —**1,6×**— y encolar el pintado 437 µs frente a 328 —**1,3×**—. La columna «las dos» esconde
+  esa asimetría al sumar. Las dos consolas tienen la misma rejilla y la misma carga, así que la explicación
+  está en el orden en que se pintan o en el foco, y **no se ha investigado**.
+- **Tres cosas del método no se pueden comprobar desde el informe**: los 44 MiB por consola, que las
+  dos arrancaran alineadas, y la frecuencia de publicación. El informe no imprime ni volumen, ni
+  duración, ni recuento de publicaciones — quien quiera auditarlo tiene que leer
+  `scripts/medir-fotograma.sh`, no los ficheros de salida.
+- **Nada del peor caso**: esto es un volcado exigente, no el techo de pantallas llenas con repintado
+  continuo. Sigue sin cerrarse ese criterio.
+- **Nada de cuatro divisiones**, y ahora hay una razón nueva para no extrapolar: si dos consolas dan
+  57 columnas cada una, cuatro darían unas **28 antes de descontar el panel** — y el panel se lleva
+  **36**. O sea que con cuatro divisiones el panel **no cabe**, y el reparto tendría que hacer algo
+  que hoy no hace. El número no se puede multiplicar
+  ([#33](https://github.com/mashware/agent-terminal/issues/33)).
+
+**Qué significa para esta decisión.** **D3 no cambia, y el cambio de sospechoso que anunció el anexo
+anterior se confirma y se agranda.** Con los dos paneles encima, lo demostrablemente atribuible al
+framework de interfaz es **0,50 ms de 8,33**, el **6 % del hueco** —menos que los 0,74 ms de agosto, y
+por una razón que no le hace ningún favor a egui: hay menos celdas que teselar—. Los paneles, que eran
+la otra mitad de la carga que esta decisión mandaba medir, gastan **13 µs**, cuatro órdenes de
+magnitud por debajo del presupuesto. **El fotograma sigue gastándolo interpretar** —4,5 de los 5,8 ms
+de la tanda del panel quieto— y
+un pintor propio que nadie ha optimizado.
+
+De las tres medidas que faltaban, **ésta queda hecha**. Siguen faltando dos, y las dos dependen del
+banco con reparto real: el peor caso con dos divisiones y la línea base de una sola dentro de la
+aplicación, que dejó de ser medible desde dentro cuando la ventana pasó a abrir siempre dos.
+
 ---
 
 ## D4 — Control por consola, no por API
