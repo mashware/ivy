@@ -9,8 +9,10 @@
 //! bloques, envolver al ancho con su sangría de continuación, y pintar el símbolo de cada marca. Hasta
 //! entonces cada línea es una fila y lo que no cabe se recorta.
 
+use std::time::{Duration, SystemTime};
+
 use eframe::egui::{Align2, Color32, Painter, Pos2, Rect};
-use panel_contract::{Line, Mark, Panel, Problem};
+use panel_contract::{Line, Mark, Panel, Problem, Style};
 
 use crate::pintor::Metrica;
 use crate::tema::Tema;
@@ -89,23 +91,30 @@ pub fn apartar(division: Rect, ancho_de_celda: f32, hay_panel: bool) -> Hueco {
 /// **Guarda el último panel bueno a propósito.** El productor machaca el fichero entero en cada
 /// publicación —así lo dice su contrato— así que una lectura puede caer justo en medio y no encontrar
 /// JSON válido. Sin esto el panel parpadearía a vacío en cada escritura, que es un fallo mucho más
-/// visible que el que evita. **Lo que falta todavía es confesarlo**: decir en el propio panel que lo
-/// que se ve no es lo último. Eso llega con el aviso de rancio, y hasta entonces un productor roto se
-/// ve como uno que no ha vuelto a publicar.
+/// visible que el que evita. **Y por eso mismo hay que confesarlo**: conservar el último bueno sin
+/// decirlo esconde a un productor roto detrás de un resumen plausible de hace una hora.
 #[derive(Default)]
 pub struct Estado {
     ultimo_bueno: Option<Panel>,
-    /// La maqueta de lo que hay que pintar, con el ancho para el que se calculó.
+    /// Lo maquetado, y para qué se maquetó.
     ///
     /// **Existe por coste, y el escenario es presente**: mientras una consola vuelca, la ventana
     /// repinta todos los fotogramas, y envolver el panel al ancho se recalcularía sesenta veces por
-    /// segundo sin que su fichero haya cambiado. Se tira cuando cambia el fichero o cambia el ancho,
-    /// que son las dos únicas cosas de las que depende.
-    maqueta: Option<(usize, Vec<Fila>)>,
-    /// Por qué falló la última lectura, si falló. Todavía no se pinta: es lo que el aviso de rancio
-    /// necesitará para distinguir «aquí no hay productor» de «hay uno y está roto».
-    #[allow(dead_code)]
+    /// segundo sin que su fichero haya cambiado.
+    maqueta: Option<Maqueta>,
+    /// Por qué falló la última lectura, si falló. Es lo que distingue «aquí no hay productor» de «hay
+    /// uno y está roto», que se ven igual y no son lo mismo.
     problema: Option<Problem>,
+}
+
+/// Una maqueta y las dos cosas de las que depende: si cambia cualquiera, hay que rehacerla.
+struct Maqueta {
+    ancho: usize,
+    /// **La línea que pone la app entra en la clave de la caché.** Un panel que envejece cambia lo que
+    /// hay que pintar sin que su fichero se haya tocado, así que una caché que solo mirara el ancho
+    /// seguiría enseñando la maqueta de cuando el panel era fresco — y el aviso no aparecería nunca.
+    aviso: Option<String>,
+    filas: Vec<Fila>,
 }
 
 impl Estado {
@@ -128,31 +137,166 @@ impl Estado {
                 self.problema = None;
                 self.maqueta = None;
             }
-            // Sigue vigente lo que ya hay: ni se toca el panel ni se toca el problema.
-            Ok(None) => {}
+            // **Lo que hay sigue vigente, y eso incluye borrar el problema anterior.** Que la lectura
+            // llegue hasta aquí significa que se pudo preguntar por el fichero y que su fecha es la del
+            // panel que ya se tiene: lo que se enseña **es** lo último, y un fallo de hace un rato ya no
+            // describe la realidad. Sin esto, un tropiezo pasajero —quedarse sin descriptores, un
+            // montaje de red que parpadea— acusaría al productor para siempre, porque su fichero no va a
+            // volver a cambiar de fecha por sí solo.
+            Ok(None) => self.problema = None,
             Err(problema) => self.problema = Some(problema),
         }
     }
 
-    /// El panel que hay que pintar, si hay alguno.
+    /// El último panel que se entendió, si hay alguno.
     ///
-    /// `None` significa que esta consola no tiene nada legible que enseñar — porque su productor no ha
-    /// publicado todavía, o porque lo que publicó no se entiende y nunca hubo nada bueno antes. **Los
-    /// dos casos se ven igual**, y distinguirlos es del PR que añade la línea que lo confiesa: hoy no
-    /// hay dónde decirlo.
-    pub fn a_pintar(&self) -> Option<&Panel> {
+    /// **Solo lo usan las pruebas, y por eso está detrás de su bandera.** El pintado no lo necesita —
+    /// va por [`Estado::maquetar_si_hace_falta`], que puede componer un panel que es solo la confesión
+    /// de la aplicación— y dejarlo como método de producción sería una puerta abierta a que alguien
+    /// vuelva a decidir «hay panel» por su cuenta, que es justo lo que [`Estado::se_ve`] centraliza.
+    #[cfg(test)]
+    pub(crate) fn a_pintar(&self) -> Option<&Panel> {
         self.ultimo_bueno.as_ref()
     }
 
-    /// La maqueta para este ancho, calculándola solo si no vale la que hay.
-    fn maquetar_si_hace_falta(&mut self, id: &str, ancho: usize, tema: &Tema) -> Option<&[Fila]> {
-        let panel = self.ultimo_bueno.as_ref()?;
-        let vigente = matches!(&self.maqueta, Some((para, _)) if *para == ancho);
-        if !vigente {
-            self.maqueta = Some((ancho, maquetar(panel, id, ancho, tema)));
-        }
-        self.maqueta.as_ref().map(|(_, filas)| filas.as_slice())
+    /// Si esta consola tiene algo que enseñar, sea del productor o de la propia aplicación.
+    ///
+    /// **Sale de lo mismo que decide el pintado, y no de un criterio paralelo.** Con dos predicados que
+    /// dicen «hay panel» por su cuenta, el día que discrepen se reserva una franja donde no se pinta
+    /// nada, o se pinta fuera de la que se reservó.
+    ///
+    /// **Que el fichero no exista todavía no cuenta**, y esa es la raya que sostiene la promesa de que
+    /// una consola sin productor se ve exactamente como antes de este hito: no hay panel, no se
+    /// descuenta ancho, no hay nada.
+    pub fn se_ve(&self, ahora: SystemTime) -> bool {
+        self.ultimo_bueno.is_some() || self.aviso(ahora).is_some()
     }
+
+    /// Lo que la aplicación tiene que decir de su cuenta sobre este panel, si tiene algo que decir.
+    ///
+    /// **Es la línea de la app, no una línea del productor**, y por eso no depende de `header`: esa
+    /// bandera decide si se pinta la identidad de la división, no si la aplicación puede ser honesta.
+    /// Un productor que la apagara para esconder que su panel está roto sería justo el caso que esto
+    /// viene a impedir.
+    fn aviso(&self, ahora: SystemTime) -> Option<String> {
+        // **El fichero que todavía no existe es la excepción, y va primero por eso.** El resto se
+        // ordena por lo que hay que decir: primero los fallos de lectura, que son lo más reciente que
+        // se sabe, y solo si no hay ninguno se mira el reloj.
+        match (&self.problema, &self.ultimo_bueno) {
+            (Some(cual), _) if es_falta_de_fichero(cual) => self
+                .ultimo_bueno
+                .as_ref()
+                .map(|_| "el fichero del panel ya no está".to_owned()),
+            (Some(cual), Some(_)) => Some(format!("lo que se ve no es lo último: {cual}")),
+            (Some(cual), None) => Some(format!("sin panel: {cual}")),
+            (None, Some(panel)) if panel.is_stale_at(ahora) => Some(sin_noticias(panel, ahora)),
+            (None, _) => None,
+        }
+    }
+
+    /// Cuánto falta para que **cambie lo que este panel dice de sí mismo**, si es que va a cambiar.
+    ///
+    /// **La ventana lo necesita para despertarse a tiempo.** Un productor que se muere o se cuelga no
+    /// escribe nada, así que no hay evento de fichero que avise: sin este despertador el aviso de
+    /// «esto es viejo» no aparecería jamás en una ventana en reposo, que es exactamente cuando hace
+    /// falta.
+    ///
+    /// **Y no acaba cuando el panel se marca como viejo**: el aviso lleva un número que avanza, así que
+    /// hay que volver cuando ese número cambie. Sin eso, un panel que se marcó viejo a los cinco
+    /// minutos seguiría diciendo «5 min» tres horas después — acertando en lo cualitativo y mintiendo
+    /// justo en el dato que sirve para decidir si el agente está muerto o solo lento.
+    pub fn cuanto_falta_para_avisar(&self, ahora: SystemTime) -> Option<Duration> {
+        // Con un problema el aviso ya está puesto y no cambia con el tiempo: no hay a qué volver.
+        if self.problema.is_some() {
+            return None;
+        }
+        let panel = self.ultimo_bueno.as_ref()?;
+        let silencio = ahora.duration_since(panel.written_at?).ok()?;
+
+        match panel.stale_after.checked_sub(silencio) {
+            // Todavía no es viejo: lo próximo que cambia es que lo sea.
+            Some(falta) => Some(falta),
+            // Ya lo es, y lo que se enseña es un número redondeado: se vuelve cuando salte.
+            None => Some(hasta_el_siguiente_salto(silencio)),
+        }
+    }
+
+    /// La maqueta para este ancho y este aviso, calculándola solo si no vale la que hay.
+    fn maquetar_si_hace_falta(
+        &mut self,
+        id: &str,
+        ancho: usize,
+        tema: &Tema,
+        aviso: Option<String>,
+    ) -> Option<&[Fila]> {
+        if self.ultimo_bueno.is_none() && aviso.is_none() {
+            return None;
+        }
+
+        let vigente =
+            matches!(&self.maqueta, Some(hecha) if hecha.ancho == ancho && hecha.aviso == aviso);
+        if !vigente {
+            self.maqueta = Some(Maqueta {
+                filas: maquetar(
+                    self.ultimo_bueno.as_ref(),
+                    id,
+                    ancho,
+                    tema,
+                    aviso.as_deref(),
+                ),
+                ancho,
+                aviso,
+            });
+        }
+        self.maqueta.as_ref().map(|hecha| hecha.filas.as_slice())
+    }
+}
+
+/// Si el problema es que el fichero no está, que es el único que **no** se enseña por sí solo.
+fn es_falta_de_fichero(problema: &Problem) -> bool {
+    matches!(problema, Problem::Missing)
+}
+
+/// Lo que se dice de un panel que lleva callado más de lo suyo.
+///
+/// **Sin cuánto cuando el plazo es de menos de un minuto**: el contrato permite un
+/// `stale_after_minutes` de cero, y «sin noticias desde hace 0 min» un segundo después de publicar se
+/// lee como un fallo de la aplicación, no como una confesión.
+fn sin_noticias(panel: &Panel, ahora: SystemTime) -> String {
+    match ahora.duration_since(panel.written_at.unwrap_or(ahora)) {
+        Ok(silencio) if silencio.as_secs() >= 60 => {
+            format!("sin noticias desde hace {}", en_palabras(silencio))
+        }
+        _ => "sin noticias".to_owned(),
+    }
+}
+
+/// Un rato, dicho como lo diría alguien: minutos hasta que son demasiados, y entonces horas.
+///
+/// Sin segundos ni decimales a propósito. Lo que el aviso tiene que transmitir es «hace mucho», y un
+/// número que cambia cada segundo en una esquina de la pantalla es ruido, no información — y cada
+/// cambio cuesta un fotograma, porque hay que despertar a la ventana para pintarlo.
+fn en_palabras(cuanto: Duration) -> String {
+    let minutos = cuanto.as_secs() / 60;
+    match minutos {
+        0..=119 => format!("{minutos} min"),
+        _ => format!("{} h", minutos / 60),
+    }
+}
+
+/// Cuánto falta para que el número de [`en_palabras`] cambie.
+///
+/// Es lo que hace que el aviso no se pudra en pantalla sin despertar a la ventana más de lo justo:
+/// mientras se digan minutos se vuelve al siguiente minuto, y cuando se digan horas, a la siguiente
+/// hora.
+fn hasta_el_siguiente_salto(silencio: Duration) -> Duration {
+    let paso = if silencio.as_secs() < 2 * 60 * 60 {
+        60
+    } else {
+        60 * 60
+    };
+
+    Duration::from_secs(paso - silencio.as_secs() % paso)
 }
 
 /// Lo más largo que se pinta de una línea, en caracteres.
@@ -238,11 +382,18 @@ struct Fila {
 /// recordar el resultado entre fotogramas: mientras el fichero y el ancho no cambien, la maqueta es la
 /// misma. Sin ella, envolver el panel se recalcularía sesenta veces por segundo mientras la consola de
 /// al lado vuelca.
-fn maquetar(panel: &Panel, id: &str, ancho: usize, tema: &Tema) -> Vec<Fila> {
+fn maquetar(
+    panel: Option<&Panel>,
+    id: &str,
+    ancho: usize,
+    tema: &Tema,
+    aviso: Option<&str>,
+) -> Vec<Fila> {
     let mut filas = Vec::new();
 
-    if panel.header {
-        let identidad = match panel.phase.as_deref() {
+    if panel.is_none_or(|panel| panel.header) {
+        let fase = panel.and_then(|panel| panel.phase.as_deref());
+        let identidad = match fase {
             Some(fase) => format!("{id} · {fase}"),
             None => id.to_owned(),
         };
@@ -253,14 +404,33 @@ fn maquetar(panel: &Panel, id: &str, ancho: usize, tema: &Tema) -> Vec<Fila> {
             tema.color_del_panel(None, None),
             ancho,
         );
-        // La fila en blanco la escribe la maqueta, no el pintado: separada del cuerpo, la identidad se
-        // lee como lo que es —algo que pone la aplicación— y no como la primera línea del productor.
+    }
+
+    // **El aviso va arriba y no al final**, porque abajo es donde el recorte se come lo que no cabe:
+    // el aviso de que un panel no es de fiar sería justo lo primero en desaparecer de un panel largo.
+    if let Some(aviso) = aviso {
+        envolver(
+            &mut filas,
+            0,
+            &sanear(aviso),
+            tema.color_del_panel(None, Some(Style::Warn)),
+            ancho,
+        );
+    }
+
+    // La fila en blanco la escribe la maqueta, no el pintado: separada del cuerpo, lo que pone la
+    // aplicación se lee como lo que es y no como la primera línea del productor.
+    if !filas.is_empty() {
         filas.push(Fila {
             columna: 0,
             texto: String::new(),
             color: Color32::TRANSPARENT,
         });
     }
+
+    let Some(panel) = panel else {
+        return filas;
+    };
 
     for bloque in bloques(&panel.lines) {
         // **El ancho de la columna se calcula por bloque, y esa es la regla del contrato.** Con un
@@ -444,7 +614,14 @@ fn envolver(filas: &mut Vec<Fila>, sangria: usize, texto: &str, color: Color32, 
 ///
 /// El encuadre sale del propio pintor y no de un argumento aparte: con las dos vías, nada impediría
 /// que un día dejaran de coincidir.
-pub fn pintar(painter: &Painter, estado: &mut Estado, id: &str, tema: &Tema, metrica: &Metrica) {
+pub fn pintar(
+    painter: &Painter,
+    estado: &mut Estado,
+    id: &str,
+    tema: &Tema,
+    metrica: &Metrica,
+    ahora: SystemTime,
+) {
     let rect = painter.clip_rect();
     painter.rect_filled(rect, 0.0, tema.fondo_del_panel());
 
@@ -452,7 +629,8 @@ pub fn pintar(painter: &Painter, estado: &mut Estado, id: &str, tema: &Tema, met
     // izquierda: sin el de la derecha, la envoltura llenaría hasta el borde exacto del panel y el texto
     // quedaría pegado a la consola de al lado.
     let ancho = ((rect.width() / metrica.ancho()) as usize).saturating_sub(2 * MARGEN as usize);
-    let Some(filas) = estado.maquetar_si_hace_falta(id, ancho, tema) else {
+    let aviso = estado.aviso(ahora);
+    let Some(filas) = estado.maquetar_si_hace_falta(id, ancho, tema, aviso) else {
         return;
     };
 
@@ -640,15 +818,24 @@ mod tests {
             "el fichero de la prueba no se leyó"
         );
 
+        pintando(&mut estado, sitio, SystemTime::now())
+    }
+
+    /// Pinta el estado que se le dé, en el momento que se le diga.
+    ///
+    /// Separado de [`lo_que_se_encola`] porque la confesión depende de **cuándo** se mire: el mismo
+    /// panel se pinta distinto si ha pasado su plazo.
+    fn pintando(estado: &mut Estado, sitio: Rect, ahora: SystemTime) -> Vec<eframe::egui::Shape> {
         let ctx = eframe::egui::Context::default();
         let mut salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let metrica = Metrica::medir(ui.ctx(), eframe::egui::FontId::monospace(crate::CUERPO));
             pintar(
                 &ui.painter_at(sitio),
-                &mut estado,
+                estado,
                 "a1b2",
                 &Tema::default(),
                 &metrica,
+                ahora,
             );
         });
 
@@ -661,6 +848,384 @@ mod tests {
             .into_iter()
             .map(|recortada| recortada.shape)
             .collect()
+    }
+
+    /// Un estado con un panel publicado hace lo que se diga.
+    ///
+    /// La fecha se mueve a mano y no se espera al reloj, por lo mismo que en [`envejecer`]: una prueba
+    /// que dependa de cuánto tarda en correr da un resultado distinto en cada máquina.
+    fn publicado_hace(fichero: &str, cuanto: Duration) -> Estado {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(&dir, fichero);
+        std::fs::File::open(dir.path().join(FICHERO_DEL_PANEL))
+            .expect("abrir")
+            .set_modified(SystemTime::now() - cuanto)
+            .expect("mover la fecha");
+
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        estado
+    }
+
+    /// El texto de lo que se pintó, fila a fila.
+    fn textos(formas: Vec<eframe::egui::Shape>) -> Vec<String> {
+        formas
+            .into_iter()
+            .filter_map(|forma| match forma {
+                eframe::egui::Shape::Text(texto) => Some(texto.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// **El productor que se muere no avisa de que se ha muerto.** Es el caso que este aviso existe
+    /// para cubrir: no escribe nada, así que no hay evento de fichero que lo delate — solo el tiempo.
+    #[test]
+    fn un_panel_que_lleva_callado_mas_de_lo_suyo_lo_confiesa() {
+        // 45 min **y medio**: el silencio se trunca a minutos enteros, y con la fecha justo en la
+        // frontera un sistema de ficheros que redondeara al alza diría «44 min» y la prueba señalaría
+        // al código sin que el código tenga nada.
+        let mut estado = publicado_hace(
+            r#"{"stale_after_minutes":5,"lines":["lo que decía"]}"#,
+            Duration::from_secs(45 * 60 + 30),
+        );
+
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+
+        assert!(
+            pintado.iter().any(|fila| fila.contains("sin noticias")),
+            "el panel lleva 45 minutos sin tocarse y se enseña como si fuera de ahora: {pintado:?}"
+        );
+        assert!(
+            pintado.iter().any(|fila| fila.contains("45 min")),
+            "el aviso no dice cuánto lleva callado: {pintado:?}"
+        );
+        assert!(
+            pintado.iter().any(|fila| fila.contains("lo que decía")),
+            "se perdió lo que el productor había publicado: {pintado:?}"
+        );
+
+        // **Y va arriba, no al final.** Abajo es donde el recorte se come lo que no cabe: en un panel
+        // largo, el aviso de que no es de fiar sería lo primero en desaparecer.
+        let donde = |texto: &str| pintado.iter().position(|fila| fila.contains(texto));
+        assert!(
+            donde("sin noticias") < donde("lo que decía"),
+            "el aviso se pinta detrás del cuerpo del productor: {pintado:?}"
+        );
+    }
+
+    /// Y la otra mitad: **un panel al día no dice nada**. Sin esto, un aviso puesto siempre pasaría por
+    /// bueno y el panel tendría una línea de ruido permanente.
+    #[test]
+    fn un_panel_recien_publicado_no_confiesa_nada() {
+        let mut estado = publicado_hace(
+            r#"{"stale_after_minutes":5,"lines":["recién puesto"]}"#,
+            Duration::from_secs(10),
+        );
+
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+
+        assert!(
+            !pintado.iter().any(|fila| fila.contains("sin noticias")),
+            "un panel de hace diez segundos se anuncia como viejo: {pintado:?}"
+        );
+    }
+
+    /// **Conservar el último panel bueno sin decirlo esconde a un productor roto** detrás de un resumen
+    /// plausible de hace una hora. Esta es la mitad de AC7 que faltaba: la ventana sigue en pie, se
+    /// conserva lo último bueno, **y el panel dice que eso no es lo último**.
+    #[test]
+    fn una_publicacion_que_no_se_entiende_se_confiesa_sin_perder_lo_bueno() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(&dir, r#"{"lines":["lo bueno de antes"]}"#);
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        publicar(&dir, "esto no es json");
+        envejecer(&dir, 1);
+        estado.refrescar(dir.path());
+
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+        assert!(
+            pintado
+                .iter()
+                .any(|fila| fila.contains("no es lo último") && fila.contains("no se entiende")),
+            "se sigue enseñando lo viejo como si fuera lo último: {pintado:?}"
+        );
+        assert!(
+            pintado
+                .iter()
+                .any(|fila| fila.contains("lo bueno de antes")),
+            "confesar no puede costar lo último que sí se entendió: {pintado:?}"
+        );
+    }
+
+    /// Y cuando **nunca** hubo nada bueno, el panel es solo la confesión. Sin esto, una consola cuyo
+    /// productor publica basura desde el principio se ve igual que una que no tiene productor: como una
+    /// consola pelada, sin una palabra que explique por qué no hay panel.
+    #[test]
+    fn una_consola_sin_nada_bueno_ensena_el_aviso_a_solas() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(&dir, "ni esto tampoco");
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        assert!(
+            estado.se_ve(SystemTime::now()),
+            "hay un productor publicando algo ilegible y la división se ve como si no lo hubiera"
+        );
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+        assert!(
+            pintado
+                .iter()
+                .any(|fila| fila.contains("sin panel") && fila.contains("no se entiende")),
+            "no se dice por qué no hay panel: {pintado:?}"
+        );
+    }
+
+    /// **Un fichero que se pasa del techo no se pinta, pero tampoco se calla.** El techo es lo que
+    /// impide que un `panel.json` ajeno cueste un fotograma entero en interpretarse; que además dejara
+    /// la consola indistinguible de una sin productor sería el fallo que este hito viene a evitar,
+    /// solo que provocado por la propia defensa.
+    #[test]
+    fn un_panel_que_pasa_del_techo_no_se_pinta_pero_se_dice_por_que() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        let relleno = "x".repeat(panel_contract::MAX_BYTES as usize);
+        publicar(&dir, &format!(r#"{{"lines":["{relleno}"]}}"#));
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        assert!(
+            estado.se_ve(SystemTime::now()),
+            "hay un productor publicando algo enorme y la división se ve como si no lo hubiera"
+        );
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+        assert!(
+            pintado
+                .iter()
+                .any(|fila| fila.contains("sin panel") && fila.contains("KiB")),
+            "no se dice por qué no hay panel: {pintado:?}"
+        );
+        assert!(
+            !pintado.iter().any(|fila| fila.contains("xxxx")),
+            "se pintó contenido de un fichero que pasa del techo: {pintado:?}"
+        );
+    }
+
+    /// **La raya que sostiene la promesa del hito**: una consola cuyo productor no ha publicado todavía
+    /// se ve exactamente como antes de que el panel existiera. Que el fichero no esté es el estado
+    /// normal de arranque, no una avería que anunciar.
+    #[test]
+    fn una_consola_sin_fichero_no_ensena_nada_ni_avisa_de_nada() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        assert!(
+            !estado.se_ve(SystemTime::now()),
+            "una consola sin productor se estrecha para enseñar un panel que no existe"
+        );
+        assert!(estado.aviso(SystemTime::now()).is_none());
+    }
+
+    /// Pero si **había** panel y su fichero desaparece, eso sí se dice: el productor lo borró o alguien
+    /// limpió por debajo, y lo que se sigue viendo ya no tiene respaldo en disco.
+    #[test]
+    fn que_el_fichero_desaparezca_despues_si_se_confiesa() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(&dir, r#"{"lines":["estuve aquí"]}"#);
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        std::fs::remove_file(dir.path().join(FICHERO_DEL_PANEL)).expect("borrar el panel");
+        estado.refrescar(dir.path());
+
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+        assert!(
+            pintado.iter().any(|fila| fila.contains("ya no está")),
+            "el fichero se borró y el panel sigue como si nada: {pintado:?}"
+        );
+    }
+
+    /// **`header: false` apaga la línea de identidad, no la honestidad de la aplicación.** Si la
+    /// apagara, a un productor le bastaría con ponerlo para que su panel roto no lo pareciera.
+    #[test]
+    fn el_aviso_sale_aunque_el_productor_apague_la_cabecera() {
+        let mut estado = publicado_hace(
+            r#"{"header":false,"stale_after_minutes":1,"lines":["sin cabecera"]}"#,
+            Duration::from_secs(60 * 60),
+        );
+
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+
+        assert!(
+            pintado.iter().any(|fila| fila.contains("sin noticias")),
+            "apagar la cabecera escondió el aviso de la app: {pintado:?}"
+        );
+        assert!(
+            !pintado.iter().any(|fila| fila.contains("a1b2")),
+            "`header: false` tiene que seguir escondiendo la identidad: {pintado:?}"
+        );
+    }
+
+    /// **El aviso entra en la clave de la maqueta guardada.** Un panel que envejece cambia lo que hay
+    /// que pintar sin que su fichero se toque, así que una caché que solo mirase el ancho seguiría
+    /// enseñando la maqueta de cuando era fresco y el aviso no aparecería nunca.
+    #[test]
+    fn envejecer_tira_la_maqueta_aunque_el_fichero_no_cambie() {
+        let mut estado = publicado_hace(
+            r#"{"stale_after_minutes":10,"lines":["lo mismo de siempre"]}"#,
+            Duration::from_secs(60),
+        );
+
+        let fresco = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+        let viejo = textos(pintando(
+            &mut estado,
+            SITIO,
+            SystemTime::now() + Duration::from_secs(30 * 60),
+        ));
+
+        assert!(!fresco.iter().any(|fila| fila.contains("sin noticias")));
+        assert!(
+            viejo.iter().any(|fila| fila.contains("sin noticias")),
+            "el panel envejeció y se siguió pintando la maqueta de cuando era fresco: {viejo:?}"
+        );
+    }
+
+    /// **Lo que el latido necesita saber**: cuánto queda para que toque avisar. Sin esto la ventana no
+    /// sabría cuándo despertarse, y con la consola callada el aviso no llegaría nunca.
+    #[test]
+    fn se_sabe_cuanto_falta_para_que_toque_avisar() {
+        let estado = publicado_hace(
+            r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
+            Duration::from_secs(4 * 60),
+        );
+
+        let falta = estado
+            .cuanto_falta_para_avisar(SystemTime::now())
+            .expect("todavía no es viejo, así que hay algo que esperar");
+
+        // Seis minutos, con holgura para lo que tarde la propia prueba.
+        assert!(
+            falta.as_secs() > 5 * 60 && falta.as_secs() <= 6 * 60,
+            "faltan {} s para avisar de un panel de hace 4 min con plazo de 10",
+            falta.as_secs()
+        );
+    }
+
+    /// **Y un panel ya viejo sigue pidiendo despertador, porque su aviso lleva un número que avanza.**
+    /// Sin esto, el agente que muere a las 10:00 con un plazo de cinco minutos deja en pantalla «sin
+    /// noticias desde hace 5 min», y a las 13:00 sigue diciendo cinco: acierta en lo cualitativo y
+    /// miente en el dato que sirve para decidir si está muerto o solo lento.
+    #[test]
+    fn un_panel_ya_viejo_vuelve_a_despertar_cuando_su_numero_cambie() {
+        let estado = publicado_hace(
+            r#"{"stale_after_minutes":1,"lines":["algo"]}"#,
+            Duration::from_secs(45 * 60 + 40),
+        );
+
+        let falta = estado
+            .cuanto_falta_para_avisar(SystemTime::now())
+            .expect("el número del aviso va a cambiar, así que hay a qué volver");
+
+        // Al siguiente minuto, no dentro de un minuto: lo que importa es cuándo salta el número.
+        // Veinte segundos de margen entre mover la fecha y preguntar: el más estrecho de la suite
+        // era de diez, y es el que caería primero en una máquina saturada.
+        assert!(
+            falta.as_secs() > 10 && falta.as_secs() <= 20,
+            "vuelve en {} s, y al número le faltan 20 para saltar",
+            falta.as_secs()
+        );
+    }
+
+    /// Cuando se dicen horas, se vuelve a la siguiente hora y no cada minuto: el número solo cambia
+    /// cuando cambia, y cada cambio cuesta despertar a la ventana.
+    #[test]
+    fn con_horas_de_silencio_se_despierta_una_vez_por_hora() {
+        let estado = publicado_hace(
+            r#"{"stale_after_minutes":1,"lines":["algo"]}"#,
+            Duration::from_secs(5 * 60 * 60 + 10 * 60),
+        );
+
+        let falta = estado
+            .cuanto_falta_para_avisar(SystemTime::now())
+            .expect("el número sigue avanzando");
+
+        assert!(
+            falta.as_secs() > 45 * 60,
+            "con cinco horas de silencio se despierta a los {} s, que es una vez por minuto",
+            falta.as_secs()
+        );
+    }
+
+    /// Sin panel no hay nada que esperar.
+    #[test]
+    fn sin_panel_no_se_pide_despertador() {
+        assert!(
+            Estado::default()
+                .cuanto_falta_para_avisar(SystemTime::now())
+                .is_none()
+        );
+    }
+
+    /// **Un fallo pasajero no puede acusar al productor para siempre.** Que la relectura diga «lo que
+    /// tienes sigue vigente» significa que se pudo preguntar por el fichero y que su fecha es la del
+    /// panel bueno que ya se tiene: el tropiezo de hace un rato —quedarse sin descriptores, un montaje
+    /// de red que parpadea— ya no describe nada. Sin limpiarlo, el aviso se quedaba pegado de por vida,
+    /// porque un fichero que nadie vuelve a tocar no cambia de fecha nunca.
+    #[test]
+    fn un_fallo_pasajero_no_deja_al_panel_acusado_para_siempre() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(&dir, r#"{"lines":["lo último de verdad"]}"#);
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        // El fichero se vuelve ilegible un instante y luego se recupera, sin cambiar de fecha.
+        let ruta = dir.path().join(FICHERO_DEL_PANEL);
+        let fecha = std::fs::metadata(&ruta)
+            .expect("mirar la fecha")
+            .modified()
+            .expect("hay fecha");
+        std::fs::write(&ruta, "roto").expect("romperlo");
+        std::fs::File::open(&ruta)
+            .expect("abrir")
+            .set_modified(fecha + Duration::from_secs(1))
+            .expect("mover la fecha");
+        estado.refrescar(dir.path());
+        publicar(&dir, r#"{"lines":["lo último de verdad"]}"#);
+        std::fs::File::open(&ruta)
+            .expect("abrir")
+            .set_modified(fecha)
+            .expect("devolver la fecha");
+
+        estado.refrescar(dir.path());
+
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+        assert!(
+            !pintado.iter().any(|fila| fila.contains("no es lo último")),
+            "el fichero se lee bien y su panel sigue acusado: {pintado:?}"
+        );
+    }
+
+    /// Con un plazo por debajo del minuto —que el contrato permite— el aviso **no dice un número**: «sin
+    /// noticias desde hace 0 min» un segundo después de publicar se lee como un fallo de la aplicación.
+    #[test]
+    fn con_un_plazo_de_cero_el_aviso_no_dice_cero_minutos() {
+        let mut estado = publicado_hace(
+            r#"{"stale_after_minutes":0,"lines":["algo"]}"#,
+            Duration::from_secs(5),
+        );
+
+        let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
+
+        assert!(
+            pintado.iter().any(|fila| fila.contains("sin noticias")),
+            "con plazo cero el panel es viejo desde el primer segundo: {pintado:?}"
+        );
+        assert!(
+            !pintado.iter().any(|fila| fila.contains("0 min")),
+            "el aviso dice «hace 0 min», que se lee como un fallo: {pintado:?}"
+        );
     }
 
     /// Lo que mide una celda con la fuente con la que pinta el panel.
@@ -1172,17 +1737,17 @@ mod tests {
         let tema = Tema::default();
 
         let primera = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
             .expect("hay panel")
             .to_vec();
         let repetida = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
             .expect("hay panel")
             .to_vec();
         assert_eq!(primera, repetida, "el mismo ancho da la misma maqueta");
 
         let estrecha = estado
-            .maquetar_si_hace_falta("a1b2", 12, &tema)
+            .maquetar_si_hace_falta("a1b2", 12, &tema, None)
             .expect("hay panel")
             .to_vec();
         assert_ne!(
@@ -1199,14 +1764,14 @@ mod tests {
         let mut estado = Estado::default();
         estado.refrescar(dir.path());
         let tema = Tema::default();
-        estado.maquetar_si_hace_falta("a1b2", 40, &tema);
+        estado.maquetar_si_hace_falta("a1b2", 40, &tema, None);
 
         publicar(&dir, r#"{"header":false,"lines":["lo nuevo"]}"#);
         envejecer(&dir, 1);
         estado.refrescar(dir.path());
 
         let filas = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
             .expect("hay panel");
         assert!(
             filas.iter().any(|fila| fila.texto.contains("lo nuevo")),
@@ -1273,7 +1838,13 @@ mod tests {
         let fichero =
             r#"{"lines":[{"indent":40,"text":"una frase larga que no cabe de ninguna manera"}]}"#;
 
-        let filas = maquetar(&panel_con(fichero), "a1b2", ancho, &Tema::default());
+        let filas = maquetar(
+            Some(&panel_con(fichero)),
+            "a1b2",
+            ancho,
+            &Tema::default(),
+            None,
+        );
 
         for fila in &filas {
             assert!(
@@ -1293,7 +1864,13 @@ mod tests {
         let larga = "R".repeat(50);
         let fichero = format!(r##"{{"lines":[{{"ref":"{larga}","text":"algo que decir"}}]}}"##);
 
-        let filas = maquetar(&panel_con(&fichero), "a1b2", ancho, &Tema::default());
+        let filas = maquetar(
+            Some(&panel_con(&fichero)),
+            "a1b2",
+            ancho,
+            &Tema::default(),
+            None,
+        );
 
         for fila in &filas {
             assert!(
@@ -1312,15 +1889,16 @@ mod tests {
     #[test]
     fn una_linea_con_marca_y_sin_texto_no_se_desplaza() {
         let filas = maquetar(
-            &panel_con(
+            Some(&panel_con(
                 r##"{"header":false,"lines":[
                     {"mark":"done","ref":"#1","text":"con texto"},
                     {"mark":"block","ref":"#2","text":""}
                 ]}"##,
-            ),
+            )),
             "a1b2",
             36,
             &Tema::default(),
+            None,
         );
 
         assert_eq!(
@@ -1339,12 +1917,13 @@ mod tests {
         let larga = "R".repeat(48);
 
         let filas = maquetar(
-            &panel_con(&format!(
+            Some(&panel_con(&format!(
                 r##"{{"header":false,"lines":[{{"ref":"{larga}","text":"un texto cualquiera"}}]}}"##
-            )),
+            ))),
             "a1b2",
             ancho,
             &Tema::default(),
+            None,
         );
 
         for fila in &filas {
@@ -1364,12 +1943,13 @@ mod tests {
     #[test]
     fn la_sangria_que_pide_el_productor_desplaza_su_linea() {
         let filas = maquetar(
-            &panel_con(
+            Some(&panel_con(
                 r#"{"header":false,"lines":[{"text":"pegada"},{"indent":4,"text":"sangrada"}]}"#,
-            ),
+            )),
             "a1b2",
             36,
             &Tema::default(),
+            None,
         );
 
         let pegada = filas[0].texto.find("pegada").expect("está");
@@ -1387,10 +1967,13 @@ mod tests {
     #[test]
     fn la_envoltura_parte_por_palabras_mientras_pueda() {
         let filas = maquetar(
-            &panel_con(r#"{"header":false,"lines":["alfa beta gamma delta epsilon zeta"]}"#),
+            Some(&panel_con(
+                r#"{"header":false,"lines":["alfa beta gamma delta epsilon zeta"]}"#,
+            )),
             "a1b2",
             16,
             &Tema::default(),
+            None,
         );
 
         for fila in &filas {
@@ -1416,11 +1999,11 @@ mod tests {
         let tema = Tema::default();
 
         let primera = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
             .expect("hay panel")
             .as_ptr();
         let segunda = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
             .expect("hay panel")
             .as_ptr();
 
@@ -1465,16 +2048,17 @@ mod tests {
         // cerrarlo, así que con dos el ancho sale igual de las dos maneras. Con una tercera detrás, si
         // la de en medio cerrara bloque, su referencia larga no llegaría a la primera.
         let filas = maquetar(
-            &panel_con(
+            Some(&panel_con(
                 r##"{"header":false,"lines":[
                     {"mark":"done","ref":"#1","text":"arriba"},
                     {"mark":"block","ref":"#22222"},
                     {"mark":"info","ref":"#3","text":"abajo"}
                 ]}"##,
-            ),
+            )),
             "a1b2",
             36,
             &Tema::default(),
+            None,
         );
 
         let columna_de = |fila: &Fila, palabra: &str| {

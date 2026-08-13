@@ -31,7 +31,7 @@ use medida::{Medida, RestoDelFotograma};
 use panel_contract::PanelDir;
 use pintor::Metrica;
 use puente::Puente;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 use tema::Tema;
 use term_core::{Pty, Screen, Size};
 use vigilante::{Bandera, Vigilante};
@@ -376,12 +376,17 @@ impl Division {
     }
 
     /// Parte el rectángulo de esta división entre su consola y su panel.
-    fn repartir_con_su_panel(&self, rect: egui::Rect, ancho_de_celda: f32) -> panel::Hueco {
-        panel::apartar(
-            rect,
-            ancho_de_celda,
-            self.estado_del_panel.a_pintar().is_some(),
-        )
+    ///
+    /// **El reloj se pasa desde fuera y es el mismo con el que se pinta**: de la hora depende que un
+    /// panel esté viejo, y de que lo esté depende que haya algo que enseñar. Dos relojes distintos en
+    /// el mismo fotograma podrían reservar una franja donde luego no se pinta nada.
+    fn repartir_con_su_panel(
+        &self,
+        rect: egui::Rect,
+        ancho_de_celda: f32,
+        ahora: SystemTime,
+    ) -> panel::Hueco {
+        panel::apartar(rect, ancho_de_celda, self.estado_del_panel.se_ve(ahora))
     }
 
     /// Manda al programa lo que se ha tecleado en este pase, y mide cuánto se tarda.
@@ -504,6 +509,36 @@ impl Ventana {
         let despertador = ctx.clone();
 
         Vigilante::nuevo(move || despertador.request_repaint(), &consolas)
+    }
+
+    /// **El latido: despertar a tiempo de decir que un panel está viejo.**
+    ///
+    /// El vigilante ve lo que cambia; esto ve lo que **deja** de cambiar, y son cosas distintas — un
+    /// productor que se muere o se cuelga no escribe nada, así que no produce ningún evento de fichero.
+    /// Sin este despertador el aviso no aparecería jamás en una ventana en reposo, que es justo cuando
+    /// hace falta.
+    ///
+    /// Se pide **solo lo que falta para el primero que vence**: no es un reloj que corre siempre, es
+    /// una alarma que se pone cuando hay algo que esperar y no se pone cuando no lo hay.
+    ///
+    /// **Se llama dos veces por fotograma, y las dos hacen falta.** Los paneles se releen en la pasada
+    /// de interfaz, que corre *después* de la mitad lógica: armando la alarma solo en la primera, el
+    /// fotograma en que un panel se lee por primera vez la calcularía con el estado de antes de
+    /// leerlo —o sea, sin plazo que esperar— y la ventana se dormiría para siempre. Medido: el retardo
+    /// que se publicaba en ese fotograma era `Duration::MAX`. Y armarla solo en la segunda dejaría
+    /// fuera las vueltas en que la ventana está tapada y solo corre la mitad lógica. Pedir de más no
+    /// cuesta: la ventana se queda con el plazo más corto de todos los que se le pidan.
+    fn poner_el_despertador(&self, ctx: &egui::Context) {
+        let ahora = SystemTime::now();
+
+        if let Some(falta) = self
+            .divisiones
+            .iter()
+            .filter_map(|division| division.estado_del_panel.cuanto_falta_para_avisar(ahora))
+            .min()
+        {
+            ctx.request_repaint_after(falta);
+        }
     }
 
     /// Cierra el fotograma anterior: cada consola cierra sus tramos y la ventana se queda con lo que
@@ -665,7 +700,10 @@ impl Ventana {
         // este mismo fotograma, no en el siguiente.
         let antes_del_panel = Instant::now();
         division.refrescar_su_panel();
-        let hueco = division.repartir_con_su_panel(rect, metrica.ancho());
+        // Un solo reloj para repartir y para pintar: si el panel envejeciera entre las dos preguntas,
+        // se reservaría una franja para un aviso que no llega a pintarse.
+        let ahora = SystemTime::now();
+        let hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
         let coste_de_leer = antes_del_panel.elapsed();
 
         division.medido = metrica.celdas_en(hueco.consola.size());
@@ -688,6 +726,7 @@ impl Ventana {
                 dir.id(),
                 tema,
                 metrica,
+                ahora,
             );
         }
         let coste_del_panel = coste_de_leer + antes_de_pintarlo.elapsed();
@@ -747,6 +786,10 @@ impl eframe::App for Ventana {
             }
             ctx.request_repaint_after(RESPIRO_SIN_VIGILANTE);
         }
+
+        // El latido va aquí **y también al final de la pasada de interfaz**, y las dos veces hacen
+        // falta: ver [`Ventana::poner_el_despertador`].
+        self.poner_el_despertador(ctx);
 
         let Bombeo {
             alguna_dejo_cola,
@@ -810,6 +853,11 @@ impl eframe::App for Ventana {
             egui::Stroke::new(1.0, self.tema.foco()),
             egui::StrokeKind::Inside,
         );
+
+        // **Y ahora sí, con los paneles ya releídos.** Ver [`Ventana::poner_el_despertador`]: la mitad
+        // lógica lo pide con el estado de antes de leer, así que el fotograma en que un panel aparece
+        // por primera vez se dormiría sin haber programado nada.
+        self.poner_el_despertador(ui.ctx());
     }
 
     /// Los números se publican al apagar, y **aquí y no al ver morir el programa**, por dos razones
@@ -1870,6 +1918,125 @@ mod tests {
         );
     }
 
+    /// Lo que la ventana pide esperar antes del próximo fotograma, en la pasada entera.
+    ///
+    /// **Se afirma sobre el número y no sobre «¿ha pedido repintar?»**, porque ese booleano lo satisface
+    /// cualquier cosa —una animación, una fuente que se carga— y no distingue «se puso el despertador de
+    /// este panel» de «alguien pidió pintar por otro motivo».
+    fn lo_que_la_ventana_espera(ventana: &mut Ventana, ctx: &egui::Context) -> Duration {
+        // **`logic` y `ui` dentro de la misma pasada, que es como corren de verdad.** Llamando solo a
+        // `logic` se mide el despertador contra el estado de *antes* de releer los paneles, y ese es
+        // justo el fallo que esta prueba existe para cazar.
+        let mut frame = eframe::Frame::_new_kittest();
+        let entrada = egui::RawInput {
+            screen_rect: Some(area_de(800.0)),
+            ..Default::default()
+        };
+
+        eframe::App::logic(ventana, ctx, &mut frame);
+        let salida = ctx.run_ui(entrada, |ui| eframe::App::ui(ventana, ui, &mut frame));
+        let espera = salida.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        salida.drop_without_applying_deltas();
+
+        espera
+    }
+
+    /// **El latido, desde el camino real y con la pasada entera.** El vigilante ve lo que cambia; esto
+    /// ve lo que *deja* de cambiar, y son cosas distintas: un productor que se muere no escribe nada,
+    /// así que no hay evento de fichero que lo delate. Sin este despertador el aviso de «esto es viejo»
+    /// no aparecería jamás en una ventana en reposo, que es justo cuando hace falta.
+    ///
+    /// **El fotograma en que el panel se lee por primera vez es el caso difícil**, y es el que aquí se
+    /// prueba: los paneles se releen en la pasada de interfaz, que corre después de la mitad lógica, así
+    /// que un despertador puesto solo en la primera mitad se calcularía con un estado en el que todavía
+    /// no hay panel — y la ventana se dormiría para siempre con el productor ya muerto.
+    ///
+    /// Las dos mitades van juntas a propósito: sin la negativa, la aserción de arriba pasaría también
+    /// con un despertador puesto siempre, que sería una ventana que no duerme nunca.
+    #[test]
+    fn la_ventana_se_despierta_para_avisar_de_que_un_panel_envejece_y_no_si_no_hay_ninguno() {
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        // Con su directorio y sin publicar: es la raya que el hito promete —el fichero que todavía no
+        // existe no es un aviso— y aquí además comprueba que no se programa nada por él.
+        for division in &mut ventana.divisiones {
+            division.panel = Some(PanelDir::create().expect("crear el directorio"));
+        }
+
+        // Unas cuantas pasadas primero: un contexto recién hecho pide fotograma inmediato por su
+        // cuenta —tiene su propia interfaz que componer— y sin dejarlo asentarse la mitad negativa no
+        // mediría nada.
+        let mut sin_nada = Duration::ZERO;
+        for _ in 0..4 {
+            sin_nada = lo_que_la_ventana_espera(&mut ventana, &ctx);
+        }
+        assert_eq!(
+            sin_nada,
+            Duration::MAX,
+            "sin ningún panel publicado la ventana se pone un despertador que no tiene nada que hacer"
+        );
+
+        publicar_en(
+            &ventana.divisiones[0],
+            r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
+        );
+        ventana.divisiones[0].por_releer.levantar();
+        let con_panel = lo_que_la_ventana_espera(&mut ventana, &ctx);
+
+        assert!(
+            con_panel <= Duration::from_secs(10 * 60),
+            "el panel envejece en diez minutos y la ventana espera {con_panel:?} antes de mirar"
+        );
+        assert!(
+            con_panel > Duration::from_secs(9 * 60),
+            "se despierta a los {con_panel:?} para un panel que aguanta diez minutos"
+        );
+    }
+
+    /// **El latido también en la mitad lógica, que es la única que corre con la ventana tapada.**
+    /// Leído en la fuente: con la ventana minimizada u ocluida el framework llama a su vuelta lógica,
+    /// que **empieza poniendo el retardo de repintado en el máximo** y después ejecuta solo la mitad
+    /// lógica de la aplicación — no hay pasada de interfaz que rearme nada. Sin el despertador ahí,
+    /// cada vuelta de ventana tapada borra la alarma y la ventana se duerme para siempre con el
+    /// productor ya muerto. La prueba de al lado no lo ve: corre las dos mitades seguidas, y la
+    /// segunda arma la alarma igual.
+    #[test]
+    fn con_la_ventana_tapada_el_latido_se_sigue_armando() {
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        for division in &mut ventana.divisiones {
+            division.panel = Some(PanelDir::create().expect("crear el directorio"));
+        }
+        publicar_en(
+            &ventana.divisiones[0],
+            r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
+        );
+        ventana.divisiones[0].por_releer.levantar();
+        // Una pasada entera primero, que es donde el panel se lee.
+        lo_que_la_ventana_espera(&mut ventana, &ctx);
+
+        // Vueltas de solo lógica en vacío hasta dejar el contexto en reposo: sin esto, la aserción de
+        // abajo la cumpliría cualquier repintado pendiente de antes.
+        for _ in 0..4 {
+            let _ = ctx.run_logic(&egui::RawInput::default(), |_| {});
+        }
+        assert!(
+            !ctx.has_requested_repaint(),
+            "el contexto no llega a estar en reposo, causas: {:?}",
+            ctx.repaint_causes()
+        );
+
+        let mut frame = eframe::Frame::_new_kittest();
+        let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| {
+            eframe::App::logic(&mut ventana, ctx, &mut frame);
+        });
+
+        assert!(
+            ctx.has_requested_repaint(),
+            "con la ventana tapada nadie rearma el despertador: el aviso de rancio no llega nunca"
+        );
+    }
+
     /// **La economía que este PR entrega, y la mitad que se rompería sin ruido.** Hasta ahora cada
     /// consola le preguntaba al disco por la fecha de su fichero en cada fotograma —sesenta veces por
     /// segundo mientras haya volcado—; a partir de aquí solo mira cuando le avisan. Sin esta prueba,
@@ -1986,7 +2153,7 @@ mod tests {
         let division = division_con("sleep 30");
         let entera = area_de(800.0);
 
-        let hueco = division.repartir_con_su_panel(entera, ANCHO_DE_CELDA);
+        let hueco = division.repartir_con_su_panel(entera, ANCHO_DE_CELDA, SystemTime::now());
 
         assert_eq!(hueco.consola, entera, "sin panel no se descuenta nada");
         assert!(hueco.panel.is_none());
@@ -2036,7 +2203,7 @@ mod tests {
             let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
             Ventana::pintar_division(ui, &mut division, entera, &Tema::default(), &metrica);
             corte = division
-                .repartir_con_su_panel(entera, metrica.ancho())
+                .repartir_con_su_panel(entera, metrica.ancho(), SystemTime::now())
                 .consola
                 .right();
         });

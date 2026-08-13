@@ -190,7 +190,7 @@ Tamaño: **S** = una sentada · **M** = varias · **L** = va a doler.
 | **F1.3** ✅ | `app`: pintar la rejilla en egui — fuente monoespaciada, colores ANSI, cursor. Teclado → PTY | Se puede usar `ls`, `vim` y **`claude`** dentro de la ventana | L |
 | **F1.4** ✅ | Dos divisiones lado a lado, foco por clic, divisor arrastrable | Dos shells vivos a la vez sin que se pisen | M |
 | **F1.5** ✅ | `PANEL_ID` / `PANEL_DIR` inyectados al lanzar cada shell; el directorio se crea y se limpia al cerrar | `echo $PANEL_ID` da valores distintos en cada división | S |
-| **F1.6** | `panel-contract` + `notify`: panel a la derecha de cada división, repintado al cambiar el fichero | `flow` escribe en una división y solo esa repinta | M |
+| **F1.6** ✅ | `panel-contract` + `notify`: panel a la derecha de cada división, repintado al cambiar el fichero, y aviso cuando lo que se ve es viejo o no se pudo leer | `flow` escribe en una división y solo esa repinta | M |
 
 ### Lo que la Fase 1 deja fuera a propósito
 
