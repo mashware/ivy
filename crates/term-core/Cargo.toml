@@ -6,9 +6,3 @@ edition.workspace = true
 [dependencies]
 alacritty_terminal = "0.26"
 portable-pty = "0.9"
-
-# Solo para `termios`: apagar el procesamiento de salida del núcleo y preguntarle después si el
-# programa de dentro sigue queriendo la traducción de saltos. No añade nada al árbol —`portable-pty`
-# ya la trae— y se declara aquí acotada porque en Windows el pseudoterminal no tiene `termios`.
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"

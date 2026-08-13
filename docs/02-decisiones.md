@@ -905,73 +905,75 @@ tiene que seguir sin empujar el texto fuera del panel.
 dos, y en cuatro la cuenta puede salir distinta — es la misma revisión pendiente que el fotograma
 ([#33](https://github.com/mashware/agent-terminal/issues/33)).
 
-## D12 — El núcleo deja de procesar la salida, y quien pone el retorno de carro es el hilo lector
+## D12 — El pseudoterminal se queda con el procesamiento de salida del núcleo, aunque cueste
 
-**Decidido.** El pseudoterminal se abre con `OPOST` apagado —el procesamiento de salida del núcleo, que
-convertía cada salto de línea en retorno de carro más salto— y ese trabajo lo hace el hilo lector de la
-consola. Pero **no siempre: solo si el programa de dentro sigue queriéndolo**, y eso se pregunta mirando
-`ONLCR`, que se deja puesto a propósito.
+**Decidido.** El pseudoterminal **no** toca `termios`: `OPOST` se queda encendido y el núcleo sigue
+convirtiendo cada salto de línea en retorno de carro más salto. Se paga el coste. **Esta decisión se
+tomó al revés primero, se entregó, y se revirtió al descubrir por qué no puede funcionar** — lo que
+sigue es esa autopsia, que vale más que la decisión.
 
-**Por qué apagarlo.** Cuesta caro y **no lo eligió nadie**: `portable-pty` le pasa un puntero nulo a
-`openpty`, así que manda el valor por defecto del núcleo. Medido en este repo con
-`cargo run --release --example entrega -p term-core`, volcando doce megas con `cat`:
+**Lo que cuesta, medido en este repo** con `cargo run --release --example entrega -p term-core`,
+volcando doce megas con `cat` por un pseudoterminal real:
 
 | Línea | Procesando en el núcleo | Sin procesar | Relación |
 |---|---|---|---|
-| de log, 70 B | 53,8 MiB/s | 162,9 MiB/s | **3×** |
-| corta, 2 B | 2,6 MiB/s | 170,2 MiB/s | **65×** |
+| de log, 70 B | 53,3 MiB/s | 208,2 MiB/s | **4×** |
+| corta, 2 B | 2,4 MiB/s | 270,0 MiB/s | **112×** |
 
-**El titular de «casi dos órdenes de magnitud» del ticket es real y necesita un adverbio.** Lo que cuesta
-es **cada salto de línea**, así que la relación depende de cuántos haya por byte: con líneas de log son
-tres veces, con líneas de dos bytes son sesenta y cinco. Publicar un solo número —cualquiera de los dos—
-sería publicar un número que parece universal y no lo es. Por eso el ejemplo mide los dos largos.
+**El titular del issue —«casi dos órdenes de magnitud»— es cierto y necesita un adverbio.** Lo que se
+paga es **cada salto de línea**, no cada byte: con líneas de log son cuatro veces y con líneas de dos
+bytes, ciento doce. Un solo número parece universal y no lo es. El ejemplo se queda en el repo aunque
+la optimización no: mide un coste real que sigue ahí.
 
-**Por qué la traducción no puede ser incondicional, que es la parte que no se ve venir.** El núcleo
-traducía **según lo que pedía cada programa**, y uno a pantalla completa apaga `ONLCR` justo para poder
-usar el salto de línea como «bajar sin mover la columna». Medido leyendo los ajustes del maestro mientras
-corren: `vim`, `htop` y `nano` lo apagan al arrancar y lo devuelven al salir, y el terminfo de
-`xterm-256color` —el tipo de terminal que se le declara al hijo— define `cud1=\n` e `ind=\n`. Traducirles a
-ellos les descoloca el repintado. **La primera versión de este cambio traducía siempre, y la tumbó la
-revisión del diseño antes de que llegara a pantalla.**
+**Por qué no se puede quitar, que es lo que había que averiguar.** Apagar `OPOST` obliga a reponer el
+retorno de carro desde fuera, y **eso exige saber si el programa de dentro lo quiere**. El núcleo lo
+sabía porque traducía según el `termios` de cada uno; desde fuera hay que deducirlo, y **la
+información no está**:
 
-**Y la señal no es una heurística de esta aplicación**: `ncurses` documenta que solo usa el salto como
-movimiento después de `nonl()` —que es exactamente lo que apaga `ONLCR`—, así que mientras ese bit esté
-puesto ningún programa de curses manda un salto desnudo esperando quedarse en su columna. Preguntar por él
-es preguntarle al programa lo mismo que le preguntaba el núcleo.
+| Estado del terminal | ¿El núcleo traduce? | Quién lo deja así |
+|---|---|---|
+| `OPOST` on, `ONLCR` on | sí | nadie lo ha tocado |
+| `OPOST` off, `ONLCR` on | **no** | `stty raw`, `cfmakeraw`, `tty.setraw`, `enable_raw_mode` de crossterm, `MakeRaw` de Go |
+| `OPOST` off, `ONLCR` on | **no** | **y también nosotros, si lo apagáramos** |
 
-**Dos propiedades que hacen que las dos mitades no se puedan desincronizar.**
+Las dos últimas filas son **el mismo estado, bit a bit** (comprobado ejecutándolo). El modo crudo
+estándar apaga **solo** `OPOST` y deja `ONLCR` puesto, que es exactamente lo que dejaría un apagado
+nuestro. Así que no hay forma de distinguir «nadie ha tocado nada, tradúceme» de «he entrado en modo
+crudo, no me traduzcas», y a todo programa que entra en crudo por la vía normal —cualquier TUI de
+`ratatui`, de Node o de Go— se le inyectaría un retorno que pidió no tener.
 
-1. **`ONLCR` sobrevive intacto al apagar `OPOST`** —en `stty -a` sigue saliendo sin guion, como subflag
-   inerte—, así que queda como declaración de lo que el programa quiere aunque el interruptor maestro esté
-   bajado.
-2. **Traducir de más es inocuo.** Si algo reenciende el procesamiento del núcleo —`less` lo hace mientras
-   corre, y lo devuelve al salir— llegan dos retornos seguidos, y dos retornos dejan el cursor donde uno.
-   Por eso apagar `OPOST` es **best-effort**: si falla, no falla nada.
+> **La regla que deja, y es general:** en cuanto le mientes al programa sobre el estado de su
+> terminal, **pierdes la información de quién puso qué**. No es que falte una señal mejor: es que el
+> núcleo la destruye al aceptar la escritura. Por eso ningún emulador de terminal apaga `OPOST`.
 
-**Lo que se descartó, y por qué.**
+**Lo que se probó y no bastó.**
 
-- **Encender el modo `LNM` del terminal** (`ESC[20h`), que hace exactamente esto dentro del motor y en una
-  línea. **`reset_state()` lo borra**: el modo por defecto al que se vuelve no lo incluye, así que un
-  `reset` o un `tput reset` escrito en la consola dejaría la escalera **permanente**. Y un modo lo puede
-  apagar el programa de dentro: repone con una preferencia algo que antes garantizaba el núcleo.
-- **Traducir siempre, en la rejilla.** Rompe a `vim` — arriba. Y mete el coste dentro del fotograma.
-- **Traducir en el puente de la capa de pintado.** No ve los ajustes del pseudoterminal, que son la
-  condición.
-- **Apagar `ONLCR` en vez de `OPOST`.** Borraría precisamente la señal en la que se apoya todo lo demás.
-- **Reencender el procesamiento si un programa lo cambia.** Si alguien escribe `stty sane`, lo ha pedido.
-- **Tocar el eco o el modo canónico.** Están medidos como gratuitos y cambiarlos cambiaría el teclado.
+- **Condicionar la traducción a `ONLCR`.** Es la señal que usa `ncurses` —su manual dice que solo usa
+  el salto como movimiento después de `nonl()`— y **cubre a `vim`, `htop` y `nano`**, que lo apagan al
+  arrancar. No cubre a nada que no sea `ncurses`. Esta fue la versión que se entregó y se revirtió.
+- **Comparar el `termios` entero contra el que dejamos.** Falla igual: `stty raw` produce nuestro
+  mismo `c_oflag`.
+- **Añadir `ICANON` a la condición.** Arregla el modo crudo y rompe a un programa de `ncurses` en
+  `cbreak`, que apaga `ICANON` sin apagar `ONLCR`. Cambia un agujero por otro.
+- **Encender el modo `LNM` del motor de terminal** (`ESC[20h`), que hace esto en una línea.
+  `reset_state()` lo borra —el modo por defecto al que vuelve no lo incluye— así que un `reset` en la
+  consola dejaría la escalera **permanente**. Y un modo es estado que el programa puede pisar:
+  reponer con una preferencia algo que garantizaba el núcleo.
 
-**Lo que hay que saber para no llevarse un susto.**
+**Lo que se aprendió y no se tira.**
 
-- **La ganancia es para programas orientados a línea lanzados desde el shell** — un agente escupiendo
-  salida, `cargo build`, un log. Un paginador (`less`, y con él `git log` o `man`) reenciende el
-  procesamiento mientras está abierto y allí no se ve.
-- **Hay una esquina donde esta regla y la del núcleo difieren**: un programa que apague `OPOST` dejando
-  `ONLCR` puesto —lo que hace `cfmakeraw`, que solo toca el primero— recibiría traducción donde el núcleo
-  no traducía. Ninguno de los probados lo hace, y por la regla de `ncurses` sería inofensivo.
-- **La cadena de esta aplicación es ahora el cuello, no el núcleo.** Sin procesar, el núcleo entrega
-  ~358 MiB/s medidos y por el canal salen ~170: lo que falta se lo llevan el hilo lector, la traducción y
-  la cola con techo de D8. No es un problema —el presupuesto por fotograma drena mucho menos— pero explica
-  por qué el número de punta a punta es menor que el del núcleo a solas.
-- **Windows no tiene nada de esto**: su pseudoterminal va por tuberías, sin ajustes de terminal que
-  apagar, y ya entrega los saltos con su retorno. Todo el apartado se compila solo en Unix.
+- **La ventana de emular al leer algo que se hacía al escribir.** Aunque la señal fuera fiable, el
+  trozo que ya está en el búfer del núcleo se traduciría con la regla de *ahora*. Cota: los ~20 KiB
+  del búfer; y **con contrapresión no son microsegundos sino segundos**, porque el hilo lector está
+  parado esperando sitio. Medido: 17 KiB de un log en escalera al abrir `vim` detrás de un `cat`
+  grande.
+- **Cómo medir esto sin engañarse**: generar las líneas con un `while` de `sh` y `printf` da 12 MiB/s
+  con el interruptor puesto de las dos formas, porque el cuello es el bucle del shell. Sale «1×» y
+  entierra el hallazgo con un número tranquilizador y falso. Hay que volcar un fichero con `cat`.
+- **Y el cuello de esta aplicación, de paso**: el núcleo entrega ~358 MiB/s sin procesar y por el
+  canal de `term-core` salían ~170. Si algún día el coste del pseudoterminal importa de verdad, hay
+  más que ganar ahí que en `termios`.
+
+**Cuándo reabrir esto.** Si aparece una forma de saber qué quiere el programa **sin** mentirle sobre
+el estado de su terminal. Hoy no la hay, y el issue
+[#27](https://github.com/mashware/agent-terminal/issues/27) queda con esta autopsia dentro.

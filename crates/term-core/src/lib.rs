@@ -4,8 +4,6 @@
 
 use std::ffi::OsStr;
 use std::io::{Read, Write};
-#[cfg(unix)]
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
@@ -46,14 +44,9 @@ impl Default for Size {
 /// Un programa corriendo dentro de un pseudoterminal.
 ///
 /// La salida llega por un canal, alimentado por un hilo lector propio: quien consume no se bloquea
-/// al ritmo del programa. Los bytes se entregan **sin interpretar** y sin validar como UTF-8 —una
-/// secuencia de escape puede llegar partida entre dos mensajes—, porque interpretarlos es trabajo de
-/// otra capa.
-///
-/// **Lo que sí se hace es lo que hacía el núcleo**: el salto de línea llega con su retorno de carro
-/// delante, si el programa de dentro lo quiere así. Ver [`ProcesadoDeSalida`] — no es una
-/// normalización de esta caja, es un trabajo que se le quitó al pseudoterminal por lo que costaba y
-/// que hay que seguir haciendo en su nombre.
+/// al ritmo del programa. Los bytes se entregan **crudos**, sin interpretar ni validar como UTF-8
+/// —una secuencia de escape puede llegar partida entre dos mensajes—, porque interpretarlos es
+/// trabajo de otra capa.
 pub struct Pty {
     child: Box<dyn Child + Send + Sync>,
     master: Box<dyn MasterPty + Send>,
@@ -139,11 +132,6 @@ impl Pty {
             pixel_height: 0,
         })?;
 
-        // Antes de lanzar al hijo, y no después: un shell lee los ajustes del terminal al arrancar,
-        // y `less` los fotografía para restaurarlos al salir. Hacerlo tarde deja esas copias con el
-        // procesamiento encendido.
-        let procesado = ProcesadoDeSalida::quitarselo_al_nucleo(pair.master.as_ref());
-
         let mut cmd = CommandBuilder::new(program);
         cmd.args(args);
         for (nombre, valor) in FIXED_ENV {
@@ -174,7 +162,7 @@ impl Pty {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if entregar(&tx, procesado.aplicar(&buf[..n]), &parar_del_hilo).is_err() {
+                        if entregar(&tx, buf[..n].to_vec(), &parar_del_hilo).is_err() {
                             break;
                         }
                     }
@@ -253,121 +241,6 @@ fn entregar(
     }
 }
 
-/// El procesamiento de salida que hacía el núcleo, traído aquí.
-///
-/// Un pseudoterminal se abre con `OPOST` encendido, y con él el núcleo convierte cada `\n` en
-/// `\r\n` antes de entregarlo. Cuesta caro, y **cuánto depende del largo de línea**, porque lo que
-/// se paga es cada salto: medido en este repo con `cargo run --release --example entrega`, de
-/// 53,8 a 162,9 MiB/s con líneas de log, y de 2,6 a 170,2 con líneas de dos bytes. Se le quita el
-/// trabajo, y hay que hacerlo aquí — sin el retorno de carro, toda salida de varias líneas sale en
-/// escalera.
-///
-/// **La traducción no puede ser incondicional, y esa es la parte que no se ve venir.** El núcleo
-/// traducía **según lo que pedía cada programa**, y uno a pantalla completa apaga `ONLCR` justo para
-/// poder usar el salto de línea como «bajar sin mover la columna»: es lo que declara `cud1=\n` en
-/// `xterm-256color` y lo que hacen `vim` y `htop` al arrancar. Traducirles a ellos les descoloca el
-/// repintado.
-///
-/// Por eso la condición es **`ONLCR`**, que queda intacto al apagar solo `OPOST` y sigue diciendo lo
-/// que el programa quiere. No es una regla inventada aquí: `ncurses` documenta que solo usa el salto
-/// como movimiento después de `nonl()`, que es exactamente lo que apaga ese bit.
-///
-/// Y traducir de más es inocuo: si algo reenciende `OPOST` —`less` lo hace mientras corre—, llega
-/// `\r\n`, sale `\r\r\n`, y dos retornos seguidos dejan el cursor donde uno.
-#[cfg(unix)]
-struct ProcesadoDeSalida {
-    /// Copia propia del descriptor del maestro.
-    ///
-    /// Propia y no prestada porque este valor se muda al hilo lector: con un descriptor prestado,
-    /// que siga siendo válido dependería del orden de destrucción del [`Pty`], y eso habría que
-    /// volver a comprobarlo cada vez que alguien tocara su [`Drop`].
-    ///
-    /// `None` cuando no se pudo obtener. Entonces tampoco se pudo apagar `OPOST`, así que el núcleo
-    /// sigue traduciendo y aquí no hay nada que reponer.
-    maestro: Option<OwnedFd>,
-}
-
-#[cfg(unix)]
-impl ProcesadoDeSalida {
-    /// Apaga `OPOST` en el pseudoterminal y se queda con lo necesario para hacerlo por su cuenta.
-    ///
-    /// Es **best-effort**: si no se puede, se sigue adelante sin error. Esto es velocidad, no
-    /// corrección, y fallar el arranque de una consola por no poder acelerarla sería peor que la
-    /// lentitud.
-    fn quitarselo_al_nucleo(maestro: &(dyn MasterPty + Send)) -> Self {
-        let Some(prestado) = maestro.as_raw_fd() else {
-            return Self { maestro: None };
-        };
-        // `dup` devuelve un descriptor nuevo del que no es dueño nadie más, que es lo que permite
-        // envolverlo en un `OwnedFd` y que se cierre solo con el hilo.
-        let propio = unsafe { libc::dup(prestado) };
-        if propio < 0 {
-            return Self { maestro: None };
-        }
-        let propio = unsafe { OwnedFd::from_raw_fd(propio) };
-
-        let mut ajustes: libc::termios = unsafe { std::mem::zeroed() };
-        if unsafe { libc::tcgetattr(propio.as_raw_fd(), &mut ajustes) } == 0 {
-            // Solo `OPOST`. `ONLCR` se queda puesto **a propósito**: es la señal que dice si el
-            // programa de dentro quiere la traducción, y apagarlo la borraría.
-            ajustes.c_oflag &= !libc::OPOST;
-            // El resultado se descarta a propósito: ver el best-effort de arriba.
-            let _ = unsafe { libc::tcsetattr(propio.as_raw_fd(), libc::TCSANOW, &ajustes) };
-        }
-
-        Self {
-            maestro: Some(propio),
-        }
-    }
-
-    /// Devuelve el trozo como lo habría entregado el núcleo.
-    fn aplicar(&self, bytes: &[u8]) -> Vec<u8> {
-        let saltos = bytes.iter().filter(|byte| **byte == b'\n').count();
-        // Sin saltos no hay nada que traducir, y preguntarlo cuesta una llamada al sistema: un
-        // volcado binario no paga ninguna.
-        if saltos == 0 || !self.lo_quiere_el_programa() {
-            return bytes.to_vec();
-        }
-
-        let mut salida = Vec::with_capacity(bytes.len() + saltos);
-        for &byte in bytes {
-            if byte == b'\n' {
-                salida.push(b'\r');
-            }
-            salida.push(byte);
-        }
-        salida
-    }
-
-    /// Si el programa de dentro sigue queriendo que se le traduzcan los saltos.
-    fn lo_quiere_el_programa(&self) -> bool {
-        let Some(maestro) = &self.maestro else {
-            return false;
-        };
-        let mut ajustes: libc::termios = unsafe { std::mem::zeroed() };
-        if unsafe { libc::tcgetattr(maestro.as_raw_fd(), &mut ajustes) } != 0 {
-            return false;
-        }
-        ajustes.c_oflag & libc::ONLCR != 0
-    }
-}
-
-/// En Windows no hay nada que quitarle a nadie: el pseudoterminal va por tuberías, sin `termios` y
-/// sin disciplina de línea, y `ConPTY` ya entrega los saltos con su retorno de carro.
-#[cfg(not(unix))]
-struct ProcesadoDeSalida;
-
-#[cfg(not(unix))]
-impl ProcesadoDeSalida {
-    fn quitarselo_al_nucleo(_maestro: &(dyn MasterPty + Send)) -> Self {
-        Self
-    }
-
-    fn aplicar(&self, bytes: &[u8]) -> Vec<u8> {
-        bytes.to_vec()
-    }
-}
-
 impl Drop for Pty {
     fn drop(&mut self) {
         // Primero la bandera: con el canal lleno, el hilo no está dentro de `read` sino esperando
@@ -414,132 +287,6 @@ mod tests {
 
     fn contiene(salida: &[u8], texto: &str) -> bool {
         String::from_utf8_lossy(salida).contains(texto)
-    }
-
-    /// Los ajustes que `stty -a` enumera, como símbolos sueltos.
-    ///
-    /// Comparar símbolos completos y no subcadenas **no es tiquismiquis**: `echo` es prefijo de
-    /// `echoe` y `echok`, y `-echo` contiene `echo`. Buscar por texto daría verde con el ajuste
-    /// puesto del revés.
-    fn ajustes_del_terminal(salida: &[u8]) -> Vec<String> {
-        String::from_utf8_lossy(salida)
-            .split([' ', '\t', '\r', '\n', ';'])
-            .filter(|simbolo| !simbolo.is_empty())
-            .map(str::to_string)
-            .collect()
-    }
-
-    /// Lo que ve el programa de dentro sobre su propio terminal.
-    fn como_ve_su_terminal_el_programa() -> Vec<String> {
-        let (_pty, canal) =
-            Pty::spawn("sh", &["-c", "stty -a"], Size::default()).expect("lanzar sh");
-
-        ajustes_del_terminal(&consumir_hasta_el_cierre(&canal))
-    }
-
-    /// El interruptor que cuesta: con él encendido, el núcleo procesa la salida salto a salto y
-    /// entrega hasta sesenta y cinco veces menos. Ver **D12** en `docs/02-decisiones.md`.
-    #[test]
-    fn el_nucleo_no_procesa_la_salida_del_programa() {
-        let ajustes = como_ve_su_terminal_el_programa();
-
-        assert!(
-            ajustes.iter().any(|ajuste| ajuste == "-opost"),
-            "el procesamiento de salida sigue encendido: {ajustes:?}"
-        );
-    }
-
-    /// La otra mitad del mismo ajuste, y la que sostiene todo lo demás: `ONLCR` se queda **puesto**
-    /// porque es la señal por la que se sabe si el programa quiere que se le traduzcan los saltos.
-    /// Apagarlo de paso borraría esa señal y no habría forma de distinguir a `vim` de un `ls`.
-    #[test]
-    fn la_senal_que_dice_si_el_programa_quiere_la_traduccion_sigue_intacta() {
-        let ajustes = como_ve_su_terminal_el_programa();
-
-        assert!(
-            ajustes.iter().any(|ajuste| ajuste == "onlcr"),
-            "la señal se ha borrado al apagar el procesamiento: {ajustes:?}"
-        );
-    }
-
-    /// Lo que **no** se toca. El eco y la edición de línea están medidos como gratuitos, y cambiarlos
-    /// cambiaría el teclado de la consola.
-    #[test]
-    fn el_eco_y_la_edicion_de_linea_se_quedan_como_estaban() {
-        let ajustes = como_ve_su_terminal_el_programa();
-
-        for esperado in ["icanon", "echo"] {
-            assert!(
-                ajustes.iter().any(|ajuste| ajuste == esperado),
-                "falta {esperado} en los ajustes del terminal: {ajustes:?}"
-            );
-        }
-    }
-
-    /// El trabajo que se le quitó al núcleo, hecho aquí: sin esto, toda salida de varias líneas sale
-    /// en escalera.
-    #[test]
-    fn los_saltos_llegan_con_su_retorno_de_carro() {
-        let (_pty, canal) = Pty::spawn("sh", &["-c", r#"printf "uno\ndos\n""#], Size::default())
-            .expect("lanzar sh");
-
-        let salida = consumir_hasta_el_cierre(&canal);
-
-        assert!(
-            contiene(&salida, "uno\r\ndos\r\n"),
-            "los saltos llegaron desnudos: {:?}",
-            String::from_utf8_lossy(&salida)
-        );
-    }
-
-    /// Y la condición, que es lo que salva a `vim` y a `htop`: un programa a pantalla completa apaga
-    /// la traducción para poder usar el salto como «bajar sin mover la columna». Traducírselo de
-    /// todas formas le descoloca el repintado.
-    #[test]
-    fn a_quien_apaga_la_traduccion_no_se_le_traduce() {
-        let (_pty, canal) = Pty::spawn(
-            "sh",
-            &["-c", r#"stty -onlcr; printf "uno\ndos\n""#],
-            Size::default(),
-        )
-        .expect("lanzar sh");
-
-        let salida = consumir_hasta_el_cierre(&canal);
-
-        assert!(
-            contiene(&salida, "uno\ndos\n"),
-            "no llegaron los saltos desnudos que pidió: {:?}",
-            String::from_utf8_lossy(&salida)
-        );
-        assert!(
-            !contiene(&salida, "\r\n"),
-            "se le añadió el retorno de carro que había pedido no tener: {:?}",
-            String::from_utf8_lossy(&salida)
-        );
-    }
-
-    /// Y traducir de más es inocuo, que es lo que hace que las dos mitades no se puedan
-    /// desincronizar: si algo reenciende el procesamiento del núcleo —`less` lo hace mientras
-    /// corre— llegan dos retornos seguidos, y dos retornos dejan el cursor donde uno.
-    #[test]
-    fn reencender_el_procesamiento_del_nucleo_no_descoloca_el_pintado() {
-        let (_pty, canal) = Pty::spawn(
-            "sh",
-            &["-c", r#"stty opost onlcr; printf "uno\ndos""#],
-            Size::default(),
-        )
-        .expect("lanzar sh");
-
-        let salida = consumir_hasta_el_cierre(&canal);
-        let mut pantalla = Screen::new(Size::default());
-        pantalla.advance(&salida);
-
-        assert_eq!(
-            pantalla.to_text(),
-            "uno\ndos",
-            "la segunda línea no empezó en el margen: {:?}",
-            String::from_utf8_lossy(&salida)
-        );
     }
 
     // Ojo con el `_pty` de los tests: no es una variable sobrante. Mientras viva, el hijo vive;

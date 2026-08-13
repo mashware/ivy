@@ -5,11 +5,11 @@ name: >-
   Quitarle al núcleo la traducción del salto de línea obliga a preguntarle a
   ONLCR: es la señal por la que un programa dice si la quiere
 type: aspect
-status: active
-superseded_by: null
+status: superseded
+superseded_by: asp_onlcr-no-distingue-el-modo-crudo_thhb6n
 confidence: 80
 created_at: '2026-08-13T18:28:50.597Z'
-updated_at: '2026-08-13T18:28:50.597Z'
+updated_at: '2026-08-13T18:42:02.621Z'
 last_verified: '2026-08-13T18:28:50.597Z'
 file_paths:
   - crates/term-core/src/lib.rs

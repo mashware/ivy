@@ -9,11 +9,15 @@
 //! enciende o apaga el interruptor por su cuenta con `stty`, así que no hace falta ninguna API para
 //! medir la diferencia, y lo que se compara no depende de dos ejecuciones distintas.
 //!
-//! **Dos avisos que los números necesitan al lado.** Uno: lo que cuesta es **cada salto de línea**,
-//! así que la relación depende de cuántos haya por byte — por eso se mide con dos largos de línea y
-//! no con uno. Dos: la ganancia es para programas orientados a línea; un paginador (`less`, y con él
-//! `git log` o `man`) reenciende el procesamiento mientras está abierto, así que allí no se ve, y lo
-//! devuelve al salir.
+//! **Lo que cuesta es cada salto de línea, no cada byte**, así que la relación depende de cuántos
+//! haya por byte — por eso se mide con dos largos y no con uno. Un solo número parece universal y no
+//! lo es.
+//!
+//! **Este coste se paga a propósito.** Se intentó quitar apagando `OPOST` al abrir el pseudoterminal,
+//! y se revirtió: reponer el retorno de carro desde fuera exige saber si el programa lo quiere, y esa
+//! información desaparece en cuanto se le miente sobre el estado de su terminal. La autopsia entera
+//! está en **D12** de `docs/02-decisiones.md`. El ejemplo se queda porque el coste sigue ahí y
+//! conviene poder volver a mirarlo.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
