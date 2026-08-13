@@ -640,13 +640,35 @@ impl Ventana {
         &mut self.pestañas[self.activa]
     }
 
+    /// Todas las consolas abiertas, se vean o no.
+    ///
+    /// **La distinción entre esto y [`Ventana::activa`] es la del hito entero**, y no es de estilo:
+    /// lo que un programa *hace* corre en todas las pestañas, y lo que se *ve* ocurre solo en una. Un
+    /// recorrido puesto del lado equivocado no da error ni sale en pantalla — con una sola pestaña los
+    /// dos hacen exactamente lo mismo—, así que la única defensa es que cada sitio diga cuál de las
+    /// dos cosas es.
+    fn todas_las_divisiones(&self) -> impl Iterator<Item = &Division> {
+        self.pestañas
+            .iter()
+            .flat_map(|pestaña| pestaña.divisiones.iter())
+    }
+
+    fn todas_las_divisiones_mut(&mut self) -> impl Iterator<Item = &mut Division> {
+        self.pestañas
+            .iter_mut()
+            .flat_map(|pestaña| pestaña.divisiones.iter_mut())
+    }
+
     /// Arma el vigilante sobre los directorios de las consolas que tienen uno.
     ///
     /// Una consola sin directorio no se vigila porque no hay nada que vigilar: nadie puede publicarle
     /// un panel. Su bandera se queda como esté y su lectura no encuentra dónde mirar.
-    fn vigilar(ctx: &egui::Context, divisiones: &[Division]) -> Vigilante {
+    fn vigilar<'a>(
+        ctx: &egui::Context,
+        divisiones: impl IntoIterator<Item = &'a Division>,
+    ) -> Vigilante {
         let consolas: Vec<_> = divisiones
-            .iter()
+            .into_iter()
             .filter_map(|division| {
                 let dir = division.panel.as_ref()?;
                 Some((dir.path(), division.por_releer.clone()))
@@ -678,6 +700,12 @@ impl Ventana {
     /// que se publicaba en ese fotograma era `Duration::MAX`. Y armarla solo en la segunda dejaría
     /// fuera las vueltas en que la ventana está tapada y solo corre la mitad lógica. Pedir de más no
     /// cuesta: la ventana se queda con el plazo más corto de todos los que se le pidan.
+    ///
+    /// **Y mira solo la pestaña que se ve**, al revés que el bombeo. La alarma existe para que la
+    /// etiqueta de «esto es viejo» **aparezca en pantalla**, y una pestaña que no se pinta no tiene
+    /// pantalla: despertar la ventana por ella sería gastar un fotograma en un aviso que nadie va a
+    /// ver. No se pierde nada, porque si el panel se ve rancio se decide **al pintarlo**, así que al
+    /// volver a esa pestaña el aviso sale en ese mismo fotograma.
     fn poner_el_despertador(&self, ctx: &egui::Context) {
         let ahora = SystemTime::now();
 
@@ -709,8 +737,20 @@ impl Ventana {
         }
     }
 
-    /// Bombea las dos consolas y las redimensiona, y resume lo que el fotograma tiene que decidir con
-    /// eso.
+    /// Bombea **todas** las consolas de **todas** las pestañas y las redimensiona, y resume lo que el
+    /// fotograma tiene que decidir con eso.
+    ///
+    /// **Las de las pestañas que no se ven se bombean igual, con el mismo presupuesto**, y esto es la
+    /// promesa del hito, no una elección de rendimiento. Recortárselo sería dejar de vaciar su
+    /// pseudoterminal al ritmo que produce, y el margen que el núcleo regala antes de bloquear al
+    /// programa son 20 KiB —seis veces menos que el propio presupuesto—, así que el programa de la
+    /// pestaña de fondo **se pararía al escribir**. «Sigue corriendo aunque no la mires» y «consume
+    /// menos por no mirarla» son incompatibles por construcción.
+    ///
+    /// **Lo que sí cuesta, y conviene no esconderlo:** el reparto lo hace el propio fotograma. Cada
+    /// consola traga lo suyo y el fotograma se alarga, así que con varias volcando a la vez **todas**
+    /// van más lentas, la visible incluida. «Siguen corriendo» no significa «a la misma velocidad que
+    /// si las miraras».
     ///
     /// Vive aparte del bucle del framework para que las dos decisiones que salen de aquí —pedir otro
     /// fotograma y cerrar la ventana— se puedan comprobar sin abrir ninguna. Es la única forma de
@@ -722,7 +762,7 @@ impl Ventana {
             todas_terminadas: true,
         };
 
-        for division in &mut self.activa_mut().divisiones {
+        for division in self.todas_las_divisiones_mut() {
             // Primero se interpreta lo pendiente y después se cambia de tamaño: esos bytes los
             // escribió el programa para las dimensiones que todavía no sabe que han cambiado.
             let queda_cola = division.bombear();
@@ -940,8 +980,12 @@ impl eframe::App for Ventana {
         // y la consola callada —un agente esperando respuesta, que es justo cuando su panel dice lo
         // más valioso— no hay ninguna vuelta donde recoger la bandera. Medio segundo de latencia, y
         // solo en el modo degradado.
+        //
+        // **Todas, también las que no se ven**, al revés que el despertador: levantar una bandera es
+        // una escritura atómica y lo que compra es que al volver a una pestaña su panel esté al día.
+        // Por qué el despertador sí se acota, en [`Ventana::poner_el_despertador`].
         if self.vigilante.esta_ciego() {
-            for division in &self.activa().divisiones {
+            for division in self.todas_las_divisiones() {
                 division.por_releer.levantar();
             }
             ctx.request_repaint_after(RESPIRO_SIN_VIGILANTE);
@@ -1348,14 +1392,44 @@ mod tests {
     /// Lo que aquí se prueba —bombear, decidir el cierre, enrutar el teclado— no toca el escritorio,
     /// así que se arma el struct a mano con las mismas piezas que [`Ventana::nueva`].
     fn ventana_con(izquierda: &str, derecha: &str) -> Ventana {
-        let pestaña = Pestaña::con([division_con(izquierda), division_con(derecha)]);
+        ventana_de_pestañas([[izquierda, derecha]])
+    }
+
+    /// Monta una ventana con **las pestañas que se le pidan**, cada consola con su programa.
+    ///
+    /// Existe porque la aplicación **todavía no sabe abrir una segunda pestaña** —crearlas es parte
+    /// de F2.1, en un paso posterior— y sin esto no habría forma de comprobar lo que este paso
+    /// promete: que una consola de una pestaña que no se ve se sigue vaciando. La primera de la lista
+    /// queda activa.
+    fn ventana_de_pestañas<'a>(programas: impl IntoIterator<Item = [&'a str; 2]>) -> Ventana {
+        let pestañas: Vec<_> = programas
+            .into_iter()
+            .map(|[izquierda, derecha]| {
+                Pestaña::con([division_con(izquierda), division_con(derecha)])
+            })
+            .collect();
+
+        // Sin pestañas, `activa: 0` apunta fuera de la lista y el pánico saldría dentro de la
+        // aplicación, lejos de la prueba que lo causó. Se ata donde se comete.
+        assert!(
+            !pestañas.is_empty(),
+            "una ventana necesita al menos una pestaña"
+        );
 
         Ventana {
             // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
             // arma igual —sobre una lista vacía— para que la ventana de las pruebas no se declare
             // ciega y active el respaldo, que es un camino con su propia prueba.
-            vigilante: Ventana::vigilar(&egui::Context::default(), &pestaña.divisiones),
-            pestañas: vec![pestaña],
+            //
+            // Se le pasan las de todas las pestañas por lo mismo que hace la aplicación al armarlo,
+            // aunque hoy dé igual: sin directorio, la lista sale vacía se le pase lo que se le pase.
+            vigilante: Ventana::vigilar(
+                &egui::Context::default(),
+                pestañas
+                    .iter()
+                    .flat_map(|pestaña| pestaña.divisiones.iter()),
+            ),
+            pestañas,
             activa: 0,
             modificadores: egui::Modifiers::NONE,
             tema: Tema::default(),
@@ -1943,6 +2017,184 @@ mod tests {
     }
 
     #[test]
+    fn la_consola_de_una_pestaña_que_no_se_ve_se_sigue_vaciando() {
+        // **Esto es lo que el hito promete**, y lo que separa este terminal de abrir dos ventanas: un
+        // agente trabajando en otra pestaña no se para porque no lo estés mirando.
+        //
+        // Y no es una cuestión de que su salida tarde en verse: si la ventana dejara de vaciar su
+        // pseudoterminal, el freno del terminal entraría en acción —el núcleo da unos 20 KiB de margen
+        // antes de bloquear al que escribe— y **el programa se pararía**. Lo observable desde aquí es
+        // que lo que escribió acaba en su rejilla sin haber pintado esa pestaña ni una sola vez.
+        let mut ventana = ventana_de_pestañas([
+            ["sleep 30", "sleep 30"],
+            ["printf trabajando-de-fondo", "sleep 30"],
+        ]);
+        let de_fondo = &ventana.pestañas[1].divisiones[0];
+        esperar_a_que_muera(de_fondo);
+
+        ventana.bombear_todas();
+
+        assert_eq!(
+            ventana.activa, 0,
+            "la prueba no está mirando la otra pestaña"
+        );
+        assert!(
+            ventana.pestañas[1].divisiones[0]
+                .pantalla
+                .to_text()
+                .contains("trabajando-de-fondo"),
+            "la consola de la pestaña de fondo no se vació: su programa se habría bloqueado al escribir"
+        );
+    }
+
+    #[test]
+    fn una_consola_viva_en_una_pestaña_de_fondo_no_deja_cerrar_la_ventana() {
+        // El mismo criterio que ya vale para las dos consolas de una pestaña, extendido a todas: cerrar
+        // con algo vivo detrás se llevaría por delante un trabajo que nadie ha visto terminar. Sin esto,
+        // recorrer solo la pestaña visible cerraría la ventana en cuanto sus dos consolas murieran,
+        // matando al programa de la otra pestaña sin decir nada.
+        let mut ventana =
+            ventana_de_pestañas([["printf ya", "printf esta"], ["sleep 30", "sleep 30"]]);
+        for division in &ventana.pestañas[0].divisiones {
+            esperar_a_que_muera(division);
+        }
+
+        let bombeo = ventana.bombear_todas();
+
+        assert!(
+            !bombeo.todas_terminadas,
+            "la ventana se cierra con una consola viva en una pestaña que no se ve"
+        );
+    }
+
+    #[test]
+    fn la_ventana_se_cierra_cuando_han_muerto_las_de_todas_las_pestañas() {
+        // **La mitad positiva del mismo criterio, y sin ella la de arriba se cumple sola.** «Con más de
+        // una pestaña, no cerrar nunca» pasa la prueba de al lado y deja una ventana que no se puede
+        // cerrar desde dentro: las cuatro consolas muertas y el terminal ahí plantado, esperando a que
+        // alguien lo cierre con el ratón. Comprobado mutándolo —dar por terminada la ventana solo si hay
+        // una pestaña— y la suite entera seguía verde.
+        //
+        // La otra prueba positiva que ya existe usa **una** pestaña, donde recorrer todas y recorrer la
+        // visible son lo mismo, así que tampoco la ve.
+        let mut ventana = ventana_de_pestañas([
+            ["printf una", "printf otra"],
+            ["printf tres", "printf cuatro"],
+        ]);
+        for division in ventana.todas_las_divisiones() {
+            esperar_a_que_muera(division);
+        }
+
+        let bombeo = ventana.bombear_todas();
+
+        assert!(
+            bombeo.todas_terminadas,
+            "murieron las cuatro consolas y la ventana sigue sin cerrarse"
+        );
+        // Y lo que escribió la pestaña que nunca se vio está en su rejilla: «terminada» incluye que no
+        // deje cola, así que darla por terminada antes de vaciarla sería cerrar comiéndose su final —
+        // que en una pestaña de fondo es justamente lo único que uno iba a leer de ella.
+        assert!(
+            ventana.pestañas[1].divisiones[1]
+                .pantalla
+                .to_text()
+                .contains("cuatro"),
+            "se dio por terminada una consola de fondo cuya salida aún no había llegado a la rejilla"
+        );
+    }
+
+    #[test]
+    fn el_despertador_no_madruga_por_un_panel_que_no_se_ve() {
+        // La cara opuesta del bombeo, y por eso va aquí al lado: el trabajo corre en todas las
+        // pestañas, pero lo que se ve ocurre en una sola. El razonamiento entero está en el doc de
+        // [`Ventana::poner_el_despertador`].
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        for division in &mut ventana.pestañas[1].divisiones {
+            division.panel = Some(PanelDir::create().expect("crear el directorio"));
+        }
+        publicar_en(
+            &ventana.pestañas[1].divisiones[0],
+            r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
+        );
+        ventana.pestañas[1].divisiones[0].por_releer.levantar();
+        ventana.activa = 1;
+        // Con la pestaña delante, su panel se lee y la alarma queda armada: es el estado de partida.
+        lo_que_la_ventana_espera(&mut ventana, &ctx);
+        ventana.activa = 0;
+
+        for _ in 0..4 {
+            let _ = ctx.run_logic(&egui::RawInput::default(), |_| {});
+        }
+        assert!(
+            !ctx.has_requested_repaint(),
+            "el contexto no llega a estar en reposo, causas: {:?}",
+            ctx.repaint_causes()
+        );
+
+        let mut frame = eframe::Frame::_new_kittest();
+        let _ = ctx.run_logic(&egui::RawInput::default(), |ctx| {
+            eframe::App::logic(&mut ventana, ctx, &mut frame);
+        });
+
+        assert!(
+            !ctx.has_requested_repaint(),
+            "la ventana se despierta por el panel de una pestaña que no se ve, causas: {:?}",
+            ctx.repaint_causes()
+        );
+    }
+
+    #[test]
+    fn al_volver_a_la_pestaña_el_aviso_de_rancio_sale_en_ese_mismo_fotograma() {
+        // **Esta es la prueba que salva a la de arriba**, y por eso van juntas. Acotar el despertador a
+        // la pestaña visible solo sale gratis si la pregunta de si un panel está viejo se contesta **al
+        // pintarlo**, con el reloj de ese fotograma. Si dependiera de que alguien hubiera despertado a
+        // la ventana a la hora del vencimiento, el panel de una pestaña de fondo volvería con la
+        // etiqueta sin poner y nadie se la pondría hasta que su fichero cambiara — que en un productor
+        // muerto, que es justo el caso que el aviso existe para delatar, no pasa nunca. Sin esto, «no se
+        // pierde nada» es una afirmación de palabra.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let de_fondo = &mut ventana.pestañas[1].divisiones[0];
+        de_fondo.panel = Some(PanelDir::create().expect("crear el directorio"));
+        // Plazo cero, que el contrato permite: el panel está viejo desde el primer instante, así que la
+        // prueba llega al caso sin esperar diez minutos ni tocar ningún reloj.
+        publicar_en(de_fondo, r#"{"stale_after_minutes":0,"lines":["algo"]}"#);
+        de_fondo.por_releer.levantar();
+
+        // Fotogramas con la otra pestaña delante. La comprobación de cada uno no es un adorno: si la de
+        // fondo se estuviera pintando, la aserción de abajo pasaría sin haber vuelto de ninguna parte.
+        for _ in 0..3 {
+            let formas = pasada_de_interfaz(
+                &mut ventana,
+                &ctx,
+                area_de(1200.0),
+                egui::RawInput::default(),
+            );
+            assert!(
+                !se_encolo_el_texto(&formas, "sin noticias"),
+                "el panel de la pestaña de fondo se está pintando sin estar delante"
+            );
+        }
+
+        ventana.activa = 1;
+        let al_volver = pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        assert!(
+            se_encolo_el_texto(&al_volver, "sin noticias"),
+            "se vuelve a la pestaña y su panel no dice que lleva callado: el aviso que el despertador \
+             no fue a buscar tampoco aparece al mirarlo"
+        );
+    }
+
+    #[test]
     fn un_volcado_en_una_consola_no_frena_ni_ensucia_a_la_otra() {
         // AC10. El freno del terminal es **por consola**: con una volcando, la otra sigue entregando lo
         // suyo en el mismo fotograma. Si el presupuesto fuera común, la parada se quedaría esperando
@@ -2196,16 +2448,33 @@ mod tests {
     /// La pasada corre **una sola vez** por llamada: `run_ui` repite solo si alguien pide descartar
     /// (`context.rs:863-865`), y aquí nadie lo pide. Importa porque los eventos del teclado se consumen:
     /// una segunda vuelta no vería la tecla.
+    ///
+    /// **Devuelve lo que la pasada encoló**, para quien necesite afirmar sobre lo que se ve y no sobre
+    /// el estado que lo produce. La mayoría de las pruebas de aquí lo ignoran a propósito: miran el
+    /// estado porque es lo que están atando.
     fn pasada_de_interfaz(
         ventana: &mut Ventana,
         ctx: &egui::Context,
         area: egui::Rect,
         mut entrada: egui::RawInput,
-    ) {
+    ) -> Vec<egui::epaint::ClippedShape> {
         entrada.screen_rect = Some(area);
         let mut frame = eframe::Frame::_new_kittest();
-        ctx.run_ui(entrada, |ui| eframe::App::ui(ventana, ui, &mut frame))
-            .drop_without_applying_deltas();
+        let mut salida = ctx.run_ui(entrada, |ui| eframe::App::ui(ventana, ui, &mut frame));
+        let formas = std::mem::take(&mut salida.shapes);
+        salida.drop_without_applying_deltas();
+        formas
+    }
+
+    /// Si entre lo que la pasada encoló a pintar hay un texto que dice esto.
+    ///
+    /// **Se mira lo encolado y no el estado del panel**, porque lo que se promete es que el aviso *se
+    /// ve*: un estado impecable que nadie llega a pintar se lee igual de bien desde el test y no se ve
+    /// en la pantalla.
+    fn se_encolo_el_texto(formas: &[egui::epaint::ClippedShape], dice: &str) -> bool {
+        formas.iter().any(|recortada| {
+            matches!(&recortada.shape, egui::Shape::Text(texto) if texto.galley.text().contains(dice))
+        })
     }
 
     /// La entrada de un puntero que se mueve a un sitio.
@@ -2557,6 +2826,35 @@ mod tests {
             "el respaldo mira «en cada fotograma» y nadie pide ninguno: con la consola callada no \
              habría vuelta donde recogerlo"
         );
+    }
+
+    #[test]
+    fn sin_vigilante_el_respaldo_alcanza_tambien_a_las_pestañas_que_no_se_ven() {
+        // El respaldo va en el sentido contrario al despertador, y por eso hay que atarlo aparte.
+        //
+        // Con una sola pestaña esa distinción no se ve, así que sin esta prueba dejar el respaldo
+        // mirando solo la visible pasa inadvertido: comprobado, la suite entera sigue verde.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let dir = PanelDir::create().expect("crear el directorio");
+        let sin_armar = dir.path().join("no-existe");
+        ventana.vigilante = Vigilante::nuevo(|| {}, &[(sin_armar.as_path(), Bandera::levantada())]);
+        assert!(ventana.vigilante.esta_ciego(), "el respaldo no está activo");
+        for division in ventana.todas_las_divisiones() {
+            division.por_releer.recoger();
+        }
+        dormir_la_ventana(&ctx);
+
+        eframe::App::logic(&mut ventana, &ctx, &mut eframe::Frame::_new_kittest());
+
+        for (cual, division) in ventana.pestañas[1].divisiones.iter().enumerate() {
+            assert!(
+                division.por_releer.recoger(),
+                "el panel de la consola {cual} de la pestaña de fondo se queda congelado hasta que \
+                 alguien vuelva a mirarla"
+            );
+        }
     }
 
     /// **Que el tramo del panel se declare desde el camino real, y no solo cuando se anota a mano.**
