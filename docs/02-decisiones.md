@@ -635,3 +635,53 @@ trabajo.
 cuadros—. La comprobación está atada por una prueba que pregunta a la fuente y falla si algún símbolo
 deja de medir una celda, así que el día que cambie se enterará quien corra la suite y no quien mire la
 pantalla.
+
+---
+
+## D10 — El ancho del panel: fijo en celdas hoy, ajustable con el plegado
+
+**Decisión.** El panel se lleva **36 celdas de la fuente** —ni una fracción del ancho de la división ni
+un número de puntos— y **hoy no se puede arrastrar**. Cuando no cabe todo, el que cede es el panel: se
+estrecha hasta desaparecer y la consola conserva un suelo de veinte columnas. Ajustarlo a mano llega en
+**F2.4**, junto al plegado.
+
+**Por qué en celdas y no en puntos.** La petición fue «ancho fijo, sin plegar», y se cumple en lo que
+quería decir —no depende del ancho de la ventana y no se arrastra— pero **medido en celdas**. Un ancho
+en puntos se estrecha en columnas al subir el aumento del escritorio, y lo que el panel tiene que
+conservar es **cuántos caracteres caben**, que es lo que decide si su texto se lee. Un panel que en una
+pantalla enseña las líneas enteras y en otra las corta no es el mismo panel.
+
+> Ojo con probarlo: con una celda de 8 puntos, «36 celdas» y «288 puntos» dan el mismo número. Una
+> prueba escrita con ese ancho de celda no distingue las dos implementaciones — hay que variar el
+> tamaño de la celda para que la diferencia aparezca.
+
+**Por qué el que cede es el panel.** El panel es margen y la consola es el trabajo: en una ventana
+estrecha lo que sobra es el estado, no el programa. Con la regla al revés, arrastrar el divisor dejaría
+a un programa interactivo sin sitio donde escribir mientras su panel conserva sus treinta y seis
+columnas.
+
+**Por qué ajustarlo no entra hasta F2.4.** Plegar y estrechar son **el mismo gesto sobre la misma
+frontera** —plegar es arrastrar hasta el final—, así que hacer uno y volver después por el otro sale más
+caro que hacer los dos juntos. Y lo que hace falta para cualquiera de los dos es de Fase 2: una segunda
+frontera arrastrable por división —hoy solo existe la que reparte las dos consolas— y guardar ese ancho
+por división para restaurarlo al abrir, que es F2.5.
+
+**Lo que ya está resuelto para cuando llegue.** El pintado no supone que el ancho sea 36: `apartar()` ya
+devuelve panels más estrechos cuando no cabe, y la maqueta guarda **para qué ancho** se envolvió el
+texto y solo la rehace cuando ese ancho cambia — o sea que un panel de ancho variable no reenvuelve en
+cada fotograma. Lo que queda por decidir es qué pasa con anchos muy pequeños, donde la columna de `ref`
+tiene que seguir sin empujar el texto fuera del panel.
+
+**Lo que se descartó, y por qué.**
+
+- **Una fracción del ancho de la división**, como el reparto entre las dos consolas. Al redimensionar la
+  ventana el panel crecería y encogería con ella, y con él el punto donde se corta su texto: líneas que
+  se leían enteras dejarían de leerse sin que nadie tocara nada.
+- **Ancho en puntos** — arriba: fijo en puntos no es fijo en columnas.
+- **Que ceda la consola** — arriba.
+- **Hacerlo arrastrable ya en F1.6.** Es trabajo de Fase 2 dentro del hito que tenía que responder si el
+  panel merece existir, y la respuesta a eso no depende de poder estrecharlo.
+
+**Cuándo dejaría de valer.** Al usarlo con cuatro divisiones: treinta y seis celdas caben holgadas en
+dos, y en cuatro la cuenta puede salir distinta — es la misma revisión pendiente que el fotograma
+([#33](https://github.com/mashware/agent-terminal/issues/33)).

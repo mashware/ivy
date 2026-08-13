@@ -26,6 +26,9 @@ use crate::tema::Tema;
 ///
 /// Con treinta y seis caben las líneas de los `panel.json` reales del repo sin que la consola se quede
 /// sin sus ochenta columnas de siempre en una ventana normal.
+///
+/// **Poder ajustarlo a mano llega en F2.4**, con el plegado y por el mismo gesto: ver D10 en
+/// `docs/02-decisiones.md`, que es donde está el razonamiento entero y lo que se descartó.
 const ANCHO: f32 = 36.0;
 
 /// Lo menos que se le deja a la consola cuando su panel le quita sitio, en celdas.

@@ -36,7 +36,7 @@ divisiones que quieras, colocadas como quieras.
 **Lo que puedes hacer:** una pestaña por proyecto o por contexto, y dentro tantas tareas en
 paralelo como quepan. **Arrastrar una división y soltarla en otro sitio** cuando el trabajo
 cambia de forma — lo que no da ningún terminal actual y lo que originó este proyecto. Copiar,
-pegar, buscar, subir por el historial. Plegar el panel. Cerrar y encontrártelo como lo dejaste.
+pegar, buscar, subir por el historial. Plegar el panel, o darle el ancho que quieras. Cerrar y encontrártelo como lo dejaste.
 
 **Lo que falta:** el panel sigue siendo de solo lectura. Cuenta cosas, no puedes hacer nada
 desde él.
@@ -220,7 +220,7 @@ Lo que convierte el prototipo en algo que se usa a diario.
 | **F2.1** | Pestañas |
 | **F2.2** | Divisiones arbitrarias — árbol de divisiones, no solo dos |
 | **F2.3** | **Arrastrar divisiones con el ratón** para recolocarlas — lo que ningún terminal actual da |
-| **F2.4** | Plegar el panel por división |
+| **F2.4** | Plegar el panel por división, y **estrechar su ancho arrastrando** — el mismo gesto sobre la misma frontera, así que van juntos ([02-decisiones.md](02-decisiones.md) → D10) |
 | **F2.5** | Guardar y restaurar la disposición al abrir |
 | **F2.6** | Scrollback, selección, copiar y pegar |
 | **F2.7** | Primera compilación y prueba real en **macOS y Windows** |
