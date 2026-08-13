@@ -720,6 +720,70 @@ impl Ventana {
         }
     }
 
+    /// Escribe el informe de la sesión al destino que se le dé.
+    ///
+    /// **Recibe el destino en vez de imprimir**, por lo mismo que la tabla de tramos de cada consola:
+    /// es la única forma de que una prueba afirme sobre **lo que el informe dice de verdad** y no
+    /// sobre las constantes con las que se escribe. Comprobar la constante demuestra que está bien
+    /// redactada, no que alguien la imprima — y eso, en este proyecto, ya ha dejado pasar cosas con la
+    /// suite en verde.
+    fn publicar_informe(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if !self
+            .todas_las_divisiones()
+            .any(|division| division.medida.hay_algo())
+        {
+            return Ok(());
+        }
+
+        let rejillas: Vec<_> = self
+            .pestañas
+            .iter()
+            .map(|pestaña| pestaña.divisiones.each_ref().map(|d| d.pantalla.size()))
+            .collect();
+        medida::cabecera(a, &rejillas, self.activa)?;
+
+        // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo
+        // pueden venir de dos consolas de anchos muy distintos, y una tabla de tramos sin saber con qué
+        // reparto se tomó no compara con nada.
+        //
+        // **Se publica la fracción pedida, no los anchos resultantes.** Los anchos de verdad están
+        // arriba, en la rejilla de cada consola, que es lo que se usó para interpretar; repetirlos aquí
+        // a partir de la fracción los haría discrepar en el único caso en que el suelo actúa.
+        //
+        // **Y de la pestaña que se veía, porque es la única cuyo divisor y foco significan algo**: en
+        // una que no se pinta ni se arrastra el divisor ni se teclea.
+        let visible = self.activa();
+        writeln!(
+            a,
+            "divisor:      al {:.0} % del ancho repartible al salir, y son {GROSOR_DEL_DIVISOR} \
+             puntos de ancho. Si se arrastró durante la sesión, los tramos de abajo mezclan repartos",
+            visible.fraccion * 100.0
+        )?;
+        writeln!(
+            a,
+            "foco al salir: consola {} ({}) de la pestaña {}",
+            visible.foco,
+            medida::NOMBRE_DE_CONSOLA[visible.foco],
+            self.activa
+        )?;
+
+        // **Todas las pestañas, no solo la que se veía.** Una consola de fondo cronometra su
+        // interpretar igual que las demás, y publicar solo las visibles tiraría justo los números que
+        // la tanda de dos pestañas existe para tomar.
+        for (que_pestaña, pestaña) in self.pestañas.iter().enumerate() {
+            for (cual, division) in pestaña.divisiones.iter().enumerate() {
+                writeln!(
+                    a,
+                    "\n── pestaña {que_pestaña}, consola {cual} ({}) ──",
+                    medida::NOMBRE_DE_CONSOLA[cual]
+                )?;
+                division.medida.publicar_tramos(a)?;
+            }
+        }
+
+        self.resto_del_fotograma.publicar(a)
+    }
+
     /// Cierra la vuelta de las consolas que **interpretaron y no se pintaron**, para que su trabajo no
     /// acabe publicado como coste del framework de interfaz.
     ///
@@ -1114,49 +1178,15 @@ impl eframe::App for Ventana {
     /// camino imprimía el informe una vez por cada fotograma que aún llegaba; y cerrar la ventana a
     /// mano —que es como se sale la mitad de las veces— no pasa por ahí, así que la sesión se
     /// perdía entera sin publicar nada.
+    /// **Estas dos líneas no las cubre ninguna prueba, y conviene saberlo**: capturar la salida
+    /// estándar del propio proceso no se puede hacer desde un test sin maquinaria que no compensa,
+    /// así que las pruebas entran por [`Ventana::publicar_informe`]. Vaciar esto dejaría la suite
+    /// entera en verde con el informe mudo — el mismo hueco que ya costó una vez en este proyecto.
+    /// Lo que lo tapa hoy no es una prueba, es el uso: quien mide se encuentra el fichero de la tanda
+    /// vacío en cuanto lo abre. Por eso aquí no puede haber **nada** más que la llamada.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        let pestaña = self.activa();
-
-        if !pestaña
-            .divisiones
-            .iter()
-            .any(|division| division.medida.hay_algo())
-        {
-            return;
-        }
-
-        let mut salida = std::io::stdout().lock();
-        medida::cabecera(pestaña.divisiones.each_ref().map(|d| d.pantalla.size()));
-        // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo pueden
-        // venir de dos consolas de anchos muy distintos, y una tabla de tramos sin saber con qué reparto
-        // se tomó no compara con nada.
-        //
-        // **Se publica la fracción pedida, no los anchos resultantes.** Los anchos de verdad están arriba,
-        // en la rejilla de cada consola, que es lo que se usó para interpretar; repetirlos aquí a partir de
-        // la fracción los haría discrepar en el único caso en que el suelo actúa.
-        println!(
-            "divisor:      al {:.0} % del ancho repartible al salir, y son {GROSOR_DEL_DIVISOR} puntos \
-             de ancho. Si se arrastró durante la sesión, los tramos de abajo mezclan repartos",
-            pestaña.fraccion * 100.0
-        );
-        println!(
-            "foco al salir: consola {} ({})",
-            pestaña.foco,
-            medida::NOMBRE_DE_CONSOLA[pestaña.foco]
-        );
-
-        for (cual, division) in pestaña.divisiones.iter().enumerate() {
-            println!(
-                "\n── consola {cual} ({}) ──",
-                medida::NOMBRE_DE_CONSOLA[cual]
-            );
-            division
-                .medida
-                .publicar_tramos(&mut salida)
-                .expect("escribir el informe por la salida estándar");
-        }
-
-        self.resto_del_fotograma.publicar();
+        self.publicar_informe(&mut std::io::stdout().lock())
+            .expect("escribir el informe por la salida estándar");
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -2380,6 +2410,91 @@ mod tests {
             "la consola que se ve se quedó sin una sola muestra: su vuelta se cerró antes de \
              pintarla, así que se declaró como si no le hubiera llegado nada"
         );
+    }
+
+    /// El informe de la sesión, tal como lo escribe la aplicación al cerrarse.
+    fn informe_de(ventana: &Ventana) -> String {
+        let mut salida = Vec::new();
+        ventana
+            .publicar_informe(&mut salida)
+            .expect("escribir a memoria no falla");
+        String::from_utf8(salida).expect("el informe es texto")
+    }
+
+    #[test]
+    fn el_informe_dice_cuantas_pestañas_habia_y_cual_se_veia() {
+        // **Sin esto, dos tandas de medida distintas producen informes indistinguibles.** Los tramos
+        // de abajo se toman con todas las pestañas bombeando, así que una tanda de dos pestañas y otra
+        // de una no se pueden comparar; y quien transcriba la de dos creyendo que es de una publicaría
+        // que el fotograma se encareció sin causa. Es el mismo fallo que el aviso de la rejilla ya
+        // existe para evitar, con una variable más.
+        let mut ventana = ventana_de_pestañas([
+            ["printf visible", "sleep 30"],
+            ["printf de-fondo", "sleep 30"],
+        ]);
+        // Solo las que imprimen y terminan; las otras dos siguen vivas a propósito, porque un informe
+        // de una sesión real se toma con consolas todavía trabajando.
+        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &egui::Context::default(),
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
+
+        let informe = informe_de(&ventana);
+
+        assert!(
+            informe.contains("pestañas:     2"),
+            "el informe no dice cuántas pestañas había:\n{informe}"
+        );
+        assert!(
+            informe.contains("pestaña 0:    se veía"),
+            "el informe no dice cuál se veía:\n{informe}"
+        );
+        assert!(
+            informe.contains("de fondo, se bombeaba sin pintarse"),
+            "el informe no distingue la pestaña de fondo:\n{informe}"
+        );
+    }
+
+    #[test]
+    fn el_informe_publica_los_tramos_de_las_consolas_de_todas_las_pestañas() {
+        // **Lo que este hito hace medible se perdería justo al publicarlo.** Una consola de fondo
+        // cronometra su interpretar igual que las visibles —para eso se arregló el descuento—, así que
+        // un informe que solo publique las de la pestaña que se veía tira los números que la tanda de
+        // dos pestañas existe para tomar, y lo hace **en silencio**: el informe sale entero y con buena
+        // pinta, solo que con la mitad de las consolas.
+        let mut ventana = ventana_de_pestañas([
+            ["printf visible", "sleep 30"],
+            ["printf de-fondo", "sleep 30"],
+        ]);
+        // Solo las que imprimen y terminan; las otras dos siguen vivas a propósito, porque un informe
+        // de una sesión real se toma con consolas todavía trabajando.
+        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &egui::Context::default(),
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
+
+        let informe = informe_de(&ventana);
+
+        for que_pestaña in 0..2 {
+            for cual in 0..2 {
+                assert!(
+                    informe.contains(&format!("── pestaña {que_pestaña}, consola {cual} ")),
+                    "el informe no publica la consola {cual} de la pestaña {que_pestaña}:\n{informe}"
+                );
+            }
+        }
     }
 
     #[test]

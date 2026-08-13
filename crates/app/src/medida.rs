@@ -358,24 +358,27 @@ impl RestoDelFotograma {
         self.serie.anotar(coste_cpu.saturating_sub(cronometrado));
     }
 
-    pub fn publicar(&self) {
+    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
         if !self.serie.hay() {
-            return;
+            return Ok(());
         }
-        println!(
+        writeln!(
+            a,
             "\nel resto del fotograma — de la ventana, común a todas las consolas   ({} fotogramas)",
             self.serie.total
-        );
-        println!("  {}", self.serie);
-        println!(
+        )?;
+        writeln!(a, "  {}", self.serie)?;
+        writeln!(
+            a,
             "  es teselar, dibujar y el armazón de egui: desde dentro no se pueden separar, y\n  \
              llamarlo «teselado» sería publicar como medido algo que no lo está"
-        );
-        println!(
+        )?;
+        writeln!(
+            a,
             "  ya tiene descontado lo que cronometraron todas las consolas de todas las pestañas:\n  \
              también el pintado de una que no recibiera salida, y lo que interpretó una que no se\n  \
              llegó a pintar por estar en una pestaña de fondo"
-        );
+        )
     }
 }
 
@@ -386,25 +389,43 @@ impl RestoDelFotograma {
 /// falta para comparar con una medida antigua de una sola consola a pantalla completa: sin él, un
 /// «encolar» más bajo se lee como que el framework va más rápido, cuando lo que pasa es que hay la
 /// mitad de columnas.
-pub fn cabecera(rejillas: [term_core::Size; 2]) {
+pub fn cabecera(
+    a: &mut dyn std::io::Write,
+    rejillas: &[[term_core::Size; 2]],
+    visible: usize,
+) -> std::io::Result<()> {
     let perfil = if cfg!(debug_assertions) {
         "depuración — el número que vale es el de --release"
     } else {
         "release"
     };
-    println!("\n── latencia ──");
-    for (cual, rejilla) in rejillas.iter().enumerate() {
-        println!(
-            "{:<13} {}×{}  ({})",
-            format!("consola {cual}:"),
-            rejilla.rows,
-            rejilla.cols,
-            NOMBRE_DE_CONSOLA[cual]
-        );
+    writeln!(a, "\n── latencia ──")?;
+    // **Cuántas pestañas había, y no solo cuáles se pintaron.** Los tramos de abajo se tomaron con
+    // todas ellas bombeando, así que una tanda de dos pestañas y otra de una no se pueden comparar sin
+    // este dato — y sin él, el informe de las dos se lee como si fuera de una sola y con el fotograma
+    // inexplicablemente más caro.
+    writeln!(a, "pestañas:     {}", rejillas.len())?;
+    for (que_pestaña, rejillas) in rejillas.iter().enumerate() {
+        let mirada = if que_pestaña == visible {
+            "se veía"
+        } else {
+            "de fondo, se bombeaba sin pintarse"
+        };
+        writeln!(a, "pestaña {que_pestaña}:    {mirada}")?;
+        for (cual, rejilla) in rejillas.iter().enumerate() {
+            writeln!(
+                a,
+                "{:<13} {}×{}  ({})",
+                format!("  consola {cual}:"),
+                rejilla.rows,
+                rejilla.cols,
+                NOMBRE_DE_CONSOLA[cual]
+            )?;
+        }
     }
-    println!("renderizador: glow");
-    println!("perfil:       {perfil}");
-    println!("máquina:      {}", maquina());
+    writeln!(a, "renderizador: glow")?;
+    writeln!(a, "perfil:       {perfil}")?;
+    writeln!(a, "máquina:      {}", maquina())
 }
 
 /// Cómo se llama cada consola en el informe, por su sitio en la ventana.
