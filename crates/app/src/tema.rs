@@ -214,6 +214,11 @@ impl Tema {
         self.fondo
     }
 
+    /// El color de las letras por defecto, para el texto que pinta la aplicación y no el programa.
+    pub fn primer_plano(&self) -> Color32 {
+        self.primer_plano
+    }
+
     /// El color de la línea que separa dos consolas.
     pub fn divisor(&self) -> Color32 {
         self.divisor
