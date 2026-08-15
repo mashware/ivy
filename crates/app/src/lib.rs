@@ -137,13 +137,14 @@ struct Bombeo {
 enum Orden {
     /// Cambiar de pestaña, **tantas como diga el número**: negativo hacia atrás, positivo hacia delante.
     ///
-    /// **Lleva un desplazamiento acumulado y no una sola dirección**, aunque cada pulsación valga uno.
-    /// egui entrega en un solo lote todo lo que llegó mientras la ventana dormía, que es exactamente el
-    /// caso de este hito —dos agentes callados y la ventana en reposo—: con una dirección por fotograma,
-    /// de tres pulsaciones acumuladas se atendería una y **las otras dos se perderían**, porque el evento
-    /// ya se consumió. Componer también hace que derecha y luego izquierda en el mismo lote se queden
-    /// donde estaban, en vez de moverse una.
+    /// **Lleva un número y no una dirección porque el clic en una ficha salta a donde sea**: de la primera
+    /// a la tercera son dos. Cada pulsación del teclado, en cambio, vale exactamente uno — no se componen
+    /// entre ellas, se aplican en orden, y por qué es así está en [`Division::teclear`].
     Ir(isize),
+    /// Abrir una pestaña nueva, con sus dos consolas, y dejarla delante.
+    Crear,
+    /// Cerrar la que se está viendo. Si es la única, lo que se cierra es la ventana.
+    Cerrar,
 }
 
 /// Los rectángulos que ocupan las dos consolas y la línea que las separa.
@@ -518,23 +519,32 @@ impl Division {
     /// esperando cuando el fotograma empezó y no trae sello propio, así que ese trecho no se puede
     /// ver desde aquí. El número lleva escrita esa frontera.
     ///
-    /// **Devuelve la orden que el acorde le pida a la ventana**, si pidió alguna. El corte de esos
+    /// **Devuelve las órdenes que los acordes le pidan a la ventana**, en el orden en que llegaron.
+    ///
+    /// **Son una lista y no una sola, y eso no es generalidad de más.** egui entrega en un mismo lote todo
+    /// lo que llegó mientras la ventana dormía —el caso de este hito: dos agentes callados—, y ahí puede
+    /// venir más de un acorde. Con una sola habría que elegir cuál sobrevive, y ninguna elección es
+    /// buena: quedarse con la última pierde un cierre, sumarlas solo funciona entre desplazamientos, y un
+    /// desplazamiento pedido *antes* de crear o cerrar se refiere a una lista de pestañas que ya no
+    /// existe. Aplicándolas en orden no hay nada que elegir. Un vector vacío no reserva memoria, así que
+    /// el caso normal —ningún acorde— no cuesta nada. El corte de esos
     /// acordes vive aquí dentro, en el mismo recorrido que ya consume el pegado y **antes** de traducir
     /// a bytes, y no en un recorrido propio de [`Ventana`]: el acorde se reconstruye evento a evento, así
     /// que dos recorridos sobre la misma cola serían **dos reconstrucciones que pueden discrepar**, y el
     /// evento hay que consumirlo en uno de los dos — repartirlo deja la pregunta de cuál gana.
     ///
-    /// `hay_a_donde_ir` dice si existe más de una pestaña. Se recibe en vez de deducirse porque una
+    /// `pestañas_abiertas` es cuántas hay al empezar el lote. Se recibe en vez de deducirse porque una
     /// división no sabe —ni tiene por qué— cuántas hay: lo que aquí se decide es si el acorde se consume
     /// o se le deja pasar al programa, y eso solo puede decidirse **dentro** de este recorrido. Filtrarlo
-    /// después, en la ventana, llegaría tarde: la tecla ya se habría tragado.
+    /// después, en la ventana, llegaría tarde: la tecla ya se habría tragado. Dentro, la cuenta se lleva
+    /// al día evento a evento, porque el propio lote crea y cierra pestañas.
     fn teclear(
         &mut self,
         ctx: &egui::Context,
         empezo_el_fotograma: Instant,
         modificadores: &mut egui::Modifiers,
-        hay_a_donde_ir: bool,
-    ) -> Option<Orden> {
+        pestañas_abiertas: usize,
+    ) -> Vec<Orden> {
         self.pulsaciones.clear();
         // Se pregunta una vez y no por evento porque **el modo no puede cambiar a mitad de pase**:
         // lo pone el programa de dentro con lo que escribe, y lo que escribe se interpreta en la otra
@@ -542,7 +552,7 @@ impl Division {
         // préstamos disjuntos—, así que esto es una elección, no una pared.)
         let marcado = self.pantalla.pegado_marcado();
         let mut pegado = false;
-        let mut orden = None;
+        let mut ordenes = Vec::new();
 
         // Los eventos que van al programa **se consumen**, no se leen y se dejan. Un fotograma
         // puede correr más de un pase sobre la misma entrada —egui lo hace cuando algo pide
@@ -558,7 +568,8 @@ impl Division {
             // es exacto.
             let mut acorde = *modificadores;
             let mut pego = false;
-            let mut pedida = None;
+            let mut pedidas = Vec::new();
+            let mut abiertas = pestañas_abiertas;
 
             estado.events.retain(|evento| {
                 if let egui::Event::ModifiersChanged(nuevos) = evento {
@@ -598,27 +609,61 @@ impl Division {
                 // es letra se cae a esa tabla— y el programa de dentro recibiría `\x1b[D`: el cursor se
                 // movería en el editor de la pestaña que se acaba de dejar.
                 //
-                // **Con una sola pestaña no se corta nada**, y esa guarda no es cosmética: sin ella el
-                // acorde se tragaría la flecha para no hacer absolutamente nada —ir de una pestaña a
-                // ella misma— y le quitaría a todo el mundo una tecla que hoy sí llega al programa.
-                // Mientras no se puedan crear pestañas, «todo el mundo» es literal.
-                if hay_a_donde_ir
-                    && let egui::Event::Key {
-                        key, pressed: true, ..
-                    } = evento
+                // **Con una sola pestaña la flecha no se corta**, y esa guarda no es cosmética: sin ella
+                // el acorde se tragaría la tecla para no hacer nada —ir de una pestaña a ella misma— y se
+                // la quitaría al programa, que hoy sí la recibe. Crear y cerrar sí valen con una sola.
+                //
+                // **La cuenta se lleva evento a evento y no se mira una vez por fotograma**, porque el
+                // propio lote la cambia: con una pestaña abierta y `[crear, ←]` en el mismo lote, mirarla
+                // al principio dejaría la flecha fuera de la guarda y se le colaría al programa, que es
+                // justo lo que el párrafo de arriba dice que no puede pasar.
+                //
+                // **La repetición de mantener pulsada la tecla vale para las flechas y no para crear ni
+                // cerrar.** egui marca las repeticiones con `repeat`, pero sigue poniendo `pressed`, así
+                // que sin mirarlo un segundo con el acorde de cerrar apretado son unas treinta órdenes de
+                // cierre en un lote: **todas las pestañas cerradas, todos sus programas muertos y la
+                // ventana con ellos, de un solo gesto**. Ciclar entre pestañas sí es barato y reversible.
+                // Aun así el evento **se consume igual** cuando es repetición: devolverlo a la cola
+                // mandaría `0x14` al programa por cada repetición.
+                if let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    repeat,
+                    ..
+                } = evento
                     && acorde.ctrl
                     && acorde.shift
-                    && let Some(delta) = match key {
-                        egui::Key::ArrowLeft => Some(-1),
-                        egui::Key::ArrowRight => Some(1),
-                        _ => None,
-                    }
                 {
-                    // **Se compone en vez de sustituir**, y es lo que hace que un lote acumulado durante
-                    // el sueño de la ventana no pierda pulsaciones. La razón entera, en [`Orden`].
-                    let Orden::Ir(hasta_ahora) = pedida.unwrap_or(Orden::Ir(0));
-                    pedida = Some(Orden::Ir(hasta_ahora + delta));
-                    return false;
+                    // **Primero si el acorde es nuestro, y solo después qué hacer con él.** Resolver las
+                    // dos cosas en el mismo `match` deja un camino que no consume el evento **ni lo
+                    // traduce**: la flecha se quedaba en la cola sin llegar nunca al programa.
+                    let es_nuestro = match key {
+                        egui::Key::ArrowLeft | egui::Key::ArrowRight => abiertas > 1,
+                        egui::Key::T | egui::Key::W => true,
+                        _ => false,
+                    };
+
+                    if es_nuestro {
+                        match key {
+                            egui::Key::ArrowLeft => pedidas.push(Orden::Ir(-1)),
+                            egui::Key::ArrowRight => pedidas.push(Orden::Ir(1)),
+                            egui::Key::T if !repeat => {
+                                abiertas += 1;
+                                pedidas.push(Orden::Crear);
+                            }
+                            // Cerrar la última no quita nada de la lista: pide cerrar la ventana. Por eso
+                            // la cuenta no baja de uno.
+                            egui::Key::W if !repeat => {
+                                abiertas = (abiertas - 1).max(1);
+                                pedidas.push(Orden::Cerrar);
+                            }
+                            // La repetición de crear o cerrar se traga sin hacer nada, que es el objeto de
+                            // la guarda.
+                            _ => {}
+                        }
+
+                        return false;
+                    }
                 }
 
                 match teclado::bytes(evento) {
@@ -632,20 +677,20 @@ impl Division {
 
             *modificadores = acorde;
             pegado = pego;
-            orden = pedida;
+            ordenes = pedidas;
         });
 
         // Una orden sale igual aunque no se haya tecleado nada para el programa, que es el caso normal:
         // el acorde de cambiar de pestaña no manda ningún byte.
         if self.pulsaciones.is_empty() {
-            return orden;
+            return ordenes;
         }
         if let Err(fallo) = self.pty.write(&self.pulsaciones) {
             // Lo que se acaba de teclear no ha llegado. Una tecla que se pierde en silencio es de
             // los fallos que más tardan en entenderse desde el otro lado de la pantalla.
             eprintln!("no se pudo enviar lo tecleado al programa: {fallo}");
             // Un envío que falló no es una ida rápida: no se anota, o el número mediría el fallo.
-            return orden;
+            return ordenes;
         }
 
         // **Un pegado no entra en esta serie, y no es un detalle de limpieza.** Lo que este número
@@ -667,7 +712,7 @@ impl Division {
             self.pulsaciones.shrink_to(HOLGURA_DE_PULSACIONES);
         }
 
-        orden
+        ordenes
     }
 
     /// Si el programa terminó y no queda nada suyo por mostrar.
@@ -746,8 +791,8 @@ impl Pestaña {
 struct Ventana {
     /// Las disposiciones abiertas. **Nunca vacía**: la ventana siempre está enseñando una.
     ///
-    /// Hoy se abre con una sola y no hay forma de crear más — la barra y los atajos son de un paso
-    /// posterior. Lo que este campo trae ya es la forma del estado sobre la que se apoyan.
+    /// Se abre con una, o con las que diga la variable de la puerta de medida, y a partir de ahí las crea
+    /// y las cierra quien usa la ventana.
     pestañas: Vec<Pestaña>,
     /// Cuál se ve y a cuál va el teclado. **Siempre menor que el número de pestañas.**
     activa: usize,
@@ -770,6 +815,17 @@ struct Ventana {
     /// El último fotograma cuyo coste ya se anotó, para no contarlo dos veces si egui repite la
     /// pasada sobre la misma entrada.
     ultimo_fotograma_cerrado: u64,
+    /// Si alguna pestaña se ha cerrado **a mano**, y por tanto la ventana ya no se cierra sola.
+    ///
+    /// **Existe por un caso que solo aparece cuando cerrar es posible**: una pestaña cuyos programas ya
+    /// terminaron —y cuyo último contenido se está leyendo, que es lo que la regla del cierre existe para
+    /// preservar— junto a otra con un agente vivo. Al cerrar a mano la del agente no queda nada vivo, y la
+    /// regla de siempre cerraría la ventana **llevándose lo que se estaba leyendo**. Nadie pidió eso: se
+    /// pidió cerrar una pestaña.
+    ///
+    /// No se vuelve a bajar. Quien ha cerrado una pestaña a mano ha dicho que gobierna él las pestañas, y
+    /// le quedan la última con su acorde y el botón de la ventana.
+    cerrada_alguna_a_mano: bool,
 }
 
 impl Ventana {
@@ -811,6 +867,7 @@ impl Ventana {
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
+            cerrada_alguna_a_mano: false,
         })
     }
 
@@ -1223,21 +1280,17 @@ impl Ventana {
     /// Vive aparte del pintado por lo mismo que [`Self::atender_clics`]: mandarlo a las dos escribiría
     /// la misma tecla en dos programas, que es exactamente lo que «sin que se pisen» prohíbe, y dentro
     /// de la pasada de interfaz esa decisión no se puede comprobar sin abrir una ventana.
-    fn teclear_la_del_foco(&mut self, ctx: &egui::Context) -> Option<Orden> {
+    fn teclear_la_del_foco(&mut self, ctx: &egui::Context) -> Vec<Orden> {
         let empezo = self.empezo_el_fotograma;
         // La semilla se saca y se vuelve a meter porque la división y el campo son dos préstamos
         // del mismo dueño, y el compilador no deja tener los dos a la vez.
         let mut modificadores = self.modificadores;
-        let hay_a_donde_ir = self.pestañas.len() > 1;
+        let abiertas = self.pestañas.len();
         let pestaña = self.activa_mut();
-        let orden = pestaña.divisiones[pestaña.foco].teclear(
-            ctx,
-            empezo,
-            &mut modificadores,
-            hay_a_donde_ir,
-        );
+        let ordenes =
+            pestaña.divisiones[pestaña.foco].teclear(ctx, empezo, &mut modificadores, abiertas);
         self.modificadores = modificadores;
-        orden
+        ordenes
     }
 
     /// Hace lo que el acorde pidió, y **pide fotograma**.
@@ -1256,9 +1309,96 @@ impl Ventana {
                 let cuantas = self.pestañas.len() as isize;
                 self.activa = (self.activa as isize + delta).rem_euclid(cuantas) as usize;
             }
+            Orden::Crear => self.crear_una_pestaña(ctx),
+            Orden::Cerrar => self.cerrar_la_pestaña_activa(ctx),
         }
 
         ctx.request_repaint();
+    }
+
+    /// Abre una pestaña con sus dos consolas y la deja delante.
+    ///
+    /// **Si alguna consola no se puede abrir, no se crea la pestaña**: se dice por la salida de errores y
+    /// la ventana sigue exactamente como estaba. Es el mismo criterio que el directorio de panel —o los
+    /// dos, o ninguno—, y por la misma razón: media pestaña se descubre al llegar a ella, que es tarde.
+    fn crear_una_pestaña(&mut self, ctx: &egui::Context) {
+        self.poner_delante(Pestaña::nueva(ctx), ctx);
+    }
+
+    /// Pone delante la pestaña que se acaba de abrir, o deja la ventana como estaba si no se pudo abrir.
+    ///
+    /// **Recibe el intento ya hecho en vez de hacerlo, y es por lo mismo que [`panel_o_ninguno`]:** abrir
+    /// una consola solo falla cuando el sistema no da más pseudoterminales o descriptores, y eso no se
+    /// puede provocar desde una prueba sin tocar el proceso entero. Partirlo aquí es lo que permite
+    /// afirmar lo que el caso promete — que un fallo no deja media pestaña, no mueve la que se estaba
+    /// viendo y no rearma nada.
+    fn poner_delante(&mut self, abierta: term_core::Result<Pestaña>, ctx: &egui::Context) {
+        let pestaña = match abierta {
+            Ok(pestaña) => pestaña,
+            Err(fallo) => {
+                eprintln!("no se pudo abrir la pestaña ({fallo})");
+                return;
+            }
+        };
+
+        self.pestañas.push(pestaña);
+        self.activa = self.pestañas.len() - 1;
+        self.rearmar_el_vigilante(ctx);
+    }
+
+    /// Cierra la pestaña que se está viendo. Si es la única, lo que se cierra es la ventana.
+    ///
+    /// **Rearmar el vigilante es imprescindible**: sin ello se queda siguiendo dos directorios que acaban
+    /// de borrarse, ve desaparecer lo que vigilaba y se declara ciego. A partir de ahí la ventana releería
+    /// todos los paneles en cada fotograma, para siempre y en el modo degradado, sin que nada en pantalla
+    /// lo diga. Hay una prueba que cae si se quita.
+    ///
+    /// **Se rearma después de soltar la pestaña, y el diseño pedía lo contrario.** Su razón era que el
+    /// vigilante viejo no llegase a ver el borrado y se declarara ciego; comprobado invirtiéndolo, **el
+    /// resultado observable es el mismo**, porque el vigilante nuevo trae su propia bandera de ceguera y
+    /// el viejo se descarta entero con la suya. Sin diferencia que defender, se hace en el orden que no
+    /// necesita saber qué pestaña se va.
+    fn cerrar_la_pestaña_activa(&mut self, ctx: &egui::Context) {
+        // **La última no se quita de la lista, y no es una excepción caprichosa:** pedir el cierre no
+        // cierra en el acto —todavía corren fotogramas, y el informe se publica al salir—, así que un
+        // vector vacío dejaría a `activa` indexando fuera de rango en cada uno de ellos.
+        if self.pestañas.len() == 1 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
+        let que_se_va = self.activa;
+        self.cerrada_alguna_a_mano = true;
+        // Aquí mueren sus dos programas y desaparecen sus dos directorios, por los `Drop` de siempre.
+        self.pestañas.remove(que_se_va);
+        self.rearmar_el_vigilante(ctx);
+        // Al quitar la última de la lista el índice se queda fuera; en cualquier otro caso, se queda
+        // apuntando a la que ocupó su sitio, que es la de la derecha.
+        self.activa = que_se_va.min(self.pestañas.len() - 1);
+    }
+
+    /// Vuelve a armar el vigilante sobre las divisiones de todas las pestañas que quedan.
+    ///
+    /// **Después se levantan todas las banderas, y lo que eso salva no es un hueco de tiempo.** El
+    /// vigilante nuevo se construye antes de asignarlo, así que el viejo sigue armado hasta el último
+    /// momento y no hay instante sin nadie escuchando — una versión anterior de este comentario decía que
+    /// sí, y era falso. Lo que sí se pierde es **lo que el viejo tenía en vuelo**: su hilo puede llevar
+    /// avisos recibidos y aún sin procesar, y al soltarlo se van con él. Un productor que publicara en ese
+    /// momento se quedaría sin que nadie levantara su bandera, y su panel enseñaría lo de antes hasta la
+    /// siguiente publicación — que en un agente que acaba de terminar puede no llegar nunca.
+    ///
+    /// Releerlos todos una vez es barato y no puede perder nada. **Que las banderas acaben levantadas sí
+    /// está atado por prueba; el orden entre armar y levantarlas, no** — provocar una publicación dentro
+    /// de esa ventana de microsegundos no se puede hacer de forma fiable desde un test.
+    fn rearmar_el_vigilante(&mut self, ctx: &egui::Context) {
+        // El vigilante se construye en su propio ámbito para que el préstamo de la lista de pestañas
+        // termine antes de asignarlo: el campo y la lista son del mismo dueño.
+        let vigilante = Self::vigilar(ctx, self.todas_las_divisiones());
+
+        self.vigilante = vigilante;
+        for division in self.todas_las_divisiones() {
+            division.por_releer.levantar();
+        }
     }
 
     /// Pinta una consola recortada a su rectángulo, y devuelve lo que costó encolar el pintado.
@@ -1398,7 +1538,8 @@ impl eframe::App for Ventana {
         // acabada, cerrar se llevaría por delante el trabajo de la que sigue viva — y la que murió se
         // queda con su último contenido en pantalla, que es lo que uno quiere leer justo después de que
         // un programa termine.
-        if todas_terminadas {
+        // **Salvo que alguna pestaña se haya cerrado a mano**: ver [`Ventana::cerrada_alguna_a_mano`].
+        if todas_terminadas && !self.cerrada_alguna_a_mano {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -1409,12 +1550,12 @@ impl eframe::App for Ventana {
         // El teclado va antes de todo lo demás **y ese orden importa para el número, no para el
         // comportamiento**: el cronómetro de la ida se cierra dentro de `teclear`, así que cualquier
         // trabajo que se cuele por delante —aunque sea leer un rectángulo— se le suma.
-        let orden = self.teclear_la_del_foco(ui.ctx());
+        let ordenes = self.teclear_la_del_foco(ui.ctx());
 
         // **La orden se aplica antes de repartir**, para que lo que se pinte en este mismo fotograma sea
         // ya la pestaña nueva. Aplicarla al final dejaría un fotograma enseñando la anterior, que con la
         // ventana en reposo es el último que se pinta.
-        if let Some(orden) = orden {
+        for orden in ordenes {
             self.aplicar(orden, ui.ctx());
         }
 
@@ -1547,7 +1688,7 @@ mod tests {
                 egui::Event::Paste("hola".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(division.pulsaciones, b"hola", "con Mayúsculas no se pegó");
 
         encolar(
@@ -1557,7 +1698,7 @@ mod tests {
                 egui::Event::Paste("hola".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(
             division.pulsaciones, b"\x16",
             "sin Mayúsculas tiene que llegar el byte de control, no el texto"
@@ -1582,7 +1723,7 @@ mod tests {
                 egui::Event::Paste("ls\n".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(division.pulsaciones, b"ls\r", "llegó marcado sin pedirlo");
 
         // Y en cuanto lo pide, la marca aparece — sin tocar nada más que la pantalla.
@@ -1594,7 +1735,7 @@ mod tests {
                 egui::Event::Paste("ls\n".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(
             division.pulsaciones, b"\x1b[200~ls\n\x1b[201~",
             "el programa pidió el pegado marcado y el bucle no se enteró"
@@ -1625,7 +1766,7 @@ mod tests {
                 egui::Event::ModifiersChanged(egui::Modifiers::NONE),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(
             division.pulsaciones, b"bueno",
             "soltar el acorde después de pegar impidió el pegado: se leyó el final del lote"
@@ -1640,7 +1781,7 @@ mod tests {
                 egui::Event::ModifiersChanged(con_mayusculas()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(
             division.pulsaciones, b"\x16",
             "pulsar Mayúsculas después del pegado lo convirtió en pegado: se leyó el final del lote"
@@ -1668,13 +1809,13 @@ mod tests {
                 egui::Event::WindowFocused(false),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
 
         encolar(
             &ctx,
             vec![egui::Event::Paste("no deberías verme".to_owned())],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(
             division.pulsaciones, b"\x16",
             "las Mayúsculas se quedaron pegadas al salir de la ventana, y el pegado se coló"
@@ -1692,7 +1833,7 @@ mod tests {
         let mut modificadores = egui::Modifiers::NONE;
 
         encolar(&ctx, vec![egui::Event::ModifiersChanged(con_mayusculas())]);
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
 
         // **Vaciar la cola es lo que convierte esto en dos fotogramas de verdad.** egui rehace la
         // lista de eventos en cada uno, así que el aviso de que se pulsaron las teclas no sigue ahí
@@ -1701,7 +1842,7 @@ mod tests {
         ctx.input_mut(|entrada| entrada.events.clear());
 
         encolar(&ctx, vec![egui::Event::Paste("tarde".to_owned())]);
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(
             division.pulsaciones, b"tarde",
             "el acorde del fotograma anterior se perdió"
@@ -1723,14 +1864,14 @@ mod tests {
                 &ctx,
                 vec![egui::Event::ModifiersChanged(acorde), egui::Event::Copy],
             );
-            division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
             assert_eq!(division.pulsaciones, b"\x03", "dejó de interrumpir");
 
             encolar(
                 &ctx,
                 vec![egui::Event::ModifiersChanged(acorde), egui::Event::Cut],
             );
-            division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
             assert_eq!(division.pulsaciones, b"\x18", "cortar cambió de byte");
         }
     }
@@ -1816,6 +1957,7 @@ mod tests {
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
+            cerrada_alguna_a_mano: false,
         }
     }
 
@@ -1963,10 +2105,10 @@ mod tests {
             entrada.events.push(egui::Event::WindowFocused(true));
         });
 
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert_eq!(division.pulsaciones, b"a", "no se envió lo tecleado");
 
-        division.teclear(&ctx, Instant::now(), &mut modificadores, true);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
         assert!(
             division.pulsaciones.is_empty(),
             "la misma tecla se envió en el segundo pase"
@@ -2324,6 +2466,490 @@ mod tests {
 
         for ruta in rutas {
             assert!(!ruta.exists(), "quedó el directorio {}", ruta.display());
+        }
+    }
+
+    /// Las rutas de los directorios de panel de una pestaña, para poder mirar si siguen ahí después.
+    fn directorios_de(pestaña: &Pestaña) -> [std::path::PathBuf; 2] {
+        pestaña.divisiones.each_ref().map(|division| {
+            division
+                .panel
+                .as_ref()
+                .expect("la consola tiene que arrancar con su directorio")
+                .path()
+                .to_path_buf()
+        })
+    }
+
+    #[test]
+    fn el_acorde_de_crear_abre_una_pestaña_delante_y_no_le_llega_al_programa() {
+        // AC2. Sin consumir el evento el programa recibiría `0x14` —Ctrl+T es un código de control como
+        // cualquier otro— y en un shell eso intercambia dos caracteres: el acorde escribiría en el
+        // programa de la pestaña que se acaba de dejar.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
+
+        assert_eq!(ventana.pestañas.len(), 2, "no se abrió la pestaña");
+        assert_eq!(ventana.activa, 1, "la pestaña nueva no quedó delante");
+        assert!(
+            ventana.pestañas[0].divisiones[0].pulsaciones.is_empty(),
+            "el acorde de crear se le coló al programa"
+        );
+        // Con su propia identidad: dos consolas que compartieran directorio se pisarían el estado.
+        let [de_la_vieja, de_la_nueva] = [0, 1].map(|cual| directorios_de(&ventana.pestañas[cual]));
+        for nueva in &de_la_nueva {
+            assert!(
+                !de_la_vieja.contains(nueva),
+                "la pestaña nueva reutilizó el directorio de la vieja"
+            );
+        }
+    }
+
+    #[test]
+    fn crear_con_varias_abiertas_pone_la_nueva_al_final_y_delante() {
+        // AC2 con la lista ya poblada, que es donde «se abre una pestaña» deja de tener una sola lectura:
+        // con una única pestaña, ponerla al final y ponerla junto a la activa son lo mismo. Va al final
+        // porque la barra pinta las fichas en el orden de la lista, y meterla en medio movería de sitio a
+        // las de la derecha mientras alguien las está mirando.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 3).expect("no se pudo abrir la ventana");
+        let de_cada_una: Vec<_> = ventana.pestañas.iter().map(directorios_de).collect();
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
+
+        assert_eq!(ventana.pestañas.len(), 4, "no se abrió la pestaña");
+        assert_eq!(
+            ventana.activa, 3,
+            "la pestaña nueva no quedó al final y delante"
+        );
+        let siguen: Vec<_> = ventana.pestañas[..3].iter().map(directorios_de).collect();
+        assert_eq!(
+            siguen, de_cada_una,
+            "la pestaña nueva descolocó a las que ya estaban abiertas"
+        );
+    }
+
+    #[test]
+    fn una_pestaña_que_no_se_pudo_abrir_deja_la_ventana_como_estaba() {
+        // El otro lado de AC2: media pestaña —una consola abierta y la otra no— se descubriría al llegar
+        // a ella, que es tarde, así que o las dos o ninguna. Y «como estaba» incluye **cuál se está
+        // viendo**: mover la activa dando por hecho que la pestaña se creó cambiaría por un fallo del
+        // sistema lo que la ventana enseña, y si la mueve al sitio que la nueva iba a ocupar, además
+        // indexa fuera de la lista.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([
+            ["sleep 30", "sleep 30"],
+            ["sleep 30", "sleep 30"],
+            ["sleep 30", "sleep 30"],
+        ]);
+
+        ventana.poner_delante(Err("no quedan pseudoterminales".into()), &ctx);
+
+        assert_eq!(
+            ventana.pestañas.len(),
+            3,
+            "se coló media pestaña en la lista"
+        );
+        assert_eq!(
+            ventana.activa, 0,
+            "la ventana dejó de enseñar la pestaña que se estaba viendo"
+        );
+        for (cual, division) in ventana.todas_las_divisiones().enumerate() {
+            assert!(
+                division.puente.sigue_vivo(),
+                "el fallo al abrir se llevó por delante el programa de la consola {cual}"
+            );
+        }
+    }
+
+    #[test]
+    fn el_acorde_de_cerrar_mata_sus_programas_y_borra_sus_directorios() {
+        // AC3. Lo que se comprueba no es que la pestaña desaparezca de la lista —eso lo diría cualquier
+        // `remove`— sino que **lo que colgaba de ella se ha soltado**: sus dos directorios de panel ya no
+        // están en disco, y la otra pestaña sigue entera.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        ventana.activa = 1;
+
+        let de_la_que_se_va = directorios_de(&ventana.pestañas[1]);
+        let de_la_que_queda = directorios_de(&ventana.pestañas[0]);
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::W));
+
+        assert_eq!(ventana.pestañas.len(), 1, "la pestaña no se cerró");
+        assert_eq!(ventana.activa, 0, "la activa quedó fuera de la lista");
+        for ruta in &de_la_que_se_va {
+            assert!(
+                !ruta.exists(),
+                "quedó el directorio {} de la pestaña cerrada",
+                ruta.display()
+            );
+        }
+        for ruta in &de_la_que_queda {
+            assert!(
+                ruta.exists(),
+                "se llevó por delante el directorio {} de la otra pestaña",
+                ruta.display()
+            );
+        }
+        assert!(
+            ventana.pestañas[0].divisiones[0].pulsaciones.is_empty(),
+            "el acorde de cerrar se le coló al programa"
+        );
+    }
+
+    #[test]
+    fn cerrar_la_del_medio_deja_delante_la_de_su_derecha_y_no_descoloca_las_demas() {
+        // AC3 con más de dos pestañas, que es donde recolocar la activa dice algo. Con dos, casi cualquier
+        // cuenta acierta —quedarse en el sitio, restar uno o irse a la primera dan todas cero—, así que
+        // hacen falta cuatro para separar lo correcto de lo que se le parece: al cerrar la segunda queda
+        // delante la que estaba a su derecha, y las demás **siguen donde estaban**, que es lo que la barra
+        // enseña y lo que las flechas recorren.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 4).expect("no se pudo abrir la ventana");
+        let de_cada_una: Vec<_> = ventana.pestañas.iter().map(directorios_de).collect();
+        ventana.activa = 1;
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::W));
+
+        let quedan: Vec<_> = ventana.pestañas.iter().map(directorios_de).collect();
+        let esperadas = vec![
+            de_cada_una[0].clone(),
+            de_cada_una[2].clone(),
+            de_cada_una[3].clone(),
+        ];
+        assert_eq!(
+            quedan, esperadas,
+            "cerrar la del medio descolocó a las que quedaban"
+        );
+        assert_eq!(
+            directorios_de(&ventana.pestañas[ventana.activa]),
+            de_cada_una[2],
+            "delante no quedó la pestaña que estaba a la derecha de la que se cerró"
+        );
+        for ruta in &de_cada_una[1] {
+            assert!(
+                !ruta.exists(),
+                "quedó el directorio {} de la pestaña cerrada",
+                ruta.display()
+            );
+        }
+    }
+
+    #[test]
+    fn dos_cierres_en_el_mismo_lote_cierran_dos_pestañas() {
+        // Un lote acumulado mientras la ventana dormía puede traer dos acordes de cerrar, y se aplican los
+        // dos en orden. Lo que esto ata es que el segundo cae sobre la lista **ya recortada**: cierra la
+        // pestaña que el primero dejó delante, no la que ocupaba ese índice antes.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 3).expect("no se pudo abrir la ventana");
+        let de_la_primera = directorios_de(&ventana.pestañas[0]);
+        ventana.activa = 2;
+
+        let pidio_cerrar = un_fotograma_con(&mut ventana, &ctx, dos_veces_el_acorde(egui::Key::W));
+
+        assert_eq!(
+            ventana.pestañas.len(),
+            1,
+            "los dos cierres del lote no cerraron dos pestañas"
+        );
+        assert_eq!(
+            directorios_de(&ventana.pestañas[0]),
+            de_la_primera,
+            "el segundo cierre se llevó una pestaña que no era la que quedó delante"
+        );
+        assert!(
+            !pidio_cerrar,
+            "cerrar dos de tres pestañas pidió además cerrar la ventana"
+        );
+    }
+
+    #[test]
+    fn cerrar_dos_veces_la_unica_pestaña_no_hunde_la_cuenta_de_las_abiertas() {
+        // Cerrar la última no quita nada de la lista —lo que pide es cerrar la ventana—, así que la cuenta
+        // de pestañas que se lleva **dentro** del lote no puede bajar de uno. Restando sin suelo, el
+        // segundo acorde de un lote con una sola pestaña abierta deja la cuenta por debajo de cero.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+
+        let pidio_cerrar = un_fotograma_con(&mut ventana, &ctx, dos_veces_el_acorde(egui::Key::W));
+
+        assert!(
+            pidio_cerrar,
+            "dos acordes de cerrar sobre la única pestaña no pidieron cerrar la ventana"
+        );
+        assert_eq!(
+            ventana.pestañas.len(),
+            1,
+            "la última pestaña se quitó de la lista"
+        );
+    }
+
+    #[test]
+    fn cerrar_la_ultima_pestaña_pide_cerrar_la_ventana_sin_vaciar_la_lista() {
+        // AC4, y la parte que importa es la segunda mitad. Pedir el cierre **no cierra en el acto**: aún
+        // corren fotogramas, y el informe se publica al salir. Si la última se quitara de la lista, cada
+        // uno de esos fotogramas indexaría fuera de rango — un pánico al cerrar la ventana, que es el
+        // peor momento para tenerlo porque se lleva por delante el informe.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+
+        let pidio_cerrar = un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::W));
+
+        // La primera mitad del criterio, y no la daba por buena ninguna prueba: sin esto, el acorde sobre
+        // la única pestaña no haría absolutamente nada y la suite seguiría en verde.
+        assert!(
+            pidio_cerrar,
+            "cerrar la única pestaña no pidió cerrar la ventana"
+        );
+        assert_eq!(
+            ventana.pestañas.len(),
+            1,
+            "la última pestaña se quitó de la lista"
+        );
+        assert!(
+            ventana.activa < ventana.pestañas.len(),
+            "la pestaña activa apunta fuera de la lista"
+        );
+
+        // Y los fotogramas que aún corren no entran en pánico, que es lo que la invariante compra.
+        for _ in 0..3 {
+            un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        }
+    }
+
+    #[test]
+    fn mantener_pulsado_el_acorde_de_cerrar_no_cierra_mas_que_una_pestaña() {
+        // **De un solo gesto se perdía todo.** egui marca las repeticiones de una tecla mantenida con
+        // `repeat`, pero les sigue poniendo `pressed`, así que un segundo con el acorde apretado son unas
+        // treinta órdenes de cierre en un mismo lote — y como se aplican todas en orden, se cerraban todas
+        // las pestañas, morían todos sus programas y la última cerraba la ventana. Sin vuelta atrás.
+        //
+        // La repetición **se consume igual**: devolverla a la cola le mandaría al programa el byte de
+        // control de cada repetición.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        let mut modificadores = egui::Modifiers::NONE;
+
+        let mut lote = acorde_con(egui::Key::W);
+        for _ in 0..5 {
+            lote.push(egui::Event::Key {
+                key: egui::Key::W,
+                physical_key: None,
+                pressed: true,
+                repeat: true,
+                modifiers: con_mayusculas(),
+            });
+        }
+        encolar(&ctx, lote);
+
+        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 4);
+
+        assert_eq!(
+            ordenes,
+            vec![Orden::Cerrar],
+            "las repeticiones de la tecla mantenida pidieron cerrar más pestañas"
+        );
+        assert!(
+            division.pulsaciones.is_empty(),
+            "las repeticiones se le colaron al programa"
+        );
+    }
+
+    #[test]
+    fn una_flecha_tras_crear_en_el_mismo_lote_no_se_le_cuela_al_programa() {
+        // Con una sola pestaña la flecha es del programa, pero **el propio lote puede haber creado otra**.
+        // Mirando cuántas hay una sola vez, antes de recorrerlo, la flecha se evaluaba contra la cuenta
+        // vieja, caía en la traducción de siempre y le llegaba `\x1b[C` — exactamente lo que el corte
+        // existe para impedir.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        let mut modificadores = egui::Modifiers::NONE;
+
+        let mut lote = acorde_con(egui::Key::T);
+        lote.extend(acorde_con(egui::Key::ArrowRight));
+        encolar(&ctx, lote);
+
+        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 1);
+
+        assert_eq!(
+            ordenes,
+            vec![Orden::Crear, Orden::Ir(1)],
+            "la flecha que seguía a crear no se atendió"
+        );
+        assert!(
+            division.pulsaciones.is_empty(),
+            "la flecha se le coló al programa tras crear una pestaña en el mismo lote"
+        );
+    }
+
+    #[test]
+    fn una_flecha_tras_cerrar_en_el_mismo_lote_le_llega_al_programa() {
+        // El reverso de la de crear, y falla por el mismo sitio. Con dos pestañas la flecha es del acorde;
+        // pero si el lote ya ha pedido cerrar una, cuando la flecha se aplique quedará **una sola**, y con
+        // una sola la flecha es del programa. Sin llevar la cuenta al día dentro del lote, el acorde se la
+        // tragaría para ir de la única pestaña a ella misma.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30");
+        let mut modificadores = egui::Modifiers::NONE;
+
+        let mut lote = acorde_con(egui::Key::W);
+        lote.extend(acorde_con(egui::Key::ArrowRight));
+        encolar(&ctx, lote);
+
+        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+
+        assert_eq!(
+            ordenes,
+            vec![Orden::Cerrar],
+            "la flecha que seguía a cerrar se pidió como cambio de pestaña"
+        );
+        assert_eq!(
+            division.pulsaciones, b"\x1b[C",
+            "la flecha no le llegó al programa quedando una sola pestaña"
+        );
+    }
+
+    #[test]
+    fn cerrar_una_pestaña_a_mano_no_cierra_la_ventana_con_lo_que_quedaba_por_leer() {
+        // El caso aparece justo cuando cerrar se vuelve posible: una pestaña cuyos dos programas ya
+        // terminaron —y cuyo último contenido se está leyendo— junto a otra con un agente vivo. Al cerrar
+        // la del agente no queda nada vivo, y la regla de siempre cerraría la ventana llevándose lo que se
+        // estaba mirando. Nadie pidió eso: se pidió cerrar una pestaña.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["printf leeme", "printf leeme"], ["sleep 30", "sleep 30"]]);
+        for division in &ventana.pestañas[0].divisiones {
+            esperar_a_que_muera(division);
+        }
+        ventana.activa = 1;
+
+        ventana.aplicar(Orden::Cerrar, &ctx);
+
+        assert_eq!(ventana.pestañas.len(), 1, "no se cerró la pestaña");
+        let mut frame = eframe::Frame::_new_kittest();
+        let salida = ctx.run_logic(&egui::RawInput::default(), |ctx| {
+            eframe::App::logic(&mut ventana, ctx, &mut frame);
+        });
+
+        assert!(
+            !salida
+                .viewport_commands
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|ordenes| ordenes.contains(&egui::ViewportCommand::Close)),
+            "la ventana se cerró sola tras un cierre a mano, con lo que quedaba por leer"
+        );
+    }
+
+    #[test]
+    fn tras_crear_y_cerrar_el_vigilante_sigue_viendo_lo_que_queda() {
+        // AC9. Es la comprobación que no se ve desde fuera: el vigilante se arma **entero** cada vez, así
+        // que si al cerrar se soltara la pestaña antes de rearmarlo, el vigilante viejo vería desaparecer
+        // los directorios que estaba siguiendo y se declararía ciego. A partir de ahí la ventana releería
+        // todos los paneles en cada fotograma, para siempre, sin que nada en pantalla lo diga.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        assert!(
+            !ventana.vigilante.esta_ciego(),
+            "la ventana abrió ya ciega, así que esta prueba no probaría nada"
+        );
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
+        assert!(
+            !ventana.vigilante.esta_ciego(),
+            "crear una pestaña dejó ciego al vigilante"
+        );
+
+        ventana.activa = 1;
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::W));
+        assert!(
+            !ventana.vigilante.esta_ciego(),
+            "cerrar una pestaña dejó ciego al vigilante: se soltó antes de rearmarlo"
+        );
+    }
+
+    #[test]
+    fn crear_una_pestaña_vuelve_a_armar_el_vigilante_que_estaba_ciego() {
+        // AC9 en el caso que el diseño da por sentado para **no** llevar reintento propio: armar el
+        // vigilante se abandona entero en cuanto un `watch` falla, y a partir de ahí la ventana relee
+        // todos los paneles cada 500 ms. Como cada alta lo rearma entero, un fallo pasajero deja de doler
+        // en cuanto se abre la siguiente pestaña; sin ese rearme, la ceguera duraría toda la sesión.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        // Armarlo sobre una ruta que no existe es la forma de conseguir uno ciego sin agotar los del
+        // núcleo, que es lo que lo provoca de verdad.
+        ventana.vigilante = Vigilante::nuevo(
+            || {},
+            &[(
+                std::path::Path::new("/no/existe/ningun/directorio/de/panel"),
+                Bandera::levantada(),
+            )],
+        );
+        assert!(
+            ventana.vigilante.esta_ciego(),
+            "no se pudo montar la ceguera que esta prueba necesita"
+        );
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
+
+        assert!(
+            !ventana.vigilante.esta_ciego(),
+            "abrir una pestaña no rearmó el vigilante, así que la ceguera dura el resto de la sesión"
+        );
+    }
+
+    #[test]
+    fn la_ventana_se_entera_de_lo_que_publica_una_pestaña_recien_creada() {
+        // AC9, y es el hueco que `esta_ciego()` **no** ve: si al crear no se rearmara el vigilante, el
+        // viejo seguiría perfectamente sano —vigilando las pestañas de antes— y no estaría ciego. Lo que
+        // no haría es mirar la pestaña nueva, así que su panel no se releería **nunca**: un agente que
+        // publique ahí trabajaría con un panel congelado desde el primer fotograma. Comprobado quitando
+        // el rearme: sin esta prueba, la suite entera se queda verde.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
+        assert_eq!(ventana.pestañas.len(), 2, "no se abrió la pestaña");
+
+        // El rearme levanta todas las banderas; se recogen para que lo que se mire después sea solo lo
+        // que provoca la publicación.
+        for division in ventana.todas_las_divisiones() {
+            division.por_releer.recoger();
+        }
+
+        publicar_en(
+            &ventana.pestañas[1].divisiones[0],
+            r#"{"lines":["ya estoy"]}"#,
+        );
+
+        esperar_la_bandera(
+            &ventana.pestañas[1].divisiones[0].por_releer,
+            "la ventana no vigila el directorio de la pestaña que acaba de crear",
+        );
+    }
+
+    #[test]
+    fn tras_rearmar_el_vigilante_quedan_todas_las_banderas_levantadas() {
+        // AC9, la otra mitad. Entre soltar el vigilante viejo y armar el nuevo **no llega ningún aviso**:
+        // lo que un productor publique en ese hueco no lo ve nadie. Sin levantar las banderas después de
+        // armar, su panel se quedaría con lo de antes hasta la siguiente publicación — que en un agente
+        // que acaba de terminar puede no llegar nunca.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        for division in ventana.todas_las_divisiones() {
+            division.por_releer.recoger();
+        }
+
+        ventana.rearmar_el_vigilante(&ctx);
+
+        for (cual, division) in ventana.todas_las_divisiones().enumerate() {
+            assert!(
+                division.por_releer.recoger(),
+                "la división {cual} quedó sin bandera tras rearmar, así que su panel puede haberse \
+                 publicado en el hueco y nadie lo vería"
+            );
         }
     }
 
@@ -2875,16 +3501,35 @@ mod tests {
         resultado.expect("el pase no llegó a correr el cuerpo")
     }
 
-    /// Un acorde de flecha con Ctrl y Mayúsculas, tal y como llega del escritorio.
-    fn flecha_con_acorde(key: egui::Key) -> Vec<egui::Event> {
-        flecha_con(key, con_mayusculas())
+    /// Una tecla con Ctrl y Mayúsculas, tal y como el acorde llega del escritorio.
+    fn acorde_con(key: egui::Key) -> Vec<egui::Event> {
+        tecla_con(key, con_mayusculas())
     }
 
-    /// Una flecha pulsada con los modificadores que se digan, y el aviso de cambio que la precede.
+    /// El mismo acorde pulsado dos veces, tal y como llegan dos gestos seguidos.
+    ///
+    /// **La suelta de en medio es lo que los hace dos.** egui marca como repetición cualquier pulsación
+    /// de una tecla que ya estaba abajo —lo hace él, mirando las que tiene pulsadas, sin fiarse de lo que
+    /// traiga el evento—, y las repeticiones de crear y cerrar se tragan a propósito. Sin la suelta, esto
+    /// sería la tecla mantenida, que es el otro caso y ya tiene su prueba.
+    fn dos_veces_el_acorde(key: egui::Key) -> Vec<egui::Event> {
+        let mut lote = acorde_con(key);
+        lote.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: con_mayusculas(),
+        });
+        lote.extend(acorde_con(key));
+        lote
+    }
+
+    /// Una tecla pulsada con los modificadores que se digan, y el aviso de cambio que la precede.
     ///
     /// El aviso va delante porque el acorde **se reconstruye evento a evento**: sin él, la flecha llega
     /// con las teclas de la pasada anterior y la prueba mediría otra cosa.
-    fn flecha_con(key: egui::Key, modificadores: egui::Modifiers) -> Vec<egui::Event> {
+    fn tecla_con(key: egui::Key, modificadores: egui::Modifiers) -> Vec<egui::Event> {
         vec![
             egui::Event::ModifiersChanged(modificadores),
             egui::Event::Key {
@@ -2997,10 +3642,10 @@ mod tests {
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
 
-        encolar(&ctx, flecha_con_acorde(egui::Key::ArrowRight));
-        let orden = ventana.teclear_la_del_foco(&ctx);
+        encolar(&ctx, acorde_con(egui::Key::ArrowRight));
+        let ordenes = ventana.teclear_la_del_foco(&ctx);
 
-        assert_eq!(orden, Some(Orden::Ir(1)), "el acorde no pidió cambiar");
+        assert_eq!(ordenes, vec![Orden::Ir(1)], "el acorde no pidió cambiar");
         assert!(
             ventana.activa().divisiones[0].pulsaciones.is_empty(),
             "el acorde se le coló al programa"
@@ -3023,13 +3668,13 @@ mod tests {
             ["sleep 30", "sleep 30"],
         ]);
 
-        let mut lote = flecha_con_acorde(egui::Key::ArrowRight);
-        lote.extend(flecha_con_acorde(egui::Key::ArrowRight));
+        let mut lote = acorde_con(egui::Key::ArrowRight);
+        lote.extend(acorde_con(egui::Key::ArrowRight));
         encolar(&ctx, lote);
 
         assert_eq!(
             ventana.teclear_la_del_foco(&ctx),
-            Some(Orden::Ir(2)),
+            vec![Orden::Ir(1), Orden::Ir(1)],
             "el segundo acorde del lote se perdió"
         );
     }
@@ -3042,31 +3687,30 @@ mod tests {
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
 
-        let mut lote = flecha_con_acorde(egui::Key::ArrowRight);
-        lote.extend(flecha_con_acorde(egui::Key::ArrowLeft));
+        let mut lote = acorde_con(egui::Key::ArrowRight);
+        lote.extend(acorde_con(egui::Key::ArrowLeft));
         encolar(&ctx, lote);
 
         assert_eq!(
             ventana.teclear_la_del_foco(&ctx),
-            Some(Orden::Ir(0)),
+            vec![Orden::Ir(1), Orden::Ir(-1)],
             "ir y volver movió de pestaña"
         );
     }
 
     #[test]
     fn con_una_sola_pestaña_la_flecha_le_llega_al_programa() {
-        // **Regresión que este PR estuvo a punto de meter**: consumir el acorde siempre le quitaba la
-        // flecha a todo el mundo para no hacer nada —ir de la única pestaña a ella misma—, y hasta que se
-        // puedan crear pestañas «todo el mundo» es literal. Antes de este cambio, `Ctrl+Mayúsculas+←`
-        // llegaba al programa como `\x1b[D`.
+        // Consumir la flecha con una sola pestaña la quitaría de en medio para no hacer nada —ir de la
+        // única pestaña a ella misma— y el programa dejaría de recibirla. Antes de que existieran los
+        // atajos, `Ctrl+Mayúsculas+←` le llegaba como `\x1b[D`, y con una pestaña le sigue llegando.
         let ctx = egui::Context::default();
         let mut ventana = ventana_con("sleep 30", "sleep 30");
 
-        encolar(&ctx, flecha_con_acorde(egui::Key::ArrowLeft));
+        encolar(&ctx, acorde_con(egui::Key::ArrowLeft));
 
         assert_eq!(
             ventana.teclear_la_del_foco(&ctx),
-            None,
+            Vec::new(),
             "pidió cambiar de pestaña habiendo una sola"
         );
         assert_eq!(
@@ -3109,17 +3753,25 @@ mod tests {
     }
 
     /// Corre el fotograma entero —`logic` y `ui` en la misma pasada, como de verdad— con los eventos
-    /// dados, y devuelve cuánto pide esperar la ventana después.
+    /// dados, y devuelve si la ventana pidió cerrarse en él.
     ///
     /// Es la variante con entrada de [`lo_que_la_ventana_espera`], y hace falta porque lo que estas
     /// pruebas comprueban **es el orden dentro de `ui`**: qué se calcula antes de qué. Llamando a las
     /// piezas por separado en el orden que uno cree que tienen, la prueba afirmaría sobre su propia
     /// composición y no sobre la del producto — que es el hueco por el que se coló el defecto.
+    ///
+    /// **La invariante de los índices se comprueba aquí y no en una prueba suya**, porque no es de un
+    /// escenario: vale para *todo* fotograma, también para los que corren **después** de pedir el cierre.
+    /// Puesta en el ayudante, cualquier prueba que corra fotogramas la comprueba de paso.
+    ///
+    /// **No es lo que caza que se rompa, y conviene no creerlo:** una activa fuera de la lista revienta
+    /// el propio fotograma al indexar, antes de llegar aquí. Lo que esto añade es decir **cuál** era el
+    /// índice y cuántas pestañas había, en vez de un pánico a secas desde dentro del pintado.
     fn un_fotograma_con(
         ventana: &mut Ventana,
         ctx: &egui::Context,
         eventos: Vec<egui::Event>,
-    ) -> Duration {
+    ) -> bool {
         let mut frame = eframe::Frame::_new_kittest();
         let entrada = egui::RawInput {
             screen_rect: Some(area_de(800.0)),
@@ -3129,9 +3781,19 @@ mod tests {
 
         eframe::App::logic(ventana, ctx, &mut frame);
         let salida = ctx.run_ui(entrada, |ui| eframe::App::ui(ventana, ui, &mut frame));
-        let espera = salida.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        let pidio_cerrar = salida.viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::Close);
         salida.drop_without_applying_deltas();
-        espera
+
+        assert!(
+            ventana.activa < ventana.pestañas.len(),
+            "la pestaña activa ({}) quedó fuera de una lista de {}",
+            ventana.activa,
+            ventana.pestañas.len()
+        );
+
+        pidio_cerrar
     }
 
     /// Los tres eventos de un clic del ratón en un punto.
@@ -3300,7 +3962,7 @@ mod tests {
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
 
-        un_fotograma_con(&mut ventana, &ctx, flecha_con_acorde(egui::Key::ArrowRight));
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::ArrowRight));
 
         assert_eq!(
             ventana.activa, 1,
@@ -3338,11 +4000,11 @@ mod tests {
             let mut ventana =
                 ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
 
-            encolar(&ctx, flecha_con(egui::Key::ArrowRight, teclas));
+            encolar(&ctx, tecla_con(egui::Key::ArrowRight, teclas));
 
             assert_eq!(
                 ventana.teclear_la_del_foco(&ctx),
-                None,
+                Vec::new(),
                 "{como} se pidió cambiar de pestaña"
             );
             assert_eq!(
@@ -3366,7 +4028,7 @@ mod tests {
             ["sleep 30", "sleep 30"],
         ]);
 
-        let mut lote = flecha_con_acorde(egui::Key::ArrowRight);
+        let mut lote = acorde_con(egui::Key::ArrowRight);
         lote.push(egui::Event::Key {
             key: egui::Key::ArrowRight,
             physical_key: None,
@@ -3378,7 +4040,7 @@ mod tests {
 
         assert_eq!(
             ventana.teclear_la_del_foco(&ctx),
-            Some(Orden::Ir(1)),
+            vec![Orden::Ir(1)],
             "soltar la flecha contó como una pulsación más"
         );
     }
