@@ -147,59 +147,223 @@ enum Orden {
     Cerrar,
 }
 
-/// Los rectángulos que ocupan las dos consolas y la línea que las separa.
-struct Reparto {
-    izquierda: egui::Rect,
-    divisor: egui::Rect,
-    derecha: egui::Rect,
+/// Hacia dónde se corta un área al repartirla.
+///
+/// **Se nombra por lo que produce y no por el eje que corta**, que es como se lee en voz alta: repartir
+/// «en columnas» deja las partes una al lado de otra. Nombrarlo por el eje —«horizontal»— obliga a
+/// pararse a pensar si eso significa el corte o el resultado, y las dos lecturas son defendibles.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Orientacion {
+    /// Una al lado de otra; el divisor es una línea vertical y lo que se reparte es el ancho.
+    Columnas,
+    /// Una encima de otra; el divisor es una línea horizontal y lo que se reparte es el alto.
+    ///
+    /// **Todavía no la construye producción**, porque partir en horizontal llega con el árbol de
+    /// divisiones; sí la ejercitan las pruebas del reparto, que es donde un eje mal puesto se
+    /// escondería.
+    ///
+    /// Se probó a marcarlo con `expect`, que tendría la ventaja de avisar el día que sobrase, y **no
+    /// vale aquí**: con las pruebas compiladas la variante sí se construye, así que la expectativa
+    /// queda incumplida en ese objetivo y cumplida en el otro, y el aviso salta igual. Un `allow` dice
+    /// la verdad de los dos.
+    #[allow(
+        dead_code,
+        reason = "la construye el árbol de divisiones; sus pruebas ya la ejercitan"
+    )]
+    Filas,
 }
 
-/// Reparte el ancho del área entre las dos consolas según la fracción, sin dejar a ninguna sin sitio.
-///
-/// **El grosor del divisor se descuenta primero y se reparte lo que queda.** Si se partiera el área
-/// entera y luego se restara la línea, la consola de la que se restase saldría más estrecha que la otra
-/// sin que nadie hubiera pedido eso.
-///
-/// **La fracción es de lo repartible, no del área**, y es lo que hace que la proporción sobreviva al
-/// redimensionado de la ventana: al cambiar el área se recalculan los dos anchos desde la misma
-/// fracción, en vez de que uno conserve sus puntos y el otro se coma toda la diferencia.
-///
-/// **Lo que compra el suelo de `ancho_minimo` por consola es modesto, y conviene no exagerarlo.** No
-/// evita ningún pánico —el de `Screen::resize` con cero columnas lo cubre el mínimo de 1×1 de
-/// [`Metrica::celdas_en`]— y tampoco salva la rejilla: con cero píxeles esa misma función ya da una
-/// columna, exactamente la que da con el suelo puesto. Y **el asa no es la consola, es el divisor**, que
-/// sigue en pantalla y sigue agarrable con la fracción a cero, así que una consola colapsada se recupera
-/// con el mismo gesto que la colapsó. Lo que el suelo consigue es que la consola colapsada **siga
-/// mostrando su columna** en vez de nada, para que el colapso se lea como algo que se ha hecho y no como
-/// un fallo de pintado, y que el asa no acabe pegada al borde de la ventana.
-///
-/// **El suelo se rebaja a la mitad de lo repartible cuando no cabe dos veces.** Así el divisor termina en
-/// el centro y las dos quedan iguales —por debajo del mínimo, que es lo único posible ahí— sin necesidad de
-/// una rama aparte. Y no es solo brevedad: `f32::clamp` **entra en pánico si el mínimo supera al máximo**,
-/// y rebajar el suelo hace que eso no pueda ocurrir por construcción, en vez de depender de que una guarda
-/// cubra todos los casos.
-///
-/// El `max` con cero sobre `util` mantiene los tres rectángulos bien formados con una ventana más estrecha
-/// que el propio divisor. Ahí las dos consolas llegan a cero puntos: no hay reparto posible, y lo que se
-/// conserva es que ningún rectángulo salga invertido.
-fn repartir(area: egui::Rect, fraccion: f32, ancho_minimo: f32) -> Reparto {
-    let util = (area.width() - GROSOR_DEL_DIVISOR).max(0.0);
-    let suelo = ancho_minimo.min(util / 2.0);
-    let izquierda = (fraccion * util).clamp(suelo, util - suelo);
-    let corte = area.left() + izquierda;
-    let tras_el_divisor = corte + GROSOR_DEL_DIVISOR;
-
-    Reparto {
-        izquierda: egui::Rect::from_min_max(area.left_top(), egui::pos2(corte, area.bottom())),
-        divisor: egui::Rect::from_min_max(
-            egui::pos2(corte, area.top()),
-            egui::pos2(tras_el_divisor, area.bottom()),
-        ),
-        derecha: egui::Rect::from_min_max(
-            egui::pos2(tras_el_divisor, area.top()),
-            egui::pos2(area.right().max(tras_el_divisor), area.bottom()),
-        ),
+impl Orientacion {
+    /// Cuánto mide el área en el sentido que se reparte.
+    fn largo_de(self, area: egui::Rect) -> f32 {
+        match self {
+            Self::Columnas => area.width(),
+            Self::Filas => area.height(),
+        }
     }
+
+    /// El rectángulo que va desde `empieza` hasta `acaba` medido en el sentido que se reparte, ocupando
+    /// el área entera en el otro.
+    fn tramo(self, area: egui::Rect, empieza: f32, acaba: f32) -> egui::Rect {
+        match self {
+            Self::Columnas => egui::Rect::from_min_max(
+                egui::pos2(area.left() + empieza, area.top()),
+                egui::pos2(area.left() + acaba, area.bottom()),
+            ),
+            Self::Filas => egui::Rect::from_min_max(
+                egui::pos2(area.left(), area.top() + empieza),
+                egui::pos2(area.right(), area.top() + acaba),
+            ),
+        }
+    }
+}
+
+/// Lo que le toca a una parte del reparto, **en proporción a sus hermanas**.
+///
+/// **Un tipo y no un `f32` suelto, y no es ceremonia.** El reparto divide el peso de cada parte por la
+/// suma de los de todas, así que una suma de cero da `NaN`; y un `NaN` metido en un rectángulo se
+/// propaga a todo lo que se pinte a partir de él, sin fallar en el sitio donde se generó. Prohibiendo el
+/// cero **en el constructor** el caso deja de existir, en vez de depender de que cada camino que crea
+/// pesos se acuerde de comprobarlo. Es el mismo criterio con el que [`panel::Hueco`] mantiene juntos el
+/// rectángulo del panel y su panel: no dejar escribible un estado que no puede ocurrir.
+///
+/// **Peso y no fracción normalizada**, que es la otra forma de hacer esto: con fracciones que tienen que
+/// sumar uno, quitar una parte obliga a repartir su hueco entre las demás a mano, y «suman uno» pasa a
+/// ser una invariante que alguien romperá. Con pesos, quitar una parte es quitarla de la lista y las
+/// demás conservan su proporción sin tocar ningún número.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Peso(f32);
+
+impl Peso {
+    /// Un peso, si el número puede serlo.
+    ///
+    /// **Rechaza el cero, los negativos y lo que no es un número.** El cero porque una parte sin peso no
+    /// es una parte; los negativos porque invertirían el orden de los cortes; y `NaN` o infinito porque
+    /// contaminan la suma y con ella el reparto entero.
+    fn nuevo(valor: f32) -> Option<Self> {
+        (valor.is_finite() && valor > 0.0).then_some(Self(valor))
+    }
+
+    fn valor(self) -> f32 {
+        self.0
+    }
+}
+
+/// Los rectángulos que ocupan las partes de un área y las líneas que las separan.
+///
+/// **Dos listas y no una pareja de campos con nombre de lado.** Los nombres «izquierda» y «derecha»
+/// dejan de describir nada en cuanto el corte puede ser horizontal o las partes ser tres, y un campo que
+/// miente es peor que un índice.
+struct Reparto {
+    /// Una por parte, en el orden en que se pidieron.
+    partes: Vec<egui::Rect>,
+    /// Uno entre cada dos partes consecutivas, así que hay **uno menos** que partes — y **ninguno**
+    /// cuando la parte es una sola, que es lo que hace que una división sin compañía se vea igual que
+    /// antes de que existiera el reparto.
+    divisores: Vec<egui::Rect>,
+}
+
+/// Reparte un área entre sus partes según lo que pese cada una, sin dejar a ninguna sin sitio.
+///
+/// **El grosor de los divisores se descuenta primero y se reparte lo que queda.** Si se partiera el área
+/// entera y luego se restaran las líneas, la parte de la que se restase saldría más estrecha que las
+/// otras sin que nadie hubiera pedido eso.
+///
+/// **A cada parte le toca lo que pesa entre lo que pesan todas, y eso es lo que hace que la proporción
+/// sobreviva al redimensionado**: al cambiar el área se recalculan todos los largos desde los mismos
+/// pesos, en vez de que uno conserve sus puntos y el otro se coma toda la diferencia. Que ningún peso
+/// pueda ser cero ni `NaN` lo garantiza [`Peso`], así que la suma **nunca es cero** y la división de
+/// aquí no puede producir un `NaN` que se propague a los rectángulos.
+///
+/// **Lo que compra el suelo de `minimo` por parte es modesto, y conviene no exagerarlo.** No evita ningún
+/// pánico —el de `Screen::resize` con cero columnas lo cubre el mínimo de 1×1 de [`Metrica::celdas_en`]—
+/// y tampoco salva la rejilla: con cero píxeles esa misma función ya da una columna, exactamente la que
+/// da con el suelo puesto. Y **el asa no es la consola, es el divisor**, que sigue en pantalla y sigue
+/// agarrable con la parte colapsada, así que se recupera con el mismo gesto que la colapsó. Lo que el
+/// suelo consigue es que la parte colapsada **siga mostrando su columna** en vez de nada, para que el
+/// colapso se lea como algo que se ha hecho y no como un fallo de pintado, y que el asa no acabe pegada
+/// al borde de la ventana.
+///
+/// **El suelo se rebaja al reparto a partes iguales cuando no cabe para todas.** Así los divisores
+/// terminan repartidos y las partes quedan iguales —por debajo del mínimo, que es lo único posible ahí—
+/// sin necesidad de una rama aparte. Y no es solo brevedad: `f32::clamp` **entra en pánico si el mínimo
+/// supera al máximo**, y rebajar el suelo hace que eso no pueda ocurrir por construcción, en vez de
+/// depender de que una guarda cubra todos los casos.
+///
+/// El `max` con cero sobre `util` mantiene los rectángulos bien formados con un área más estrecha que los
+/// propios divisores. Ahí las partes llegan a cero puntos: no hay reparto posible, y lo que se conserva
+/// es que ninguno salga invertido.
+///
+/// **Con una sola parte no hay ningún divisor**, y por tanto tampoco se le descuenta grosor: se lleva el
+/// área entera. Es lo que hace que quitar la compañía de una división la deje exactamente como estaba
+/// antes de que hubiera reparto.
+fn repartir(area: egui::Rect, orientacion: Orientacion, pesos: &[Peso], minimo: f32) -> Reparto {
+    let cuantas = pesos.len();
+    if cuantas == 0 {
+        return Reparto {
+            partes: Vec::new(),
+            divisores: Vec::new(),
+        };
+    }
+
+    let largo = orientacion.largo_de(area);
+    let huecos = (cuantas - 1) as f32;
+    let util = (largo - huecos * GROSOR_DEL_DIVISOR).max(0.0);
+    let suelo = minimo.min(util / cuantas as f32);
+    let total: f32 = pesos.iter().map(|peso| peso.valor()).sum();
+
+    // **Los largos se calculan primero y se colocan después, y no es un rodeo.** Lo que cada parte mide
+    // vive en el espacio **útil** —el área menos los divisores— mientras que dónde empieza vive en el
+    // espacio **real**. Mezclar los dos en un solo acumulador es lo que hace que la última parte se
+    // quede corta justo el grosor de las líneas, y ese fallo no se ve con dos partes iguales.
+    let mut largos = Vec::with_capacity(cuantas);
+    let mut repartido = 0.0;
+    for (cual, peso) in pesos.iter().enumerate() {
+        // **El suelo se aplica por parte y no al final**, para que una que se lleve casi todo no pueda
+        // dejar a la siguiente sin su mínimo. El techo es lo que queda tras reservar el suelo de las que
+        // faltan, así que la última siempre encuentra sitio.
+        let faltan = (cuantas - cual - 1) as f32;
+        let queda = (util - repartido - faltan * suelo).max(suelo);
+        let largo_de_esta = (util * peso.valor() / total).clamp(suelo, queda);
+        largos.push(largo_de_esta);
+        repartido += largo_de_esta;
+    }
+
+    let mut partes = Vec::with_capacity(cuantas);
+    let mut divisores = Vec::with_capacity(cuantas - 1);
+    let mut empieza = 0.0;
+    for (cual, largo_de_esta) in largos.iter().enumerate() {
+        let ultima = cual + 1 == cuantas;
+        // **La última llega hasta el borde en vez de hasta donde le tocaba.** Cuando algún suelo ha
+        // actuado, la suma de los largos no da el útil exacto y quedaría una rendija contra el borde;
+        // estirarla es lo que conserva que las partes y los divisores cubran el área **exactamente**,
+        // que es la invariante por la que este reparto existe. Es lo mismo que hacía el reparto de dos
+        // llevando la derecha hasta `area.right()`.
+        let acaba = if ultima {
+            largo.max(empieza)
+        } else {
+            empieza + largo_de_esta
+        };
+
+        partes.push(orientacion.tramo(area, empieza, acaba));
+        if !ultima {
+            divisores.push(orientacion.tramo(area, acaba, acaba + GROSOR_DEL_DIVISOR));
+        }
+        empieza = acaba + GROSOR_DEL_DIVISOR;
+    }
+
+    Reparto { partes, divisores }
+}
+
+/// Los dos pesos que reparten un área entre dos partes según la fracción que se lleva la primera.
+///
+/// **Existe porque la fracción es lo que la pestaña guarda hoy**, y traducirla en un sitio —en vez de en
+/// cada sitio que reparte— es lo que permite que el día que la pestaña guarde pesos de verdad no haya
+/// que cazar conversiones sueltas.
+///
+/// **La fracción se recorta antes de convertirla, y eso cambia algo observable**: hasta ahora podía valer
+/// exactamente cero, y el suelo de largo rescataba a la parte colapsada en cada fotograma. Un peso cero
+/// no existe ([`Peso`]), así que se recorta a un uno por ciento — que con el suelo de columnas puesto da
+/// el mismo ancho en cualquier ventana normal, y en una muy ancha deja crecer un poco a la colapsada en
+/// vez de dejarla clavada en el mínimo para siempre.
+fn pesos_de(fraccion: f32) -> [Peso; 2] {
+    const MINIMA: f32 = 0.01;
+    let primera = if fraccion.is_finite() {
+        fraccion.clamp(MINIMA, 1.0 - MINIMA)
+    } else {
+        FRACCION_INICIAL
+    };
+
+    [
+        // **`expect` y no un respaldo silencioso.** El recorte de arriba deja `primera` dentro de un
+        // rango donde los dos pesos son válidos, así que estas dos llamadas no pueden fallar hoy. Un
+        // `unwrap_or` diría lo contrario: convertiría un imposible en un reparto plausible a partes
+        // iguales, y el día que alguien tocara el recorte el defecto se vería como «el divisor se ha
+        // puesto solo en el centro» — un síntoma que no apunta a su causa. Todas las pruebas del reparto
+        // pasan por aquí, así que romper la invariante cae ruidosamente y en el sitio.
+        Peso::nuevo(primera).expect("el recorte deja la fracción en un rango con peso válido"),
+        Peso::nuevo(1.0 - primera).expect("y su complemento también"),
+    ]
 }
 
 /// Con cuántas pestañas abre la ventana, a partir de lo que dijera la variable.
@@ -1189,12 +1353,13 @@ impl Ventana {
                 continue;
             }
 
-            let reparto = repartir(area, pestaña.fraccion, metrica.ancho());
-            for (division, rect) in pestaña
-                .divisiones
-                .iter_mut()
-                .zip([reparto.izquierda, reparto.derecha])
-            {
+            let reparto = repartir(
+                area,
+                Orientacion::Columnas,
+                &pesos_de(pestaña.fraccion),
+                metrica.ancho(),
+            );
+            for (division, rect) in pestaña.divisiones.iter_mut().zip(reparto.partes) {
                 let antes_del_panel = Instant::now();
                 division.refrescar_su_panel();
                 let hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
@@ -1818,21 +1983,39 @@ impl eframe::App for Ventana {
             self.atender_clics_de_la_barra(ui, barra);
         }
 
-        let mut reparto = repartir(area, self.activa().fraccion, metrica.ancho());
+        let reparto_de = |ventana: &Self| {
+            repartir(
+                area,
+                Orientacion::Columnas,
+                &pesos_de(ventana.activa().fraccion),
+                metrica.ancho(),
+            )
+        };
+        let mut reparto = reparto_de(self);
 
         // El arrastre se atiende **antes de pintar y se vuelve a repartir en el mismo pase**: pintar con
         // el reparto de antes dejaría al divisor un fotograma por detrás del ratón, que es justo lo que se
         // nota en un arrastre.
-        if self.arrastrar_el_divisor(ui, reparto.divisor, area) {
-            reparto = repartir(area, self.activa().fraccion, metrica.ancho());
+        //
+        // **Se coge el divisor con `first` y no indexando**: con una sola parte no hay ninguno, y aunque
+        // hoy siempre haya dos consolas, el reparto ya no lo garantiza por su tipo.
+        if let Some(divisor) = reparto.divisores.first().copied()
+            && self.arrastrar_el_divisor(ui, divisor, area)
+        {
+            reparto = reparto_de(self);
         }
 
-        let rectangulos = [reparto.izquierda, reparto.derecha];
-
-        // El divisor se pinta antes que las consolas: si el glifo del borde de una se saliera, el
+        // Los divisores se pintan antes que las consolas: si el glifo del borde de una se saliera, el
         // recorte ya lo corta, y así la línea nunca queda por encima de una letra.
-        ui.painter()
-            .rect_filled(reparto.divisor, 0.0, self.tema.divisor());
+        //
+        // **Y se pintan antes de quedarse con las partes** para poder llevárselas sin copiarlas: el
+        // reparto se rehace en cada fotograma, así que un clon aquí es una reserva de memoria por
+        // fotograma que además nadie declararía en la medida.
+        for divisor in &reparto.divisores {
+            ui.painter().rect_filled(*divisor, 0.0, self.tema.divisor());
+        }
+
+        let rectangulos = reparto.partes;
 
         self.atender_clics(ui, &rectangulos);
 
@@ -1848,7 +2031,7 @@ impl eframe::App for Ventana {
         for (division, rect) in self.pestañas[self.activa]
             .divisiones
             .iter_mut()
-            .zip(rectangulos)
+            .zip(rectangulos.iter().copied())
         {
             Self::pintar_division(ui, division, rect, &self.tema, &metrica);
         }
@@ -5275,8 +5458,13 @@ mod tests {
         // y eso solo lo sabe egui.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
         let area = area_de(400.0 + GROSOR_DEL_DIVISOR);
-        let reparto = repartir(area, FRACCION_INICIAL, ANCHO_DE_CELDA);
-        let agarre = reparto.divisor.center();
+        let reparto = repartir(
+            area,
+            Orientacion::Columnas,
+            &pesos_de(FRACCION_INICIAL),
+            ANCHO_DE_CELDA,
+        );
+        let agarre = reparto.divisores[0].center();
         // **El puntero se pasa del borde derecho y luego vuelve**, y ese ida y vuelta es lo que hace que la
         // prueba distinga entre seguir al puntero y acumular su desplazamiento. Con un solo salto las dos
         // implementaciones dan casi lo mismo y la prueba pasaría con la que el doc dice haber descartado;
@@ -5293,16 +5481,34 @@ mod tests {
         // botón tiene que bajar en una pasada distinta del movimiento: el candidato a arrastrarse sale de
         // **dónde estaba el puntero al pulsar** (`interaction.rs:169-171`), así que un pulsar y mover en la
         // misma pasada busca al candidato en el destino, donde el divisor ya no está.
-        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, mover(agarre));
-        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, pulsar(agarre));
-        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, mover(fuera));
+        pasada_de_arrastre(
+            &mut ventana,
+            &ctx,
+            reparto.divisores[0],
+            area,
+            mover(agarre),
+        );
+        pasada_de_arrastre(
+            &mut ventana,
+            &ctx,
+            reparto.divisores[0],
+            area,
+            pulsar(agarre),
+        );
+        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisores[0], area, mover(fuera));
         assert_eq!(
             ventana.activa().fraccion,
             1.0,
             "pasarse del borde derecho no dejó la fracción pegada al tope"
         );
 
-        let movio = pasada_de_arrastre(&mut ventana, &ctx, reparto.divisor, area, mover(suelta));
+        let movio = pasada_de_arrastre(
+            &mut ventana,
+            &ctx,
+            reparto.divisores[0],
+            area,
+            mover(suelta),
+        );
 
         assert!(movio, "el arrastre no movió la fracción");
         // Exacto y no aproximado: 300 de 400 repartibles es 0,75 sin resto, así que una tolerancia solo
@@ -5358,8 +5564,13 @@ mod tests {
         let mut ventana = ventana_con("sleep 30", "sleep 30");
         // Un cuarto y tres cuartos: con mitades, una consola midiendo el rectángulo de la otra daría el mismo
         // número y la prueba no vería nada.
-        let reparto = repartir(area_de(802.0), 0.25, ANCHO_DE_CELDA);
-        let rectangulos = [reparto.izquierda, reparto.derecha];
+        let reparto = repartir(
+            area_de(802.0),
+            Orientacion::Columnas,
+            &pesos_de(0.25),
+            ANCHO_DE_CELDA,
+        );
+        let rectangulos = [reparto.partes[0], reparto.partes[1]];
 
         let ctx = egui::Context::default();
         let mut esperado = [REJILLA_INICIAL; 2];
@@ -6004,32 +6215,199 @@ mod tests {
         );
     }
 
+    /// Los pesos de un reparto escrito a mano en la prueba. Entra por el mismo constructor que
+    /// producción, así que un número que `Peso` rechazaría hace caer la prueba en vez de colarse.
+    fn pesos(valores: [f32; 2]) -> [Peso; 2] {
+        valores.map(peso)
+    }
+
+    /// Un peso escrito a mano en la prueba, por el mismo constructor que producción: un número que
+    /// `Peso` rechazaría hace caer la prueba en vez de colarse como un valor de repuesto.
+    fn peso(valor: f32) -> Peso {
+        Peso::nuevo(valor).expect("la prueba pide un peso válido")
+    }
+
     #[test]
     fn el_reparto_conserva_la_proporcion_al_cambiar_el_ancho_de_la_ventana() {
         // AC6. Es la razón por la que el área se reparte a mano en vez de con los paneles
         // redimensionables de egui: aquellos trabajan en puntos, así que al ensanchar la ventana el
         // panel mantendría su ancho y toda la diferencia caería en el otro lado.
         //
-        // **Se prueba con un cuarto y no con la mitad**: con la mitad, un reparto que ignorase la
-        // fracción por completo daría exactamente el mismo resultado y el test pasaría igual.
-        const UN_CUARTO: f32 = 0.25;
+        // **Se prueba con un cuarto y no con la mitad**: con la mitad, un reparto que ignorase los
+        // pesos por completo daría exactamente el mismo resultado y el test pasaría igual.
+        let un_cuarto = pesos([1.0, 3.0]);
         let estrecha = repartir(
             area_de(400.0 + GROSOR_DEL_DIVISOR),
-            UN_CUARTO,
+            Orientacion::Columnas,
+            &un_cuarto,
             ANCHO_DE_CELDA,
         );
         let ancha = repartir(
             area_de(800.0 + GROSOR_DEL_DIVISOR),
-            UN_CUARTO,
+            Orientacion::Columnas,
+            &un_cuarto,
             ANCHO_DE_CELDA,
         );
 
-        assert_eq!(estrecha.izquierda.width(), 100.0);
-        assert_eq!(estrecha.derecha.width(), 300.0);
+        assert_eq!(estrecha.partes[0].width(), 100.0);
+        assert_eq!(estrecha.partes[1].width(), 300.0);
         // Al doblar el ancho de la ventana, los dos anchos se doblan: la diferencia se reparte, no cae
         // entera en un lado.
-        assert_eq!(ancha.izquierda.width(), 200.0);
-        assert_eq!(ancha.derecha.width(), 600.0);
+        assert_eq!(ancha.partes[0].width(), 200.0);
+        assert_eq!(ancha.partes[1].width(), 600.0);
+    }
+
+    #[test]
+    fn en_filas_se_reparte_el_alto_y_cada_parte_se_queda_el_ancho_entero() {
+        // La otra mitad de lo que este reparto sabe hacer, y la que nadie usa todavía en pantalla. Se
+        // prueba ahora porque el corte horizontal no es «el mismo código con las coordenadas cambiadas»
+        // hasta que alguien lo ejecuta: es exactamente donde un eje mal puesto se esconde.
+        //
+        // **Pesos desiguales otra vez**, por lo mismo que arriba: con dos iguales, repartir por peso y
+        // repartir a ciegas dan el mismo resultado.
+        let area = egui::Rect::from_min_size(
+            egui::pos2(10.0, 5.0),
+            egui::vec2(500.0, 400.0 + GROSOR_DEL_DIVISOR),
+        );
+        let reparto = repartir(area, Orientacion::Filas, &pesos([1.0, 3.0]), 0.0);
+
+        assert_eq!(reparto.partes[0].height(), 100.0);
+        assert_eq!(reparto.partes[1].height(), 300.0);
+        // Y el ancho no se toca: repartir en filas parte el alto y deja a cada una el área entera de
+        // lado a lado. Si el eje estuviera cambiado, esto valdría 100 y 300.
+        for parte in &reparto.partes {
+            assert_eq!(
+                parte.width(),
+                area.width(),
+                "una fila no ocupa el ancho entero"
+            );
+            assert_eq!(parte.left(), area.left());
+        }
+        // El divisor de un reparto en filas es una línea horizontal: ancho entero y alto de grosor.
+        assert_eq!(reparto.divisores[0].height(), GROSOR_DEL_DIVISOR);
+        assert_eq!(reparto.divisores[0].width(), area.width());
+    }
+
+    #[test]
+    fn con_tres_partes_hay_dos_divisores_y_entre_todos_cubren_el_area_sin_huecos() {
+        // La invariante que justifica repartir con un árbol en vez de con rectángulos sueltos: lo que se
+        // pinta cubre el área **exactamente**, sin huecos ni solapes. Con dos partes se cumplía casi por
+        // casualidad —hay un solo corte—; con tres es donde un acumulador mal llevado deja una rendija.
+        let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
+        let tres = [peso(1.0), peso(2.0), peso(1.0)];
+        let reparto = repartir(area, Orientacion::Columnas, &tres, ANCHO_DE_CELDA);
+
+        assert_eq!(reparto.partes.len(), 3);
+        assert_eq!(
+            reparto.divisores.len(),
+            2,
+            "con tres partes hay dos fronteras"
+        );
+
+        // Recorrido de izquierda a derecha: parte, divisor, parte, divisor, parte, sin saltos.
+        assert_eq!(reparto.partes[0].left(), area.left());
+        for (parte, divisor) in reparto.partes.iter().zip(&reparto.divisores) {
+            assert_eq!(
+                parte.right(),
+                divisor.left(),
+                "hay un hueco antes de un divisor"
+            );
+            assert_eq!(divisor.width(), GROSOR_DEL_DIVISOR);
+        }
+        for (divisor, siguiente) in reparto.divisores.iter().zip(&reparto.partes[1..]) {
+            assert_eq!(
+                divisor.right(),
+                siguiente.left(),
+                "hay un hueco después de un divisor"
+            );
+        }
+        assert_eq!(reparto.partes[2].right(), area.right());
+
+        // Y la del medio pesa el doble, que es lo que distingue repartir por peso de repartir a tercios.
+        assert_eq!(reparto.partes[1].width(), reparto.partes[0].width() * 2.0);
+    }
+
+    #[test]
+    fn las_partes_llegan_al_borde_aunque_la_proporcion_no_salga_redonda() {
+        // **La rendija de coma flotante**, que es lo único que separa «casi cubre el área» de «la
+        // cubre». Con proporciones que no salen redondas, la suma de los largos no reproduce el ancho
+        // útil exacto y la última parte se queda a una fracción de punto del borde. No se ve en pantalla
+        // —y por eso hace falta afirmarlo aquí— pero rompe la invariante que justifica repartir con un
+        // árbol en vez de con rectángulos sueltos: que lo pintado cubra el área **exactamente**.
+        //
+        // **Dos elecciones del caso, y las dos hicieron falta**, comprobadas mutando el estirón de la
+        // última parte hasta el borde:
+        //
+        // - **Pesos 98·1·1 y no algo redondo.** Con pesos que dividen limpio, el defecto y el arreglo
+        //   dan el mismo número y la suite se queda entera en verde.
+        // - **Suelo cero.** Con suelo, el techo que reserva sitio para las partes que faltan hace que la
+        //   última tome exactamente lo que resta, así que el reparto cuadra por construcción y la
+        //   rendija tampoco aparece. Solo asoma cuando nadie se recorta y la proporción manda sola.
+        let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
+        let torcidos = [peso(98.0), peso(1.0), peso(1.0)];
+        let reparto = repartir(area, Orientacion::Columnas, &torcidos, 0.0);
+
+        assert_eq!(
+            reparto.partes.last().unwrap().right(),
+            area.right(),
+            "la última parte no llega al borde: queda una rendija"
+        );
+    }
+
+    #[test]
+    fn una_sola_parte_se_lleva_el_area_entera_y_no_tiene_divisor() {
+        // Lo que hace que quitarle la compañía a una división la deje como si el reparto no existiera:
+        // sin frontera, tampoco se le descuenta el grosor de ninguna.
+        let area = area_de(500.0);
+        let reparto = repartir(area, Orientacion::Columnas, &[peso(1.0)], ANCHO_DE_CELDA);
+
+        assert_eq!(reparto.partes.len(), 1);
+        assert!(
+            reparto.divisores.is_empty(),
+            "una parte sola no separa de nada"
+        );
+        assert_eq!(
+            reparto.partes[0], area,
+            "la parte única no se lleva el área entera"
+        );
+    }
+
+    #[test]
+    fn un_peso_no_puede_ser_cero_ni_negativo_ni_dejar_de_ser_un_numero() {
+        // AC16. **La suma de los pesos es el divisor de todo el reparto**, así que una suma cero daría
+        // `NaN` en cada coordenada, y un `NaN` dentro de un rectángulo no falla donde se genera: se
+        // propaga a todo lo que se pinte a partir de él. Prohibirlo en el constructor es lo que hace que
+        // ese estado no exista, en vez de repartir guardas por los sitios que crean pesos.
+        for imposible in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(
+                Peso::nuevo(imposible).is_none(),
+                "{imposible} se aceptó como peso"
+            );
+        }
+        assert_eq!(Peso::nuevo(0.5).map(Peso::valor), Some(0.5));
+    }
+
+    #[test]
+    fn la_fraccion_de_la_pestaña_nunca_produce_un_reparto_imposible() {
+        // El puente entre lo que la pestaña guarda hoy —una fracción, que **sí** puede llegar a cero
+        // arrastrando hasta el borde— y los pesos, que no lo admiten. Sin el recorte, arrastrar al
+        // extremo daría un peso cero, y con los dos al extremo una suma cero: el `NaN` de la prueba de
+        // arriba, pero llegando por el camino que un usuario recorre de verdad.
+        for fraccion in [0.0_f32, 1.0, -5.0, 12.0, f32::NAN, f32::INFINITY] {
+            let reparto = repartir(
+                area_de(500.0),
+                Orientacion::Columnas,
+                &pesos_de(fraccion),
+                ANCHO_DE_CELDA,
+            );
+
+            for (cual, parte) in reparto.partes.iter().enumerate() {
+                assert!(
+                    parte.width().is_finite() && parte.width() >= 0.0,
+                    "con la fracción a {fraccion} la parte {cual} salió {parte:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -6047,15 +6425,20 @@ mod tests {
             (0.0_f32, ANCHO_DE_CELDA, UTIL - ANCHO_DE_CELDA),
             (1.0_f32, UTIL - ANCHO_DE_CELDA, ANCHO_DE_CELDA),
         ] {
-            let reparto = repartir(area_de(500.0), fraccion, ANCHO_DE_CELDA);
+            let reparto = repartir(
+                area_de(500.0),
+                Orientacion::Columnas,
+                &pesos_de(fraccion),
+                ANCHO_DE_CELDA,
+            );
 
             assert_eq!(
-                reparto.izquierda.width(),
+                reparto.partes[0].width(),
                 izquierda,
                 "con la fracción a {fraccion} la consola izquierda no respetó el suelo"
             );
             assert_eq!(
-                reparto.derecha.width(),
+                reparto.partes[1].width(),
                 derecha,
                 "con la fracción a {fraccion} la consola derecha no respetó el suelo"
             );
@@ -6068,11 +6451,16 @@ mod tests {
         // mínimo que no cabe daría un mínimo mayor que el máximo, o sea un rectángulo invertido. Lo que se
         // conserva es lo único que se puede: que ninguna de las dos desaparezca.
         let util = ANCHO_DE_CELDA * 2.0 - 1.0;
-        let reparto = repartir(area_de(util + GROSOR_DEL_DIVISOR), 0.0, ANCHO_DE_CELDA);
+        let reparto = repartir(
+            area_de(util + GROSOR_DEL_DIVISOR),
+            Orientacion::Columnas,
+            &pesos_de(0.0),
+            ANCHO_DE_CELDA,
+        );
 
-        assert_eq!(reparto.izquierda.width(), reparto.derecha.width());
-        assert!(reparto.izquierda.width() > 0.0, "la izquierda desapareció");
-        assert!(reparto.derecha.width() > 0.0, "la derecha desapareció");
+        assert_eq!(reparto.partes[0].width(), reparto.partes[1].width());
+        assert!(reparto.partes[0].width() > 0.0, "la izquierda desapareció");
+        assert!(reparto.partes[1].width() > 0.0, "la derecha desapareció");
     }
 
     #[test]
@@ -6080,13 +6468,13 @@ mod tests {
         // Las tres piezas tienen que cubrir el área exactamente: si el divisor se restara después de
         // repartir, una consola perdería ancho sin que nadie hubiera movido nada.
         let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
-        let reparto = repartir(area, 0.4, ANCHO_DE_CELDA);
+        let reparto = repartir(area, Orientacion::Columnas, &pesos_de(0.4), ANCHO_DE_CELDA);
 
-        assert_eq!(reparto.divisor.width(), GROSOR_DEL_DIVISOR);
-        assert_eq!(reparto.izquierda.right(), reparto.divisor.left());
-        assert_eq!(reparto.divisor.right(), reparto.derecha.left());
-        assert_eq!(reparto.izquierda.left(), area.left());
-        assert_eq!(reparto.derecha.right(), area.right());
+        assert_eq!(reparto.divisores[0].width(), GROSOR_DEL_DIVISOR);
+        assert_eq!(reparto.partes[0].right(), reparto.divisores[0].left());
+        assert_eq!(reparto.divisores[0].right(), reparto.partes[1].left());
+        assert_eq!(reparto.partes[0].left(), area.left());
+        assert_eq!(reparto.partes[1].right(), area.right());
     }
 
     #[test]
@@ -6099,16 +6487,17 @@ mod tests {
         // suelo es justo donde un mínimo mayor que el máximo aparecería.
         for ancho in [0.0_f32, 1.0, 2.0, 3.0, 20.0] {
             for fraccion in [0.0_f32, 0.5, 1.0] {
-                let reparto = repartir(area_de(ancho), fraccion, ANCHO_DE_CELDA);
-                for (nombre, rect) in [
-                    ("izquierda", reparto.izquierda),
-                    ("divisor", reparto.divisor),
-                    ("derecha", reparto.derecha),
-                ] {
+                let reparto = repartir(
+                    area_de(ancho),
+                    Orientacion::Columnas,
+                    &pesos_de(fraccion),
+                    ANCHO_DE_CELDA,
+                );
+                for (cual, rect) in reparto.partes.iter().chain(&reparto.divisores).enumerate() {
                     assert!(
                         rect.width() >= 0.0,
                         "con {ancho} puntos de ancho y la fracción a {fraccion}, \
-                         el rectángulo de la {nombre} salió invertido"
+                         el rectángulo {cual} salió invertido"
                     );
                 }
             }
@@ -6138,16 +6527,21 @@ mod tests {
             // La métrica se le pregunta a la misma fuente que usó la pasada, y se puede preguntar desde
             // fuera de ella porque las fuentes existen desde la primera (`context.rs:1120`).
             let metrica = Metrica::medir(&ctx, egui::FontId::monospace(CUERPO));
-            let reparto = repartir(area, UN_CUARTO, metrica.ancho());
+            let reparto = repartir(
+                area,
+                Orientacion::Columnas,
+                &pesos_de(UN_CUARTO),
+                metrica.ancho(),
+            );
 
             assert_eq!(
                 ventana.activa().divisiones[0].medido,
-                metrica.celdas_en(reparto.izquierda.size()),
+                metrica.celdas_en(reparto.partes[0].size()),
                 "con la ventana a {ancho} puntos, la consola izquierda no midió su cuarto"
             );
             assert_eq!(
                 ventana.activa().divisiones[1].medido,
-                metrica.celdas_en(reparto.derecha.size()),
+                metrica.celdas_en(reparto.partes[1].size()),
                 "con la ventana a {ancho} puntos, la consola derecha no midió sus tres cuartos"
             );
             // Un cuarto y no la mitad, por lo mismo que en la prueba de `repartir`: con la mitad, una
@@ -6191,8 +6585,13 @@ mod tests {
         eframe::App::logic(&mut ventana, &ctx, &mut frame);
 
         let metrica = Metrica::medir(&ctx, egui::FontId::monospace(CUERPO));
-        let reparto = repartir(area, UN_CUARTO, metrica.ancho());
-        let rectangulos = [reparto.izquierda, reparto.derecha];
+        let reparto = repartir(
+            area,
+            Orientacion::Columnas,
+            &pesos_de(UN_CUARTO),
+            metrica.ancho(),
+        );
+        let rectangulos = [reparto.partes[0], reparto.partes[1]];
         for (cual, (division, rect)) in ventana
             .activa()
             .divisiones
@@ -6326,15 +6725,20 @@ mod tests {
             .expect("el realce del foco tenía que quedar encolado");
 
         let metrica = Metrica::medir(&ctx, egui::FontId::monospace(CUERPO));
-        let reparto = repartir(area, FRACCION_INICIAL, metrica.ancho());
+        let reparto = repartir(
+            area,
+            Orientacion::Columnas,
+            &pesos_de(FRACCION_INICIAL),
+            metrica.ancho(),
+        );
         assert_eq!(
-            realce, reparto.derecha,
+            realce, reparto.partes[1],
             "el realce no rodeó a la consola con el foco"
         );
         // Y la comprobación que impide que la de arriba sea cierta por casualidad: las dos mitades del
         // reparto inicial miden lo mismo, así que lo único que las distingue es dónde empiezan.
         assert_ne!(
-            reparto.izquierda, reparto.derecha,
+            reparto.partes[0], reparto.partes[1],
             "con este reparto las dos consolas ocupan el mismo rectángulo y la prueba no dice nada"
         );
     }
@@ -6373,15 +6777,20 @@ mod tests {
         );
 
         let metrica = Metrica::medir(&ctx, egui::FontId::monospace(CUERPO));
-        let reparto = repartir(area, 0.75, metrica.ancho());
+        let reparto = repartir(
+            area,
+            Orientacion::Columnas,
+            &pesos_de(0.75),
+            metrica.ancho(),
+        );
         assert_eq!(
             ventana.activa().divisiones[0].medido,
-            metrica.celdas_en(reparto.izquierda.size()),
+            metrica.celdas_en(reparto.partes[0].size()),
             "la consola izquierda se midió con el reparto de antes del arrastre"
         );
         assert_eq!(
             ventana.activa().divisiones[1].medido,
-            metrica.celdas_en(reparto.derecha.size()),
+            metrica.celdas_en(reparto.partes[1].size()),
             "la consola derecha se midió con el reparto de antes del arrastre"
         );
     }
