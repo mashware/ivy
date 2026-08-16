@@ -240,4 +240,7 @@ if [ "$DECLARADAS" != "$PESTANAS" ]; then
 fi
 
 echo "hecho: $(basename "$INFORME")" >&2
-echo "rejilla: $(grep -m1 '  consola 0:' "$INFORME" | tr -s ' ')" >&2
+# **La primera división, por su nombre y no por su posición.** El informe las nombra con un número que
+# no se reutiliza al cerrar, así que «división 0» es siempre la primera consola que abrió la ventana —
+# que es la que estas tandas comparan entre corridas.
+echo "rejilla: $(grep -m1 '  división 0:' "$INFORME" | tr -s ' ')" >&2

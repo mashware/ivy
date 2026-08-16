@@ -296,6 +296,16 @@ pub fn arrancar() -> eframe::Result {
 /// Cada campo de aquí era un campo de [`Ventana`] cuando solo había una consola. Agruparlos es lo que
 /// permite instanciar el conjunto entero más de una vez sin escribir cada operación dos veces.
 struct Division {
+    /// Cómo se la llama en el informe, y **no cambia aunque se cierren otras**.
+    ///
+    /// **El índice en la disposición no vale para esto**, por lo mismo que no valía para las pestañas:
+    /// en cuanto se pueda cerrar una división, las de al lado corren un puesto y el informe le pondría
+    /// a una tabla de números el nombre de otra consola — con los tramos de la que los produjo, y sin
+    /// nada en el texto que permita notarlo. Se asigna al abrirla y no se reutiliza.
+    ///
+    /// **Va aquí dentro y no en una lista paralela de la pestaña.** Dos vectores que hay que mantener
+    /// alineados son una invariante que alguien romperá; dentro del tipo no hay nada que alinear.
+    nombre: usize,
     /// El pseudoterminal y su cola van juntos a propósito. El hilo del puente vive mientras viva
     /// el pseudoterminal, no mientras viva el puente: separarlos dejaría un hilo y una cola sin
     /// dueño, creciendo.
@@ -391,7 +401,7 @@ fn identidad_de(panel: Option<&PanelDir>) -> [(&'static str, Option<&std::ffi::O
 
 impl Division {
     /// Lanza el shell de esta división y la deja lista para el primer fotograma.
-    fn nueva(ctx: &egui::Context) -> term_core::Result<Self> {
+    fn nueva(ctx: &egui::Context, nombre: usize) -> term_core::Result<Self> {
         // El shell sale del entorno de quien lanza la aplicación, que es lo que hace un terminal:
         // sin esto se abre un shell sin prompt ni historial, y este hito existe para mirar lo que
         // sale en pantalla. Sigue sin ser una entrada ajena —es la sesión del propio usuario—,
@@ -399,18 +409,18 @@ impl Division {
         // esta línea pasa a ser superficie sensible y hay que revisarla como tal.
         let shell = std::env::var("SHELL").unwrap_or_else(|_| SHELL_DE_RESPALDO.to_owned());
 
-        Self::lanzando(ctx, &shell)
+        Self::lanzando(ctx, &shell, nombre)
     }
 
     /// Lo mismo, con el programa dicho a mano.
     ///
     /// Existe porque el programa que elige [`Division::nueva`] es el del usuario, y una prueba que
     /// dependa de él no prueba este código: prueba la configuración de quien la corre.
-    fn lanzando(ctx: &egui::Context, programa: &str) -> term_core::Result<Self> {
+    fn lanzando(ctx: &egui::Context, programa: &str, nombre: usize) -> term_core::Result<Self> {
         // El directorio se crea **antes** de lanzar, porque el programa puede publicar en su primer
         // segundo y la variable que le decimos tiene que apuntar a algo que ya existe. Si lanzar
         // falla después, el directorio se borra solo: el valor muere por el camino de error.
-        Self::con_panel(ctx, programa, panel_o_ninguno(PanelDir::create()))
+        Self::con_panel(ctx, programa, panel_o_ninguno(PanelDir::create()), nombre)
     }
 
     /// Y lo mismo con el directorio ya resuelto, incluido el caso de que no haya podido crearse.
@@ -422,6 +432,7 @@ impl Division {
         ctx: &egui::Context,
         programa: &str,
         panel: Option<PanelDir>,
+        nombre: usize,
     ) -> term_core::Result<Self> {
         let identidad = identidad_de(panel.as_ref());
 
@@ -443,6 +454,7 @@ impl Division {
         let puente = Puente::nuevo(salida, move || despertador.request_repaint());
 
         Ok(Self {
+            nombre,
             pty,
             puente,
             panel,
@@ -791,9 +803,21 @@ struct Pestaña {
 
 impl Pestaña {
     /// Dos consolas nuevas, con el shell del usuario dentro de cada una.
-    fn nueva(ctx: &egui::Context, nombre: usize) -> term_core::Result<Self> {
+    ///
+    /// **Los nombres de las divisiones llegan de fuera**, igual que el de la pestaña: el contador que
+    /// garantiza que no se repitan es de la ventana, porque las divisiones de dos pestañas distintas
+    /// también tienen que distinguirse en el informe.
+    fn nueva(
+        ctx: &egui::Context,
+        nombre: usize,
+        nombres_de_division: [usize; 2],
+    ) -> term_core::Result<Self> {
+        let [izquierda, derecha] = nombres_de_division;
         Ok(Self::con(
-            [Division::nueva(ctx)?, Division::nueva(ctx)?],
+            [
+                Division::nueva(ctx, izquierda)?,
+                Division::nueva(ctx, derecha)?,
+            ],
             nombre,
         ))
     }
@@ -863,6 +887,12 @@ struct Ventana {
     /// algo**: con dos abiertas y la primera cerrada, `pestañas.len()` vale 1 y volvería a repartir un
     /// nombre que ya se usó.
     siguiente_nombre: usize,
+    /// El nombre que llevará la próxima división que se abra. Ver [`Division::nombre`].
+    ///
+    /// **Uno solo para toda la ventana, no uno por pestaña.** El informe publica las divisiones de todas
+    /// las pestañas seguidas, así que dos contadores independientes darían dos «división 0» en el mismo
+    /// texto — el nombre volvería a no identificar a nadie, que es justo lo que viene a arreglar.
+    siguiente_nombre_de_division: usize,
     /// Si alguna pestaña se ha cerrado **a mano**, y por tanto la ventana ya no se cierra sola.
     ///
     /// **Existe por un caso que solo aparece cuando cerrar es posible**: una pestaña cuyos programas ya
@@ -895,9 +925,15 @@ impl Ventana {
         // mismo criterio que `panel_o_ninguno`. Media docena de pestañas de las que una está a medias es
         // peor que no arrancar, porque el fallo se descubre al llegar a ella.
         let pestañas: Vec<Pestaña> = (0..cuantas)
-            .map(|nombre| Pestaña::nueva(ctx, nombre))
+            .map(|nombre| Pestaña::nueva(ctx, nombre, [nombre * 2, nombre * 2 + 1]))
             .collect::<term_core::Result<_>>()?;
         let siguiente_nombre = pestañas.len();
+        // **Contadas de la lista y no del parámetro**, por lo mismo que se explica abajo para el nombre
+        // de pestaña: son dos fuentes para el mismo dato y con dos se puede coger la que no toca.
+        let siguiente_nombre_de_division = pestañas
+            .iter()
+            .map(|pestaña| pestaña.divisiones.len())
+            .sum();
 
         Ok(Self {
             // **Sobre las divisiones de todas las pestañas, no solo la primera.** Una pestaña de fondo
@@ -925,6 +961,7 @@ impl Ventana {
             // verdad leyendo `SHELL`, así que solo se ejercita al arrancar la aplicación. Derivarlo de
             // la lista es lo que hace que no haya nada que confundir.
             siguiente_nombre,
+            siguiente_nombre_de_division,
             cerrada_alguna_a_mano: false,
         })
     }
@@ -1046,7 +1083,11 @@ impl Ventana {
             .map(|pestaña| {
                 (
                     pestaña.nombre,
-                    pestaña.divisiones.each_ref().map(|d| d.pantalla.size()),
+                    pestaña
+                        .divisiones
+                        .iter()
+                        .map(|d| (d.nombre, d.pantalla.size()))
+                        .collect(),
                 )
             })
             .collect();
@@ -1069,10 +1110,13 @@ impl Ventana {
              puntos de ancho. Si se arrastró durante la sesión, los tramos de abajo mezclan repartos",
             visible.fraccion * 100.0
         )?;
+        // **Por el nombre de la división, no por su posición.** La posición identifica bien mientras las
+        // divisiones sean dos y fijas; el nombre sigue identificando cuando dejen de serlo, y publicar ya
+        // el que va a valer es lo que evita que las tandas de antes y las de después se lean distinto.
         writeln!(
             a,
-            "foco al salir: consola {} ({}) de la pestaña {}",
-            visible.foco,
+            "foco al salir: división {} ({}) de la pestaña {}",
+            visible.divisiones[visible.foco].nombre,
             medida::NOMBRE_DE_CONSOLA[visible.foco],
             visible.nombre
         )?;
@@ -1080,12 +1124,16 @@ impl Ventana {
         // **Todas las pestañas, no solo la que se veía.** Una consola de fondo cronometra su
         // interpretar igual que las demás, y publicar solo las visibles tiraría justo los números que
         // la tanda de dos pestañas existe para tomar.
+        // **Y cada tabla se titula con el nombre de su división.** Es el sitio donde equivocarse sale más
+        // caro: quien lea el informe ve una tabla de números bajo una etiqueta y no tiene forma de
+        // comprobar que sean de esa consola.
         for pestaña in &self.pestañas {
             let que_pestaña = pestaña.nombre;
             for (cual, division) in pestaña.divisiones.iter().enumerate() {
                 writeln!(
                     a,
-                    "\n── pestaña {que_pestaña}, consola {cual} ({}) ──",
+                    "\n── pestaña {que_pestaña}, división {} ({}) ──",
+                    division.nombre,
                     medida::NOMBRE_DE_CONSOLA[cual]
                 )?;
                 division.medida.publicar_tramos(a)?;
@@ -1475,12 +1523,18 @@ impl Ventana {
         // es la pestaña que todavía no existe. Sin esto, lanzar dos procesos se publica como coste del
         // framework de interfaz.
         let antes = Instant::now();
-        let abierta = Pestaña::nueva(ctx, self.siguiente_nombre);
+        let nombres_de_division = [
+            self.siguiente_nombre_de_division,
+            self.siguiente_nombre_de_division + 1,
+        ];
+        let abierta = Pestaña::nueva(ctx, self.siguiente_nombre, nombres_de_division);
         self.cronometrado_aparte += antes.elapsed();
-        // **El nombre se gasta aunque la apertura falle**, para que no se reutilice nunca: si el intento
-        // fallido dejó una línea en la salida de errores, la pestaña que se abra después no debe llamarse
-        // igual que la que no llegó a existir.
+        // **Los nombres se gastan aunque la apertura falle**, para que no se reutilicen nunca: si el
+        // intento fallido dejó una línea en la salida de errores, lo que se abra después no debe llamarse
+        // igual que lo que no llegó a existir. Vale para la pestaña y para sus dos divisiones por la
+        // misma razón, así que se avanzan los dos contadores en el mismo sitio.
         self.siguiente_nombre += 1;
+        self.siguiente_nombre_de_division += nombres_de_division.len();
 
         self.poner_delante(abierta, ctx);
     }
@@ -1874,7 +1928,7 @@ mod tests {
         // programa de dentro, que es quien decide si para él significa pegar (Claude) o bloque
         // visual (vim).
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
         let mut modificadores = egui::Modifiers::NONE;
 
@@ -1909,7 +1963,7 @@ mod tests {
         // marca, no que alguien le pase el modo de verdad. Poniendo `false` a pelo en el bucle, las
         // 298 seguían verdes y pegar varias líneas volvía a ejecutarlas una a una.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         let mut modificadores = egui::Modifiers::NONE;
 
         // Sin que el programa lo pida, el texto va desnudo.
@@ -1949,7 +2003,7 @@ mod tests {
         // Las dos secuencias de abajo tienen el mismo conjunto de eventos y orden distinto, y con
         // ese campo darían el resultado cambiado en las dos.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
         let mut modificadores = egui::Modifiers::NONE;
 
@@ -1996,7 +2050,7 @@ mod tests {
         // Es la misma salvaguarda que egui tiene en su propio bucle de entrada, con su razón escrita
         // ahí; esta reconstrucción la había olvidado.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         let mut modificadores = egui::Modifiers::NONE;
 
         encolar(
@@ -2025,7 +2079,7 @@ mod tests {
         // aviso de que se pulsaron llegó en el lote anterior y ya no está en éste. Sin recordar cómo
         // se cerró el pase, ese pegado se leería como si no hubiera Mayúsculas.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
         let mut modificadores = egui::Modifiers::NONE;
 
@@ -2052,7 +2106,7 @@ mod tests {
         // Ctrl+Mayúsculas+C, y si esa combinación dejara de interrumpir, un programa colgado se
         // queda colgado.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
         let mut modificadores = egui::Modifiers::NONE;
 
@@ -2085,11 +2139,12 @@ mod tests {
     /// segunda llamada correría contra los suyos **más los del tramo anterior** — y la prueba estaría
     /// afirmando sobre una secuencia que no es la que escribió. Un fotograma de verdad rehace la
     /// lista entera; esto hace lo mismo.
-    fn division_con(programa: &str) -> Division {
+    fn division_con(programa: &str, nombre: usize) -> Division {
         let (pty, salida) = Pty::spawn("sh", &["-c", programa], REJILLA_INICIAL)
             .expect("no se pudo abrir el pseudoterminal");
 
         Division {
+            nombre,
             pty,
             puente: Puente::nuevo(salida, || {}),
             panel: None,
@@ -2126,8 +2181,16 @@ mod tests {
             .enumerate()
             .map(|(nombre, [izquierda, derecha])| {
                 // Con su nombre, como las abre la aplicación: si todas se llamaran igual, el informe
-                // diría «pestaña 0» dos veces y la prueba que lo lee no notaría la diferencia.
-                Pestaña::con([division_con(izquierda), division_con(derecha)], nombre)
+                // diría «pestaña 0» dos veces y la prueba que lo lee no notaría la diferencia. Y sus
+                // divisiones **numeradas seguidas entre pestañas**, también como la aplicación: con un
+                // contador por pestaña habría dos «división 0» en el mismo informe.
+                Pestaña::con(
+                    [
+                        division_con(izquierda, nombre * 2),
+                        division_con(derecha, nombre * 2 + 1),
+                    ],
+                    nombre,
+                )
             })
             .collect();
 
@@ -2139,6 +2202,10 @@ mod tests {
         );
 
         let siguiente_nombre = pestañas.len();
+        let siguiente_nombre_de_division = pestañas
+            .iter()
+            .map(|pestaña| pestaña.divisiones.len())
+            .sum();
 
         Ventana {
             // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
@@ -2162,6 +2229,7 @@ mod tests {
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
             siguiente_nombre,
+            siguiente_nombre_de_division,
             cerrada_alguna_a_mano: false,
         }
     }
@@ -2180,7 +2248,7 @@ mod tests {
 
     #[test]
     fn lo_que_el_programa_escribe_acaba_en_la_rejilla_una_sola_vez() {
-        let mut division = division_con("printf hola");
+        let mut division = division_con("printf hola", 0);
         esperar_a_que_muera(&division);
 
         assert!(!division.bombear(), "cuatro bytes no agotan el presupuesto");
@@ -2202,9 +2270,10 @@ mod tests {
         // Tres presupuestos y pico: bastante para que ningún fotograma pueda con todo, y poco para
         // que el test siga tardando milisegundos.
         const VOLCADO: usize = 400_000;
-        let mut division = division_con(&format!(
-            "head -c {VOLCADO} /dev/zero | tr '\\0' a; printf '\\r\\nFIN'"
-        ));
+        let mut division = division_con(
+            &format!("head -c {VOLCADO} /dev/zero | tr '\\0' a; printf '\\r\\nFIN'"),
+            0,
+        );
         esperar_a_que_muera(&division);
 
         let mut queda = division.bombear();
@@ -2243,7 +2312,7 @@ mod tests {
 
     #[test]
     fn la_rejilla_toma_el_tamano_que_midio_el_pase_anterior() {
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         let nuevo = Size { rows: 10, cols: 40 };
 
         division.medido = nuevo;
@@ -2263,7 +2332,7 @@ mod tests {
         // lado del esclavo, y desde este proceso no se puede leer. Quien puede contarlo es el programa de
         // dentro, y `stty size` es preguntárselo.
         let nuevo = Size { rows: 10, cols: 40 };
-        let mut division = division_con("while :; do stty size; sleep 0.05; done");
+        let mut division = division_con("while :; do stty size; sleep 0.05; done", 0);
 
         // Primero se comprueba que el programa informa del tamaño de arranque. Sin esto, un `stty` que no
         // existiera o que fallara daría el mismo resultado que un redimensionado que no llega: pantalla sin
@@ -2302,7 +2371,7 @@ mod tests {
         // egui puede correr la pasada de interfaz dos veces sobre la misma entrada. Los eventos que
         // van al programa se consumen por eso: leerlos y dejarlos escribiría la misma tecla dos
         // veces al pseudoterminal, y el programa de dentro no tiene forma de saber que sobra una.
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         let ctx = egui::Context::default();
         let mut modificadores = egui::Modifiers::NONE;
         ctx.input_mut(|entrada| {
@@ -2500,7 +2569,7 @@ mod tests {
     /// en vez de por el código.
     #[test]
     fn el_programa_de_dentro_publica_en_el_directorio_que_le_dijeron() {
-        let mut division = Division::lanzando(&egui::Context::default(), "sh")
+        let mut division = Division::lanzando(&egui::Context::default(), "sh", 0)
             .expect("no se pudo abrir la consola");
 
         let publicado = {
@@ -2631,7 +2700,7 @@ mod tests {
     /// rejilla el test seguía en verde, porque los dos nombres habían salido de la pantalla.
     #[test]
     fn una_consola_sin_directorio_arranca_igual_y_su_programa_no_ve_la_identidad() {
-        let mut division = Division::con_panel(&egui::Context::default(), "env", None)
+        let mut division = Division::con_panel(&egui::Context::default(), "env", None, 0)
             .expect("una consola sin panel tiene que abrir igual");
         esperar_a_que_muera(&division);
 
@@ -2935,7 +3004,7 @@ mod tests {
         // La repetición **se consume igual**: devolverla a la cola le mandaría al programa el byte de
         // control de cada repetición.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         let mut modificadores = egui::Modifiers::NONE;
 
         let mut lote = acorde_con(egui::Key::W);
@@ -2970,7 +3039,7 @@ mod tests {
         // vieja, caía en la traducción de siempre y le llegaba `\x1b[C` — exactamente lo que el corte
         // existe para impedir.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         let mut modificadores = egui::Modifiers::NONE;
 
         let mut lote = acorde_con(egui::Key::T);
@@ -2997,7 +3066,7 @@ mod tests {
         // una sola la flecha es del programa. Sin llevar la cuenta al día dentro del lote, el acorde se la
         // tragaría para ir de la única pestaña a ella misma.
         let ctx = egui::Context::default();
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         let mut modificadores = egui::Modifiers::NONE;
 
         let mut lote = acorde_con(egui::Key::W);
@@ -3632,13 +3701,28 @@ mod tests {
 
         let informe = informe_de(&ventana);
 
-        for que_pestaña in 0..2 {
-            for cual in 0..2 {
+        // **Las divisiones se numeran seguidas entre pestañas**, así que las de la segunda son la 2 y la
+        // 3, no otra vez la 0 y la 1. Escrito así, la prueba distingue un contador de toda la ventana de
+        // uno por pestaña: con el segundo, el informe publicaría dos «división 0» y esto caería.
+        for (que_pestaña, divisiones) in [(0, [0, 1]), (1, [2, 3])] {
+            for division in divisiones {
                 assert!(
-                    informe.contains(&format!("── pestaña {que_pestaña}, consola {cual} ")),
-                    "el informe no publica la consola {cual} de la pestaña {que_pestaña}:\n{informe}"
+                    informe.contains(&format!("── pestaña {que_pestaña}, división {division} ")),
+                    "el informe no publica la división {division} de la pestaña {que_pestaña}:\n{informe}"
                 );
             }
+        }
+
+        // **Y la cabecera también, que es otra línea y se escribe en otro sitio.** Es la que declara la
+        // rejilla de cada consola y la que el guion de medida lee para validar una corrida, así que
+        // nombrar ahí por posición publicaría dos «división 0» con rejillas distintas. Comprobado
+        // mutándolo: sin estas líneas, la cabecera podía volver a numerar por posición con la suite en
+        // verde, porque las de arriba solo miran los títulos de las tablas.
+        for division in [0, 1, 2, 3] {
+            assert!(
+                informe.contains(&format!("  división {division}:")),
+                "la cabecera no declara la rejilla de la división {division}:\n{informe}"
+            );
         }
     }
 
@@ -4116,12 +4200,12 @@ mod tests {
 
         let informe = informe_de(&ventana);
         assert!(
-            informe.contains("── pestaña 1, consola 0"),
+            informe.contains("── pestaña 1, división 2"),
             "la pestaña que quedó no conserva su nombre, así que sus números se publican con la \
              etiqueta de otra:\n{informe}"
         );
         assert!(
-            !informe.contains("── pestaña 0, consola 0"),
+            !informe.contains("── pestaña 0, división 0"),
             "la pestaña que quedó se publicó como la 0, que es la que se cerró:\n{informe}"
         );
     }
@@ -4150,6 +4234,64 @@ mod tests {
             nombres.len(),
             "hay pestañas que se llaman igual: {nombres:?}"
         );
+    }
+
+    #[test]
+    fn el_nombre_de_una_division_cerrada_no_se_le_da_a_otra() {
+        // **El caso que este nombre existe para cubrir.** Cerrar una pestaña se lleva sus dos divisiones,
+        // y si el contador se dedujera de las que quedan vivas —en vez de no retroceder nunca— la pestaña
+        // que se abriera después reutilizaría sus números. El informe publicaría entonces dos tablas de
+        // números bajo la misma etiqueta, y **quien lo lea no tiene forma de notarlo**: son dos consolas
+        // distintas con el mismo nombre, no un hueco que se vea.
+        //
+        // Se comprueba sobre los nombres vivos y sobre los ya gastados, porque el defecto no deja rastro
+        // en el número de divisiones ni en el de pestañas: los dos salen iguales con el contador bueno y
+        // con el malo.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+
+        // **El contador de partida no se toca aquí a propósito**: lo calcula quien monta la ventana, y
+        // dejar que lo haga es lo que pone ese cálculo dentro de lo que la prueba cubre. Fijándolo a mano
+        // —comprobado mutándolo— arrancarlo en cero pasaba desapercibido, y arrancar en cero significa
+        // repartirle a la primera pestaña que se abra los nombres de las que ya estaban.
+
+        // La primera se cierra, así que sus divisiones 0 y 1 quedan gastadas para siempre.
+        ventana.activa = 0;
+        ventana.aplicar(Orden::Cerrar, &ctx);
+        assert_eq!(ventana.pestañas.len(), 1, "no se cerró la primera pestaña");
+
+        // **Dos, y no una.** Con una sola no se distingue un contador que no retrocede de uno que se
+        // deduce de las divisiones vivas: los nombres se toman **antes** de tocar el contador, así que la
+        // primera que se abre sale bien con las dos versiones. El defecto solo asoma en la siguiente, que
+        // reutilizaría los nombres que acaba de repartir. Comprobado mutándolo: con una sola creación la
+        // prueba pasaba con el contador roto.
+        ventana.crear_una_pestaña(&ctx);
+        ventana.crear_una_pestaña(&ctx);
+        assert_eq!(
+            ventana.pestañas.len(),
+            3,
+            "no se abrieron las pestañas nuevas"
+        );
+
+        let vivos: Vec<usize> = ventana
+            .todas_las_divisiones()
+            .map(|division| division.nombre)
+            .collect();
+        let mut sin_repetir = vivos.clone();
+        sin_repetir.sort_unstable();
+        sin_repetir.dedup();
+        assert_eq!(
+            sin_repetir.len(),
+            vivos.len(),
+            "hay divisiones vivas que se llaman igual: {vivos:?}"
+        );
+        for gastado in [0, 1] {
+            assert!(
+                !vivos.contains(&gastado),
+                "la división {gastado} se cerró y su nombre se le dio a otra: {vivos:?}"
+            );
+        }
     }
 
     #[test]
@@ -5360,7 +5502,7 @@ mod tests {
     /// entera —el fichero en disco, la lectura del contrato y el reparto que sale de ella— y con un
     /// panel puesto a mano se probaría el reparto contra un estado que nadie ha leído nunca.
     fn division_con_panel(contenido: &str) -> Division {
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         division.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
         publicar_en(&division, contenido);
         division.refrescar_su_panel();
@@ -5424,7 +5566,7 @@ mod tests {
     #[test]
     fn publicar_saca_a_la_ventana_del_reposo() {
         let ctx = egui::Context::default();
-        let mut divisiones = [division_con("sleep 30"), division_con("sleep 30")];
+        let mut divisiones = [division_con("sleep 30", 0), division_con("sleep 30", 1)];
         for division in &mut divisiones {
             division.panel = Some(PanelDir::create().expect("crear el directorio"));
         }
@@ -5463,7 +5605,7 @@ mod tests {
     /// fotograma lo llamara. Un panel publicado después de abrir la consola no aparecería jamás.
     #[test]
     fn el_fotograma_recoge_un_panel_publicado_despues_de_abrir_la_consola() {
-        let mut division = division_con("sleep 30");
+        let mut division = division_con("sleep 30", 0);
         division.panel = Some(PanelDir::create().expect("crear el directorio"));
         assert!(
             division.estado_del_panel.a_pintar().is_none(),
@@ -5741,7 +5883,7 @@ mod tests {
     /// como antes de que existiera el panel: sin ancho descontado y sin segundo rectángulo.
     #[test]
     fn una_consola_sin_panel_publicado_se_queda_con_todo_su_rectangulo() {
-        let division = division_con("sleep 30");
+        let division = division_con("sleep 30", 0);
         let entera = area_de(800.0);
 
         let hueco = division.repartir_con_su_panel(entera, ANCHO_DE_CELDA, SystemTime::now());

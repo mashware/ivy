@@ -477,9 +477,17 @@ impl RestoDelFotograma {
 /// derecha corren un puesto, así que numerar aquí por el orden del recorrido le pondría a una tabla de
 /// números el nombre de otra pestaña — y quien lea el informe no tiene forma de notarlo. `visible` es
 /// también un nombre, por lo mismo.
+///
+/// **Y cada división llega con el suyo, por lo mismo y en cuanto se puedan cerrar.** Hoy son dos y
+/// fijas, así que el nombre coincide con la posición; publicar ya el nombre es lo que hace que las
+/// tandas tomadas antes y después del árbol de divisiones se lean igual.
+///
+/// **Una lista por pestaña y no un array de dos**: el número de divisiones deja de estar fijado por el
+/// tipo en cuanto llega el árbol, y una firma que siga prometiendo dos obligaría a recortar o rellenar
+/// justo aquí, que es donde el informe se convierte en el dato que alguien va a creerse.
 pub fn cabecera(
     a: &mut dyn std::io::Write,
-    rejillas: &[(usize, [term_core::Size; 2])],
+    rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
     visible: usize,
 ) -> std::io::Result<()> {
     let perfil = if cfg!(debug_assertions) {
@@ -500,14 +508,14 @@ pub fn cabecera(
             "de fondo, se bombeaba sin pintarse"
         };
         writeln!(a, "pestaña {que_pestaña}:    {mirada}")?;
-        for (cual, rejilla) in rejillas.iter().enumerate() {
+        for (cual, (division, rejilla)) in rejillas.iter().enumerate() {
             writeln!(
                 a,
-                "{:<13} {}×{}  ({})",
-                format!("  consola {cual}:"),
+                "{:<15} {}×{}{}",
+                format!("  división {division}:"),
                 rejilla.rows,
                 rejilla.cols,
-                NOMBRE_DE_CONSOLA[cual]
+                donde_cae(rejillas.len(), cual)
             )?;
         }
     }
@@ -520,6 +528,21 @@ pub fn cabecera(
 ///
 /// Un número suelto obliga a adivinar de qué lado es, y el reparto del ancho hace que el lado importe.
 pub const NOMBRE_DE_CONSOLA: [&str; 2] = ["izquierda", "derecha"];
+
+/// La pista de sitio que acompaña a una división en el informe, **si es que significa algo**.
+///
+/// **«Izquierda» y «derecha» solo describen algo cuando hay exactamente dos**, así que con cualquier
+/// otro número la pista se calla en vez de inventarse un lado. No es una guarda por si acaso: hasta
+/// este cambio el tipo de la cabecera era un array de dos y el número estaba fijado por él, y al
+/// pasarlo a una lista —que es lo que el árbol de divisiones necesita— la garantía dejó de existir.
+/// Indexar el array por la posición se convertía en un pánico **dentro del informe que se publica al
+/// salir**, o sea perdiendo de golpe todo lo medido en la sesión.
+fn donde_cae(cuantas: usize, cual: usize) -> String {
+    match NOMBRE_DE_CONSOLA.get(cual) {
+        Some(donde) if cuantas == NOMBRE_DE_CONSOLA.len() => format!("  ({donde})"),
+        _ => String::new(),
+    }
+}
 
 /// Cómo se llama esta máquina, o «desconocida» si no hay forma de saberlo.
 ///
@@ -555,6 +578,68 @@ mod tests {
             .publicar_tramos(&mut salida)
             .expect("escribir a memoria no falla");
         String::from_utf8(salida).expect("el informe es texto")
+    }
+
+    /// La cabecera que se publica de verdad, por el mismo camino que la escribe al salir.
+    fn cabecera_de(rejillas: &[(usize, Vec<(usize, term_core::Size)>)], visible: usize) -> String {
+        let mut salida = Vec::new();
+        cabecera(&mut salida, rejillas, visible).expect("escribir a memoria no falla");
+        String::from_utf8(salida).expect("la cabecera es texto")
+    }
+
+    fn rejilla(rows: u16, cols: u16) -> term_core::Size {
+        term_core::Size { rows, cols }
+    }
+
+    #[test]
+    fn con_dos_divisiones_la_cabecera_dice_de_qué_lado_cae_cada_una() {
+        let texto = cabecera_de(&[(0, vec![(0, rejilla(59, 57)), (1, rejilla(59, 21))])], 0);
+
+        assert!(
+            texto.contains("  división 0:   59×57  (izquierda)"),
+            "no publica la primera con su lado:\n{texto}"
+        );
+        assert!(
+            texto.contains("  división 1:   59×21  (derecha)"),
+            "no publica la segunda con su lado:\n{texto}"
+        );
+    }
+
+    #[test]
+    fn con_tres_divisiones_la_cabecera_no_se_inventa_un_lado_ni_se_cae() {
+        // **El tipo ya no impide que lleguen tres.** Hasta este cambio la cabecera recibía un array de
+        // dos y el número estaba fijado por él; al pasarlo a una lista —lo que el árbol de divisiones
+        // necesita— indexar el array de lados por la posición pasó a ser un pánico posible **dentro del
+        // informe que se publica al salir**, o sea perdiendo de golpe todo lo medido en la sesión.
+        //
+        // Y no basta con que no reviente: «izquierda» y «derecha» solo describen algo cuando hay dos, así
+        // que con tres la pista tiene que **callarse**, no repartirse a las dos primeras. La aserción
+        // mira las dos cosas porque un `get` que devuelva `None` solo para la tercera pasaría la primera
+        // mitad y seguiría publicando una geometría falsa para las otras dos.
+        let texto = cabecera_de(
+            &[(
+                0,
+                vec![
+                    (0, rejilla(59, 30)),
+                    (1, rejilla(59, 30)),
+                    (2, rejilla(59, 30)),
+                ],
+            )],
+            0,
+        );
+
+        for division in [0, 1, 2] {
+            assert!(
+                texto.contains(&format!("  división {division}:")),
+                "no publica la división {division}:\n{texto}"
+            );
+        }
+        for lado in NOMBRE_DE_CONSOLA {
+            assert!(
+                !texto.contains(lado),
+                "con tres divisiones sigue diciendo «{lado}», que ya no describe nada:\n{texto}"
+            );
+        }
     }
 
     /// Una medida con un fotograma anotado, que es lo mínimo para que el informe hable.
