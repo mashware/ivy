@@ -341,6 +341,20 @@ struct Division {
     /// recogido, cuándo se recogió y lo que costó interpretarlo—, a la espera de que la pasada de
     /// interfaz añada lo que cuesta encolar el pintado.
     pendiente_de_medir: Option<(Option<Instant>, Instant, std::time::Duration)>,
+    /// Lo que ha costado releer el `panel.json` de esta consola **sin llegar a pintarla**, a la espera
+    /// de que se cierre su vuelta al final de la pasada de interfaz.
+    ///
+    /// Una consola de una pestaña de fondo relee su panel igual que la que se ve —de que haya panel
+    /// depende cuánto ancho le queda—, pero no pasa por el pintado, que es donde ese tramo se declara.
+    /// Sin este campo, leer un fichero de disco quedaría dentro del fotograma sin que nadie lo
+    /// cronometre y la resta se lo regalaría al framework de interfaz.
+    ///
+    /// **Vive un suspiro: se escribe al medir y se vacía al cerrar la vuelta, dentro de la misma
+    /// pasada.** No hace falta que acumule entre pasadas, y conviene saber por qué: eframe llama a
+    /// `logic` **y** a `ui` dentro del mismo cierre que egui repite (`epi_integration.rs:288-303`), así
+    /// que una pasada repetida vuelve a bombear y vuelve a dejar vuelta pendiente. Nunca hay una
+    /// lectura esperando a una vuelta que no llega.
+    panel_sin_pintar: std::time::Duration,
 }
 
 /// Un directorio que no se pudo crear **no impide abrir la consola**.
@@ -440,6 +454,7 @@ impl Division {
             medido: REJILLA_INICIAL,
             medida: Medida::default(),
             pendiente_de_medir: None,
+            panel_sin_pintar: std::time::Duration::ZERO,
         })
     }
 
@@ -1031,6 +1046,75 @@ impl Ventana {
         self.resto_del_fotograma.publicar(a)
     }
 
+    /// Le da a las consolas de las pestañas que no se ven la rejilla que tendrían si se vieran.
+    ///
+    /// **Sin esto una pestaña de fondo se queda con [`REJILLA_INICIAL`] mientras dure**, porque
+    /// `medido` solo se escribe al pintar y a ellas no se las pinta. Y eso no es un detalle interno:
+    /// es el tamaño que [`Division::redimensionar`] le anuncia al programa de dentro, así que un
+    /// agente que trabaja en una pestaña que no miras formatea su salida para una ventana que no
+    /// existe —80 columnas de arranque cuando la suya son 57— y al volver a esa pestaña lo escrito
+    /// sigue ajustado a un ancho ajeno hasta que el programa redibuje. La promesa del hito es que la
+    /// de fondo siga corriendo; corriendo con la rejilla equivocada corre mal.
+    ///
+    /// **Cada una se reparte con su propia fracción, no con la de la activa**: el divisor es de la
+    /// disposición, y usar el de la pestaña visible mediría estas consolas con un divisor que no es
+    /// el suyo — el mismo defecto que ya costó una revisión cuando el clic de la barra se atendía
+    /// después de repartir.
+    ///
+    /// **El panel se relee también aquí, igual que en el pintado, y el primer intento no lo hacía.**
+    /// De que haya panel depende cuánto ancho le queda a la consola —el panel se lleva 36 columnas—,
+    /// así que una división de fondo cuyo productor publica por primera vez se mediría **36 columnas
+    /// de más** mientras dure el segundo plano: el mismo defecto que esta función viene a arreglar,
+    /// con el signo cambiado y más grande. Releer no es caro por defecto: `refrescar_su_panel` sale
+    /// por un `swap` atómico y solo llega al disco en el fotograma en que el vigilante avisó de que
+    /// **ese** `panel.json` cambió, que es exactamente cuando hace falta.
+    ///
+    /// **Y esa lectura se declara**, que es la otra mitad. Cae dentro de la pasada de interfaz, y aquí
+    /// no hay pintado que la cronometre: sin declararla, la resta se la regalaría al framework — la
+    /// cifra con la que D3 decide. Se guarda en `panel_sin_pintar` y la recoge
+    /// [`Ventana::cerrar_las_vueltas_no_pintadas`], que corre justo después.
+    ///
+    /// **El cronómetro solo cuenta si esta consola tiene directorio de panel.** Sin él no hay fichero
+    /// que leer y el refresco es el `swap` y nada más; publicar esos nanosegundos bajo la etiqueta
+    /// «panel» sería un tramo con el nombre cambiado, y en este proyecto eso ya invalidó una medida
+    /// entera.
+    ///
+    /// Con la ventana minimizada u ocluida no hay pasada de interfaz y esto no corre, igual que no
+    /// corre el pintado que mide la visible: nadie se queda peor que la que se ve.
+    fn medir_las_que_no_se_ven(&mut self, area: egui::Rect, metrica: &Metrica) {
+        // Un solo reloj para todas, y aquí sí basta con uno: de la hora solo depende si el panel de
+        // una división está rancio, y no se pinta nada después que pudiera desmentirlo.
+        let ahora = SystemTime::now();
+        let activa = self.activa;
+
+        for (cual, pestaña) in self.pestañas.iter_mut().enumerate() {
+            if cual == activa {
+                continue;
+            }
+
+            let reparto = repartir(area, pestaña.fraccion, metrica.ancho());
+            for (division, rect) in pestaña
+                .divisiones
+                .iter_mut()
+                .zip([reparto.izquierda, reparto.derecha])
+            {
+                let antes_del_panel = Instant::now();
+                division.refrescar_su_panel();
+                let hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
+                // **La frontera del tramo es la misma que en el pintado**, que cierra su cronómetro
+                // también después de repartir: `repartir_con_su_panel` pregunta si el panel se ve, y
+                // esa pregunta llega a componer el texto de un aviso cuando el productor está callado
+                // o roto. Cerrar antes dejaría ese trabajo fuera, y las dos consolas de un mismo
+                // informe medirían el tramo «panel» con fronteras distintas según se las mire o no.
+                if division.panel.is_some() {
+                    division.panel_sin_pintar = antes_del_panel.elapsed();
+                }
+
+                division.medido = metrica.celdas_en(hueco.consola.size());
+            }
+        }
+    }
+
     /// Cierra la vuelta de las consolas que **interpretaron y no se pintaron**, para que su trabajo no
     /// acabe publicado como coste del framework de interfaz.
     ///
@@ -1042,11 +1126,14 @@ impl Ventana {
     /// del fotograma siguiente sobrescribe lo pendiente, así que la muestra no se doblaba, **se
     /// perdía**.
     ///
-    /// **Encolado y panel a cero es la verdad, no un relleno**: esa consola no encoló nada ni pintó
-    /// ningún panel. Y **la espera se declara a `None` a propósito**, que es lo que hace que las
-    /// cuatro medias no se toquen —ver [`medida::Medida::cerrar_fotograma`]—; lo único que se conserva
-    /// es lo interpretado, que es justo lo que la resta necesita. Por eso esto **no lleva ninguna
-    /// serie nueva**.
+    /// **El encolado a cero es la verdad, no un relleno**: esa consola no encoló ningún pintado. **El
+    /// tramo del panel ya no es cero**, y ésa es la diferencia con la primera versión de este barrido:
+    /// una consola de fondo **sí** relee su `panel.json` —de que haya panel depende cuánto ancho le
+    /// queda—, y esa lectura la cronometra [`Ventana::medir_las_que_no_se_ven`] y la entrega aquí. Y
+    /// **la espera se declara a `None` a propósito**, que es lo que hace que las cuatro medias no se
+    /// toquen —ver [`medida::Medida::cerrar_fotograma`]—; lo que se conserva es lo interpretado y lo
+    /// que costó el panel, que es justo lo que la resta necesita. Por eso esto **no lleva ninguna serie
+    /// nueva**.
     ///
     /// **Va al final de la pasada de interfaz y no tras bombear**, porque hasta que no se ha pintado
     /// no se sabe qué se pintó: un atajo puede cambiar la pestaña visible en ese mismo fotograma.
@@ -1057,13 +1144,19 @@ impl Ventana {
     /// queda sin medir, que es lo correcto, en vez de medido de menos.
     fn cerrar_las_vueltas_no_pintadas(&mut self) {
         for division in self.todas_las_divisiones_mut() {
+            // **El tramo del panel viaja con la vuelta, y no en una anotación propia.** No es una
+            // preferencia: [`medida::Medida::anotar_vuelta`] **sobrescribe** lo pendiente, así que una
+            // segunda anotación en el mismo fotograma se llevaría por delante la vuelta buena. Aquí no
+            // llega a pasar —`bombear` deja siempre algo pendiente y las dos cosas se declaran
+            // juntas—, y por eso mismo conviene que quede escrito: la forma segura de añadir un tramo
+            // a esta vuelta es meterlo dentro, nunca al lado.
             if let Some((_, recogido_en, interpretado)) = division.pendiente_de_medir.take() {
                 division.medida.anotar_vuelta(medida::Tramos::de_una_vuelta(
                     None,
                     recogido_en,
                     interpretado,
                     std::time::Duration::ZERO,
-                    std::time::Duration::ZERO,
+                    std::mem::take(&mut division.panel_sin_pintar),
                 ));
             }
         }
@@ -1616,6 +1709,10 @@ impl eframe::App for Ventana {
             egui::StrokeKind::Inside,
         );
 
+        // Las que no se pintan no tienen otro sitio donde enterarse de su tamaño: ésta es la única
+        // mitad del fotograma que conoce el área que les tocaría.
+        self.medir_las_que_no_se_ven(area, &metrica);
+
         // Ya se ha pintado, así que lo que siga pendiente es de una consola que no se pintó.
         self.cerrar_las_vueltas_no_pintadas();
 
@@ -1901,6 +1998,7 @@ mod tests {
             pantalla: Screen::new(REJILLA_INICIAL),
             medida: Medida::default(),
             pendiente_de_medir: None,
+            panel_sin_pintar: std::time::Duration::ZERO,
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
@@ -3853,6 +3951,301 @@ mod tests {
             medida_de_la_segunda > con_el_divisor_de_la_primera,
             "la izquierda de la segunda pestaña se lleva el 80 % y salió más estrecha que el 20 % de la primera"
         );
+    }
+
+    #[test]
+    fn una_pestaña_que_no_se_ve_recibe_la_rejilla_de_la_ventana_y_no_la_de_arranque() {
+        // El programa de una pestaña de fondo formatea su salida para el tamaño que se le anunció. Si
+        // nadie se lo cuenta se queda con el de arranque —24×80— y escribe para una ventana que no
+        // existe: al volver a esa pestaña, lo escrito está ajustado a un ancho ajeno.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+
+        let de_fondo = ventana.pestañas[1].divisiones[0].medido;
+        assert_ne!(
+            de_fondo, REJILLA_INICIAL,
+            "la pestaña de fondo se quedó con la rejilla de arranque"
+        );
+        // Las dos pestañas nacen con la misma fracción y comparten el área, así que la de fondo tiene
+        // que medir exactamente lo mismo que la que se está pintando.
+        assert_eq!(
+            de_fondo, ventana.pestañas[0].divisiones[0].medido,
+            "la de fondo no mide lo mismo que la visible teniendo el mismo divisor y la misma área"
+        );
+    }
+
+    #[test]
+    fn la_de_fondo_se_mide_con_su_divisor_y_no_con_el_de_la_visible() {
+        // El divisor es de la disposición, así que cada pestaña reparte su área con el suyo. Medir las
+        // de fondo con el de la pestaña visible les daría una rejilla que cambia sola cada vez que
+        // arrastras un divisor que no es el de ellas.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        // Muy distintos a propósito: con dos repartos parecidos las dos rejillas darían el mismo
+        // número de columnas y la prueba no vería nada.
+        ventana.pestañas[0].fraccion = 0.2;
+        ventana.pestañas[1].fraccion = 0.8;
+
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        let desde_el_fondo = [
+            ventana.pestañas[1].divisiones[0].medido,
+            ventana.pestañas[1].divisiones[1].medido,
+        ];
+
+        // Y ahora la misma pestaña, pero pintándose: lo que se mide desde el fondo tiene que ser lo
+        // que se mide al verla. Comparar contra la otra pestaña solo diría que salieron distintas.
+        ventana.activa = 1;
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+
+        assert_eq!(
+            desde_el_fondo,
+            [
+                ventana.pestañas[1].divisiones[0].medido,
+                ventana.pestañas[1].divisiones[1].medido,
+            ],
+            "la pestaña de fondo se midió con un divisor que no era el suyo"
+        );
+    }
+
+    #[test]
+    fn la_rejilla_de_una_pestaña_de_fondo_llega_hasta_su_rejilla_de_verdad() {
+        // Escribir `medido` no le sirve de nada a nadie si el campo se queda ahí: quien lo aplica es el
+        // bombeo del fotograma siguiente. Sin este paso, la prueba de arriba pasaría con la rejilla de
+        // la consola —y con la del programa de dentro— todavía en 24×80.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+
+        let de_fondo = &ventana.pestañas[1].divisiones[0];
+        assert_eq!(
+            de_fondo.pantalla.size(),
+            de_fondo.medido,
+            "la rejilla de la consola de fondo no llegó a cambiar de tamaño"
+        );
+        assert_ne!(
+            de_fondo.pantalla.size(),
+            REJILLA_INICIAL,
+            "la consola de fondo sigue interpretando contra la rejilla de arranque"
+        );
+    }
+
+    #[test]
+    fn el_panel_que_aparece_en_una_pestaña_de_fondo_le_estrecha_la_consola() {
+        // **De que haya panel depende cuánto ancho le queda a la consola** —se lleva 36 columnas—, y
+        // el estado del panel solo se refrescaba al pintar. Una división de fondo cuyo productor
+        // publica mientras no la miras se medía con el rectángulo entero: 36 columnas de más durante
+        // todo el segundo plano, o sea el mismo defecto que esta función arregla, con el signo
+        // cambiado y más grande. Es además el caso central del producto: un agente que trabaja en la
+        // pestaña que no estás mirando y publica su estado.
+        let ctx = egui::Context::default();
+        let area = area_de(1200.0);
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        ventana.pestañas[1].divisiones[0].panel =
+            Some(PanelDir::create().expect("crear el directorio"));
+
+        // Con el directorio vacío no hay nada que enseñar, así que la consola ocupa su rectángulo.
+        pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+        let sin_panel = ventana.pestañas[1].divisiones[0].medido;
+
+        // Y ahora el productor publica, con su pestaña todavía de fondo.
+        publicar_en(
+            &ventana.pestañas[1].divisiones[0],
+            r#"{"lines":["algo publicado"]}"#,
+        );
+        ventana.pestañas[1].divisiones[0].por_releer.levantar();
+        pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+        let de_fondo = ventana.pestañas[1].divisiones[0].medido;
+        assert!(
+            de_fondo.cols < sin_panel.cols,
+            "la consola de fondo no cedió ancho a un panel ya publicado: midió {} columnas, las \
+             mismas que sin panel",
+            de_fondo.cols
+        );
+
+        // Y lo definitivo: mide lo mismo que mediría pintándose. Comparar solo contra «más estrecha»
+        // dejaría pasar cualquier ancho equivocado que fuera menor.
+        ventana.activa = 1;
+        pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+        assert_eq!(
+            de_fondo, ventana.pestañas[1].divisiones[0].medido,
+            "la consola se mide distinto según se la mire o no"
+        );
+    }
+
+    #[test]
+    fn lo_que_cuesta_releer_el_panel_de_una_de_fondo_se_declara() {
+        // Releer el `panel.json` de una consola de fondo es tocar el disco **dentro** de la pasada de
+        // interfaz, y ahí no hay pintado que lo cronometre. Sin declararlo, la resta se lo regala al
+        // framework de interfaz — la cifra con la que D3 decide si egui aguanta, y el error que este
+        // proyecto ya cometió tres veces.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        ventana.pestañas[1].divisiones[0].panel =
+            Some(PanelDir::create().expect("crear el directorio"));
+        publicar_en(
+            &ventana.pestañas[1].divisiones[0],
+            r#"{"lines":["algo publicado"]}"#,
+        );
+        ventana.pestañas[1].divisiones[0].por_releer.levantar();
+
+        // El tramo del panel viaja con la vuelta que deja el bombeo, así que hay que bombear. Lo que
+        // interpretó se guarda aparte para poder afirmar sobre **el panel** y no sobre la suma: sin
+        // esa resta, la prueba la cumpliría cualquier tramo que declarase algo.
+        ventana.bombear_todas();
+        let (_, _, interpretado) = ventana.pestañas[1].divisiones[0]
+            .pendiente_de_medir
+            .expect("el bombeo tiene que dejar pendiente la vuelta de la consola de fondo");
+
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        let declarado = ventana.pestañas[1].divisiones[0]
+            .medida
+            .cerrar_fotograma(std::time::Duration::from_millis(10))
+            .expect("la consola de fondo no declaró nada");
+        assert!(
+            declarado > interpretado,
+            "declaró {declarado:?} y solo interpretar ya costó {interpretado:?}: leer el panel se \
+             publicaría como coste del framework"
+        );
+        assert!(
+            !ventana.pestañas[1].divisiones[0].medida.hay_medias(),
+            "leer el panel de una consola que no se pinta ensució una media: no hubo vuelta que \
+             medir, solo algo que restar"
+        );
+    }
+
+    #[test]
+    fn con_tres_pestañas_abiertas_se_miden_todas_las_de_fondo_y_no_solo_la_primera() {
+        // **Medido, no supuesto:** con el bucle cortado después de la primera de fondo —un `break` al
+        // final de la vuelta— las 263 pruebas de antes seguían verdes, porque todas abrían dos
+        // pestañas y con dos la primera de fondo es la única que hay. A partir de la tercera, la que
+        // se queda sin medir corre con la rejilla de arranque durante todo el segundo plano, que es
+        // exactamente lo que este hito promete que no pasa. Y tres es lo normal aquí: el producto son
+        // varios agentes a la vez, no dos.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([
+            ["sleep 30", "sleep 30"],
+            ["sleep 30", "sleep 30"],
+            ["sleep 30", "sleep 30"],
+        ]);
+        // Tres divisores distintos: con fracciones parecidas las tres pestañas darían el mismo número
+        // de columnas y medir una por otra no se vería.
+        ventana.pestañas[0].fraccion = 0.2;
+        ventana.pestañas[1].fraccion = 0.5;
+        ventana.pestañas[2].fraccion = 0.8;
+
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        let desde_el_fondo: Vec<[Size; 2]> = ventana.pestañas[1..]
+            .iter()
+            .map(|pestaña| [pestaña.divisiones[0].medido, pestaña.divisiones[1].medido])
+            .collect();
+
+        for (cual, medidas) in desde_el_fondo.iter().enumerate() {
+            assert!(
+                !medidas.contains(&REJILLA_INICIAL),
+                "la pestaña {} se quedó con la rejilla de arranque: midió {medidas:?}",
+                cual + 1
+            );
+        }
+
+        // Y cada una tiene que medir desde el fondo lo que mide al verse. Comparar solo contra la
+        // rejilla de arranque dejaría pasar cualquier tamaño equivocado que no fuera 24×80.
+        for (cual, medidas) in desde_el_fondo.iter().enumerate() {
+            let pestaña = cual + 1;
+            ventana.activa = pestaña;
+            un_fotograma_con(&mut ventana, &ctx, Vec::new());
+            assert_eq!(
+                *medidas,
+                [
+                    ventana.pestañas[pestaña].divisiones[0].medido,
+                    ventana.pestañas[pestaña].divisiones[1].medido,
+                ],
+                "la pestaña {pestaña} no midió desde el fondo lo que mide al verse"
+            );
+        }
+    }
+
+    #[test]
+    fn al_aparecer_la_barra_la_pestaña_que_pasa_a_fondo_pierde_el_alto_que_la_barra_ocupa() {
+        // El fotograma en que se abre la segunda pestaña es el único en que el área de las consolas
+        // encoge: hasta ahí no había barra que apartar. La que se queda detrás no se pinta en ese
+        // fotograma, así que si se la mide contra el área de antes se queda con **una fila de más**
+        // hasta que algo más la vuelva a medir, y su programa escribe una línea que no cabe.
+        //
+        // **Medido:** medir contra el área de antes de apartar la barra —el rectángulo entero de la
+        // ventana— tira ésta y otras tres. Antes de que existiera, ninguna prueba abría una pestaña y
+        // miraba después lo que midió la que se quedó detrás.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+
+        // Con una sola pestaña no hay barra, así que las consolas se llevan el alto entero.
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        let sin_barra = ventana.pestañas[0].divisiones[0].medido;
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
+
+        assert_eq!(ventana.pestañas.len(), 2, "no se abrió la pestaña");
+        let paso_a_fondo = ventana.pestañas[0].divisiones[0].medido;
+        assert!(
+            paso_a_fondo.rows < sin_barra.rows,
+            "la que se quedó detrás midió {} filas, las mismas que cuando no había barra",
+            paso_a_fondo.rows
+        );
+        // Se comparan las filas y no la rejilla entera: lo que la barra quita es alto, y las columnas
+        // de la pestaña nueva dependen además de su panel, que la de antes no tiene.
+        assert_eq!(
+            paso_a_fondo.rows, ventana.pestañas[1].divisiones[0].medido.rows,
+            "la que se quedó detrás no tiene el alto de la que ahora se ve"
+        );
+    }
+
+    #[test]
+    fn el_programa_de_una_pestaña_de_fondo_se_entera_del_tamaño_que_se_le_midio() {
+        // La última cláusula del criterio que este cambio cubre: que el tamaño **llegue hasta el
+        // programa de dentro**. Las demás pruebas llegan hasta `pantalla`, que es esta misma
+        // aplicación contándose las cosas a sí misma.
+        //
+        // Lo que añade sobre `al_redimensionar_el_programa_de_dentro_se_entera_del_tamano_nuevo` es el
+        // **camino entero**: aquella llama a `redimensionar` a mano sobre una división suelta, así que
+        // demuestra que el `ioctl` funciona, no que alguien lo dispare por una pestaña que nunca se
+        // pinta. Ésta pasa por el fotograma completo, que es donde el defecto vivía. Las dos caen si
+        // se quita el `ioctl`, y eso está bien: se cubren dos tramos distintos del mismo camino.
+        //
+        // Se pregunta con `stty size` porque no hay otra forma: el tamaño vive en el núcleo, del lado
+        // del esclavo, y desde este proceso no se puede leer.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([
+            ["sleep 30", "sleep 30"],
+            ["while :; do stty size; sleep 0.05; done", "sleep 30"],
+        ]);
+
+        // Dos fotogramas: el primero mide —la pasada de interfaz escribe `medido`— y el segundo
+        // aplica, porque `redimensionar` corre en la mitad lógica, antes de medir.
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+
+        let de_fondo = &mut ventana.pestañas[1].divisiones[0];
+        assert_ne!(
+            de_fondo.medido, REJILLA_INICIAL,
+            "la de fondo se quedó con la rejilla de arranque y la espera de abajo no probaría nada"
+        );
+        let suyo = format!("{} {}", de_fondo.medido.rows, de_fondo.medido.cols);
+        esperar_a_que_la_pantalla_diga(de_fondo, &suyo);
     }
 
     #[test]
