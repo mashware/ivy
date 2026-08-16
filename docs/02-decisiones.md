@@ -977,3 +977,104 @@ crudo, no me traduzcas», y a todo programa que entra en crudo por la vía norma
 **Cuándo reabrir esto.** Si aparece una forma de saber qué quiere el programa **sin** mentirle sobre
 el estado de su terminal. Hoy no la hay, y el issue
 [#27](https://github.com/mashware/agent-terminal/issues/27) queda con esta autopsia dentro.
+
+## D13 — Las pestañas son una lista de disposiciones, y las que no se ven trabajan igual
+
+**Qué se decidió.** La ventana pasa a ser una **lista de pestañas** más el índice de la que se ve.
+Cada pestaña se lleva lo que es de una disposición —sus dos divisiones, cuál tiene el foco y dónde
+está el divisor— y la ventana conserva lo que es del proceso: el tema, el vigilante, la medida y los
+modificadores del teclado. La mitad lógica del fotograma recorre **todas** las pestañas; la de
+interfaz pinta **solo** la que se ve.
+
+**Por qué.** Es el primer hito de la Fase 2 porque **decide la forma del estado** sobre la que
+escriben el árbol de divisiones (F2.2), el arrastre (F2.3) y la persistencia (F2.5). Y porque el
+problema que el proyecto resuelve —varios agentes a la vez— no cabe en dos consolas: hace falta un
+contexto por tarea.
+
+**Lo que se descartó, y por qué:**
+
+- **Esconder la disposición detrás de una frontera de métodos.** Obligaba a meter dentro del pintado
+  dos funciones que se extrajeron a propósito para poder probarse **sin abrir ventana**, y cuatro de
+  esos métodos existían solo para no indexar. `Pestaña` es un **contenedor transparente**: sus tres
+  campos se ven desde la ventana. El beneficio de la frontera se cobraba en F2.2, y adelantar trabajo
+  de la fase siguiente es justo lo que las reglas del proyecto prohíben.
+- **Bajarle el presupuesto de bombeo a las pestañas que no se ven.** Es incompatible por
+  construcción con lo que el hito promete: el margen que el núcleo regala antes de bloquear al
+  programa son **20 KiB**, seis veces menos que el propio presupuesto de 128 KiB, así que recortarlo
+  no hace que la consola de fondo vaya más despacio — **hace que su programa se pare al escribir**.
+  Las de fondo se bombean con el mismo presupuesto y el fotograma se alarga: el reparto lo hace el
+  propio fotograma, sin mecanismo, y el precio se paga en fotogramas por segundo de toda la ventana.
+- **Invertir el orden con F2.2** (árbol de divisiones antes que pestañas). Un árbol sin pestañas no
+  vale por sí solo, y el orden ya estaba justificado en el roadmap.
+- **Una serie propia en el informe** para lo que interpretan las consolas que no se pintan, y un
+  contador de pestañas cerradas. Los dos se cortaron por no tener consumidor.
+- **Cerrar la última pestaña dejando la lista vacía.** Pedir el cierre no cierra en el acto —siguen
+  corriendo fotogramas y el informe se publica al salir—, así que una lista vacía dejaría el índice
+  de la activa apuntando fuera de rango en cada uno de ellos. La última pestaña no se quita: lo que
+  se cierra es la ventana.
+
+**Lo que costó, y conviene que quede escrito.** Los números del informe estaban mal en cinco sitios
+distintos en cuanto hubo pestañas, y ninguno se veía desde fuera: el fotograma se cerraba dos veces
+cuando egui repetía la pasada —la guarda contaba pasadas y no fotogramas—, la segunda anotación
+machacaba la buena y borraba lo interpretado, abrir una pestaña lanzaba dos procesos que nadie
+declaraba, cerrarla se llevaba el tiempo que su consola ya había medido, y las etiquetas del informe
+se renumeraban al cerrar una pestaña, de modo que una tabla de números podía acabar titulada con el
+nombre de otra. **La lección es del método, no del código:** en un instrumento que reparte un total
+por resta, cada camino nuevo que aparece —una pestaña que no se pinta, un atajo que crea procesos— es
+una fuga posible, y ninguna se ve leyendo el informe, porque el número sale plausible.
+
+### Medido — el fotograma con pestañas (16 de agosto de 2026)
+
+Tres tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
+`scripts/medir-fotograma.sh C|F|G`. Las tres con los cuatro paneles publicándose a ritmo de una vez
+por segundo, para que se puedan comparar entre sí. Carga de 44 MiB por consola que vuelca.
+
+| | **C** — 1 pestaña | **F** — 2, la de fondo quieta | **G** — 2, la de fondo volcando |
+|---|---|---|---|
+| Rejilla de cada consola | 61×21 | 59×21 | 59×21 |
+| Consolas volcando | 2 | 2 | **4** |
+| Vuelta completa | 76,4 ms · 76,4 | 75,1 · 76,9 | **90,3 · 95,1** |
+| — esperando en la cola | 71,0 · 71,0 | 70,1 · 71,3 | **81,0 · 85,4** |
+| — interpretando | 2,21 · 2,17 | 1,97 · 2,25 | 2,03 · 2,24 |
+| — encolando el pintado | 371 µs · 351 | 360 · 346 | 361 · 369 |
+| — el panel de estado | 7,6 µs · 7,0 | 6,5 · 7,4 | 7,1 · 7,6 |
+| **el resto del fotograma** | **386 µs · 409** | **466 · 399** | **399 · 403** |
+
+**Qué prueba esto, que es lo que la decisión mandaba medir:**
+
+1. **El coste del framework de interfaz no se mueve al añadir una pestaña.** El «resto del
+   fotograma» —teselar, dibujar y el armazón de egui— se queda entre **386 y 466 µs** en las seis
+   corridas, y la variación entre las dos corridas de una misma tanda (386 → 409 en C, 466 → 399 en F)
+   es del mismo orden que la variación entre tandas. Dicho al revés: **el número con el que D3 juzga a
+   egui no empeora por tener pestañas**, ni siquiera con cuatro consolas volcando a la vez.
+2. **La barra sale gratis.** F le quita a cada consola dos filas de rejilla frente a C —61 pasa a
+   59— y el fotograma no se distingue del de C en ningún tramo. Pintar las fichas y repartir el alto
+   no cuesta nada medible.
+3. **Lo que sí cuesta es el trabajo de fondo, y se paga en la cola.** En G la vuelta completa sube de
+   76 a **93 ms**, y **casi todo el aumento está en esperar** (71 → 83 ms). Es el presupuesto haciendo
+   su trabajo: cuatro divisiones tragan 128 KiB cada una por fotograma, así que con el doble de
+   consolas volcando cada byte espera más su turno. Interpretar, encolar y el panel **no se mueven**,
+   que es lo que confirma que no hay coste nuevo por división.
+
+**Y qué NO prueba, que importa igual:**
+
+- **No dice lo que le cuesta a la consola de fondo interpretar sus 44 MiB.** Su bloque del informe
+  sale **vacío**, y es por decisión: una consola que no se pinta declara su vuelta **sin espera** para
+  no ensuciar las cuatro medias con muestras de una vuelta que nadie vio. Su tiempo **sí se descuenta**
+  del resto —eso es lo que arregló el hito—, pero no hay número publicado de su trabajo. Lo que la
+  tanda G mide es el **efecto** del trabajo de fondo sobre las consolas de delante, no su coste
+  directo.
+- **No es un fotograma de 120 Hz.** Con dos consolas volcando a plena carga el fotograma entero está
+  muy por encima del hueco de 8,3 ms; estos números describen el **peor caso sostenido**, no el uso
+  normal. La comparación válida es entre tandas, no contra el presupuesto de un refresco.
+- **No dice nada de cuatro pestañas.** Todo esto es con una y con dos. Con cuatro divisiones visibles
+  el panel se comería la consola entera y habría que volver a medir
+  ([#33](https://github.com/mashware/agent-terminal/issues/33)).
+- **La rejilla de estas tandas es de 21 columnas por consola**, no de 57: el panel se lleva 36. No son
+  comparables con los anexos de D3 anteriores a los paneles.
+
+**Un número de campo que vale la pena conservar:** en la tanda G la cabecera publica la pestaña de
+fondo con rejilla **59×21**, la misma que la visible. Antes de este hito habría dicho **24×80** —la
+rejilla de arranque— porque el tamaño solo se calculaba al pintar. Es la comprobación en la
+aplicación real de que un agente en una pestaña que no miras trabaja con la ventana que de verdad
+tiene.

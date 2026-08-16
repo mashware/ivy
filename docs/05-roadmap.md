@@ -217,7 +217,7 @@ Lo que convierte el prototipo en algo que se usa a diario.
 
 | Hito | Qué |
 |---|---|
-| **F2.1** | Pestañas |
+| **F2.1** ✅ | Pestañas — **cerrado el 16 de agosto de 2026**. Ocho entregas; el fotograma medido con una y dos pestañas en el anexo de [D13](02-decisiones.md) |
 | **F2.2** | Divisiones arbitrarias — árbol de divisiones, no solo dos |
 | **F2.3** | **Arrastrar divisiones con el ratón** para recolocarlas — lo que ningún terminal actual da |
 | **F2.4** | Plegar el panel por división, y **estrechar su ancho arrastrando** — el mismo gesto sobre la misma frontera, así que van juntos ([02-decisiones.md](02-decisiones.md) → D10) |
