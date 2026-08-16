@@ -170,6 +170,33 @@ impl Tramos {
             panel,
         }
     }
+
+    /// Junta los tramos de **otra pasada del mismo fotograma**.
+    ///
+    /// egui puede repetir la pasada sobre la misma entrada, y `eframe` llama a las dos mitades de la
+    /// aplicación dentro del cierre que se repite (`epi_integration.rs:288-303`), así que en un
+    /// fotograma repetido se vuelve a bombear y a pintar. **Los dos trabajos ocurrieron**, y los dos hay
+    /// que devolverlos a la resta del fotograma: sumarlos es lo que dice la verdad.
+    ///
+    /// **La espera se queda con la primera que hubo, y no se suman.** La espera no es trabajo de la
+    /// aplicación —es cuánto llevaba el byte más antiguo en la cola—, así que sumar dos esperas daría un
+    /// número que nadie esperó. La de la primera pasada es la del lote que de verdad esperó; la segunda
+    /// recoge una cola ya vacía.
+    /// Lo que hay que devolverle a la resta del fotograma: todo lo que la aplicación hizo de verdad.
+    ///
+    /// La espera no entra, y no es un olvido: **no es trabajo**, es cuánto llevaba el byte en la cola.
+    fn declarable(&self) -> Duration {
+        self.interpretado + self.encolado + self.panel
+    }
+
+    fn y_ademas(self, otra: Self) -> Self {
+        Self {
+            esperado: self.esperado.or(otra.esperado),
+            interpretado: self.interpretado + otra.interpretado,
+            encolado: self.encolado + otra.encolado,
+            panel: self.panel + otra.panel,
+        }
+    }
 }
 
 /// Los cronómetros **de una división** y lo que llevan medido.
@@ -206,8 +233,27 @@ impl Medida {
     ///
     /// **Se guarda siempre, también sin salida.** Lo que decide si hubo vuelta es que la espera sea
     /// `Some`; el trabajo de pintar ocurrió en los dos casos y la ventana tiene que poder descontarlo.
+    ///
+    /// **Se SUMA a lo que ya hubiera pendiente, y esto arregla un sesgo que estuvo vivo.** Antes
+    /// sustituía, y el fotograma con la pasada repetida —egui la repite cuando algo pide recomponerse—
+    /// llegaba aquí dos veces: la segunda anotación, con lo interpretado a casi cero porque la cola ya
+    /// estaba vacía, **machacaba la buena**. Lo que la consola había interpretado de verdad se publicaba
+    /// como coste del framework de interfaz, que es la cifra con la que D3 decide. Medido antes del
+    /// arreglo: **50 ns declarados donde interpretar había costado 20,158 µs**. Ver [`Tramos::y_ademas`]
+    /// por qué la espera no se suma.
+    ///
+    /// **Sumar solo es correcto porque el fotograma se cierra una vez, y las dos cosas van juntas.** Si
+    /// el cierre ocurriera por pasada, esto acumularía tramos de la primera pasada dentro del total de la
+    /// segunda; y si el cierre fuera por fotograma pero esto sustituyera, se perderían los de la primera.
+    /// Lo que hace que encaje: en la mitad lógica del fotograma **N** se cierra con los tramos del
+    /// **N-1** y el coste del **N-1** —`eframe` publica el total con un fotograma de retraso—, así que lo
+    /// que aquí se suma son siempre las pasadas **de un mismo fotograma**. Quien toque una de las dos
+    /// piezas tiene que mirar la otra.
     pub fn anotar_vuelta(&mut self, tramos: Tramos) {
-        self.pendiente = Some(tramos);
+        self.pendiente = Some(match self.pendiente.take() {
+            Some(ya_habia) => ya_habia.y_ademas(tramos),
+            None => tramos,
+        });
     }
 
     /// Cierra el fotograma anterior de esta división con lo que `eframe` dice que costó de CPU.
@@ -232,7 +278,21 @@ impl Medida {
             self.vuelta.anotar(esperado + coste_cpu);
         }
 
-        Some(tramos.interpretado + tramos.encolado + tramos.panel)
+        Some(tramos.declarable())
+    }
+
+    /// Se lleva lo que quedaba pendiente **sin anotar ninguna media**, y devuelve lo que hay que restar.
+    ///
+    /// **Es para la división que se va con su pestaña.** Sus tramos ocurrieron y hay que declararlos, o el
+    /// resto del fotograma se queda con su trabajo. Pero sus medias no las va a publicar nadie —el informe
+    /// recorre las pestañas vivas—, y cerrarla por el camino normal exigiría inventarse un coste de
+    /// fotograma para la serie de la vuelta: con un cero, una vuelta artificialmente corta; con el de
+    /// verdad, una muestra de un fotograma que esta consola ya no va a terminar. Lo honesto es no anotar
+    /// nada y quedarse solo con lo que la resta necesita.
+    pub fn llevarse_lo_pendiente(&mut self) -> Duration {
+        self.pendiente
+            .take()
+            .map_or(Duration::ZERO, |tramos| tramos.declarable())
     }
 
     /// Lo que esta división lleva anotado del tramo del panel.
@@ -358,6 +418,28 @@ impl RestoDelFotograma {
         self.serie.anotar(coste_cpu.saturating_sub(cronometrado));
     }
 
+    /// Lo que se ha publicado como resto, de media.
+    ///
+    /// **Solo lo usan las pruebas, y por eso está detrás de su bandera.** Es lo que permite afirmar que
+    /// un trabajo declarado **se descuenta de verdad**: sin esto, una prueba solo puede comprobar que
+    /// alguien apuntó el número en un campo, que es atar al ayudante y no al camino — y ese hueco ya dejó
+    /// pasar una mutación en este mismo trabajo.
+    #[cfg(test)]
+    pub fn media(&self) -> Duration {
+        self.serie.media()
+    }
+
+    /// Cuántas veces se ha anotado un resto, o sea **cuántos fotogramas se han cerrado**.
+    ///
+    /// **Solo lo usan las pruebas, y por eso está detrás de su bandera.** Es el único observable que
+    /// distingue un fotograma cerrado una vez de uno cerrado dos: las medias no lo delatan —dos cierres
+    /// del mismo fotograma anotan un valor parecido— y el informe tampoco. Es lo que hace falta para
+    /// atar la guarda que evita el doble cierre.
+    #[cfg(test)]
+    pub fn fotogramas_cerrados(&self) -> usize {
+        self.serie.total
+    }
+
     pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
         if !self.serie.hay() {
             return Ok(());
@@ -389,9 +471,15 @@ impl RestoDelFotograma {
 /// falta para comparar con una medida antigua de una sola consola a pantalla completa: sin él, un
 /// «encolar» más bajo se lee como que el framework va más rápido, cuando lo que pasa es que hay la
 /// mitad de columnas.
+/// La cabecera del informe: cuántas pestañas había, cuál se veía y con qué rejilla cada consola.
+///
+/// **Cada pestaña llega con su nombre, no con su posición en la lista.** Al cerrar una, las de su
+/// derecha corren un puesto, así que numerar aquí por el orden del recorrido le pondría a una tabla de
+/// números el nombre de otra pestaña — y quien lea el informe no tiene forma de notarlo. `visible` es
+/// también un nombre, por lo mismo.
 pub fn cabecera(
     a: &mut dyn std::io::Write,
-    rejillas: &[[term_core::Size; 2]],
+    rejillas: &[(usize, [term_core::Size; 2])],
     visible: usize,
 ) -> std::io::Result<()> {
     let perfil = if cfg!(debug_assertions) {
@@ -405,8 +493,8 @@ pub fn cabecera(
     // este dato — y sin él, el informe de las dos se lee como si fuera de una sola y con el fotograma
     // inexplicablemente más caro.
     writeln!(a, "pestañas:     {}", rejillas.len())?;
-    for (que_pestaña, rejillas) in rejillas.iter().enumerate() {
-        let mirada = if que_pestaña == visible {
+    for (que_pestaña, rejillas) in rejillas {
+        let mirada = if *que_pestaña == visible {
             "se veía"
         } else {
             "de fondo, se bombeaba sin pintarse"
@@ -481,6 +569,77 @@ mod tests {
         ));
         medida.cerrar_fotograma(ms(7));
         medida
+    }
+
+    #[test]
+    fn dos_pasadas_del_mismo_fotograma_suman_su_trabajo_en_vez_de_pisarse() {
+        // **El sesgo que esto arregla estuvo vivo y medido:** con `anotar_vuelta` sustituyendo, la
+        // segunda pasada de un fotograma —egui la repite cuando algo pide recomponerse— machacaba la
+        // vuelta buena de la primera. Y la segunda llega con lo interpretado a casi cero, porque la cola
+        // ya se vació en la primera, así que lo que la consola interpretó de verdad desaparecía de lo
+        // declarado y se publicaba como coste del framework de interfaz.
+        let mut medida = Medida::default();
+        let recogido = Instant::now();
+
+        // La primera pasada: la que trae la espera y el trabajo de verdad.
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(recogido - ms(5)),
+            recogido,
+            ms(20),
+            ms(2),
+            ms(1),
+        ));
+        // La segunda: sin espera, porque no recogió nada, y con lo que costó repetir el trabajo.
+        //
+        // **Los tres tramos de la segunda van distintos de cero a propósito.** En producción apenas
+        // interpreta —la cola se vació en la primera—, pero un cero aquí deja de distinguir sumar de no
+        // sumar: comprobado mutándolo, con un cero en lo interpretado esta prueba pasaba **con la suma
+        // de ese tramo quitada**. Los tres tienen que poder fallar por separado.
+        medida.anotar_vuelta(Tramos::de_una_vuelta(None, recogido, ms(3), ms(2), ms(1)));
+
+        assert_eq!(
+            medida.cerrar_fotograma(ms(60)),
+            Some(ms(29)),
+            "lo declarado no es la suma de lo que hicieron las dos pasadas: 20+2+1 de la primera y \
+             3+2+1 de la segunda"
+        );
+    }
+
+    #[test]
+    fn de_dos_pasadas_la_espera_es_la_de_la_primera_y_no_la_suma() {
+        // La espera **no es trabajo de la aplicación**: es cuánto llevaba en la cola el byte más
+        // antiguo. Sumar las dos daría un número que nadie esperó, y ese número va a la media de
+        // «tecla → pantalla» que el informe publica. Se queda con la de la pasada que de verdad recogió.
+        let mut medida = Medida::default();
+        let recogido = Instant::now();
+
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(recogido - ms(5)),
+            recogido,
+            ms(1),
+            ms(0),
+            ms(0),
+        ));
+        medida.anotar_vuelta(Tramos::de_una_vuelta(
+            Some(recogido - ms(9)),
+            recogido,
+            ms(1),
+            ms(0),
+            ms(0),
+        ));
+        medida.cerrar_fotograma(ms(10));
+
+        // Se lee del informe, que es lo que un humano acaba viendo: la espera publicada tiene que ser
+        // la de la primera pasada —5 ms— y no los 14 de sumarlas.
+        let informe = informe_de(&medida);
+        assert!(
+            informe.contains("esperando en la cola:   5.000ms de media"),
+            "la espera declarada no es la de la primera pasada; el informe dice: {informe}"
+        );
+        assert!(
+            !informe.contains("14.000ms"),
+            "la espera de las dos pasadas se sumó, y eso es un número que nadie esperó: {informe}"
+        );
     }
 
     #[test]

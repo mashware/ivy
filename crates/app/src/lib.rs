@@ -780,12 +780,22 @@ struct Pestaña {
     /// estrecha seguiría pegada al borde después de ensancharla. Es el mismo argumento que descarta los
     /// paneles de egui, aplicado al estado en vez de a la geometría.
     fraccion: f32,
+    /// Cómo se la llama en el informe, y **no cambia aunque se cierren otras**.
+    ///
+    /// **Es el índice de la lista lo que no vale para esto.** Al cerrar una pestaña, las de su derecha
+    /// corren un puesto: la que era la 2 pasa a ser la 1, y el informe que se publica al salir acabaría
+    /// poniéndole a una tabla de números el nombre de otra pestaña — con los tramos de la que los produjo.
+    /// Quien lea ese informe no tiene forma de notarlo. Se asigna al abrirla y no se reutiliza.
+    nombre: usize,
 }
 
 impl Pestaña {
     /// Dos consolas nuevas, con el shell del usuario dentro de cada una.
-    fn nueva(ctx: &egui::Context) -> term_core::Result<Self> {
-        Ok(Self::con([Division::nueva(ctx)?, Division::nueva(ctx)?]))
+    fn nueva(ctx: &egui::Context, nombre: usize) -> term_core::Result<Self> {
+        Ok(Self::con(
+            [Division::nueva(ctx)?, Division::nueva(ctx)?],
+            nombre,
+        ))
     }
 
     /// Cómo se abre una pestaña: el foco a la izquierda y el divisor donde diga [`FRACCION_INICIAL`].
@@ -793,11 +803,12 @@ impl Pestaña {
     /// Existe aparte de [`Pestaña::nueva`] para que las pruebas entren por aquí con sus propias
     /// consolas en vez de armar el struct a mano — si no, el día que abrir una pestaña signifique algo
     /// más, las pruebas seguirían abriendo la de antes.
-    fn con(divisiones: [Division; 2]) -> Self {
+    fn con(divisiones: [Division; 2], nombre: usize) -> Self {
         Self {
             divisiones,
             foco: 0,
             fraccion: FRACCION_INICIAL,
+            nombre,
         }
     }
 }
@@ -830,6 +841,28 @@ struct Ventana {
     /// El último fotograma cuyo coste ya se anotó, para no contarlo dos veces si egui repite la
     /// pasada sobre la misma entrada.
     ultimo_fotograma_cerrado: u64,
+    /// Lo que este fotograma ha gastado **fuera de las divisiones que siguen vivas**, y que por tanto
+    /// ninguna va a declarar.
+    ///
+    /// Son dos cosas, y las dos inflaban «el resto del fotograma» —o sea, el coste que se le atribuye al
+    /// framework de interfaz, que es la cifra con la que D3 decide—:
+    ///
+    /// 1. **Abrir una pestaña son dos `fork`/`exec`**, y ocurren dentro de la pasada de interfaz porque es
+    ///    ahí donde se atiende el acorde. Nadie los cronometraba.
+    /// 2. **Cerrar una pestaña se lleva sus divisiones, y con ellas su [`medida::Medida`]** — incluida la
+    ///    vuelta que ya tenían anotada de este mismo fotograma. Ese trabajo ocurrió, así que si se va sin
+    ///    declararse, el resto se queda con él.
+    ///
+    /// Se vacía al cerrar el fotograma. **No lleva serie propia en el informe**: lo que hace falta es que
+    /// se **reste**, y una serie más para un suceso que pasa cuando el usuario pulsa un atajo diría muy
+    /// poco y habría que explicarla entera.
+    cronometrado_aparte: std::time::Duration,
+    /// El nombre que llevará la próxima pestaña que se abra. Ver [`Pestaña::nombre`].
+    ///
+    /// Vive en la ventana y no se deduce de la lista **porque la lista se queda corta en cuanto se cierra
+    /// algo**: con dos abiertas y la primera cerrada, `pestañas.len()` vale 1 y volvería a repartir un
+    /// nombre que ya se usó.
+    siguiente_nombre: usize,
     /// Si alguna pestaña se ha cerrado **a mano**, y por tanto la ventana ya no se cierra sola.
     ///
     /// **Existe por un caso que solo aparece cuando cerrar es posible**: una pestaña cuyos programas ya
@@ -862,8 +895,9 @@ impl Ventana {
         // mismo criterio que `panel_o_ninguno`. Media docena de pestañas de las que una está a medias es
         // peor que no arrancar, porque el fallo se descubre al llegar a ella.
         let pestañas: Vec<Pestaña> = (0..cuantas)
-            .map(|_| Pestaña::nueva(ctx))
+            .map(|nombre| Pestaña::nueva(ctx, nombre))
             .collect::<term_core::Result<_>>()?;
+        let siguiente_nombre = pestañas.len();
 
         Ok(Self {
             // **Sobre las divisiones de todas las pestañas, no solo la primera.** Una pestaña de fondo
@@ -882,6 +916,15 @@ impl Ventana {
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
+            cronometrado_aparte: std::time::Duration::ZERO,
+            // **Del largo de la lista y no del parámetro `cuantas`, aunque aquí valgan lo mismo.** Son
+            // dos fuentes para el mismo dato, y con dos se puede coger la que no toca: poner un cero o
+            // el parámetro equivocado hace que la siguiente pestaña que se abra **se llame igual que
+            // una que ya existe**, y el informe publique dos bloques de números con la misma etiqueta.
+            // Comprobado mutándolo, y no lo caza ninguna prueba: este constructor lanza consolas de
+            // verdad leyendo `SHELL`, así que solo se ejercita al arrancar la aplicación. Derivarlo de
+            // la lista es lo que hace que no haya nada que confundir.
+            siguiente_nombre,
             cerrada_alguna_a_mano: false,
         })
     }
@@ -1000,9 +1043,14 @@ impl Ventana {
         let rejillas: Vec<_> = self
             .pestañas
             .iter()
-            .map(|pestaña| pestaña.divisiones.each_ref().map(|d| d.pantalla.size()))
+            .map(|pestaña| {
+                (
+                    pestaña.nombre,
+                    pestaña.divisiones.each_ref().map(|d| d.pantalla.size()),
+                )
+            })
             .collect();
-        medida::cabecera(a, &rejillas, self.activa)?;
+        medida::cabecera(a, &rejillas, self.activa().nombre)?;
 
         // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo
         // pueden venir de dos consolas de anchos muy distintos, y una tabla de tramos sin saber con qué
@@ -1026,13 +1074,14 @@ impl Ventana {
             "foco al salir: consola {} ({}) de la pestaña {}",
             visible.foco,
             medida::NOMBRE_DE_CONSOLA[visible.foco],
-            self.activa
+            visible.nombre
         )?;
 
         // **Todas las pestañas, no solo la que se veía.** Una consola de fondo cronometra su
         // interpretar igual que las demás, y publicar solo las visibles tiraría justo los números que
         // la tanda de dos pestañas existe para tomar.
-        for (que_pestaña, pestaña) in self.pestañas.iter().enumerate() {
+        for pestaña in &self.pestañas {
+            let que_pestaña = pestaña.nombre;
             for (cual, division) in pestaña.divisiones.iter().enumerate() {
                 writeln!(
                     a,
@@ -1170,10 +1219,16 @@ impl Ventana {
             .filter_map(|division| division.medida.cerrar_fotograma(coste_cpu))
             .reduce(|una, otra| una + otra);
 
+        // **Se vacía siempre, haya resto que anotar o no.** Arrastrarlo al fotograma siguiente sería
+        // restarle a un fotograma un trabajo que ocurrió en otro, que es la clase de error que este
+        // instrumento persigue. Ver [`Ventana::cronometrado_aparte`] por qué existe.
+        let aparte = std::mem::take(&mut self.cronometrado_aparte);
+
         // Sin tramos de nadie no hay resto que anotar: el fotograma entero se contaría como resto y la
         // serie acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
         if let Some(cronometrado) = cronometrado {
-            self.resto_del_fotograma.anotar(coste_cpu, cronometrado);
+            self.resto_del_fotograma
+                .anotar(coste_cpu, cronometrado + aparte);
         }
     }
 
@@ -1415,7 +1470,19 @@ impl Ventana {
     /// la ventana sigue exactamente como estaba. Es el mismo criterio que el directorio de panel —o los
     /// dos, o ninguno—, y por la misma razón: media pestaña se descubre al llegar a ella, que es tarde.
     fn crear_una_pestaña(&mut self, ctx: &egui::Context) {
-        self.poner_delante(Pestaña::nueva(ctx), ctx);
+        // **Abrir la pestaña son dos `fork`/`exec`, y se cronometran.** Ocurren dentro de la pasada de
+        // interfaz —es donde se atiende el acorde— y ninguna división los va a declarar: la que los paga
+        // es la pestaña que todavía no existe. Sin esto, lanzar dos procesos se publica como coste del
+        // framework de interfaz.
+        let antes = Instant::now();
+        let abierta = Pestaña::nueva(ctx, self.siguiente_nombre);
+        self.cronometrado_aparte += antes.elapsed();
+        // **El nombre se gasta aunque la apertura falle**, para que no se reutilice nunca: si el intento
+        // fallido dejó una línea en la salida de errores, la pestaña que se abra después no debe llamarse
+        // igual que la que no llegó a existir.
+        self.siguiente_nombre += 1;
+
+        self.poner_delante(abierta, ctx);
     }
 
     /// Pone delante la pestaña que se acaba de abrir, o deja la ventana como estaba si no se pudo abrir.
@@ -1462,8 +1529,24 @@ impl Ventana {
 
         let que_se_va = self.activa;
         self.cerrada_alguna_a_mano = true;
+
+        // **Lo que sus consolas ya habían declarado de este fotograma se recoge antes de soltarlas.** Se
+        // van con su `Medida` dentro, y ahí puede haber una vuelta anotada de este mismo fotograma: bytes
+        // que se interpretaron de verdad hace un instante. Si se marcha sin declararse, la resta se lo
+        // atribuye al framework de interfaz y el «resto» sale inflado justo en el fotograma en que se
+        // cierra una pestaña. El coste del cierre en sí —matar los programas y borrar sus directorios,
+        // que pasa al soltar la pestaña— entra en el mismo saco por la misma razón.
+        let antes = Instant::now();
+        let suyo: std::time::Duration = self.pestañas[que_se_va]
+            .divisiones
+            .iter_mut()
+            .map(|division| division.medida.llevarse_lo_pendiente())
+            .sum();
+
         // Aquí mueren sus dos programas y desaparecen sus dos directorios, por los `Drop` de siempre.
         self.pestañas.remove(que_se_va);
+        self.cronometrado_aparte += suyo + antes.elapsed();
+
         self.rearmar_el_vigilante(ctx);
         // Al quitar la última de la lista el índice se queda fuera; en cualquier otro caso, se queda
         // apuntando a la que ocupó su sitio, que es la de la derecha.
@@ -1581,11 +1664,28 @@ impl eframe::App for Ventana {
         // cierra **una vez por fotograma y no por pase**: egui puede repetir la pasada sobre la
         // misma entrada, y entonces el segundo cierre emparejaría los tramos de este fotograma con
         // el total del anterior — una muestra inventada, y el total de verdad perdido.
-        let pase = ctx.cumulative_pass_nr();
-        if pase != self.ultimo_fotograma_cerrado
+        //
+        // **Y el contador tiene que ser el de fotogramas, no el de pasadas.** Esto se escribió con
+        // `cumulative_pass_nr` y así no filtraba nada, porque ése **sube en cada pasada**: en un
+        // fotograma repetido daba dos valores distintos y el segundo cierre entraba igual. Leído en su
+        // fuente (`egui-0.36/src/context.rs:1748-1791`): `cumulative_frame_nr` se incrementa **una vez
+        // al final de cada `run_ui`**, `cumulative_pass_nr` **una por pasada completada**, y la
+        // documentación dice que el primero es siempre menor o igual que el segundo. Los dos se
+        // incrementan al terminar, así que dentro de las dos pasadas de un mismo fotograma el de
+        // fotogramas vale lo mismo — y eso es lo que hace de guarda. Lo ata
+        // `egui_cuenta_los_fotogramas_una_vez_y_las_pasadas_todas`.
+        //
+        // **Estas cuatro líneas no las cubre ninguna prueba de la ventana, y conviene saberlo**:
+        // `eframe::Frame::_new_kittest()` entrega `cpu_usage: None` —comprobado—, así que por este
+        // camino `cerrar_fotograma` no llega a llamarse nunca desde una prueba. Lo que sí está probado
+        // es el contrato de egui del que depende la guarda, y el cierre en sí entra por
+        // [`Ventana::cerrar_fotograma`], que las pruebas llaman directamente. Es la misma frontera
+        // declarada de [`Ventana::on_exit`] y [`pestañas_al_arrancar`].
+        let fotograma = ctx.cumulative_frame_nr();
+        if fotograma != self.ultimo_fotograma_cerrado
             && let Some(segundos) = frame.info().cpu_usage
         {
-            self.ultimo_fotograma_cerrado = pase;
+            self.ultimo_fotograma_cerrado = fotograma;
             self.cerrar_fotograma(std::time::Duration::from_secs_f32(segundos));
         }
 
@@ -2023,8 +2123,11 @@ mod tests {
     fn ventana_de_pestañas<'a>(programas: impl IntoIterator<Item = [&'a str; 2]>) -> Ventana {
         let pestañas: Vec<_> = programas
             .into_iter()
-            .map(|[izquierda, derecha]| {
-                Pestaña::con([division_con(izquierda), division_con(derecha)])
+            .enumerate()
+            .map(|(nombre, [izquierda, derecha])| {
+                // Con su nombre, como las abre la aplicación: si todas se llamaran igual, el informe
+                // diría «pestaña 0» dos veces y la prueba que lo lee no notaría la diferencia.
+                Pestaña::con([division_con(izquierda), division_con(derecha)], nombre)
             })
             .collect();
 
@@ -2034,6 +2137,8 @@ mod tests {
             !pestañas.is_empty(),
             "una ventana necesita al menos una pestaña"
         );
+
+        let siguiente_nombre = pestañas.len();
 
         Ventana {
             // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
@@ -2055,6 +2160,8 @@ mod tests {
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
+            cronometrado_aparte: std::time::Duration::ZERO,
+            siguiente_nombre,
             cerrada_alguna_a_mano: false,
         }
     }
@@ -3892,6 +3999,334 @@ mod tests {
         );
 
         pidio_cerrar
+    }
+
+    #[test]
+    fn egui_cuenta_los_fotogramas_una_vez_y_las_pasadas_todas() {
+        // **La premisa de la que depende la guarda del doble cierre, comprobada en vez de supuesta.**
+        // El coste del fotograma se anota una sola vez, y para saber si ya se anotó se compara un
+        // contador de egui contra el último visto. Con el contador equivocado —el de pasadas— la guarda
+        // no filtra nada: en un fotograma repetido da dos valores distintos, el segundo cierre entra, y
+        // empareja los tramos de este fotograma con el total del anterior. Eso estuvo así, y esta prueba
+        // es lo que impide que vuelva sin que nadie se entere.
+        //
+        // Es también la clase de prueba que este proyecto ha aprendido a escribir a base de sustos: la
+        // API ajena se lee, no se supone, y aquí además se **ata**, para que una versión nueva de egui
+        // que cambie el criterio se note aquí y no en un anexo con números falsos.
+        let ctx = egui::Context::default();
+        let mut fotogramas = Vec::new();
+        let mut pasadas = Vec::new();
+
+        let salida = ctx.run_ui(egui::RawInput::default(), |ui| {
+            fotogramas.push(ui.ctx().cumulative_frame_nr());
+            pasadas.push(ui.ctx().cumulative_pass_nr());
+            // Solo en la primera: pedir descarte en todas dejaría a egui repitiendo hasta su tope.
+            if pasadas.len() == 1 {
+                ui.ctx()
+                    .request_discard("la prueba necesita un fotograma de dos pasadas");
+            }
+        });
+        salida.drop_without_applying_deltas();
+
+        assert_eq!(
+            pasadas.len(),
+            2,
+            "egui no repitió la pasada, así que la prueba no está mirando lo que cree"
+        );
+        assert_eq!(
+            fotogramas[0], fotogramas[1],
+            "el contador de fotogramas cambió entre dos pasadas del mismo fotograma: ya no sirve de \
+             guarda para cerrarlo una sola vez"
+        );
+        assert_ne!(
+            pasadas[0], pasadas[1],
+            "el contador de pasadas no cambió entre dos pasadas: entonces el defecto que la guarda \
+             arregla no se puede reproducir y hay que revisar por qué"
+        );
+    }
+
+    /// Corre un fotograma **como lo corre `eframe`**: las dos mitades de la aplicación dentro del mismo
+    /// cierre que egui puede repetir, y no `logic` por fuera y `ui` por dentro.
+    ///
+    /// **La diferencia no es de estilo, y ya dejó pasar un defecto.** `eframe` mete las dos llamadas
+    /// dentro del cierre de `run_ui` (`epi_integration.rs:288-303`), así que una pasada repetida vuelve a
+    /// bombear **y** vuelve a pintar. Un ayudante que llame a `logic` una sola vez modela un fotograma
+    /// que no existe, y una prueba escrita sobre él certifica una garantía que el sistema real no da.
+    ///
+    /// Con `repitiendo` en `true` pide descarte en la primera pasada, que es la forma de provocar el
+    /// fotograma de dos pasadas. Devuelve cuántas hubo, para que quien la use pueda afirmar que de verdad
+    /// se repitió en vez de dar por hecho que egui obedeció.
+    fn un_fotograma_como_eframe(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        repitiendo: bool,
+    ) -> usize {
+        let mut frame = eframe::Frame::_new_kittest();
+        let entrada = egui::RawInput {
+            screen_rect: Some(area_de(1200.0)),
+            ..Default::default()
+        };
+        let mut pasadas = 0;
+
+        let salida = ctx.run_ui(entrada, |ui| {
+            pasadas += 1;
+            eframe::App::logic(ventana, ui.ctx(), &mut frame);
+            eframe::App::ui(ventana, ui, &mut frame);
+            if repitiendo && pasadas == 1 {
+                ui.ctx()
+                    .request_discard("la prueba necesita repetir la pasada");
+            }
+        });
+        salida.drop_without_applying_deltas();
+
+        pasadas
+    }
+
+    #[test]
+    fn cerrar_una_pestaña_no_renombra_a_las_que_quedan_en_el_informe() {
+        // **El informe se publica al salir, con los números de toda la sesión, y las etiquetas se
+        // escribían con la posición en la lista.** Al cerrar una pestaña las de su derecha corren un
+        // puesto, así que una tabla de tramos acababa titulada con el nombre de otra pestaña. No hay
+        // forma de notarlo leyendo el informe: los números son plausibles y la etiqueta es firme.
+        //
+        // Se cierra la **primera** a propósito: es el único caso en que las demás se mueven.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([
+            ["printf de-la-primera", "sleep 30"],
+            ["printf de-la-segunda", "sleep 30"],
+        ]);
+        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+
+        // **La segunda tiene que estar delante mientras se mide**, o su bloque no se publica: una
+        // pestaña de fondo declara su vuelta sin espera —para no ensuciar las medias— y sin espera no se
+        // anota ninguna serie, así que el informe la daría por muda.
+        ventana.activa = 1;
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
+
+        ventana.activa = 0;
+        ventana.aplicar(Orden::Cerrar, &ctx);
+        assert_eq!(ventana.pestañas.len(), 1, "no se cerró la primera pestaña");
+
+        let informe = informe_de(&ventana);
+        assert!(
+            informe.contains("── pestaña 1, consola 0"),
+            "la pestaña que quedó no conserva su nombre, así que sus números se publican con la \
+             etiqueta de otra:\n{informe}"
+        );
+        assert!(
+            !informe.contains("── pestaña 0, consola 0"),
+            "la pestaña que quedó se publicó como la 0, que es la que se cerró:\n{informe}"
+        );
+    }
+
+    #[test]
+    fn dos_pestañas_abiertas_seguidas_no_se_llaman_igual() {
+        // El nombre sale de un contador de la ventana, y **si no avanza, dos pestañas distintas se
+        // llaman igual**: el informe publicaría dos bloques de números bajo la misma etiqueta, que es
+        // otra forma del mismo engaño que arregla la prueba de arriba. No se afirma sobre valores
+        // concretos sino sobre que no haya repetidos: lo que importa es que cada una sea distinguible,
+        // no en qué número empieza la cuenta.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+
+        // Con la suelta en medio, que es lo que las hace dos pulsaciones y no una tecla mantenida — las
+        // repeticiones de crear se tragan a propósito.
+        un_fotograma_con(&mut ventana, &ctx, dos_veces_el_acorde(egui::Key::T));
+        assert_eq!(ventana.pestañas.len(), 3, "no se abrieron las dos pestañas");
+
+        let nombres: Vec<usize> = ventana.pestañas.iter().map(|p| p.nombre).collect();
+        let mut sin_repetir = nombres.clone();
+        sin_repetir.sort_unstable();
+        sin_repetir.dedup();
+        assert_eq!(
+            sin_repetir.len(),
+            nombres.len(),
+            "hay pestañas que se llaman igual: {nombres:?}"
+        );
+    }
+
+    #[test]
+    fn abrir_una_pestaña_declara_lo_que_cuesta_lanzar_sus_dos_programas() {
+        // Abrir una pestaña son **dos `fork`/`exec`**, y ocurren dentro de la pasada de interfaz porque
+        // es donde se atiende el acorde. Nadie los declaraba: el «resto del fotograma» se los quedaba, y
+        // ese número es el que dice cuánto cuesta el framework de interfaz — la cifra con la que D3
+        // decide si egui aguanta. Lanzar dos procesos no es coste de egui.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+
+        un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
+
+        assert_eq!(ventana.pestañas.len(), 2, "no se abrió la pestaña");
+        assert!(
+            !ventana.cronometrado_aparte.is_zero(),
+            "abrir una pestaña no declaró nada: los dos fork/exec se publican como coste del framework"
+        );
+    }
+
+    #[test]
+    fn cerrar_una_pestaña_no_se_lleva_lo_que_sus_consolas_ya_habian_declarado() {
+        // Al cerrar una pestaña se sueltan sus divisiones **con su `Medida` dentro**, y ahí puede haber
+        // una vuelta anotada de este mismo fotograma: bytes interpretados hace un instante. Si se va sin
+        // declararse, la resta se la atribuye al framework y el «resto» sale inflado justo en el
+        // fotograma del cierre.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([
+            ["printf de-la-que-se-va", "sleep 30"],
+            ["sleep 30", "sleep 30"],
+        ]);
+        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+
+        // El bombeo deja anotado lo que interpretó; la pasada de interfaz cierra su vuelta.
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        assert!(
+            ventana.pestañas[0].divisiones[0]
+                .pantalla
+                .to_text()
+                .contains("de-la-que-se-va"),
+            "la consola no interpretó nada: la prueba no está midiendo lo que cree"
+        );
+
+        // **Un tramo enorme y a mano encima de lo que ya hay, y no es artificio: es lo que hace que la
+        // afirmación signifique algo.** Con solo lo que la consola interpretó de verdad —microsegundos—,
+        // recoger su vuelta y **tirarla** deja el campo lleno igualmente, porque el coste de cerrar la
+        // pestaña también se suma ahí: comprobado mutándolo, la prueba pasaba con lo recogido descartado.
+        // Cinco segundos no los puede producir el cierre, así que si aparecen es porque llegaron de la
+        // consola que se fue.
+        const SUYO: std::time::Duration = std::time::Duration::from_secs(5);
+        ventana.pestañas[0].divisiones[0]
+            .medida
+            .anotar_vuelta(medida::Tramos::de_una_vuelta(
+                None,
+                Instant::now(),
+                SUYO,
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+            ));
+
+        ventana.aplicar(Orden::Cerrar, &ctx);
+
+        assert_eq!(ventana.pestañas.len(), 1, "no se cerró la pestaña");
+        assert!(
+            ventana.cronometrado_aparte >= SUYO,
+            "declaró {:?} y solo la vuelta de la consola que se fue valía {SUYO:?}: lo que la pestaña \
+             cerrada había declarado se fue con ella, así que el resto del fotograma se queda con su \
+             trabajo",
+            ventana.cronometrado_aparte
+        );
+    }
+
+    #[test]
+    fn lo_declarado_aparte_se_descuenta_del_resto_y_no_se_arrastra_al_fotograma_siguiente() {
+        // **Las dos pruebas de arriba no bastan, y esto lo demostró una mutación:** apuntar el coste en
+        // el campo y no restarlo del total dejaba las 272 en verde. Comprobar que alguien anotó un número
+        // es atar al ayudante; lo que hay que atar es que el resto **baje**, porque el resto es lo que el
+        // informe publica como coste del framework de interfaz.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["printf algo", "sleep 30"]]);
+        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+
+        // Hace falta que alguna división declare algo: sin tramos de nadie no se anota resto.
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        // **Los números son absurdos para un fotograma, y a propósito.** En modo depuración, encolar el
+        // pintado de una rejilla cuesta milisegundos, así que con un coste de 30 ms lo que declaran las
+        // divisiones se come el margen y la resta satura a cero: la prueba pasaba con el defecto puesto.
+        // Con diez segundos de fotograma y cuatro declarados aparte, todo lo que tarde la máquina es
+        // ruido y la afirmación mide lo que dice medir. Comprobado mutándolo.
+        const FOTOGRAMA: std::time::Duration = std::time::Duration::from_secs(10);
+        ventana.cronometrado_aparte = std::time::Duration::from_secs(4);
+        ventana.cerrar_fotograma(FOTOGRAMA);
+
+        let resto = ventana.resto_del_fotograma.media();
+        assert!(
+            resto < std::time::Duration::from_secs(7),
+            "el resto salió {resto:?} de 10s: los 4s declarados aparte no se descontaron"
+        );
+
+        // Y no se arrastra: un fotograma después, sin nada declarado aparte, el resto vuelve a ser el
+        // total. Sin vaciar el campo se le restaría a un fotograma un trabajo que ocurrió en otro, y la
+        // media se quedaría abajo.
+        ventana.bombear_todas();
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        ventana.cerrar_fotograma(FOTOGRAMA);
+        let media = ventana.resto_del_fotograma.media();
+        assert!(
+            media > std::time::Duration::from_secs(7),
+            "la media quedó en {media:?}: el descuento se aplicó dos veces, así que el campo no se vació \
+             al cerrar el fotograma"
+        );
+    }
+
+    #[test]
+    fn un_fotograma_de_dos_pasadas_no_pierde_lo_que_interpreto_la_consola() {
+        // **El sesgo, en una frase:** la segunda pasada vuelve a bombear, no encuentra nada —la cola se
+        // vació en la primera— y anota una vuelta con lo interpretado a casi cero. Cuando eso
+        // **sustituía** lo anotado, el trabajo de verdad de la consola desaparecía de lo declarado y la
+        // resta se lo regalaba al framework de interfaz, que es la cifra con la que D3 decide. Medido
+        // antes del arreglo: 50 ns declarados donde interpretar había costado 20 µs.
+        //
+        // Se corre por el fotograma de verdad, con las dos mitades dentro del cierre que egui repite:
+        // por el otro camino este defecto es invisible.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("printf de-verdad", "sleep 30");
+        esperar_a_que_muera(&ventana.activa().divisiones[0]);
+
+        let pasadas = un_fotograma_como_eframe(&mut ventana, &ctx, true);
+        assert_eq!(
+            pasadas, 2,
+            "egui no repitió la pasada, así que la prueba no está mirando lo que cree"
+        );
+        assert!(
+            ventana.activa().divisiones[0]
+                .pantalla
+                .to_text()
+                .contains("de-verdad"),
+            "la consola no llegó a interpretar nada: la prueba no está midiendo lo que cree"
+        );
+
+        // El cierre se llama a mano porque `eframe::Frame::_new_kittest()` entrega `cpu_usage: None`, así
+        // que por el camino de la aplicación no llega a ocurrir dentro de una prueba.
+        ventana.activa_mut().divisiones[0]
+            .medida
+            .cerrar_fotograma(std::time::Duration::from_millis(50))
+            .expect("la consola no declaró nada de lo que hizo");
+
+        // **La afirmación es binaria a propósito, y no una comparación de duraciones.** Solo se anotan
+        // medias cuando la vuelta trae espera, y la espera solo la tiene la pasada que de verdad recogió
+        // bytes: la primera. Si la segunda pasada machaca esa vuelta, la que queda no tiene espera y las
+        // cuatro series se quedan **vacías** — la sesión entera acabaría publicando un informe en blanco
+        // para esta consola. Comparar tiempos aquí no valía: con el defecto puesto, lo que la segunda
+        // pasada declara por encolar el pintado ya supera cualquier umbral pequeño, así que la prueba
+        // pasaba igual. Comprobado mutándolo.
+        assert!(
+            ventana.activa().divisiones[0].medida.hay_medias(),
+            "la vuelta buena se perdió: la que quedó no traía espera, así que las series del informe se \
+             quedan sin una sola muestra de esta consola"
+        );
     }
 
     /// Los tres eventos de un clic del ratón en un punto.
