@@ -916,6 +916,123 @@ impl Division {
     }
 }
 
+/// Cómo están repartidas las consolas de una pestaña: una hoja es una consola, una rama es un corte.
+///
+/// **Un árbol y no una lista de rectángulos**, que es la otra forma de describir una disposición. El
+/// árbol garantiza **por construcción** que lo pintado cubre el área sin huecos ni solapes: cada rama
+/// reparte lo que le dieron entre sus hijos, y no hay forma de escribir un estado donde sobre o falte
+/// sitio. Con rectángulos sueltos esa invariante pasa a ser código que mantener, y arrastrar una
+/// división a otro sitio —el hito siguiente— se convierte en un problema de empaquetado.
+///
+/// **N-ario y no binario**, que es como lo hacen `tmux` y compañía. Con el binario, tres consolas en
+/// fila obligan a anidar dos ramas, y entonces el divisor de fuera mueve **un bloque de dos** en vez de
+/// a su vecina — el comportamiento del que más se queja quien usa esos terminales. Aquí las tres son
+/// hermanas de una sola rama y cada frontera mueve solo a las dos que separa.
+/// **Sin `Box` en la hoja, y es una decisión con su cuenta hecha.** Una consola ocupa unos 3 KiB, así
+/// que cada nodo del árbol ocupa eso aunque sea una rama: con ocho divisiones son quince nodos, unos
+/// **45 KiB por pestaña**, y con ocho pestañas 360 KiB. Al lado del techo de cola que cada división ya
+/// tiene —1 MiB, o sea 8 MiB con esas mismas ocho— es ruido. Lo que un `Box` costaría a cambio es un
+/// salto de puntero por hoja **en el camino del pintado**, que es justo el que este proyecto mide y del
+/// que cuelga la decisión sobre el framework de interfaz.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "45 KiB por pestaña frente a un salto de puntero en el camino que se mide"
+)]
+enum Nodo {
+    /// Una consola, y el final de una rama.
+    Hoja(Division),
+    /// Un corte: sus hijos se reparten el área en el sentido que diga la orientación.
+    ///
+    /// **Todavía no la construye nadie**, porque partir divisiones es un hito posterior; la construyen
+    /// sus pruebas, que es donde un reparto recursivo mal hecho se vería. Lo que este cambio entrega es
+    /// que la disposición **pueda** describirse así, no que se pueda crear desde la ventana.
+    #[allow(
+        dead_code,
+        reason = "la construye el PR de partir divisiones; sus pruebas ya la ejercitan"
+    )]
+    Rama {
+        orientacion: Orientacion,
+        hijos: Vec<Hijo>,
+    },
+}
+
+/// Un hijo de una rama, con lo que le toca del reparto.
+struct Hijo {
+    peso: Peso,
+    nodo: Nodo,
+}
+
+impl Nodo {
+    /// Las consolas de este nodo, de la primera a la última en el orden en que se pintan.
+    ///
+    /// **Devuelve un vector y no un iterador perezoso**, y es una decisión con precio: recorrer un árbol
+    /// sin reservar exige o bien recursión con un cierre —que no compone con el resto del código, que
+    /// espera un iterador— o bien una pila propia, que también reserva. El vector cuesta una reserva por
+    /// llamada, con dos consolas son dos punteros, y **lo que cuesta se declara**: el recorrido del
+    /// pintado se cronometra y se resta, por lo mismo que se cronometran los `fork` al abrir una pestaña.
+    fn hojas(&self) -> Vec<&Division> {
+        let mut sueltas = Vec::new();
+        self.recorrer(&mut |division| sueltas.push(division));
+        sueltas
+    }
+
+    fn recorrer<'a>(&'a self, hacer: &mut impl FnMut(&'a Division)) {
+        match self {
+            Self::Hoja(division) => hacer(division),
+            Self::Rama { hijos, .. } => {
+                for hijo in hijos {
+                    hijo.nodo.recorrer(hacer);
+                }
+            }
+        }
+    }
+
+    fn hojas_mut(&mut self) -> Vec<&mut Division> {
+        let mut sueltas = Vec::new();
+        self.recorrer_mut(&mut |division| sueltas.push(division));
+        sueltas
+    }
+
+    fn recorrer_mut<'a>(&'a mut self, hacer: &mut impl FnMut(&'a mut Division)) {
+        match self {
+            Self::Hoja(division) => hacer(division),
+            Self::Rama { hijos, .. } => {
+                for hijo in hijos {
+                    hijo.nodo.recorrer_mut(hacer);
+                }
+            }
+        }
+    }
+
+    /// Dónde cae cada consola dentro del área, y dónde cada frontera.
+    ///
+    /// **Las hojas salen en el mismo orden que [`Nodo::hojas`]**, y eso es lo que permite casarlas por
+    /// posición en vez de arrastrar la geometría dentro del árbol. Es el mismo trato que ya tenía el
+    /// reparto de dos con sus dos rectángulos.
+    fn colocar(&self, area: egui::Rect, minimo: f32) -> Reparto {
+        match self {
+            Self::Hoja(_) => Reparto {
+                partes: vec![area],
+                divisores: Vec::new(),
+            },
+            Self::Rama { orientacion, hijos } => {
+                let pesos: Vec<Peso> = hijos.iter().map(|hijo| hijo.peso).collect();
+                let mio = repartir(area, *orientacion, &pesos, minimo);
+
+                let mut partes = Vec::with_capacity(hijos.len());
+                let mut divisores = mio.divisores;
+                for (hijo, suya) in hijos.iter().zip(mio.partes) {
+                    let dentro = hijo.nodo.colocar(suya, minimo);
+                    partes.extend(dentro.partes);
+                    divisores.extend(dentro.divisores);
+                }
+
+                Reparto { partes, divisores }
+            }
+        }
+    }
+}
+
 /// Una disposición de consolas: lo que se ve dentro de una pestaña.
 ///
 /// **Existe para separar lo que es de una disposición de lo que es del proceso.** Los tres campos de
@@ -930,32 +1047,23 @@ impl Division {
 /// [`Ventana::arrastrar_el_divisor`], que se sacaron justamente para poder comprobarse sin abrir
 /// ninguna ventana.
 struct Pestaña {
-    /// Las dos consolas, de izquierda a derecha.
+    /// Cómo están repartidas sus consolas. Ver [`Nodo`].
     ///
-    /// **Un array de dos y no una lista**: el número está fijado por el hito —el árbol de divisiones
-    /// arbitrarias es F2.2— y decirlo en el tipo es lo que permite indexar sin escribir ramas para un
-    /// caso vacío que no existe. Una lista obligaría a preguntar en cada acceso si hay alguien ahí.
-    divisiones: [Division; 2],
-    /// A cuál va el teclado. Arranca en `0` —la izquierda— porque teclear antes del primer clic ocurre
-    /// siempre al abrir la ventana, y con un foco nulo esas teclas se perderían.
+    /// **Sustituye al array de dos y a la fracción suelta que había aquí.** Aquel array decía en el tipo
+    /// que las consolas eran exactamente dos, que era verdad y era útil mientras lo fue; el árbol dice
+    /// que pueden ser las que sean y **conserva la garantía que de verdad importaba**: que lo pintado
+    /// cubra el área sin huecos.
+    raiz: Nodo,
+    /// A cuál va el teclado, **por su nombre y no por su sitio**.
+    ///
+    /// El índice servía mientras las consolas fueran dos y fijas. En cuanto se puedan cerrar, las de al
+    /// lado corren un puesto y el foco saltaría solo a otra consola — el mismo problema que el informe
+    /// ya resolvió llamando a cada división por un nombre que no se reutiliza.
     ///
     /// **No es el foco de egui.** El del framework es foco de teclado por widget, para tabular entre
     /// controles; esto es geográfico y lo decide la aplicación. Confundirlos deja el teclado en manos
     /// de quien no lo enruta.
     foco: usize,
-    /// Qué parte del ancho repartible se lleva la consola de la izquierda.
-    ///
-    /// **Una fracción y no dos anchos en puntos**: es lo que hace que el reparto sobreviva al
-    /// redimensionado de la ventana. Guardar puntos es lo que hacen los paneles de egui, y por eso se
-    /// descartaron en el diseño — al ensanchar la ventana el panel conserva su ancho y toda la diferencia
-    /// cae en el otro lado.
-    ///
-    /// **Se guarda la proporción que se pidió, no la que cupo.** El suelo por consola lo aplica
-    /// [`repartir`] contra el área de cada fotograma, y no al guardar: recortarla antes hornearía el ancho
-    /// actual de la ventana dentro del estado, así que una consola arrastrada al borde con la ventana
-    /// estrecha seguiría pegada al borde después de ensancharla. Es el mismo argumento que descarta los
-    /// paneles de egui, aplicado al estado en vez de a la geometría.
-    fraccion: f32,
     /// Cómo se la llama en el informe, y **no cambia aunque se cierren otras**.
     ///
     /// **Es el índice de la lista lo que no vale para esto.** Al cerrar una pestaña, las de su derecha
@@ -992,12 +1100,90 @@ impl Pestaña {
     /// consolas en vez de armar el struct a mano — si no, el día que abrir una pestaña signifique algo
     /// más, las pruebas seguirían abriendo la de antes.
     fn con(divisiones: [Division; 2], nombre: usize) -> Self {
+        let [izquierda, derecha] = divisiones;
+        let foco = izquierda.nombre;
+
         Self {
-            divisiones,
-            foco: 0,
-            fraccion: FRACCION_INICIAL,
+            // **Nace como una rama de dos columnas con la fracción de siempre**, así que la ventana se
+            // ve y se mide exactamente igual que antes de que existiera el árbol. Que esto no cambie
+            // nada es el criterio de este paso: cualquier diferencia en la tanda de medida sería un
+            // defecto, no una novedad.
+            raiz: Nodo::Rama {
+                orientacion: Orientacion::Columnas,
+                hijos: pesos_de(FRACCION_INICIAL)
+                    .into_iter()
+                    .zip([izquierda, derecha])
+                    .map(|(peso, division)| Hijo {
+                        peso,
+                        nodo: Nodo::Hoja(division),
+                    })
+                    .collect(),
+            },
+            // El foco arranca en la de la izquierda porque teclear antes del primer clic ocurre siempre
+            // al abrir la ventana, y con un foco que no apunte a nadie esas teclas se perderían.
+            foco,
             nombre,
         }
+    }
+
+    /// Sus consolas, de la primera a la última en el orden en que se pintan.
+    fn divisiones(&self) -> Vec<&Division> {
+        self.raiz.hojas()
+    }
+
+    fn divisiones_mut(&mut self) -> Vec<&mut Division> {
+        self.raiz.hojas_mut()
+    }
+
+    /// Dónde cae la consola que tiene el teclado dentro de la lista pintada, si sigue viva.
+    ///
+    /// **Devuelve una posición y no la consola** porque quien pregunta necesita casarla con la geometría,
+    /// que viaja en una lista aparte y en el mismo orden.
+    fn donde_esta_el_foco(&self) -> Option<usize> {
+        self.divisiones()
+            .iter()
+            .position(|division| division.nombre == self.foco)
+    }
+
+    /// Qué parte del sitio se lleva lo que hay antes de la primera frontera, si hay alguna.
+    ///
+    /// **Es el puente entre el árbol y lo que todavía habla de «la fracción»** — el informe, y el
+    /// arrastre mientras solo se pueda mover una frontera. Cuando haya varias arrastrables, quien
+    /// pregunte tendrá que decir *cuál*, y estos dos métodos se van con ello.
+    fn fraccion_de_la_primera_frontera(&self) -> Option<f32> {
+        let Nodo::Rama { hijos, .. } = &self.raiz else {
+            return None;
+        };
+        let (primero, segundo) = (hijos.first()?, hijos.get(1)?);
+        let entre_los_dos = primero.peso.valor() + segundo.peso.valor();
+
+        Some(primero.peso.valor() / entre_los_dos)
+    }
+
+    /// Mueve la primera frontera a esa fracción. Dice si algo cambió.
+    ///
+    /// **Reparte solo entre las dos que la frontera separa y conserva lo que suman**, que es la regla
+    /// del árbol: mover un divisor no toca a las hermanas que están más allá. Con dos hijos da igual;
+    /// con tres es lo que separa este comportamiento del de un terminal donde arrastrar una frontera
+    /// mueve todo lo que hay a su derecha.
+    fn mover_la_primera_frontera(&mut self, fraccion: f32) -> bool {
+        let Nodo::Rama { hijos, .. } = &mut self.raiz else {
+            return false;
+        };
+        if hijos.len() < 2 {
+            return false;
+        }
+
+        let entre_los_dos = hijos[0].peso.valor() + hijos[1].peso.valor();
+        let [primero, segundo] = pesos_de(fraccion).map(|peso| peso.valor() * entre_los_dos);
+        let cambia = hijos[0].peso.valor() != primero;
+
+        // Los dos pesos vienen de `pesos_de`, que ya recorta la fracción a un rango donde ninguno puede
+        // ser cero, y multiplicarlos por una suma positiva conserva esa propiedad.
+        hijos[0].peso = Peso::nuevo(primero).expect("la fracción recortada da pesos válidos");
+        hijos[1].peso = Peso::nuevo(segundo).expect("y su complemento también");
+
+        cambia
     }
 }
 
@@ -1096,7 +1282,7 @@ impl Ventana {
         // de pestaña: son dos fuentes para el mismo dato y con dos se puede coger la que no toca.
         let siguiente_nombre_de_division = pestañas
             .iter()
-            .map(|pestaña| pestaña.divisiones.len())
+            .map(|pestaña| pestaña.divisiones().len())
             .sum();
 
         Ok(Self {
@@ -1107,7 +1293,7 @@ impl Ventana {
                 ctx,
                 pestañas
                     .iter()
-                    .flat_map(|pestaña| pestaña.divisiones.iter()),
+                    .flat_map(|pestaña| pestaña.divisiones().into_iter()),
             ),
             pestañas,
             activa: 0,
@@ -1156,13 +1342,13 @@ impl Ventana {
     fn todas_las_divisiones(&self) -> impl Iterator<Item = &Division> {
         self.pestañas
             .iter()
-            .flat_map(|pestaña| pestaña.divisiones.iter())
+            .flat_map(|pestaña| pestaña.divisiones().into_iter())
     }
 
     fn todas_las_divisiones_mut(&mut self) -> impl Iterator<Item = &mut Division> {
         self.pestañas
             .iter_mut()
-            .flat_map(|pestaña| pestaña.divisiones.iter_mut())
+            .flat_map(|pestaña| pestaña.divisiones_mut().into_iter())
     }
 
     /// Arma el vigilante sobre los directorios de las consolas que tienen uno.
@@ -1217,8 +1403,8 @@ impl Ventana {
 
         if let Some(falta) = self
             .activa()
-            .divisiones
-            .iter()
+            .divisiones()
+            .into_iter()
             .filter_map(|division| division.estado_del_panel.cuanto_falta_para_avisar(ahora))
             .min()
         {
@@ -1248,8 +1434,8 @@ impl Ventana {
                 (
                     pestaña.nombre,
                     pestaña
-                        .divisiones
-                        .iter()
+                        .divisiones()
+                        .into_iter()
                         .map(|d| (d.nombre, d.pantalla.size()))
                         .collect(),
                 )
@@ -1268,20 +1454,28 @@ impl Ventana {
         // **Y de la pestaña que se veía, porque es la única cuyo divisor y foco significan algo**: en
         // una que no se pinta ni se arrastra el divisor ni se teclea.
         let visible = self.activa();
-        writeln!(
-            a,
-            "divisor:      al {:.0} % del ancho repartible al salir, y son {GROSOR_DEL_DIVISOR} \
-             puntos de ancho. Si se arrastró durante la sesión, los tramos de abajo mezclan repartos",
-            visible.fraccion * 100.0
-        )?;
+        // **La primera frontera, mientras solo haya una que se pueda mover.** Con varias, esta línea
+        // tendrá que enumerarlas o decir cuántas hay; publicar solo la primera y llamarla «el divisor»
+        // sería justo el número mal etiquetado que este proyecto ya ha pagado una vez.
+        if let Some(fraccion) = visible.fraccion_de_la_primera_frontera() {
+            writeln!(
+                a,
+                "divisor:      al {:.0} % del ancho repartible al salir, y son {GROSOR_DEL_DIVISOR} \
+                 puntos de ancho. Si se arrastró durante la sesión, los tramos de abajo mezclan repartos",
+                fraccion * 100.0
+            )?;
+        }
         // **Por el nombre de la división, no por su posición.** La posición identifica bien mientras las
         // divisiones sean dos y fijas; el nombre sigue identificando cuando dejen de serlo, y publicar ya
         // el que va a valer es lo que evita que las tandas de antes y las de después se lean distinto.
         writeln!(
             a,
             "foco al salir: división {} ({}) de la pestaña {}",
-            visible.divisiones[visible.foco].nombre,
-            medida::NOMBRE_DE_CONSOLA[visible.foco],
+            visible.foco,
+            visible
+                .donde_esta_el_foco()
+                .and_then(|donde| medida::NOMBRE_DE_CONSOLA.get(donde).copied())
+                .unwrap_or("sin lado, que ya no describe nada"),
             visible.nombre
         )?;
 
@@ -1293,7 +1487,7 @@ impl Ventana {
         // comprobar que sean de esa consola.
         for pestaña in &self.pestañas {
             let que_pestaña = pestaña.nombre;
-            for (cual, division) in pestaña.divisiones.iter().enumerate() {
+            for (cual, division) in pestaña.divisiones().into_iter().enumerate() {
                 writeln!(
                     a,
                     "\n── pestaña {que_pestaña}, división {} ({}) ──",
@@ -1353,13 +1547,12 @@ impl Ventana {
                 continue;
             }
 
-            let reparto = repartir(
-                area,
-                Orientacion::Columnas,
-                &pesos_de(pestaña.fraccion),
-                metrica.ancho(),
-            );
-            for (division, rect) in pestaña.divisiones.iter_mut().zip(reparto.partes) {
+            // **Por el árbol de esa pestaña y no por un reparto de dos supuesto.** Una pestaña de fondo
+            // tiene la disposición que tenga, y darle la de una plantilla le anunciaría a su programa
+            // una rejilla que no es la suya — que es exactamente el defecto que F2.1 arregló para las
+            // pestañas y que aquí volvería por la puerta del árbol.
+            let reparto = pestaña.raiz.colocar(area, metrica.ancho());
+            for (division, rect) in pestaña.divisiones_mut().into_iter().zip(reparto.partes) {
                 let antes_del_panel = Instant::now();
                 division.refrescar_su_panel();
                 let hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
@@ -1494,7 +1687,12 @@ impl Ventana {
             // competiría con el enrutado que hace la aplicación — que es geográfico y no por widget.
             let id = ui.id().with(("division", que_consola));
             if ui.interact(*rect, id, egui::Sense::CLICK).clicked() {
-                self.activa_mut().foco = que_consola;
+                // Se guarda **el nombre** de la que se ha pulsado, no su sitio en la lista: el
+                // sitio cambia en cuanto se cierra una vecina, y el foco saltaría solo a otra consola.
+                if let Some(pulsada) = self.activa().divisiones().get(que_consola) {
+                    let nombre = pulsada.nombre;
+                    self.activa_mut().foco = nombre;
+                }
             }
         }
     }
@@ -1630,10 +1828,7 @@ impl Ventana {
             return false;
         }
 
-        let pestaña = self.activa_mut();
-        let anterior = pestaña.fraccion;
-        pestaña.fraccion = nueva;
-        pestaña.fraccion != anterior
+        self.activa_mut().mover_la_primera_frontera(nueva)
     }
 
     /// Manda lo que se ha tecleado en este pase a **una sola** consola, la que tiene el foco.
@@ -1648,8 +1843,15 @@ impl Ventana {
         let mut modificadores = self.modificadores;
         let abiertas = self.pestañas.len();
         let pestaña = self.activa_mut();
-        let ordenes =
-            pestaña.divisiones[pestaña.foco].teclear(ctx, empezo, &mut modificadores, abiertas);
+        // **La del foco se busca por su nombre**, y si no aparece no se teclea a nadie: escribir en
+        // «la primera que haya» mandaría las teclas a un programa que el usuario no está mirando, que es
+        // peor que perderlas.
+        let donde = pestaña.donde_esta_el_foco();
+        let ordenes = donde
+            .map(|donde| {
+                pestaña.divisiones_mut()[donde].teclear(ctx, empezo, &mut modificadores, abiertas)
+            })
+            .unwrap_or_default();
         self.modificadores = modificadores;
         ordenes
     }
@@ -1757,8 +1959,8 @@ impl Ventana {
         // que pasa al soltar la pestaña— entra en el mismo saco por la misma razón.
         let antes = Instant::now();
         let suyo: std::time::Duration = self.pestañas[que_se_va]
-            .divisiones
-            .iter_mut()
+            .divisiones_mut()
+            .into_iter()
             .map(|division| division.medida.llevarse_lo_pendiente())
             .sum();
 
@@ -1983,15 +2185,19 @@ impl eframe::App for Ventana {
             self.atender_clics_de_la_barra(ui, barra);
         }
 
-        let reparto_de = |ventana: &Self| {
-            repartir(
-                area,
-                Orientacion::Columnas,
-                &pesos_de(ventana.activa().fraccion),
-                metrica.ancho(),
-            )
-        };
+        // **Recorrer el árbol se cronometra, y no es celo: es la regla del instrumento.** El coste del
+        // fotograma se reparte por resta —lo que ninguna consola declara se publica como coste del
+        // framework de interfaz, que es la cifra con la que D3 lo juzga—, y este recorrido no es trabajo
+        // de ninguna división: es de la disposición. Con dos consolas era indexar un array y no había
+        // nada que declarar; con el árbol son dos recorridos y sus reservas.
+        //
+        // Va a `cronometrado_aparte`, que ya existe para exactamente esto —el trabajo de la ventana que
+        // no es de ninguna consola— y que ya se resta. Un tramo nuevo en el informe para unos
+        // microsegundos habría que explicarlo entero y diría muy poco.
+        let recorrido = Instant::now();
+        let reparto_de = |ventana: &Self| ventana.activa().raiz.colocar(area, metrica.ancho());
         let mut reparto = reparto_de(self);
+        self.cronometrado_aparte += recorrido.elapsed();
 
         // El arrastre se atiende **antes de pintar y se vuelve a repartir en el mismo pase**: pintar con
         // el reparto de antes dejaría al divisor un fotograma por detrás del ratón, que es justo lo que se
@@ -2002,7 +2208,9 @@ impl eframe::App for Ventana {
         if let Some(divisor) = reparto.divisores.first().copied()
             && self.arrastrar_el_divisor(ui, divisor, area)
         {
+            let rehacer = Instant::now();
             reparto = reparto_de(self);
+            self.cronometrado_aparte += rehacer.elapsed();
         }
 
         // Los divisores se pintan antes que las consolas: si el glifo del borde de una se saliera, el
@@ -2029,8 +2237,8 @@ impl eframe::App for Ventana {
         // Se indexa a mano en vez de pasar por `activa_mut`, que prestaría la ventana entera: el tema
         // hace falta a la vez y es otro campo.
         for (division, rect) in self.pestañas[self.activa]
-            .divisiones
-            .iter_mut()
+            .divisiones_mut()
+            .into_iter()
             .zip(rectangulos.iter().copied())
         {
             Self::pintar_division(ui, division, rect, &self.tema, &metrica);
@@ -2039,12 +2247,17 @@ impl eframe::App for Ventana {
         // El realce va al final para que quede por encima del contenido: un borde tapado a medias por
         // un glifo del borde no dice nada. `StrokeKind::Inside` lo mantiene dentro del rectángulo, así
         // que no invade la consola vecina ni el divisor.
-        ui.painter().rect_stroke(
-            rectangulos[self.activa().foco],
-            0.0,
-            egui::Stroke::new(1.0, self.tema.foco()),
-            egui::StrokeKind::Inside,
-        );
+        // **El foco es un nombre, así que hay que buscar dónde cayó**: indexar con él la lista de
+        // rectángulos señalaría a otra consola —o se saldría de la lista— en cuanto los nombres dejen de
+        // coincidir con las posiciones, que es todo el motivo de que el foco sea un nombre.
+        if let Some(donde) = self.activa().donde_esta_el_foco() {
+            ui.painter().rect_stroke(
+                rectangulos[donde],
+                0.0,
+                egui::Stroke::new(1.0, self.tema.foco()),
+                egui::StrokeKind::Inside,
+            );
+        }
 
         // Las que no se pintan no tienen otro sitio donde enterarse de su tamaño: ésta es la única
         // mitad del fotograma que conoce el área que les tocaría.
@@ -2387,7 +2600,7 @@ mod tests {
         let siguiente_nombre = pestañas.len();
         let siguiente_nombre_de_division = pestañas
             .iter()
-            .map(|pestaña| pestaña.divisiones.len())
+            .map(|pestaña| pestaña.divisiones().len())
             .sum();
 
         Ventana {
@@ -2401,7 +2614,7 @@ mod tests {
                 &egui::Context::default(),
                 pestañas
                     .iter()
-                    .flat_map(|pestaña| pestaña.divisiones.iter()),
+                    .flat_map(|pestaña| pestaña.divisiones().into_iter()),
             ),
             pestañas,
             activa: 0,
@@ -2587,12 +2800,15 @@ mod tests {
         // AC1. Dos programas distintos a la vez, y cada rejilla con lo suyo: es la comprobación de que
         // no comparten ni pseudoterminal ni pantalla, que es lo que «sin que se pisen» significa.
         let mut ventana = ventana_con("printf izquierda", "printf derecha");
-        for division in &ventana.activa().divisiones {
+        for division in ventana.activa().divisiones() {
             esperar_a_que_muera(division);
         }
         ventana.bombear_todas();
 
-        let [izquierda, derecha] = &ventana.activa().divisiones;
+        let (izquierda, derecha) = {
+            let suyas = ventana.activa().divisiones();
+            (suyas[0], suyas[1])
+        };
         assert!(izquierda.pantalla.to_text().contains("izquierda"));
         assert!(derecha.pantalla.to_text().contains("derecha"));
         assert!(
@@ -2646,7 +2862,7 @@ mod tests {
         let ventana = Ventana::con_pestañas(&egui::Context::default(), 1)
             .expect("no se pudo abrir la ventana con sus dos consolas");
 
-        let [izquierda, derecha] = ventana.activa().divisiones.each_ref().map(|division| {
+        let [izquierda, derecha] = las_dos(ventana.activa(), |division| {
             division
                 .panel
                 .as_ref()
@@ -2693,21 +2909,21 @@ mod tests {
             !ventana.vigilante.esta_ciego(),
             "la ventana abrió sin nadie que la avise"
         );
-        for division in &ventana.activa().divisiones {
+        for division in ventana.activa().divisiones() {
             division.por_releer.recoger();
         }
 
         publicar_en(
-            &ventana.activa().divisiones[cual],
+            ventana.activa().divisiones()[cual],
             r#"{"lines":["ya estoy"]}"#,
         );
 
         esperar_la_bandera(
-            &ventana.activa().divisiones[cual].por_releer,
+            &ventana.activa().divisiones()[cual].por_releer,
             "la ventana no vigila el directorio de esa consola",
         );
         assert!(
-            !ventana.activa().divisiones[1 - cual].por_releer.recoger(),
+            !ventana.activa().divisiones()[1 - cual].por_releer.recoger(),
             "publicar en una consola hizo releer a la otra"
         );
     }
@@ -2720,25 +2936,25 @@ mod tests {
     fn una_consola_sin_directorio_no_deja_ciega_a_la_ventana() {
         let ctx = egui::Context::default();
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().divisiones[0].panel =
+        ventana.activa_mut().divisiones_mut()[0].panel =
             Some(PanelDir::create().expect("crear el directorio"));
         assert!(
-            ventana.activa().divisiones[1].panel.is_none(),
+            ventana.activa().divisiones()[1].panel.is_none(),
             "esta prueba necesita una consola sin directorio"
         );
 
-        ventana.vigilante = Ventana::vigilar(&ctx, &ventana.activa().divisiones);
+        ventana.vigilante = Ventana::vigilar(&ctx, ventana.activa().divisiones());
 
         assert!(
             !ventana.vigilante.esta_ciego(),
             "una consola sin sitio donde publicar apagó el vigilante de la que sí lo tiene"
         );
-        for division in &ventana.activa().divisiones {
+        for division in ventana.activa().divisiones() {
             division.por_releer.recoger();
         }
-        publicar_en(&ventana.activa().divisiones[0], r#"{"lines":["aquí sí"]}"#);
+        publicar_en(ventana.activa().divisiones()[0], r#"{"lines":["aquí sí"]}"#);
         esperar_la_bandera(
-            &ventana.activa().divisiones[0].por_releer,
+            &ventana.activa().divisiones()[0].por_releer,
             "la consola con directorio dejó de estar vigilada",
         );
     }
@@ -2911,7 +3127,7 @@ mod tests {
             let ventana = Ventana::con_pestañas(&egui::Context::default(), 1)
                 .expect("no se pudo abrir la ventana con sus dos consolas");
 
-            ventana.activa().divisiones.each_ref().map(|division| {
+            las_dos(ventana.activa(), |division| {
                 division
                     .panel
                     .as_ref()
@@ -2926,9 +3142,33 @@ mod tests {
         }
     }
 
+    /// Pone el foco en la consola que ocupa esa posición dentro de la pestaña.
+    ///
+    /// **Existe porque el foco es un nombre y no un sitio.** Escribir `foco = 1` funcionaba cuando el
+    /// número era la posición; con nombres, el 1 es una consola concreta —la segunda de la **primera**
+    /// pestaña— y en cualquier otra pestaña no apunta a nadie. Traducirlo aquí es lo que evita que una
+    /// prueba diga «la segunda» y esté nombrando a otra.
+    fn poner_el_foco_en(pestaña: &mut Pestaña, posicion: usize) {
+        let nombre = pestaña.divisiones()[posicion].nombre;
+        pestaña.foco = nombre;
+    }
+
+    /// Las dos consolas de una pestaña, transformadas. Sustituye al `each_ref().map(...)` que el array
+    /// de dos permitía: con el árbol la lista no promete su número, y las pruebas que hablan de «las
+    /// dos» quieren fallar en el sitio si algún día no son dos.
+    fn las_dos<'a, T>(pestaña: &'a Pestaña, mirar: impl Fn(&'a Division) -> T) -> [T; 2] {
+        let suyas = pestaña.divisiones();
+        assert_eq!(
+            suyas.len(),
+            2,
+            "esta prueba habla de exactamente dos consolas"
+        );
+        [mirar(suyas[0]), mirar(suyas[1])]
+    }
+
     /// Las rutas de los directorios de panel de una pestaña, para poder mirar si siguen ahí después.
     fn directorios_de(pestaña: &Pestaña) -> [std::path::PathBuf; 2] {
-        pestaña.divisiones.each_ref().map(|division| {
+        las_dos(pestaña, |division| {
             division
                 .panel
                 .as_ref()
@@ -2951,7 +3191,7 @@ mod tests {
         assert_eq!(ventana.pestañas.len(), 2, "no se abrió la pestaña");
         assert_eq!(ventana.activa, 1, "la pestaña nueva no quedó delante");
         assert!(
-            ventana.pestañas[0].divisiones[0].pulsaciones.is_empty(),
+            ventana.pestañas[0].divisiones()[0].pulsaciones.is_empty(),
             "el acorde de crear se le coló al programa"
         );
         // Con su propia identidad: dos consolas que compartieran directorio se pisarían el estado.
@@ -3052,7 +3292,7 @@ mod tests {
             );
         }
         assert!(
-            ventana.pestañas[0].divisiones[0].pulsaciones.is_empty(),
+            ventana.pestañas[0].divisiones()[0].pulsaciones.is_empty(),
             "el acorde de cerrar se le coló al programa"
         );
     }
@@ -3278,7 +3518,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana =
             ventana_de_pestañas([["printf leeme", "printf leeme"], ["sleep 30", "sleep 30"]]);
-        for division in &ventana.pestañas[0].divisiones {
+        for division in ventana.pestañas[0].divisiones() {
             esperar_a_que_muera(division);
         }
         ventana.activa = 1;
@@ -3377,12 +3617,12 @@ mod tests {
         }
 
         publicar_en(
-            &ventana.pestañas[1].divisiones[0],
+            ventana.pestañas[1].divisiones()[0],
             r#"{"lines":["ya estoy"]}"#,
         );
 
         esperar_la_bandera(
-            &ventana.pestañas[1].divisiones[0].por_releer,
+            &ventana.pestañas[1].divisiones()[0].por_releer,
             "la ventana no vigila el directorio de la pestaña que acaba de crear",
         );
     }
@@ -3416,19 +3656,19 @@ mod tests {
         // indexa él mismo la consola destino, así que seguiría verde con el fallo que de verdad importa:
         // escribir en las dos, o en la izquierda fija. Con el foco en la derecha, los dos salen en rojo.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().foco = 1;
+        poner_el_foco_en(ventana.activa_mut(), 1);
 
         let ctx = egui::Context::default();
         ctx.input_mut(|entrada| entrada.events.push(egui::Event::Text("a".to_owned())));
         ventana.teclear_la_del_foco(&ctx);
 
         assert_eq!(
-            ventana.activa().divisiones[1].pulsaciones,
+            ventana.activa().divisiones()[1].pulsaciones,
             b"a",
             "la consola con el foco no recibió lo tecleado"
         );
         assert!(
-            ventana.activa().divisiones[0].pulsaciones.is_empty(),
+            ventana.activa().divisiones()[0].pulsaciones.is_empty(),
             "la tecla acabó también en la consola sin foco"
         );
     }
@@ -3439,12 +3679,12 @@ mod tests {
         // puede llevarse por delante la ventana del otro. La condición ingenua —«si una murió, cierra»—
         // es justo la que este test pone en rojo.
         let mut ventana = ventana_con("printf ya", "sleep 30");
-        esperar_a_que_muera(&ventana.activa().divisiones[0]);
+        esperar_a_que_muera(ventana.activa().divisiones()[0]);
 
         let bombeo = ventana.bombear_todas();
 
         assert!(
-            !ventana.activa().divisiones[0].puente.sigue_vivo(),
+            !ventana.activa().divisiones()[0].puente.sigue_vivo(),
             "la primera consola debería haber muerto ya"
         );
         assert!(
@@ -3458,7 +3698,7 @@ mod tests {
         // AC9. Y el «sin cola» no es un adorno: morir no borra lo que el programa escribió antes de
         // hacerlo, y cerrar con salida pendiente se comería el final, que es la parte que se mira.
         let mut ventana = ventana_con("printf una", "printf otra");
-        for division in &ventana.activa().divisiones {
+        for division in ventana.activa().divisiones() {
             esperar_a_que_muera(division);
         }
 
@@ -3469,13 +3709,13 @@ mod tests {
             "las dos murieron y la ventana no se cerró"
         );
         assert!(
-            ventana.activa().divisiones[0]
+            ventana.activa().divisiones()[0]
                 .pantalla
                 .to_text()
                 .contains("una")
         );
         assert!(
-            ventana.activa().divisiones[1]
+            ventana.activa().divisiones()[1]
                 .pantalla
                 .to_text()
                 .contains("otra")
@@ -3495,7 +3735,7 @@ mod tests {
             ["sleep 30", "sleep 30"],
             ["printf trabajando-de-fondo", "sleep 30"],
         ]);
-        let de_fondo = &ventana.pestañas[1].divisiones[0];
+        let de_fondo = &ventana.pestañas[1].divisiones()[0];
         esperar_a_que_muera(de_fondo);
 
         ventana.bombear_todas();
@@ -3505,7 +3745,7 @@ mod tests {
             "la prueba no está mirando la otra pestaña"
         );
         assert!(
-            ventana.pestañas[1].divisiones[0]
+            ventana.pestañas[1].divisiones()[0]
                 .pantalla
                 .to_text()
                 .contains("trabajando-de-fondo"),
@@ -3521,7 +3761,7 @@ mod tests {
         // matando al programa de la otra pestaña sin decir nada.
         let mut ventana =
             ventana_de_pestañas([["printf ya", "printf esta"], ["sleep 30", "sleep 30"]]);
-        for division in &ventana.pestañas[0].divisiones {
+        for division in ventana.pestañas[0].divisiones() {
             esperar_a_que_muera(division);
         }
 
@@ -3561,7 +3801,7 @@ mod tests {
         // deje cola, así que darla por terminada antes de vaciarla sería cerrar comiéndose su final —
         // que en una pestaña de fondo es justamente lo único que uno iba a leer de ella.
         assert!(
-            ventana.pestañas[1].divisiones[1]
+            ventana.pestañas[1].divisiones()[1]
                 .pantalla
                 .to_text()
                 .contains("cuatro"),
@@ -3577,14 +3817,14 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
-        for division in &mut ventana.pestañas[1].divisiones {
+        for division in ventana.pestañas[1].divisiones_mut() {
             division.panel = Some(PanelDir::create().expect("crear el directorio"));
         }
         publicar_en(
-            &ventana.pestañas[1].divisiones[0],
+            ventana.pestañas[1].divisiones()[0],
             r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
         );
-        ventana.pestañas[1].divisiones[0].por_releer.levantar();
+        ventana.pestañas[1].divisiones()[0].por_releer.levantar();
         ventana.activa = 1;
         // Con la pestaña delante, su panel se lee y la alarma queda armada: es el estado de partida.
         lo_que_la_ventana_espera(&mut ventana, &ctx);
@@ -3623,7 +3863,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
-        let de_fondo = &mut ventana.pestañas[1].divisiones[0];
+        let de_fondo = ventana.pestañas[1].divisiones_mut().swap_remove(0);
         de_fondo.panel = Some(PanelDir::create().expect("crear el directorio"));
         // Plazo cero, que el contrato permite: el panel está viejo desde el primer instante, así que la
         // prueba llega al caso sin esperar diez minutos ni tocar ningún reloj.
@@ -3669,7 +3909,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["printf de-fondo", "sleep 30"]]);
-        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[1].divisiones()[0]);
 
         // El bombeo deja pendiente lo que interpretó cada consola; el pintado solo recoge el de la
         // pestaña visible.
@@ -3677,7 +3917,7 @@ mod tests {
         // Que hubo algo que interpretar de verdad. Preguntar si quedó medida pendiente **no** vale
         // como guardián: el bombeo la deja puesta siempre, haya llegado un byte o no.
         assert!(
-            ventana.pestañas[1].divisiones[0]
+            ventana.pestañas[1].divisiones()[0]
                 .pantalla
                 .to_text()
                 .contains("de-fondo"),
@@ -3692,7 +3932,7 @@ mod tests {
         );
 
         assert!(
-            ventana.pestañas[1].divisiones[0]
+            ventana.pestañas[1].divisiones()[0]
                 .pendiente_de_medir
                 .is_none(),
             "la vuelta de la consola de fondo se quedó sin cerrar"
@@ -3702,7 +3942,7 @@ mod tests {
         // deja la medida vacía —sin nada pendiente, sin medias sucias y sin nada por recoger, o sea
         // verde— mientras el tiempo de esa consola se sigue publicando como coste del framework.
         // Comprobado mutándolo: sin esta afirmación, ese barrido pasaba.
-        let declarado = ventana.pestañas[1].divisiones[0]
+        let declarado = ventana.pestañas[1].divisiones_mut()[0]
             .medida
             .cerrar_fotograma(std::time::Duration::from_millis(10))
             .expect("la consola de fondo no declaró nada de lo que interpretó");
@@ -3711,7 +3951,7 @@ mod tests {
             "declaró cero: lo que interpretó se perdió por el camino"
         );
         assert!(
-            !ventana.pestañas[1].divisiones[0].medida.hay_medias(),
+            !ventana.pestañas[1].divisiones()[0].medida.hay_medias(),
             "la consola de fondo ensució alguna media: no hubo vuelta que medir, solo algo que restar"
         );
 
@@ -3727,7 +3967,7 @@ mod tests {
         );
         ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
         assert!(
-            ventana.pestañas[1].divisiones[0]
+            ventana.pestañas[1].divisiones_mut()[0]
                 .medida
                 .cerrar_fotograma(std::time::Duration::from_millis(10))
                 .is_none(),
@@ -3745,10 +3985,10 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["printf de-fondo", "sleep 30"]]);
-        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[1].divisiones()[0]);
 
         ventana.bombear_todas();
-        let (_, _, interpretado) = ventana.pestañas[1].divisiones[0]
+        let (_, _, interpretado) = ventana.pestañas[1].divisiones()[0]
             .pendiente_de_medir
             .expect("el bombeo tiene que dejar pendiente lo que interpretó la consola de fondo");
         // Con un cero aquí la comparación de abajo la cumpliría también un barrido que declarase
@@ -3769,7 +4009,7 @@ mod tests {
         // ventana lo declarado sale ya sumado con lo de las otras tres y deja de poderse afirmar
         // sobre este número. Que la ventana lo recoge lo ata la prueba de arriba.
         assert_eq!(
-            ventana.pestañas[1].divisiones[0]
+            ventana.pestañas[1].divisiones_mut()[0]
                 .medida
                 .cerrar_fotograma(std::time::Duration::from_millis(10)),
             Some(interpretado),
@@ -3789,7 +4029,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana =
             ventana_de_pestañas([["printf delante", "sleep 30"], ["sleep 30", "sleep 30"]]);
-        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[0].divisiones()[0]);
 
         ventana.bombear_todas();
         pasada_de_interfaz(
@@ -3803,7 +4043,7 @@ mod tests {
         ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
 
         assert!(
-            ventana.pestañas[0].divisiones[0].medida.hay_medias(),
+            ventana.pestañas[0].divisiones()[0].medida.hay_medias(),
             "la consola que se ve se quedó sin una sola muestra: su vuelta se cerró antes de \
              pintarla, así que se declaró como si no le hubiera llegado nada"
         );
@@ -3831,8 +4071,8 @@ mod tests {
         ]);
         // Solo las que imprimen y terminan; las otras dos siguen vivas a propósito, porque un informe
         // de una sesión real se toma con consolas todavía trabajando.
-        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
-        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[0].divisiones()[0]);
+        esperar_a_que_muera(ventana.pestañas[1].divisiones()[0]);
         ventana.bombear_todas();
         pasada_de_interfaz(
             &mut ventana,
@@ -3871,8 +4111,8 @@ mod tests {
         ]);
         // Solo las que imprimen y terminan; las otras dos siguen vivas a propósito, porque un informe
         // de una sesión real se toma con consolas todavía trabajando.
-        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
-        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[0].divisiones()[0]);
+        esperar_a_que_muera(ventana.pestañas[1].divisiones()[0]);
         ventana.bombear_todas();
         pasada_de_interfaz(
             &mut ventana,
@@ -3919,7 +4159,7 @@ mod tests {
             &format!("head -c {VOLCADO} /dev/zero | tr '\\0' a"),
             "printf tranquila",
         );
-        for division in &ventana.activa().divisiones {
+        for division in ventana.activa().divisiones() {
             esperar_a_que_muera(division);
         }
 
@@ -3931,14 +4171,14 @@ mod tests {
         );
         // La de al lado entregó lo suyo en ese mismo fotograma, sin esperar a que el volcado acabe.
         assert!(
-            ventana.activa().divisiones[1]
+            ventana.activa().divisiones()[1]
                 .pantalla
                 .to_text()
                 .contains("tranquila"),
             "la consola tranquila se quedó esperando detrás del volcado"
         );
         // Y lo retenido sigue acotado por consola: ninguna se pasa del presupuesto.
-        for (cual, division) in ventana.activa().divisiones.iter().enumerate() {
+        for (cual, division) in ventana.activa().divisiones().into_iter().enumerate() {
             assert!(
                 division.recibido.len() <= PRESUPUESTO,
                 "la consola {cual} se pasó del presupuesto: {}",
@@ -4119,7 +4359,7 @@ mod tests {
 
         assert_eq!(ordenes, vec![Orden::Ir(1)], "el acorde no pidió cambiar");
         assert!(
-            ventana.activa().divisiones[0].pulsaciones.is_empty(),
+            ventana.activa().divisiones()[0].pulsaciones.is_empty(),
             "el acorde se le coló al programa"
         );
 
@@ -4186,7 +4426,7 @@ mod tests {
             "pidió cambiar de pestaña habiendo una sola"
         );
         assert_eq!(
-            ventana.activa().divisiones[0].pulsaciones,
+            ventana.activa().divisiones()[0].pulsaciones,
             b"\x1b[D",
             "la flecha se la tragó el acorde en vez de llegar al programa"
         );
@@ -4362,7 +4602,7 @@ mod tests {
             ["printf de-la-primera", "sleep 30"],
             ["printf de-la-segunda", "sleep 30"],
         ]);
-        esperar_a_que_muera(&ventana.pestañas[1].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[1].divisiones()[0]);
 
         // **La segunda tiene que estar delante mientras se mide**, o su bloque no se publica: una
         // pestaña de fondo declara su vuelta sin espera —para no ensuciar las medias— y sin espera no se
@@ -4496,6 +4736,37 @@ mod tests {
     }
 
     #[test]
+    fn recorrer_el_arbol_para_pintar_se_declara_y_no_se_le_regala_al_framework() {
+        // AC17. Con dos consolas fijas, repartir el área era indexar un array y no había nada que
+        // declarar. Con el árbol son dos recorridos con sus reservas, y **no son trabajo de ninguna
+        // consola**: son de la disposición. El coste del fotograma se reparte por resta, así que lo que
+        // nadie declara se publica como coste del framework de interfaz — la cifra con la que D3 lo
+        // juzga.
+        //
+        // Se mira `cronometrado_aparte` **antes de cerrar el fotograma**, que es donde se vacía. En una
+        // pasada normal nadie más le suma —solo abrir y cerrar pestañas, y aquí no pasa ninguna de las
+        // dos—, así que si sale cero es que el recorrido no se declaró.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        assert!(
+            ventana.cronometrado_aparte.is_zero(),
+            "la ventana ya nace con algo declarado aparte, y entonces esta prueba no mide nada"
+        );
+
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        assert!(
+            !ventana.cronometrado_aparte.is_zero(),
+            "recorrer el árbol no declaró nada: su coste se publica como coste del framework"
+        );
+    }
+
+    #[test]
     fn cerrar_una_pestaña_no_se_lleva_lo_que_sus_consolas_ya_habian_declarado() {
         // Al cerrar una pestaña se sueltan sus divisiones **con su `Medida` dentro**, y ahí puede haber
         // una vuelta anotada de este mismo fotograma: bytes interpretados hace un instante. Si se va sin
@@ -4506,7 +4777,7 @@ mod tests {
             ["printf de-la-que-se-va", "sleep 30"],
             ["sleep 30", "sleep 30"],
         ]);
-        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[0].divisiones()[0]);
 
         // El bombeo deja anotado lo que interpretó; la pasada de interfaz cierra su vuelta.
         ventana.bombear_todas();
@@ -4517,7 +4788,7 @@ mod tests {
             egui::RawInput::default(),
         );
         assert!(
-            ventana.pestañas[0].divisiones[0]
+            ventana.pestañas[0].divisiones()[0]
                 .pantalla
                 .to_text()
                 .contains("de-la-que-se-va"),
@@ -4531,7 +4802,7 @@ mod tests {
         // Cinco segundos no los puede producir el cierre, así que si aparecen es porque llegaron de la
         // consola que se fue.
         const SUYO: std::time::Duration = std::time::Duration::from_secs(5);
-        ventana.pestañas[0].divisiones[0]
+        ventana.pestañas[0].divisiones_mut()[0]
             .medida
             .anotar_vuelta(medida::Tramos::de_una_vuelta(
                 None,
@@ -4561,7 +4832,7 @@ mod tests {
         // informe publica como coste del framework de interfaz.
         let ctx = egui::Context::default();
         let mut ventana = ventana_de_pestañas([["printf algo", "sleep 30"]]);
-        esperar_a_que_muera(&ventana.pestañas[0].divisiones[0]);
+        esperar_a_que_muera(ventana.pestañas[0].divisiones()[0]);
 
         // Hace falta que alguna división declare algo: sin tramos de nadie no se anota resto.
         ventana.bombear_todas();
@@ -4618,7 +4889,7 @@ mod tests {
         // por el otro camino este defecto es invisible.
         let ctx = egui::Context::default();
         let mut ventana = ventana_con("printf de-verdad", "sleep 30");
-        esperar_a_que_muera(&ventana.activa().divisiones[0]);
+        esperar_a_que_muera(ventana.activa().divisiones()[0]);
 
         let pasadas = un_fotograma_como_eframe(&mut ventana, &ctx, true);
         assert_eq!(
@@ -4626,7 +4897,7 @@ mod tests {
             "egui no repitió la pasada, así que la prueba no está mirando lo que cree"
         );
         assert!(
-            ventana.activa().divisiones[0]
+            ventana.activa().divisiones()[0]
                 .pantalla
                 .to_text()
                 .contains("de-verdad"),
@@ -4635,7 +4906,7 @@ mod tests {
 
         // El cierre se llama a mano porque `eframe::Frame::_new_kittest()` entrega `cpu_usage: None`, así
         // que por el camino de la aplicación no llega a ocurrir dentro de una prueba.
-        ventana.activa_mut().divisiones[0]
+        ventana.activa_mut().divisiones_mut()[0]
             .medida
             .cerrar_fotograma(std::time::Duration::from_millis(50))
             .expect("la consola no declaró nada de lo que hizo");
@@ -4648,7 +4919,7 @@ mod tests {
         // pasada declara por encolar el pintado ya supera cualquier umbral pequeño, así que la prueba
         // pasaba igual. Comprobado mutándolo.
         assert!(
-            ventana.activa().divisiones[0].medida.hay_medias(),
+            ventana.activa().divisiones()[0].medida.hay_medias(),
             "la vuelta buena se perdió: la que quedó no traía espera, así que las series del informe se \
              quedan sin una sola muestra de esta consola"
         );
@@ -4690,19 +4961,19 @@ mod tests {
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         // Divisores muy distintos: con dos repartos parecidos las dos rejillas darían el mismo número de
         // columnas y la prueba no vería nada.
-        ventana.pestañas[0].fraccion = 0.2;
-        ventana.pestañas[1].fraccion = 0.8;
+        ventana.pestañas[0].mover_la_primera_frontera(0.2);
+        ventana.pestañas[1].mover_la_primera_frontera(0.8);
 
         // Primera pasada: se registran las regiones. egui resuelve la interacción contra la anterior, así
         // que un clic en la primera no encontraría a nadie a quien dárselo.
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
-        let con_el_divisor_de_la_primera = ventana.pestañas[0].divisiones[0].medido.cols;
+        let con_el_divisor_de_la_primera = ventana.pestañas[0].divisiones()[0].medido.cols;
 
         // La ficha de la segunda pestaña ocupa la mitad derecha de la barra.
         un_fotograma_con(&mut ventana, &ctx, clic_en(egui::pos2(600.0, 8.0)));
 
         assert_eq!(ventana.activa, 1, "el clic no cambió de pestaña");
-        let medida_de_la_segunda = ventana.pestañas[1].divisiones[0].medido.cols;
+        let medida_de_la_segunda = ventana.pestañas[1].divisiones()[0].medido.cols;
         assert_ne!(
             medida_de_la_segunda, con_el_divisor_de_la_primera,
             "la consola de la pestaña nueva se midió con el divisor de la anterior"
@@ -4724,7 +4995,7 @@ mod tests {
 
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
 
-        let de_fondo = ventana.pestañas[1].divisiones[0].medido;
+        let de_fondo = ventana.pestañas[1].divisiones()[0].medido;
         assert_ne!(
             de_fondo, REJILLA_INICIAL,
             "la pestaña de fondo se quedó con la rejilla de arranque"
@@ -4732,7 +5003,8 @@ mod tests {
         // Las dos pestañas nacen con la misma fracción y comparten el área, así que la de fondo tiene
         // que medir exactamente lo mismo que la que se está pintando.
         assert_eq!(
-            de_fondo, ventana.pestañas[0].divisiones[0].medido,
+            de_fondo,
+            ventana.pestañas[0].divisiones()[0].medido,
             "la de fondo no mide lo mismo que la visible teniendo el mismo divisor y la misma área"
         );
     }
@@ -4747,13 +5019,13 @@ mod tests {
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         // Muy distintos a propósito: con dos repartos parecidos las dos rejillas darían el mismo
         // número de columnas y la prueba no vería nada.
-        ventana.pestañas[0].fraccion = 0.2;
-        ventana.pestañas[1].fraccion = 0.8;
+        ventana.pestañas[0].mover_la_primera_frontera(0.2);
+        ventana.pestañas[1].mover_la_primera_frontera(0.8);
 
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
         let desde_el_fondo = [
-            ventana.pestañas[1].divisiones[0].medido,
-            ventana.pestañas[1].divisiones[1].medido,
+            ventana.pestañas[1].divisiones()[0].medido,
+            ventana.pestañas[1].divisiones()[1].medido,
         ];
 
         // Y ahora la misma pestaña, pero pintándose: lo que se mide desde el fondo tiene que ser lo
@@ -4764,8 +5036,8 @@ mod tests {
         assert_eq!(
             desde_el_fondo,
             [
-                ventana.pestañas[1].divisiones[0].medido,
-                ventana.pestañas[1].divisiones[1].medido,
+                ventana.pestañas[1].divisiones()[0].medido,
+                ventana.pestañas[1].divisiones()[1].medido,
             ],
             "la pestaña de fondo se midió con un divisor que no era el suyo"
         );
@@ -4783,7 +5055,7 @@ mod tests {
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
 
-        let de_fondo = &ventana.pestañas[1].divisiones[0];
+        let de_fondo = &ventana.pestañas[1].divisiones()[0];
         assert_eq!(
             de_fondo.pantalla.size(),
             de_fondo.medido,
@@ -4808,22 +5080,22 @@ mod tests {
         let area = area_de(1200.0);
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
-        ventana.pestañas[1].divisiones[0].panel =
+        ventana.pestañas[1].divisiones_mut()[0].panel =
             Some(PanelDir::create().expect("crear el directorio"));
 
         // Con el directorio vacío no hay nada que enseñar, así que la consola ocupa su rectángulo.
         pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
-        let sin_panel = ventana.pestañas[1].divisiones[0].medido;
+        let sin_panel = ventana.pestañas[1].divisiones()[0].medido;
 
         // Y ahora el productor publica, con su pestaña todavía de fondo.
         publicar_en(
-            &ventana.pestañas[1].divisiones[0],
+            ventana.pestañas[1].divisiones()[0],
             r#"{"lines":["algo publicado"]}"#,
         );
-        ventana.pestañas[1].divisiones[0].por_releer.levantar();
+        ventana.pestañas[1].divisiones()[0].por_releer.levantar();
         pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
 
-        let de_fondo = ventana.pestañas[1].divisiones[0].medido;
+        let de_fondo = ventana.pestañas[1].divisiones()[0].medido;
         assert!(
             de_fondo.cols < sin_panel.cols,
             "la consola de fondo no cedió ancho a un panel ya publicado: midió {} columnas, las \
@@ -4836,7 +5108,8 @@ mod tests {
         ventana.activa = 1;
         pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
         assert_eq!(
-            de_fondo, ventana.pestañas[1].divisiones[0].medido,
+            de_fondo,
+            ventana.pestañas[1].divisiones()[0].medido,
             "la consola se mide distinto según se la mire o no"
         );
     }
@@ -4850,19 +5123,19 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
-        ventana.pestañas[1].divisiones[0].panel =
+        ventana.pestañas[1].divisiones_mut()[0].panel =
             Some(PanelDir::create().expect("crear el directorio"));
         publicar_en(
-            &ventana.pestañas[1].divisiones[0],
+            ventana.pestañas[1].divisiones()[0],
             r#"{"lines":["algo publicado"]}"#,
         );
-        ventana.pestañas[1].divisiones[0].por_releer.levantar();
+        ventana.pestañas[1].divisiones()[0].por_releer.levantar();
 
         // El tramo del panel viaja con la vuelta que deja el bombeo, así que hay que bombear. Lo que
         // interpretó se guarda aparte para poder afirmar sobre **el panel** y no sobre la suma: sin
         // esa resta, la prueba la cumpliría cualquier tramo que declarase algo.
         ventana.bombear_todas();
-        let (_, _, interpretado) = ventana.pestañas[1].divisiones[0]
+        let (_, _, interpretado) = ventana.pestañas[1].divisiones()[0]
             .pendiente_de_medir
             .expect("el bombeo tiene que dejar pendiente la vuelta de la consola de fondo");
 
@@ -4873,7 +5146,7 @@ mod tests {
             egui::RawInput::default(),
         );
 
-        let declarado = ventana.pestañas[1].divisiones[0]
+        let declarado = ventana.pestañas[1].divisiones_mut()[0]
             .medida
             .cerrar_fotograma(std::time::Duration::from_millis(10))
             .expect("la consola de fondo no declaró nada");
@@ -4883,7 +5156,7 @@ mod tests {
              publicaría como coste del framework"
         );
         assert!(
-            !ventana.pestañas[1].divisiones[0].medida.hay_medias(),
+            !ventana.pestañas[1].divisiones()[0].medida.hay_medias(),
             "leer el panel de una consola que no se pinta ensució una media: no hubo vuelta que \
              medir, solo algo que restar"
         );
@@ -4905,14 +5178,19 @@ mod tests {
         ]);
         // Tres divisores distintos: con fracciones parecidas las tres pestañas darían el mismo número
         // de columnas y medir una por otra no se vería.
-        ventana.pestañas[0].fraccion = 0.2;
-        ventana.pestañas[1].fraccion = 0.5;
-        ventana.pestañas[2].fraccion = 0.8;
+        ventana.pestañas[0].mover_la_primera_frontera(0.2);
+        ventana.pestañas[1].mover_la_primera_frontera(0.5);
+        ventana.pestañas[2].mover_la_primera_frontera(0.8);
 
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
         let desde_el_fondo: Vec<[Size; 2]> = ventana.pestañas[1..]
             .iter()
-            .map(|pestaña| [pestaña.divisiones[0].medido, pestaña.divisiones[1].medido])
+            .map(|pestaña| {
+                [
+                    pestaña.divisiones()[0].medido,
+                    pestaña.divisiones()[1].medido,
+                ]
+            })
             .collect();
 
         for (cual, medidas) in desde_el_fondo.iter().enumerate() {
@@ -4932,8 +5210,8 @@ mod tests {
             assert_eq!(
                 *medidas,
                 [
-                    ventana.pestañas[pestaña].divisiones[0].medido,
-                    ventana.pestañas[pestaña].divisiones[1].medido,
+                    ventana.pestañas[pestaña].divisiones()[0].medido,
+                    ventana.pestañas[pestaña].divisiones()[1].medido,
                 ],
                 "la pestaña {pestaña} no midió desde el fondo lo que mide al verse"
             );
@@ -4955,12 +5233,12 @@ mod tests {
 
         // Con una sola pestaña no hay barra, así que las consolas se llevan el alto entero.
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
-        let sin_barra = ventana.pestañas[0].divisiones[0].medido;
+        let sin_barra = ventana.pestañas[0].divisiones()[0].medido;
 
         un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
 
         assert_eq!(ventana.pestañas.len(), 2, "no se abrió la pestaña");
-        let paso_a_fondo = ventana.pestañas[0].divisiones[0].medido;
+        let paso_a_fondo = ventana.pestañas[0].divisiones()[0].medido;
         assert!(
             paso_a_fondo.rows < sin_barra.rows,
             "la que se quedó detrás midió {} filas, las mismas que cuando no había barra",
@@ -4969,7 +5247,8 @@ mod tests {
         // Se comparan las filas y no la rejilla entera: lo que la barra quita es alto, y las columnas
         // de la pestaña nueva dependen además de su panel, que la de antes no tiene.
         assert_eq!(
-            paso_a_fondo.rows, ventana.pestañas[1].divisiones[0].medido.rows,
+            paso_a_fondo.rows,
+            ventana.pestañas[1].divisiones()[0].medido.rows,
             "la que se quedó detrás no tiene el alto de la que ahora se ve"
         );
     }
@@ -4999,7 +5278,7 @@ mod tests {
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
 
-        let de_fondo = &mut ventana.pestañas[1].divisiones[0];
+        let de_fondo = ventana.pestañas[1].divisiones_mut().swap_remove(0);
         assert_ne!(
             de_fondo.medido, REJILLA_INICIAL,
             "la de fondo se quedó con la rejilla de arranque y la espera de abajo no probaría nada"
@@ -5041,18 +5320,19 @@ mod tests {
         let mut ventana =
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         // La segunda pestaña escucha por su consola derecha; la primera, por la izquierda.
-        ventana.pestañas[1].foco = 1;
+        poner_el_foco_en(&mut ventana.pestañas[1], 1);
 
         ventana.aplicar(Orden::Ir(1), &ctx);
         encolar(&ctx, vec![egui::Event::Text("x".to_owned())]);
         ventana.teclear_la_del_foco(&ctx);
 
         assert_eq!(
-            ventana.pestañas[1].divisiones[1].pulsaciones, b"x",
+            ventana.pestañas[1].divisiones()[1].pulsaciones,
+            b"x",
             "la tecla no fue a la consola con el foco de la pestaña nueva"
         );
         assert!(
-            ventana.pestañas[1].divisiones[0].pulsaciones.is_empty(),
+            ventana.pestañas[1].divisiones()[0].pulsaciones.is_empty(),
             "la tecla fue a la consola que tenía el foco en la pestaña anterior"
         );
     }
@@ -5122,7 +5402,7 @@ mod tests {
             "el fotograma no llegó a aplicar lo que pidió el acorde"
         );
         assert!(
-            ventana.pestañas[0].divisiones[0].pulsaciones.is_empty(),
+            ventana.pestañas[0].divisiones()[0].pulsaciones.is_empty(),
             "el acorde se le coló al programa de la pestaña que se dejaba"
         );
     }
@@ -5161,7 +5441,7 @@ mod tests {
                 "{como} se pidió cambiar de pestaña"
             );
             assert_eq!(
-                ventana.activa().divisiones[0].pulsaciones,
+                ventana.activa().divisiones()[0].pulsaciones,
                 b"\x1b[C",
                 "{como} la flecha se la tragó el acorde en vez de llegar al programa"
             );
@@ -5389,7 +5669,7 @@ mod tests {
         // de cualquier atajo que se tome al armar.
         let ventana = Ventana::con_pestañas(&egui::Context::default(), 3)
             .expect("no se pudieron abrir las tres pestañas");
-        let de_fondo = &ventana.pestañas[2].divisiones[1];
+        let de_fondo = &ventana.pestañas[2].divisiones()[1];
         for division in ventana.todas_las_divisiones() {
             division.por_releer.recoger();
         }
@@ -5496,10 +5776,19 @@ mod tests {
             pulsar(agarre),
         );
         pasada_de_arrastre(&mut ventana, &ctx, reparto.divisores[0], area, mover(fuera));
+        // **El tope es el 99 % y no el 100 %, y el cambio es a propósito.** Con el árbol, lo que la
+        // pestaña guarda son los pesos de sus hijos, y un peso cero no existe — la parte que se colapsa
+        // conserva un uno por ciento. Antes se guardaba la fracción cruda (`1.0`) y el suelo de ancho
+        // rescataba a la consola en cada fotograma; ahora el rescate está en el estado.
+        //
+        // Lo que **no** cambia es la razón por la que la fracción no se recorta contra la ventana: ese
+        // uno por ciento es relativo a las dos vecinas, no al ancho de hoy, así que no hornea la
+        // geometría actual en el estado. Y a cambio, la consola arrastrada al borde vuelve a crecer al
+        // ensanchar la ventana en vez de quedarse clavada en el mínimo para siempre.
         assert_eq!(
-            ventana.activa().fraccion,
-            1.0,
-            "pasarse del borde derecho no dejó la fracción pegada al tope"
+            ventana.activa().fraccion_de_la_primera_frontera().unwrap(),
+            0.99,
+            "pasarse del borde derecho no dejó la frontera pegada a su tope"
         );
 
         let movio = pasada_de_arrastre(
@@ -5514,7 +5803,7 @@ mod tests {
         // Exacto y no aproximado: 300 de 400 repartibles es 0,75 sin resto, así que una tolerancia solo
         // serviría para dejar pasar una implementación que casi acierta.
         assert_eq!(
-            ventana.activa().fraccion,
+            ventana.activa().fraccion_de_la_primera_frontera().unwrap(),
             0.75,
             "el divisor no siguió al puntero después de volver de fuera"
         );
@@ -5546,7 +5835,7 @@ mod tests {
             );
 
             assert_eq!(
-                ventana.activa().fraccion,
+                ventana.activa().fraccion_de_la_primera_frontera().unwrap(),
                 FRACCION_INICIAL,
                 "con un área de {} puntos el arrastre movió la fracción",
                 area.width()
@@ -5578,8 +5867,8 @@ mod tests {
             let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
             for (cual, (division, rect)) in ventana
                 .activa_mut()
-                .divisiones
-                .iter_mut()
+                .divisiones_mut()
+                .into_iter()
                 .zip(rectangulos)
                 .enumerate()
             {
@@ -5590,20 +5879,20 @@ mod tests {
         .drop_without_applying_deltas();
 
         assert_eq!(
-            ventana.activa().divisiones[0].medido,
+            ventana.activa().divisiones()[0].medido,
             esperado[0],
             "la consola izquierda no midió su propio rectángulo"
         );
         assert_eq!(
-            ventana.activa().divisiones[1].medido,
+            ventana.activa().divisiones()[1].medido,
             esperado[1],
             "la consola derecha no midió su propio rectángulo"
         );
         // Y la comprobación que hace que las dos de arriba no puedan ser ciertas por casualidad: con este
         // reparto los dos anchos **tienen** que salir distintos.
         assert_ne!(
-            ventana.activa().divisiones[0].medido.cols,
-            ventana.activa().divisiones[1].medido.cols,
+            ventana.activa().divisiones()[0].medido.cols,
+            ventana.activa().divisiones()[1].medido.cols,
             "las dos consolas midieron el mismo ancho con un reparto de un cuarto"
         );
     }
@@ -5874,7 +6163,7 @@ mod tests {
         let mut ventana = ventana_con("sleep 30", "sleep 30");
         // Con su directorio y sin publicar: es la raya que el hito promete —el fichero que todavía no
         // existe no es un aviso— y aquí además comprueba que no se programa nada por él.
-        for division in &mut ventana.activa_mut().divisiones {
+        for division in ventana.activa_mut().divisiones_mut() {
             division.panel = Some(PanelDir::create().expect("crear el directorio"));
         }
 
@@ -5892,10 +6181,10 @@ mod tests {
         );
 
         publicar_en(
-            &ventana.activa().divisiones[0],
+            ventana.activa().divisiones()[0],
             r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
         );
-        ventana.activa().divisiones[0].por_releer.levantar();
+        ventana.activa().divisiones()[0].por_releer.levantar();
         let con_panel = lo_que_la_ventana_espera(&mut ventana, &ctx);
 
         assert!(
@@ -5919,14 +6208,14 @@ mod tests {
     fn con_la_ventana_tapada_el_latido_se_sigue_armando() {
         let ctx = egui::Context::default();
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        for division in &mut ventana.activa_mut().divisiones {
+        for division in ventana.activa_mut().divisiones_mut() {
             division.panel = Some(PanelDir::create().expect("crear el directorio"));
         }
         publicar_en(
-            &ventana.activa().divisiones[0],
+            ventana.activa().divisiones()[0],
             r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
         );
-        ventana.activa().divisiones[0].por_releer.levantar();
+        ventana.activa().divisiones()[0].por_releer.levantar();
         // Una pasada entera primero, que es donde el panel se lee.
         lo_que_la_ventana_espera(&mut ventana, &ctx);
 
@@ -6004,7 +6293,7 @@ mod tests {
         let sin_armar = dir.path().join("no-existe");
         ventana.vigilante = Vigilante::nuevo(|| {}, &[(sin_armar.as_path(), Bandera::levantada())]);
         assert!(ventana.vigilante.esta_ciego(), "el respaldo no está activo");
-        for division in &ventana.activa().divisiones {
+        for division in ventana.activa().divisiones() {
             division.por_releer.recoger();
         }
         // **Dormirla primero, o la aserción de abajo es vacía**: un contexto recién hecho ya pide
@@ -6013,7 +6302,7 @@ mod tests {
 
         eframe::App::logic(&mut ventana, &ctx, &mut eframe::Frame::_new_kittest());
 
-        for (cual, division) in ventana.activa().divisiones.iter().enumerate() {
+        for (cual, division) in ventana.activa().divisiones().into_iter().enumerate() {
             assert!(
                 division.por_releer.recoger(),
                 "sin nadie que avise, el panel de la consola {cual} se queda congelado"
@@ -6046,7 +6335,7 @@ mod tests {
 
         eframe::App::logic(&mut ventana, &ctx, &mut eframe::Frame::_new_kittest());
 
-        for (cual, division) in ventana.pestañas[1].divisiones.iter().enumerate() {
+        for (cual, division) in ventana.pestañas[1].divisiones().into_iter().enumerate() {
             assert!(
                 division.por_releer.recoger(),
                 "el panel de la consola {cual} de la pestaña de fondo se queda congelado hasta que \
@@ -6190,11 +6479,12 @@ mod tests {
             area,
             egui::RawInput::default(),
         );
-        let como_antes = ninguna.activa().divisiones[1].medido;
+        let como_antes = ninguna.activa().divisiones()[1].medido;
 
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().divisiones[0] = division_con_panel(r#"{"lines":["algo publicado"]}"#);
-        ventana.activa_mut().divisiones[1].panel =
+        *ventana.activa_mut().divisiones_mut()[0] =
+            division_con_panel(r#"{"lines":["algo publicado"]}"#);
+        ventana.activa_mut().divisiones_mut()[1].panel =
             Some(PanelDir::create().expect("crear el directorio"));
         pasada_de_interfaz(
             &mut ventana,
@@ -6204,12 +6494,12 @@ mod tests {
         );
 
         assert!(
-            ventana.activa().divisiones[0].medido.cols < como_antes.cols,
+            ventana.activa().divisiones()[0].medido.cols < como_antes.cols,
             "la consola cuyo productor publicó no cedió ancho: midió {} columnas",
-            ventana.activa().divisiones[0].medido.cols
+            ventana.activa().divisiones()[0].medido.cols
         );
         assert_eq!(
-            ventana.activa().divisiones[1].medido,
+            ventana.activa().divisiones()[1].medido,
             como_antes,
             "la consola con el directorio vacío se estrechó sin que nadie hubiera publicado"
         );
@@ -6351,6 +6641,119 @@ mod tests {
             reparto.partes.last().unwrap().right(),
             area.right(),
             "la última parte no llega al borde: queda una rendija"
+        );
+    }
+
+    #[test]
+    fn un_arbol_anidado_coloca_sus_hojas_en_el_orden_en_que_se_pintan() {
+        // **Lo que hace que el árbol y la geometría se puedan casar por posición.** Las consolas viajan
+        // en una lista y sus rectángulos en otra, y todo el pintado depende de que las dos listas vayan
+        // en el mismo orden. Si `colocar` recorriera los hijos en un orden y `hojas` en otro, cada
+        // consola se pintaría en el sitio de otra — y con dos columnas simétricas eso ni se notaría.
+        //
+        // El árbol de la prueba: una columna izquierda, y a la derecha dos filas. Tres consolas, dos
+        // fronteras, y **una de ellas horizontal**, que es lo que distingue un recorrido de verdad de
+        // uno que solo sabe de columnas.
+        let arbol = Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 7)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Rama {
+                        orientacion: Orientacion::Filas,
+                        hijos: vec![
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 8)),
+                            },
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 9)),
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+
+        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
+        assert_eq!(
+            nombres,
+            [7, 8, 9],
+            "las hojas no salen en el orden del árbol"
+        );
+
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
+        let reparto = arbol.colocar(area, 0.0);
+
+        assert_eq!(reparto.partes.len(), 3, "una consola se quedó sin sitio");
+        assert_eq!(
+            reparto.divisores.len(),
+            2,
+            "un corte en columnas y otro en filas son dos fronteras"
+        );
+
+        // La primera se lleva media anchura y todo el alto; las otras dos se reparten el alto de la
+        // mitad derecha. Escrito así, un recorrido que colocara las hojas en otro orden caería.
+        let [izquierda, arriba, abajo] = [reparto.partes[0], reparto.partes[1], reparto.partes[2]];
+        assert_eq!(
+            izquierda.height(),
+            area.height(),
+            "la columna no ocupa el alto entero"
+        );
+        assert_eq!(arriba.top(), area.top(), "la de arriba no empieza arriba");
+        assert_eq!(
+            abajo.bottom(),
+            area.bottom(),
+            "la de abajo no llega al fondo"
+        );
+        assert!(
+            arriba.bottom() < abajo.top(),
+            "las dos filas no están una encima de otra: {arriba:?} y {abajo:?}"
+        );
+        assert_eq!(
+            arriba.left(),
+            abajo.left(),
+            "las dos filas no comparten columna"
+        );
+        assert!(
+            izquierda.right() < arriba.left(),
+            "la columna izquierda no está a la izquierda de las filas"
+        );
+    }
+
+    #[test]
+    fn el_foco_sigue_a_su_consola_aunque_cambie_de_sitio() {
+        // **Por esto el foco es un nombre y no una posición.** Se monta una pestaña, se pone el foco en
+        // la segunda consola, y se le da la vuelta a la disposición. Con el foco guardado como posición,
+        // el teclado se iría a la consola que ahora ocupa ese sitio — otra distinta, y sin que nada en
+        // pantalla lo explique.
+        let mut pestaña = Pestaña::con(
+            [division_con("sleep 30", 3), division_con("sleep 30", 4)],
+            0,
+        );
+        poner_el_foco_en(&mut pestaña, 1);
+        assert_eq!(pestaña.foco, 4, "el foco no guardó el nombre de la segunda");
+        assert_eq!(pestaña.donde_esta_el_foco(), Some(1));
+
+        // Se invierten las dos consolas dentro del árbol, que es lo que hará cerrar una vecina.
+        let Nodo::Rama { hijos, .. } = &mut pestaña.raiz else {
+            panic!("la pestaña tiene que nacer con una rama");
+        };
+        hijos.swap(0, 1);
+
+        assert_eq!(
+            pestaña.foco, 4,
+            "el foco cambió de consola al reordenarse la disposición"
+        );
+        assert_eq!(
+            pestaña.donde_esta_el_foco(),
+            Some(0),
+            "el foco no siguió a su consola al sitio nuevo"
         );
     }
 
@@ -6517,7 +6920,7 @@ mod tests {
         // acabó cada consola, que es lo que el programa de dentro va a recibir.
         const UN_CUARTO: f32 = 0.25;
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().fraccion = UN_CUARTO;
+        ventana.activa_mut().mover_la_primera_frontera(UN_CUARTO);
         let ctx = egui::Context::default();
 
         for ancho in [400.0 + GROSOR_DEL_DIVISOR, 800.0 + GROSOR_DEL_DIVISOR] {
@@ -6535,20 +6938,20 @@ mod tests {
             );
 
             assert_eq!(
-                ventana.activa().divisiones[0].medido,
+                ventana.activa().divisiones()[0].medido,
                 metrica.celdas_en(reparto.partes[0].size()),
                 "con la ventana a {ancho} puntos, la consola izquierda no midió su cuarto"
             );
             assert_eq!(
-                ventana.activa().divisiones[1].medido,
+                ventana.activa().divisiones()[1].medido,
                 metrica.celdas_en(reparto.partes[1].size()),
                 "con la ventana a {ancho} puntos, la consola derecha no midió sus tres cuartos"
             );
             // Un cuarto y no la mitad, por lo mismo que en la prueba de `repartir`: con la mitad, una
             // pasada que ignorase la fracción daría estos mismos dos números.
             assert_ne!(
-                ventana.activa().divisiones[0].medido.cols,
-                ventana.activa().divisiones[1].medido.cols,
+                ventana.activa().divisiones()[0].medido.cols,
+                ventana.activa().divisiones()[1].medido.cols,
                 "las dos consolas midieron el mismo ancho con un reparto de un cuarto"
             );
         }
@@ -6557,7 +6960,7 @@ mod tests {
         // mitad de AC6 —«la fracción no se rompe sola»— y es lo que se vería roto si algún día la pasada
         // guardara aquí lo que cupo en vez de lo que se pidió.
         assert_eq!(
-            ventana.activa().fraccion,
+            ventana.activa().fraccion_de_la_primera_frontera().unwrap(),
             UN_CUARTO,
             "ensanchar la ventana movió la fracción"
         );
@@ -6575,7 +6978,7 @@ mod tests {
         const UN_CUARTO: f32 = 0.25;
         let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().fraccion = UN_CUARTO;
+        ventana.activa_mut().mover_la_primera_frontera(UN_CUARTO);
         let ctx = egui::Context::default();
         // El `Frame` de pruebas de `eframe` viene sin consumo de CPU (`cpu_usage: None`, `epi.rs:931`), así
         // que `logic` se salta el cierre del fotograma anterior: aquí lo que se mira es el bombeo.
@@ -6594,8 +6997,8 @@ mod tests {
         let rectangulos = [reparto.partes[0], reparto.partes[1]];
         for (cual, (division, rect)) in ventana
             .activa()
-            .divisiones
-            .iter()
+            .divisiones()
+            .into_iter()
             .zip(rectangulos)
             .enumerate()
         {
@@ -6627,7 +7030,7 @@ mod tests {
         let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
         let dentro_de_la_derecha = egui::pos2(area.left() + 300.0, area.center().y);
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().fraccion = UN_CUARTO;
+        ventana.activa_mut().mover_la_primera_frontera(UN_CUARTO);
         let ctx = egui::Context::default();
 
         // Dos pasadas, como en la prueba de `atender_clics`: egui resuelve la interacción contra las
@@ -6670,7 +7073,7 @@ mod tests {
         // prueba llamándolo a mano, así que borrar esa llamada de `ui` deja la suite en verde y la ventana
         // muda — no llegaría una sola tecla a ningún programa.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().foco = 1;
+        poner_el_foco_en(ventana.activa_mut(), 1);
         let ctx = egui::Context::default();
 
         pasada_de_interfaz(
@@ -6684,7 +7087,7 @@ mod tests {
         );
 
         assert_eq!(
-            ventana.activa().divisiones[1].pulsaciones,
+            ventana.activa().divisiones()[1].pulsaciones,
             b"a",
             "la pasada de interfaz no mandó la tecla a la consola con el foco"
         );
@@ -6700,7 +7103,7 @@ mod tests {
         // que se teclea en una consola mientras las teclas van a la otra.
         let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().foco = 1;
+        poner_el_foco_en(ventana.activa_mut(), 1);
         let ctx = egui::Context::default();
 
         // Como en la prueba del panel: la pasada de interfaz de arriba tira lo encolado, y aquí lo
@@ -6771,7 +7174,7 @@ mod tests {
 
         // 600 de 800 repartibles es 0,75 sin resto, así que aquí tampoco hace falta tolerancia.
         assert_eq!(
-            ventana.activa().fraccion,
+            ventana.activa().fraccion_de_la_primera_frontera().unwrap(),
             0.75,
             "el arrastre no llevó la fracción hasta el puntero"
         );
@@ -6784,12 +7187,12 @@ mod tests {
             metrica.ancho(),
         );
         assert_eq!(
-            ventana.activa().divisiones[0].medido,
+            ventana.activa().divisiones()[0].medido,
             metrica.celdas_en(reparto.partes[0].size()),
             "la consola izquierda se midió con el reparto de antes del arrastre"
         );
         assert_eq!(
-            ventana.activa().divisiones[1].medido,
+            ventana.activa().divisiones()[1].medido,
             metrica.celdas_en(reparto.partes[1].size()),
             "la consola derecha se midió con el reparto de antes del arrastre"
         );
