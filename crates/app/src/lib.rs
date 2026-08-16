@@ -182,6 +182,22 @@ impl Orientacion {
         }
     }
 
+    /// Qué cursor pide una frontera de este sentido: el de estirar hacia donde de verdad se mueve.
+    fn cursor(self) -> egui::CursorIcon {
+        match self {
+            Self::Columnas => egui::CursorIcon::ResizeHorizontal,
+            Self::Filas => egui::CursorIcon::ResizeVertical,
+        }
+    }
+
+    /// Cuánto hay desde el principio del área hasta ese punto, en el sentido que se reparte.
+    fn desde_el_principio(self, area: egui::Rect, punto: egui::Pos2) -> f32 {
+        match self {
+            Self::Columnas => punto.x - area.left(),
+            Self::Filas => punto.y - area.top(),
+        }
+    }
+
     /// El rectángulo que va desde `empieza` hasta `acaba` medido en el sentido que se reparte, ocupando
     /// el área entera en el otro.
     fn tramo(self, area: egui::Rect, empieza: f32, acaba: f32) -> egui::Rect {
@@ -229,6 +245,22 @@ impl Peso {
     }
 }
 
+/// Una línea que separa dos partes, con lo que hace falta para poder arrastrarla.
+///
+/// **Lleva el tramo que ocupan las dos que separa, y no el área de su rama.** Arrastrar reparte el peso
+/// **entre esas dos** conservando lo que suman, así que la fracción tiene que medirse dentro de su
+/// tramo: medida contra la rama entera, mover una frontera de tres hermanas daría un salto en cuanto el
+/// puntero pasara por encima de la tercera.
+#[derive(Clone, Copy)]
+struct Frontera {
+    /// Dónde se pinta y dónde se agarra.
+    rect: egui::Rect,
+    /// Hacia dónde reparte, que decide el eje del arrastre y la forma del cursor.
+    orientacion: Orientacion,
+    /// El tramo de las dos partes que separa, contando la línea de en medio.
+    entre_las_dos: egui::Rect,
+}
+
 /// Los rectángulos que ocupan las partes de un área y las líneas que las separan.
 ///
 /// **Dos listas y no una pareja de campos con nombre de lado.** Los nombres «izquierda» y «derecha»
@@ -237,10 +269,10 @@ impl Peso {
 struct Reparto {
     /// Una por parte, en el orden en que se pidieron.
     partes: Vec<egui::Rect>,
-    /// Uno entre cada dos partes consecutivas, así que hay **uno menos** que partes — y **ninguno**
+    /// Una entre cada dos partes consecutivas, así que hay **una menos** que partes — y **ninguna**
     /// cuando la parte es una sola, que es lo que hace que una división sin compañía se vea igual que
     /// antes de que existiera el reparto.
-    divisores: Vec<egui::Rect>,
+    divisores: Vec<Frontera>,
 }
 
 /// Reparte un área entre sus partes según lo que pese cada una, sin dejar a ninguna sin sitio.
@@ -327,7 +359,14 @@ fn repartir(area: egui::Rect, orientacion: Orientacion, pesos: &[Peso], minimo: 
 
         partes.push(orientacion.tramo(area, empieza, acaba));
         if !ultima {
-            divisores.push(orientacion.tramo(area, acaba, acaba + GROSOR_DEL_DIVISOR));
+            // El tramo de las dos que separa va desde donde empieza ésta hasta donde acaba la siguiente,
+            // y la siguiente todavía no está colocada: se calcula con su largo, que sí se sabe.
+            let hasta = acaba + GROSOR_DEL_DIVISOR + largos[cual + 1];
+            divisores.push(Frontera {
+                rect: orientacion.tramo(area, acaba, acaba + GROSOR_DEL_DIVISOR),
+                orientacion,
+                entre_las_dos: orientacion.tramo(area, empieza, hasta),
+            });
         }
         empieza = acaba + GROSOR_DEL_DIVISOR;
     }
@@ -1166,24 +1205,45 @@ impl Pestaña {
     /// del árbol: mover un divisor no toca a las hermanas que están más allá. Con dos hijos da igual;
     /// con tres es lo que separa este comportamiento del de un terminal donde arrastrar una frontera
     /// mueve todo lo que hay a su derecha.
-    fn mover_la_primera_frontera(&mut self, fraccion: f32) -> bool {
-        let Nodo::Rama { hijos, .. } = &mut self.raiz else {
+    fn mover_la_frontera(&mut self, cual: usize, fraccion: f32) -> bool {
+        let mut van = 0;
+        Self::mover_en(&mut self.raiz, cual, fraccion, &mut van)
+    }
+
+    /// Busca la frontera número `cual` recorriendo el árbol **en el mismo orden en que se colocan**, y la
+    /// mueve. `van` es cuántas se han dejado atrás.
+    ///
+    /// **Se numeran recorriendo en vez de guardar un camino hasta la rama**, y es la misma invariante en
+    /// la que ya descansa el pintado: las hojas y sus rectángulos se casan por posición porque los dos
+    /// recorridos van en el mismo orden. Un camino explícito sería un segundo mecanismo diciendo lo
+    /// mismo, con la posibilidad de que los dos discrepen.
+    fn mover_en(nodo: &mut Nodo, cual: usize, fraccion: f32, van: &mut usize) -> bool {
+        let Nodo::Rama { hijos, .. } = nodo else {
             return false;
         };
-        if hijos.len() < 2 {
-            return false;
+
+        for corte in 0..hijos.len().saturating_sub(1) {
+            if *van == cual {
+                let entre_los_dos = hijos[corte].peso.valor() + hijos[corte + 1].peso.valor();
+                let [primero, segundo] =
+                    pesos_de(fraccion).map(|peso| peso.valor() * entre_los_dos);
+                let cambia = hijos[corte].peso.valor() != primero;
+
+                // Los dos pesos vienen de `pesos_de`, que ya recorta la fracción a un rango donde
+                // ninguno puede ser cero, y multiplicarlos por una suma positiva conserva esa propiedad.
+                hijos[corte].peso =
+                    Peso::nuevo(primero).expect("la fracción recortada da pesos válidos");
+                hijos[corte + 1].peso = Peso::nuevo(segundo).expect("y su complemento también");
+
+                return cambia;
+            }
+            *van += 1;
         }
 
-        let entre_los_dos = hijos[0].peso.valor() + hijos[1].peso.valor();
-        let [primero, segundo] = pesos_de(fraccion).map(|peso| peso.valor() * entre_los_dos);
-        let cambia = hijos[0].peso.valor() != primero;
-
-        // Los dos pesos vienen de `pesos_de`, que ya recorta la fracción a un rango donde ninguno puede
-        // ser cero, y multiplicarlos por una suma positiva conserva esa propiedad.
-        hijos[0].peso = Peso::nuevo(primero).expect("la fracción recortada da pesos válidos");
-        hijos[1].peso = Peso::nuevo(segundo).expect("y su complemento también");
-
-        cambia
+        // No estaba en esta rama: sigue por dentro de sus hijos, en el orden en que se colocan.
+        hijos
+            .iter_mut()
+            .any(|hijo| Self::mover_en(&mut hijo.nodo, cual, fraccion, van))
     }
 }
 
@@ -1781,34 +1841,36 @@ impl Ventana {
     /// lo aplicaría otra vez, moviendo el divisor al doble. Con la posición absoluta el segundo pase
     /// calcula lo mismo y no cambia nada. Es la misma trampa que obligó a consumir los eventos del
     /// teclado en vez de leerlos.
-    fn arrastrar_el_divisor(
-        &mut self,
-        ui: &egui::Ui,
-        divisor: egui::Rect,
-        area: egui::Rect,
-    ) -> bool {
-        // `Sense::DRAG` y no `Sense::drag()`: el segundo añade `FOCUSABLE`, o sea que el divisor pediría
+    fn arrastrar_la_frontera(&mut self, ui: &egui::Ui, cual: usize, frontera: Frontera) -> bool {
+        // `Sense::DRAG` y no `Sense::drag()`: el segundo añade `FOCUSABLE`, o sea que la frontera pediría
         // el foco de teclado de egui y competiría con el enrutado geográfico de la aplicación. Es la
         // misma trampa que ya costó un caso con el clic.
-        let id = ui.id().with("divisor");
+        //
+        // **El identificador lleva cuál es, y antes era una constante.** Con una sola frontera daba
+        // igual; con varias, un identificador compartido las convierte a todas en **el mismo control**
+        // para egui, así que arrastrar una movería otra o ninguna. Es exactamente lo que `atender_clics`
+        // ya resolvía indexando el suyo, a una línea de distancia.
+        let id = ui.id().with(("frontera", cual));
         let respuesta = ui
-            .interact(divisor, id, egui::Sense::DRAG)
+            .interact(frontera.rect, id, egui::Sense::DRAG)
             // Se mantiene el cursor **también mientras se arrastra**. No es por que el puntero se salga de
             // la línea —egui da por «encima» al widget que se está arrastrando, esté el puntero donde
             // esté—: es por el fotograma en que se suelta, donde el arrastre ya ha terminado y el puntero
             // puede haber quedado fuera. Con `on_hover_cursor` ahí el cursor parpadea a flecha justo al
             // acabar la maniobra.
-            .on_hover_and_drag_cursor(egui::CursorIcon::ResizeHorizontal);
+            .on_hover_and_drag_cursor(frontera.orientacion.cursor());
 
         let Some(puntero) = respuesta.interact_pointer_pos() else {
             return false;
         };
 
-        let util = area.width() - GROSOR_DEL_DIVISOR;
+        // **Medido dentro del tramo de las dos que separa**, no del área entera: mover una frontera
+        // reparte el peso de sus dos vecinas conservando lo que suman, y las demás no se enteran.
+        let tramo = frontera.entre_las_dos;
+        let util = frontera.orientacion.largo_de(tramo) - GROSOR_DEL_DIVISOR;
         // Sin nada que repartir no hay fracción que elegir, y con `util` **negativo** la división cambia de
-        // signo: el divisor iría hacia el lado contrario al ratón. Se deja la fracción como la dejó el
-        // último arrastre de verdad, que es lo que el usuario pidió la última vez que la petición tenía
-        // sentido.
+        // signo: la frontera iría hacia el lado contrario al ratón. Se deja el reparto como lo dejó el
+        // último arrastre de verdad, que es lo que el usuario pidió la última vez que tenía sentido.
         if util <= 0.0 {
             return false;
         }
@@ -1816,8 +1878,9 @@ impl Ventana {
         // El recorte a `0..1` **no es para la geometría** —de eso se encarga [`repartir`] en cada
         // fotograma, con su propio suelo— sino para el estado: sin él, arrastrar más allá del borde
         // guardaría una fracción de 5, que el informe de salida publicaría como «al 500 %» y que obligaría
-        // a recorrer el camino de vuelta antes de que el divisor se moviera.
-        let nueva = ((puntero.x - area.left()) / util).clamp(0.0, 1.0);
+        // a recorrer el camino de vuelta antes de que la frontera se moviera.
+        let dentro = frontera.orientacion.desde_el_principio(tramo, puntero);
+        let nueva = (dentro / util).clamp(0.0, 1.0);
         // La guarda de arriba deja pasar un `util` **sin número**, porque `NaN <= 0.0` es falso, y de ahí
         // sale una fracción NaN que el recorte tampoco atrapa: un `clamp` sobre un NaN devuelve NaN. Y un
         // NaN guardado aquí no se va nunca — la ventana dejaría de pintar y ni ensancharla ni volver a
@@ -1828,7 +1891,7 @@ impl Ventana {
             return false;
         }
 
-        self.activa_mut().mover_la_primera_frontera(nueva)
+        self.activa_mut().mover_la_frontera(cual, nueva)
     }
 
     /// Manda lo que se ha tecleado en este pase a **una sola** consola, la que tiene el foco.
@@ -2203,14 +2266,20 @@ impl eframe::App for Ventana {
         // el reparto de antes dejaría al divisor un fotograma por detrás del ratón, que es justo lo que se
         // nota en un arrastre.
         //
-        // **Se coge el divisor con `first` y no indexando**: con una sola parte no hay ninguno, y aunque
-        // hoy siempre haya dos consolas, el reparto ya no lo garantiza por su tipo.
-        if let Some(divisor) = reparto.divisores.first().copied()
-            && self.arrastrar_el_divisor(ui, divisor, area)
-        {
-            let rehacer = Instant::now();
-            reparto = reparto_de(self);
-            self.cronometrado_aparte += rehacer.elapsed();
+        // **Todas las fronteras, cada una con su identidad.** Con una sola daba igual atender solo la
+        // primera; con varias, las que quedaran fuera serían líneas que se ven y no se agarran.
+        //
+        // Se recorre sobre una copia de la lista —las fronteras son `Copy`— porque atender una puede
+        // cambiar el reparto, y **basta con que se mueva una**: dos fronteras no pueden arrastrarse en
+        // el mismo fotograma, así que en cuanto una responde se rehace el reparto y se deja de mirar.
+        let fronteras = reparto.divisores.clone();
+        for (cual, frontera) in fronteras.into_iter().enumerate() {
+            if self.arrastrar_la_frontera(ui, cual, frontera) {
+                let rehacer = Instant::now();
+                reparto = reparto_de(self);
+                self.cronometrado_aparte += rehacer.elapsed();
+                break;
+            }
         }
 
         // Los divisores se pintan antes que las consolas: si el glifo del borde de una se saliera, el
@@ -2220,7 +2289,8 @@ impl eframe::App for Ventana {
         // reparto se rehace en cada fotograma, así que un clon aquí es una reserva de memoria por
         // fotograma que además nadie declararía en la medida.
         for divisor in &reparto.divisores {
-            ui.painter().rect_filled(*divisor, 0.0, self.tema.divisor());
+            ui.painter()
+                .rect_filled(divisor.rect, 0.0, self.tema.divisor());
         }
 
         let rectangulos = reparto.partes;
@@ -4961,8 +5031,8 @@ mod tests {
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         // Divisores muy distintos: con dos repartos parecidos las dos rejillas darían el mismo número de
         // columnas y la prueba no vería nada.
-        ventana.pestañas[0].mover_la_primera_frontera(0.2);
-        ventana.pestañas[1].mover_la_primera_frontera(0.8);
+        ventana.pestañas[0].mover_la_frontera(0, 0.2);
+        ventana.pestañas[1].mover_la_frontera(0, 0.8);
 
         // Primera pasada: se registran las regiones. egui resuelve la interacción contra la anterior, así
         // que un clic en la primera no encontraría a nadie a quien dárselo.
@@ -5019,8 +5089,8 @@ mod tests {
             ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         // Muy distintos a propósito: con dos repartos parecidos las dos rejillas darían el mismo
         // número de columnas y la prueba no vería nada.
-        ventana.pestañas[0].mover_la_primera_frontera(0.2);
-        ventana.pestañas[1].mover_la_primera_frontera(0.8);
+        ventana.pestañas[0].mover_la_frontera(0, 0.2);
+        ventana.pestañas[1].mover_la_frontera(0, 0.8);
 
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
         let desde_el_fondo = [
@@ -5178,9 +5248,9 @@ mod tests {
         ]);
         // Tres divisores distintos: con fracciones parecidas las tres pestañas darían el mismo número
         // de columnas y medir una por otra no se vería.
-        ventana.pestañas[0].mover_la_primera_frontera(0.2);
-        ventana.pestañas[1].mover_la_primera_frontera(0.5);
-        ventana.pestañas[2].mover_la_primera_frontera(0.8);
+        ventana.pestañas[0].mover_la_frontera(0, 0.2);
+        ventana.pestañas[1].mover_la_frontera(0, 0.5);
+        ventana.pestañas[2].mover_la_frontera(0, 0.8);
 
         un_fotograma_con(&mut ventana, &ctx, Vec::new());
         let desde_el_fondo: Vec<[Size; 2]> = ventana.pestañas[1..]
@@ -5744,7 +5814,7 @@ mod tests {
             &pesos_de(FRACCION_INICIAL),
             ANCHO_DE_CELDA,
         );
-        let agarre = reparto.divisores[0].center();
+        let agarre = reparto.divisores[0].rect.center();
         // **El puntero se pasa del borde derecho y luego vuelve**, y ese ida y vuelta es lo que hace que la
         // prueba distinga entre seguir al puntero y acumular su desplazamiento. Con un solo salto las dos
         // implementaciones dan casi lo mismo y la prueba pasaría con la que el doc dice haber descartado;
@@ -5761,21 +5831,9 @@ mod tests {
         // botón tiene que bajar en una pasada distinta del movimiento: el candidato a arrastrarse sale de
         // **dónde estaba el puntero al pulsar** (`interaction.rs:169-171`), así que un pulsar y mover en la
         // misma pasada busca al candidato en el destino, donde el divisor ya no está.
-        pasada_de_arrastre(
-            &mut ventana,
-            &ctx,
-            reparto.divisores[0],
-            area,
-            mover(agarre),
-        );
-        pasada_de_arrastre(
-            &mut ventana,
-            &ctx,
-            reparto.divisores[0],
-            area,
-            pulsar(agarre),
-        );
-        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisores[0], area, mover(fuera));
+        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisores[0], mover(agarre));
+        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisores[0], pulsar(agarre));
+        pasada_de_arrastre(&mut ventana, &ctx, reparto.divisores[0], mover(fuera));
         // **El tope es el 99 % y no el 100 %, y el cambio es a propósito.** Con el árbol, lo que la
         // pestaña guarda son los pesos de sus hijos, y un peso cero no existe — la parte que se colapsa
         // conserva un uno por ciento. Antes se guardaba la fracción cruda (`1.0`) y el suelo de ancho
@@ -5791,13 +5849,7 @@ mod tests {
             "pasarse del borde derecho no dejó la frontera pegada a su tope"
         );
 
-        let movio = pasada_de_arrastre(
-            &mut ventana,
-            &ctx,
-            reparto.divisores[0],
-            area,
-            mover(suelta),
-        );
+        let movio = pasada_de_arrastre(&mut ventana, &ctx, reparto.divisores[0], mover(suelta));
 
         assert!(movio, "el arrastre no movió la fracción");
         // Exacto y no aproximado: 300 de 400 repartibles es 0,75 sin resto, así que una tolerancia solo
@@ -5818,19 +5870,23 @@ mod tests {
         // no se va nunca: la ventana dejaría de pintar y ni ensancharla la recuperaría.
         for area in [area_de(1.0), area_de(f32::NAN)] {
             let mut ventana = ventana_con("sleep 30", "sleep 30");
-            let divisor = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2.0, 300.0));
-            let agarre = divisor.center();
+            let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2.0, 300.0));
+            let divisor = Frontera {
+                rect,
+                orientacion: Orientacion::Columnas,
+                entre_las_dos: area,
+            };
+            let agarre = rect.center();
             let ctx = egui::Context::default();
 
-            pasada_de_arrastre(&mut ventana, &ctx, divisor, area, mover(agarre));
-            pasada_de_arrastre(&mut ventana, &ctx, divisor, area, pulsar(agarre));
+            pasada_de_arrastre(&mut ventana, &ctx, divisor, mover(agarre));
+            pasada_de_arrastre(&mut ventana, &ctx, divisor, pulsar(agarre));
             // Al borde izquierdo, que es donde el numerador también se hace cero: es la única posición que
             // produce el cero partido por cero del que sale el no-número.
             pasada_de_arrastre(
                 &mut ventana,
                 &ctx,
                 divisor,
-                area,
                 mover(egui::pos2(area.left(), agarre.y)),
             );
 
@@ -5905,13 +5961,28 @@ mod tests {
     fn pasada_de_arrastre(
         ventana: &mut Ventana,
         ctx: &egui::Context,
-        divisor: egui::Rect,
-        area: egui::Rect,
+        frontera: Frontera,
         entrada: egui::RawInput,
     ) -> bool {
-        let mut movio = false;
+        pasada_sobre_fronteras(ventana, ctx, &[frontera], entrada)[0]
+    }
+
+    /// Una pasada que atiende **varias** fronteras, como hace el pintado de verdad. Dice cuáles se
+    /// movieron.
+    ///
+    /// Hace falta que sea una sola pasada: lo que distingue a dos fronteras con identidad propia de dos
+    /// que la comparten solo se ve cuando egui las tiene a las dos delante en el mismo fotograma.
+    fn pasada_sobre_fronteras(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        fronteras: &[Frontera],
+        entrada: egui::RawInput,
+    ) -> Vec<bool> {
+        let mut movio = vec![false; fronteras.len()];
         ctx.run_ui(entrada, |ui| {
-            movio = ventana.arrastrar_el_divisor(ui, divisor, area);
+            for (cual, frontera) in fronteras.iter().enumerate() {
+                movio[cual] = ventana.arrastrar_la_frontera(ui, cual, *frontera);
+            }
         })
         .drop_without_applying_deltas();
         movio
@@ -6574,8 +6645,8 @@ mod tests {
             assert_eq!(parte.left(), area.left());
         }
         // El divisor de un reparto en filas es una línea horizontal: ancho entero y alto de grosor.
-        assert_eq!(reparto.divisores[0].height(), GROSOR_DEL_DIVISOR);
-        assert_eq!(reparto.divisores[0].width(), area.width());
+        assert_eq!(reparto.divisores[0].rect.height(), GROSOR_DEL_DIVISOR);
+        assert_eq!(reparto.divisores[0].rect.width(), area.width());
     }
 
     #[test]
@@ -6599,14 +6670,14 @@ mod tests {
         for (parte, divisor) in reparto.partes.iter().zip(&reparto.divisores) {
             assert_eq!(
                 parte.right(),
-                divisor.left(),
+                divisor.rect.left(),
                 "hay un hueco antes de un divisor"
             );
-            assert_eq!(divisor.width(), GROSOR_DEL_DIVISOR);
+            assert_eq!(divisor.rect.width(), GROSOR_DEL_DIVISOR);
         }
         for (divisor, siguiente) in reparto.divisores.iter().zip(&reparto.partes[1..]) {
             assert_eq!(
-                divisor.right(),
+                divisor.rect.right(),
                 siguiente.left(),
                 "hay un hueco después de un divisor"
             );
@@ -6723,6 +6794,198 @@ mod tests {
         assert!(
             izquierda.right() < arriba.left(),
             "la columna izquierda no está a la izquierda de las filas"
+        );
+    }
+
+    #[test]
+    fn dos_fronteras_en_el_mismo_fotograma_son_dos_controles_distintos() {
+        // **El defecto que este paso arregla, y que no se ve con una sola frontera.** El identificador
+        // del control de egui era una constante: con dos en pantalla, las dos son *el mismo* control
+        // para el framework, así que el arrastre acaba en la que no es —o en ninguna.
+        //
+        // Hay que atenderlas **en la misma pasada**, que es lo que hace el pintado: por separado, cada
+        // una es la única de su fotograma y una identidad compartida no se distingue de una propia.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let area = area_de(600.0);
+
+        // **Tres consolas, o no hay dos fronteras que confundir.** Con dos, la segunda no existe y la
+        // prueba pasaría por la razón equivocada: nadie respondería porque no hay a qué responder.
+        let Nodo::Rama { hijos, .. } = &mut ventana.activa_mut().raiz else {
+            panic!("la pestaña nace con una rama");
+        };
+        hijos.push(Hijo {
+            peso: peso(1.0),
+            nodo: Nodo::Hoja(division_con("sleep 30", 42)),
+        });
+
+        let primera = Frontera {
+            rect: egui::Rect::from_min_size(egui::pos2(100.0, 0.0), egui::vec2(2.0, 300.0)),
+            orientacion: Orientacion::Columnas,
+            entre_las_dos: egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(202.0, 300.0),
+            ),
+        };
+        let segunda = Frontera {
+            rect: egui::Rect::from_min_size(egui::pos2(400.0, 0.0), egui::vec2(2.0, 300.0)),
+            orientacion: Orientacion::Columnas,
+            entre_las_dos: egui::Rect::from_min_size(
+                egui::pos2(202.0, 0.0),
+                egui::vec2(area.right() - 202.0, 300.0),
+            ),
+        };
+        let dos = [primera, segunda];
+
+        // El puntero se lleva a la **segunda** y se arrastra ahí.
+        let agarre = segunda.rect.center();
+        pasada_sobre_fronteras(&mut ventana, &ctx, &dos, mover(agarre));
+        pasada_sobre_fronteras(&mut ventana, &ctx, &dos, pulsar(agarre));
+        let movio = pasada_sobre_fronteras(
+            &mut ventana,
+            &ctx,
+            &dos,
+            mover(egui::pos2(agarre.x - 80.0, agarre.y)),
+        );
+
+        assert!(
+            !movio[0],
+            "la primera frontera respondió a un arrastre que ocurrió sobre la segunda: comparten \
+             identidad de control"
+        );
+        assert!(
+            movio[1],
+            "la segunda frontera no respondió a su propio arrastre"
+        );
+    }
+
+    #[test]
+    fn una_frontera_horizontal_se_arrastra_arriba_y_abajo() {
+        // La otra mitad del arrastre, y la que no existía hasta ahora: una frontera de un corte en filas
+        // se mueve por el eje vertical. Con el eje de las columnas, el puntero subiendo o bajando no
+        // cambiaría nada — y peor: su posición horizontal, que aquí no significa nada, decidiría el
+        // reparto.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+
+        // Un tramo alto y estrecho, partido por la mitad: el corte va a lo ancho, a media altura.
+        let tramo = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 402.0));
+        let frontera = Frontera {
+            rect: egui::Rect::from_min_size(egui::pos2(0.0, 200.0), egui::vec2(300.0, 2.0)),
+            orientacion: Orientacion::Filas,
+            entre_las_dos: tramo,
+        };
+
+        let agarre = frontera.rect.center();
+        pasada_de_arrastre(&mut ventana, &ctx, frontera, mover(agarre));
+        pasada_de_arrastre(&mut ventana, &ctx, frontera, pulsar(agarre));
+        // Un cuarto de la altura útil: 100 de 400.
+        let movio = pasada_de_arrastre(
+            &mut ventana,
+            &ctx,
+            frontera,
+            mover(egui::pos2(agarre.x, tramo.top() + 100.0)),
+        );
+
+        assert!(
+            movio,
+            "arrastrar en vertical no movió la frontera horizontal"
+        );
+        assert_eq!(
+            ventana.activa().fraccion_de_la_primera_frontera().unwrap(),
+            0.25,
+            "la frontera horizontal no fue a donde estaba el puntero en el eje que le toca"
+        );
+    }
+
+    #[test]
+    fn mover_una_frontera_solo_cambia_a_sus_dos_vecinas() {
+        // **AC3, y la razón entera de que el árbol sea n-ario.** Con tres consolas en fila y el árbol
+        // binario que usan los terminales al uso, la frontera de fuera separa a una consola de un
+        // *bloque* de dos, así que arrastrarla mueve dos a la vez. Aquí las tres son hermanas y cada
+        // frontera reparte solo entre sus dos vecinas.
+        //
+        // Se comprueba sobre los pesos y no sobre los anchos pintados: los anchos cambian igualmente
+        // porque el reparto es proporcional, y mirarlos no distinguiría «mover dos pesos» de «mover
+        // tres».
+        let mut pestaña = Pestaña::con(
+            [division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            0,
+        );
+        let Nodo::Rama { hijos, .. } = &mut pestaña.raiz else {
+            panic!("la pestaña nace con una rama");
+        };
+        hijos.iter_mut().for_each(|hijo| hijo.peso = peso(1.0));
+        hijos.push(Hijo {
+            peso: peso(1.0),
+            nodo: Nodo::Hoja(division_con("sleep 30", 2)),
+        });
+
+        // La segunda frontera: la que separa a la del medio de la última.
+        assert!(
+            pestaña.mover_la_frontera(1, 0.25),
+            "la frontera no se movió"
+        );
+
+        let Nodo::Rama { hijos, .. } = &pestaña.raiz else {
+            unreachable!()
+        };
+        let pesos: Vec<f32> = hijos.iter().map(|hijo| hijo.peso.valor()).collect();
+        assert_eq!(
+            pesos[0], 1.0,
+            "mover la segunda frontera cambió el peso de la primera consola, que no toca"
+        );
+        // Las dos vecinas se reparten lo que sumaban —dos— en la proporción pedida.
+        assert_eq!(pesos[1], 0.5, "la del medio no se quedó con su cuarto");
+        assert_eq!(pesos[2], 1.5, "la última no se quedó con lo demás");
+        assert_eq!(
+            pesos[1] + pesos[2],
+            2.0,
+            "las dos vecinas no conservaron lo que sumaban"
+        );
+    }
+
+    #[test]
+    fn una_pestaña_de_fondo_con_su_propio_arbol_recibe_la_rejilla_que_le_toca() {
+        // AC10, heredado del PR que el árbol absorbió. La pestaña que no se ve tiene **tres** consolas,
+        // no la disposición de por defecto: con dos, una medida que repartiera por una plantilla en vez
+        // de por el árbol de esa pestaña daría el mismo número y no se notaría nada.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+
+        let Nodo::Rama { hijos, .. } = &mut ventana.pestañas[1].raiz else {
+            panic!("la pestaña nace con una rama");
+        };
+        hijos.push(Hijo {
+            peso: peso(1.0),
+            nodo: Nodo::Hoja(division_con("sleep 30", 99)),
+        });
+
+        // Dos fotogramas: el primero escribe la rejilla y el segundo la aplica al bombear.
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+
+        let anchos: Vec<u16> = ventana.pestañas[1]
+            .divisiones()
+            .iter()
+            .map(|division| division.medido.cols)
+            .collect();
+
+        assert_eq!(anchos.len(), 3, "la pestaña de fondo perdió una consola");
+        for (cual, ancho) in anchos.iter().enumerate() {
+            assert_ne!(
+                *ancho, REJILLA_INICIAL.cols,
+                "la consola {cual} de la pestaña de fondo se quedó con la rejilla de arranque"
+            );
+        }
+        // Tres consolas repartiéndose la misma ventana caben más estrechas que dos. Sin esta
+        // comparación, una medida que ignorase el árbol y repartiera entre dos pasaría igual.
+        let de_delante = ventana.pestañas[0].divisiones()[0].medido.cols;
+        assert!(
+            anchos[0] < de_delante,
+            "la de fondo, con tres consolas, no salió más estrecha que la de delante con dos: \
+             {anchos:?} frente a {de_delante}"
         );
     }
 
@@ -6873,9 +7136,9 @@ mod tests {
         let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
         let reparto = repartir(area, Orientacion::Columnas, &pesos_de(0.4), ANCHO_DE_CELDA);
 
-        assert_eq!(reparto.divisores[0].width(), GROSOR_DEL_DIVISOR);
-        assert_eq!(reparto.partes[0].right(), reparto.divisores[0].left());
-        assert_eq!(reparto.divisores[0].right(), reparto.partes[1].left());
+        assert_eq!(reparto.divisores[0].rect.width(), GROSOR_DEL_DIVISOR);
+        assert_eq!(reparto.partes[0].right(), reparto.divisores[0].rect.left());
+        assert_eq!(reparto.divisores[0].rect.right(), reparto.partes[1].left());
         assert_eq!(reparto.partes[0].left(), area.left());
         assert_eq!(reparto.partes[1].right(), area.right());
     }
@@ -6896,7 +7159,12 @@ mod tests {
                     &pesos_de(fraccion),
                     ANCHO_DE_CELDA,
                 );
-                for (cual, rect) in reparto.partes.iter().chain(&reparto.divisores).enumerate() {
+                let suyos = reparto
+                    .partes
+                    .iter()
+                    .copied()
+                    .chain(reparto.divisores.iter().map(|frontera| frontera.rect));
+                for (cual, rect) in suyos.enumerate() {
                     assert!(
                         rect.width() >= 0.0,
                         "con {ancho} puntos de ancho y la fracción a {fraccion}, \
@@ -6920,7 +7188,7 @@ mod tests {
         // acabó cada consola, que es lo que el programa de dentro va a recibir.
         const UN_CUARTO: f32 = 0.25;
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().mover_la_primera_frontera(UN_CUARTO);
+        ventana.activa_mut().mover_la_frontera(0, UN_CUARTO);
         let ctx = egui::Context::default();
 
         for ancho in [400.0 + GROSOR_DEL_DIVISOR, 800.0 + GROSOR_DEL_DIVISOR] {
@@ -6978,7 +7246,7 @@ mod tests {
         const UN_CUARTO: f32 = 0.25;
         let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().mover_la_primera_frontera(UN_CUARTO);
+        ventana.activa_mut().mover_la_frontera(0, UN_CUARTO);
         let ctx = egui::Context::default();
         // El `Frame` de pruebas de `eframe` viene sin consumo de CPU (`cpu_usage: None`, `epi.rs:931`), así
         // que `logic` se salta el cierre del fotograma anterior: aquí lo que se mira es el bombeo.
@@ -7030,7 +7298,7 @@ mod tests {
         let area = area_de(800.0 + GROSOR_DEL_DIVISOR);
         let dentro_de_la_derecha = egui::pos2(area.left() + 300.0, area.center().y);
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.activa_mut().mover_la_primera_frontera(UN_CUARTO);
+        ventana.activa_mut().mover_la_frontera(0, UN_CUARTO);
         let ctx = egui::Context::default();
 
         // Dos pasadas, como en la prueba de `atender_clics`: egui resuelve la interacción contra las
