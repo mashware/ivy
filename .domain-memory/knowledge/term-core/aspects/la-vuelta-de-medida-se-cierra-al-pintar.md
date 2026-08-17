@@ -2,15 +2,15 @@
 id: asp_la-vuelta-de-medida-se-cierra-al-pintar_szjxfy
 slug: la-vuelta-de-medida-se-cierra-al-pintar
 name: >-
-  La vuelta de medida de una división solo se cierra al pintarla, así que quien
-  interpreta sin pintarse le regala su tiempo al framework
+  La vuelta de medida de una división solo se cierra al pintarla, y lo que lleva
+  sin declarar vive en tres sitios — quien mire uno declara cero
 type: aspect
 status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-08-15T21:25:24.471Z'
-updated_at: '2026-08-15T21:25:24.471Z'
-last_verified: '2026-08-15T21:25:24.471Z'
+updated_at: '2026-08-17T12:01:16.017Z'
+last_verified: '2026-08-17T12:01:16.017Z'
 file_paths:
   - crates/app/src/lib.rs
   - crates/app/src/medida.rs
@@ -21,12 +21,15 @@ symbols:
   - 'Tramos::de_una_vuelta'
   - 'RestoDelFotograma::anotar'
   - cerrar_las_vueltas_no_pintadas
+  - 'Division::llevarse_lo_de_este_fotograma'
+  - 'Medida::llevarse_lo_pendiente'
 content_hashes:
-  crates/app/src/lib.rs: 'sha256:b3ca4328c99c0b94b314ea9a6c6d1ab4f6afe0dad22ef3415700f289bc9af411'
-  crates/app/src/medida.rs: 'sha256:a357d2a7f42908e764852a0cff5ca8c602915de6bb6bb064d62bd866fa4cb211'
+  crates/app/src/lib.rs: 'sha256:69e903da2ae25795351e9b8a05001efaad7c4703b59964f4e430a94a6176c041'
+  crates/app/src/medida.rs: 'sha256:627412ac283ad6138a2b514940f63e45eb84d875a0405dd62991852b0442a69c'
 tags:
   - medida
   - F2.1
+  - F2.2
   - resuelto
 feature_id: feat_term-core_nx0g1r
 ---
@@ -43,6 +46,22 @@ Es la misma clase de fallo que [[quien-no-declara-su-trabajo-se-lo-atribuye-a-ot
 
 > **Y tenía un hermano que este arreglo no tocaba**, encontrado después al revisar el PR #64: la vuelta no solo hay que cerrarla, hay que **no perderla**. En un fotograma cuya pasada egui repite, el bombeo rearmaba la vuelta y `anotar_vuelta` la **sobrescribía**, con el mismo destino final —el tiempo interpretado publicado como coste del framework— por una puerta distinta. Ver [[la-pasada-repetida-rebombea-y-sobrescribe-la-vuelta]].
 
+## Y lo que la división que se **cierra** lleva sin declarar vive en TRES sitios (F2.2, PR #74)
+
+Cuando una división se suelta hay que llevarse antes lo que ha hecho, o su trabajo se lo queda la resta. **El error no es olvidarse: es mirar un solo sitio.** El orden real del fotograma lo decide, y es contraintuitivo:
+
+1. `logic` **cierra el fotograma anterior**, lo que **vacía** `medida.pendiente`.
+2. `logic` **bombea**, lo que llena `pendiente_de_medir` con lo que la consola acaba de interpretar.
+3. La pasada de interfaz atiende **el teclado antes del pintado**, así que el acorde de cerrar llega **aquí**.
+
+> **Consecuencia: en el instante del cierre, `Medida::llevarse_lo_pendiente()` vale SIEMPRE cero.** Una primera versión de cerrar una división miraba solo ese sitio y declaraba cero justo en el fotograma en que se cierra una consola **que estaba volcando** — milisegundos de interpretar, publicados como coste del framework.
+
+Los tres sitios son: **lo anotado** (`medida.pendiente`, no vacío solo si egui repitió la pasada y el pintado alcanzó a anotar), **lo que dejó el bombeo** (`pendiente_de_medir`, el caso normal) y **`panel_sin_pintar`** — lo que costó releer su `panel.json` mientras su pestaña estaba de fondo, que `cerrar_las_vueltas_no_pintadas` solo recoge **si además interpretó algo**, así que una consola parada —un agente esperando respuesta— se lo lleva puesto al fotograma siguiente. `Division::llevarse_lo_de_este_fotograma` recoge los tres.
+
+**Y la prueba de esto se escribe mal por defecto**: plantar el valor en `medida.pendiente` y conducir el cierre sin pasar por `logic` afirma sobre un estado que el fotograma real **nunca produce**, así que pasa con el defecto dentro. Hay que plantar en los tres, con **números distintos**, y afirmar sobre la suma — con el mismo número en dos sitios, tirar uno sigue dando de sobra. Es el disfraz de [[una-prueba-que-ata-al-ayudante-no-ata-el-camino]] aplicado a un campo en vez de a una función.
+
+**Sigue vivo en el camino hermano:** `Ventana::cerrar_la_pestaña_activa` tiene el mismo defecto —mira solo lo anotado— desde F2.1.
+
 ## Where it lives
 
-`Ventana::cerrar_las_vueltas_no_pintadas` y `Ventana::pintar_division` en `crates/app/src/lib.rs`; `Medida::cerrar_fotograma` y `RestoDelFotograma::anotar` en `crates/app/src/medida.rs`
+`Ventana::cerrar_las_vueltas_no_pintadas`, `Ventana::pintar_division`, `Ventana::cerrar_la_del_foco` y `Division::llevarse_lo_de_este_fotograma` en `crates/app/src/lib.rs`; `Medida::cerrar_fotograma`, `Medida::llevarse_lo_pendiente` y `RestoDelFotograma::anotar` en `crates/app/src/medida.rs`

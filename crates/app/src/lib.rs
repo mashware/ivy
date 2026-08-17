@@ -154,10 +154,16 @@ enum Orden {
     Ir(isize),
     /// Abrir una pestaña nueva, con sus dos consolas, y dejarla delante.
     Crear,
-    /// Cerrar la que se está viendo. Si es la única, lo que se cierra es la ventana.
-    Cerrar,
+    /// Cerrar la pestaña que se está viendo. Si es la única, lo que se cierra es la ventana.
+    CerrarPestaña,
     /// Partir en dos la división que tiene el foco, cortando en ese sentido.
     Partir(Orientacion),
+    /// Cerrar la división que tiene el foco, y que su sitio se lo repartan las hermanas.
+    ///
+    /// **Lleva el sufijo, y su hermana de arriba también.** Desde que se pueden cerrar las dos cosas, una
+    /// `Orden::Cerrar` a secas junto a una `Orden::CerrarDivision` se distinguen solo por lo que **una de
+    /// las dos no dice**, y equivocarse mata los programas de una pestaña entera en vez de uno.
+    CerrarDivision,
 }
 
 /// Hacia dónde se corta un área al repartirla.
@@ -734,6 +740,35 @@ impl Division {
         recogida.queda_cola
     }
 
+    /// Se lleva **todo** lo que esta consola ha hecho en este fotograma y todavía no ha declarado nadie,
+    /// para la que se va y no va a publicar ninguna media.
+    ///
+    /// **Son dos sitios, y con uno solo no basta.** El orden real del fotograma lo decide: `logic` cierra
+    /// primero el fotograma anterior —que vacía lo pendiente de [`medida::Medida`]— y **después** bombea,
+    /// que es lo que deja en `pendiente_de_medir` lo que esta consola acaba de interpretar. El teclado se
+    /// atiende al principio de la pasada de interfaz, **antes del pintado**, así que cuando el acorde de
+    /// cerrar llega, lo pendiente de la medida está vacío y lo interpretado de este fotograma está
+    /// entero en `pendiente_de_medir`: mirar solo el primero declara **cero** justo en el fotograma en
+    /// que una consola volcando se cierra, y esos milisegundos se los queda «el resto del fotograma», o
+    /// sea el coste que se le atribuye al framework de interfaz. El otro sí puede tener algo cuando egui
+    /// repite la pasada, así que se recogen los dos.
+    ///
+    /// **No anota ninguna media**, por lo mismo que [`medida::Medida::llevarse_lo_pendiente`]: esta
+    /// consola ya no va a publicar tramos, y cerrarla por el camino normal obligaría a inventarse un
+    /// coste de fotograma que no va a terminar.
+    fn llevarse_lo_de_este_fotograma(&mut self) -> std::time::Duration {
+        let sin_anotar = self
+            .pendiente_de_medir
+            .take()
+            .map_or(std::time::Duration::ZERO, |(_, _, interpretado)| {
+                interpretado
+            });
+
+        self.medida.llevarse_lo_pendiente()
+            + sin_anotar
+            + std::mem::take(&mut self.panel_sin_pintar)
+    }
+
     /// Vuelve a leer el `panel.json` de esta consola **si alguien ha avisado** de que cambió.
     ///
     /// La bandera se recoge siempre, haya directorio o no: dejarla levantada porque esta consola no
@@ -892,7 +927,11 @@ impl Division {
                     // traduce**: la flecha se quedaba en la cola sin llegar nunca al programa.
                     let es_nuestro = match key {
                         egui::Key::ArrowLeft | egui::Key::ArrowRight => abiertas > 1,
-                        egui::Key::T | egui::Key::W | egui::Key::D | egui::Key::B => true,
+                        egui::Key::T
+                        | egui::Key::W
+                        | egui::Key::D
+                        | egui::Key::B
+                        | egui::Key::X => true,
                         _ => false,
                     };
 
@@ -908,7 +947,7 @@ impl Division {
                             // la cuenta no baja de uno.
                             egui::Key::W if !repeat => {
                                 abiertas = (abiertas - 1).max(1);
-                                pedidas.push(Orden::Cerrar);
+                                pedidas.push(Orden::CerrarPestaña);
                             }
                             // **Partir lleva la misma guarda de repetición que crear, y por lo mismo:**
                             // cada una lanza un programa, así que un segundo con el acorde apretado serían
@@ -924,6 +963,21 @@ impl Division {
                             egui::Key::B if !repeat => {
                                 pedidas.push(Orden::Partir(Orientacion::Filas));
                             }
+                            // **`X` de tachar esta consola.** Cerrar la pestaña se queda con `W`, que es
+                            // lo que hace en cualquier navegador y en cualquier terminal con pestañas.
+                            // Para la división sí hay un precedente que no se contradice entre terminales
+                            // —la `x` de tmux y de Zellij matan el panel—, al contrario de lo que pasaba
+                            // con los dos cortes; y no toca a `C` ni a `V`, que son del portapapeles.
+                            //
+                            // **La guarda de repetición es aquí la más necesaria de las cuatro:** un
+                            // segundo con el acorde apretado cerraría una consola tras otra, luego la
+                            // pestaña, y luego la ventana con todo lo que quedara por leer.
+                            //
+                            // **La cuenta de pestañas no baja aquí**, aunque cerrar la única consola de
+                            // una pestaña cierre la pestaña: desde el teclado no se sabe cuántas consolas
+                            // tiene la del foco, y bajarla siempre dejaría de consumir la flecha con dos
+                            // pestañas abiertas, que es el caso normal.
+                            egui::Key::X if !repeat => pedidas.push(Orden::CerrarDivision),
                             // La repetición de crear, cerrar o partir se traga sin hacer nada, que es el
                             // objeto de la guarda.
                             _ => {}
@@ -1132,11 +1186,7 @@ impl Nodo {
                 // dos sitios la decisión de **dónde aparece la consola nueva**, y una prueba que cubriera
                 // uno dejaría el otro sin cubrir.
                 let hermana = (*orientacion == corte)
-                    .then(|| {
-                        hijos.iter().position(|hijo| {
-                            matches!(&hijo.nodo, Self::Hoja(division) if division.nombre == nombre)
-                        })
-                    })
+                    .then(|| hijos.iter().position(|hijo| hijo.nodo.es_la_hoja(nombre)))
                     .flatten();
 
                 if let Some(donde) = hermana {
@@ -1202,6 +1252,184 @@ impl Nodo {
             ],
         };
     }
+
+    /// Si este nodo es la consola que se llama así.
+    fn es_la_hoja(&self, nombre: usize) -> bool {
+        matches!(self, Self::Hoja(division) if division.nombre == nombre)
+    }
+
+    /// La consola de este nodo, si es una hoja y no una rama.
+    fn consola(self) -> Option<Division> {
+        match self {
+            Self::Hoja(division) => Some(division),
+            Self::Rama { .. } => None,
+        }
+    }
+
+    /// Las hijas de este nodo, si es una rama y no una hoja.
+    fn hijas(self) -> Option<Vec<Hijo>> {
+        match self {
+            Self::Rama { hijos, .. } => Some(hijos),
+            Self::Hoja(_) => None,
+        }
+    }
+
+    /// Quita la consola que se llame `nombre`, y deja el árbol sin ramas que no separen nada.
+    ///
+    /// **Devuelve `None` cuando esa consola no está por aquí**, igual que [`Nodo::partir`] devuelve la
+    /// que no ha colocado: es cómo se dice «sigue buscando» sin inventar nada.
+    ///
+    /// **Una hoja no se quita a sí misma**, y no es una limitación que falte por cubrir: la lista de la
+    /// que sale es de su rama. Una pestaña de una sola consola no tiene rama, así que cerrar esa consola
+    /// no es reordenar una disposición — es cerrar la pestaña, y eso lo decide la ventana.
+    fn cerrar(&mut self, nombre: usize) -> Option<Cierre> {
+        let cierre = self.quitar(nombre)?;
+        // **El colapso va aquí y no dentro de `quitar`** porque una rama no puede sustituirse a sí misma
+        // mientras su lista de hijos está prestada. Con el cierre ya hecho, el préstamo ha terminado.
+        self.colapsar();
+        Some(cierre)
+    }
+
+    /// Saca de esta rama la hoja que se llame así, y dice a quién pasa el teclado.
+    ///
+    /// **Hereda la hermana anterior si la había, y si no la siguiente**; y dentro de ella, la consola que
+    /// queda **pegada al hueco**: la última de la anterior, la primera de la siguiente. La regla es
+    /// determinista a propósito, y no «la primera que aparezca al recorrer»: con hermanas que son una
+    /// sola consola las dos formas dicen lo mismo, pero con una hermana partida por dentro la diferencia
+    /// es darle el teclado a la consola de al lado o a una del otro extremo de la pestaña.
+    fn quitar(&mut self, nombre: usize) -> Option<Cierre> {
+        let Self::Rama { hijos, .. } = self else {
+            return None;
+        };
+
+        if let Some(donde) = hijos.iter().position(|hijo| hijo.nodo.es_la_hoja(nombre)) {
+            let se_va = hijos
+                .remove(donde)
+                .nodo
+                .consola()
+                .expect("la posición se acaba de buscar entre las hojas de esta rama");
+
+            let vecina = match donde.checked_sub(1) {
+                // La anterior sigue en su sitio, y de ella hereda la **última**.
+                Some(anterior) => hijos
+                    .get(anterior)
+                    .and_then(|hijo| hijo.nodo.hojas().last().copied()),
+                // Sin anterior hereda la siguiente, que ha corrido a ocupar el sitio de la que se va, y
+                // de ella la **primera**, por lo mismo: es la que queda pegada al hueco.
+                None => hijos
+                    .get(donde)
+                    .and_then(|hijo| hijo.nodo.hojas().first().copied()),
+            };
+            let foco = vecina
+                .expect(
+                    "una rama nace con dos hijas y se colapsa al quedarse con una, así que quitar \
+                         una deja hermana",
+                )
+                .nombre;
+
+            return Some(Cierre { se_va, foco });
+        }
+
+        // No estaba entre las hojas de esta rama: sigue por dentro de sus hijos, y **para en cuanto uno
+        // la encuentra**. Se baja por `cerrar` y no por `quitar` para que la rama de dentro que se quede
+        // con una sola hija también se colapse.
+        let mut encontrada = None;
+        for (cual, hijo) in hijos.iter_mut().enumerate() {
+            if let Some(cierre) = hijo.nodo.cerrar(nombre) {
+                encontrada = Some((cual, cierre));
+                break;
+            }
+        }
+
+        let (cual, cierre) = encontrada?;
+        // **La hija que acaba de cambiar puede haber colapsado en una rama del sentido de ésta**, y
+        // entonces sus hijas tienen que subir a ser hermanas de las de aquí. Ver [`Nodo::absorber`].
+        self.absorber(cual);
+        Some(cierre)
+    }
+
+    /// Una rama que se ha quedado con una sola hija deja de separar nada: la sustituye esa hija.
+    ///
+    /// **No es cosmético, aunque en pantalla no se distinga.** Una rama de una hija le da su área entera
+    /// y el reparto no le pone divisor, así que se pinta igual. Lo que cambia es lo que pasa **después**:
+    /// partir en el mismo sentido inserta como hermana dentro de la rama que contiene a la hoja, así que
+    /// una rama sobrante hace que la consola nueva nazca dentro de ella y no al lado — y entonces la
+    /// frontera de fuera vuelve a mover un bloque de dos consolas, que es el comportamiento de `tmux` que
+    /// este árbol existe para no repetir.
+    fn colapsar(&mut self) {
+        if let Self::Rama { hijos, .. } = self
+            && hijos.len() == 1
+        {
+            // **El peso de la que se queda se descarta**, y es lo correcto: el peso que la reparte entre
+            // sus tías es el de la rama, y ése lo lleva la entrada que su madre tiene de ella. El de
+            // dentro solo decía cómo se repartía con hermanas que ya no están.
+            let sola = hijos.pop().expect("una lista de uno tiene uno");
+            *self = sola.nodo;
+        }
+    }
+
+    /// Si la hija que ocupa ese sitio reparte en el **mismo sentido** que esta rama, sus hijas pasan a ser
+    /// hermanas de las de aquí, con el peso del grupo repartido entre ellas.
+    ///
+    /// **Sin esto, cerrar deja dos ramas del mismo sentido anidadas, y con ellas una frontera que mueve un
+    /// bloque de dos consolas** — exactamente el comportamiento de `tmux` que el árbol n-ario existe para
+    /// no repetir. No es un caso rebuscado: bastan tres gestos —partir por abajo, partir al lado, cerrar la
+    /// de arriba—, porque la rama que se queda con una sola hija se sustituye por ella y esa hija puede ser
+    /// una rama del sentido de la de fuera. **Partir no puede llegar a esa forma** (insertar como hermana
+    /// es justo lo que lo impide), así que es cerrar quien la habilita y quien tiene que deshacerla.
+    ///
+    /// **Los pesos se escalan, no se copian.** El grupo se llevaba `w` de lo que reparte esta rama y sus
+    /// hijas se lo repartían entre ellas; dándole a cada una `w · suyo / Σ` no se mueve nada en pantalla:
+    /// ni el bloque respecto a sus tías, ni las hijas entre ellas. Copiarlas tal cual sí las movería, y en
+    /// una dirección que depende de cuántas hermanas hubiera.
+    fn absorber(&mut self, cual: usize) {
+        let Self::Rama { orientacion, hijos } = self else {
+            return;
+        };
+
+        let de_fuera = *orientacion;
+        let dentro = match hijos.get(cual).map(|hijo| &hijo.nodo) {
+            Some(Self::Rama { orientacion, .. }) => *orientacion,
+            _ => return,
+        };
+        if dentro != de_fuera {
+            return;
+        }
+
+        let grupo = hijos.remove(cual);
+        let suyo = grupo.peso.valor();
+        let dentro = grupo
+            .nodo
+            .hijas()
+            .expect("el sentido se acaba de leer de una rama");
+        let suma: f32 = dentro.iter().map(|hijo| hijo.peso.valor()).sum();
+        let subidas: Vec<Hijo> = dentro
+            .into_iter()
+            .map(|hijo| Hijo {
+                peso: Peso::nuevo(suyo * hijo.peso.valor() / suma).expect(
+                    "una parte de un peso positivo entre la suma de los suyos sigue siendo un peso",
+                ),
+                nodo: hijo.nodo,
+            })
+            .collect();
+
+        // **En el sitio que ocupaba el grupo y en su orden**, o lo pintado cambiaría de sitio: lo que
+        // estaba a la derecha del bloque tiene que seguir a la derecha de sus dos consolas.
+        hijos.splice(cual..cual, subidas);
+    }
+}
+
+/// Lo que deja el cierre de una división: la consola que se va, y a quién pasa el teclado.
+///
+/// **La consola sale del árbol sin soltarse todavía**, y eso es deliberado: al soltarla muere su
+/// programa y desaparece su directorio, y antes hay que llevarse lo que tenía medido de este fotograma.
+/// Si se fuera con su [`medida::Medida`] dentro, la resta le regalaría su trabajo al framework de
+/// interfaz — la cifra con la que D3 decide. Es lo mismo que ya hace cerrar una pestaña, y no se puede
+/// hacer desde dentro del árbol porque el cronómetro es de la ventana.
+struct Cierre {
+    se_va: Division,
+    /// El nombre de la consola que se queda el teclado. Ver [`Nodo::quitar`].
+    foco: usize,
 }
 
 /// Una disposición de consolas: lo que se ve dentro de una pestaña.
@@ -1711,9 +1939,16 @@ impl Ventana {
         // consola, y eso hay que poder leerlo en el informe.
         let cuantas_visibles = visible.divisiones().len();
         let donde_mira = match visible.donde_esta_el_foco() {
-            Some(donde) => medida::lado(cuantas_visibles, donde)
-                .unwrap_or("sin lado, que con más de dos ya no describe nada"),
-            None => "NO EXISTE: el teclado no llegaba a ninguna consola",
+            Some(donde) => medida::lado(cuantas_visibles, donde).map_or_else(
+                // **Con la cuenta delante, en vez de «con más de dos».** Mientras una pestaña tuvo
+                // siempre dos consolas o más —nacía con dos y partir solo añadía—, «sin lado» solo podía
+                // significar que sobraban. Desde que se puede **cerrar**, la pestaña de una es alcanzable,
+                // y ese texto diría justo lo contrario de lo que pasa. La cuenta dice la verdad en los dos
+                // casos, y de paso deja de haber que contar líneas para saber cuántas eran.
+                || format!("sin lado: hay {cuantas_visibles} y el lado solo describe algo con dos"),
+                str::to_string,
+            ),
+            None => "NO EXISTE: el teclado no llegaba a ninguna consola".to_string(),
         };
         writeln!(
             a,
@@ -2138,8 +2373,9 @@ impl Ventana {
                 self.activa = (self.activa as isize + delta).rem_euclid(cuantas) as usize;
             }
             Orden::Crear => self.crear_una_pestaña(ctx),
-            Orden::Cerrar => self.cerrar_la_pestaña_activa(ctx),
+            Orden::CerrarPestaña => self.cerrar_la_pestaña_activa(ctx),
             Orden::Partir(corte) => self.partir_la_del_foco(corte, ctx, ventana_entera, metrica),
+            Orden::CerrarDivision => self.cerrar_la_del_foco(ctx),
         }
 
         ctx.request_repaint();
@@ -2352,6 +2588,72 @@ impl Ventana {
         // Al quitar la última de la lista el índice se queda fuera; en cualquier otro caso, se queda
         // apuntando a la que ocupó su sitio, que es la de la derecha.
         self.activa = que_se_va.min(self.pestañas.len() - 1);
+    }
+
+    /// Cierra la consola que tiene el teclado, y su sitio se lo reparten las hermanas.
+    ///
+    /// **No hace falta repartir nada a mano, y ésa es la razón de que la disposición lleve pesos y no
+    /// fracciones que sumen uno**: quitar una hija de la lista deja a las demás con los pesos que ya
+    /// tenían, y el reparto las pone en proporción sobre el área entera. Con fracciones normalizadas
+    /// habría que renormalizarlas en cada cierre.
+    ///
+    /// **Con una sola consola, cerrarla es cerrar la pestaña** —no queda disposición que reabsorba su
+    /// sitio—, y si además era la única pestaña, la ventana. Se delega en el camino que ya existe en vez
+    /// de repetir su regla, que no es evidente: la última pestaña no se quita de la lista, porque pedir el
+    /// cierre no cierra en el acto y un vector vacío dejaría a `activa` indexando fuera de rango.
+    ///
+    /// **Lo que cuesta se declara entero**, y son tres cosas que ninguna división viva va a declarar: el
+    /// recorrido del árbol, lo que la que se va tenía medido de este fotograma, y matar su programa y
+    /// borrar su directorio. Sin declararlas, la resta se las atribuye al framework de interfaz — la
+    /// cifra con la que D3 decide.
+    fn cerrar_la_del_foco(&mut self, ctx: &egui::Context) {
+        let antes = Instant::now();
+        // **Que la pestaña tenga una sola consola es que su raíz es una hoja**, y preguntárselo al tipo
+        // cuesta lo que mirar una etiqueta. Contar las hojas recorrería el árbol entero y reservaría un
+        // vector para tirarlo, y además diría por segunda vez —y más flojo— una invariante que la
+        // estructura ya garantiza: una rama nace con dos hijas y se colapsa al quedarse con una.
+        if matches!(self.activa().raiz, Nodo::Hoja(_)) {
+            self.cronometrado_aparte += antes.elapsed();
+            self.cerrar_la_pestaña_activa(ctx);
+            return;
+        }
+
+        let foco = self.activa().foco;
+        let cerrada = self.activa_mut().raiz.cerrar(foco);
+        let Some(Cierre {
+            mut se_va,
+            foco: hereda,
+        }) = cerrada
+        else {
+            // **No puede ocurrir**: el foco es el nombre de una de las hojas de esta pestaña, y con más
+            // de una consola ninguna de ellas es la raíz. Se dice en vez de callarse porque el acorde se
+            // ha tragado la tecla y no ha cerrado nada, y sin esta línea no quedaría rastro de por qué.
+            eprintln!("no se encontró la división con el foco al cerrar; no se ha cerrado nada");
+            // **El cronómetro se cierra después de escribir**, no antes: escribir en la salida de errores
+            // cuesta lo que tarde quien lea al otro lado del tubo, y lo que no se declara se publica como
+            // coste del framework de interfaz.
+            self.cronometrado_aparte += antes.elapsed();
+            return;
+        };
+
+        // **Lo que había hecho en este fotograma se recoge antes de soltarla.** Ver [`Cierre`] y
+        // [`Division::llevarse_lo_de_este_fotograma`].
+        let suyo = se_va.llevarse_lo_de_este_fotograma();
+        // Aquí muere su programa y desaparece su directorio, por los `Drop` de siempre.
+        drop(se_va);
+        self.activa_mut().foco = hereda;
+        // **Cerrar una consola a mano cuenta igual que cerrar una pestaña a mano**, y sin esta línea el
+        // mismo gesto protegía la ventana o no según cuántas hermanas tuviera la consola: con una sola,
+        // el camino de arriba delega en cerrar la pestaña, que sí la levanta. El caso real es una consola
+        // cuyo programa ya terminó —y cuyo último contenido se está leyendo— junto a otra con un agente
+        // vivo: al cerrar la del agente no queda nada vivo, y la regla de siempre cerraría la ventana
+        // llevándose lo que se estaba leyendo. Nadie pidió eso: se pidió cerrar una consola.
+        self.cerrada_alguna_a_mano = true;
+        // Sin rearmar, el vigilante se queda mirando un directorio que acaba de borrarse: ve desaparecer
+        // lo que vigilaba, se declara ciego, y a partir de ahí la ventana relee todos los paneles en cada
+        // fotograma, para siempre y sin que nada lo diga.
+        self.rearmar_el_vigilante(ctx);
+        self.cronometrado_aparte += suyo + antes.elapsed();
     }
 
     /// Vuelve a armar el vigilante sobre las divisiones de todas las pestañas que quedan.
@@ -3868,7 +4170,7 @@ mod tests {
 
         assert_eq!(
             ordenes,
-            vec![Orden::Cerrar],
+            vec![Orden::CerrarPestaña],
             "las repeticiones de la tecla mantenida pidieron cerrar más pestañas"
         );
         assert!(
@@ -3922,7 +4224,7 @@ mod tests {
 
         assert_eq!(
             ordenes,
-            vec![Orden::Cerrar],
+            vec![Orden::CerrarPestaña],
             "la flecha que seguía a cerrar se pidió como cambio de pestaña"
         );
         assert_eq!(
@@ -3945,7 +4247,7 @@ mod tests {
         }
         ventana.activa = 1;
 
-        aplicar_sin_geometria(&mut ventana, Orden::Cerrar, &ctx);
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarPestaña, &ctx);
 
         assert_eq!(ventana.pestañas.len(), 1, "no se cerró la pestaña");
         let mut frame = eframe::Frame::_new_kittest();
@@ -5072,7 +5374,7 @@ mod tests {
         ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
 
         ventana.activa = 0;
-        aplicar_sin_geometria(&mut ventana, Orden::Cerrar, &ctx);
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarPestaña, &ctx);
         assert_eq!(ventana.pestañas.len(), 1, "no se cerró la primera pestaña");
 
         let informe = informe_de(&ventana);
@@ -5135,7 +5437,7 @@ mod tests {
 
         // La primera se cierra, así que sus divisiones 0 y 1 quedan gastadas para siempre.
         ventana.activa = 0;
-        aplicar_sin_geometria(&mut ventana, Orden::Cerrar, &ctx);
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarPestaña, &ctx);
         assert_eq!(ventana.pestañas.len(), 1, "no se cerró la primera pestaña");
 
         // **Dos, y no una.** Con una sola no se distingue un contador que no retrocede de uno que se
@@ -5266,7 +5568,7 @@ mod tests {
                 std::time::Duration::ZERO,
             ));
 
-        aplicar_sin_geometria(&mut ventana, Orden::Cerrar, &ctx);
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarPestaña, &ctx);
 
         assert_eq!(ventana.pestañas.len(), 1, "no se cerró la pestaña");
         assert!(
@@ -8443,6 +8745,931 @@ mod tests {
         esperar_la_bandera(
             &ventana.activa().divisiones()[nacida].por_releer,
             "la ventana no vigila el directorio de la división que acaba de partir",
+        );
+    }
+
+    /// Una ventana de una pestaña con tantas consolas **hermanas** como pesos, repartidas en ese sentido.
+    ///
+    /// **Se arma el árbol a mano, y no partiendo**: tres hermanas con pesos desiguales son dos
+    /// particiones y un arrastre, y lo que estas pruebas atan es el cierre. Llegar hasta ahí por el
+    /// camino largo metería en cada una los defectos de partir y de arrastrar, que ya tienen sus pruebas.
+    fn ventana_de_hermanas(orientacion: Orientacion, pesos: &[f32]) -> Ventana {
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let hijos = pesos
+            .iter()
+            .enumerate()
+            .map(|(cual, valor)| Hijo {
+                peso: peso(*valor),
+                nodo: Nodo::Hoja(division_con("sleep 30", cual)),
+            })
+            .collect();
+
+        ventana.activa_mut().raiz = Nodo::Rama { orientacion, hijos };
+        // Como lo lleva la aplicación: el contador no retrocede nunca, así que lo que se abra después no
+        // se llama como ninguna de éstas.
+        ventana.siguiente_nombre_de_division = pesos.len();
+        poner_el_foco_en(ventana.activa_mut(), 0);
+        ventana
+    }
+
+    #[test]
+    fn cerrar_una_de_tres_reparte_su_sitio_entre_las_hermanas_en_proporcion() {
+        // AC4. **Los pesos de partida son desiguales a propósito**: con tres iguales, «las hermanas
+        // conservan la proporción que tenían» y «el hueco se parte a medias» dan exactamente los mismos
+        // anchos, y la prueba se quedaría verde con cualquiera de las dos. Con 3 y 2, a la de la izquierda
+        // le tienen que tocar tres quintos de lo repartible y a la de la derecha dos.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[3.0, 1.0, 2.0]);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+        let area = area_de_celdas(120.0);
+
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::X));
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            2,
+            "el acorde no cerró la consola con el foco"
+        );
+        let reparto = ventana
+            .activa()
+            .raiz
+            .colocar(area, con_metrica(Metrica::ancho));
+        assert_eq!(
+            reparto.divisores.len(),
+            1,
+            "quedaron dos consolas y {} divisores, que es la línea de más que dejaría una rama sin \
+             colapsar",
+            reparto.divisores.len()
+        );
+        let [izquierda, derecha] = [reparto.partes[0], reparto.partes[1]];
+        let repartible = area.width() - GROSOR_DEL_DIVISOR;
+        for (que, ancho, toca) in [
+            ("izquierda", izquierda.width(), repartible * 3.0 / 5.0),
+            ("derecha", derecha.width(), repartible * 2.0 / 5.0),
+        ] {
+            assert!(
+                (ancho - toca).abs() < 0.01,
+                "la consola de la {que} se quedó con {ancho} y en proporción a su peso le tocaban {toca}"
+            );
+        }
+        // Ni huecos ni solapes: la unión de las dos y del divisor es el área entera.
+        assert_eq!(
+            izquierda.left(),
+            area.left(),
+            "la primera dejó un hueco a la izquierda"
+        );
+        assert_eq!(
+            derecha.right(),
+            area.right(),
+            "la última no llega al borde: el sitio de la que se cerró se quedó sin repartir"
+        );
+        assert_eq!(
+            izquierda.right() + GROSOR_DEL_DIVISOR,
+            derecha.left(),
+            "entre las dos que quedan hay un hueco o un solape"
+        );
+        assert!(
+            ventana.activa().donde_esta_el_foco().is_some(),
+            "el teclado quedó apuntando a la consola que se cerró"
+        );
+    }
+
+    #[test]
+    fn cerrar_no_deja_una_rama_de_una_hija_donde_partir_volveria_a_anidar() {
+        // AC5, y **por su efecto y no por la forma del árbol**: una rama con una sola hija le da su área
+        // entera y el reparto no le pone divisor, así que en pantalla no se distingue de la hija suelta.
+        // Lo que cambia es lo de después. Partir en el mismo sentido inserta como hermana **dentro de la
+        // rama que contiene a la hoja**, así que con la rama sobrante la consola nueva nace dentro de
+        // ella, y la frontera de fuera pasa a mover un bloque de dos consolas — el comportamiento de
+        // `tmux` del que más se queja quien lo usa, que es la razón por la que este árbol es n-ario.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let Nodo::Rama { hijos, .. } = &mut ventana.activa_mut().raiz else {
+            panic!("la pestaña nace con una rama");
+        };
+        hijos[1].nodo = Nodo::Rama {
+            orientacion: Orientacion::Filas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 10)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 11)),
+                },
+            ],
+        };
+        ventana.siguiente_nombre_de_division = 12;
+        ventana.activa_mut().foco = 11;
+        let area = area_de_celdas(120.0);
+
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::X));
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            2,
+            "no se cerró la consola con el foco"
+        );
+        assert_eq!(
+            ventana.activa().foco,
+            10,
+            "el teclado no pasó a la única hermana que le quedaba dentro de la rama"
+        );
+
+        // La que sobrevivió al cierre se parte al lado, que es el gesto donde la rama sobrante se nota.
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::D));
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            3,
+            "no se partió la consola que quedó"
+        );
+        let nacida = ventana.activa().foco;
+        let antes = rectangulo_de(&ventana, nacida, area);
+
+        assert!(
+            ventana.activa_mut().mover_la_frontera(0, 0.25),
+            "la primera frontera no se movió, así que la prueba no está mirando lo que cree"
+        );
+
+        let despues = rectangulo_de(&ventana, nacida, area);
+        assert!(
+            (despues.width() - antes.width()).abs() < 0.5,
+            "arrastrar la primera frontera cambió el ancho de una consola que no separa —de {} a {}—: \
+             quedó una rama de una sola hija, la consola nueva nació dentro de ella, y esa frontera \
+             mueve ahora un bloque de dos",
+            antes.width(),
+            despues.width()
+        );
+    }
+
+    #[test]
+    fn el_teclado_pasa_a_la_hermana_anterior_y_solo_si_no_la_hay_a_la_siguiente() {
+        // **Determinista, y no «la primera que aparezca al recorrer»**: quien cierra una consola está
+        // mirando la de al lado, y un teclado que salta al otro extremo de la pestaña no se descubre hasta
+        // que se escribe. Las dos mitades hacen falta: la primera es la que cae si el heredero es siempre
+        // el siguiente, y la segunda es el único caso en que no hay anterior a la que pasarle nada.
+        for (cual, hereda, queja) in [
+            (
+                1,
+                0,
+                "cerrar la del medio le dio el teclado a la de su derecha en vez de a la de su izquierda",
+            ),
+            (
+                0,
+                1,
+                "cerrar la primera, que no tiene anterior, no le dio el teclado a la siguiente",
+            ),
+        ] {
+            // **Un contexto por caso, y no uno compartido.** egui lleva su propia cuenta de las teclas
+            // que están abajo y marca como repetición cualquier pulsación de una que ya lo estaba: con el
+            // mismo contexto, el segundo acorde de esta prueba se tragaría por la guarda de repetición y
+            // el caso no se ejercitaría.
+            let ctx = egui::Context::default();
+            let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+            let nombres: Vec<usize> = ventana
+                .activa()
+                .divisiones()
+                .iter()
+                .map(|division| division.nombre)
+                .collect();
+            poner_el_foco_en(ventana.activa_mut(), cual);
+
+            un_fotograma_en(
+                &mut ventana,
+                &ctx,
+                area_de_celdas(120.0),
+                acorde_con(egui::Key::X),
+            );
+
+            assert_eq!(
+                ventana.activa().divisiones().len(),
+                2,
+                "el acorde no cerró la consola con el foco"
+            );
+            assert_eq!(ventana.activa().foco, nombres[hereda], "{queja}");
+        }
+    }
+
+    #[test]
+    fn el_teclado_pasa_a_la_consola_de_al_lado_y_no_a_una_del_otro_extremo() {
+        // La hermana que hereda **puede estar partida por dentro**, y entonces «la hermana anterior» no
+        // nombra una consola sino un grupo de ellas. La que queda pegada al hueco es su **última**, y es
+        // lo único que distingue el heredero correcto de una consola que está al otro lado de la pestaña:
+        // con hermanas de una sola consola las dos reglas dicen lo mismo.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+        let Nodo::Rama { hijos, .. } = &mut ventana.activa_mut().raiz else {
+            panic!("la ventana de hermanas es una rama");
+        };
+        hijos[0].nodo = Nodo::Rama {
+            orientacion: Orientacion::Filas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 10)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 11)),
+                },
+            ],
+        };
+        ventana.siguiente_nombre_de_division = 12;
+        ventana.activa_mut().foco = 1;
+
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area_de_celdas(120.0),
+            acorde_con(egui::Key::X),
+        );
+
+        assert_eq!(
+            ventana.activa().foco,
+            11,
+            "el teclado no pasó a la consola que quedaba pegada al hueco, sino a otra de la misma \
+             hermana"
+        );
+    }
+
+    #[test]
+    fn cerrar_una_division_le_mata_el_programa_y_le_borra_el_directorio() {
+        // Lo que se promete no es que desaparezca de la lista —eso lo diría cualquier `remove`— sino que
+        // **lo que colgaba de ella se ha soltado**: su directorio de panel ya no está en disco, y el de la
+        // consola que se queda sigue entero.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let [de_la_que_se_va, de_la_que_queda] = directorios_de(ventana.activa());
+
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area_de_celdas(120.0),
+            acorde_con(egui::Key::X),
+        );
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            1,
+            "no se cerró la consola con el foco"
+        );
+        assert!(
+            !de_la_que_se_va.exists(),
+            "quedó el directorio {} de la consola cerrada",
+            de_la_que_se_va.display()
+        );
+        assert!(
+            de_la_que_queda.exists(),
+            "se llevó por delante el directorio {} de la consola que se queda",
+            de_la_que_queda.display()
+        );
+        assert!(
+            !ventana.vigilante.esta_ciego(),
+            "cerrar una consola dejó ciego al vigilante: vio desaparecer el directorio que seguía y a \
+             partir de ahí la ventana relee todos los paneles en cada fotograma"
+        );
+    }
+
+    #[test]
+    fn los_acordes_de_cerrar_una_division_no_le_llegan_al_programa() {
+        // AC14. Sin consumir el evento el programa recibiría el código de control de Ctrl+X, que en un
+        // shell con edición de línea de `emacs` es el prefijo de una familia entera de comandos: el atajo
+        // de cerrar dejaría a medias un comando en la consola de al lado.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area_de_celdas(120.0),
+            acorde_con(egui::Key::X),
+        );
+
+        for (cual, division) in ventana.todas_las_divisiones().enumerate() {
+            assert!(
+                division.pulsaciones.is_empty(),
+                "el acorde de cerrar se le coló al programa de la consola {cual}"
+            );
+        }
+    }
+
+    #[test]
+    fn sin_las_mayusculas_el_acorde_de_cerrar_es_del_programa() {
+        // La otra mitad de AC14, y la que no se ve mirando el acorde: **`Ctrl+X` a secas es una tecla que
+        // se usa**. En un shell con edición de línea de `emacs` es el prefijo de una familia entera de
+        // comandos, y en `nano` es salir. Que cerrar exija además Mayúsculas es lo único que la deja
+        // llegar al programa; sin esa mitad, teclear ese prefijo y cerrar la consola serían el mismo
+        // gesto, y quien lo hiciera perdería la consola en vez de escribir en ella.
+        //
+        // La prueba de arriba no lo cubre: allí el acorde llega **con** las dos teclas, así que da lo
+        // mismo que la guarda las exija o no.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+
+        encolar(
+            &ctx,
+            tecla_con(
+                egui::Key::X,
+                egui::Modifiers {
+                    ctrl: true,
+                    ..Default::default()
+                },
+            ),
+        );
+
+        assert_eq!(
+            ventana.teclear_la_del_foco(&ctx),
+            Vec::new(),
+            "Ctrl+X sin Mayúsculas pidió cerrar una consola"
+        );
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            3,
+            "Ctrl+X sin Mayúsculas cerró una consola"
+        );
+        assert_eq!(
+            ventana.activa().divisiones()[1].pulsaciones,
+            b"\x18",
+            "Ctrl+X sin Mayúsculas se lo tragó el acorde en vez de mandarle al programa su byte de \
+             control"
+        );
+    }
+
+    #[test]
+    fn mantener_pulsado_el_acorde_de_cerrar_no_cierra_mas_que_una_consola() {
+        // **La guarda de repetición más necesaria de las cuatro.** egui marca las repeticiones pero sigue
+        // poniendo `pressed`, así que sin mirar `repeat` un segundo con el acorde apretado son unas treinta
+        // órdenes de cierre en un solo lote: todas las consolas de la pestaña, después la pestaña, y
+        // después la ventana con lo que quedara por leer — de un solo gesto y sin nada que lo deshaga.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+        let area = area_de_celdas(120.0);
+        let mut mantenido = acorde_con(egui::Key::X);
+        for _ in 0..3 {
+            mantenido.push(egui::Event::Key {
+                key: egui::Key::X,
+                physical_key: None,
+                pressed: true,
+                repeat: true,
+                modifiers: con_mayusculas(),
+            });
+        }
+
+        un_fotograma_en(&mut ventana, &ctx, area, mantenido);
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            2,
+            "las repeticiones del acorde cerraron consolas de más"
+        );
+
+        // Y que lo que las frenó fue la repetición: el mismo acorde soltado y vuelto a pulsar sí cierra.
+        un_fotograma_en(&mut ventana, &ctx, area, otra_vez_el_acorde(egui::Key::X));
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            1,
+            "sin la repetición el acorde tampoco cierra, así que la de arriba no demuestra que la guarda \
+             haga nada"
+        );
+    }
+
+    #[test]
+    fn cerrar_la_unica_consola_de_una_pestaña_cierra_la_pestaña_y_no_la_ventana() {
+        // Con una sola consola no queda disposición que reabsorba su sitio, así que cerrarla es cerrar la
+        // pestaña. **Y la ventana sigue abierta**, que es lo que separa este caso del de abajo: con otra
+        // pestaña viva, cerrar la última consola de ésta no puede llevarse lo que se estaba leyendo en la
+        // otra.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        ventana.activa = 1;
+        let de_la_que_se_va = directorios_de(&ventana.pestañas[1]);
+        let area = area_de_celdas(120.0);
+
+        // La primera pulsación deja la pestaña con una sola consola.
+        assert!(
+            !un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::X)),
+            "cerrar una de las dos consolas pidió cerrar la ventana"
+        );
+        assert_eq!(
+            ventana.pestañas.len(),
+            2,
+            "cerrar una consola se llevó la pestaña por delante"
+        );
+
+        // La segunda ya no tiene hermanas a las que dejarle el sitio.
+        assert!(
+            !un_fotograma_en(&mut ventana, &ctx, area, otra_vez_el_acorde(egui::Key::X)),
+            "cerrar la última consola de una pestaña pidió cerrar la ventana, y quedaba otra pestaña"
+        );
+        assert_eq!(
+            ventana.pestañas.len(),
+            1,
+            "cerrar la última consola de la pestaña no cerró la pestaña"
+        );
+        assert_eq!(ventana.activa, 0, "la activa quedó fuera de la lista");
+        for ruta in &de_la_que_se_va {
+            assert!(
+                !ruta.exists(),
+                "quedó el directorio {} de la pestaña que se cerró",
+                ruta.display()
+            );
+        }
+    }
+
+    #[test]
+    fn cerrar_la_unica_consola_de_la_unica_pestaña_pide_cerrar_la_ventana() {
+        // El final de la cadena, y con la misma regla que ya tenía cerrar la última pestaña: **pedir el
+        // cierre no cierra en el acto** —todavía corren fotogramas, y el informe se publica al salir—, así
+        // que la lista no se vacía o `activa` indexaría fuera de rango en cada uno de ellos.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(120.0);
+
+        assert!(
+            !un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::X)),
+            "cerrar una de las dos consolas pidió cerrar la ventana"
+        );
+
+        let pidio_cerrar =
+            un_fotograma_en(&mut ventana, &ctx, area, otra_vez_el_acorde(egui::Key::X));
+
+        assert!(
+            pidio_cerrar,
+            "cerrar la última consola de la única pestaña no pidió cerrar la ventana"
+        );
+        assert_eq!(
+            ventana.pestañas.len(),
+            1,
+            "se vació la lista de pestañas antes de que la ventana se cierre de verdad"
+        );
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            1,
+            "se soltó la última consola: lo que quedara por leer en ella se perdió"
+        );
+    }
+
+    #[test]
+    fn cerrar_una_division_no_se_lleva_lo_que_ya_habia_hecho_en_este_fotograma() {
+        // AC11. **Lo que una consola lleva hecho de este fotograma no vive en un solo sitio**, y ahí
+        // estaba el defecto. El orden real del fotograma lo decide: `logic` cierra primero el fotograma
+        // anterior —lo que **vacía** lo pendiente de la medida— y después bombea, que es lo que deja en
+        // `pendiente_de_medir` lo que la consola acaba de interpretar; y el teclado se atiende al
+        // principio de la pasada de interfaz, **antes del pintado**. Así que en el instante del acorde lo
+        // pendiente de la medida está vacío y lo interpretado está entero en el otro sitio: mirando solo
+        // el primero se declaraban **cero** milisegundos justo en el fotograma en que se cierra una
+        // consola que estaba volcando, y esos milisegundos se los queda «el resto del fotograma» — el
+        // coste que se le atribuye al framework de interfaz, que es la cifra con la que D3 decide.
+        //
+        // **Los dos sitios llevan números distintos y grandes a propósito.** Con lo que una consola
+        // interpreta de verdad —microsegundos— el propio cierre ya llena el campo y la prueba pasaría con
+        // cualquiera de los dos tirado; y con el mismo número en los dos, tirar uno seguiría dando de
+        // sobra. Ocho segundos no los puede producir cerrar una consola.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+
+        const INTERPRETADO: std::time::Duration = std::time::Duration::from_secs(5);
+        const ANOTADO: std::time::Duration = std::time::Duration::from_secs(3);
+        let ahora = Instant::now();
+        {
+            let mut suyas = ventana.activa_mut().divisiones_mut();
+            let division = &mut suyas[1];
+            // Donde lo deja `bombear`, que es lo que la consola tiene sin declarar cuando llega el acorde.
+            division.pendiente_de_medir = Some((Some(ahora), ahora, INTERPRETADO));
+            // Y donde queda si egui repitió la pasada y el pintado alcanzó a anotar la vuelta.
+            division.medida.anotar_vuelta(medida::Tramos::de_una_vuelta(
+                None,
+                ahora,
+                ANOTADO,
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+            ));
+        }
+
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarDivision, &ctx);
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            2,
+            "no se cerró la consola con el foco"
+        );
+        // **Estrictamente mayor, y ahí cabe la tercera mitad.** Los dos tramos plantados suman exactamente
+        // once segundos, así que quedarse justo en esa cifra significa que el cierre **en sí** no se
+        // declaró: el recorrido del árbol, matar el programa, borrar el directorio y rearmar el vigilante,
+        // todo dentro de la pasada de interfaz y sin que ninguna consola viva lo firme.
+        assert!(
+            ventana.cronometrado_aparte > INTERPRETADO + ANOTADO,
+            "declaró {:?}, y solo lo que la consola que se fue llevaba sin declarar valía {:?}: algo de \
+             lo que hizo se marchó con ella, o lo que cuesta cerrarla no se declaró — y en los dos casos \
+             el resto del fotograma se queda con ese trabajo",
+            ventana.cronometrado_aparte,
+            INTERPRETADO + ANOTADO
+        );
+    }
+
+    #[test]
+    fn cerrar_una_consola_a_mano_no_cierra_la_ventana_con_lo_que_quedaba_por_leer() {
+        // **El mismo gesto protegía la ventana o no según cuántas hermanas tuviera la consola**, y esa
+        // asimetría se veía en el propio código: cerrar la única consola de una pestaña delega en cerrar
+        // la pestaña, que sí levanta la bandera; cerrar una de varias no la levantaba.
+        //
+        // El caso es real y es el mismo que la bandera existe para cubrir, una consola más abajo: una
+        // consola cuyo programa ya terminó —y cuyo último contenido se está leyendo— junto a otra con un
+        // agente vivo. Al cerrar la del agente no queda nada vivo, y la regla de siempre cerraría la
+        // ventana llevándose lo que se estaba mirando. Nadie pidió eso: se pidió cerrar una consola.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["printf leeme", "sleep 30"]]);
+        esperar_a_que_muera(ventana.activa().divisiones()[0]);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarDivision, &ctx);
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            1,
+            "no se cerró la consola del agente"
+        );
+
+        let mut frame = eframe::Frame::_new_kittest();
+        let salida = ctx.run_logic(&egui::RawInput::default(), |ctx| {
+            eframe::App::logic(&mut ventana, ctx, &mut frame);
+        });
+
+        assert!(
+            !salida
+                .viewport_commands
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|ordenes| ordenes.contains(&egui::ViewportCommand::Close)),
+            "la ventana se cerró sola tras cerrar una consola a mano, con lo que quedaba por leer en la \
+             que se quedaba"
+        );
+    }
+
+    #[test]
+    fn el_nombre_de_la_division_que_se_cierra_no_se_le_da_a_la_siguiente() {
+        // AC12 por el camino que este PR abre, y que hasta ahora solo se podía ejercitar cerrando una
+        // pestaña entera. El informe se publica al salir con los números de toda la sesión: si al cerrar
+        // se devolviera su nombre al contador, la consola que naciera después heredaría la etiqueta de una
+        // que ya publicó tramos, y **quien lea el informe no tiene forma de notarlo** — son dos consolas
+        // distintas con el mismo nombre, no un hueco que se vea.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+        let cerrada = ventana.activa().divisiones()[1].nombre;
+        let area = area_de_celdas(120.0);
+
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::X));
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::D));
+
+        let vivos: Vec<usize> = ventana
+            .todas_las_divisiones()
+            .map(|division| division.nombre)
+            .collect();
+        assert_eq!(vivos.len(), 3, "no se partió después de cerrar");
+        assert!(
+            !vivos.contains(&cerrada),
+            "la consola {cerrada} se cerró y su nombre se le dio a la que nació después: {vivos:?}"
+        );
+    }
+
+    #[test]
+    fn con_una_sola_consola_el_informe_no_dice_que_sobren_lados() {
+        // **Lo que rompe no es cerrar: es lo que cerrar vuelve alcanzable.** Hasta este PR una pestaña
+        // tenía siempre dos consolas o más —nacía con dos y partir solo añadía—, así que «sin lado» solo
+        // podía significar que había más de dos, y el texto lo decía con esas palabras. Cerrar hace
+        // alcanzable la pestaña de **una**, y ahí ese texto afirma lo contrario de lo que pasa. Es el
+        // mismo caso que el #6 arregló para la cabecera, por la misma puerta.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["printf visible", "sleep 30"]]);
+        esperar_a_que_muera(ventana.activa().divisiones()[0]);
+        ventana.bombear_todas();
+        // La pasada de interfaz es la que cierra la vuelta de lo interpretado; sin ella no hay nada
+        // medido y el informe no se publica.
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        // **Se cierra la segunda**, no la primera: lo medido lo lleva la que imprimió, y sin nada medido
+        // el informe no se publica y la prueba pasaría sin mirar nada.
+        poner_el_foco_en(ventana.activa_mut(), 1);
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarDivision, &ctx);
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            1,
+            "no se cerró la segunda consola"
+        );
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
+
+        let informe = informe_de(&ventana);
+        let linea = informe
+            .lines()
+            .find(|linea| linea.starts_with("foco al salir"))
+            .expect("el informe siempre publica dónde estaba el foco al salir");
+        assert!(
+            linea.contains("hay 1"),
+            "el informe no dice cuántas consolas quedaban, así que su explicación de por qué no hay lado \
+             no se puede comprobar: {linea}"
+        );
+    }
+
+    #[test]
+    fn cerrar_no_deja_dos_ramas_del_mismo_sentido_anidadas() {
+        // **El colapso de una rama de una sola hija puede dejar dentro una rama del sentido de la de
+        // fuera**, y con ella la frontera que mueve un bloque de dos consolas: el comportamiento de `tmux`
+        // del que más se queja quien lo usa, que es la razón de que este árbol sea n-ario. Partir no puede
+        // llegar a esa forma —insertar como hermana es justo lo que lo impide—, así que la habilita cerrar
+        // y le toca a cerrar deshacerla.
+        //
+        // **Tres gestos, todos por la puerta del usuario**, que es lo que dice que no es un caso
+        // rebuscado. Y se comprueba **arrastrando**, no mirando la forma del árbol: la forma es donde se
+        // apunta el defecto, el arrastre es el efecto que se le nota.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let area = area_de_celdas(160.0);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+
+        // Parte la derecha por abajo y luego la que nace al lado: queda una rama de columnas dentro de la
+        // rama de filas de la derecha.
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::B));
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::D));
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            4,
+            "no se montó el árbol que esta prueba necesita"
+        );
+
+        // Al cerrar la de arriba, la rama de filas se queda con una sola hija —la de columnas— y se
+        // sustituye por ella: dos ramas de columnas, una dentro de otra.
+        let de_arriba = ventana.activa().divisiones()[1].nombre;
+        ventana.activa_mut().foco = de_arriba;
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::X));
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            3,
+            "no se cerró la consola de arriba"
+        );
+
+        let ultima = ventana.activa().divisiones()[2].nombre;
+        let antes = rectangulo_de(&ventana, ultima, area);
+        assert!(
+            ventana.activa_mut().mover_la_frontera(0, 0.25),
+            "la primera frontera no se movió, así que la prueba no está mirando lo que cree"
+        );
+        let despues = rectangulo_de(&ventana, ultima, area);
+
+        assert!(
+            (despues.width() - antes.width()).abs() < 0.5,
+            "arrastrar la primera frontera le cambió el ancho a la última consola —de {} a {}—, que no \
+             separa: quedaron dos ramas del mismo sentido anidadas y esa frontera mueve un bloque de dos",
+            antes.width(),
+            despues.width()
+        );
+    }
+
+    #[test]
+    fn las_hijas_que_suben_al_absorberse_conservan_su_sitio_en_pantalla() {
+        // La otra mitad de lo de arriba: subir las hijas del grupo **no puede mover nada**. El grupo se
+        // llevaba su peso de lo que repartía la rama de fuera, y sus hijas se lo repartían entre ellas, así
+        // que a cada una le toca `peso del grupo · el suyo / la suma de los suyos`.
+        //
+        // **Los números están elegidos para que copiar los pesos tal cual no dé lo mismo**: con el grupo a
+        // 3 y sus hijas a 3 y 1, escalar reparte 1 · 2,25 · 0,75 sobre una suma de 5, y copiar repartiría
+        // 1 · 3 · 1 sobre una de 6. Con pesos iguales las dos versiones darían el mismo ancho.
+        //
+        // **Y hay una hermana detrás del grupo**, que es lo que ata el **sitio** por el que suben: metidas
+        // al final en vez de donde estaba el grupo, la disposición sale con las consolas en otro orden y
+        // lo que estaba a la derecha del bloque acabaría a su izquierda.
+        let mut pestaña = Pestaña::con(
+            [division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            0,
+        );
+        let Nodo::Rama { hijos, .. } = &mut pestaña.raiz else {
+            panic!("la pestaña nace con una rama");
+        };
+        hijos[0].peso = peso(1.0);
+        hijos[1].peso = peso(3.0);
+        hijos.push(Hijo {
+            peso: peso(1.0),
+            nodo: Nodo::Hoja(division_con("sleep 30", 13)),
+        });
+        // La derecha pasa a ser una rama de filas con una consola arriba y, debajo, una rama de columnas
+        // de dos: la forma que el cierre de la de arriba convierte en anidamiento.
+        hijos[1].nodo = Nodo::Rama {
+            orientacion: Orientacion::Filas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 10)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Rama {
+                        orientacion: Orientacion::Columnas,
+                        hijos: vec![
+                            Hijo {
+                                peso: peso(3.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 11)),
+                            },
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 12)),
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+
+        let cierre = pestaña
+            .raiz
+            .cerrar(10)
+            .expect("la consola de arriba está en el árbol");
+        drop(cierre);
+
+        let nombres: Vec<usize> = pestaña
+            .divisiones()
+            .iter()
+            .map(|division| division.nombre)
+            .collect();
+        assert_eq!(
+            nombres,
+            vec![0, 11, 12, 13],
+            "las hijas del grupo no subieron al sitio que el grupo ocupaba, así que la disposición \
+             cambió de orden"
+        );
+
+        let area = area_de_celdas(160.0);
+        let reparto = pestaña.raiz.colocar(area, con_metrica(Metrica::ancho));
+        assert_eq!(
+            reparto.divisores.len(),
+            3,
+            "las cuatro consolas que quedan tienen que ser hermanas, con tres fronteras entre ellas"
+        );
+        // Cuatro partes y tres divisores: lo repartible es el área menos las tres líneas.
+        let repartible = area.width() - 3.0 * GROSOR_DEL_DIVISOR;
+        for (cual, toca) in [
+            (0, 1.0 / 5.0),
+            (1, 2.25 / 5.0),
+            (2, 0.75 / 5.0),
+            (3, 1.0 / 5.0),
+        ] {
+            let ancho = reparto.partes[cual].width();
+            assert!(
+                (ancho - repartible * toca).abs() < 0.01,
+                "la consola {cual} se quedó con {ancho} y le tocaban {}: al subir, las hijas del grupo \
+                 se llevaron su peso sin escalar y se movió lo que ya se estaba viendo",
+                repartible * toca
+            );
+        }
+    }
+
+    #[test]
+    fn cerrar_dentro_de_un_grupo_no_le_cambia_el_sentido_al_que_queda() {
+        // **La otra cara de AC18**, y la que las dos pruebas de arriba no pueden ver: subir las hijas del
+        // grupo solo es correcto **cuando el grupo reparte en el mismo sentido que la rama de fuera**. En
+        // las dos de arriba lo reparte, así que ahí subir o no subir es justamente lo que atan; aquí el
+        // grupo reparte al revés, y subir sus hijas convertiría una columna con dos consolas apiladas en
+        // dos columnas más — dos consolas que nadie tocó cambiando de sitio y de tamaño por cerrar una
+        // tercera.
+        //
+        // **Se llega en tres gestos**, como el caso contrario: partir la derecha por abajo dos veces deja
+        // un grupo de filas de tres dentro de la raíz de columnas. Se arma a mano por lo mismo que
+        // [`ventana_de_hermanas`]: lo que esta prueba ata es el cierre.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let Nodo::Rama { hijos, .. } = &mut ventana.activa_mut().raiz else {
+            panic!("la pestaña nace con una rama");
+        };
+        hijos[1].nodo = Nodo::Rama {
+            orientacion: Orientacion::Filas,
+            hijos: (10..13)
+                .map(|nombre| Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", nombre)),
+                })
+                .collect(),
+        };
+        ventana.siguiente_nombre_de_division = 13;
+        ventana.activa_mut().foco = 10;
+        let area = area_de_celdas(160.0);
+
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::X));
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            3,
+            "no se cerró la consola con el foco"
+        );
+        let izquierda = rectangulo_de(&ventana, 0, area);
+        let arriba = rectangulo_de(&ventana, 11, area);
+        let abajo = rectangulo_de(&ventana, 12, area);
+        assert!(
+            arriba.bottom() < abajo.top(),
+            "las dos que quedaban dentro del grupo dejaron de estar una sobre otra —{arriba:?} y \
+             {abajo:?}—: subieron a hermanas de la raíz, que reparte en el otro sentido"
+        );
+        assert_eq!(
+            [arriba.left(), arriba.right()],
+            [abajo.left(), abajo.right()],
+            "las dos que quedaban dentro del grupo dejaron de compartir columna"
+        );
+        // Y la que ni siquiera estaba en el grupo conserva su mitad: con las hijas subidas serían tres
+        // columnas y le tocaría un tercio.
+        let mitad = (area.width() - GROSOR_DEL_DIVISOR) / 2.0;
+        assert!(
+            (izquierda.width() - mitad).abs() < 0.01,
+            "la consola de fuera del grupo se quedó con {} y le tocaba {mitad}: cerrar dentro del grupo \
+             le cambió el ancho a una consola que no tenía nada que ver",
+            izquierda.width()
+        );
+    }
+
+    #[test]
+    fn sin_hermana_anterior_el_teclado_pasa_a_la_de_arriba_de_la_siguiente() {
+        // La mitad de la regla del heredero que ninguna prueba distingue todavía: **sin anterior hereda
+        // la siguiente, y de ella la primera** —la que queda pegada al hueco—. La prueba de las tres
+        // hermanas ejercita este caso con hermanas de una sola consola, y ahí «la primera» y «la última»
+        // nombran a la misma: hace falta que la siguiente esté partida por dentro para que se separen, y
+        // entonces la diferencia es darle el teclado a la de al lado o a la del otro extremo.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let Nodo::Rama { hijos, .. } = &mut ventana.activa_mut().raiz else {
+            panic!("la pestaña nace con una rama");
+        };
+        hijos[1].nodo = Nodo::Rama {
+            orientacion: Orientacion::Filas,
+            hijos: (10..12)
+                .map(|nombre| Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", nombre)),
+                })
+                .collect(),
+        };
+        ventana.siguiente_nombre_de_division = 12;
+        poner_el_foco_en(ventana.activa_mut(), 0);
+
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area_de_celdas(160.0),
+            acorde_con(egui::Key::X),
+        );
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            2,
+            "no se cerró la consola con el foco"
+        );
+        assert_eq!(
+            ventana.activa().foco,
+            10,
+            "el teclado no pasó a la consola pegada al hueco, sino a la del otro extremo de la hermana \
+             que heredó"
+        );
+    }
+
+    #[test]
+    fn lo_que_costo_el_panel_de_la_que_se_cierra_tampoco_se_va_con_ella() {
+        // **La tercera pata de AC11**, y la única que no vive ni en la medida ni en lo que dejó el bombeo:
+        // lo que costó **releer su `panel.json`** mientras su pestaña estaba de fondo.
+        // `medir_las_que_no_se_ven` lo cronometra y lo deja en `panel_sin_pintar`, y quien lo recoge
+        // —`cerrar_las_vueltas_no_pintadas`— solo pasa por él **si esa consola además interpretó algo**:
+        // una consola parada, que es el caso de un agente esperando respuesta, se lo lleva puesto al
+        // fotograma siguiente. Si en ése se la cierra —y llegar a él es volver a su pestaña y pulsar el
+        // acorde—, esos milisegundos se van con ella sin declararse y la resta se los regala al framework
+        // de interfaz, que es la cifra con la que D3 decide.
+        //
+        // **Se planta solo esta pata, y grande.** Con las otras dos a cero, tirarla deja el total en lo
+        // que cuesta cerrar —microsegundos—, y ningún cierre puede producir cuatro segundos.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0]);
+        poner_el_foco_en(ventana.activa_mut(), 1);
+
+        const DEL_PANEL: std::time::Duration = std::time::Duration::from_secs(4);
+        {
+            let mut suyas = ventana.activa_mut().divisiones_mut();
+            suyas[1].panel_sin_pintar = DEL_PANEL;
+        }
+
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarDivision, &ctx);
+
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            2,
+            "no se cerró la consola con el foco"
+        );
+        assert!(
+            ventana.cronometrado_aparte > DEL_PANEL,
+            "declaró {:?}, y solo lo que la consola que se fue tenía sin declarar de su panel valía \
+             {DEL_PANEL:?}: se marchó con ella, y el resto del fotograma se queda con ese trabajo",
+            ventana.cronometrado_aparte
         );
     }
 
