@@ -983,7 +983,10 @@ el estado de su terminal. Hoy no la hay, y el issue
 **Qué se decidió.** La ventana pasa a ser una **lista de pestañas** más el índice de la que se ve.
 Cada pestaña se lleva lo que es de una disposición —sus dos divisiones, cuál tiene el foco y dónde
 está el divisor— y la ventana conserva lo que es del proceso: el tema, el vigilante, la medida y los
-modificadores del teclado. La mitad lógica del fotograma recorre **todas** las pestañas; la de
+modificadores del teclado. **Lo que una disposición es cambió en F2.2**, y la frontera que esta decisión
+traza aguantó el cambio: donde aquí se leen «dos divisiones y dónde está el divisor», ahora hay un árbol
+n-ario con pesos y el foco es un nombre en vez de una posición. Lo que se quedó arriba, en la ventana, no
+se movió. Ver **D14**. La mitad lógica del fotograma recorre **todas** las pestañas; la de
 interfaz pinta **solo** la que se ve.
 
 **Por qué.** Es el primer hito de la Fase 2 porque **decide la forma del estado** sobre la que
@@ -1078,3 +1081,150 @@ fondo con rejilla **59×21**, la misma que la visible. Antes de este hito habrí
 rejilla de arranque— porque el tamaño solo se calculaba al pintar. Es la comprobación en la
 aplicación real de que un agente en una pestaña que no miras trabaja con la ventana que de verdad
 tiene.
+
+---
+
+## D14 — La disposición de una pestaña es un árbol n-ario que reparte por pesos
+
+**Qué se decidió.** Dentro de una pestaña, las consolas viven en un **árbol**: una hoja es una
+división y una rama es una **orientación** más una lista de hijos **con peso**. Cuatro reglas lo
+definen, y las cuatro se eligieron por lo que evitan:
+
+1. **N-ario, no binario.** Una rama tiene los hijos que hagan falta, así que tres consolas en fila son
+   **tres hermanas** y cada frontera mueve solo a sus dos vecinas.
+2. **Partir en el mismo sentido que la rama que te contiene inserta como hermana**, en vez de crear una
+   rama nueva. Es lo que mantiene la regla 1 después del segundo corte.
+3. **Pesos, no fracciones normalizadas.** El reparto divide cada peso por la suma de los de su rama, así
+   que «los pesos suman 1» no es una invariante que mantener: cerrar un hijo es quitarlo de la lista y
+   el resto se reparte solo, en proporción a lo que ya tenía.
+4. **Cerrar deshace lo que cerrar puede crear.** Quitar una hoja colapsa la rama que se quede con una
+   sola hija, y si esa hija reparte **en el mismo sentido** que la rama de fuera, sus hijas **suben a
+   hermanas** con el peso escalado. Sin esto, la regla 1 se rompe en tres gestos.
+
+El foco es el **nombre** de una división, no su sitio; y cada frontera se identifica por su **posición**
+en la lista del fotograma, como ya hacía el clic. Los atajos son `Ctrl+Mayúsculas+D` (partir al lado),
+`+B` (partir debajo) y `+X` (cerrar la división).
+
+**Por qué.** Tres razones, y ninguna es de gusto:
+
+- **El divisor que mueve un bloque.** Es lo que más se le critica a `tmux`: con tres consolas en fila, un
+  árbol binario anida, y la frontera de fuera arrastra **dos consolas a la vez**. El n-ario las hace
+  hermanas. Está medido en este proyecto, no supuesto: con la forma anidada, una consola que esa frontera
+  no debería tocar pasa de **335,6 a 504,0 puntos**.
+- **La invariante sale gratis.** Que lo pintado cubra el área **sin huecos ni solapes** lo garantiza la
+  estructura; con rectángulos libres pasaría a ser código que mantener.
+- **F2.3 sale casi hecho.** Arrastrar una división a otro sitio es «quitar» e «insertar», y este hito
+  construye las dos primitivas de todas formas. Con rectángulos libres, recolocar sería un algoritmo de
+  empaquetado.
+
+**Lo que se descartó, y por qué:**
+
+- **Una lista de columnas** (`Vec<Division>` con pesos), repitiendo la jugada de `Vec<Pestaña>`. Sería la
+  más corta y **no cumple el hito**: solo da una fila, y la Parte I del roadmap pide «colocadas como
+  quieras». Habría que rehacerla en F2.3.
+- **El árbol binario a secas**, por el divisor que mueve bloques.
+- **Una rejilla de rectángulos en fracciones**, que pierde la invariante que el árbol regala.
+- **Un techo al número de divisiones.** No se puede justificar con un escenario real: partir exige un
+  gesto humano por división, y la ventana se vuelve inusable por geometría —el suelo de columnas se niega
+  a partir lo que no puede dar a las dos hijas su mínimo— mucho antes de agotar memoria (~1,06 MiB de
+  colas por división) o descriptores. El límite sale de la geometría, no de una constante inventada.
+- **Nombre estable para cada rama.** Se justificó diciendo que el identificador de control de egui tiene
+  que ser estable entre fotogramas, y el precedente lo contradice: el clic identifica cada división por
+  su índice y llevaba un hito funcionando. **Queda un caso conocido**: con el ratón apretado sobre una
+  frontera y el acorde de partir con la otra mano, la partición renumera las fronteras y el arrastre en
+  vuelo pasa a mover otra. Son dos manos, el efecto es visible y se corrige soltando. Se reabre en F2.3,
+  que es donde recolocar vuelve a mover posiciones en caliente.
+- **Una guarda «si la suma de los pesos es cero, reparte a partes iguales».** Deja vivo el estado
+  inválido y confía en que todos los caminos pasen por la guarda. En su lugar, el tipo `Peso` rechaza lo
+  no finito y lo no positivo, así que la suma cero **no se puede construir**; y arrastrar no deja bajar a
+  ningún vecino del 1 % de la suma de los dos. Ese suelo es relativo a los dos vecinos y no al área, así
+  que no hornea la geometría de hoy en el estado.
+- **Copiar los acordes de otro terminal para partir.** No se puede: **no coinciden entre ellos** — lo que
+  en uno parte al lado, en otro parte debajo. Se eligieron por lo que significan aquí (*derecha*, *bajo*).
+  Para cerrar sí hay precedente que no se contradice —la `x` de `tmux` y de Zellij matan el panel—, así
+  que cerrar la división es `X`. **`W` se queda con la pestaña**, que es lo que hace en cualquier
+  navegador, y ninguno de los tres toca a `C` ni a `V`, que son del portapapeles. Los tres llevan guarda
+  de repetición porque cada uno lanza o mata programas: sin ella, un segundo con el acorde apretado
+  cierra las consolas, la pestaña y la ventana.
+
+**Lo que costó, y conviene que quede escrito.** El hito se entregó en siete PRs y **lo que rompió no fue
+lo que se construía**: el PR que enseñó a **partir** cerró catorce hallazgos bloqueantes y **trece estaban
+en código que ese PR no escribía**, y el que enseñó a **cerrar** cerró tres, todos fuera del suyo. Lo que rompe es **lo que la operación nueva vuelve alcanzable** — tres
+divisiones donde el informe indexaba un array de dos lados (pánico al salir, o sea perdiendo todo lo
+medido), dos ramas hermanas donde la búsqueda de frontera cortaba por «cambió» en vez de por
+«encontrada», una pestaña de una sola consola donde el texto «izquierda» dejó de describir nada. Y en el
+instrumento, la misma lección con otro traje: **lo que una consola lleva sin declarar al cerrarse vive en
+tres sitios** —lo anotado en su medida, lo que el bombeo dejó interpretado y lo que costó releer su
+panel—, y mirar solo el primero declaraba **cero** justo en el fotograma del acorde. Cada camino nuevo es
+una fuga posible, y ninguna se ve leyendo el informe: el número sale plausible.
+
+### Medido — el fotograma con cuatro divisiones (17 de agosto de 2026)
+
+Tres tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
+`scripts/medir-fotograma.sh C|H|I`. Las tres con **todos** los paneles publicándose a ritmo de una vez
+por segundo y carga de 44 MiB por consola, para que se puedan comparar entre sí. Los tramos son de la
+**división 0** de cada corrida.
+
+**La ventana se pide, y eso es nuevo.** Todas las corridas son de **1280×800 puntos**, pedidos con
+`MEDIR_TAMANO` y comprobados en el informe. Antes de este hito el tamaño lo decidía el escritorio, y eso
+hacía la medida irreproducible sin que nada lo dijera: el mismo día, tres corridas de la misma tanda
+dieron **36×47, 40×66 y 61×57** de rejilla. Por eso **estos números no se comparan con los anexos
+anteriores** —los suyos se tomaron con ventanas cuyo tamaño nadie apuntó— y sí entre ellos.
+
+| | **C** — 2 divisiones | **H** — 4 en fila | **I** — 4 en cuadro |
+|---|---|---|---|
+| Rejilla de cada consola | 49×39 | **49×20** | **24×39** |
+| Celdas en total | 3 822 | 3 920 | 3 744 |
+| Consolas volcando | 2 | **4** | **4** |
+| Vuelta completa | 52,0 ms · 51,6 | **100,2 · 101,4** | **97,2 · 99,4** |
+| — esperando en la cola | 46,5 · 46,2 | **89,9 · 91,1** | **87,2 · 89,3** |
+| — interpretando | 2,12 · 2,13 | 2,18 · 2,07 | 2,20 · 2,20 |
+| — encolando el pintado | 458 µs · 464 | 316 · 320 | 259 · 256 |
+| — el panel de estado | 6,1 µs · 6,5 | 15,4 · 18,4 | 25,8 · 8,9 |
+| **el resto del fotograma** | **444 µs · 402** | **530 · 513** | **503 · 463** |
+
+**Qué prueba esto, que es lo que quedaba por medir:**
+
+1. **El coste del framework de interfaz no empeora al duplicar las divisiones.** El «resto del
+   fotograma» —teselar, dibujar y el armazón de egui— se queda entre **402 y 530 µs** en las seis
+   corridas, y la variación entre las dos corridas de una misma tanda (444 → 402 en C, 503 → 463 en I) es
+   del mismo orden que la variación entre tandas. Es la misma conclusión que el anexo de D13 sacó para
+   las pestañas, ahora para las divisiones, y **cierra la pregunta que el issue
+   [#33](https://github.com/mashware/agent-terminal/issues/33) dejó abierta**. Las tres tandas tienen casi
+   las mismas celdas en total (3 744 a 3 920), que es justamente lo que las hace comparables: lo que
+   cambia es en cuántas consolas están repartidas.
+2. **Lo que cuesta el trabajo de fondo se paga en la cola.** La vuelta completa pasa de ~52 ms con dos
+   consolas volcando a 98 y 101 ms con cuatro, y **casi todo el aumento está en esperar** (46 ms en C, 88 en
+   I y 91 en H). Interpretar **no se mueve** (2,07 a 2,20 ms en las seis corridas), que es lo que confirma que no hay
+   coste nuevo por división: es el presupuesto de 128 KiB por división haciendo su trabajo, con el doble de
+   consolas tragando del mismo fotograma.
+3. **Encolar el pintado baja, y baja con las celdas.** 458 µs con 1 911 celdas por consola, 316 con 980,
+   259 con 936. No es una mejora: es que cada consola pinta menos.
+4. **El panel cede y la consola no, comprobado en el peor caso.** Lo **medido** es esto: con las cuatro
+   **en fila** cada consola publica **20 columnas** de rejilla —exactamente `panel::CONSOLA_MINIMA`—, y en
+   **cuadro** publica las **39** de la tanda de dos. Y de ahí se **deduce** el reparto, que la cabecera no
+   publica: en la tanda C cada división son 39 columnas de consola más las 36 del panel, o sea 75; en fila
+   le toca la mitad de eso, unas 37, así que el panel no cabe y **cede hasta 17** para dejarle a la consola
+   su suelo de 20. En cuadro lo que se parte por la mitad es el **alto** —24 filas en vez de 49— y el ancho
+   no se toca, así que la disposición que alguien usaría de verdad no le quita ni una columna a la consola.
+
+**Y qué NO prueba, que importa igual:**
+
+- **No dice nada de una ventana grande.** En esta máquina el escritorio deja llegar hasta **5 120×1 357
+  puntos** —comprobado pidiendo más y viendo qué concede—, y la tanda mide 1280×800. Con cuatro en fila a
+  lo ancho de esa ventana el panel entraría entero y la conclusión 4 sería otra: la interesante es la que
+  se midió, porque es la que aprieta.
+- **El tramo del panel son microsegundos y su relación entre corridas no significa nada**: 25,8 y 8,9 µs en
+  las dos corridas de la misma tanda I. Está publicado por completitud, no para leer tendencias.
+- **No mide partir ni cerrar en caliente.** Las tandas abren la disposición y vuelcan; el congelón de
+  ~100 ms al cerrar ([#62](https://github.com/mashware/agent-terminal/issues/62)) sigue sin medirse con
+  divisiones, y este hito recorre ese camino mucho más a menudo que antes.
+- **No es un fotograma de 120 Hz.** Con cuatro consolas volcando a plena carga la vuelta completa está muy
+  por encima del hueco de 8,3 ms: describe el **peor caso sostenido**, no el uso normal. La comparación
+  válida es entre tandas.
+
+**Una corrida se marcó inválida mientras se afinaba el guion, y conviene que quede escrito por qué.** Una
+tanda I publicó una ventana de **1 279,8125×799,8125** puntos habiendo pedido 1 280×800: el compositor
+entrega el tamaño con fracción y **no siempre la misma**. La guarda del guion la tiró con una comparación exacta, y ahora
+lleva **medio punto de margen** —el mismo que la aplicación usa para no pelearse con el escritorio—,
+porque medio punto no mueve ni una celda de la rejilla y sin él la guarda descarta corridas idénticas.

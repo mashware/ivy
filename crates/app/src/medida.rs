@@ -464,6 +464,16 @@ impl RestoDelFotograma {
     }
 }
 
+/// Lo grande que es la ventana, en la unidad en la que se le pide que abra.
+///
+/// **Dos campos con nombre y no una pareja de números**, por lo mismo que los tramos de la tabla llevan
+/// el suyo: dos `f32` seguidos se pueden intercambiar sin que el compilador diga nada, y el informe
+/// publicaría una ventana con el ancho y el alto cambiados sin que quien lo lea pueda notarlo.
+pub struct EnPuntos {
+    pub ancho: f32,
+    pub alto: f32,
+}
+
 /// La cabecera del informe: dónde y cómo se midió.
 ///
 /// Las rejillas van una por consola **y con su nombre**, porque el reparto del ancho las deja
@@ -487,6 +497,7 @@ impl RestoDelFotograma {
 /// justo aquí, que es donde el informe se convierte en el dato que alguien va a creerse.
 pub fn cabecera(
     a: &mut dyn std::io::Write,
+    ventana: EnPuntos,
     rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
     visible: usize,
 ) -> std::io::Result<()> {
@@ -496,6 +507,12 @@ pub fn cabecera(
         "release"
     };
     writeln!(a, "\n── latencia ──")?;
+    // **Lo grande que era la ventana, y es lo único de la cabecera que se puede volver a pedir.** La
+    // rejilla en celdas de cada consola sale de este tamaño y de la métrica de la fuente, así que leerla
+    // no dice con qué ventana se tomó la tanda: los anexos anteriores a esta línea se midieron con
+    // ventanas cuyo tamaño nadie apuntó, y por eso no se pueden reproducir. Se publica en puntos porque
+    // es la unidad en la que se pide.
+    writeln!(a, "ventana:      {}×{} puntos", ventana.ancho, ventana.alto)?;
     // **Cuántas pestañas había, y no solo cuáles se pintaron.** Los tramos de abajo se tomaron con
     // todas ellas bombeando, así que una tanda de dos pestañas y otra de una no se pueden comparar sin
     // este dato — y sin él, el informe de las dos se lee como si fuera de una sola y con el fotograma
@@ -591,14 +608,62 @@ mod tests {
     }
 
     /// La cabecera que se publica de verdad, por el mismo camino que la escribe al salir.
+    ///
+    /// El tamaño de ventana va fijo porque ninguna de las pruebas de aquí habla de él; la que sí lo hace
+    /// lo pasa por su cuenta.
     fn cabecera_de(rejillas: &[(usize, Vec<(usize, term_core::Size)>)], visible: usize) -> String {
+        cabecera_con(
+            EnPuntos {
+                ancho: 800.0,
+                alto: 600.0,
+            },
+            rejillas,
+            visible,
+        )
+    }
+
+    fn cabecera_con(
+        ventana: EnPuntos,
+        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+        visible: usize,
+    ) -> String {
         let mut salida = Vec::new();
-        cabecera(&mut salida, rejillas, visible).expect("escribir a memoria no falla");
+        cabecera(&mut salida, ventana, rejillas, visible).expect("escribir a memoria no falla");
         String::from_utf8(salida).expect("la cabecera es texto")
     }
 
     fn rejilla(rows: u16, cols: u16) -> term_core::Size {
         term_core::Size { rows, cols }
+    }
+
+    #[test]
+    fn el_tamaño_de_la_ventana_sale_en_una_linea_entera_y_sin_redondear() {
+        // **Esta línea es un contrato con `scripts/medir-fotograma.sh`**, que la lee con una expresión
+        // anclada por los dos extremos —`^ventana: *\(.*\) puntos$`— para comprobar que la ventana abrió con
+        // el tamaño que se le pidió y para decidir si dos corridas se pueden promediar. Cualquier cosa
+        // añadida **detrás** de «puntos» rompe el ancla del final sin romper el `contains` de la prueba de
+        // `lib.rs`, y lo que el guion se encuentra entonces no es un error: es un tamaño **vacío**, o sea la
+        // clase de número plausible por la que existen sus guardas. Se afirma la línea completa por eso.
+        //
+        // **Y con fracción, que es lo que un compositor entrega de verdad** (1279,8125 puntos, medido):
+        // publicarla redondeada daría un número que no es el que hubo, y el guion compara con el mismo
+        // margen de la aplicación precisamente porque la fracción llega. Los dos ejes son distintos para que
+        // intercambiarlos no publique lo mismo.
+        let texto = cabecera_con(
+            EnPuntos {
+                ancho: 1279.8125,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39))])],
+            0,
+        );
+
+        assert!(
+            texto
+                .lines()
+                .any(|linea| linea == "ventana:      1279.8125×800 puntos"),
+            "la línea del tamaño no es la que el guion de medida sabe leer:\n{texto}"
+        );
     }
 
     #[test]

@@ -116,6 +116,51 @@ const FILAS_MINIMAS: f32 = 3.0;
 /// codificación, y sus dos hermanas ya son ASCII.
 const VARIABLE_DE_LAS_PESTAÑAS: &str = "MEDIR_PESTANAS";
 
+/// La variable de entorno que dice con qué tamaño abrir la ventana, en puntos: `<ancho>x<alto>`.
+///
+/// **Existe porque sin ella la medida no es reproducible, y eso está comprobado**: sin pedir tamaño lo
+/// decide el escritorio, y tres corridas de la misma tanda en la misma máquina el mismo día dieron tres
+/// rejillas distintas —61×57, 40×66 y 36×47—. De la rejilla cuelgan todas las medidas del proyecto: dos
+/// tandas con rejillas distintas no se pueden promediar ni comparar, y nada en el informe lo delataba.
+///
+/// **Solo se pide al medir, y no siempre**, porque cambiar cómo abre la ventana para quien la usa no lo
+/// pide ninguna fase: sin la variable, el escritorio sigue decidiendo, que es el comportamiento de
+/// siempre.
+///
+/// Se escribe sin eñe por lo mismo que sus tres hermanas: es lo que un guion de shell puede teclear sin
+/// sorpresas de codificación.
+const VARIABLE_DEL_TAMAÑO: &str = "MEDIR_TAMANO";
+
+/// La variable de entorno que dice con qué disposición de consolas abrir cada pestaña: `<columnas>x<filas>`.
+///
+/// **Existe por lo mismo que [`VARIABLE_DE_LAS_PESTAÑAS`]**: partir entra por eventos del framework, así
+/// que un guion no tiene forma de pulsar el acorde, y sin esta puerta la tanda de cuatro divisiones —la que
+/// el hito del árbol tiene que medir— no se puede lanzar sin nadie delante.
+///
+/// **Abre la disposición en vez de partir cuatro veces**, que es lo que ya hacen las dos columnas de
+/// siempre: la pestaña nace con su árbol y nadie consulta el suelo de [`cabe_partir`] al arrancar. Quien
+/// pida una disposición que no cabe en su ventana verá consolas de una columna, igual que hoy con una
+/// ventana diminuta.
+const VARIABLE_DE_LAS_DIVISIONES: &str = "MEDIR_DIVISIONES";
+
+/// En cuántos fotogramas se vuelve a pedir el tamaño antes de dejarlo. Ver [`TamañoPedido`].
+///
+/// **Cuenta fotogramas con el tamaño equivocado, no peticiones respondidas**, y de ahí sale el número.
+/// Un redimensionado en Wayland necesita una vuelta de configuración del compositor, o sea **al menos un
+/// fotograma**, y en el arranque los fotogramas van seguidos: con un tope de cuatro, un compositor que
+/// tarde cinco en contestar —una máquina más lenta que la que midió esto, una sesión más ocupada— agotaría
+/// los intentos **antes de que llegue la primera respuesta** y la ventana no volvería a pedir nada,
+/// tirando todas las tandas de esa máquina. Treinta y dos fotogramas son un parpadeo al lado de los
+/// cientos que tiene una tanda, y siguen acotando la pelea.
+const INSISTENCIAS_CON_EL_TAMAÑO: u8 = 32;
+
+/// Cuánto puede desviarse el tamaño de la ventana del pedido para darlo por bueno, en puntos.
+///
+/// **Medio punto, y no cero.** Un compositor puede entregar un tamaño con fracción —redondeos de escala—,
+/// y con la igualdad exacta la ventana se pasaría los cuatro intentos peleándose por una diferencia que no
+/// mueve ni un píxel, y menos aún una celda de la rejilla, que es lo que la medida compara.
+const MARGEN_DEL_TAMAÑO: f32 = 0.5;
+
 /// Cuánto aire deja la barra por encima y por debajo del número de la pestaña.
 ///
 /// Es lo único constante de su alto: el resto sale de la métrica de la fuente, así que la barra crece
@@ -434,6 +479,130 @@ fn cabe_partir(division: egui::Rect, corte: Orientacion, metrica: &Metrica) -> b
     corte.largo_de(division) >= 2.0 * minimo + GROSOR_DEL_DIVISOR
 }
 
+/// El árbol que una disposición produce: **las columnas por fuera y las filas por dentro**.
+///
+/// El orden de las hojas es el orden en que se pintan y el orden en que la ventana las abrió, así que con
+/// `2x2` son la de arriba y la de abajo de la columna izquierda, y luego las dos de la derecha. De ese orden
+/// cuelgan los nombres del informe.
+///
+/// **Una rama de un solo hijo no se construye nunca**, que es la misma invariante que el cierre mantiene
+/// colapsando: con una columna se devuelve directamente lo que haya dentro, y con una sola consola, su hoja.
+/// **Cuántas columnas salen se cuenta de las consolas que hay, no de lo que la disposición pedía.** Son dos
+/// fuentes para el mismo dato, y con dos se puede coger la que no toca: pedir cuatro columnas y entregar dos
+/// consolas dejaría **dos ramas sin ningún hijo**, cuya suma de pesos es cero — el `NaN` en un `Rect` que el
+/// tipo [`Peso`] existe para hacer imposible, colado por otra puerta.
+fn en_disposicion(divisiones: Vec<Division>, filas: usize) -> Nodo {
+    // `Division` no es `Clone` —lleva un pseudoterminal dentro—, así que las hojas se reparten consumiendo
+    // el vector en vez de trocearlo.
+    let cuantas_columnas = divisiones.len().div_ceil(filas);
+    let mut restantes = divisiones.into_iter();
+    let columnas: Vec<Nodo> = (0..cuantas_columnas)
+        .map(|_| {
+            let hojas = restantes.by_ref().take(filas).map(Nodo::Hoja).collect();
+            en_rama(Orientacion::Filas, hojas)
+        })
+        .collect();
+
+    en_rama(Orientacion::Columnas, columnas)
+}
+
+/// Una rama con esos hijos a partes iguales, o el hijo suelto si es uno solo.
+fn en_rama(orientacion: Orientacion, hijos: Vec<Nodo>) -> Nodo {
+    let mut hijos = hijos;
+    if hijos.len() == 1 {
+        return hijos.remove(0);
+    }
+
+    Nodo::Rama {
+        orientacion,
+        hijos: pesos_para(hijos.len())
+            .into_iter()
+            .zip(hijos)
+            .map(|(peso, nodo)| Hijo { peso, nodo })
+            .collect(),
+    }
+}
+
+/// Los pesos con los que nace una rama de `cuantos` hijos.
+///
+/// **Con dos son los de [`FRACCION_INICIAL`], y con más, iguales.** Esa constante dice dónde nace **el**
+/// divisor, y solo hay «el» divisor cuando hay dos; repartir iguales también con dos movería el divisor de
+/// la disposición de siempre el día que alguien ajuste la constante, que es justo lo que la constante existe
+/// para poder hacer.
+fn pesos_para(cuantos: usize) -> Vec<Peso> {
+    if cuantos == 2 {
+        return pesos_de(FRACCION_INICIAL).to_vec();
+    }
+
+    // **`expect` y no un respaldo, por lo mismo que en [`pesos_de`]**: el uno es un peso válido siempre, y
+    // un `unwrap_or` convertiría un imposible en un reparto plausible.
+    vec![Peso::nuevo(1.0).expect("el uno es un peso válido"); cuantos]
+}
+
+/// Con cuántas consolas abre cada pestaña, y en qué forma.
+///
+/// **Es una disposición y no un número de divisiones.** Cuatro consolas en fila y cuatro en cuadro son la
+/// misma cantidad y **dos medidas distintas**: en fila cada una se queda con la cuarta parte del ancho y el
+/// panel no cabe —que es literalmente la pregunta abierta del
+/// [#33](https://github.com/mashware/agent-terminal/issues/33)—, y en cuadro cada una tiene medio ancho y
+/// el panel entra. Un solo número obligaría a inventarse cuál de las dos se mide.
+/// **Los dos ejes son estrictamente positivos, y lo garantiza el tipo** — por eso el constructor devuelve
+/// `Option` en vez de corregir un cero. Cero columnas o cero filas no es una disposición pequeña: es una
+/// pestaña sin ninguna consola, y de ahí sale una rama sin hijos cuya suma de pesos es cero. Es el mismo
+/// criterio que [`Peso`], y por el mismo motivo.
+struct Disposicion {
+    columnas: usize,
+    filas: usize,
+}
+
+impl Disposicion {
+    /// Con la que abre la ventana si nadie pide otra: las dos columnas de siempre.
+    const DE_SIEMPRE: Self = Self {
+        columnas: 2,
+        filas: 1,
+    };
+
+    /// **También rechaza lo que no se puede contar**, y no es celo: los dos ejes entran por el entorno, y
+    /// `4294967296x4294967296` pasa los dos mayores que cero mientras su producto **da la vuelta a cero** en
+    /// release. De ahí sale una pestaña sin ninguna consola, que es justo lo que este tipo promete que no
+    /// puede existir: la aplicación se caería al arrancar contradiciendo su propio contrato —«un valor que
+    /// no se entiende deja la disposición de siempre»—. Rechazar el producto imposible **no es inventarse un
+    /// techo** de divisiones, que es una decisión ya tomada al revés: es negarse a representar lo que no
+    /// cabe en un número.
+    fn nueva(columnas: usize, filas: usize) -> Option<Self> {
+        let cuantas = columnas.checked_mul(filas)?;
+
+        (cuantas > 0).then_some(Self { columnas, filas })
+    }
+
+    /// **No puede desbordar**, y lo garantiza [`Disposicion::nueva`]: es el único sitio que construye una
+    /// disposición con valores de fuera, y ya comprobó que el producto cabe. La otra, [`Disposicion::DE_SIEMPRE`],
+    /// es un literal de dos por uno.
+    fn cuantas_divisiones(&self) -> usize {
+        self.columnas * self.filas
+    }
+}
+
+/// Qué disposición pide la variable de entorno, si pide alguna válida.
+///
+/// **Un valor que no se entiende deja la de siempre**, igual que en [`cuantas_pestañas`]: quien mide se
+/// entera en cuanto ve dos consolas donde pidió cuatro, y abortar el arranque por una variable mal escrita
+/// sería peor. Un cero en cualquiera de los dos ejes no es una disposición: no habría ninguna consola.
+fn disposicion_de(valor: Option<&str>) -> Disposicion {
+    let pedida = valor.and_then(|valor| {
+        let (columnas, filas) = valor.split_once('x')?;
+
+        Disposicion::nueva(columnas.trim().parse().ok()?, filas.trim().parse().ok()?)
+    });
+
+    pedida.unwrap_or(Disposicion::DE_SIEMPRE)
+}
+
+/// Lo que la variable de entorno dice, ya resuelto.
+fn disposicion_al_arrancar() -> Disposicion {
+    disposicion_de(std::env::var(VARIABLE_DE_LAS_DIVISIONES).ok().as_deref())
+}
+
 /// Con cuántas pestañas abre la ventana, a partir de lo que dijera la variable.
 ///
 /// **Nunca menos de una**, y ese suelo no es prudencia: la lista de pestañas no puede estar vacía —la
@@ -457,6 +626,30 @@ fn cuantas_pestañas(valor: Option<&str>) -> usize {
 /// Lo que la variable de entorno dice, ya resuelto.
 fn pestañas_al_arrancar() -> usize {
     cuantas_pestañas(std::env::var(VARIABLE_DE_LAS_PESTAÑAS).ok().as_deref())
+}
+
+/// Con qué tamaño abrir la ventana, a partir de lo que dijera la variable.
+///
+/// **Nada en vez de un tamaño por defecto**: sin variable no se pide nada y el escritorio decide, que
+/// es lo que hace hoy y lo que tiene que seguir haciendo para quien usa la aplicación.
+///
+/// **Un valor que no se entiende se ignora igual que si no estuviera**, como en [`cuantas_pestañas`]:
+/// abortar el arranque por una variable mal escrita sería peor, y quien mide se entera en cuanto compara
+/// el tamaño que pidió con el que el informe publica. Se rechaza lo que no es un número, lo no finito y
+/// lo que no es positivo — un ancho de cero deja una ventana sin nada dentro y un `NaN` se propaga a
+/// todo el pintado.
+fn tamaño_de_ventana(valor: Option<&str>) -> Option<egui::Vec2> {
+    let (ancho, alto) = valor?.split_once('x')?;
+    let ancho: f32 = ancho.trim().parse().ok()?;
+    let alto: f32 = alto.trim().parse().ok()?;
+
+    (ancho.is_finite() && ancho > 0.0 && alto.is_finite() && alto > 0.0)
+        .then_some(egui::vec2(ancho, alto))
+}
+
+/// Lo que la variable de entorno dice, ya resuelto.
+fn tamaño_al_arrancar() -> Option<egui::Vec2> {
+    tamaño_de_ventana(std::env::var(VARIABLE_DEL_TAMAÑO).ok().as_deref())
 }
 
 /// Aparta de arriba el sitio de la barra, y devuelve lo que le queda a las consolas.
@@ -516,10 +709,27 @@ fn ficha(barra: egui::Rect, cual: usize, cuantas: usize) -> egui::Rect {
 pub fn arrancar() -> eframe::Result {
     let cuantas = pestañas_al_arrancar();
 
+    let mut opciones = eframe::NativeOptions::default();
+    // **Se pide el tamaño solo si alguien lo pidió**, y por eso no hay un tamaño por defecto aquí: sin
+    // la variable, `NativeOptions::default()` no lleva `inner_size` y el escritorio decide, que es el
+    // comportamiento de siempre. Ver [`VARIABLE_DEL_TAMAÑO`].
+    let disposicion = disposicion_al_arrancar();
+    let pedido = tamaño_al_arrancar();
+    if let Some(tamaño) = pedido {
+        opciones.viewport = opciones.viewport.with_inner_size(tamaño);
+    }
+
     eframe::run_native(
         NOMBRE,
-        eframe::NativeOptions::default(),
-        Box::new(move |cc| Ok(Box::new(Ventana::con_pestañas(&cc.egui_ctx, cuantas)?))),
+        opciones,
+        Box::new(move |cc| {
+            Ok(Box::new(Ventana::con_pestañas(
+                &cc.egui_ctx,
+                cuantas,
+                disposicion,
+                pedido,
+            )?))
+        }),
     )
 }
 
@@ -1473,24 +1683,31 @@ struct Pestaña {
 }
 
 impl Pestaña {
-    /// Dos consolas nuevas, con el shell del usuario dentro de cada una.
+    /// Las consolas que diga la disposición, con el shell del usuario dentro de cada una.
     ///
-    /// **Los nombres de las divisiones llegan de fuera**, igual que el de la pestaña: el contador que
+    /// **El primer nombre de división llega de fuera**, igual que el de la pestaña: el contador que
     /// garantiza que no se repitan es de la ventana, porque las divisiones de dos pestañas distintas
     /// también tienen que distinguirse en el informe.
+    ///
+    /// **Recibe el primero y no la lista entera, y eso lo decidió una revisión.** Con una lista y una
+    /// disposición había **dos fuentes para el mismo dato** —cuántas consolas hay—, y con dos se puede
+    /// coger la que no toca: quien llamara con tres nombres y una disposición de cuatro abriría una
+    /// pestaña que no es ninguna de las dos. Contados aquí, no hay nada que mantener alineado.
     fn nueva(
         ctx: &egui::Context,
         nombre: usize,
-        nombres_de_division: [usize; 2],
+        primer_nombre_de_division: usize,
+        disposicion: &Disposicion,
     ) -> term_core::Result<Self> {
-        let [izquierda, derecha] = nombres_de_division;
-        Ok(Self::con(
-            [
-                Division::nueva(ctx, izquierda)?,
-                Division::nueva(ctx, derecha)?,
-            ],
-            nombre,
-        ))
+        // **Si alguna consola falla no se abre la pestaña**, y el `?` sobre el `collect` es lo que lo
+        // consigue: el mismo criterio que ya tenían las dos de siempre.
+        let cuantas = disposicion.cuantas_divisiones();
+        let divisiones: Vec<Division> = (primer_nombre_de_division
+            ..primer_nombre_de_division + cuantas)
+            .map(|nombre| Division::nueva(ctx, nombre))
+            .collect::<term_core::Result<_>>()?;
+
+        Ok(Self::con(divisiones, disposicion, nombre))
     }
 
     /// Cómo se abre una pestaña: el foco a la izquierda y el divisor donde diga [`FRACCION_INICIAL`].
@@ -1498,28 +1715,25 @@ impl Pestaña {
     /// Existe aparte de [`Pestaña::nueva`] para que las pruebas entren por aquí con sus propias
     /// consolas en vez de armar el struct a mano — si no, el día que abrir una pestaña signifique algo
     /// más, las pruebas seguirían abriendo la de antes.
-    fn con(divisiones: [Division; 2], nombre: usize) -> Self {
-        let [izquierda, derecha] = divisiones;
-        let foco = izquierda.nombre;
+    fn con(divisiones: Vec<Division>, disposicion: &Disposicion, nombre: usize) -> Self {
+        // **El foco arranca en la primera** porque teclear antes del primer clic ocurre siempre al abrir la
+        // ventana, y con un foco que no apunte a nadie esas teclas se perderían. Con la disposición de
+        // siempre, la primera es la de la izquierda.
+        //
+        // **`expect` y no un respaldo silencioso**, por lo mismo que en [`pesos_de`]: una pestaña sin
+        // ninguna consola no existe —[`disposicion_de`] rechaza el cero en los dos ejes y [`Pestaña::nueva`]
+        // abre una consola por nombre—, y un respaldo convertiría ese imposible en algo plausible. El cero
+        // sería el peor de todos: es el nombre de **la primera consola de la primera pestaña**, así que el
+        // foco apuntaría a una consola de otra pestaña y las teclas se irían a donde nadie las espera.
+        // Además, sin ninguna hoja, [`en_disposicion`] devolvería una rama sin hijos, con suma de pesos
+        // cero y un `NaN` en el pintado.
+        let foco = divisiones
+            .first()
+            .expect("una pestaña necesita al menos una consola")
+            .nombre;
 
         Self {
-            // **Nace como una rama de dos columnas con la fracción de siempre**, así que la ventana se
-            // ve y se mide exactamente igual que antes de que existiera el árbol. Que esto no cambie
-            // nada es el criterio de este paso: cualquier diferencia en la tanda de medida sería un
-            // defecto, no una novedad.
-            raiz: Nodo::Rama {
-                orientacion: Orientacion::Columnas,
-                hijos: pesos_de(FRACCION_INICIAL)
-                    .into_iter()
-                    .zip([izquierda, derecha])
-                    .map(|(peso, division)| Hijo {
-                        peso,
-                        nodo: Nodo::Hoja(division),
-                    })
-                    .collect(),
-            },
-            // El foco arranca en la de la izquierda porque teclear antes del primer clic ocurre siempre
-            // al abrir la ventana, y con un foco que no apunte a nadie esas teclas se perderían.
+            raiz: en_disposicion(divisiones, disposicion.filas),
             foco,
             nombre,
         }
@@ -1703,6 +1917,39 @@ struct Ventana {
     /// No se vuelve a bajar. Quien ha cerrado una pestaña a mano ha dicho que gobierna él las pestañas, y
     /// le quedan la última con su acorde y el botón de la ventana.
     cerrada_alguna_a_mano: bool,
+    /// Lo grande que era la ventana en puntos la última vez que se supo, para que el informe lo publique.
+    ///
+    /// **Sin esto, un anexo de medida no se puede reproducir.** La rejilla en celdas que el informe ya
+    /// publicaba sale del tamaño de la ventana **y** de la métrica de la fuente, así que leerla no dice
+    /// con qué ventana se tomó; y como el tamaño lo decidía el escritorio, los anexos anteriores a esto
+    /// se tomaron con ventanas cuyo tamaño nadie apuntó. Esta cifra es la que se le vuelve a pedir con
+    /// [`VARIABLE_DEL_TAMAÑO`].
+    ///
+    /// **Se guarda en vez de preguntarse al publicar** porque el informe se escribe en `on_exit`, que no
+    /// recibe el contexto de egui: cuando hay que decirlo, ya no hay a quién preguntárselo.
+    tamaño_de_la_ventana: egui::Vec2,
+    /// El tamaño que se pidió al arrancar, mientras haya que insistir en él. Ver [`TamañoPedido`].
+    tamaño_pedido: Option<TamañoPedido>,
+}
+
+/// Un tamaño de ventana pedido desde fuera, y cuántas veces queda por insistir.
+///
+/// **Los dos van juntos porque no existe el uno sin el otro**: sin el tamaño no hay nada que insistir, y
+/// sin la cuenta la insistencia no puede terminar.
+///
+/// **Hay que insistir, y está medido.** Pedir el tamaño al construir la ventana funciona durante dos
+/// fotogramas: en el tercero el compositor manda su propia configuración —en GNOME sobre Wayland, 1126×661
+/// puntos donde se habían pedido 800×600— y la ventana pasa a ese tamaño. Volver a pedirlo **después** sí
+/// se respeta, y entonces se queda.
+///
+/// **Y la insistencia se acaba**, con un tope pequeño. Un compositor que no ceda —una ventana en mosaico,
+/// un escritorio con su propia política— convertiría esto en una pelea por fotograma: cada intento pide
+/// otro fotograma, y la medida que la puerta viene a hacer posible se mediría a sí misma peleándose. Con
+/// el tope, quien mide se entera igual, porque el informe publica el tamaño que la ventana **tuvo**.
+struct TamañoPedido {
+    cuanto: egui::Vec2,
+    /// En cuántos fotogramas más se volverá a pedir. Por qué el número, en [`INSISTENCIAS_CON_EL_TAMAÑO`].
+    intentos: u8,
 }
 
 impl Ventana {
@@ -1719,12 +1966,18 @@ impl Ventana {
     /// aquí solo taparía en silencio una llamada que no puede ocurrir. Lo honesto sería un tipo que no
     /// admitiera el cero —`NonZeroUsize`—, y no entra en este cambio porque obliga a un envoltorio en
     /// cada prueba que abre una ventana.
-    fn con_pestañas(ctx: &egui::Context, cuantas: usize) -> term_core::Result<Self> {
+    fn con_pestañas(
+        ctx: &egui::Context,
+        cuantas: usize,
+        disposicion: Disposicion,
+        tamaño: Option<egui::Vec2>,
+    ) -> term_core::Result<Self> {
         // **Si alguna falla no se abre ninguna**, y el `?` sobre el `collect` es lo que lo consigue: el
         // mismo criterio que `panel_o_ninguno`. Media docena de pestañas de las que una está a medias es
         // peor que no arrancar, porque el fallo se descubre al llegar a ella.
+        let por_pestaña = disposicion.cuantas_divisiones();
         let pestañas: Vec<Pestaña> = (0..cuantas)
-            .map(|nombre| Pestaña::nueva(ctx, nombre, [nombre * 2, nombre * 2 + 1]))
+            .map(|nombre| Pestaña::nueva(ctx, nombre, nombre * por_pestaña, &disposicion))
             .collect::<term_core::Result<_>>()?;
         let siguiente_nombre = pestañas.len();
         // **Contadas de la lista y no del parámetro**, por lo mismo que se explica abajo para el nombre
@@ -1762,6 +2015,14 @@ impl Ventana {
             siguiente_nombre,
             siguiente_nombre_de_division,
             cerrada_alguna_a_mano: false,
+            // Hasta el primer fotograma no hay ventana que medir. Un cero es lo que de verdad se sabe, y
+            // el informe solo se publica cuando alguna consola llegó a interpretar algo — o sea, después
+            // de varios fotogramas.
+            tamaño_de_la_ventana: egui::Vec2::ZERO,
+            tamaño_pedido: tamaño.map(|cuanto| TamañoPedido {
+                cuanto,
+                intentos: INSISTENCIAS_CON_EL_TAMAÑO,
+            }),
         })
     }
 
@@ -1861,6 +2122,46 @@ impl Ventana {
         }
     }
 
+    /// Vuelve a pedir el tamaño de ventana mientras la ventana no lo tenga y queden intentos.
+    ///
+    /// **Pedirlo una vez, al construir la ventana, no basta**, y por qué está en [`TamañoPedido`]. Aquí
+    /// está el resto de la regla: mientras el tamaño sea el pedido **no se gasta ningún intento** —los dos
+    /// primeros fotogramas ya lo tienen, y gastarlos ahí dejaría la ventana sin con qué responder cuando
+    /// el compositor mande el suyo—, y cuando se agotan se dice y se deja de mirar.
+    ///
+    fn insistir_con_el_tamaño(&mut self, ctx: &egui::Context) {
+        let Some(pedido) = &mut self.tamaño_pedido else {
+            return;
+        };
+
+        let cuanto = pedido.cuanto;
+        if (self.tamaño_de_la_ventana - cuanto).abs().max_elem() <= MARGEN_DEL_TAMAÑO {
+            return;
+        }
+
+        if pedido.intentos == 0 {
+            self.tamaño_pedido = None;
+            // **Se dice, y en la salida de errores del proceso que mide.** Quien tome la tanda tiene que
+            // saber que el tamaño que pidió no es el que hubo; el informe publica el que hubo, así que
+            // entre las dos cosas no queda hueco para creerse una medida que no se puede reproducir.
+            //
+            // **Y se cronometra**, aunque pase una sola vez en la sesión: escribir en la salida de errores
+            // cuesta lo que tarde quien lea al otro lado del tubo, ocurre dentro de la pasada del fotograma
+            // y ninguna división lo declara. Es lo mismo que ya hacen los dos avisos de partir y cerrar.
+            let antes = Instant::now();
+            eprintln!(
+                "el escritorio no respeta el tamaño pedido ({}×{} puntos): la ventana se queda en {}×{} \
+                 y las tandas no serán comparables con otras máquinas",
+                cuanto.x, cuanto.y, self.tamaño_de_la_ventana.x, self.tamaño_de_la_ventana.y
+            );
+            self.cronometrado_aparte += antes.elapsed();
+            return;
+        }
+
+        pedido.intentos -= 1;
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(cuanto));
+    }
+
     /// Escribe el informe de la sesión al destino que se le dé.
     ///
     /// **Recibe el destino en vez de imprimir**, por lo mismo que la tabla de tramos de cada consola:
@@ -1890,7 +2191,15 @@ impl Ventana {
                 )
             })
             .collect();
-        medida::cabecera(a, &rejillas, self.activa().nombre)?;
+        medida::cabecera(
+            a,
+            medida::EnPuntos {
+                ancho: self.tamaño_de_la_ventana.x,
+                alto: self.tamaño_de_la_ventana.y,
+            },
+            &rejillas,
+            self.activa().nombre,
+        )?;
 
         // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo
         // pueden venir de dos consolas de anchos muy distintos, y una tabla de tramos sin saber con qué
@@ -1919,10 +2228,15 @@ impl Ventana {
             // pestaña eso daba igual porque decía lo mismo de cualquiera, pero desde que se puede partir
             // cada pestaña tiene las suyas, y quien lea el informe casaría este reparto con consolas que
             // no describe.
+            //
+            // **«Grosor» y no «ancho», y la diferencia se ve en la primera tanda de cuatro divisiones en
+            // cuadro**: de sus tres fronteras, una es vertical y dos son horizontales, así que llamarle
+            // ancho a los dos puntos de las horizontales publica una dimensión que no es la que mide. Es la
+            // palabra que la constante ya usa.
             writeln!(
                 a,
                 "divisores:    {} en la pestaña {}, al {} de su tramo repartible al salir, y son \
-                 {GROSOR_DEL_DIVISOR} puntos de ancho cada uno. Si se arrastró durante la sesión, los \
+                 {GROSOR_DEL_DIVISOR} puntos de grosor cada uno. Si se arrastró durante la sesión, los \
                  tramos de abajo mezclan repartos",
                 fronteras.len(),
                 visible.nombre,
@@ -2506,20 +2820,32 @@ impl Ventana {
         // es la pestaña que todavía no existe. Sin esto, lanzar dos procesos se publica como coste del
         // framework de interfaz.
         let antes = Instant::now();
-        let nombres_de_division = [
+        // **Una pestaña abierta con el acorde nace con las dos columnas de siempre**, y no con la
+        // disposición que la puerta de medida pidiera: esa variable dice cómo abre **la ventana**, y quien
+        // pulsa el acorde no ha pedido cuatro consolas. Que las de una tanda y ésta puedan diferir no
+        // engaña a nadie, porque el informe publica la rejilla de cada división.
+        let como = Disposicion::DE_SIEMPRE;
+        let abierta = Pestaña::nueva(
+            ctx,
+            self.siguiente_nombre,
             self.siguiente_nombre_de_division,
-            self.siguiente_nombre_de_division + 1,
-        ];
-        let abierta = Pestaña::nueva(ctx, self.siguiente_nombre, nombres_de_division);
-        self.cronometrado_aparte += antes.elapsed();
+            &como,
+        );
         // **Los nombres se gastan aunque la apertura falle**, para que no se reutilicen nunca: si el
         // intento fallido dejó una línea en la salida de errores, lo que se abra después no debe llamarse
         // igual que lo que no llegó a existir. Vale para la pestaña y para sus dos divisiones por la
         // misma razón, así que se avanzan los dos contadores en el mismo sitio.
         self.siguiente_nombre += 1;
-        self.siguiente_nombre_de_division += nombres_de_division.len();
+        self.siguiente_nombre_de_division += como.cuantas_divisiones();
 
+        // **El cronómetro se cierra después de poner la pestaña delante, y esa raya estaba mal puesta.**
+        // Poner delante **rearma el vigilante**, que reconstruye la vigilancia sobre las divisiones de
+        // todas las pestañas y las hace releer su `panel.json`: es la mitad cara de abrir una pestaña, y
+        // ninguna división la declara. Cerrando el cronómetro antes, ese trabajo caía en «el resto del
+        // fotograma» — el nombre que este proyecto le da al coste del framework de interfaz, que es la
+        // cifra con la que D3 decide. Es el mismo arreglo que partir ya lleva.
         self.poner_delante(abierta, ctx);
+        self.cronometrado_aparte += antes.elapsed();
     }
 
     /// Pone delante la pestaña que se acaba de abrir, o deja la ventana como estaba si no se pudo abrir.
@@ -2573,21 +2899,32 @@ impl Ventana {
         // atribuye al framework de interfaz y el «resto» sale inflado justo en el fotograma en que se
         // cierra una pestaña. El coste del cierre en sí —matar los programas y borrar sus directorios,
         // que pasa al soltar la pestaña— entra en el mismo saco por la misma razón.
+        //
+        // **Y se recogen los tres sitios donde vive lo de este fotograma, no solo el anotado.** Mirar solo
+        // lo que la medida ya tenía apuntado declaraba **cero** justo en el instante del acorde: el orden
+        // real del fotograma es cerrar el anterior —que vacía lo pendiente de la medida—, bombear —que
+        // llena lo interpretado sin anotar— y atender el teclado **antes** del pintado. Así que lo que la
+        // consola acababa de interpretar, y lo que costó releer su panel, se iban con ella sin declararse.
+        // Ver [`Division::llevarse_lo_de_este_fotograma`], que es donde cerrar una división ya lo resolvió.
         let antes = Instant::now();
         let suyo: std::time::Duration = self.pestañas[que_se_va]
             .divisiones_mut()
             .into_iter()
-            .map(|division| division.medida.llevarse_lo_pendiente())
+            .map(Division::llevarse_lo_de_este_fotograma)
             .sum();
 
         // Aquí mueren sus dos programas y desaparecen sus dos directorios, por los `Drop` de siempre.
         self.pestañas.remove(que_se_va);
-        self.cronometrado_aparte += suyo + antes.elapsed();
 
+        // **El rearme del vigilante entra en el cronómetro**, y antes se quedaba fuera por una raya mal
+        // puesta: reconstruye la vigilancia sobre las divisiones de todas las pestañas que quedan y las
+        // hace releer su `panel.json`, que es la mitad cara de cerrar. Ninguna división lo declara, así
+        // que sin esto se publicaba como coste del framework de interfaz.
         self.rearmar_el_vigilante(ctx);
         // Al quitar la última de la lista el índice se queda fuera; en cualquier otro caso, se queda
         // apuntando a la que ocupó su sitio, que es la de la derecha.
         self.activa = que_se_va.min(self.pestañas.len() - 1);
+        self.cronometrado_aparte += suyo + antes.elapsed();
     }
 
     /// Cierra la consola que tiene el teclado, y su sitio se lo reparten las hermanas.
@@ -2813,6 +3150,16 @@ impl eframe::App for Ventana {
             ctx.request_repaint_after(RESPIRO_SIN_VIGILANTE);
         }
 
+        // **Lo grande que es la ventana se apunta en cada fotograma**, porque el informe se publica en
+        // `on_exit` y allí ya no hay contexto al que preguntárselo. Ver
+        // [`Ventana::tamaño_de_la_ventana`]. Es una lectura de un rectángulo y una escritura de dos
+        // números: no se cronometra porque el par de `Instant::now()` costaría más que ella, igual que la
+        // lectura del área que ya hace la pasada de interfaz.
+        // **`viewport_rect` y no `content_rect`**, que es el que egui recorta por si el sistema tapa un
+        // borde: lo que se pide con `inner_size` es el área entera, así que publicar el recorte daría un
+        // número que no se le puede volver a pedir. En un escritorio las dos son iguales; en un móvil con
+        // muesca, no.
+        self.tamaño_de_la_ventana = ctx.viewport_rect().size();
         // El latido va aquí **y también al final de la pasada de interfaz**, y las dos veces hacen
         // falta: ver [`Ventana::poner_el_despertador`].
         self.poner_el_despertador(ctx);
@@ -2821,6 +3168,8 @@ impl eframe::App for Ventana {
             alguna_dejo_cola,
             todas_terminadas,
         } = self.bombear_todas();
+
+        self.insistir_con_el_tamaño(ctx);
 
         if alguna_dejo_cola {
             // El presupuesto cortó el bombeo. Sin pedir otro fotograma, lo que falta se quedaría
@@ -3270,10 +3619,11 @@ mod tests {
                 // divisiones **numeradas seguidas entre pestañas**, también como la aplicación: con un
                 // contador por pestaña habría dos «división 0» en el mismo informe.
                 Pestaña::con(
-                    [
+                    vec![
                         division_con(izquierda, nombre * 2),
                         division_con(derecha, nombre * 2 + 1),
                     ],
+                    &Disposicion::DE_SIEMPRE,
                     nombre,
                 )
             })
@@ -3316,6 +3666,10 @@ mod tests {
             siguiente_nombre,
             siguiente_nombre_de_division,
             cerrada_alguna_a_mano: false,
+            tamaño_de_la_ventana: egui::Vec2::ZERO,
+            // Una ventana de prueba no pide tamaño, igual que la de verdad cuando nadie exporta la
+            // variable: así ninguna prueba manda órdenes de redimensionado al contexto.
+            tamaño_pedido: None,
         }
     }
 
@@ -3547,8 +3901,9 @@ mod tests {
         // a mano, que se fija el foco ella misma: seguiría verde si `Ventana::con_pestañas` arrancara apuntando
         // a la derecha, o a un índice que no existe. Teclear antes del primer clic ocurre siempre al
         // abrir, y esas teclas no pueden perderse.
-        let ventana = Ventana::con_pestañas(&egui::Context::default(), 1)
-            .expect("no se pudo abrir la ventana con sus dos consolas");
+        let ventana =
+            Ventana::con_pestañas(&egui::Context::default(), 1, Disposicion::DE_SIEMPRE, None)
+                .expect("no se pudo abrir la ventana con sus dos consolas");
 
         assert_eq!(
             ventana.activa().foco,
@@ -3567,8 +3922,9 @@ mod tests {
         //
         // **Con cuántas abre la aplicación cuando nadie pide nada** ya no se decide aquí sino en
         // `arrancar`, y lo ata `la_variable_de_entorno_dice_cuantas_pestañas_se_abren`.
-        let ventana = Ventana::con_pestañas(&egui::Context::default(), 1)
-            .expect("no se pudo abrir la ventana con sus dos consolas");
+        let ventana =
+            Ventana::con_pestañas(&egui::Context::default(), 1, Disposicion::DE_SIEMPRE, None)
+                .expect("no se pudo abrir la ventana con sus dos consolas");
 
         assert_eq!(
             ventana.pestañas.len(),
@@ -3583,8 +3939,9 @@ mod tests {
 
     #[test]
     fn cada_consola_tiene_su_propia_identidad_y_su_propio_directorio() {
-        let ventana = Ventana::con_pestañas(&egui::Context::default(), 1)
-            .expect("no se pudo abrir la ventana con sus dos consolas");
+        let ventana =
+            Ventana::con_pestañas(&egui::Context::default(), 1, Disposicion::DE_SIEMPRE, None)
+                .expect("no se pudo abrir la ventana con sus dos consolas");
 
         let [izquierda, derecha] = las_dos(ventana.activa(), |division| {
             division
@@ -3627,8 +3984,9 @@ mod tests {
     }
 
     fn solo_la_consola_que_publica_vuelve_a_mirar(cual: usize) {
-        let ventana = Ventana::con_pestañas(&egui::Context::default(), 1)
-            .expect("no se pudo abrir la ventana con sus dos consolas");
+        let ventana =
+            Ventana::con_pestañas(&egui::Context::default(), 1, Disposicion::DE_SIEMPRE, None)
+                .expect("no se pudo abrir la ventana con sus dos consolas");
         assert!(
             !ventana.vigilante.esta_ciego(),
             "la ventana abrió sin nadie que la avise"
@@ -3848,8 +4206,9 @@ mod tests {
     #[test]
     fn al_cerrar_la_ventana_no_quedan_directorios_de_panel() {
         let rutas = {
-            let ventana = Ventana::con_pestañas(&egui::Context::default(), 1)
-                .expect("no se pudo abrir la ventana con sus dos consolas");
+            let ventana =
+                Ventana::con_pestañas(&egui::Context::default(), 1, Disposicion::DE_SIEMPRE, None)
+                    .expect("no se pudo abrir la ventana con sus dos consolas");
 
             las_dos(ventana.activa(), |division| {
                 division
@@ -3908,7 +4267,8 @@ mod tests {
         // cualquier otro— y en un shell eso intercambia dos caracteres: el acorde escribiría en el
         // programa de la pestaña que se acaba de dejar.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
 
         un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
 
@@ -3935,7 +4295,8 @@ mod tests {
         // porque la barra pinta las fichas en el orden de la lista, y meterla en medio movería de sitio a
         // las de la derecha mientras alguien las está mirando.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 3).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 3, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         let de_cada_una: Vec<_> = ventana.pestañas.iter().map(directorios_de).collect();
 
         un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
@@ -3991,7 +4352,8 @@ mod tests {
         // `remove`— sino que **lo que colgaba de ella se ha soltado**: sus dos directorios de panel ya no
         // están en disco, y la otra pestaña sigue entera.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 2, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         ventana.activa = 1;
 
         let de_la_que_se_va = directorios_de(&ventana.pestañas[1]);
@@ -4029,7 +4391,8 @@ mod tests {
         // delante la que estaba a su derecha, y las demás **siguen donde estaban**, que es lo que la barra
         // enseña y lo que las flechas recorren.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 4).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 4, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         let de_cada_una: Vec<_> = ventana.pestañas.iter().map(directorios_de).collect();
         ventana.activa = 1;
 
@@ -4065,7 +4428,8 @@ mod tests {
         // dos en orden. Lo que esto ata es que el segundo cae sobre la lista **ya recortada**: cierra la
         // pestaña que el primero dejó delante, no la que ocupaba ese índice antes.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 3).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 3, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         let de_la_primera = directorios_de(&ventana.pestañas[0]);
         ventana.activa = 2;
 
@@ -4115,7 +4479,8 @@ mod tests {
         // uno de esos fotogramas indexaría fuera de rango — un pánico al cerrar la ventana, que es el
         // peor momento para tenerlo porque se lleva por delante el informe.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
 
         let pidio_cerrar = un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::W));
 
@@ -4271,7 +4636,8 @@ mod tests {
         // los directorios que estaba siguiendo y se declararía ciego. A partir de ahí la ventana releería
         // todos los paneles en cada fotograma, para siempre, sin que nada en pantalla lo diga.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 2, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         assert!(
             !ventana.vigilante.esta_ciego(),
             "la ventana abrió ya ciega, así que esta prueba no probaría nada"
@@ -4298,7 +4664,8 @@ mod tests {
         // todos los paneles cada 500 ms. Como cada alta lo rearma entero, un fallo pasajero deja de doler
         // en cuanto se abre la siguiente pestaña; sin ese rearme, la ceguera duraría toda la sesión.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         // Armarlo sobre una ruta que no existe es la forma de conseguir uno ciego sin agotar los del
         // núcleo, que es lo que lo provoca de verdad.
         ventana.vigilante = Vigilante::nuevo(
@@ -4329,7 +4696,8 @@ mod tests {
         // publique ahí trabajaría con un panel congelado desde el primer fotograma. Comprobado quitando
         // el rearme: sin esta prueba, la suite entera se queda verde.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
 
         un_fotograma_con(&mut ventana, &ctx, acorde_con(egui::Key::T));
         assert_eq!(ventana.pestañas.len(), 2, "no se abrió la pestaña");
@@ -4358,7 +4726,8 @@ mod tests {
         // armar, su panel se quedaría con lo de antes hasta la siguiente publicación — que en un agente
         // que acaba de terminar puede no llegar nunca.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 2, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         for division in ventana.todas_las_divisiones() {
             division.por_releer.recoger();
         }
@@ -4819,6 +5188,41 @@ mod tests {
         assert!(
             informe.contains("de fondo, se bombeaba sin pintarse"),
             "el informe no distingue la pestaña de fondo:\n{informe}"
+        );
+    }
+
+    #[test]
+    fn el_informe_publica_el_tamaño_que_tuvo_la_ventana() {
+        // **Es la única línea de la cabecera que se puede volver a pedir**, y sin ella un anexo de medida no
+        // se puede reproducir: la rejilla en celdas sale del tamaño **y** de la métrica de la fuente, así
+        // que leerla no dice con qué ventana se tomó la tanda. Los anexos anteriores a esta línea se
+        // midieron con ventanas cuyo tamaño nadie apuntó, y por eso hubo tres rejillas distintas en un día.
+        //
+        // **El tamaño sale de la mitad lógica del fotograma**, que es la que tiene el contexto de egui
+        // delante; el informe se escribe en `on_exit`, donde ya no hay a quién preguntárselo.
+        let mut ventana = ventana_con("printf algo", "sleep 30");
+        esperar_a_que_muera(ventana.pestañas[0].divisiones()[0]);
+        let ctx = egui::Context::default();
+        // Dos números distintos y que no son el de ningún otro sitio de la suite: con un cuadrado, o con el
+        // ancho de otra prueba, intercambiar el ancho y el alto publicaría lo mismo.
+        ordenes_de_una_pasada_logica(
+            &mut ventana,
+            &ctx,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(903.0, 701.0)),
+        );
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(10));
+
+        let informe = informe_de(&ventana);
+
+        assert!(
+            informe.contains("ventana:      903×701 puntos"),
+            "el informe no publica el tamaño que tuvo la ventana:\n{informe}"
         );
     }
 
@@ -6386,6 +6790,574 @@ mod tests {
         // `MEDIR_TANDA`. Cambiarlo aquí dejaría la puerta cerrada sin que nada se pusiera rojo: el guion
         // seguiría midiendo una sola pestaña creyendo que mide dos.
         assert_eq!(VARIABLE_DE_LAS_PESTAÑAS, "MEDIR_PESTANAS");
+        assert_eq!(VARIABLE_DEL_TAMAÑO, "MEDIR_TAMANO");
+        assert_eq!(VARIABLE_DE_LAS_DIVISIONES, "MEDIR_DIVISIONES");
+    }
+
+    #[test]
+    fn la_variable_de_entorno_dice_con_que_tamaño_abre_la_ventana() {
+        // Sin esta puerta la medida no es reproducible: el tamaño lo decide el escritorio y de él cuelga la
+        // rejilla, que es la unidad con la que se comparan todas las tandas del proyecto.
+        assert_eq!(
+            tamaño_de_ventana(Some("1280x800")),
+            Some(egui::vec2(1280.0, 800.0)),
+            "no se leyó el tamaño"
+        );
+
+        // **Sin variable no se pide nada**, que no es lo mismo que pedir un tamaño por defecto: quien usa
+        // la aplicación sigue con la ventana que le dé su escritorio.
+        assert_eq!(tamaño_de_ventana(None), None, "sin variable se pidió algo");
+
+        // Lo que no se entiende se ignora, como en el número de pestañas. Y un cero o un negativo no son un
+        // tamaño: dejarían una ventana sin nada dentro.
+        for malo in [
+            "mil por ochocientos",
+            "1280",
+            "1280x",
+            "0x600",
+            "1280x-600",
+            "NaNx600",
+        ] {
+            assert_eq!(
+                tamaño_de_ventana(Some(malo)),
+                None,
+                "se aceptó «{malo}» como tamaño"
+            );
+        }
+    }
+
+    #[test]
+    fn la_variable_de_entorno_dice_con_que_disposicion_abre_cada_pestaña() {
+        // Sin esta puerta la tanda de cuatro divisiones —lo que este hito tiene que medir— no se puede
+        // lanzar sin nadie delante: partir entra por eventos del framework.
+        let cuatro_en_cuadro = disposicion_de(Some("2x2"));
+        assert_eq!(cuatro_en_cuadro.cuantas_divisiones(), 4);
+        assert_eq!(cuatro_en_cuadro.filas, 2, "no se leyeron las filas");
+
+        // **Y en fila no es lo mismo que en cuadro**, aunque sean cuatro las dos veces: en fila cada consola
+        // se queda con la cuarta parte del ancho y el panel no cabe.
+        let cuatro_en_fila = disposicion_de(Some("4x1"));
+        assert_eq!(cuatro_en_fila.cuantas_divisiones(), 4);
+        assert_eq!(cuatro_en_fila.filas, 1, "una fila no quedó en una fila");
+
+        // Lo que no se entiende deja la de siempre, y un cero en cualquier eje no es una disposición: sería
+        // una pestaña sin ninguna consola.
+        // **Y lo que no se puede contar tampoco es una disposición.** Los dos ejes de abajo pasan
+        // holgadamente el «mayor que cero» y su producto **da la vuelta**: en release se queda en cero y de
+        // ahí sale una pestaña sin ninguna consola, o sea la aplicación cayéndose al arrancar y
+        // contradiciendo lo que esta misma función promete. No es inventarse un techo de divisiones —eso está
+        // decidido al revés—: es negarse a representar lo que no cabe en un número.
+        for malo in [
+            "dos por dos",
+            "2",
+            "2x",
+            "0x2",
+            "2x0",
+            "4294967296x4294967296",
+        ] {
+            let caida = disposicion_de(Some(malo));
+            assert_eq!(
+                (caida.columnas, caida.filas),
+                (2, 1),
+                "«{malo}» no cayó en la disposición de siempre"
+            );
+        }
+    }
+
+    #[test]
+    fn cuatro_consolas_en_cuadro_quedan_en_dos_columnas_de_dos() {
+        // Lo que se afirma es **la geometría**, no la forma del árbol: cuatro rectángulos del mismo tamaño
+        // en dos columnas y dos filas, con la vertical entera de arriba abajo y una horizontal por columna.
+        // Mirar el árbol dejaría pasar un árbol correcto que se pinta mal.
+        let pestaña = Pestaña::con(
+            (0..4).map(|n| division_con("sleep 30", n)).collect(),
+            &disposicion_de(Some("2x2")),
+            0,
+        );
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(802.0, 602.0));
+        let reparto = pestaña.raiz.colocar(area, ANCHO_DE_CELDA);
+
+        assert_eq!(reparto.partes.len(), 4, "no salieron cuatro consolas");
+        // Tres fronteras: la vertical de fuera y una horizontal dentro de cada columna. Con el binario
+        // anidado saldrían las mismas tres, así que lo que las distingue es de dónde a dónde llegan.
+        assert_eq!(reparto.divisores.len(), 3, "no salieron tres fronteras");
+
+        let [
+            arriba_izquierda,
+            abajo_izquierda,
+            arriba_derecha,
+            abajo_derecha,
+        ] = <[egui::Rect; 4]>::try_from(reparto.partes.clone()).expect("son cuatro");
+
+        // El orden de las hojas es el orden en que se abren y el que el informe nombra: columna izquierda
+        // de arriba abajo, y luego la derecha.
+        assert_eq!(
+            (arriba_izquierda.left(), arriba_izquierda.top()),
+            (0.0, 0.0),
+            "la primera no está arriba a la izquierda"
+        );
+        assert_eq!(
+            abajo_izquierda.left(),
+            arriba_izquierda.left(),
+            "las dos de la izquierda no comparten columna"
+        );
+        assert!(
+            abajo_izquierda.top() > arriba_izquierda.bottom(),
+            "la segunda no cae debajo de la primera"
+        );
+        assert!(
+            arriba_derecha.left() > arriba_izquierda.right(),
+            "la tercera no cae a la derecha de la primera"
+        );
+        assert_eq!(
+            (abajo_derecha.right(), abajo_derecha.bottom()),
+            (802.0, 602.0),
+            "la cuarta no llega a la esquina de abajo a la derecha"
+        );
+        // Los anchos iguales son lo que dice que las columnas son hermanas y no un anidamiento con pesos
+        // heredados.
+        assert_eq!(
+            arriba_izquierda.width(),
+            arriba_derecha.width(),
+            "las dos columnas no se reparten el ancho a partes iguales"
+        );
+        // **Y los altos también, que es lo que faltaba.** El reparto de una rama de dos hijos usa
+        // `FRACCION_INICIAL`, la constante que dice dónde nace **el** divisor de una pestaña recién abierta;
+        // en un cuadro se aplica **tres veces**, incluida la partición por filas de cada columna. Sin esta
+        // afirmación, ajustar esa constante —que es para lo que existe— abriría el cuadro con filas
+        // desiguales y las dos consolas de una columna tendrían rejillas distintas, mientras el anexo de
+        // medida publica **una sola** rejilla como la de cada consola.
+        assert_eq!(
+            arriba_izquierda.height(),
+            abajo_izquierda.height(),
+            "las dos filas de una columna no se reparten el alto a partes iguales"
+        );
+    }
+
+    #[test]
+    fn cuatro_consolas_en_fila_no_anidan_y_cada_frontera_llega_de_arriba_abajo() {
+        // La disposición del peor caso del panel (#33): cuatro en fila, cada una con la cuarta parte del
+        // ancho. **Que no anide es lo que se afirma**, y se ve en las fronteras: con un árbol anidado la de
+        // fuera separaría bloques de dos y no habría tres verticales de la misma altura.
+        let pestaña = Pestaña::con(
+            (0..4).map(|n| division_con("sleep 30", n)).collect(),
+            &disposicion_de(Some("4x1")),
+            0,
+        );
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(806.0, 600.0));
+        let reparto = pestaña.raiz.colocar(area, ANCHO_DE_CELDA);
+
+        assert_eq!(reparto.partes.len(), 4);
+        assert_eq!(reparto.divisores.len(), 3, "no salieron tres fronteras");
+        for parte in &reparto.partes {
+            assert_eq!(
+                (parte.top(), parte.bottom()),
+                (0.0, 600.0),
+                "una consola de la fila no ocupa todo el alto"
+            );
+            assert_eq!(parte.width(), 200.0, "las cuatro no se reparten el ancho");
+        }
+    }
+
+    #[test]
+    fn una_sola_columna_con_dos_filas_deja_las_consolas_una_encima_de_otra() {
+        // **La forma que no cubrían las otras dos, y no es rebuscada**: `MEDIR_DIVISIONES=1x2` es una tanda
+        // legítima —dos consolas apiladas, que es lo que da partir por abajo—. Lo que fija es el **sentido**:
+        // con las columnas y las filas intercambiadas saldrían dos consolas lado a lado, que es exactamente
+        // la disposición de siempre y por tanto un defecto que no se ve en ninguna otra prueba.
+        let pestaña = Pestaña::con(
+            (0..2).map(|n| division_con("sleep 30", n)).collect(),
+            &disposicion_de(Some("1x2")),
+            0,
+        );
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 602.0));
+        let reparto = pestaña.raiz.colocar(area, ANCHO_DE_CELDA);
+
+        assert_eq!(reparto.partes.len(), 2, "no salieron dos consolas");
+        assert_eq!(reparto.divisores.len(), 1, "no salió una sola frontera");
+        for parte in &reparto.partes {
+            assert_eq!(
+                (parte.left(), parte.right()),
+                (0.0, 800.0),
+                "una consola apilada no ocupa todo el ancho"
+            );
+            assert_eq!(parte.height(), 300.0, "las dos no se reparten el alto");
+        }
+    }
+
+    #[test]
+    fn con_menos_consolas_de_las_que_pide_la_disposicion_no_queda_ninguna_columna_vacia() {
+        // **El número de columnas se cuenta de las consolas que hay, no de lo que la disposición pedía**, y
+        // esto es lo que pasa si no: una columna sin ninguna hija es una rama cuya suma de pesos es cero, y
+        // el reparto `peso / suma` mete un `NaN` en un `Rect` que se propaga a todo el pintado — el fallo
+        // que el tipo `Peso` existe para hacer imposible, colado por otra puerta.
+        let pestaña = Pestaña::con(
+            (0..3).map(|n| division_con("sleep 30", n)).collect(),
+            &Disposicion::nueva(4, 2).expect("cuatro por dos es una disposición"),
+            0,
+        );
+        let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let reparto = pestaña.raiz.colocar(area, ANCHO_DE_CELDA);
+
+        assert_eq!(reparto.partes.len(), 3, "no salieron las tres consolas");
+        for parte in &reparto.partes {
+            assert!(
+                parte.is_finite() && parte.is_positive(),
+                "una consola salió con un rectángulo imposible: {parte:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn con_una_sola_consola_pedida_el_arbol_no_deja_ninguna_rama_por_encima() {
+        // **La forma que la disposición de una consola tiene que producir es una hoja pelada**, y lo que se
+        // afirma no es la etiqueta del nodo sino **lo que esa etiqueta decide**: cerrar la consola del foco
+        // pregunta si la raíz es una hoja para saber que no queda disposición que reabsorba su sitio, y en
+        // ese caso delega en cerrar la pestaña. Con las dos ramas de un solo hijo que salen de aquí si nadie
+        // las colapsa —la columna dentro de la raíz, y la raíz sobre ella— la geometría sale **idéntica**,
+        // así que ninguna prueba de rectángulos lo nota: la única puerta por la que se ve es ésta, y lo que
+        // el usuario se encuentra es un acorde que se traga la tecla y no cierra nada.
+        //
+        // **Dos pestañas y el foco en la segunda**, no una sola: con una, cerrarla pide cerrar la ventana, y
+        // eso lo devuelve `un_fotograma_en` también cuando el cierre falla y las dos consolas están
+        // muertas. Con dos, lo que se afirma es que **la lista se recortó**.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(
+            &ctx,
+            2,
+            Disposicion::nueva(1, 1).expect("una por una es una disposición"),
+            None,
+        )
+        .expect("no se pudo abrir la ventana");
+        assert_eq!(
+            ventana.activa().divisiones().len(),
+            1,
+            "la disposición de una abrió más de una consola, así que esta prueba no probaría nada"
+        );
+        ventana.activa = 1;
+        let de_la_que_se_queda = ventana.pestañas[0].divisiones()[0]
+            .panel
+            .as_ref()
+            .expect("la consola tiene que arrancar con su directorio")
+            .path()
+            .to_owned();
+
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area_de_celdas(120.0),
+            acorde_con(egui::Key::X),
+        );
+
+        assert_eq!(
+            ventana.pestañas.len(),
+            1,
+            "cerrar la única consola de la pestaña no cerró la pestaña"
+        );
+        // Y no se llevó por delante a la otra: sin el colapso, el camino que se toma es el de quitar una
+        // hoja de una rama que solo la tiene a ella, y de ahí sale una rama sin hijos —que no revienta: se
+        // queda con su área y no pinta nada— o un cierre que no encuentra nada.
+        assert!(
+            de_la_que_se_queda.exists(),
+            "se llevó por delante el directorio {} de la consola de la pestaña que se queda",
+            de_la_que_se_queda.display()
+        );
+    }
+
+    #[test]
+    fn dos_pestañas_en_cuadro_no_publican_dos_tablas_con_la_misma_etiqueta() {
+        // **Cuántos nombres de división gasta una pestaña sale de la disposición, y con las dos columnas de
+        // siempre este defecto no se ve**: numerar de dos en dos —lo que bastaba cuando una pestaña eran dos
+        // consolas y punto— le da a la segunda pestaña en cuadro los nombres 2 y 3, que ya son de la
+        // primera. El resultado es un informe con **dos tablas de números bajo la misma etiqueta** y dos
+        // consolas que no aparecen en ninguna: es la regla dura del proyecto, un número mal etiquetado es
+        // peor que ningún número, y quien lo lea no tiene forma de notarlo.
+        //
+        // **Se afirma sobre el informe y no sobre el campo `nombre`**, que es donde se apunta: el nombre no
+        // decide el directorio de panel —ése lo crea cada consola por su cuenta—, así que comprobar que las
+        // identidades no se repiten pasa igual con los nombres duplicados. Comprobado mutándolo.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(
+            &ctx,
+            2,
+            Disposicion::nueva(2, 2).expect("dos por dos es una disposición"),
+            None,
+        )
+        .expect("no se pudo abrir la ventana");
+        assert_eq!(
+            ventana.todas_las_divisiones().count(),
+            8,
+            "no abrió cuatro consolas en cada pestaña, así que esta prueba no probaría nada"
+        );
+        // Sin una sola vuelta medida no hay informe que leer —una sesión en la que nadie interpretó nada no
+        // publica nada—, y estas consolas corren el shell del usuario, que no escribe nada por su cuenta.
+        // Cuál de las ocho la lleva da igual: las etiquetas de las tablas salen de las divisiones que hay.
+        {
+            let suya = &mut ventana.pestañas[0].divisiones_mut()[0].medida;
+            suya.anotar_vuelta(medida::Tramos::de_una_vuelta(
+                Some(Instant::now()),
+                Instant::now(),
+                std::time::Duration::from_millis(1),
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+            ));
+            suya.cerrar_fotograma(std::time::Duration::from_millis(2));
+        }
+
+        let informe = informe_de(&ventana);
+
+        for nombre in 0..8 {
+            // Con el `──` del final detrás del número, «división 1» no casa con la etiqueta de la 10.
+            let etiqueta = format!(", división {nombre} ──");
+            assert_eq!(
+                informe.matches(&etiqueta).count(),
+                1,
+                "el informe publica {} tablas tituladas «{etiqueta}»:\n{informe}",
+                informe.matches(&etiqueta).count()
+            );
+        }
+    }
+
+    /// Las órdenes que la mitad lógica del fotograma le manda a la ventana del escritorio.
+    ///
+    /// **Se mira lo que se manda y no el contador de intentos**, que es donde se apunta: un contador
+    /// impecable que no llegue a pedir nada deja la ventana del tamaño que quiera el compositor, y la
+    /// prueba no lo notaría.
+    fn ordenes_de_una_pasada_logica(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        area: egui::Rect,
+    ) -> Vec<egui::ViewportCommand> {
+        let entrada = egui::RawInput {
+            screen_rect: Some(area),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let salida = ctx.run_ui(entrada, |_| {
+            eframe::App::logic(ventana, ctx, &mut frame);
+        });
+        let ordenes = salida
+            .viewport_output
+            .values()
+            .flat_map(|salida| salida.commands.clone())
+            .collect();
+        salida.drop_without_applying_deltas();
+        ordenes
+    }
+
+    fn se_pidio_el_tamaño(ordenes: &[egui::ViewportCommand], cuanto: egui::Vec2) -> bool {
+        ordenes.iter().any(
+            |orden| matches!(orden, egui::ViewportCommand::InnerSize(pedido) if *pedido == cuanto),
+        )
+    }
+
+    fn ventana_que_pide(cuanto: egui::Vec2) -> Ventana {
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.tamaño_pedido = Some(TamañoPedido {
+            cuanto,
+            intentos: INSISTENCIAS_CON_EL_TAMAÑO,
+        });
+        ventana
+    }
+
+    #[test]
+    fn con_el_tamaño_pedido_puesto_la_ventana_no_pide_nada() {
+        // Sin esta mitad, la ventana estaría mandando una orden de redimensionado en cada fotograma de la
+        // tanda — y cada orden pide otro fotograma, así que la medida acabaría midiéndose a sí misma.
+        let pedido = egui::vec2(800.0, 600.0);
+        let mut ventana = ventana_que_pide(pedido);
+        let ctx = egui::Context::default();
+
+        let ordenes = ordenes_de_una_pasada_logica(
+            &mut ventana,
+            &ctx,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, pedido),
+        );
+
+        assert!(
+            !se_pidio_el_tamaño(&ordenes, pedido),
+            "se pidió un tamaño que la ventana ya tenía"
+        );
+    }
+
+    #[test]
+    fn si_el_escritorio_le_cambia_el_tamaño_la_ventana_vuelve_a_pedir_el_suyo() {
+        // **Medido en GNOME sobre Wayland**: pedirlo al construir la ventana vale dos fotogramas y en el
+        // tercero llega la configuración del compositor —1126×661 puntos donde se pidieron 800×600—. Sin
+        // volver a pedirlo, la tanda se toma con el tamaño del escritorio y el informe publica una rejilla
+        // que nadie puede reproducir.
+        let pedido = egui::vec2(800.0, 600.0);
+        let mut ventana = ventana_que_pide(pedido);
+        let ctx = egui::Context::default();
+
+        let ordenes = ordenes_de_una_pasada_logica(
+            &mut ventana,
+            &ctx,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0)),
+        );
+
+        assert!(
+            se_pidio_el_tamaño(&ordenes, pedido),
+            "el tamaño del compositor se aceptó sin pedir el pedido"
+        );
+    }
+
+    #[test]
+    fn los_fotogramas_que_ya_tienen_el_tamaño_bueno_no_gastan_insistencias() {
+        // La regla que hace que la insistencia sirva de algo: los primeros fotogramas **ya** tienen el
+        // tamaño pedido —el compositor no ha mandado el suyo todavía—, así que gastar un intento en cada uno
+        // dejaría a la ventana sin con qué responder cuando llegue. Se gastan tantos buenos como intentos
+        // hay, y después uno malo tiene que seguir pidiendo.
+        let pedido = egui::vec2(800.0, 600.0);
+        let mut ventana = ventana_que_pide(pedido);
+        let ctx = egui::Context::default();
+        let bueno = egui::Rect::from_min_size(egui::Pos2::ZERO, pedido);
+
+        for _ in 0..INSISTENCIAS_CON_EL_TAMAÑO {
+            ordenes_de_una_pasada_logica(&mut ventana, &ctx, bueno);
+        }
+
+        let ordenes = ordenes_de_una_pasada_logica(
+            &mut ventana,
+            &ctx,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0)),
+        );
+
+        assert!(
+            se_pidio_el_tamaño(&ordenes, pedido),
+            "los fotogramas buenos se comieron las insistencias"
+        );
+    }
+
+    #[test]
+    fn la_insistencia_con_el_tamaño_se_acaba() {
+        // Un compositor que no ceda —una ventana en mosaico, un escritorio con su propia política—
+        // convertiría esto en una pelea por fotograma, y la medida que la puerta viene a hacer posible se
+        // mediría peleándose. Quien mide se entera igual: el informe publica el tamaño que **hubo**.
+        let pedido = egui::vec2(800.0, 600.0);
+        let mut ventana = ventana_que_pide(pedido);
+        let ctx = egui::Context::default();
+        let terco = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
+
+        for cual in 0..INSISTENCIAS_CON_EL_TAMAÑO {
+            let ordenes = ordenes_de_una_pasada_logica(&mut ventana, &ctx, terco);
+            assert!(
+                se_pidio_el_tamaño(&ordenes, pedido),
+                "la insistencia número {cual} no pidió nada"
+            );
+        }
+
+        let ordenes = ordenes_de_una_pasada_logica(&mut ventana, &ctx, terco);
+
+        assert!(
+            !se_pidio_el_tamaño(&ordenes, pedido),
+            "la ventana sigue peleándose con el escritorio pasados los intentos"
+        );
+    }
+
+    #[test]
+    fn una_desviacion_de_medio_punto_en_el_tamaño_se_da_por_buena() {
+        // **El margen es lo que evita la pelea que no lleva a ningún sitio.** Un compositor puede entregar
+        // el tamaño con fracción —redondeos de escala—, y ninguna prueba de aquí lo hacía: todas piden un
+        // tamaño entero y reciben o ése o uno muy distinto, así que con la igualdad exacta la suite entera
+        // sigue verde y la ventana de verdad se pasa los treinta y dos intentos peleándose por una
+        // diferencia que no mueve ni un píxel, y menos una celda de la rejilla, que es lo que se compara.
+        //
+        // **El medio punto va escrito aquí y NO sale de la constante**, y ésa es la diferencia entre una
+        // prueba y un espejo: la primera versión desviaba la ventana `MARGEN_DEL_TAMAÑO` puntos, así que
+        // recortar el margen a cero le recortaba también la desviación —pedía el tamaño exacto— y **la prueba
+        // seguía en verde con el defecto puesto**. Comprobado mutándolo. Con el número escrito, un margen
+        // recortado cae.
+        //
+        // Y es justo el borde donde el guion de medida y la aplicación tienen que decir lo mismo: el guion
+        // compara con `<=` porque aquí es `<=`, y medio punto de desviación lo aceptan los dos o ninguno.
+        // Junto con la prueba de al lado —un punto de desviación **sí** se corrige—, este par deja el margen
+        // encajonado entre medio punto y uno.
+        let pedido = egui::vec2(800.0, 600.0);
+        let mut ventana = ventana_que_pide(pedido);
+        let ctx = egui::Context::default();
+
+        let ordenes = ordenes_de_una_pasada_logica(
+            &mut ventana,
+            &ctx,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, pedido + egui::Vec2::splat(0.5)),
+        );
+
+        assert!(
+            !se_pidio_el_tamaño(&ordenes, pedido),
+            "la ventana se pelea por medio punto, que no mueve ni una celda de la rejilla"
+        );
+    }
+
+    #[test]
+    fn se_vuelve_a_pedir_el_tamaño_por_un_punto_de_más_o_de_menos_en_cualquier_eje() {
+        // **Las cuatro direcciones, y ninguna sobra.** Las pruebas de arriba reciben siempre una ventana
+        // más grande en los dos ejes a la vez, así que dejan pasar tres formas distintas de mirar mal la
+        // desviación: quedarse solo con el ancho —un alto que no es el pedido cambia las filas de la
+        // rejilla, que es la unidad de todas las medidas del proyecto—, comparar sin valor absoluto —y
+        // entonces una ventana **más pequeña** que la pedida no se corrige nunca, que es lo que hace un
+        // escritorio en mosaico—, y ensanchar el margen hasta que ya no distinga nada.
+        //
+        // **Un solo punto de desviación**, que es el número que obliga a que el margen siga siendo medio:
+        // con veinte, un margen de dos puntos seguiría en verde.
+        let pedido = egui::vec2(800.0, 600.0);
+        let ctx = egui::Context::default();
+
+        for desviacion in [
+            egui::vec2(1.0, 0.0),
+            egui::vec2(-1.0, 0.0),
+            egui::vec2(0.0, 1.0),
+            egui::vec2(0.0, -1.0),
+        ] {
+            let mut ventana = ventana_que_pide(pedido);
+
+            let ordenes = ordenes_de_una_pasada_logica(
+                &mut ventana,
+                &ctx,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, pedido + desviacion),
+            );
+
+            assert!(
+                se_pidio_el_tamaño(&ordenes, pedido),
+                "con la ventana en {:?} —o sea {desviacion:?} de lo pedido— no se volvió a pedir nada",
+                pedido + desviacion
+            );
+        }
+    }
+
+    #[test]
+    fn el_aviso_de_que_el_escritorio_no_cede_se_declara_como_trabajo_de_la_ventana() {
+        // **Escribir en la salida de errores cuesta lo que tarde quien lea al otro lado del tubo**, ocurre
+        // dentro de la pasada del fotograma y ninguna división lo declara: sin cronometrarlo se publica
+        // entero como «el resto del fotograma», que es como este proyecto llama al coste del framework de
+        // interfaz — la cifra con la que D3 juzga a egui. Es la regla dura: un número mal etiquetado es peor
+        // que ningún número, y este camino es uno de los que no se ven leyendo el informe.
+        //
+        // **Se puede afirmar porque en la mitad lógica del fotograma no hay nada más que se cronometre
+        // aparte**, y por eso la primera aserción no es adorno: dice que los treinta y dos fotogramas en los
+        // que se pide el tamaño no declaran nada, lo que hace que el salto de después solo pueda venir del
+        // aviso. Cuánto tarda no se afirma —eso sería inventarse un umbral—, solo que no es cero.
+        let pedido = egui::vec2(800.0, 600.0);
+        let mut ventana = ventana_que_pide(pedido);
+        let ctx = egui::Context::default();
+        let terco = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
+
+        for _ in 0..INSISTENCIAS_CON_EL_TAMAÑO {
+            ordenes_de_una_pasada_logica(&mut ventana, &ctx, terco);
+        }
+        assert!(
+            ventana.cronometrado_aparte.is_zero(),
+            "insistir con el tamaño declaró {:?}, así que el salto de después no diría de dónde sale",
+            ventana.cronometrado_aparte
+        );
+
+        ordenes_de_una_pasada_logica(&mut ventana, &ctx, terco);
+
+        assert!(
+            !ventana.cronometrado_aparte.is_zero(),
+            "el fotograma en que se avisa de que el escritorio no cede no declaró nada: lo que cuesta \
+             escribir el aviso se publica como coste del framework de interfaz"
+        );
     }
 
     #[test]
@@ -6393,8 +7365,9 @@ mod tests {
         // La otra mitad de AC13: que el número llegue a ser pestañas de verdad. Y **el vigilante sobre las
         // de todas**, que es lo que no se ve al mirar la ventana — armarlo solo sobre la primera dejaría
         // los paneles de las de fondo congelados en silencio, que es justo lo contrario del hito.
-        let ventana = Ventana::con_pestañas(&egui::Context::default(), 3)
-            .expect("no se pudieron abrir las tres pestañas");
+        let ventana =
+            Ventana::con_pestañas(&egui::Context::default(), 3, Disposicion::DE_SIEMPRE, None)
+                .expect("no se pudieron abrir las tres pestañas");
 
         assert_eq!(ventana.pestañas.len(), 3, "no abrió las tres pestañas");
         assert!(
@@ -6431,8 +7404,9 @@ mod tests {
         // paneles de las de fondo congelados hasta que alguien mirase esa pestaña, que es exactamente lo
         // contrario de lo que promete el hito. Se publica en la **última** porque es la que se queda fuera
         // de cualquier atajo que se tome al armar.
-        let ventana = Ventana::con_pestañas(&egui::Context::default(), 3)
-            .expect("no se pudieron abrir las tres pestañas");
+        let ventana =
+            Ventana::con_pestañas(&egui::Context::default(), 3, Disposicion::DE_SIEMPRE, None)
+                .expect("no se pudieron abrir las tres pestañas");
         let de_fondo = &ventana.pestañas[2].divisiones()[1];
         for division in ventana.todas_las_divisiones() {
             division.por_releer.recoger();
@@ -7742,7 +8716,8 @@ mod tests {
         // porque el reparto es proporcional, y mirarlos no distinguiría «mover dos pesos» de «mover
         // tres».
         let mut pestaña = Pestaña::con(
-            [division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            vec![division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            &Disposicion::DE_SIEMPRE,
             0,
         );
         let Nodo::Rama { hijos, .. } = &mut pestaña.raiz else {
@@ -8037,7 +9012,8 @@ mod tests {
         // no se podía recorrer. Con partir bastan dos pulsaciones: parte la izquierda por abajo, pon el
         // foco en la derecha, pártela también, y ya hay dos ramas hermanas.
         let mut pestaña = Pestaña::con(
-            [division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            vec![division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            &Disposicion::DE_SIEMPRE,
             0,
         );
         let dos_filas = |primera, segunda| Nodo::Rama {
@@ -8477,7 +9453,8 @@ mod tests {
         // que dos productores se pisaran el estado, y es lo que una consola creada «a mitad de camino»
         // haría si el árbol se montara sin pasar por el constructor de siempre.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         let antes: Vec<_> = ventana
             .todas_las_divisiones()
             .map(|division| division.panel.as_ref().map(|panel| panel.id().to_owned()))
@@ -8717,7 +9694,8 @@ mod tests {
         // sigue sano vigilando las de antes, y la que acaba de nacer no se relee **nunca**. Un agente que
         // arrancara ahí trabajaría con un panel congelado desde su primer fotograma.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
 
         un_fotograma_en(
             &mut ventana,
@@ -8999,7 +9977,8 @@ mod tests {
         // **lo que colgaba de ella se ha soltado**: su directorio de panel ya no está en disco, y el de la
         // consola que se queda sigue entero.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 1).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         let [de_la_que_se_va, de_la_que_queda] = directorios_de(ventana.activa());
 
         un_fotograma_en(
@@ -9144,7 +10123,8 @@ mod tests {
         // pestaña viva, cerrar la última consola de ésta no puede llevarse lo que se estaba leyendo en la
         // otra.
         let ctx = egui::Context::default();
-        let mut ventana = Ventana::con_pestañas(&ctx, 2).expect("no se pudo abrir la ventana");
+        let mut ventana = Ventana::con_pestañas(&ctx, 2, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
         ventana.activa = 1;
         let de_la_que_se_va = directorios_de(&ventana.pestañas[1]);
         let area = area_de_celdas(120.0);
@@ -9447,7 +10427,8 @@ mod tests {
         // al final en vez de donde estaba el grupo, la disposición sale con las consolas en otro orden y
         // lo que estaba a la derecha del bloque acabaría a su izquierda.
         let mut pestaña = Pestaña::con(
-            [division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            vec![division_con("sleep 30", 0), division_con("sleep 30", 1)],
+            &Disposicion::DE_SIEMPRE,
             0,
         );
         let Nodo::Rama { hijos, .. } = &mut pestaña.raiz else {
@@ -9674,6 +10655,71 @@ mod tests {
     }
 
     #[test]
+    fn cerrar_una_pestaña_no_se_lleva_lo_que_sus_consolas_habian_hecho_en_este_fotograma() {
+        // **El mismo defecto que cerrar una división ya tenía arreglado, en el camino de al lado.** Cerrar la
+        // pestaña miraba solo lo que la medida de cada consola tenía anotado, que en el instante del acorde
+        // vale **cero**: el orden real del fotograma es cerrar el anterior —lo que vacía lo pendiente de la
+        // medida—, bombear —lo que llena lo interpretado sin anotar— y atender el teclado antes del pintado.
+        // Viene de cuando se hicieron las pestañas y no se veía desde el informe, porque el número sale
+        // plausible: lo que se marcha sin declararse se lo queda «el resto del fotograma», que es como este
+        // proyecto llama al coste del framework de interfaz — la cifra con la que D3 decide.
+        //
+        // **Las tres patas a la vez y con tres números distintos y grandes**, que es lo que hace que tirar
+        // cualquiera de ellas caiga: con el mismo número en todas, tirar una seguiría dando de sobra, y con
+        // cifras del orden de lo que una consola interpreta de verdad —microsegundos— el propio cierre ya
+        // llenaría el total. Diez segundos no los puede producir cerrar una pestaña.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        ventana.activa = 1;
+
+        const INTERPRETADO: std::time::Duration = std::time::Duration::from_secs(5);
+        const ANOTADO: std::time::Duration = std::time::Duration::from_secs(3);
+        const DEL_PANEL: std::time::Duration = std::time::Duration::from_secs(2);
+        let ahora = Instant::now();
+        {
+            let mut suyas = ventana.pestañas[1].divisiones_mut();
+            // Donde lo deja `bombear`: lo que la consola interpretó y todavía no ha declarado nadie.
+            suyas[0].pendiente_de_medir = Some((Some(ahora), ahora, INTERPRETADO));
+            // Donde queda si el pintado alcanzó a anotar la vuelta.
+            suyas[0].medida.anotar_vuelta(medida::Tramos::de_una_vuelta(
+                None,
+                ahora,
+                ANOTADO,
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+            ));
+            // Y lo que costó releer su panel estando la pestaña de fondo, que no vive en ninguno de los dos.
+            suyas[1].panel_sin_pintar = DEL_PANEL;
+        }
+
+        aplicar_sin_geometria(&mut ventana, Orden::CerrarPestaña, &ctx);
+
+        assert_eq!(ventana.pestañas.len(), 1, "no se cerró la pestaña activa");
+        // Estrictamente mayor: quedarse justo en la suma significaría que cerrar **en sí** —matar los dos
+        // programas, borrar sus directorios y rearmar el vigilante— no se declaró.
+        assert!(
+            ventana.cronometrado_aparte > INTERPRETADO + ANOTADO + DEL_PANEL,
+            "declaró {:?}, y solo lo que las consolas de la pestaña llevaban sin declarar valía {:?}: algo \
+             se marchó con ellas, o lo que cuesta cerrar la pestaña no se declaró — y en los dos casos el \
+             resto del fotograma se queda con ese trabajo",
+            ventana.cronometrado_aparte,
+            INTERPRETADO + ANOTADO + DEL_PANEL
+        );
+    }
+
+    // **Que abrir y cerrar una pestaña declaren lo que cuesta rearmar el vigilante QUEDA SIN ATAR, y se
+    // dice.** El arreglo está —el cronómetro de las dos operaciones encierra el rearme, igual que en partir
+    // y en cerrar una división—, pero **ninguna prueba lo demuestra**, y eso se comprobó en vez de suponerse:
+    // se escribió una que compara lo declarado con el reloj de pared de la operación, y **las dos mutaciones
+    // que sacan el rearme del cronómetro la dejaban en verde**. La razón es de magnitudes: en esta suite un
+    // rearme cuesta lo mismo —microsegundos— que el hueco entre el reloj de la prueba, que está por fuera de
+    // la operación, y el de la aplicación, que está por dentro. Señal y ruido del mismo orden no se
+    // distinguen, y una prueba que no cae al romper lo que dice cubrir no cubre nada. Lo que sí está atado es
+    // la otra mitad del arreglo, la de los tres sitios: `cerrar_una_pestaña_no_se_lleva_lo_que_sus_consolas_
+    // habian_hecho_en_este_fotograma`.
+
+    #[test]
     fn el_informe_distingue_un_foco_muerto_de_una_division_sin_lado() {
         // **Dos cosas muy distintas que salían con el mismo texto.** Que haya tres divisiones y «izquierda»
         // ya no describa nada es lo normal desde que se puede partir; que el foco apunte a una división que
@@ -9855,7 +10901,8 @@ mod tests {
         // el teclado se iría a la consola que ahora ocupa ese sitio — otra distinta, y sin que nada en
         // pantalla lo explique.
         let mut pestaña = Pestaña::con(
-            [division_con("sleep 30", 3), division_con("sleep 30", 4)],
+            vec![division_con("sleep 30", 3), division_con("sleep 30", 4)],
+            &Disposicion::DE_SIEMPRE,
             0,
         );
         poner_el_foco_en(&mut pestaña, 1);

@@ -3,7 +3,7 @@ id: asp_lo-que-rompe-es-lo-que-la-operacion-nueva-vuelve-alcanzable_d1y48j
 slug: lo-que-rompe-es-lo-que-la-operacion-nueva-vuelve-alcanzable
 name: >-
   Lo que rompe al añadir una operación no es su código: son los defectos que ya
-  estaban y que ella vuelve alcanzables — 15 de 17 bloqueantes en dos PRs
+  estaban y que ella vuelve alcanzables — 16 de 17 bloqueantes en dos PRs
 type: aspect
 status: active
 superseded_by: null
@@ -35,7 +35,7 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-**El patrón, con su cuenta, y ya son dos PRs seguidos.** El PR que enseñó a **partir** una división cerró **catorce hallazgos bloqueantes** y **trece estaban en código que ese PR no escribe**. El que enseñó a **cerrar** cerró **tres** y **los tres** estaban fuera de su código. Ninguno era un defecto nuevo: eran estados que hasta entonces **no se podían alcanzar desde la aplicación**, y la operación nueva los puso a un gesto de distancia.
+**El patrón, con su cuenta, y ya son dos PRs seguidos.** El PR que enseñó a **partir** una división cerró **catorce hallazgos bloqueantes** y **trece estaban en código que ese PR no escribe**. El que enseñó a **cerrar** cerró **tres** y **los tres** estaban fuera de su código. Trece más tres son **dieciséis de diecisiete**; el título de esta ficha dijo «15 de 17» durante un día, y lo corrigió el PR que cierra el hito al ir a citarlo en una decisión versionada — la aritmética de una ficha también se comprueba antes de publicarla. Ninguno era un defecto nuevo: eran estados que hasta entonces **no se podían alcanzar desde la aplicación**, y la operación nueva los puso a un gesto de distancia.
 
 **De partir, los tres que más enseñan:**
 
