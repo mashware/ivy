@@ -36,7 +36,11 @@ const ANCHO: f32 = 36.0;
 /// **El panel cede, no la consola.** El panel es margen y la consola es el trabajo: en una ventana
 /// estrecha lo que sobra es el estado, no el programa. Con veinte columnas una consola sigue siendo
 /// usable; con cinco, no.
-const CONSOLA_MINIMA: f32 = 20.0;
+///
+/// **Y es también el suelo que decide si una división se puede partir en dos**, que es el otro sitio
+/// donde hace falta saber cuándo una consola deja de servir. Son la misma pregunta, así que son la misma
+/// constante: dos números para «lo menos que necesita una consola» acabarían diciendo cosas distintas.
+pub(crate) const CONSOLA_MINIMA: f32 = 20.0;
 
 /// Lo que se deja de margen a la izquierda del texto, en celdas.
 ///

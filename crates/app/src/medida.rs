@@ -529,19 +529,29 @@ pub fn cabecera(
 /// Un número suelto obliga a adivinar de qué lado es, y el reparto del ancho hace que el lado importe.
 pub const NOMBRE_DE_CONSOLA: [&str; 2] = ["izquierda", "derecha"];
 
-/// La pista de sitio que acompaña a una división en el informe, **si es que significa algo**.
+/// De qué lado cae una división, **si es que el lado significa algo**.
 ///
 /// **«Izquierda» y «derecha» solo describen algo cuando hay exactamente dos**, así que con cualquier
-/// otro número la pista se calla en vez de inventarse un lado. No es una guarda por si acaso: hasta
-/// este cambio el tipo de la cabecera era un array de dos y el número estaba fijado por él, y al
-/// pasarlo a una lista —que es lo que el árbol de divisiones necesita— la garantía dejó de existir.
-/// Indexar el array por la posición se convertía en un pánico **dentro del informe que se publica al
-/// salir**, o sea perdiendo de golpe todo lo medido en la sesión.
-fn donde_cae(cuantas: usize, cual: usize) -> String {
+/// otro número esto no devuelve nada en vez de inventarse un lado. No es una guarda por si acaso: hasta
+/// que la cabecera dejó de recibir un array de dos, el número estaba fijado por el tipo, y al pasarlo a
+/// una lista —que es lo que el árbol de divisiones necesita— la garantía dejó de existir. Indexar el
+/// array por la posición se convertía en un pánico **dentro del informe que se publica al salir**, o sea
+/// perdiendo de golpe todo lo medido en la sesión.
+///
+/// Lo usan los tres sitios del informe que nombran una división —la cabecera, el título de su tabla de
+/// tramos y la línea del foco—, cada uno con su propio adorno alrededor. Que la regla viva en un solo
+/// sitio es lo que evita que uno de los tres se quede indexando por su cuenta el día que partir una
+/// división deje de ser una rareza: desde que se puede partir, tres divisiones son un gesto.
+pub fn lado(cuantas: usize, cual: usize) -> Option<&'static str> {
     match NOMBRE_DE_CONSOLA.get(cual) {
-        Some(donde) if cuantas == NOMBRE_DE_CONSOLA.len() => format!("  ({donde})"),
-        _ => String::new(),
+        Some(donde) if cuantas == NOMBRE_DE_CONSOLA.len() => Some(donde),
+        _ => None,
     }
+}
+
+/// La pista de sitio tal y como la lleva la cabecera: entre paréntesis y con su sangría, o nada.
+fn donde_cae(cuantas: usize, cual: usize) -> String {
+    lado(cuantas, cual).map_or_else(String::new, |donde| format!("  ({donde})"))
 }
 
 /// Cómo se llama esta máquina, o «desconocida» si no hay forma de saberlo.
