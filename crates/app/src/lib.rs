@@ -145,6 +145,161 @@ struct DelRaton {
     cambio_el_arbol: bool,
 }
 
+/// Los gestos de arrastre que la tanda de medida se hace a sí misma. Ver [`VARIABLE_DE_LOS_ARRASTRES`].
+///
+/// **Alterna el lado por el que suelta, y la razón NO es la geometría** — eso se comprobó mutándolo. Con
+/// dos consolas del mismo peso, soltar siempre por el mismo lado deja **exactamente los mismos dos
+/// rectángulos**: quitar una de dos colapsa la rama en la que queda y volver a insertarla reparte a medias
+/// otra vez. Lo que alternar consigue es que el gesto **no repita siempre el mismo movimiento**, que es lo
+/// que hace un gesto de verdad.
+///
+/// **Y ojo con lo que alternar NO consigue, que es lo que este comentario afirmaba antes de la revisión.**
+/// El gesto agarra **por sitio** —el hueco cero y el hueco uno— y no por nombre, y de ahí sale algo que no
+/// se ve leyendo el código: **la mitad de los gestos acaban soltando la consola sobre sí misma y se
+/// descartan**. Sondeado con la instrumentación puesta en el camino del soltado, no razonado:
+///
+/// | Gesto | Consola que arrastra | Su hueco | Puntero al soltar | Destino |
+/// |---|---|---|---|---|
+/// | impar | la del hueco 0 | 0 | dentro del hueco 1 | válido → reordena |
+/// | par | **la misma de antes**, que ahora está en el hueco 1 | 1 | dentro del hueco 1 | **ella misma → se descarta** |
+///
+/// Y se ve en el informe de cualquier tanda: **1.750 gestos inyectados, 875 reordenaron**, exactamente la
+/// mitad. Soltar una consola sobre sí misma es un caso legítimo del gesto —está probado aparte— así que la
+/// tanda mide una mezcla de los dos, y por eso el informe publica **los dos números**: sin el de las
+/// reordenaciones, una tanda donde ninguna cuajara se leería igual que ésta.
+///
+/// **Lo que sí decide la geometría es cuántas consolas hay**, y por eso la tanda con arrastres es de dos:
+/// con más, insertar parte el peso del destino y quitar lo reparte entre las que quedan, así que el peso se
+/// concentra gesto a gesto. Atado por
+/// `el_ciclo_de_dos_gestos_vuelve_a_la_forma_de_partida_solo_con_dos_consolas`.
+struct ArrastresInyectados {
+    /// Los que la tanda pidió, para poder declararlos junto a los que se hicieron.
+    pedidos: usize,
+    /// En qué fotograma del gesto en curso va: 0 aprieta, los siguientes arrastran, el último suelta.
+    paso: usize,
+    /// Gestos **inyectados enteros**: los que llegaron a mandar su evento de soltar. **Cuántos quedan se
+    /// deriva de aquí** en vez de llevar su propia cuenta: la revisión pilló que un campo `quedan` valía
+    /// siempre `pedidos − hechos` —las dos escrituras estaban pegadas— y dos fuentes del mismo dato son una
+    /// invariante que alguien romperá.
+    hechos: usize,
+    /// Soltados que el árbol **aceptó**, o sea los que de verdad reordenaron la disposición.
+    ///
+    /// **No es lo mismo que los inyectados, y confundirlos deja pasar una tanda vacía.** Mandar el evento de
+    /// soltar no significa que la disposición cambie: el suelo geométrico rechaza el soltado cuando la
+    /// consola de destino no puede darle su mínimo a las dos, y entonces `soltar_una_division` devuelve
+    /// `false`, lo dice por la salida de errores y **el árbol no se toca**. Con una ventana estrecha
+    /// —`TAMANO=500x400`, por ejemplo— eso pasa en **todos** los soltados de la tanda: la corrida no lleva
+    /// ni una reordenación dentro, y contando solo los inyectados el informe declararía «1.720 hechos» y el
+    /// guion la daría por buena. El anexo publicaría entonces que el gesto no cuesta nada, que es
+    /// exactamente el número mal etiquetado que la regla dura del proyecto persigue.
+    ///
+    /// **Un soltado que deja el orden como estaba también cuenta**, y es lo correcto: el árbol se
+    /// reconstruye igual —quitar, insertar y rehacer el reparto— y ese es el trabajo que la tanda mide. Lo
+    /// que no cuenta es el que **no ocurre**.
+    reordenaciones: usize,
+    /// Si el gesto en curso suelta por la derecha del destino o por su izquierda.
+    por_la_derecha: bool,
+    /// El último fotograma en el que se avanzó, y **nada** mientras no se haya avanzado en ninguno.
+    ///
+    /// **egui puede repetir la pasada sobre la misma entrada**, y el enganche de la entrada cruda corre
+    /// una vez por pasada. Sin esta cuenta, una pasada repetida mandaría dos veces el «botón apretado»
+    /// del mismo gesto, y el arrastre que egui sostiene entre fotogramas se quedaría a mitad.
+    ultimo_fotograma: Option<u64>,
+}
+
+impl ArrastresInyectados {
+    /// Cuántos pidió la tanda, y nada si no pidió ninguno.
+    fn nuevos(cuantos: usize) -> Option<Self> {
+        (cuantos > 0).then_some(Self {
+            pedidos: cuantos,
+            paso: 0,
+            hechos: 0,
+            reordenaciones: 0,
+            por_la_derecha: true,
+            ultimo_fotograma: None,
+        })
+    }
+
+    /// Apunta que un soltado reordenó la disposición de verdad. Ver [`Self::reordenaciones`].
+    fn una_reordenacion_mas(&mut self) {
+        self.reordenaciones += 1;
+    }
+
+    /// Los eventos que le tocan a este fotograma, y avanza el gesto.
+    ///
+    /// **Hacen falta al menos dos consolas**: con una no hay a dónde soltar, y el gesto no se inventa un
+    /// destino. Se devuelve la lista vacía en vez de saltarse el paso para que una tanda mal pedida
+    /// —arrastres con una sola división— declare **cero gestos hechos** y el guion la pueda invalidar,
+    /// en vez de publicar unos tramos que nadie sabría que no llevan ningún arrastre dentro.
+    fn eventos(&mut self, rectangulos: &[egui::Rect], fotograma: u64) -> Vec<egui::Event> {
+        if self.hechos == self.pedidos || self.ultimo_fotograma == Some(fotograma) {
+            return Vec::new();
+        }
+        let (Some(origen), Some(destino)) = (rectangulos.first(), rectangulos.get(1)) else {
+            return Vec::new();
+        };
+        self.ultimo_fotograma = Some(fotograma);
+
+        // **Cerca del borde y a media altura, para que el lado que elige el gesto sea el horizontal.** La
+        // elección compara la distancia a cada borde **en proporción al lado que le toca**, así que un
+        // punto a media altura tiene los bordes de arriba y abajo a media pantalla de distancia
+        // proporcional y los de los lados a una décima: sale izquierda o derecha, nunca arriba ni abajo.
+        let cerca_del_borde = if self.por_la_derecha {
+            egui::pos2(destino.right() - destino.width() * 0.1, destino.center().y)
+        } else {
+            egui::pos2(destino.left() + destino.width() * 0.1, destino.center().y)
+        };
+
+        let paso = self.paso;
+        self.paso += 1;
+        if paso == 0 {
+            return vec![
+                egui::Event::PointerMoved(origen.center()),
+                egui::Event::PointerButton {
+                    pos: origen.center(),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+        }
+        if paso < FOTOGRAMAS_ARRASTRANDO {
+            // **Los movimientos de enmedio se quedan DENTRO del origen, y no a medio camino.** Medir un
+            // arrastre son dos estados y no uno: en vuelo **sin** destino válido —encima de la consola que
+            // se arrastra, donde no hay velo que pintar— y encima de otra, donde sí. A medio camino entre
+            // dos consolas contiguas el punto ya cae dentro de la de al lado, así que el estado sin velo no
+            // se mediría nunca. El 90 % del ancho deja el punto dentro y lo bastante lejos del centro para
+            // pasar el umbral con el que egui da un arrastre por empezado.
+            //
+            // **Todos los pasos de enmedio van al mismo punto, sin interpolar.** La primera versión los
+            // repartía por el camino, y eso obligaba a dos guardas —un `max(1)` contra una división por
+            // cero y un `min(1.0)` de recorte— para un caso que **no puede darse**: los fotogramas de
+            // arrastre son una constante de este fichero. La auditoría de sobreingeniería las tiró, y el
+            // punto quieto sigue siendo un arrastre: lo que egui necesita es que el puntero se haya movido
+            // desde donde se apretó, no que se mueva en cada fotograma.
+            return vec![egui::Event::PointerMoved(egui::pos2(
+                origen.left() + origen.width() * 0.9,
+                origen.center().y,
+            ))];
+        }
+        if paso == FOTOGRAMAS_ARRASTRANDO {
+            // Y el último movimiento ya cae en la mitad del destino por la que va a entrar: es el fotograma
+            // que pinta el velo, y el que deja el puntero donde el soltado del paso siguiente lo espera.
+            return vec![egui::Event::PointerMoved(cerca_del_borde)];
+        }
+
+        self.paso = 0;
+        self.hechos += 1;
+        self.por_la_derecha = !self.por_la_derecha;
+        vec![egui::Event::PointerButton {
+            pos: cerca_del_borde,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+}
+
 /// Con qué reparto abre la ventana: las dos consolas iguales.
 const FRACCION_INICIAL: f32 = 0.5;
 
@@ -196,6 +351,37 @@ const VARIABLE_DEL_TAMAÑO: &str = "MEDIR_TAMANO";
 /// pida una disposición que no cabe en su ventana verá consolas de una columna, igual que hoy con una
 /// ventana diminuta.
 const VARIABLE_DE_LAS_DIVISIONES: &str = "MEDIR_DIVISIONES";
+
+/// La variable de entorno que dice **cuántos gestos de arrastre** inyectarse durante la tanda.
+///
+/// **Existe porque un arrastre no se produce solo, y sin él la declaración del coste del gesto vale
+/// cero.** El criterio que este hito tiene que cerrar dice que *cuando ha habido arrastres durante la
+/// tanda* su coste esté declarado y fuera de «el resto del fotograma». Las tandas corren **sin nadie
+/// delante** —las consolas lanzan su carga solas y la ventana se cierra sola—, así que sin esta puerta el
+/// informe publicaría un cero y nadie sabría distinguirlo de «no cuesta nada»: exactamente el disfraz de
+/// «declarar cero» que este proyecto ya tiene fichado.
+///
+/// **Los eventos entran por donde entran los del ratón de verdad** ([`eframe::App::raw_input_hook`], que
+/// corre justo antes de que egui procese el lote), y no llamando al efecto del gesto a mano. Es lo único
+/// que mide el camino real: el `interact` por consola, el velo del destino y el reparto que se rehace al
+/// soltar. Llamar a la operación del árbol directamente mediría una función, y el anexo compara
+/// **fotogramas**.
+///
+/// Se escribe sin eñe por lo mismo que sus tres hermanas: es lo que un guion de shell puede teclear sin
+/// sorpresas de codificación.
+const VARIABLE_DE_LOS_ARRASTRES: &str = "MEDIR_ARRASTRES";
+
+/// Cuántos fotogramas dura el tramo de arrastre de un gesto inyectado, entre apretar y soltar.
+///
+/// **Dos y no uno, y la razón NO es que con uno no fuera un arrastre** — eso decía este comentario antes de
+/// la revisión y era falso. Con uno, el único movimiento salta directo al borde del destino: son cientos de
+/// puntos desde donde se apretó, muy por encima del umbral con el que egui distingue un clic de un
+/// arrastre, así que el arrastre empieza y el velo se pinta igual.
+///
+/// **Lo que el segundo fotograma añade es el estado en vuelo SIN destino válido**: el puntero encima de la
+/// propia consola que se arrastra, donde no hay velo que pintar. Medir un arrastre son esos dos estados, y
+/// con uno solo la tanda no recorrería nunca el primero.
+const FOTOGRAMAS_ARRASTRANDO: usize = 2;
 
 /// En cuántos fotogramas se vuelve a pedir el tamaño antes de dejarlo. Ver [`TamañoPedido`].
 ///
@@ -760,6 +946,24 @@ fn tamaño_al_arrancar() -> Option<egui::Vec2> {
     tamaño_de_ventana(std::env::var(VARIABLE_DEL_TAMAÑO).ok().as_deref())
 }
 
+/// Cuántos gestos de arrastre inyectarse, a partir de lo que dijera la variable.
+///
+/// **Cero cuando no hay variable, y eso es lo que hace que esto no exista para quien usa la aplicación**:
+/// sin gestos pedidos no se inyecta ni un evento y el camino nuevo no llega a correr. Un valor que no se
+/// entiende se ignora igual que si no estuviera, como en [`cuantas_pestañas`] y [`tamaño_de_ventana`]:
+/// quien mide se entera al leer los arrastres que el informe declara.
+///
+/// **Recibe el valor y no lo lee**, por lo mismo que [`cuantas_pestañas`]: `std::env::set_var` tiene un
+/// contrato sobre todo el entorno y esta suite lo lee a mansalva desde varios hilos.
+fn cuantos_arrastres(valor: Option<&str>) -> usize {
+    valor.and_then(|valor| valor.parse().ok()).unwrap_or(0)
+}
+
+/// Lo que la variable de entorno dice, ya resuelto.
+fn arrastres_al_arrancar() -> usize {
+    cuantos_arrastres(std::env::var(VARIABLE_DE_LOS_ARRASTRES).ok().as_deref())
+}
+
 /// Aparta de arriba el sitio de la barra, y devuelve lo que le queda a las consolas.
 ///
 /// **Con una sola pestaña no hay barra, y eso no es una comodidad estética.** Es lo que deja la rejilla
@@ -823,6 +1027,7 @@ pub fn arrancar() -> eframe::Result {
     // comportamiento de siempre. Ver [`VARIABLE_DEL_TAMAÑO`].
     let disposicion = disposicion_al_arrancar();
     let pedido = tamaño_al_arrancar();
+    let arrastres = arrastres_al_arrancar();
     if let Some(tamaño) = pedido {
         opciones.viewport = opciones.viewport.with_inner_size(tamaño);
     }
@@ -831,12 +1036,10 @@ pub fn arrancar() -> eframe::Result {
         NOMBRE,
         opciones,
         Box::new(move |cc| {
-            Ok(Box::new(Ventana::con_pestañas(
-                &cc.egui_ctx,
-                cuantas,
-                disposicion,
-                pedido,
-            )?))
+            let mut ventana = Ventana::con_pestañas(&cc.egui_ctx, cuantas, disposicion, pedido)?;
+            // Solo una tanda de medida los pide, así que se ponen aquí y no en el constructor.
+            ventana.arrastres = ArrastresInyectados::nuevos(arrastres);
+            Ok(Box::new(ventana))
         }),
     )
 }
@@ -2129,6 +2332,27 @@ struct Ventana {
     /// se **reste**, y una serie más para un suceso que pasa cuando el usuario pulsa un atajo diría muy
     /// poco y habría que explicarla entera.
     cronometrado_aparte: std::time::Duration,
+    /// Los gestos de arrastre que la tanda de medida se hace a sí misma, si pidió alguno.
+    ///
+    /// **Nada cuando nadie los pide**, que es siempre salvo en una tanda: así el camino no llega a correr
+    /// para quien usa la aplicación. Ver [`VARIABLE_DE_LOS_ARRASTRES`].
+    arrastres: Option<ArrastresInyectados>,
+    /// Lo que gastó el enganche de la entrada cruda inyectando el gesto, esperando a declararse.
+    ///
+    /// **Existe por el ORDEN y no por comodidad.** Ese enganche corre justo antes de que el fotograma
+    /// cierre el anterior, así que sumarlo directo a [`Ventana::cronometrado_aparte`] se lo llevaría el
+    /// vaciado del fotograma **que se está cerrando** — uno cuyo coste de CPU no lo incluye, porque el
+    /// trabajo ocurrió después de que terminara. El resto de aquel saldría corto y el de éste, inflado.
+    /// Se aparca aquí y se declara al fotograma que empieza, que es el que lo pagó.
+    gastado_inyectando: std::time::Duration,
+    /// Los rectángulos con los que se pintó el último fotograma.
+    ///
+    /// **Existe para el gesto inyectado y nada más**, y por eso guarda lo ya calculado en vez de volver a
+    /// repartir: el enganche de la entrada cruda corre **antes** de la pasada de interfaz, así que en ese
+    /// momento el reparto de este fotograma todavía no existe. Repartir por su cuenta sería una segunda
+    /// copia del cálculo que decide dónde está cada consola, y las dos podrían discrepar justamente en la
+    /// tanda que mide.
+    ultimos_rectangulos: Vec<egui::Rect>,
     /// El nombre que llevará la próxima pestaña que se abra. Ver [`Pestaña::nombre`].
     ///
     /// Vive en la ventana y no se deduce de la lista **porque la lista se queda corta en cuanto se cierra
@@ -2240,6 +2464,13 @@ impl Ventana {
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
+            // **Nada de entrada, y lo pone quien mide.** Era un parámetro más de este constructor, y la
+            // revisión lo tiró con un argumento que las propias pruebas ya demostraban: nadie salvo una
+            // tanda lo pone, y a cambio la firma acababa en dos `Option` seguidos que se rellenaban con dos
+            // `None` pelados en más de treinta llamadas — dos huecos que no dicen cuál es cuál.
+            arrastres: None,
+            gastado_inyectando: std::time::Duration::ZERO,
+            ultimos_rectangulos: Vec::new(),
             // **Del largo de la lista y no del parámetro `cuantas`, aunque aquí valgan lo mismo.** Son
             // dos fuentes para el mismo dato, y con dos se puede coger la que no toca: poner un cero o
             // el parámetro equivocado hace que la siguiente pestaña que se abra **se llame igual que
@@ -2434,6 +2665,10 @@ impl Ventana {
             },
             &rejillas,
             self.activa().nombre,
+            self.arrastres.as_ref().map(|arrastres| medida::Arrastres {
+                inyectados: arrastres.hechos,
+                reordenaron: arrastres.reordenaciones,
+            }),
         )?;
 
         // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo
@@ -2662,6 +2897,11 @@ impl Ventana {
         // instrumento persigue. Ver [`Ventana::cronometrado_aparte`] por qué existe.
         let aparte = std::mem::take(&mut self.cronometrado_aparte);
 
+        // **Y lo del enganche de la entrada cruda se declara aquí, DESPUÉS de vaciar.** Ver
+        // [`Ventana::gastado_inyectando`]: corrió después de que el fotograma que se cierra terminara, así
+        // que es del que empieza. Sumarlo arriba lo restaría del que no lo pagó.
+        self.cronometrado_aparte += std::mem::take(&mut self.gastado_inyectando);
+
         // Sin tramos de nadie no hay resto que anotar: el fotograma entero se contaría como resto y la
         // serie acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
         if let Some(cronometrado) = cronometrado {
@@ -2881,6 +3121,27 @@ impl Ventana {
         let arbol = std::mem::replace(&mut self.activa_mut().raiz, hueco);
         let (arbol, movio) = arbol.mover(quien, destino, lado);
         self.activa_mut().raiz = arbol;
+
+        // **La reordenación se apunta aquí, que es donde se sabe que ocurrió**, y no en quien pinta. Lo que
+        // el informe de una tanda tiene que declarar no es cuántos gestos se inyectaron sino cuántos
+        // **cambiaron la disposición**: mandar el evento de soltar no significa que el árbol lo acepte, y una
+        // tanda donde ninguno cuaje mediría el gesto tanto como una sin gestos. Ver
+        // [`ArrastresInyectados::reordenaciones`].
+        //
+        // Y vive en esta función y no en el pintado por lo que este proyecto tiene fichado sobre las pruebas:
+        // atándolo donde el pintado se enteraba, la única prueba posible llamaba al contador a mano y no
+        // habría cazado que producción dejara de llamarlo.
+        //
+        // **El `movio` de aquí no tiene hoy ningún escenario que lo dispare, y se queda a propósito.**
+        // Comprobado mutándolo: quitarlo deja la suite en verde, porque los dos rechazos salen antes de esta
+        // línea —el del suelo geométrico con su propio `return` unas líneas arriba, y el de soltar sobre sí
+        // misma filtrado por quien atiende el ratón—, así que todo lo que llega aquí ha movido. Lo que
+        // protege no es un escenario: es **el número que el anexo publica**, y publicar de más es exactamente
+        // el defecto que esta cuenta viene a corregir. Es el mismo trato que el proyecto ya aceptó para
+        // recoger la consola si insertar fallara.
+        if movio && let Some(arrastres) = self.arrastres.as_mut() {
+            arrastres.una_reordenacion_mas();
+        }
         movio
     }
 
@@ -3502,6 +3763,43 @@ impl Ventana {
 }
 
 impl eframe::App for Ventana {
+    /// Inyecta el gesto de arrastre de una tanda de medida, si la tanda pidió alguno.
+    ///
+    /// **Aquí y no llamando al efecto del gesto a mano**: eframe llama a esto justo antes de que egui
+    /// procese el lote de entrada (`eframe-0.36/src/native/epi_integration.rs:362`, dentro de
+    /// `prepare_raw_input`), así que los eventos que se dejen aquí recorren **el mismo camino** que los
+    /// del ratón de verdad — el `interact` de cada consola, el arrastre que egui sostiene entre
+    /// fotogramas, el velo del destino y el reparto que se rehace al soltar. Llamar a la operación del
+    /// árbol directamente mediría una función, y el anexo compara fotogramas.
+    ///
+    /// **Sin arrastres pedidos no hace absolutamente nada**, ni siquiera mira el reloj: es el camino de
+    /// quien usa la aplicación.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        let Some(arrastres) = self.arrastres.as_mut() else {
+            return;
+        };
+
+        let empezo = Instant::now();
+        // **El fotograma y no la pasada**, que es la trampa que este proyecto ya tiene pagada: egui puede
+        // repetir la pasada sobre la misma entrada, y con el número de pasada el gesto avanzaría dos veces
+        // en el mismo fotograma.
+        let eventos = arrastres.eventos(&self.ultimos_rectangulos, ctx.cumulative_frame_nr());
+        raw_input.events.extend(eventos);
+
+        // **Y NO se piden fotogramas, aunque queden gestos. Eso lo intentó la primera versión y falseaba
+        // la tanda entera.** Pedir repintado en cada fotograma pone la ventana a girar a tope, y entonces
+        // la tanda con arrastres deja de ser «la tanda de comparación más el gesto» para ser otro régimen:
+        // medido el 18 de agosto de 2026, dos corridas dieron **2.219 y 7.008 fotogramas** frente a los
+        // **413** de la tanda C con la que se compara, y el coste medio del resto del fotograma **bajaba**
+        // —163 µs y 103 µs contra 280 µs— simplemente porque se diluía entre miles de fotogramas sin
+        // trabajo de consola dentro. Dos corridas de la misma tanda tampoco se parecían entre sí.
+        //
+        // El gesto avanza en los fotogramas que la tanda ya produce por su cuenta: durante un volcado hay
+        // de sobra. Si la ventana se durmiera a mitad de un gesto, lo único que pasa es que ese gesto tarda
+        // más — el arrastre lo sostiene egui, no esta función.
+        self.gastado_inyectando += empezo.elapsed();
+    }
+
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // **El cronómetro de la ida arranca aquí y no en la pasada de interfaz**, porque `logic`
         // corre antes dentro del mismo fotograma y lo que hace —tragar y meter en la rejilla— llega
@@ -3735,6 +4033,19 @@ impl eframe::App for Ventana {
         // sale de recorrer esta misma lista en este mismo fotograma.
         if let Some((destino, lado)) = destino_del_arrastre {
             self.pintar_el_arrastre(ui, rectangulos[destino], lado);
+        }
+
+        // **Los rectángulos con los que se acaba de pintar, para el gesto que una tanda se inyecta.** Se
+        // guardan aquí y no antes del pintado porque son los definitivos: si alguien soltó en este mismo
+        // fotograma, el reparto se rehizo y los de arriba ya no valen.
+        //
+        // **Se MUEVEN, no se copian, y eso lo pidió la revisión.** La primera versión copiaba la lista con
+        // `extend_from_slice` y no cronometraba la copia por ser pequeña — que es justo la fuga que la regla
+        // dura del proyecto describe: lo que no se declara se publica como coste del framework, la cifra con
+        // la que D3 juzga a egui, y encima en la única tanda que recorre este camino. Moviendo el vector no
+        // hay nada que declarar, porque no queda trabajo que hacer.
+        if self.arrastres.is_some() {
+            self.ultimos_rectangulos = rectangulos;
         }
 
         // Las que no se pintan no tienen otro sitio donde enterarse de su tamaño: ésta es la única
@@ -4103,6 +4414,11 @@ mod tests {
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
+            // Una ventana de prueba no inyecta gestos: los suyos los manda la prueba por el `Ui` de
+            // pruebas, que es la única forma de comprobar el gesto sin abrir ventana.
+            arrastres: None,
+            gastado_inyectando: std::time::Duration::ZERO,
+            ultimos_rectangulos: Vec::new(),
             siguiente_nombre,
             siguiente_nombre_de_division,
             cerrada_alguna_a_mano: false,
@@ -7225,6 +7541,23 @@ mod tests {
     }
 
     #[test]
+    fn los_arrastres_que_no_se_piden_no_existen() {
+        // **El cero es el caso de quien usa la aplicación**, y de él depende que el camino no llegue a
+        // correr: sin gestos pedidos no hay ni un evento inyectado ni un reloj que mirar.
+        assert_eq!(cuantos_arrastres(None), 0, "sin variable se pidió alguno");
+        assert_eq!(
+            cuantos_arrastres(Some("veinte")),
+            0,
+            "un valor sin número no se ignoró"
+        );
+        assert_eq!(cuantos_arrastres(Some("20")), 20, "no se leyó el número");
+        assert!(
+            ArrastresInyectados::nuevos(0).is_none(),
+            "con cero pedidos se montó la máquina del gesto igualmente"
+        );
+    }
+
+    #[test]
     fn la_variable_que_se_lee_es_la_del_guion_de_medida() {
         // El nombre **es** el contrato con `scripts/medir-fotograma.sh`, que ya exporta `MEDIR_MIB` y
         // `MEDIR_TANDA`. Cambiarlo aquí dejaría la puerta cerrada sin que nada se pusiera rojo: el guion
@@ -7232,6 +7565,7 @@ mod tests {
         assert_eq!(VARIABLE_DE_LAS_PESTAÑAS, "MEDIR_PESTANAS");
         assert_eq!(VARIABLE_DEL_TAMAÑO, "MEDIR_TAMANO");
         assert_eq!(VARIABLE_DE_LAS_DIVISIONES, "MEDIR_DIVISIONES");
+        assert_eq!(VARIABLE_DE_LOS_ARRASTRES, "MEDIR_ARRASTRES");
     }
 
     #[test]
@@ -8275,6 +8609,62 @@ mod tests {
     }
 
     #[test]
+    fn una_tanda_solo_cuenta_los_soltados_que_el_arbol_acepta() {
+        // **La prueba que le faltaba al hallazgo más grave de la revisión.** El informe de una tanda declara
+        // cuántos gestos reordenaron la disposición, y ese número es lo único que distingue una tanda que
+        // midió el gesto de una donde **todos** los soltados se rechazaron —cosa que pasa en cuanto la
+        // ventana es estrecha, porque el suelo geométrico no puede darle su mínimo a las dos—. Sin esa
+        // distinción, una corrida vacía se publica como «el gesto no cuesta nada».
+        //
+        // **Y entra por el camino real, no por el contador.** La cuenta vive en `soltar_una_division`
+        // justamente para que esta prueba pueda existir: atada donde el pintado se enteraba, lo único que se
+        // podía hacer era llamar al contador a mano, y eso no caza que producción deje de llamarlo — el
+        // disfraz que este proyecto tiene fichado como «una prueba que ata al ayudante no ata el camino».
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.arrastres = ArrastresInyectados::nuevos(5);
+        let [izquierda, derecha] = dos_consolas_anchas();
+        let ctx = egui::Context::default();
+
+        // Uno que se acepta: de la izquierda al borde derecho de la de al lado.
+        arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &[izquierda, derecha],
+            izquierda.center(),
+            egui::pos2(derecha.right() - derecha.width() * 0.1, derecha.center().y),
+        );
+        assert_eq!(
+            ventana
+                .arrastres
+                .as_ref()
+                .expect("los acabo de poner")
+                .reordenaciones,
+            1,
+            "un soltado que el árbol aceptó no se contó como reordenación"
+        );
+
+        // **Y uno que se rechaza por el suelo geométrico**, que es el caso que de verdad importa: es el que
+        // ocurre en **todos** los soltados de una tanda con la ventana estrecha. Se entra por
+        // `soltar_una_division` a propósito y no por el gesto entero, porque el otro rechazo —soltar sobre
+        // sí misma— se filtra antes de llegar aquí y con él la prueba no distinguiría nada: comprobado
+        // mutándolo, contar también los rechazados dejaba esta prueba en verde.
+        let estrecho = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 300.0));
+        con_metrica(|metrica| {
+            ventana.soltar_una_division(1, 0, Lado::Derecha, estrecho, metrica);
+        });
+        assert_eq!(
+            ventana
+                .arrastres
+                .as_ref()
+                .expect("siguen puestos")
+                .reordenaciones,
+            1,
+            "un soltado que el suelo geométrico rechazó se contó igual, así que el informe no distingue una \
+             tanda que midió el gesto de una donde ninguno cuajó"
+        );
+    }
+
+    #[test]
     fn agarrar_una_consola_le_da_el_foco_aunque_el_gesto_no_llegue_a_ser_un_clic() {
         // **La mitad que se olvida.** El foco se daba con `clicked()`, y cuando el puntero se mueve lo
         // bastante egui decide que es un arrastre y el clic **no llega a existir**: sin mirar también el
@@ -8843,6 +9233,71 @@ mod tests {
     }
 
     #[test]
+    fn la_consola_que_se_arrastra_se_sigue_pintando_y_cierra_su_vuelta_de_medida() {
+        // **AC12**, y era el único criterio de esta entrega que no tenía prueba: hasta ahora estaba
+        // «verificado por lectura», que en este proyecto no cuenta.
+        //
+        // Lo que hay que atar es que una división **con el arrastre en vuelo** no se salte el pintado. Si se
+        // lo saltara, su vuelta de medida no se cerraría por el camino normal —la recogería la red de
+        // seguridad de después, con el tramo de encolado en cero— y el informe publicaría ese trabajo como
+        // coste del framework. Es exactamente el defecto que ya ocurrió con las pestañas de fondo.
+        //
+        // **Se afirma sobre `medido`, que es la rejilla que el pintado le anota a cada consola** y lo que el
+        // bombeo le anuncia a su programa. Para que la afirmación distinga algo, el área **cambia** entre las
+        // dos pasadas: si la consola arrastrada se pintara, su rejilla pasa a ser la del área nueva; si no,
+        // se queda con la de antes. Con un área fija, una consola que no se pinte da el mismo número y la
+        // prueba no probaría nada.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+        let estrecha = area_de(900.0);
+        let ancha = area_de(1400.0);
+
+        pasada_de_interfaz(&mut ventana, &ctx, estrecha, egui::RawInput::default());
+        let partes = con_metrica(|metrica| {
+            ventana
+                .activa()
+                .raiz
+                .colocar(estrecha, metrica.ancho())
+                .partes
+        });
+        let antes: Vec<u16> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.medido.cols)
+            .collect();
+
+        // El arrastre queda **en vuelo**: se pulsa y se mueve, y no se suelta. La consola de la izquierda es
+        // la que lo tiene, y la pasada siguiente ocurre con el botón todavía apretado.
+        pasada_de_interfaz(&mut ventana, &ctx, estrecha, pulsar(partes[0].center()));
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            ancha,
+            mover(egui::pos2(partes[1].center().x, partes[1].center().y)),
+        );
+
+        let despues: Vec<u16> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.medido.cols)
+            .collect();
+
+        assert_ne!(
+            antes, despues,
+            "ninguna de las dos consolas se enteró de que la ventana se ensanchó, así que la pasada con el \
+             arrastre en vuelo no pintó nada y esta prueba no distingue nada"
+        );
+        assert!(
+            despues.iter().all(|&cols| !antes.contains(&cols)),
+            "alguna consola se quedó con la rejilla de la ventana estrecha teniendo el arrastre en vuelo: no \
+             se pintó, así que su vuelta de medida la recoge la red de seguridad con el encolado en cero y \
+             ese trabajo se publica como coste del framework. antes={antes:?} después={despues:?}"
+        );
+    }
+
+    #[test]
     fn no_se_señala_un_destino_donde_soltar_se_va_a_rechazar() {
         // **El velo es una promesa.** Si se pinta sobre una consola que luego no puede recibir a nadie
         // —porque las dos no caben con su suelo de columnas—, el usuario ve la mitad marcada, suelta, y no
@@ -9095,6 +9550,338 @@ mod tests {
                  veces la 8 y ahora ocupa {ahora}"
             );
         }
+    }
+
+    /// Dos consolas lado a lado en una ventana de mil doscientos por seiscientos.
+    fn dos_al_lado() -> Vec<egui::Rect> {
+        vec![
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 600.0)),
+            egui::Rect::from_min_size(egui::pos2(600.0, 0.0), egui::vec2(600.0, 600.0)),
+        ]
+    }
+
+    /// Los eventos de un gesto entero, fotograma a fotograma, con un número de fotograma distinto cada vez.
+    fn un_gesto(arrastres: &mut ArrastresInyectados, desde: u64) -> Vec<Vec<egui::Event>> {
+        (0..=FOTOGRAMAS_ARRASTRANDO + 1)
+            .map(|paso| arrastres.eventos(&dos_al_lado(), desde + paso as u64))
+            .collect()
+    }
+
+    #[test]
+    fn el_gesto_inyectado_aprieta_arrastra_y_suelta_en_ese_orden() {
+        // **Lo que se ata es que sea un ARRASTRE y no un clic.** egui da el arrastre por empezado cuando
+        // el puntero se mueve por encima de un umbral **después** de apretar, y el velo del destino solo
+        // se pinta mientras está en vuelo: un gesto que apretara y soltara en el sitio mediría un clic y
+        // el trabajo que este hito añade no se ejercería nunca.
+        let mut arrastres = ArrastresInyectados::nuevos(1).expect("uno es más que ninguno");
+        let fotogramas = un_gesto(&mut arrastres, 10);
+
+        assert!(
+            matches!(
+                fotogramas[0].as_slice(),
+                [
+                    egui::Event::PointerMoved(_),
+                    egui::Event::PointerButton { pressed: true, .. }
+                ]
+            ),
+            "el primer fotograma no coloca el puntero y aprieta: {:?}",
+            fotogramas[0]
+        );
+        for enmedio in &fotogramas[1..=FOTOGRAMAS_ARRASTRANDO] {
+            assert!(
+                matches!(enmedio.as_slice(), [egui::Event::PointerMoved(_)]),
+                "un fotograma de arrastre manda algo que no es mover el puntero: {enmedio:?}"
+            );
+        }
+        assert!(
+            matches!(
+                fotogramas[FOTOGRAMAS_ARRASTRANDO + 1].as_slice(),
+                [egui::Event::PointerButton { pressed: false, .. }]
+            ),
+            "el último fotograma no suelta: {:?}",
+            fotogramas[FOTOGRAMAS_ARRASTRANDO + 1]
+        );
+        assert_eq!(arrastres.hechos, 1, "el gesto no se contó como hecho");
+        assert_eq!(
+            arrastres.pedidos - arrastres.hechos,
+            0,
+            "quedó algún gesto pendiente"
+        );
+
+        // **Y el movimiento de enmedio todavía NO está encima del destino**, que es el estado sin velo que
+        // pintar. Sin esta comprobación, un gesto que salte del origen al destino en un fotograma pasaría
+        // las de arriba y mediría un fotograma menos de los que un arrastre tiene.
+        let donde_mueve = |cual: usize| -> egui::Pos2 {
+            match &fotogramas[cual][0] {
+                egui::Event::PointerMoved(donde) => *donde,
+                otro => panic!("el fotograma {cual} no mueve el puntero: {otro:?}"),
+            }
+        };
+        let (origen, destino) = (dos_al_lado()[0], dos_al_lado()[1]);
+        assert!(
+            origen.contains(donde_mueve(1)) && !destino.contains(donde_mueve(1)),
+            "el primer movimiento no se queda dentro del origen, así que el fotograma de arrastre SIN \
+             destino válido —el que no pinta velo— no se mide nunca"
+        );
+        assert!(
+            destino.contains(donde_mueve(FOTOGRAMAS_ARRASTRANDO)),
+            "el último movimiento no llega al destino, así que el velo no se pinta ni una vez"
+        );
+    }
+
+    #[test]
+    fn el_gesto_inyectado_alterna_el_lado_por_el_que_suelta() {
+        // **Sin alternar, cada gesto mediría una disposición distinta de la anterior**, y los tramos de una
+        // tanda de veinte no se podrían promediar — que es lo que el informe hace con ellos. Se comprueba
+        // sobre el punto de soltado, que es lo que decide el lado, y no sobre la bandera: afirmar sobre el
+        // campo donde se apunta un valor en vez de sobre su efecto es el disfraz que este proyecto tiene
+        // fichado.
+        let mut arrastres = ArrastresInyectados::nuevos(2).expect("dos son más que ninguno");
+        let destino = dos_al_lado()[1];
+
+        let primero = un_gesto(&mut arrastres, 100);
+        let segundo = un_gesto(&mut arrastres, 200);
+
+        let donde_suelta = |fotogramas: &[Vec<egui::Event>]| -> egui::Pos2 {
+            match &fotogramas[FOTOGRAMAS_ARRASTRANDO + 1][0] {
+                egui::Event::PointerButton { pos, .. } => *pos,
+                otro => panic!("el último fotograma no suelta: {otro:?}"),
+            }
+        };
+
+        assert_eq!(
+            lado_de(destino, donde_suelta(&primero)),
+            Lado::Derecha,
+            "el primer gesto no suelta por la derecha"
+        );
+        assert_eq!(
+            lado_de(destino, donde_suelta(&segundo)),
+            Lado::Izquierda,
+            "el segundo gesto no suelta por la izquierda, así que la forma no vuelve a la de partida"
+        );
+    }
+
+    #[test]
+    fn el_gesto_inyectado_no_avanza_dos_veces_en_el_mismo_fotograma() {
+        // **La trampa que este proyecto ya tiene pagada:** egui puede repetir la pasada sobre la misma
+        // entrada, y el enganche de la entrada cruda corre una vez por pasada. Sin la cuenta del fotograma,
+        // una pasada repetida mandaría dos veces el «botón apretado» del mismo gesto y el arrastre que egui
+        // sostiene entre fotogramas se quedaría a mitad.
+        let mut arrastres = ArrastresInyectados::nuevos(1).expect("uno es más que ninguno");
+
+        let primera = arrastres.eventos(&dos_al_lado(), 7);
+        let repetida = arrastres.eventos(&dos_al_lado(), 7);
+        let siguiente = arrastres.eventos(&dos_al_lado(), 8);
+
+        assert!(!primera.is_empty(), "la primera pasada no mandó nada");
+        assert!(
+            repetida.is_empty(),
+            "la pasada repetida del mismo fotograma volvió a mandar: {repetida:?}"
+        );
+        assert!(
+            matches!(siguiente.as_slice(), [egui::Event::PointerMoved(_)]),
+            "el fotograma siguiente no continuó el gesto por donde iba: {siguiente:?}"
+        );
+    }
+
+    #[test]
+    fn sin_dos_consolas_el_gesto_inyectado_no_declara_ninguno_hecho() {
+        // **Una tanda mal pedida tiene que quedar en evidencia, no publicar tramos sin arrastre dentro.**
+        // Con una sola consola no hay a dónde soltar, y el gesto no se inventa un destino: se queda a cero
+        // hechos, que es lo que el guion lee para invalidar la corrida.
+        let mut arrastres = ArrastresInyectados::nuevos(3).expect("tres son más que ninguno");
+        let una_sola = vec![egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(600.0, 600.0),
+        )];
+
+        for fotograma in 0..20 {
+            assert!(
+                arrastres.eventos(&una_sola, fotograma).is_empty(),
+                "con una sola consola se mandó algún evento"
+            );
+        }
+
+        assert_eq!(arrastres.hechos, 0, "declaró gestos hechos sin destino");
+
+        // **Y que los gestos no se hayan GASTADO**, que es lo que la comprobación de arriba no puede decir:
+        // con dos consolas por fin delante, el gesto tiene que salir entero. La versión anterior afirmaba
+        // `pedidos − hechos == 3`, y la revisión pilló que eso no puede fallar por su cuenta —`pedidos` es 3
+        // por construcción y el aserto de arriba ya fija `hechos` en 0—, así que no cubría nada.
+        for fotograma in 100..(100 + FOTOGRAMAS_ARRASTRANDO as u64 + 2) {
+            arrastres.eventos(&dos_al_lado(), fotograma);
+        }
+        assert_eq!(
+            arrastres.hechos, 1,
+            "tras aparecer la segunda consola el gesto no salió, así que los intentos sin destino se \
+             habían comido los gestos pedidos"
+        );
+    }
+    #[test]
+    fn el_ciclo_de_dos_gestos_vuelve_a_la_forma_de_partida_solo_con_dos_consolas() {
+        // **Esto es lo que decide que la tanda de medida con arrastres sea de DOS divisiones**, y se
+        // sondeó antes de escribir el guion en vez de razonarlo. La tanda promedia los tramos de cientos
+        // de fotogramas, así que el gesto que se inyecta tiene que dejar la disposición **como estaba**: si
+        // cada gesto la cambia, cada fotograma mide una ventana distinta y la media no describe ninguna.
+        //
+        // **Con dos vuelve exactamente**, porque las dos se reparten a la mitad y cambiar de sitio a la
+        // primera con la segunda deja los mismos dos anchos. **Con más no vuelve, y no de poco**: insertar
+        // parte el peso de la consola de destino y quitar lo reparte entre las que quedan, así que el peso
+        // se va concentrando. Medido en un área de 1.200 puntos: con cuatro en fila, la primera pasa de
+        // 298,5 puntos a **119,4** tras un solo ciclo de ida y vuelta.
+        //
+        // **Ojo con lo que ata cada mitad, porque no es simétrico.** La segunda —que con cuatro se
+        // deforme— es la que decide que la tanda sea de dos, y cae al mutar el reparto del peso al
+        // insertar. La primera **se cumple por simetría y no por el lado elegido**: comprobado mutándola,
+        // soltar las dos veces por la derecha da los mismos dos rectángulos que ir y volver. Quien busque
+        // aquí la prueba de que el gesto alterna el lado, está en
+        // `el_gesto_inyectado_alterna_el_lado_por_el_que_suelta`, que afirma sobre el punto de soltado.
+        //
+        // No es un defecto del gesto: quien arrastra una consola pide **recolocar**, no conservar los
+        // tamaños. Es un límite de lo que se puede medir con él.
+        let en_fila = |cuantas: usize| Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: (0..cuantas)
+                .map(|n| Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", n)),
+                })
+                .collect(),
+        };
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 600.0));
+        // Un ciclo entero del gesto inyectado: la primera consola va a la derecha de la segunda y vuelve.
+        let ida_y_vuelta = |arbol: Nodo| -> Vec<egui::Rect> {
+            let (arbol, fue) = arbol.mover(0, 1, Lado::Derecha);
+            assert!(fue, "la ida no movió nada");
+            let (arbol, volvio) = arbol.mover(0, 1, Lado::Izquierda);
+            assert!(volvio, "la vuelta no movió nada");
+            arbol.colocar(area, 0.0).partes
+        };
+
+        let dos = en_fila(2);
+        let antes = dos.colocar(area, 0.0).partes;
+        assert_eq!(
+            ida_y_vuelta(dos),
+            antes,
+            "con dos consolas el ciclo no devuelve la disposición a la de partida, así que la tanda con \
+             arrastres estaría promediando fotogramas de ventanas distintas"
+        );
+
+        let cuatro = en_fila(4);
+        let antes = cuatro.colocar(area, 0.0).partes;
+        let despues = ida_y_vuelta(cuatro);
+        assert!(
+            despues[0].width() < antes[0].width() / 2.0,
+            "con cuatro consolas el ciclo ya no deforma el reparto: si esto deja de ser verdad, la tanda \
+             con arrastres puede dejar de estar limitada a dos divisiones"
+        );
+    }
+    #[test]
+    fn inyectar_el_gesto_declara_lo_que_gasta_en_el_fotograma_que_lo_paga() {
+        // **Dos cosas en una, y la segunda es la que cuesta ver.** La primera: el enganche que inyecta el
+        // gesto es trabajo dentro del fotograma, así que sin declararlo se publicaría como coste del
+        // framework — la cifra con la que D3 juzga a egui, y encima contaminada justo en la tanda que viene
+        // a medir el gesto.
+        //
+        // La segunda: **se declara al fotograma que EMPIEZA, no al que se cierra.** El enganche corre justo
+        // antes de que el fotograma cierre el anterior, así que sumarlo directo a `cronometrado_aparte` se
+        // lo llevaría el vaciado del cierre — restándoselo a un fotograma cuyo coste de CPU no lo incluye.
+        // Es lo que distingue esta prueba: con la suma puesta antes del vaciado, lo declarado acaba en cero.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
+        ventana.arrastres = ArrastresInyectados::nuevos(4);
+        ventana.ultimos_rectangulos = dos_al_lado();
+
+        let mut lote = egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut ventana, &ctx, &mut lote);
+
+        assert!(
+            !lote.events.is_empty(),
+            "el enganche no inyectó ningún evento, así que no mide el gesto"
+        );
+        assert!(
+            !ventana.gastado_inyectando.is_zero(),
+            "inyectar el gesto no declaró nada de lo que gastó"
+        );
+
+        // Y ahora el fotograma se cierra. Lo del enganche tiene que **sobrevivir** al vaciado.
+        ventana.cerrar_fotograma(std::time::Duration::from_millis(5));
+
+        assert!(
+            ventana.gastado_inyectando.is_zero(),
+            "lo del enganche se quedó sin traspasar, así que nunca se declara"
+        );
+        assert!(
+            !ventana.cronometrado_aparte.is_zero(),
+            "lo del enganche se declaró al fotograma que se cerraba en vez de al que empieza: el vaciado \
+             se lo llevó y ese trabajo acaba publicado como coste del framework"
+        );
+    }
+
+    #[test]
+    fn el_informe_declara_los_arrastres_inyectados_y_los_que_reordenaron() {
+        // **La línea es un contrato con `scripts/medir-fotograma.sh`**, que la lee para invalidar una tanda
+        // que pidió arrastres y no llegó a hacer ninguno. Los dos números hacen falta: con solo los hechos
+        // no se distingue una tanda sin arrastres de una que los pidió y no pudo.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
+        ventana.arrastres = ArrastresInyectados::nuevos(9);
+        // Tres gestos enteros y **dos** reordenaciones, a propósito distintos: si los dos números fueran
+        // iguales, esta prueba no distinguiría publicar uno de publicar el otro — que es el disfraz que este
+        // proyecto tiene fichado. Se avanza el gesto directamente porque el enganche ya tiene su prueba.
+        let arrastres = ventana.arrastres.as_mut().expect("los acabo de poner");
+        for fotograma in 0..(3 * (FOTOGRAMAS_ARRASTRANDO as u64 + 2)) {
+            arrastres.eventos(&dos_al_lado(), fotograma);
+        }
+        arrastres.una_reordenacion_mas();
+        arrastres.una_reordenacion_mas();
+        // Sin nada medido el informe no se publica, y entonces esto pasaría por no encontrar una línea en
+        // un texto vacío.
+        ventana.pestañas[0].divisiones_mut()[0]
+            .medida
+            .anotar_ida(std::time::Duration::from_micros(10));
+
+        let mut salida = Vec::new();
+        ventana
+            .publicar_informe(&mut salida)
+            .expect("escribir a memoria no falla");
+        let informe = String::from_utf8(salida).expect("el informe es texto");
+
+        assert!(
+            informe.contains("arrastres:    3 inyectados, 2 reordenaron"),
+            "el informe no declara los arrastres inyectados y los que reordenaron:\n{informe}"
+        );
+        assert!(
+            !informe.contains("pedidos"),
+            "el informe sigue publicando los gestos PEDIDOS, que es un número sin señal: el guion pide \
+             cien mil para que el gesto dure toda la tanda, así que la diferencia vale lo mismo en una \
+             corrida buena que en una rota\n{informe}"
+        );
+    }
+
+    #[test]
+    fn sin_arrastres_pedidos_el_informe_no_habla_de_ellos() {
+        // **Las tandas del anexo anteriores a este hito tienen que seguir teniendo la misma forma**, o dejan
+        // de ser comparables con las de ahora — y comparar tandas entre sí es para lo que existe el informe.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudo abrir la ventana");
+        ventana.pestañas[0].divisiones_mut()[0]
+            .medida
+            .anotar_ida(std::time::Duration::from_micros(10));
+
+        let mut salida = Vec::new();
+        ventana
+            .publicar_informe(&mut salida)
+            .expect("escribir a memoria no falla");
+        let informe = String::from_utf8(salida).expect("el informe es texto");
+
+        assert!(
+            !informe.contains("arrastres:"),
+            "el informe habla de arrastres sin que nadie los pidiera:\n{informe}"
+        );
     }
 
     #[test]

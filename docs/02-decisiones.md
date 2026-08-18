@@ -1228,3 +1228,140 @@ tanda I publicó una ventana de **1 279,8125×799,8125** puntos habiendo pedido 
 entrega el tamaño con fracción y **no siempre la misma**. La guarda del guion la tiró con una comparación exacta, y ahora
 lleva **medio punto de margen** —el mismo que la aplicación usa para no pelearse con el escritorio—,
 porque medio punto no mueve ni una celda de la rejilla y sin él la guarda descarta corridas idénticas.
+
+## D15 — Mover una división transforma el árbol por valor, y solo lo sustituye si la transformación llega al final
+
+**Qué se decidió.** Una división se **agarra con el ratón** y se **suelta a un lado de otra**; al soltar,
+la disposición se reordena para hacerle sitio. Cinco decisiones lo definen:
+
+1. **La operación se hace por valor y es atómica por construcción.** `Nodo::mover` recibe el árbol
+   entero, lo transforma y solo se sustituye el original **si la transformación llega al final**. No hay
+   ningún camino en el que una consola quede viva y fuera del árbol.
+2. **El destino es una de las cuatro mitades de otra división**, y cuál se elige por la distancia al borde
+   **en proporción al lado que le toca** —multiplicando en cruz, no dividiendo—. En puntos, una consola
+   ancha y baja solo se dejaría soltar por arriba y por abajo.
+3. **Antes de soltar se ve la mitad que la consola va a ocupar**, y no una franja fina al borde: es
+   literalmente el sitio que ocupará. Una franja se leería como el gesto de acoplar a la pantalla de los
+   gestores de ventanas, que aquí no existe.
+4. **El velo no promete lo que se va a rechazar.** El suelo geométrico —el mismo que ya usa partir— se
+   consulta **antes** de señalar un destino, así que donde soltar se vaya a negar no se marca nada.
+5. **Las divisiones se identifican por su nombre, y el identificador con el que egui sostiene el arrastre
+   también.** Las fronteras siguen por posición.
+
+**Por qué.**
+
+- **Componer «cerrar» con «partir» no da atomicidad, y no por descuido de implementación.** `colapsar`
+  descarta el peso de la hija superviviente y `absorber` escala los de las nietas, así que **tras quitar
+  una hoja la forma anterior ya no se puede reconstruir**: si partir fallara después, no hay a dónde
+  volver y la consola se queda fuera. Por valor, el fallo es no haber cambiado nada.
+- **Y una operación que muta en el sitio con validación previa también funcionaría — mientras todos se
+  acuerden de validar.** Este proyecto tiene contado con números lo que pasa con las invariantes que
+  dependen de que alguien se acuerde: 15 de 17 hallazgos bloqueantes de los dos hitos anteriores estaban
+  en código que esos PRs no escribían. Transformar por valor la hace **imposible de romper**.
+- **El suelo se comprueba contra el árbol de ahora**, y es conservador: quitar una hoja casi nunca le quita
+  área a las que quedan —`absorber` les cuesta un divisor, y nada más—. La formulación intuitiva
+  —«validar contra el árbol posterior a quitar»— **es incoherente**: no se puede validar contra un árbol
+  que todavía no existe.
+- **La identidad no se refactorizó, y con esto queda cerrado el caso que D14 dejó abierto para este hito.**
+  Las hojas ya tenían nombre estable; lo que faltaba era que el identificador del control lo llevara
+  **también**. Con el sitio dentro, cualquier cosa que renumere mientras el botón sigue apretado hace que
+  el arrastre en vuelo apunte a otra cosa — y no hacen falta dos manos: agarrar una consola y pulsar
+  `Ctrl+Mayúsculas+→` sin soltar **reordenaba dos consolas de la pestaña de destino**. Las fronteras
+  siguen por posición porque su arrastre **no sobrevive a nada**: se resuelve dentro del mismo fotograma.
+
+**Lo que se descartó, y por qué:**
+
+- **Componer `cerrar` + `partir`** desde la ventana: no son atómicos, por lo de arriba.
+- **Mutar en el sitio con validación previa**: funciona, pero la atomicidad pasa a depender de cada camino
+  futuro.
+- **Cerrar la consola y volver a abrirla en el destino**: mata el trabajo de dentro, que es el motivo del
+  hito. Y está medido: cerrar en caliente congela la ventana **50,72 ms** de mediana, **404 ms** si el
+  programa ignora `SIGHUP`, y puede colgarla indefinidamente.
+- **`Result<Nodo, Nodo>` para el resultado de mover.** Era el diseño; se cambió a una tupla porque la
+  variante de error cargaba el árbol entero y porque `Err` no significaba siempre lo mismo. Una tupla no
+  invita a leer «falló» como «no cambió nada».
+- **Deshacer un movimiento.** No hace falta: un movimiento que no puede completarse no llega a empezar.
+- **Mover una división a otra pestaña.** Fuera de F2.3 por la Parte I del roadmap, no por dificultad.
+- **Nombre estable para las fronteras.** Ver arriba: su arrastre no cruza fotogramas.
+
+### Medido — el fotograma mientras se arrastra (18 de agosto de 2026)
+
+Dos tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
+`scripts/medir-fotograma.sh C|J`. Las dos con una pestaña de **dos divisiones**, los dos paneles
+publicándose a ritmo de una vez por segundo, carga de 44 MiB por consola y ventana de **1280×800 puntos**,
+con las dos consolas a 49×39 celdas. La **J** añade una sola cosa: **la ventana se arrastra a sí misma** de
+principio a fin —agarra una consola, la lleva sobre la otra y la suelta, alternando el lado— por la misma
+puerta por la que entra el ratón de verdad. Los tramos son de la **división 0**.
+
+| | **C** — sin gesto | **J** — arrastrando sin parar |
+|---|---|---|
+| Gestos inyectados | — | **1 724 · 1 722** |
+| De ésos, los que reordenaron | — | **862 · 861** |
+| Fotogramas con salida | 358 · 363 | 357 · 357 |
+| **Fotogramas en total** | **467 · 532** | **6 898 · 6 888** |
+| Vuelta completa | 37,2 ms · 37,1 | **37,3 · 38,5** |
+| — esperando en la cola | 35,0 · 35,0 | **35,1 · 35,6** |
+| — interpretando | 849 µs · 763 | 813 · 1 058 |
+| — encolando el pintado | 205 µs · 189 | 163 · 234 |
+| — el panel de estado | 3,6 µs · 3,6 | 2,6 · 4,6 |
+| el resto del fotograma | 222 µs · 220 | 112 · 105 |
+
+**Qué prueba esto:**
+
+1. **Arrastrar sin parar no empeora nada de lo que la consola percibe.** La vuelta completa —lo que tarda un
+   byte disponible en llegar a un fotograma pagado— es **37,1 a 38,5 ms en las cuatro corridas**, y la
+   variación entre las dos corridas de la misma tanda (37,3 → 38,5 en J) es del mismo orden que la variación
+   entre tandas. Esperar en la cola tampoco se mueve: **35,0 a 35,6 ms**. Y los fotogramas **con salida** son
+   los mismos (357 a 363), o sea que el presupuesto de bombeo hace su trabajo igual.
+2. **El gesto declara su coste.** Atender el ratón, pintar el velo, rehacer el reparto al soltar e inyectar
+   los eventos están **todos** cronometrados y restados, así que ninguno se publica como coste del framework
+   —la cifra con la que D3 juzga a egui—. La revisión encontró una quinta pieza que se había quedado fuera:
+   la copia de los rectángulos del último fotograma. No se cronometró: se **quitó**, moviendo el vector en
+   vez de copiarlo, que es mejor que declarar trabajo que no hace falta hacer.
+3. **El resto del fotograma se queda muy por debajo del presupuesto** incluso arrastrando: 112 y 105 µs de
+   media, 258 y 302 µs el 95 %.
+
+**Y qué NO prueba, que importa igual:**
+
+- **Las medias del «resto del fotograma» de C y J NO se comparan entre sí, y la tabla las pone juntas solo
+  para que se vea por qué.** Inyectar eventos de puntero mantiene la ventana despierta —igual que la mantiene
+  despierta un ratón humano moviéndose—, así que J corre **unas trece veces más fotogramas** que C. El coste
+  medio por fotograma baja porque se reparte entre miles de fotogramas que no llevan trabajo de consola
+  dentro, no porque el gesto abarate nada. Leer «112 µs contra 222» como una mejora sería exactamente el
+  número plausible que este proyecto lleva tres hitos evitando. Lo mismo vale para interpretar, encolar y el
+  panel. La conclusión 1 se apoya en la vuelta completa, que es por fotograma **con salida**.
+- **La mitad de los gestos se descartan al soltar, y el informe lo dice: 1 724 inyectados y 862 que
+  reordenaron.** No es un fallo del gesto: el inyector agarra la consola **por su hueco**, así que tras el
+  primer intercambio vuelve a agarrar la misma —que ahora está en el otro hueco— y la suelta encima de sí
+  misma, caso que el gesto rechaza a propósito. La tanda mide por tanto una **mezcla** de los dos caminos, y
+  los dos son reales al arrastrar. Sondeado con instrumentación en el camino del soltado, no deducido.
+- **Publicar solo los gestos inyectados habría dejado pasar una tanda vacía**, y esto lo encontró la
+  revisión: en una ventana estrecha el suelo geométrico rechaza **todos** los soltados, la disposición no
+  cambia ni una vez, y una corrida así declaraba «1 724 hechos» y se daba por buena. El anexo habría
+  publicado que el gesto no cuesta nada. Ahora el guion invalida la corrida si ninguno reordenó.
+- **La etiqueta «(izquierda)» o «(derecha)» de cada tabla de tramos describe el hueco en el que la consola
+  acabó**, y en la tanda J una consola cambia de hueco a mitad de corrida: la mitad de las muestras se
+  tomaron con ella en el otro lado. Los números no salen mal porque las dos consolas se reparten el ancho a
+  medias y tienen la misma rejilla, pero la etiqueta afirma una procedencia que la corrida no sostiene, y
+  dejaría de ser inocua en una tanda de anchos distintos.
+- **No hay tanda con arrastres de cuatro divisiones**, y no es un olvido: el ciclo del gesto solo devuelve la
+  disposición a la de partida **con dos**. Con más, insertar parte el peso del destino y quitar lo reparte
+  entre las que quedan, así que el peso se concentra — medido con cuatro en fila sobre 1 200 puntos, la
+  primera consola pasa de **298,5 a 119,4** puntos en un solo ciclo de ida y vuelta.
+- **El número de fotogramas de la tanda J no es estable, y con él tampoco el de gestos.** Tres corridas
+  seguidas dieron **6 898, 6 888 y 6 854** fotogramas —muy parejas— pero una cuarta, tomada mientras la
+  máquina compilaba, se quedó en **764** con solo 191 gestos. Los fotogramas **con salida** fueron los mismos
+  en las cuatro (357 a 359), que es lo que hace que la conclusión 1 aguante: se apoya en la vuelta completa,
+  que es por fotograma con salida, y no en nada dividido por el total. Es otra razón para no comparar las
+  medias del resto entre corridas, no solo entre tandas.
+- **No mide el gesto de una persona.** Mide un gesto sintético que agarra el centro de una consola, cruza en
+  dos fotogramas y suelta. Un arrastre humano dura más y se mueve más despacio.
+- **No mide partir ni cerrar en caliente**, igual que el anexo anterior: el congelón de ~100 ms al cerrar
+  ([#62](https://github.com/mashware/agent-terminal/issues/62)) sigue sin medirse con divisiones.
+
+**Dos cosas que la primera versión de la tanda hizo mal, y quedan escritas porque los números salían
+plausibles.** La primera: el gesto pedía repintado en cada fotograma para no dormirse a mitad de un arrastre,
+y con eso la tanda dejaba de ser «la de comparación más el gesto» para ser otro régimen —**2 219 y 7 008
+fotogramas** con el resto en **163 y 103 µs**, o sea el gesto *abaratando* el fotograma a la mitad—. La
+segunda: contar los gestos inyectados como si fueran reordenaciones, que es la que habría dejado pasar la
+tanda vacía de más arriba. Las dos las cazó la revisión de este PR, no la medida.

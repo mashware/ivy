@@ -22,6 +22,18 @@
 #                    el peor caso del panel: la pregunta abierta del issue #33
 #                I = las cuatro EN CUADRO (dos columnas de dos). Medio ancho cada una, que es la
 #                    disposición que alguien usaría de verdad
+#              Con UNA pestaña y DOS divisiones **arrastrándose**, la que F2.3 añade — también en el
+#              régimen de la C, que es con quien se compara:
+#                J = como la C, y además la ventana **se arrastra a sí misma**: agarra una consola, la
+#                    lleva sobre la otra y la suelta, una y otra vez, alternando el lado. La diferencia
+#                    entre J y C es lo que cuesta el gesto
+#
+#              NO hay tanda con arrastres de CUATRO divisiones, y no es un olvido: el ciclo del gesto solo
+#              devuelve la disposición a la de partida **con dos**. Con más, insertar parte el peso del
+#              destino y quitar lo reparte entre las que quedan, así que el peso se concentra: medido con
+#              cuatro en fila sobre 1.200 puntos, la primera consola pasa de 298,5 a 119,4 puntos en un
+#              solo ciclo. Cada fotograma mediría una ventana distinta y la media no describiría ninguna.
+#              Atado por `el_ciclo_de_dos_gestos_vuelve_a_la_forma_de_partida_solo_con_dos_consolas`.
 #     [mib]    tamaño de la carga por consola, 44 por defecto
 #
 #   El modo `comparar` no mide: lee dos informes de la misma tanda y dice si se pueden promediar.
@@ -128,8 +140,15 @@ if [ "${MEDIR_COMO_CONSOLA:-}" != "1" ] && [ "${1:-}" = comparar ]; then
     # misma —1280×800 en una corrida y 1279,8125×799,8125 en otra—, las dos dentro del margen y **con la
     # misma rejilla**. Y como la fracción no es determinista, volver a tomarlas podía fallar otra vez. El
     # tamaño se compara abajo, con el mismo margen que usa la aplicación.
+    # **Y el NOMBRE de cada división tampoco entra, por la misma clase de razón que el tamaño.** Lo que
+    # decide si dos corridas se pueden promediar es cuántas consolas hubo y con qué rejilla cada **sitio**,
+    # no qué consola ocupaba cada sitio al cerrar. Desde que la ventana se arrastra a sí misma (tanda J) las
+    # consolas **cambian de sitio durante la corrida**, así que cuál acaba a la izquierda depende de si el
+    # último gesto llegó a completarse — y con el nombre dentro, dos corridas idénticas en ventana, pestañas
+    # y rejillas salían «no comparables» por un dato que no cambia nada de lo que se mide. Medido: dos J del
+    # 18 de agosto de 2026, las dos 1280×800 con las dos consolas a 49×39, rechazadas solo por eso.
     geometria() {
-        sed -n -e 's/^pestañas: */pestañas /p' -e 's/^  división /división /p' "$1"
+        sed -n -e 's/^pestañas: */pestañas /p' -e 's/^  división [0-9]*: */división /p' "$1"
     }
     primera=$(geometria "$2")
     segunda=$(geometria "$3")
@@ -176,7 +195,7 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
 fi
 
 # ── Modo tanda ──────────────────────────────────────────────────────────────────
-TANDA=${1:?falta la tanda: A, B, C, D, F, G, H o I}
+TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I o J}
 MIB=${2:-44}
 SALIDA="$RAIZ/target/medidas"
 mkdir -p "$SALIDA"
@@ -192,14 +211,25 @@ rm -f "$TESTIGO"
 # derivado de la letra. La aplicación abre las consolas **pestaña por pestaña y en el orden en que se
 # pintan**, así que con dos pestañas las dos primeras son las de delante y las dos últimas las de fondo,
 # y con cuatro en cuadro el orden es la columna izquierda de arriba abajo y luego la derecha.
+# **Una tanda se define en UN solo sitio, incluidos sus arrastres.** Estuvieron en un `case` aparte y la
+# revisión lo tiró: con dos, añadir una tanda pide dos ediciones y la que se olvide cae en el `*)` del
+# segundo con cero gestos — o sea que una tanda nueva pensada para arrastrar se quedaría quieta y el guion la
+# invalidaría por no declarar arrastres, en vez de simplemente funcionar.
 case "$TANDA" in
-    A|B|C|D) PESTANAS=1; DIVISIONES=2x1; VUELCAN=2 ;;
-    F)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=2 ;;   # la de fondo, quieta: no vuelca ninguna de sus dos
-    G)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=4 ;;   # la de fondo, volcando igual que la de delante
-    H)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4 ;;   # cuatro en fila: el peor caso del panel (#33)
-    I)       PESTANAS=1; DIVISIONES=2x2; VUELCAN=4 ;;   # cuatro en cuadro
-    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H o I" >&2; exit 2 ;;
+    A|B|C|D) PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0 ;;
+    F)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0 ;;   # la de fondo, quieta: no vuelca ninguna
+    G)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=4; ARRASTRES=0 ;;   # la de fondo, volcando como la de delante
+    H)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0 ;;   # cuatro en fila: el peor caso del panel (#33)
+    I)       PESTANAS=1; DIVISIONES=2x2; VUELCAN=4; ARRASTRES=0 ;;   # cuatro en cuadro
+    J)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000 ;;   # dos, y arrastrándose: el gesto de F2.3
+    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I o J" >&2; exit 2 ;;
 esac
+# **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
+# que caben, porque lo que hace falta es que el gesto dure **de principio a fin**. Una tanda que se queda sin
+# gestos a mitad promedia dos regímenes distintos y publica la media de los dos como si fuera uno. Cuántos
+# ocurrieron de verdad lo dice el informe, y **ése** es el número que vale: el informe publica los inyectados
+# y los que reordenaron, no los pedidos.
+
 # Las consolas por pestaña salen de la disposición, que es «columnas por filas».
 POR_PESTANA=$(( ${DIVISIONES%x*} * ${DIVISIONES#*x} ))
 DIRECTORIOS=$((PESTANAS * POR_PESTANA))
@@ -302,7 +332,7 @@ sembrar() {
 case "$TANDA" in
     A) : ;;                       # sin panel: nadie publica nada
     B) sembrar quieto & ;;
-    C|D|F|G|H|I) sembrar hablador & ;;
+    C|D|F|G|H|I|J) sembrar hablador & ;;
 esac
 
 echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIRECTORIOS consolas volcando $MIB MiB · ventana $TAMANO · no toques la máquina hasta que cierre" >&2
@@ -313,7 +343,7 @@ INFORME="$SALIDA/tanda-$TANDA-$(date +%H%M%S).txt"
 MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
     MEDIR_TURNOS="$TURNOS" MEDIR_VUELCAN="$VUELCAN" \
     MEDIR_PESTANAS="$PESTANAS" MEDIR_DIVISIONES="$DIVISIONES" \
-    MEDIR_TAMANO="$TAMANO" \
+    MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" \
     SHELL="$RAIZ/scripts/medir-fotograma.sh" \
     "$APP" > "$INFORME"
 
@@ -336,6 +366,31 @@ fi
 DECLARADAS=$(sed -n 's/^pestañas: *\([0-9]*\)$/\1/p' "$INFORME" | head -1)
 if [ "$DECLARADAS" != "$PESTANAS" ]; then
     invalidar "el informe dice «$DECLARADAS» pestañas y se pidieron $PESTANAS"
+fi
+
+# **Que los arrastres pedidos llegaran a ocurrir.** Es el mismo engaño que el testigo evita con los
+# paneles, y aquí muerde más: sin gesto durante la tanda el informe declara su coste en **cero** y esa
+# tanda se lee como «el gesto no cuesta nada» en vez de como «no hubo gesto». Pasa si la variable no llega
+# —un cambio de nombre, un binario viejo—, si la disposición tiene una sola consola, o si la ventana se
+# cierra antes de completar el primero.
+if [ "$ARRASTRES" != 0 ]; then
+    INYECTADOS=$(sed -n 's/^arrastres: *\([0-9]*\) inyectados, [0-9]* reordenaron$/\1/p' "$INFORME" | head -1)
+    REORDENARON=$(sed -n 's/^arrastres: *[0-9]* inyectados, \([0-9]*\) reordenaron$/\1/p' "$INFORME" | head -1)
+    if [ -z "$INYECTADOS" ]; then
+        invalidar "se pidieron arrastres y el informe no declara ninguna línea de arrastres"
+    fi
+    if [ "$INYECTADOS" = 0 ]; then
+        invalidar "se pidieron arrastres y el informe dice que no se inyectó ninguno entero"
+    fi
+    # **Y que alguno haya REORDENADO, que es lo que de verdad mide la tanda.** Mandar el evento de soltar no
+    # significa que la disposición cambie: el suelo geométrico lo rechaza cuando la consola de destino no
+    # puede darle su mínimo a las dos, y con una ventana estrecha eso pasa en todos. Esa corrida inyecta mil
+    # gestos, no reordena ni uno, y sin esta comprobación se publicaría como «el gesto no cuesta nada».
+    if [ "$REORDENARON" = 0 ]; then
+        invalidar "se inyectaron $INYECTADOS arrastres y ninguno reordenó nada: la ventana es demasiado \
+estrecha para que el suelo geométrico acepte el soltado, así que esta tanda no mide el gesto"
+    fi
+    echo "arrastres durante la tanda: $INYECTADOS inyectados, $REORDENARON reordenaron" >&2
 fi
 
 # **Que las consolas fueran las que se pidieron.** Con la variable de la disposición sin llegar, la

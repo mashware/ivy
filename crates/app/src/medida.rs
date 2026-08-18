@@ -474,14 +474,27 @@ pub struct EnPuntos {
     pub alto: f32,
 }
 
-/// La cabecera del informe: dónde y cómo se midió.
+/// Los gestos de arrastre que una tanda de medida se inyectó a sí misma, tal como se declaran.
+#[derive(Clone, Copy)]
+pub struct Arrastres {
+    /// Gestos enteros que se inyectaron: los que llegaron a mandar su evento de soltar.
+    pub inyectados: usize,
+    /// De ésos, los que el árbol **aceptó**, o sea los que reordenaron la disposición de verdad.
+    pub reordenaron: usize,
+}
+
+/// La cabecera del informe: dónde y cómo se midió — cuántas pestañas había, cuál se veía y con qué
+/// rejilla cada consola.
+///
+/// **Este comentario llevaba el título dos veces y los dos párrafos pegados sin separación**, de antes de
+/// este hito; se arregló al pasar por aquí, porque un doc que se presenta dos veces se lee como si
+/// describiera dos cosas.
 ///
 /// Las rejillas van una por consola **y con su nombre**, porque el reparto del ancho las deja
 /// distintas y ningún tramo se entiende sin saber sobre cuántas celdas se tomó. Es el dato que hace
 /// falta para comparar con una medida antigua de una sola consola a pantalla completa: sin él, un
 /// «encolar» más bajo se lee como que el framework va más rápido, cuando lo que pasa es que hay la
 /// mitad de columnas.
-/// La cabecera del informe: cuántas pestañas había, cuál se veía y con qué rejilla cada consola.
 ///
 /// **Cada pestaña llega con su nombre, no con su posición en la lista.** Al cerrar una, las de su
 /// derecha corren un puesto, así que numerar aquí por el orden del recorrido le pondría a una tabla de
@@ -500,6 +513,7 @@ pub fn cabecera(
     ventana: EnPuntos,
     rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
     visible: usize,
+    arrastres: Option<Arrastres>,
 ) -> std::io::Result<()> {
     let perfil = if cfg!(debug_assertions) {
         "depuración — el número que vale es el de --release"
@@ -535,6 +549,30 @@ pub fn cabecera(
                 donde_cae(rejillas.len(), cual)
             )?;
         }
+    }
+    // **Los gestos que la tanda se inyectó, y solo si pidió alguno.** Dos números, y los dos tienen señal:
+    // los **inyectados** dicen que el gesto ocurrió, y los que **reordenaron** dicen que el árbol los
+    // aceptó. Hacen falta los dos porque no son lo mismo: el suelo geométrico rechaza el soltado cuando la
+    // consola de destino no puede darle su mínimo a las dos, y en una ventana estrecha eso pasa en todos —
+    // la tanda inyecta mil gestos y no reordena ni uno. Con un solo número, esa corrida se leería como «el
+    // gesto no cuesta nada» en vez de como «no pasó nada», que es el disfraz de declarar cero que este
+    // proyecto ya se ha comido una vez.
+    //
+    // **Los pedidos NO se publican, y eso lo corrigió la revisión.** La primera versión imprimía «pedidos» y
+    // decía que la diferencia con los hechos era el aviso; pero el guion pide un número deliberadamente
+    // altísimo para que el gesto dure toda la tanda, así que esa diferencia vale lo mismo en una corrida
+    // buena que en una rota. Un número que un lector va a intentar interpretar y no puede es peor que no
+    // publicarlo.
+    //
+    // **La línea no sale cuando nadie pidió arrastres**, y eso es deliberado: las tandas del anexo
+    // anteriores a este hito se compararían con informes de forma distinta, y aquí lo que se compara son
+    // tandas entre sí.
+    if let Some(arrastres) = arrastres {
+        writeln!(
+            a,
+            "arrastres:    {} inyectados, {} reordenaron",
+            arrastres.inyectados, arrastres.reordenaron
+        )?;
     }
     writeln!(a, "renderizador: glow")?;
     writeln!(a, "perfil:       {perfil}")?;
@@ -627,9 +665,60 @@ mod tests {
         rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
         visible: usize,
     ) -> String {
+        cabecera_de_una_tanda(ventana, rejillas, visible, None)
+    }
+
+    fn cabecera_de_una_tanda(
+        ventana: EnPuntos,
+        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+        visible: usize,
+        arrastres: Option<Arrastres>,
+    ) -> String {
         let mut salida = Vec::new();
-        cabecera(&mut salida, ventana, rejillas, visible).expect("escribir a memoria no falla");
+        cabecera(&mut salida, ventana, rejillas, visible, arrastres)
+            .expect("escribir a memoria no falla");
         String::from_utf8(salida).expect("la cabecera es texto")
+    }
+
+    #[test]
+    fn la_cabecera_declara_los_arrastres_solo_cuando_la_tanda_los_tuvo() {
+        // **Esta prueba existe porque el ayudante de aquí nunca llegaba a pasar `Some`.** La línea de
+        // arrastres solo la cubría una prueba de `lib.rs` que entra por el informe entero, así que vaciar
+        // este bloque dejaba **todas** las pruebas de este fichero en verde. Lo pilló la revisión.
+        //
+        // Los dos números son distintos a propósito: iguales no distinguirían publicar uno de publicar el
+        // otro.
+        let con_gesto = cabecera_de_una_tanda(
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            0,
+            Some(Arrastres {
+                inyectados: 1720,
+                reordenaron: 1719,
+            }),
+        );
+        assert!(
+            con_gesto.contains("arrastres:    1720 inyectados, 1719 reordenaron"),
+            "la cabecera no declaró los arrastres de la tanda:\n{con_gesto}"
+        );
+
+        let sin_gesto = cabecera_de_una_tanda(
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            0,
+            None,
+        );
+        assert!(
+            !sin_gesto.contains("arrastres"),
+            "la cabecera habla de arrastres en una tanda que no los tuvo, así que las tandas de los anexos \
+             anteriores dejan de tener la misma forma y no se pueden comparar:\n{sin_gesto}"
+        );
     }
 
     fn rejilla(rows: u16, cols: u16) -> term_core::Size {
