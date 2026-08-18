@@ -23,6 +23,13 @@ const ATENUACION: f32 = 0.5;
 /// el programa espera ver.
 const NIVELES_CUBO: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
+/// Cuánto tapa el velo que señala la consola sobre la que se soltaría la que se arrastra, de 0 a 255.
+///
+/// Es gusto, pero acotado por los dos lados: tiene que verse sobre una consola llena de texto y tiene que
+/// dejar leer lo que hay debajo, porque lo que hay debajo es lo que el usuario está mirando para decidir
+/// si suelta ahí. Una sexta parte cumple las dos.
+const VELO_DEL_DESTINO: u8 = 40;
+
 /// El tema: qué color de pantalla le corresponde a cada color que pide un programa.
 #[derive(Debug, Clone, Copy)]
 pub struct Tema {
@@ -227,6 +234,19 @@ impl Tema {
     /// El color con el que se señala la consola a la que va el teclado.
     pub fn foco(&self) -> Color32 {
         self.foco
+    }
+
+    /// El color con el que se señala la consola sobre la que se soltaría la que se arrastra.
+    ///
+    /// **Sale del color del foco y no es un color nuevo**, porque dice lo mismo en otro tiempo verbal:
+    /// «aquí va a ir el teclado». Un color propio obligaría a elegirlo en los dos temas y a explicar en
+    /// qué se diferencia de éste, y la respuesta sería «en nada».
+    ///
+    /// Traslúcido porque se pinta **encima** de lo que la consola esté escribiendo: opaco taparía el
+    /// contenido justo cuando el usuario está decidiendo si soltar ahí.
+    pub fn destino_del_arrastre(&self) -> Color32 {
+        let foco = self.foco;
+        Color32::from_rgba_unmultiplied(foco.r(), foco.g(), foco.b(), VELO_DEL_DESTINO)
     }
 
     /// Acerca un color al fondo. Es lo que aquí significa «atenuado».

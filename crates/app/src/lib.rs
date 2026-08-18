@@ -1364,6 +1364,39 @@ impl Nodo {
         }
     }
 
+    /// Cambia de sitio dos consolas, **sin tocar la forma del árbol**.
+    ///
+    /// **Los pesos se quedan con el sitio, no con la consola.** Lo que se pide al soltar una encima de
+    /// otra es que cada una ocupe el hueco de la otra; llevándose además su tamaño, las vecinas de las dos
+    /// se moverían sin que nadie les haya tocado ninguna frontera.
+    ///
+    /// **Con el mismo nombre dos veces no hace nada, y se dice aquí y no en quien llama**: soltar una
+    /// consola sobre sí misma es un gesto de un segundo, así que es un caso corriente y no un abuso, y
+    /// dejarlo fuera obligaría a cada llamador a acordarse.
+    ///
+    /// Devuelve si el intercambio ocurrió.
+    fn intercambiar(&mut self, una: usize, otra: usize) -> bool {
+        if una == otra {
+            return false;
+        }
+
+        let mut hojas = self.hojas_mut();
+        let (Some(aqui), Some(alli)) = (
+            hojas.iter().position(|hoja| hoja.nombre == una),
+            hojas.iter().position(|hoja| hoja.nombre == otra),
+        ) else {
+            return false;
+        };
+
+        // **`split_at_mut` es lo que permite tener las dos a la vez.** Prestar dos elementos de la misma
+        // lista por separado no lo deja el préstamo, y la salida fácil —clonar una para copiarla en la
+        // otra— no existe: una consola lleva dentro su pseudoterminal y su programa.
+        let (antes, despues) = (aqui.min(alli), aqui.max(alli));
+        let (izquierda, derecha) = hojas.split_at_mut(despues);
+        std::mem::swap(&mut *izquierda[antes], &mut *derecha[0]);
+        true
+    }
+
     /// Mete `nueva` junto a la hoja que se llame `nombre`, cortando en ese sentido.
     ///
     /// **Devuelve la división que no ha colocado**, que es la forma de decir «esa hoja no está por aquí»
@@ -1652,7 +1685,7 @@ struct Cierre {
 /// **Es un contenedor transparente a propósito, sin frontera de métodos.** La costura que hace falta
 /// la da el propio tipo: cuando las divisiones dejen de ser dos y pasen a ser un árbol, lo que cambia
 /// es el interior de esto, y la lista de pestañas no se entera. Esconderlo además detrás de métodos
-/// obligaría a meter dentro del pintado a [`Ventana::atender_clics`] y
+/// obligaría a meter dentro del pintado a [`Ventana::atender_el_raton`] y
 /// [`Ventana::arrastrar_el_divisor`], que se sacaron justamente para poder comprobarse sin abrir
 /// ninguna ventana.
 struct Pestaña {
@@ -2473,30 +2506,143 @@ impl Ventana {
         bombeo
     }
 
-    /// Da el foco a la consola sobre la que se ha hecho clic.
+    /// Atiende el ratón sobre las consolas: el clic que da el foco, y el arrastre que las cambia de sitio.
     ///
     /// Vive aparte del pintado para poder comprobarse con un `Ui` de prueba, sin abrir ventana.
-    fn atender_clics(&mut self, ui: &egui::Ui, rectangulos: &[egui::Rect]) {
-        for (que_consola, rect) in rectangulos.iter().enumerate() {
-            // El clic se detecta con `interact` y no mirando la posición del puntero a pelo, porque así
-            // respeta capas y orden de pintado. Y con `Sense::CLICK` en vez de `Sense::click()`: el
-            // segundo incluye `FOCUSABLE`, o sea que el widget **pediría el foco de teclado de egui** y
-            // competiría con el enrutado que hace la aplicación — que es geográfico y no por widget.
-            let id = ui.id().with(("division", que_consola));
-            if ui.interact(*rect, id, egui::Sense::CLICK).clicked() {
-                // Se guarda **el nombre** de la que se ha pulsado, no su sitio en la lista: el
-                // sitio cambia en cuanto se cierra una vecina, y el foco saltaría solo a otra consola.
-                if let Some(pulsada) = self.activa().divisiones().get(que_consola) {
-                    let nombre = pulsada.nombre;
-                    self.activa_mut().foco = nombre;
+    ///
+    /// **Devuelve dónde se soltaría, en vez de pintarlo aquí.** Lo que se ve es cosa del pintado, y esta
+    /// función tiene que poder correr en una prueba que no pinta nada. Es un **sitio en el reparto y no un
+    /// nombre**, al revés que el foco: no se guarda de un fotograma para otro —se calcula y se pinta en el
+    /// mismo— y lo que hay que pintar es un rectángulo, que se busca por su sitio.
+    ///
+    /// **No guarda estado entre fotogramas, y eso no es un descuido:** egui sostiene el arrastre él mismo
+    /// y conserva la posición del puntero **también en el fotograma en que se suelta** — lo hace a
+    /// propósito, con `res.drag_stopped()` dentro de su propia condición de «se está interactuando»
+    /// (`context.rs:1532`, con su comentario). Un campo propio con la consola agarrada sería una segunda
+    /// copia de algo que ya está guardado, y las dos podrían discrepar.
+    fn atender_el_raton(&mut self, ui: &egui::Ui, rectangulos: &[egui::Rect]) -> Option<usize> {
+        // **El cronómetro vive aquí y no en quien llama**, al revés que el del recorrido del reparto. La
+        // razón es que así la propiedad se puede probar: con el cronómetro fuera, una prueba que llame a
+        // esta función no toca el contador, y la única forma de comprobarlo sería cronometrar la pasada
+        // entera desde fuera — donde este gesto cuesta lo mismo que el ruido del planificador y ninguna
+        // prueba distingue las dos cosas. Comprobado mutándolo: con el cronómetro en el llamador, quitarlo
+        // deja la suite entera en verde.
+        //
+        // **Y el trabajo vive en otra función a propósito.** Con el cuerpo aquí dentro, subir la primera
+        // lectura del reloj unas líneas —dejando fuera el recorrido del árbol, las reservas y las N
+        // llamadas a `interact`— publicaría casi todo el gesto como coste del framework **sin que ninguna
+        // prueba cayera**: un contador mayor que cero lo cumple cualquier par de lecturas seguidas.
+        // Partiéndolo, la región cronometrada es la llamada entera y encogerla deja de ser mover una línea.
+        let empezo = Instant::now();
+        let destino = self.atender_el_raton_sin_declararse(ui, rectangulos);
+        self.cronometrado_aparte += empezo.elapsed();
+        destino
+    }
+
+    /// El trabajo de [`Self::atender_el_raton`], sin el cronómetro. No se llama desde ningún otro sitio.
+    fn atender_el_raton_sin_declararse(
+        &mut self,
+        ui: &egui::Ui,
+        rectangulos: &[egui::Rect],
+    ) -> Option<usize> {
+        // **Un solo vector, no dos.** Recorrer el árbol apuntando nombres reserva una vez; pedir
+        // `divisiones()` y mapearlo encima reservaría otra, y este camino se recorre en **todos** los
+        // fotogramas, haya gesto o no.
+        let mut nombres = Vec::new();
+        self.activa()
+            .raiz
+            .recorrer(&mut |division| nombres.push(division.nombre));
+
+        let mut destino = None;
+
+        // **Los rectángulos y los nombres se recorren emparejados, no indexando uno con el otro.** Son
+        // dos listas que salen del mismo árbol y siempre miden lo mismo; emparejarlas hace imposible el
+        // desajuste en vez de defenderse de él con una guarda que en la aplicación no puede saltar nunca.
+        for (que_consola, (rect, &nombre)) in rectangulos.iter().zip(&nombres).enumerate() {
+            // El gesto se detecta con `interact` y no mirando la posición del puntero a pelo, porque así
+            // respeta capas y orden de pintado.
+            //
+            // **`Sense::CLICK | Sense::DRAG`, y no `Sense::click_and_drag()`**: el segundo incluye
+            // `FOCUSABLE`, o sea que el widget **pediría el foco de teclado de egui** y competiría con el
+            // enrutado que hace la aplicación —que es geográfico y no por widget—. Es la misma trampa que
+            // ya costó un caso con el clic y otro con la frontera, y aquí no hay constante que la evite de
+            // un tirón: `Sense::CLICK_AND_DRAG` no existe.
+            //
+            // **El identificador lleva el NOMBRE de la consola, no su sitio**, y aquí está la diferencia
+            // con la frontera de al lado. egui sostiene el arrastre entre fotogramas por el identificador,
+            // así que con el sitio dentro, cualquier cosa que renumere las consolas **mientras el botón
+            // sigue apretado** hace que el arrastre en vuelo pase a apuntar a otra: cambiar de pestaña
+            // (`Ctrl+Mayús+←/→`), partir o cerrar, que se aplican todas al principio de esta misma pasada.
+            // Cambiar de pestaña con una consola agarrada llegaba a reordenar **la pestaña de destino**,
+            // que es justo lo que este hito deja fuera. Con el nombre, el identificador viaja con la
+            // consola: si desaparece o cambia de pestaña, no lo reclama nadie y el arrastre muere solo.
+            let id = ui.id().with(("division", nombre));
+            let respuesta = ui.interact(*rect, id, egui::Sense::CLICK | egui::Sense::DRAG);
+
+            // **Agarrar también da el foco.** El gesto empieza pulsando sobre la consola, y no dárselo
+            // dejaría el teclado en una que ya no es la que se está tocando. `clicked()` no cubre este
+            // caso: cuando el puntero se mueve lo bastante, egui decide que es un arrastre y el clic no
+            // llega a existir.
+            if respuesta.clicked() || respuesta.drag_started() {
+                self.activa_mut().foco = nombre;
+            }
+
+            // **Solo el botón primario mueve consolas.** `dragged()` y `drag_stopped()` no miran qué botón
+            // es —egui apunta como candidato a arrastrarse cualquier pulsación—, y en un terminal eso no es
+            // teórico: el botón central es el pegado de X11 y el derecho es la selección en casi todos. Un
+            // arrastre con cualquiera de los dos cambiaría dos consolas de sitio sin que nadie lo pidiera.
+            if !respuesta.dragged_by(egui::PointerButton::Primary) && !respuesta.drag_stopped() {
+                continue;
+            }
+
+            // Sin puntero no hay destino: el ratón se ha ido de la ventana. El gesto se queda sin efecto y
+            // el árbol no se toca, que es lo que se espera de cancelar a medias.
+            let encima = respuesta
+                .interact_pointer_pos()
+                .and_then(|puntero| rectangulos.iter().position(|donde| donde.contains(puntero)))
+                .filter(|&donde| donde != que_consola);
+
+            // **Se exige que el botón se haya SOLTADO, y no basta con que el arrastre termine.** egui
+            // aborta el arrastre al pulsar Escape y eso también levanta `drag_stopped()`, con el botón
+            // todavía apretado y la posición del puntero intacta: sin esta distinción, arrepentirse a
+            // media maniobra —agarrar, pasar por encima de otra, pulsar Escape— **completaba el
+            // intercambio** en vez de cancelarlo.
+            if respuesta.drag_stopped_by(egui::PointerButton::Primary) {
+                if let Some(otra) = encima.and_then(|donde| nombres.get(donde).copied()) {
+                    self.activa_mut().raiz.intercambiar(nombre, otra);
                 }
+            } else if !respuesta.drag_stopped() {
+                destino = encima;
             }
         }
+
+        destino
+    }
+
+    /// Señala, mientras se arrastra, sobre qué consola se soltaría.
+    ///
+    /// **Se pinta encima de las consolas y no debajo**: lo que hay debajo es lo que el programa esté
+    /// escribiendo, y una marca tapada por una pantalla llena de texto no marca nada.
+    ///
+    /// **A la agarrada no se le pinta nada, y no es un olvido**: agarrar le da el foco, así que ya lleva
+    /// su realce. Ponerle otro borde sería dibujar dos veces lo mismo con dos grosores distintos.
+    ///
+    /// **Declara su coste desde dentro**, por lo mismo que [`Self::atender_el_raton`]: dejándolo en el
+    /// llamador, quitarlo no lo caza ninguna prueba —comprobado mutándolo— porque desde fuera este trabajo
+    /// cuesta lo mismo que el ruido entre dos relojes.
+    ///
+    /// **Recibe el rectángulo y no el sitio en la lista.** Con el sitio haría falta buscarlo, y con la
+    /// búsqueda una guarda por si no está — de un número que sale de recorrer esa misma lista.
+    fn pintar_el_arrastre(&mut self, ui: &egui::Ui, destino: egui::Rect) {
+        let empezo = Instant::now();
+        ui.painter()
+            .rect_filled(destino, 0.0, self.tema.destino_del_arrastre());
+        self.cronometrado_aparte += empezo.elapsed();
     }
 
     /// Cambia de pestaña al hacer clic en una ficha.
     ///
-    /// Vive aparte del pintado por lo mismo que [`Self::atender_clics`], y usa `Sense::CLICK` por lo
+    /// Vive aparte del pintado por lo mismo que [`Self::atender_el_raton`], y usa `Sense::CLICK` por lo
     /// mismo también: `Sense::click()` añade `FOCUSABLE`, o sea que la ficha **pediría el foco de teclado
     /// de egui** y competiría con el enrutado de la aplicación, que es geográfico.
     fn atender_clics_de_la_barra(&mut self, ui: &egui::Ui, barra: egui::Rect, metrica: &Metrica) {
@@ -2566,8 +2712,8 @@ impl Ventana {
 
     /// Mueve el divisor con el puntero, y devuelve si la fracción ha cambiado en este pase.
     ///
-    /// Vive aparte del pintado por lo mismo que [`Self::atender_clics`]: es la decisión que este PR
-    /// entrega, y dentro de la pasada de interfaz no se puede comprobar sin abrir una ventana.
+    /// Vive aparte del pintado por lo mismo que [`Self::atender_el_raton`]: dentro de la pasada de
+    /// interfaz no se puede comprobar sin abrir una ventana.
     ///
     /// **La fracción sale de la posición absoluta del puntero, no de su desplazamiento.** Con el
     /// desplazamiento, cada trocito que el recorte del suelo descarta se perdería para siempre: el
@@ -2587,7 +2733,7 @@ impl Ventana {
         //
         // **El identificador lleva cuál es, y antes era una constante.** Con una sola frontera daba
         // igual; con varias, un identificador compartido las convierte a todas en **el mismo control**
-        // para egui, así que arrastrar una movería otra o ninguna. Es exactamente lo que `atender_clics`
+        // para egui, así que arrastrar una movería otra o ninguna. Es exactamente lo que `atender_el_raton`
         // ya resolvía indexando el suyo, a una línea de distancia.
         let id = ui.id().with(("frontera", cual));
         let respuesta = ui
@@ -2635,7 +2781,7 @@ impl Ventana {
 
     /// Manda lo que se ha tecleado en este pase a **una sola** consola, la que tiene el foco.
     ///
-    /// Vive aparte del pintado por lo mismo que [`Self::atender_clics`]: mandarlo a las dos escribiría
+    /// Vive aparte del pintado por lo mismo que [`Self::atender_el_raton`]: mandarlo a las dos escribiría
     /// la misma tecla en dos programas, que es exactamente lo que «sin que se pisen» prohíbe, y dentro
     /// de la pasada de interfaz esa decisión no se puede comprobar sin abrir una ventana.
     fn teclear_la_del_foco(&mut self, ctx: &egui::Context) -> Vec<Orden> {
@@ -3263,7 +3409,13 @@ impl eframe::App for Ventana {
 
         let rectangulos = reparto.partes;
 
-        self.atender_clics(ui, &rectangulos);
+        // **El ratón se atiende antes de pintar las consolas**, porque soltar una encima de otra las
+        // cambia de sitio y pintar con el orden de antes las dejaría un fotograma cruzadas. El reparto
+        // **no** se rehace: intercambiar no toca la forma del árbol, así que los rectángulos son los
+        // mismos y lo único que cambia es qué consola le toca a cada uno.
+        //
+        // **Se declara sola**: el cronómetro va dentro de ella, no aquí, y su comentario dice por qué.
+        let destino_del_arrastre = self.atender_el_raton(ui, &rectangulos);
 
         // La barra se pinta antes que las consolas por lo mismo que el divisor: lo que se pinte después
         // queda por encima, y el glifo del borde de una consola que se saliera ya lo corta su recorte.
@@ -3295,6 +3447,15 @@ impl eframe::App for Ventana {
                 egui::Stroke::new(1.0, self.tema.foco()),
                 egui::StrokeKind::Inside,
             );
+        }
+
+        // Y el velo del destino va después del realce, por lo mismo: es lo último que se decide y tiene
+        // que verse sobre todo lo demás. Se cronometra aparte porque es de la disposición, no de la
+        // consola sobre la que cae.
+        // Se indexa directamente, como el realce del foco de justo arriba y por la misma razón: el número
+        // sale de recorrer esta misma lista en este mismo fotograma.
+        if let Some(destino) = destino_del_arrastre {
+            self.pintar_el_arrastre(ui, rectangulos[destino]);
         }
 
         // Las que no se pintan no tienen otro sitio donde enterarse de su tamaño: ésta es la única
@@ -7435,7 +7596,7 @@ mod tests {
         // resuelve la interacción contra lo que había en la pasada anterior, así que un clic en la
         // primera no encontraría a nadie a quien dárselo.
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            ventana.atender_clics(ui, &[izquierda, derecha]);
+            ventana.atender_el_raton(ui, &[izquierda, derecha]);
         })
         .drop_without_applying_deltas();
 
@@ -7458,7 +7619,7 @@ mod tests {
             ..Default::default()
         };
         ctx.run_ui(entrada, |ui| {
-            ventana.atender_clics(ui, &[izquierda, derecha]);
+            ventana.atender_el_raton(ui, &[izquierda, derecha]);
         })
         .drop_without_applying_deltas();
 
@@ -7466,6 +7627,853 @@ mod tests {
             ventana.activa().foco,
             1,
             "el clic en la consola derecha no le dio el foco"
+        );
+    }
+
+    /// Un arrastre entero del ratón: pulsar aquí, mover allí, y soltar.
+    ///
+    /// **Van en cuatro pasadas, y cada una hace falta.** La primera registra las regiones, porque egui
+    /// resuelve la interacción contra lo que había en la pasada anterior. La segunda aprieta. La tercera
+    /// mueve — y **el movimiento tiene que llegar en un fotograma distinto del apretón**: egui decide que
+    /// un apretón es un arrastre comparando contra dónde empezó, y en el mismo fotograma todavía no ha
+    /// empezado en ninguna parte. La cuarta suelta.
+    ///
+    /// Comprobado por las malas: con el apretón y el movimiento juntos, ningún widget se da por arrastrado
+    /// y las tres pruebas de arrastre caen.
+    ///
+    /// Devuelve sobre qué consola decía la aplicación que se soltaría, tomado **en vuelo**, que es cuando
+    /// esa respuesta significa algo.
+    fn arrastrar_una_consola(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        rectangulos: &[egui::Rect],
+        desde: egui::Pos2,
+        hasta: egui::Pos2,
+    ) -> Option<usize> {
+        let mut pasada = |entrada: egui::RawInput| {
+            let mut visto = None;
+            ctx.run_ui(entrada, |ui| {
+                visto = ventana.atender_el_raton(ui, rectangulos);
+            })
+            .drop_without_applying_deltas();
+            visto
+        };
+
+        pasada(egui::RawInput::default());
+
+        pasada(egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(desde),
+                egui::Event::PointerButton {
+                    pos: desde,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+            ..Default::default()
+        });
+
+        let en_vuelo = pasada(egui::RawInput {
+            events: vec![egui::Event::PointerMoved(hasta)],
+            ..Default::default()
+        });
+
+        pasada(egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: hasta,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+            ..Default::default()
+        });
+
+        en_vuelo
+    }
+
+    /// Los nombres de las consolas de la pestaña activa, en el orden en que se pintan.
+    fn nombres_en_orden(ventana: &Ventana) -> Vec<usize> {
+        ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.nombre)
+            .collect()
+    }
+
+    #[test]
+    fn cambiar_de_pestaña_con_una_consola_agarrada_no_reordena_la_pestaña_de_destino() {
+        // **El caso que D14 dejó abierto y remitió a este hito, y que aquí es peor que con las fronteras.**
+        // egui sostiene el arrastre entre fotogramas por el identificador del control. Con el **sitio**
+        // dentro del identificador, un `Ctrl+Mayús+→` sin soltar el botón registra los mismos
+        // identificadores sobre los rectángulos de **otra** pestaña, egui sigue creyendo que arrastra el
+        // suyo, y al soltar se intercambian dos consolas de una pestaña a la que se acaba de llegar. Mover
+        // una consola a otra pestaña está explícitamente fuera de este hito, así que hacerlo por accidente
+        // lo está más todavía.
+        //
+        // Con el **nombre** dentro, los identificadores de la pestaña nueva son otros, nadie reclama el
+        // arrastre en vuelo y muere solo.
+        let ctx_ventana = egui::Context::default();
+        let mut ventana = Ventana::con_pestañas(&ctx_ventana, 2, Disposicion::DE_SIEMPRE, None)
+            .expect("no se pudieron abrir las dos pestañas");
+
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let rectangulos = [izquierda, derecha];
+
+        let de_la_segunda: Vec<usize> = ventana.pestañas[1]
+            .divisiones()
+            .iter()
+            .map(|division| division.nombre)
+            .collect();
+        assert_eq!(
+            de_la_segunda.len(),
+            2,
+            "la segunda pestaña no abrió con dos consolas"
+        );
+
+        let ctx = egui::Context::default();
+        let pasada = |ventana: &mut Ventana, entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(ui, &rectangulos);
+            })
+            .drop_without_applying_deltas();
+        };
+
+        pasada(&mut ventana, egui::RawInput::default());
+        pasada(&mut ventana, mover(egui::pos2(100.0, 150.0)));
+        pasada(&mut ventana, pulsar(egui::pos2(100.0, 150.0)));
+        pasada(&mut ventana, mover(egui::pos2(300.0, 150.0)));
+
+        // El acorde de cambiar de pestaña se aplica al principio de la pasada, mucho antes de que se
+        // atienda el ratón. Aquí se hace a mano porque lo que se prueba es el efecto, no el atajo.
+        ventana.activa = 1;
+
+        pasada(&mut ventana, soltar(egui::pos2(300.0, 150.0)));
+
+        let despues: Vec<usize> = ventana.pestañas[1]
+            .divisiones()
+            .iter()
+            .map(|division| division.nombre)
+            .collect();
+        assert_eq!(
+            despues, de_la_segunda,
+            "llegar a otra pestaña con una consola agarrada le reordenó las suyas"
+        );
+    }
+
+    #[test]
+    fn cancelar_con_escape_a_media_maniobra_no_cambia_las_consolas_de_sitio() {
+        // **egui aborta el arrastre al pulsar Escape, y eso levanta `drag_stopped()` con el botón todavía
+        // apretado y la posición del puntero intacta.** Sin exigir que el botón se haya **soltado**,
+        // arrepentirse a media maniobra —agarrar, pasar por encima de otra, pulsar Escape— completaba el
+        // intercambio en vez de cancelarlo. Es lo contrario de lo que promete cancelar.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let rectangulos = [izquierda, derecha];
+
+        let ctx = egui::Context::default();
+        let mut pasada = |entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(ui, &rectangulos);
+            })
+            .drop_without_applying_deltas();
+        };
+
+        pasada(egui::RawInput::default());
+        pasada(mover(egui::pos2(100.0, 150.0)));
+        pasada(pulsar(egui::pos2(100.0, 150.0)));
+        pasada(mover(egui::pos2(300.0, 150.0)));
+        pasada(egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [0, 1],
+            "cancelar con Escape completó el intercambio en vez de anularlo"
+        );
+    }
+
+    #[test]
+    fn arrastrar_con_un_boton_que_no_es_el_primario_no_cambia_las_consolas_de_sitio() {
+        // En un terminal esto no es teórico: el botón central es el pegado de X11 y el derecho es la
+        // selección en casi todos. `dragged()` y `drag_stopped()` no miran qué botón es —egui apunta como
+        // candidato a arrastrarse **cualquier** pulsación—, así que sin cualificarlos, un pegado con el
+        // central que se desplace un poco cambiaría dos consolas de sitio sin que nadie lo pidiera.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let rectangulos = [izquierda, derecha];
+
+        let boton = |en: egui::Pos2, pressed: bool| egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: en,
+                button: egui::PointerButton::Middle,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            }],
+            ..Default::default()
+        };
+
+        let ctx = egui::Context::default();
+        let mut pasada = |entrada: egui::RawInput| {
+            let mut visto = None;
+            ctx.run_ui(entrada, |ui| {
+                visto = ventana.atender_el_raton(ui, &rectangulos);
+            })
+            .drop_without_applying_deltas();
+            visto
+        };
+
+        pasada(egui::RawInput::default());
+        pasada(mover(egui::pos2(100.0, 150.0)));
+        pasada(boton(egui::pos2(100.0, 150.0), true));
+        let en_vuelo = pasada(mover(egui::pos2(300.0, 150.0)));
+        pasada(boton(egui::pos2(300.0, 150.0), false));
+
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [0, 1],
+            "un arrastre con el botón central cambió las consolas de sitio"
+        );
+        // Y tampoco se le enseña un destino: el velo dice «si sueltas aquí, va aquí», y con el botón
+        // central no va a ir a ninguna parte. Prometerlo y no cumplirlo es peor que no prometer nada.
+        assert_eq!(
+            en_vuelo, None,
+            "arrastrando con el botón central se señaló un destino que nunca se iba a usar"
+        );
+    }
+
+    #[test]
+    fn arrastrar_una_consola_sobre_otra_las_cambia_de_sitio() {
+        // El criterio del hito. Se comprueba sobre los **nombres en el orden en que se pintan**, que es lo
+        // que decide qué consola ve el usuario en cada hueco; afirmar sobre el campo donde se apunta el
+        // agarre diría que el gesto se registró, no que algo se movió.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+
+        let antes = nombres_en_orden(&ventana);
+        assert_eq!(antes, [0, 1], "la ventana no abrió con las dos en orden");
+
+        let ctx = egui::Context::default();
+        arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &[izquierda, derecha],
+            egui::pos2(100.0, 150.0),
+            egui::pos2(300.0, 150.0),
+        );
+
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [1, 0],
+            "arrastrar la izquierda sobre la derecha no las cambió de sitio"
+        );
+    }
+
+    #[test]
+    fn agarrar_una_consola_le_da_el_foco_aunque_el_gesto_no_llegue_a_ser_un_clic() {
+        // **La mitad que se olvida.** El foco se daba con `clicked()`, y cuando el puntero se mueve lo
+        // bastante egui decide que es un arrastre y el clic **no llega a existir**: sin mirar también el
+        // comienzo del arrastre, agarrar la consola de la derecha dejaría el teclado en la izquierda.
+        // Se arrastra de la derecha a la izquierda para que el foco de destino no coincida con el que la
+        // ventana ya tenía: empezando por la izquierda, el defecto y el arreglo darían lo mismo.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+
+        assert_eq!(
+            ventana.activa().foco,
+            0,
+            "la ventana no abrió con el foco en la izquierda"
+        );
+
+        let ctx = egui::Context::default();
+        arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &[izquierda, derecha],
+            egui::pos2(300.0, 150.0),
+            egui::pos2(100.0, 150.0),
+        );
+
+        // Se comprueba el **nombre** y no el sitio: las dos se acaban de cambiar de sitio, así que el
+        // hueco de la izquierda lo ocupa ahora la que se agarró. Preguntar por el sitio daría verde
+        // aunque el foco se hubiera quedado en la otra.
+        assert_eq!(
+            ventana.activa().foco,
+            1,
+            "agarrar la consola de la derecha no le dio el foco"
+        );
+    }
+
+    #[test]
+    fn el_foco_se_queda_con_la_consola_movida_y_va_por_su_nombre_y_no_por_su_sitio() {
+        // **AC3, con el disfraz de su hermana quitado.** La prueba de arriba arrastra dos consolas recién
+        // abiertas, donde el nombre y el sitio de cada una son el mismo número: guardar en el foco
+        // `que_consola` en vez de `nombre` da exactamente el mismo resultado y la suite no lo nota — y ese
+        // foco es por quién enruta el teclado, así que equivocarlo se lo entrega a otra consola.
+        //
+        // Con los extremos cruzados el número correcto no lo produce ninguna otra lectura. Se agarra la del
+        // sitio 0, que es la consola **2**, y se suelta sobre la del sitio 1:
+        //
+        // - por su nombre (lo que se pide) → **2**
+        // - por su sitio al agarrarla → 0, que además es donde nace el foco: también caza que no se toque
+        // - por su sitio después del intercambio → 1
+        // - por el nombre de la consola de destino → 1
+        let (mut ventana, rectangulos) = tres_consolas_con_los_extremos_cruzados();
+
+        assert_eq!(
+            ventana.activa().foco,
+            0,
+            "la ventana no abrió con el foco en la consola 0"
+        );
+
+        let ctx = egui::Context::default();
+        arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].center(),
+            rectangulos[1].center(),
+        );
+
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [1, 2, 0],
+            "el arrastre no llegó a mover la consola, así que del foco no se puede concluir nada"
+        );
+        assert_eq!(
+            ventana.activa().foco,
+            2,
+            "el teclado no se quedó con la consola que se movió"
+        );
+    }
+
+    #[test]
+    fn mientras_se_arrastra_se_dice_sobre_que_consola_se_soltaria() {
+        // Lo que sostiene que el usuario vea el destino **antes** de soltar. Se afirma sobre lo que la
+        // función devuelve en vuelo porque es lo único que el pintado recibe.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+
+        let ctx = egui::Context::default();
+        let en_vuelo = arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &[izquierda, derecha],
+            egui::pos2(100.0, 150.0),
+            egui::pos2(300.0, 150.0),
+        );
+
+        assert_eq!(
+            en_vuelo,
+            Some(1),
+            "arrastrando sobre la consola de la derecha no se señaló a la derecha"
+        );
+    }
+
+    #[test]
+    fn el_destino_que_se_señala_es_su_sitio_en_el_reparto_y_no_el_nombre_de_su_consola() {
+        // **Lo que se devuelve es un sitio y no un nombre**, al revés que el foco, y con él se busca el
+        // rectángulo que se vela. Su hermana de arriba no puede afirmarlo: con dos consolas recién abiertas
+        // los dos números coinciden, y devolver el nombre —que es lo que usa todo lo demás de esta
+        // función— la deja verde. Equivocarlo pinta el velo **sobre otra consola**, así que promete un
+        // destino que no es el que se va a usar.
+        //
+        // Se suelta sobre el sitio 2, que es el único de los tres cuyo nombre (0) no es su sitio: por sitio
+        // se señala el **2** y por nombre se señalaría el 0, que es además el extremo contrario de la fila.
+        let (mut ventana, rectangulos) = tres_consolas_con_los_extremos_cruzados();
+
+        let ctx = egui::Context::default();
+        let en_vuelo = arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].center(),
+            rectangulos[2].center(),
+        );
+
+        assert_eq!(
+            en_vuelo,
+            Some(2),
+            "arrastrando sobre la tercera consola se señaló su nombre en vez de su sitio"
+        );
+        // Y que el gesto llegó de verdad hasta el final del reparto, y no solo hasta la vecina de al lado.
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [0, 1, 2],
+            "soltar sobre la consola del otro extremo no las cambió de sitio"
+        );
+    }
+
+    #[test]
+    fn soltar_una_consola_fuera_de_las_demas_no_cambia_nada() {
+        // Cancelar a medias: se suelta en un hueco que no es de ninguna consola. **El árbol tiene que
+        // quedar igual**, y sobre todo ninguna consola puede perderse por el camino — soltarla mataría su
+        // programa.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+
+        let ctx = egui::Context::default();
+        let en_vuelo = arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &[izquierda, derecha],
+            egui::pos2(100.0, 150.0),
+            // Muy a la derecha de las dos: fuera de cualquier rectángulo.
+            egui::pos2(900.0, 150.0),
+        );
+
+        assert_eq!(
+            en_vuelo, None,
+            "soltando fuera de toda consola se señaló un destino"
+        );
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [0, 1],
+            "soltar fuera de toda consola cambió la disposición"
+        );
+    }
+
+    #[test]
+    fn soltar_una_consola_sobre_si_misma_no_cambia_nada() {
+        // Un gesto de un segundo: agarrar y soltar sin llegar a otra consola. Se mueve dentro del mismo
+        // rectángulo lo bastante para que egui lo dé por arrastre y no por clic.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+
+        let ctx = egui::Context::default();
+        let en_vuelo = arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &[izquierda, derecha],
+            egui::pos2(20.0, 150.0),
+            egui::pos2(180.0, 150.0),
+        );
+
+        assert_eq!(
+            en_vuelo, None,
+            "arrastrando dentro de la misma consola se señaló un destino"
+        );
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [0, 1],
+            "soltar una consola sobre sí misma cambió la disposición"
+        );
+    }
+
+    #[test]
+    fn soltar_sobre_si_misma_una_consola_que_no_es_la_primera_no_cambia_nada() {
+        // **AC7 otra vez, con el cero fuera.** Su hermana de arriba suelta sobre sí misma la consola del
+        // sitio **0**, y ese cero es el otro disfraz que este proyecto tiene fichado: comparar el sitio del
+        // destino contra el de la consola agarrada y compararlo contra un cero dan el mismo resultado
+        // cuando la agarrada está en el sitio 0, así que la prueba pasa con el defecto puesto.
+        //
+        // Aquí se agarra la del sitio **2** y se suelta dentro de ella misma, moviendo 160 puntos —de
+        // sobra para que egui lo dé por arrastre y no por clic— sin salir de su rectángulo. Se afirma sobre
+        // lo que se señala **en vuelo** porque es la mitad que distingue: dejar de descartar el propio sitio
+        // no cambia la disposición —`intercambiar` rechaza el mismo nombre dos veces— pero sí le promete al
+        // usuario un destino que no existe.
+        let (mut ventana, rectangulos) = tres_consolas_con_los_extremos_cruzados();
+        let suya = rectangulos[2];
+
+        let ctx = egui::Context::default();
+        let en_vuelo = arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            egui::pos2(suya.left() + 20.0, suya.center().y),
+            egui::pos2(suya.right() - 20.0, suya.center().y),
+        );
+
+        assert_eq!(
+            en_vuelo, None,
+            "arrastrando dentro de la tercera consola se la señaló a ella misma como destino"
+        );
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [2, 1, 0],
+            "soltar la tercera consola sobre sí misma cambió la disposición"
+        );
+    }
+
+    /// Tres consolas en fila con **el nombre y el sitio descruzados a propósito**, y sus rectángulos.
+    ///
+    /// **Es lo que hace falta para que una prueba distinga leer el nombre de leer el sitio.** Con dos —o
+    /// con tres— consolas recién abiertas cada nombre coincide con su sitio, así que las dos lecturas dan
+    /// exactamente el mismo número y una prueba escrita encima no ata nada: es el disfraz que este
+    /// proyecto tiene fichado, y ya se comprobó mutándolo —la suite entera seguía en verde—. Aquí se
+    /// cruzan las de los extremos antes de empezar, así que los sitios 0, 1 y 2 los ocupan los nombres
+    /// **2, 1 y 0**.
+    ///
+    /// El foco se queda como nace, en el nombre 0, que después de cruzar está en el sitio **2**: también
+    /// eso descruza las dos lecturas del foco.
+    fn tres_consolas_con_los_extremos_cruzados() -> (Ventana, Vec<egui::Rect>) {
+        let mut ventana = Ventana::con_pestañas(
+            &egui::Context::default(),
+            1,
+            Disposicion::nueva(3, 1).expect("tres columnas por una fila son tres consolas"),
+            None,
+        )
+        .expect("no se pudo abrir la ventana de tres consolas");
+
+        assert!(
+            ventana.activa_mut().raiz.intercambiar(0, 2),
+            "no se pudieron cruzar las dos de los extremos para preparar la prueba"
+        );
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [2, 1, 0],
+            "la preparación no dejó los nombres cruzados respecto a los sitios"
+        );
+
+        let ancho = 200.0;
+        let rectangulos: Vec<egui::Rect> = (0..3)
+            .map(|cual| {
+                egui::Rect::from_min_size(
+                    egui::pos2(cual as f32 * (ancho + GROSOR_DEL_DIVISOR), 0.0),
+                    egui::vec2(ancho, 300.0),
+                )
+            })
+            .collect();
+
+        (ventana, rectangulos)
+    }
+
+    #[test]
+    fn el_arrastre_va_por_el_nombre_de_la_consola_y_no_por_su_sitio() {
+        // Se arrastra la del sitio 0 sobre la del sitio 1, que es el único par cuyo resultado distingue las
+        // dos lecturas: por nombre queda [1, 2, 0] y por sitio quedaría [2, 0, 1].
+        let (mut ventana, rectangulos) = tres_consolas_con_los_extremos_cruzados();
+
+        let ctx = egui::Context::default();
+        arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].center(),
+            rectangulos[1].center(),
+        );
+
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [1, 2, 0],
+            "el arrastre movió las consolas por su sitio en vez de por su nombre"
+        );
+    }
+
+    #[test]
+    fn atender_el_raton_declara_lo_que_gasta() {
+        // La regla dura del proyecto: el fotograma se reparte por resta, así que un camino que no declare
+        // su coste se publica como coste del framework de interfaz, que es la cifra con la que se juzga a
+        // egui. Y este camino se recorre en **cada** fotograma mientras dura el gesto.
+        //
+        // Se afirma sobre el contador y **no** contra un reloj de pared tomado por fuera: entre los dos
+        // relojes cabe una expropiación del planificador, y este trabajo cuesta lo mismo que ese hueco.
+        // Lo que hace honesta a esta prueba es que aquí no hay nada más que pueda mover el contador —la
+        // llamada es directa, no una pasada de interfaz entera—, así que lo que sube solo puede ser esto.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+
+        assert_eq!(
+            ventana.cronometrado_aparte,
+            Duration::ZERO,
+            "la ventana no nació con el contador a cero"
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ventana.atender_el_raton(ui, &[izquierda, derecha]);
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            ventana.cronometrado_aparte > Duration::ZERO,
+            "atender el ratón no declaró nada de lo que gastó"
+        );
+    }
+
+    #[test]
+    fn pintar_el_velo_del_destino_declara_lo_que_gasta() {
+        // Lo mismo que su hermana de atender el ratón, y por la misma razón: es un camino que se recorre
+        // en cada fotograma **mientras dura el gesto**, y el fotograma se reparte por resta.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+
+        assert_eq!(
+            ventana.cronometrado_aparte,
+            Duration::ZERO,
+            "la ventana no nació con el contador a cero"
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            ventana.pintar_el_arrastre(ui, derecha);
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            ventana.cronometrado_aparte > Duration::ZERO,
+            "pintar el velo del destino no declaró nada de lo que gastó"
+        );
+    }
+
+    /// Tres hermanas en fila con pesos **distintos**, para que el reparto las distinga.
+    ///
+    /// Los pesos 1, 2 y 3 no son decorativos: con tres pesos iguales, intercambiar las consolas y
+    /// intercambiar las entradas enteras —peso incluido— dan exactamente el mismo reparto, y la prueba de
+    /// abajo pasaría con las dos.
+    fn tres_en_fila_con_pesos_distintos() -> Nodo {
+        Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 5)),
+                },
+                Hijo {
+                    peso: peso(2.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 6)),
+                },
+                Hijo {
+                    peso: peso(3.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 7)),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn intercambiar_dos_consolas_las_cambia_de_sitio_y_deja_los_pesos_donde_estaban() {
+        let mut arbol = tres_en_fila_con_pesos_distintos();
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 300.0));
+        let antes: Vec<egui::Rect> = arbol.colocar(area, 0.0).partes;
+
+        assert!(
+            arbol.intercambiar(5, 7),
+            "no encontró dos consolas que están las dos en el árbol"
+        );
+
+        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
+        assert_eq!(
+            nombres,
+            [7, 6, 5],
+            "las consolas no se cambiaron de sitio en el árbol"
+        );
+
+        // **Aquí está lo que de verdad se afirma.** Si el intercambio se llevara también el peso, la
+        // primera pasaría de una sexta parte del ancho a la mitad y la última al revés, moviendo además a
+        // la de en medio, que nadie ha tocado.
+        assert_eq!(
+            arbol.colocar(area, 0.0).partes,
+            antes,
+            "intercambiar dos consolas movió el reparto: los pesos se fueron con ellas"
+        );
+    }
+
+    #[test]
+    fn intercambiar_mueve_las_consolas_sin_tocar_su_programa_ni_su_identidad() {
+        // **El criterio por el que existe el hito, y el diseño avisaba de su disfraz**: comprobar que el
+        // campo `nombre` no cambió NO prueba que el proceso siga vivo. Una implementación que rehiciera
+        // las hojas en vez de moverlas dejaría los nombres idénticos, los rectángulos idénticos y **los
+        // dos programas muertos** — y las demás pruebas de este PR seguirían todas en verde.
+        //
+        // Lo que se ata aquí es la identidad: el `PANEL_ID` y el directorio son de la consola, se crean
+        // una sola vez y una consola rehecha tendría otros. Más que el programa siga vivo después.
+        // Se montan a mano y con **directorio de verdad**: las consolas del ayudante de siempre no
+        // publican identidad, y sin ella la comparación de abajo pasaría sin comparar nada.
+        let con_identidad = |nombre: usize| {
+            let mut division = division_con("sleep 30", nombre);
+            division.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
+            division
+        };
+        let mut arbol = Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(con_identidad(5)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(con_identidad(6)),
+                },
+            ],
+        };
+
+        let identidad_de = |arbol: &Nodo| -> Vec<(usize, String)> {
+            let mut suyas: Vec<(usize, String)> = arbol
+                .hojas()
+                .iter()
+                .map(|hoja| {
+                    (
+                        hoja.nombre,
+                        hoja.panel
+                            .as_ref()
+                            .expect("la consola de la prueba nace con directorio")
+                            .id()
+                            .to_owned(),
+                    )
+                })
+                .collect();
+            // Ordenado por nombre para comparar **cada consola consigo misma** y no con la que ocupa su
+            // hueco: el sitio cambia a propósito, y es lo único que debía cambiar.
+            suyas.sort_by_key(|(nombre, _)| *nombre);
+            suyas
+        };
+
+        let antes = identidad_de(&arbol);
+        assert!(arbol.intercambiar(5, 6), "no se pudieron cruzar las dos");
+
+        assert_eq!(
+            identidad_de(&arbol),
+            antes,
+            "cruzar dos consolas les cambió la identidad: no se movieron, se rehicieron"
+        );
+        assert_eq!(
+            arbol.hojas().iter().map(|h| h.nombre).collect::<Vec<_>>(),
+            [6, 5],
+            "las consolas no llegaron a cambiarse de sitio"
+        );
+        for hoja in arbol.hojas() {
+            assert!(
+                hoja.puente.sigue_vivo(),
+                "el programa de una consola murió al cruzarla de sitio"
+            );
+        }
+    }
+
+    #[test]
+    fn una_pestaña_de_una_sola_consola_no_tiene_donde_moverla() {
+        // Sin hermanas no hay gesto posible, y lo que no puede pasar es que lo intente y algo se rompa.
+        let mut ventana = Ventana::con_pestañas(
+            &egui::Context::default(),
+            1,
+            Disposicion::nueva(1, 1).expect("una columna por una fila es una consola"),
+            None,
+        )
+        .expect("no se pudo abrir la ventana de una sola consola");
+        let entera = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
+
+        let ctx = egui::Context::default();
+        let en_vuelo = arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &[entera],
+            egui::pos2(50.0, 150.0),
+            egui::pos2(350.0, 150.0),
+        );
+
+        assert_eq!(
+            en_vuelo, None,
+            "con una sola consola se señaló un destino que no existe"
+        );
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [0],
+            "arrastrar la única consola de la pestaña la descolocó"
+        );
+    }
+
+    #[test]
+    fn intercambiar_una_consola_consigo_misma_no_hace_nada() {
+        let mut arbol = tres_en_fila_con_pesos_distintos();
+
+        assert!(
+            !arbol.intercambiar(6, 6),
+            "intercambiar una consola consigo misma dijo que había hecho algo"
+        );
+
+        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
+        assert_eq!(
+            nombres,
+            [5, 6, 7],
+            "intercambiar una consola consigo misma descolocó el árbol"
+        );
+    }
+
+    #[test]
+    fn intercambiar_con_un_nombre_que_no_existe_deja_el_arbol_entero() {
+        // El caso que muerde de verdad: el destino dejó de existir entre agarrar y soltar. Lo que no puede
+        // pasar es que se quede a medias — una consola movida y la otra no, o peor, una perdida.
+        let mut arbol = tres_en_fila_con_pesos_distintos();
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 300.0));
+        let antes: Vec<egui::Rect> = arbol.colocar(area, 0.0).partes;
+
+        assert!(
+            !arbol.intercambiar(5, 99),
+            "intercambiar con un nombre que no existe dijo que había hecho algo"
+        );
+
+        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
+        assert_eq!(
+            nombres,
+            [5, 6, 7],
+            "intercambiar con un nombre que no existe descolocó las que sí existían"
+        );
+        assert_eq!(
+            arbol.colocar(area, 0.0).partes,
+            antes,
+            "intercambiar con un nombre que no existe cambió el reparto"
+        );
+    }
+
+    #[test]
+    fn intercambiar_alcanza_consolas_de_ramas_distintas() {
+        // Sin esto, el gesto solo funcionaría entre hermanas — que es justo la disposición en la que menos
+        // falta hace, porque ahí las dos ya están juntas.
+        let mut arbol = Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 5)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Rama {
+                        orientacion: Orientacion::Filas,
+                        hijos: vec![
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 6)),
+                            },
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 7)),
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+
+        assert!(
+            arbol.intercambiar(5, 7),
+            "no encontró una consola que está dentro de otra rama"
+        );
+
+        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
+        assert_eq!(
+            nombres,
+            [7, 6, 5],
+            "la consola de la columna no se cambió con la de dentro de la rama"
         );
     }
 
@@ -7722,6 +8730,72 @@ mod tests {
             }],
             ..Default::default()
         }
+    }
+
+    /// La entrada de un botón que se suelta.
+    fn soltar(en: egui::Pos2) -> egui::RawInput {
+        egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: en,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::default(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn arrastrar_una_frontera_sigue_moviendola_y_no_cambia_las_consolas_de_sitio() {
+        // **Lo que la operación nueva vuelve alcanzable, que es como rompen las cosas en este proyecto.**
+        // Desde que las consolas sienten arrastres, el mismo apretón llega a dos controles: el borde del
+        // divisor **es** el borde de la consola de al lado, y egui cuenta un punto sobre el borde como
+        // acierto directo del rectángulo. Si la consola le ganara el arrastre al divisor, redimensionar
+        // dejaría de funcionar; y como el gesto de la consola termina soltándola sobre otra,
+        // redimensionar **cambiaría las consolas de sitio**.
+        //
+        // Ninguna prueba anterior lo caza: las del divisor registran la frontera y **ninguna consola**, y
+        // las del arrastre de consolas no registran ninguna frontera. Hace falta una que monte las dos en
+        // la misma pasada y en el mismo orden que la aplicación.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let area = area_de(400.0 + GROSOR_DEL_DIVISOR);
+        let reparto = repartir(
+            area,
+            Orientacion::Columnas,
+            &pesos_de(FRACCION_INICIAL),
+            ANCHO_DE_CELDA,
+        );
+        let frontera = reparto.divisores[0];
+        let agarre = frontera.rect.center();
+        let suelta = egui::pos2(area.left() + 300.0, agarre.y);
+        let rectangulos = reparto.partes.clone();
+
+        let ctx = egui::Context::default();
+        let mut pasada = |entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                // El mismo orden que la pasada de verdad: primero las fronteras, después el ratón sobre
+                // las consolas.
+                ventana.arrastrar_la_frontera(ui, 0, frontera);
+                ventana.atender_el_raton(ui, &rectangulos);
+            })
+            .drop_without_applying_deltas();
+        };
+
+        pasada(mover(agarre));
+        pasada(pulsar(agarre));
+        pasada(mover(suelta));
+        pasada(soltar(suelta));
+
+        assert_eq!(
+            ventana.activa().fracciones_de_las_fronteras()[0],
+            0.75,
+            "la frontera dejó de moverse cuando las consolas empezaron a sentir arrastres"
+        );
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            [0, 1],
+            "arrastrar una frontera cambió las consolas de sitio"
+        );
     }
 
     /// Lo que mide una celda de ancho en los tests del reparto.
@@ -11207,7 +12281,7 @@ mod tests {
         ventana.activa_mut().mover_la_frontera(0, UN_CUARTO);
         let ctx = egui::Context::default();
 
-        // Dos pasadas, como en la prueba de `atender_clics`: egui resuelve la interacción contra las
+        // Dos pasadas, como en la prueba de `atender_el_raton`: egui resuelve la interacción contra las
         // regiones de la pasada anterior, así que un clic en la primera no encontraría a quién dárselo.
         pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
         pasada_de_interfaz(

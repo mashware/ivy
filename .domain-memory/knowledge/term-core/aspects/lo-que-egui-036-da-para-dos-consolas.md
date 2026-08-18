@@ -16,7 +16,7 @@ file_paths:
   - crates/app/src/pintor.rs
 symbols:
   - 'Ventana::ui'
-  - 'Ventana::atender_clics'
+  - 'Ventana::atender_el_raton'
   - 'Ventana::arrastrar_el_divisor'
   - repartir
   - 'pintor::pintar'
@@ -70,4 +70,4 @@ Leído en el fuente de egui/eframe **0.36.1** en el registro local de cargo, no 
 
 ## Where it lives
 
-El reparto a mano es la función `repartir` en `crates/app/src/lib.rs`; el recorte por consola está en `Ventana::pintar_division`, que llama a `painter_at`. El clic vive en `Ventana::atender_clics` y el arrastre en `Ventana::arrastrar_el_divisor`, los dos separados de la pasada de pintado precisamente para poder probarlos con `run_ui`. Las pruebas que corren la pasada **entera** usan el helper `pasada_de_interfaz` del módulo de tests de ese mismo fichero. La precondición de que el pintor no recorta glifos está documentada en `crates/app/src/pintor.rs`.
+El reparto a mano es la función `repartir` en `crates/app/src/lib.rs`; el recorte por consola está en `Ventana::pintar_division`, que llama a `painter_at`. El clic vive en `Ventana::atender_el_raton` —que desde F2.3 atiende también el arrastre de una consola sobre otra; antes se llamaba `atender_clics`— y el arrastre de la frontera en `Ventana::arrastrar_la_frontera`, los dos separados de la pasada de pintado precisamente para poder probarlos con `run_ui`. Las pruebas que corren la pasada **entera** usan el helper `pasada_de_interfaz` del módulo de tests de ese mismo fichero. La precondición de que el pintor no recorta glifos está documentada en `crates/app/src/pintor.rs`.
