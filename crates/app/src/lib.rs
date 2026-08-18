@@ -91,6 +91,60 @@ const REJILLA_INICIAL: Size = Size { rows: 24, cols: 80 };
 /// esperar—; se escribe para que nadie lo lea como una garantía que no existe.
 const GROSOR_DEL_DIVISOR: f32 = 2.0;
 
+/// A qué lado de una consola se pone la que llega.
+///
+/// **Existe para que insertar sepa decir «antes» además de «después».** Partir siempre pone la nueva
+/// detrás, y con eso bastaba mientras el único que insertaba era el acorde de teclado; recolocar necesita
+/// los cuatro, porque soltar a la izquierda y soltar a la derecha son disposiciones distintas.
+///
+/// **Cuatro variantes y no una orientación más un booleano**, aunque por dentro sea exactamente eso: quien
+/// llama tiene un gesto del ratón en la mano y sabe decir «arriba», no «en filas, antes».
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lado {
+    Izquierda,
+    Derecha,
+    Arriba,
+    Abajo,
+}
+
+impl Lado {
+    /// En qué sentido hay que cortar para poner algo a este lado.
+    fn corte(self) -> Orientacion {
+        match self {
+            Self::Izquierda | Self::Derecha => Orientacion::Columnas,
+            Self::Arriba | Self::Abajo => Orientacion::Filas,
+        }
+    }
+
+    /// Si la que llega va **antes** que la que ya estaba, en el orden en que se pintan.
+    fn antes(self) -> bool {
+        matches!(self, Self::Izquierda | Self::Arriba)
+    }
+
+    /// El lado que significa «detrás», que es lo único que insertar sabía decir antes de los cuatro.
+    ///
+    /// Los dos acordes de partir siguen queriendo exactamente eso: `Ctrl+Mayúsculas+D` deja la consola
+    /// nueva **a la derecha** y `+B` la deja **debajo**, y esa promesa no la cambia este hito.
+    fn detras_de(corte: Orientacion) -> Self {
+        match corte {
+            Orientacion::Columnas => Self::Derecha,
+            Orientacion::Filas => Self::Abajo,
+        }
+    }
+}
+
+/// Lo que la pasada del ratón sobre las consolas deja para el resto del fotograma.
+///
+/// **Dos cosas y no una porque la segunda no se puede deducir de la primera**: cuando alguien suelta, el
+/// árbol cambia y el destino se apaga en el mismo fotograma, así que un `None` no distingue «no hay
+/// arrastre» de «acaba de soltar».
+struct DelRaton {
+    /// Sobre qué consola —su sitio en el reparto— y por qué lado se soltaría, para poder pintarlo.
+    destino: Option<(usize, Lado)>,
+    /// Si la disposición se reordenó en esta pasada, y por tanto los rectángulos de antes ya no valen.
+    cambio_el_arbol: bool,
+}
+
 /// Con qué reparto abre la ventana: las dos consolas iguales.
 const FRACCION_INICIAL: f32 = 0.5;
 
@@ -454,6 +508,60 @@ fn pesos_de(fraccion: f32) -> [Peso; 2] {
         Peso::nuevo(primera).expect("el recorte deja la fracción en un rango con peso válido"),
         Peso::nuevo(1.0 - primera).expect("y su complemento también"),
     ]
+}
+
+/// La mitad de una consola que ocuparía la que llega por ese lado.
+///
+/// **Es la mitad y no una franja fina**, porque es literalmente el sitio que va a ocupar: recibir a otra
+/// consola parte el hueco por la mitad. Una marca más estrecha se leería como «va aquí al borde», que es
+/// lo que hacen los gestores de ventanas donde soltar en un borde acopla a la pantalla — y aquí no pasa
+/// eso.
+fn mitad(division: egui::Rect, lado: Lado) -> egui::Rect {
+    let centro = division.center();
+    match lado {
+        Lado::Izquierda => {
+            egui::Rect::from_min_max(division.min, egui::pos2(centro.x, division.bottom()))
+        }
+        Lado::Derecha => {
+            egui::Rect::from_min_max(egui::pos2(centro.x, division.top()), division.max)
+        }
+        Lado::Arriba => {
+            egui::Rect::from_min_max(division.min, egui::pos2(division.right(), centro.y))
+        }
+        Lado::Abajo => {
+            egui::Rect::from_min_max(egui::pos2(division.left(), centro.y), division.max)
+        }
+    }
+}
+
+/// A qué lado de esa consola cae el puntero: el borde que tiene más cerca.
+///
+/// **Se comparan en proporción al lado que les toca, y para eso se multiplica en cruz en vez de dividir.**
+/// En puntos, una consola ancha y baja tiene los bordes de arriba y abajo mucho más cerca que los de los
+/// lados, así que sin normalizar solo se podría soltar arriba o abajo por muy al borde izquierdo que se
+/// suelte. Multiplicar por el otro lado da la misma comparación **y** evita dividir por el ancho de una
+/// consola que se haya quedado en cero, que daría un número sin sentido justo en el caso raro.
+///
+/// Los empates caen del lado de la izquierda y de arriba. Da igual cuál: lo que importa es que sea
+/// siempre el mismo, para que el mismo punto no dé dos respuestas en dos fotogramas seguidos.
+fn lado_de(division: egui::Rect, puntero: egui::Pos2) -> Lado {
+    let (izquierda, derecha) = (puntero.x - division.left(), division.right() - puntero.x);
+    let (arriba, abajo) = (puntero.y - division.top(), division.bottom() - puntero.y);
+
+    let horizontal = izquierda.min(derecha) * division.height();
+    let vertical = arriba.min(abajo) * division.width();
+
+    if horizontal <= vertical {
+        if izquierda <= derecha {
+            Lado::Izquierda
+        } else {
+            Lado::Derecha
+        }
+    } else if arriba <= abajo {
+        Lado::Arriba
+    } else {
+        Lado::Abajo
+    }
 }
 
 /// Si una división de este tamaño se puede partir sin dejar a ninguna de las dos hijas por debajo del
@@ -1375,6 +1483,13 @@ impl Nodo {
     /// dejarlo fuera obligaría a cada llamador a acordarse.
     ///
     /// Devuelve si el intercambio ocurrió.
+    ///
+    /// **Solo lo usan las pruebas, y por eso lleva `cfg(test)`.** Nació siendo el efecto del gesto cuando
+    /// soltar una consola sobre otra las intercambiaba; desde que soltar **recoloca**, producción no lo
+    /// llama. Sobrevive porque es la forma más barata de montar un árbol donde el **nombre** de cada
+    /// consola no coincide con su **sitio**, que es lo único que distingue leer uno de leer el otro — el
+    /// disfraz que este proyecto tiene fichado.
+    #[cfg(test)]
     fn intercambiar(&mut self, una: usize, otra: usize) -> bool {
         if una == otra {
             return false;
@@ -1411,14 +1526,15 @@ impl Nodo {
     /// **Y las dos se reparten el peso de la que se partió**, en vez de darle a la nueva un peso propio:
     /// así las hermanas que ya estaban no se mueven ni un píxel, que es lo mismo que promete arrastrar
     /// una frontera.
-    fn partir(&mut self, nombre: usize, corte: Orientacion, nueva: Division) -> Option<Division> {
+    fn partir(&mut self, nombre: usize, lado: Lado, nueva: Division) -> Option<Division> {
+        let corte = lado.corte();
         match self {
             Self::Hoja(division) => {
                 if division.nombre != nombre {
                     return Some(nueva);
                 }
 
-                self.hacer_rama(corte, nueva);
+                self.hacer_rama(lado, nueva);
                 None
             }
             Self::Rama { orientacion, hijos } => {
@@ -1441,8 +1557,11 @@ impl Nodo {
                     let mitad = Peso::nuevo(hijos[donde].peso.valor() / 2.0)
                         .expect("la mitad de un peso válido sigue siéndolo");
                     hijos[donde].peso = mitad;
+                    // **El lado decide de qué parte del hueco sale la nueva**, y solo eso: las hermanas de
+                    // los dos extremos no se enteran, porque lo que se reparte es el peso de una sola.
+                    let sitio = if lado.antes() { donde } else { donde + 1 };
                     hijos.insert(
-                        donde + 1,
+                        sitio,
                         Hijo {
                             peso: mitad,
                             nodo: Self::Hoja(nueva),
@@ -1458,7 +1577,7 @@ impl Nodo {
                 for hijo in hijos {
                     // El `?` dice justo lo que hace falta: si el hijo **no** la devuelve es que la
                     // colocó, y entonces aquí no queda nada que seguir buscando.
-                    viajera = hijo.nodo.partir(nombre, corte, viajera)?;
+                    viajera = hijo.nodo.partir(nombre, lado, viajera)?;
                 }
 
                 Some(viajera)
@@ -1466,11 +1585,12 @@ impl Nodo {
         }
     }
 
-    /// Convierte esta hoja en una rama de dos: la que había, y la nueva detrás.
+    /// Convierte esta hoja en una rama de dos: la que había, y la nueva al lado que se pida.
     ///
     /// Los dos pesos son iguales porque una división que nace al partir nace **a medias**, y el peso de
     /// la rama entera —el que ven sus hermanas de fuera— es cosa de quien la contiene, no de aquí.
-    fn hacer_rama(&mut self, corte: Orientacion, nueva: Division) {
+    fn hacer_rama(&mut self, lado: Lado, nueva: Division) {
+        let corte = lado.corte();
         let peso = Peso::nuevo(1.0).expect("uno es un peso válido");
         // El marcador que se deja en el hueco es una rama sin hijos: hace falta **algo** ahí para poder
         // sacar la consola de la hoja sin clonarla, y una rama vacía es lo más barato que se puede poner.
@@ -1484,16 +1604,88 @@ impl Nodo {
             },
         );
 
+        let llega = Hijo {
+            peso,
+            nodo: Self::Hoja(nueva),
+        };
+        let estaba = Hijo { peso, nodo: vieja };
+
         *self = Self::Rama {
             orientacion: corte,
-            hijos: vec![
-                Hijo { peso, nodo: vieja },
-                Hijo {
-                    peso,
-                    nodo: Self::Hoja(nueva),
-                },
-            ],
+            hijos: if lado.antes() {
+                vec![llega, estaba]
+            } else {
+                vec![estaba, llega]
+            },
         };
+    }
+
+    /// Si en algún sitio de aquí abajo hay una consola que se llame así.
+    fn tiene_hoja(&self, nombre: usize) -> bool {
+        let mut hay = false;
+        self.recorrer(&mut |division| hay |= division.nombre == nombre);
+        hay
+    }
+
+    /// Saca una consola de donde esté y la pone al lado que se pida de otra.
+    ///
+    /// **Se lleva el árbol por valor y devuelve uno entero, salga bien o mal.** Esa es la forma en la que
+    /// se garantiza que un movimiento ocurre entero o no ocurre, y no una promesa que haya que recordar:
+    /// mientras la transformación no llegue al final, quien llamó **no tiene árbol que poner**, así que no
+    /// existe el estado intermedio en el que una consola —con su programa vivo dentro— se ha quitado de un
+    /// sitio y todavía no está en otro. Cuando se rechaza, el árbol vuelve tal cual.
+    ///
+    /// **Las comprobaciones van antes de tocar nada, y son las tres que pueden fallar de verdad:**
+    /// mover una consola sobre sí misma, un nombre que ya no existe —el destino pudo cerrarse entre
+    /// agarrar y soltar— y una pestaña de una sola consola, que no tiene dónde mover nada.
+    ///
+    /// **Después de esas tres, insertar no puede fallar, y eso se puede demostrar en vez de confiarlo**:
+    /// el destino existe, es distinto del que se mueve, y quitar una hoja **nunca borra otra** — `quitar`
+    /// saca una de la lista, `colapsar` sustituye una rama por su única hija y `absorber` sube nietas a
+    /// hermanas; ninguna de las tres pierde hojas.
+    ///
+    /// **Devuelve siempre un árbol, y aparte si el movimiento ocurrió.** La primera versión devolvía un
+    /// `Result<Self, Self>`, y se cambió por dos razones que apuntan al mismo sitio: el `Err` cargaba el
+    /// árbol entero (clippy lo señala), y sobre todo **`Err` no significaba siempre lo mismo** — en las tres
+    /// comprobaciones de arriba el árbol está intacto, y en el camino imposible de abajo no. Una tupla no
+    /// invita a leer «falló» como «no cambió nada».
+    ///
+    /// **El suelo geométrico no se comprueba aquí**, y no es un olvido: el árbol no conoce el área. Lo
+    /// mira quien tiene los rectángulos delante, igual que hace el acorde de partir con [`cabe_partir`].
+    fn mover(mut self, quien: usize, destino: usize, lado: Lado) -> (Self, bool) {
+        if quien == destino || !self.tiene_hoja(quien) || !self.tiene_hoja(destino) {
+            return (self, false);
+        }
+
+        // Una hoja no se quita a sí misma: si la raíz es la propia consola, esta pestaña tiene una sola y
+        // no hay disposición que reordenar.
+        let Some(cierre) = self.cerrar(quien) else {
+            return (self, false);
+        };
+
+        match self.partir(destino, lado, cierre.se_va) {
+            None => (self, true),
+            // **No puede ocurrir**, y aun así no se resuelve con un `expect`. La razón es la misma por la
+            // que cerrar tampoco entra en pánico cuando no encuentra el foco: aquí dentro hay una consola
+            // **viva**, y las dos salidas cómodas son las dos peores — soltarla mata su programa, y un
+            // pánico se lleva por delante la sesión entera, todas las demás consolas incluidas.
+            //
+            // Así que se injerta en la raíz, que la deja a la vista aunque en un sitio que nadie pidió, y
+            // se dice por la salida de errores. **`Err` significa «no se movió como se pidió», no «el
+            // árbol está intacto»**: por este camino sí cambió, y por eso hay que decirlo.
+            Some(devuelta) => {
+                eprintln!(
+                    "no se pudo colocar la consola en su destino después de sacarla; se deja en la raíz \
+                     para no perder su programa"
+                );
+                // **Y este injerto tampoco es limpio, conviene decirlo:** `hacer_rama` sobre lo que
+                // aquí es una rama y no una hoja puede dejar dos ramas del mismo sentido anidadas si la
+                // raíz reparte en el sentido de `lado`. Se acepta porque este camino es inalcanzable y
+                // porque una forma fea es mejor que un programa muerto — pero no es «la salida segura».
+                self.hacer_rama(lado, devuelta);
+                (self, false)
+            }
+        }
     }
 
     /// Si este nodo es la consola que se llama así.
@@ -1622,9 +1814,19 @@ impl Nodo {
     /// es justo lo que lo impide), así que es cerrar quien la habilita y quien tiene que deshacerla.
     ///
     /// **Los pesos se escalan, no se copian.** El grupo se llevaba `w` de lo que reparte esta rama y sus
-    /// hijas se lo repartían entre ellas; dándole a cada una `w · suyo / Σ` no se mueve nada en pantalla:
-    /// ni el bloque respecto a sus tías, ni las hijas entre ellas. Copiarlas tal cual sí las movería, y en
-    /// una dirección que depende de cuántas hermanas hubiera.
+    /// hijas se lo repartían entre ellas; dándole a cada una `w · suyo / Σ` se conserva **el reparto**: ni
+    /// el bloque respecto a sus tías, ni las hijas entre ellas. Copiarlas tal cual sí las movería, y en una
+    /// dirección que depende de cuántas hermanas hubiera.
+    ///
+    /// **Y «conserva el reparto» no es «no se mueve nada en pantalla», que es lo que esta doc decía antes
+    /// de medirlo.** Subir las hijas mete un divisor más en esta rama, y los divisores se descuentan del
+    /// área **antes** de repartir: el útil baja un grosor por cada hija que sube de más, y ese punto lo
+    /// pagan todas las de aquí, también las que no participan. Medido con
+    /// `absorber_conserva_la_geometria_de_las_consolas_que_no_se_mueven`: una consola que se llevaba la
+    /// mitad de 1.200 puntos pasa de 599 a 598. Es un punto y es inevitable —el divisor tiene que caber en
+    /// algún sitio—, pero **la afirmación fuerte era falsa**, y de ella cuelga el argumento de que
+    /// comprobar el suelo geométrico contra el árbol de ahora sea conservador: lo es porque el suelo se
+    /// exige a la rama que **se parte**, no porque nadie más se mueva.
     fn absorber(&mut self, cual: usize) {
         let Self::Rama { orientacion, hijos } = self else {
             return;
@@ -2520,7 +2722,12 @@ impl Ventana {
     /// propósito, con `res.drag_stopped()` dentro de su propia condición de «se está interactuando»
     /// (`context.rs:1532`, con su comentario). Un campo propio con la consola agarrada sería una segunda
     /// copia de algo que ya está guardado, y las dos podrían discrepar.
-    fn atender_el_raton(&mut self, ui: &egui::Ui, rectangulos: &[egui::Rect]) -> Option<usize> {
+    fn atender_el_raton(
+        &mut self,
+        ui: &egui::Ui,
+        rectangulos: &[egui::Rect],
+        metrica: &Metrica,
+    ) -> DelRaton {
         // **El cronómetro vive aquí y no en quien llama**, al revés que el del recorrido del reparto. La
         // razón es que así la propiedad se puede probar: con el cronómetro fuera, una prueba que llame a
         // esta función no toca el contador, y la única forma de comprobarlo sería cronometrar la pasada
@@ -2534,9 +2741,9 @@ impl Ventana {
         // prueba cayera**: un contador mayor que cero lo cumple cualquier par de lecturas seguidas.
         // Partiéndolo, la región cronometrada es la llamada entera y encogerla deja de ser mover una línea.
         let empezo = Instant::now();
-        let destino = self.atender_el_raton_sin_declararse(ui, rectangulos);
+        let del_raton = self.atender_el_raton_sin_declararse(ui, rectangulos, metrica);
         self.cronometrado_aparte += empezo.elapsed();
-        destino
+        del_raton
     }
 
     /// El trabajo de [`Self::atender_el_raton`], sin el cronómetro. No se llama desde ningún otro sitio.
@@ -2544,7 +2751,8 @@ impl Ventana {
         &mut self,
         ui: &egui::Ui,
         rectangulos: &[egui::Rect],
-    ) -> Option<usize> {
+        metrica: &Metrica,
+    ) -> DelRaton {
         // **Un solo vector, no dos.** Recorrer el árbol apuntando nombres reserva una vez; pedir
         // `divisiones()` y mapearlo encima reservaría otra, y este camino se recorre en **todos** los
         // fotogramas, haya gesto o no.
@@ -2554,6 +2762,7 @@ impl Ventana {
             .recorrer(&mut |division| nombres.push(division.nombre));
 
         let mut destino = None;
+        let mut cambio_el_arbol = false;
 
         // **Los rectángulos y los nombres se recorren emparejados, no indexando uno con el otro.** Son
         // dos listas que salen del mismo árbol y siempre miden lo mismo; emparejarlas hace imposible el
@@ -2597,10 +2806,19 @@ impl Ventana {
 
             // Sin puntero no hay destino: el ratón se ha ido de la ventana. El gesto se queda sin efecto y
             // el árbol no se toca, que es lo que se espera de cancelar a medias.
-            let encima = respuesta
-                .interact_pointer_pos()
-                .and_then(|puntero| rectangulos.iter().position(|donde| donde.contains(puntero)))
-                .filter(|&donde| donde != que_consola);
+            let encima = respuesta.interact_pointer_pos().and_then(|puntero| {
+                let donde = rectangulos
+                    .iter()
+                    .position(|rect| rect.contains(puntero))
+                    .filter(|&donde| donde != que_consola)?;
+                let lado = lado_de(rectangulos[donde], puntero);
+                // **Un destino donde no cabría no es un destino.** El velo dice «si sueltas, va aquí», y
+                // sin esta comprobación lo diría también donde soltar se va a rechazar: el usuario ve la
+                // mitad marcada, suelta, y no pasa nada — el aviso solo sale por la salida de errores, que
+                // nadie está mirando. Es la **misma regla** que aplica soltar, preguntada antes para no
+                // prometer lo que no se va a cumplir.
+                cabe_partir(rectangulos[donde], lado.corte(), metrica).then_some((donde, lado))
+            });
 
             // **Se exige que el botón se haya SOLTADO, y no basta con que el arrastre termine.** egui
             // aborta el arrastre al pulsar Escape y eso también levanta `drag_stopped()`, con el botón
@@ -2608,15 +2826,62 @@ impl Ventana {
             // media maniobra —agarrar, pasar por encima de otra, pulsar Escape— **completaba el
             // intercambio** en vez de cancelarlo.
             if respuesta.drag_stopped_by(egui::PointerButton::Primary) {
-                if let Some(otra) = encima.and_then(|donde| nombres.get(donde).copied()) {
-                    self.activa_mut().raiz.intercambiar(nombre, otra);
+                if let Some((donde, lado)) = encima
+                    && let Some(&otra) = nombres.get(donde)
+                {
+                    cambio_el_arbol |=
+                        self.soltar_una_division(nombre, otra, lado, rectangulos[donde], metrica);
                 }
             } else if !respuesta.drag_stopped() {
                 destino = encima;
             }
         }
 
-        destino
+        DelRaton {
+            destino,
+            cambio_el_arbol,
+        }
+    }
+
+    /// Deja una consola al lado de otra, si cabe.
+    ///
+    /// **El suelo geométrico se comprueba aquí y no dentro del árbol**, porque es aquí donde se conocen
+    /// los rectángulos. Es exactamente lo que ya hace el acorde de partir, y por la misma razón: recibir a
+    /// una consola sube en uno los hijos de la rama de destino, igual que partirla.
+    fn soltar_una_division(
+        &mut self,
+        quien: usize,
+        destino: usize,
+        lado: Lado,
+        suyo: egui::Rect,
+        metrica: &Metrica,
+    ) -> bool {
+        // **La misma regla que el gesto ya usó para decidir si enseñar el velo, y no sobra.** Allí sirve
+        // para no prometer; aquí para que la operación sea segura la llame quien la llame — el gesto es
+        // hoy el único llamador, pero la guarda no depende de que siga siéndolo.
+        if !cabe_partir(suyo, lado.corte(), metrica) {
+            // Se dice por lo mismo que al partir: el gesto ha terminado y no ha pasado nada, y sin esta
+            // línea se lee como que el arrastre está roto.
+            eprintln!(
+                "no se suelta ahí: la consola de destino no puede darle a las dos su mínimo. Agranda la \
+                 ventana o suéltala en otro sitio"
+            );
+            return false;
+        }
+
+        // **El árbol se saca, se transforma y se vuelve a poner, salga bien o mal.** El hueco se rellena
+        // con una rama vacía mientras tanto —el mismo marcador que ya usa `hacer_rama`, y por lo mismo:
+        // hace falta *algo* ahí para poder llevarse el árbol sin clonarlo, y vive lo que tardan estas dos
+        // líneas—. Las dos ramas del `match` devuelven un árbol entero, que es lo que hace imposible
+        // quedarse a medias.
+        let hueco = Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: Vec::new(),
+        };
+        let arbol = std::mem::replace(&mut self.activa_mut().raiz, hueco);
+        let (arbol, movio) = arbol.mover(quien, destino, lado);
+        self.activa_mut().raiz = arbol;
+        movio
     }
 
     /// Señala, mientras se arrastra, sobre qué consola se soltaría.
@@ -2633,10 +2898,10 @@ impl Ventana {
     ///
     /// **Recibe el rectángulo y no el sitio en la lista.** Con el sitio haría falta buscarlo, y con la
     /// búsqueda una guarda por si no está — de un número que sale de recorrer esa misma lista.
-    fn pintar_el_arrastre(&mut self, ui: &egui::Ui, destino: egui::Rect) {
+    fn pintar_el_arrastre(&mut self, ui: &egui::Ui, destino: egui::Rect, lado: Lado) {
         let empezo = Instant::now();
         ui.painter()
-            .rect_filled(destino, 0.0, self.tema.destino_del_arrastre());
+            .rect_filled(mitad(destino, lado), 0.0, self.tema.destino_del_arrastre());
         self.cronometrado_aparte += empezo.elapsed();
     }
 
@@ -2939,7 +3204,7 @@ impl Ventana {
         let nombre = nueva.nombre;
         let foco = self.activa().foco;
         let pestaña = self.activa_mut();
-        if let Some(sobrante) = pestaña.raiz.partir(foco, corte, nueva) {
+        if let Some(sobrante) = pestaña.raiz.partir(foco, Lado::detras_de(corte), nueva) {
             // **No puede ocurrir**: quien llama acaba de encontrar el foco entre las hojas de esta misma
             // pestaña, y nada ha tocado el árbol en medio. Se dice en vez de callarse porque la consola sí
             // se llegó a abrir, y al soltarla aquí muere su programa y desaparece su directorio: sin esta
@@ -3402,20 +3667,34 @@ impl eframe::App for Ventana {
         // **Y se pintan antes de quedarse con las partes** para poder llevárselas sin copiarlas: el
         // reparto se rehace en cada fotograma, así que un clon aquí es una reserva de memoria por
         // fotograma que además nadie declararía en la medida.
+        // **El ratón se atiende antes de pintar nada, y el reparto se rehace si soltó.** Soltar una
+        // consola sobre otra **reordena el árbol**, así que los rectángulos de arriba pasan a describir la
+        // disposición de antes: pintar con ellos dejaría un fotograma con los divisores y las consolas en
+        // el sitio viejo, y —peor— `pintar_division` le anotaría a cada consola la rejilla vieja, que es la
+        // que el bombeo le anuncia a su programa en el fotograma siguiente. Un reajuste doble y visible en
+        // cualquier programa de pantalla completa, que es el mismo defecto que este fichero ya documenta
+        // para el arrastre de fronteras.
+        //
+        // Rehacer se cronometra como el de las fronteras: es trabajo de la disposición y lo que no se
+        // declara se publica como coste del framework de interfaz.
+        //
+        // **Atender el ratón se declara solo**: el cronómetro va dentro, y su comentario dice por qué.
+        let del_raton = self.atender_el_raton(ui, &reparto.partes, &metrica);
+        if del_raton.cambio_el_arbol {
+            let rehacer = Instant::now();
+            reparto = reparto_de(self);
+            self.cronometrado_aparte += rehacer.elapsed();
+        }
+
         for divisor in &reparto.divisores {
             ui.painter()
                 .rect_filled(divisor.rect, 0.0, self.tema.divisor());
         }
 
         let rectangulos = reparto.partes;
-
-        // **El ratón se atiende antes de pintar las consolas**, porque soltar una encima de otra las
-        // cambia de sitio y pintar con el orden de antes las dejaría un fotograma cruzadas. El reparto
-        // **no** se rehace: intercambiar no toca la forma del árbol, así que los rectángulos son los
-        // mismos y lo único que cambia es qué consola le toca a cada uno.
-        //
-        // **Se declara sola**: el cronómetro va dentro de ella, no aquí, y su comentario dice por qué.
-        let destino_del_arrastre = self.atender_el_raton(ui, &rectangulos);
+        // **El destino que se pinta indexa el reparto de antes**, y vale: solo hay destino cuando el
+        // arrastre sigue en vuelo, y en ese fotograma nadie ha soltado, así que el árbol no cambió.
+        let destino_del_arrastre = del_raton.destino;
 
         // La barra se pinta antes que las consolas por lo mismo que el divisor: lo que se pinte después
         // queda por encima, y el glifo del borde de una consola que se saliera ya lo corta su recorte.
@@ -3454,8 +3733,8 @@ impl eframe::App for Ventana {
         // consola sobre la que cae.
         // Se indexa directamente, como el realce del foco de justo arriba y por la misma razón: el número
         // sale de recorrer esta misma lista en este mismo fotograma.
-        if let Some(destino) = destino_del_arrastre {
-            self.pintar_el_arrastre(ui, rectangulos[destino]);
+        if let Some((destino, lado)) = destino_del_arrastre {
+            self.pintar_el_arrastre(ui, rectangulos[destino], lado);
         }
 
         // Las que no se pintan no tienen otro sitio donde enterarse de su tamaño: ésta es la única
@@ -7587,16 +7866,19 @@ mod tests {
         // consolas son una curiosidad. Se prueba con un `Ui` de verdad porque lo que hay que comprobar
         // es la traducción de un clic del escritorio a nuestro foco, y eso solo lo sabe egui.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
-        let dentro_de_la_derecha = egui::pos2(300.0, 150.0);
+        let [izquierda, derecha] = dos_consolas_anchas();
+        let dentro_de_la_derecha = egui::pos2(600.0, 150.0);
 
         let ctx = egui::Context::default();
         // Dos pasadas: en la primera se registran las regiones, y en la segunda llega el clic. egui
         // resuelve la interacción contra lo que había en la pasada anterior, así que un clic en la
         // primera no encontraría a nadie a quien dárselo.
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            ventana.atender_el_raton(ui, &[izquierda, derecha]);
+            ventana.atender_el_raton(
+                ui,
+                &[izquierda, derecha],
+                &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+            );
         })
         .drop_without_applying_deltas();
 
@@ -7619,7 +7901,11 @@ mod tests {
             ..Default::default()
         };
         ctx.run_ui(entrada, |ui| {
-            ventana.atender_el_raton(ui, &[izquierda, derecha]);
+            ventana.atender_el_raton(
+                ui,
+                &[izquierda, derecha],
+                &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+            );
         })
         .drop_without_applying_deltas();
 
@@ -7628,6 +7914,19 @@ mod tests {
             1,
             "el clic en la consola derecha no le dio el foco"
         );
+    }
+
+    /// Dos consolas lado a lado **con sitio de sobra** para recibir a otra por cualquier lado.
+    ///
+    /// **Cuatrocientos puntos de ancho y no doscientos**: soltar por un lado exige que las dos quepan con
+    /// su suelo de columnas, y con doscientos el gesto se rechaza. Una prueba escrita sobre consolas
+    /// estrechas pasaría **por no caber** en vez de por lo que dice comprobar, que es el tercer disfraz
+    /// fichado de este proyecto.
+    fn dos_consolas_anchas() -> [egui::Rect; 2] {
+        [
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0)),
+            egui::Rect::from_min_size(egui::pos2(402.0, 0.0), egui::vec2(400.0, 300.0)),
+        ]
     }
 
     /// Un arrastre entero del ratón: pulsar aquí, mover allí, y soltar.
@@ -7649,11 +7948,17 @@ mod tests {
         rectangulos: &[egui::Rect],
         desde: egui::Pos2,
         hasta: egui::Pos2,
-    ) -> Option<usize> {
+    ) -> Option<(usize, Lado)> {
         let mut pasada = |entrada: egui::RawInput| {
             let mut visto = None;
             ctx.run_ui(entrada, |ui| {
-                visto = ventana.atender_el_raton(ui, rectangulos);
+                visto = ventana
+                    .atender_el_raton(
+                        ui,
+                        rectangulos,
+                        &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                    )
+                    .destino;
             })
             .drop_without_applying_deltas();
             visto
@@ -7718,8 +8023,7 @@ mod tests {
         let mut ventana = Ventana::con_pestañas(&ctx_ventana, 2, Disposicion::DE_SIEMPRE, None)
             .expect("no se pudieron abrir las dos pestañas");
 
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
         let rectangulos = [izquierda, derecha];
 
         let de_la_segunda: Vec<usize> = ventana.pestañas[1]
@@ -7736,21 +8040,68 @@ mod tests {
         let ctx = egui::Context::default();
         let pasada = |ventana: &mut Ventana, entrada: egui::RawInput| {
             ctx.run_ui(entrada, |ui| {
-                ventana.atender_el_raton(ui, &rectangulos);
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
             })
             .drop_without_applying_deltas();
         };
 
         pasada(&mut ventana, egui::RawInput::default());
-        pasada(&mut ventana, mover(egui::pos2(100.0, 150.0)));
-        pasada(&mut ventana, pulsar(egui::pos2(100.0, 150.0)));
-        pasada(&mut ventana, mover(egui::pos2(300.0, 150.0)));
+        pasada(&mut ventana, mover(egui::pos2(200.0, 150.0)));
+        pasada(&mut ventana, pulsar(egui::pos2(200.0, 150.0)));
+        // Por el borde de **arriba**: soltar a la izquierda de la consola de la derecha las dejaría donde
+        // ya estaban, y entonces reordenar la pestaña de destino no se vería.
+        pasada(&mut ventana, mover(egui::pos2(600.0, 20.0)));
+
+        // **La mitad de control, y sin ella esta prueba no ata nada.** Antes de cambiar de pestaña hay que
+        // demostrar que este mismo gesto, sin cambiar, SÍ mueve — si no, «la pestaña de destino no cambió»
+        // se cumple igual cuando el gesto no llega a completarse nunca. Comprobado: sin esta mitad, la
+        // mutación que pone el sitio en el identificador seguía en verde.
+        {
+            let mut control =
+                Ventana::con_pestañas(&ctx_ventana, 2, Disposicion::DE_SIEMPRE, None)
+                    .expect("no se pudieron abrir las dos pestañas de control");
+            let ctx_control = egui::Context::default();
+            for entrada in [
+                egui::RawInput::default(),
+                mover(egui::pos2(200.0, 150.0)),
+                pulsar(egui::pos2(200.0, 150.0)),
+                mover(egui::pos2(600.0, 20.0)),
+                soltar(egui::pos2(600.0, 20.0)),
+            ] {
+                ctx_control
+                    .run_ui(entrada, |ui| {
+                        control.atender_el_raton(
+                            ui,
+                            &rectangulos,
+                            &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                        );
+                    })
+                    .drop_without_applying_deltas();
+            }
+            let partes = control
+                .activa()
+                .raiz
+                .colocar(izquierda.union(derecha), ANCHO_DE_CELDA)
+                .partes;
+            assert!(
+                partes[0].bottom() <= partes[1].top(),
+                "sin cambiar de pestaña el gesto tampoco movió nada, así que la prueba no distingue"
+            );
+        }
 
         // El acorde de cambiar de pestaña se aplica al principio de la pasada, mucho antes de que se
         // atienda el ratón. Aquí se hace a mano porque lo que se prueba es el efecto, no el atajo.
         ventana.activa = 1;
 
-        pasada(&mut ventana, soltar(egui::pos2(300.0, 150.0)));
+        // **Se suelta en el mismo punto por el que se pasó**, arriba del todo: soltar a media altura elige
+        // el lado izquierdo, y por ese lado el movimiento deja la pestaña con la misma forma y el mismo
+        // orden — o sea que el defecto ocurriría y la prueba no lo vería. Comprobado sondeando: con el
+        // identificador por sitio, el arrastre sí llega a la otra pestaña y suelta ahí.
+        pasada(&mut ventana, soltar(egui::pos2(600.0, 20.0)));
 
         let despues: Vec<usize> = ventana.pestañas[1]
             .divisiones()
@@ -7761,6 +8112,16 @@ mod tests {
             despues, de_la_segunda,
             "llegar a otra pestaña con una consola agarrada le reordenó las suyas"
         );
+        // Y la **forma** tampoco: apilarlas es lo que haría el movimiento por el borde de arriba, y es lo
+        // que el orden de los nombres por sí solo no delata.
+        let partes = ventana.pestañas[1]
+            .raiz
+            .colocar(izquierda.union(derecha), ANCHO_DE_CELDA)
+            .partes;
+        assert!(
+            partes[0].right() <= partes[1].left(),
+            "llegar a otra pestaña con una consola agarrada le cambió la forma: {partes:?}"
+        );
     }
 
     #[test]
@@ -7770,22 +8131,28 @@ mod tests {
         // arrepentirse a media maniobra —agarrar, pasar por encima de otra, pulsar Escape— completaba el
         // intercambio en vez de cancelarlo. Es lo contrario de lo que promete cancelar.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
         let rectangulos = [izquierda, derecha];
 
         let ctx = egui::Context::default();
         let mut pasada = |entrada: egui::RawInput| {
             ctx.run_ui(entrada, |ui| {
-                ventana.atender_el_raton(ui, &rectangulos);
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
             })
             .drop_without_applying_deltas();
         };
 
         pasada(egui::RawInput::default());
-        pasada(mover(egui::pos2(100.0, 150.0)));
-        pasada(pulsar(egui::pos2(100.0, 150.0)));
-        pasada(mover(egui::pos2(300.0, 150.0)));
+        pasada(mover(egui::pos2(200.0, 150.0)));
+        pasada(pulsar(egui::pos2(200.0, 150.0)));
+        // **Por el borde de arriba, no por el centro.** Soltar a la izquierda de la consola de la derecha
+        // deja las dos exactamente donde estaban, así que cancelar y no cancelar darían el mismo orden y
+        // la prueba no distinguiría nada. Por arriba, no cancelar las apilaría.
+        pasada(mover(egui::pos2(600.0, 20.0)));
         pasada(egui::RawInput {
             events: vec![egui::Event::Key {
                 key: egui::Key::Escape,
@@ -7797,10 +8164,15 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(
-            nombres_en_orden(&ventana),
-            [0, 1],
-            "cancelar con Escape completó el intercambio en vez de anularlo"
+        let partes = ventana
+            .activa()
+            .raiz
+            .colocar(izquierda.union(derecha), ANCHO_DE_CELDA)
+            .partes;
+        assert!(
+            partes[0].right() <= partes[1].left(),
+            "cancelar con Escape completó el movimiento en vez de anularlo: las consolas quedaron \
+             apiladas en vez de una al lado de la otra"
         );
     }
 
@@ -7811,8 +8183,7 @@ mod tests {
         // candidato a arrastrarse **cualquier** pulsación—, así que sin cualificarlos, un pegado con el
         // central que se desplace un poco cambiaría dos consolas de sitio sin que nadie lo pidiera.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
         let rectangulos = [izquierda, derecha];
 
         let boton = |en: egui::Pos2, pressed: bool| egui::RawInput {
@@ -7829,17 +8200,23 @@ mod tests {
         let mut pasada = |entrada: egui::RawInput| {
             let mut visto = None;
             ctx.run_ui(entrada, |ui| {
-                visto = ventana.atender_el_raton(ui, &rectangulos);
+                visto = ventana
+                    .atender_el_raton(
+                        ui,
+                        &rectangulos,
+                        &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                    )
+                    .destino;
             })
             .drop_without_applying_deltas();
             visto
         };
 
         pasada(egui::RawInput::default());
-        pasada(mover(egui::pos2(100.0, 150.0)));
-        pasada(boton(egui::pos2(100.0, 150.0), true));
-        let en_vuelo = pasada(mover(egui::pos2(300.0, 150.0)));
-        pasada(boton(egui::pos2(300.0, 150.0), false));
+        pasada(mover(egui::pos2(200.0, 150.0)));
+        pasada(boton(egui::pos2(200.0, 150.0), true));
+        let en_vuelo = pasada(mover(egui::pos2(600.0, 150.0)));
+        pasada(boton(egui::pos2(600.0, 150.0), false));
 
         assert_eq!(
             nombres_en_orden(&ventana),
@@ -7855,30 +8232,45 @@ mod tests {
     }
 
     #[test]
-    fn arrastrar_una_consola_sobre_otra_las_cambia_de_sitio() {
-        // El criterio del hito. Se comprueba sobre los **nombres en el orden en que se pintan**, que es lo
-        // que decide qué consola ve el usuario en cada hueco; afirmar sobre el campo donde se apunta el
-        // agarre diría que el gesto se registró, no que algo se movió.
+    fn soltar_una_consola_encima_de_otra_cambia_la_forma_de_la_pestaña() {
+        // **El criterio del hito, y lo que de verdad distingue esta entrega de la anterior.** Antes, soltar
+        // una consola sobre otra las intercambiaba y la **forma** del árbol no se tocaba. Ahora la
+        // disposición se reordena de verdad: soltando por el borde de arriba, dos consolas que estaban una
+        // al lado de la otra pasan a estar **una encima de otra**.
+        //
+        // Se afirma sobre la **geometría** y no sobre el orden de los nombres, y no es un capricho: con
+        // dos consolas, el orden [0, 1] es el mismo antes y después de este gesto. Lo que cambia es que
+        // dejan de repartirse el ancho para repartirse el alto, y eso solo se ve en los rectángulos.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
+        let area = izquierda.union(derecha);
 
-        let antes = nombres_en_orden(&ventana);
-        assert_eq!(antes, [0, 1], "la ventana no abrió con las dos en orden");
+        let antes = ventana.activa().raiz.colocar(area, ANCHO_DE_CELDA).partes;
+        assert!(
+            antes[0].right() <= antes[1].left(),
+            "la ventana no abrió con las dos una al lado de la otra"
+        );
 
         let ctx = egui::Context::default();
         arrastrar_una_consola(
             &mut ventana,
             &ctx,
             &[izquierda, derecha],
-            egui::pos2(100.0, 150.0),
-            egui::pos2(300.0, 150.0),
+            egui::pos2(200.0, 150.0),
+            // Por el borde de **arriba** de la derecha: es lo que pide ponerla encima.
+            egui::pos2(600.0, 20.0),
         );
 
+        let despues = ventana.activa().raiz.colocar(area, ANCHO_DE_CELDA).partes;
+        assert_eq!(despues.len(), 2, "una consola se perdió por el camino");
+        assert!(
+            despues[0].bottom() <= despues[1].top(),
+            "soltar por el borde de arriba no dejó una consola encima de la otra: {despues:?}"
+        );
         assert_eq!(
             nombres_en_orden(&ventana),
-            [1, 0],
-            "arrastrar la izquierda sobre la derecha no las cambió de sitio"
+            [0, 1],
+            "la consola soltada por arriba no quedó la primera"
         );
     }
 
@@ -7890,8 +8282,7 @@ mod tests {
         // Se arrastra de la derecha a la izquierda para que el foco de destino no coincida con el que la
         // ventana ya tenía: empezando por la izquierda, el defecto y el arreglo darían lo mismo.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
 
         assert_eq!(
             ventana.activa().foco,
@@ -7904,8 +8295,8 @@ mod tests {
             &mut ventana,
             &ctx,
             &[izquierda, derecha],
-            egui::pos2(300.0, 150.0),
-            egui::pos2(100.0, 150.0),
+            egui::pos2(600.0, 150.0),
+            egui::pos2(200.0, 150.0),
         );
 
         // Se comprueba el **nombre** y no el sitio: las dos se acaban de cambiar de sitio, así que el
@@ -7946,7 +8337,10 @@ mod tests {
             &ctx,
             &rectangulos,
             rectangulos[0].center(),
-            rectangulos[1].center(),
+            // **Por el borde derecho de la del medio, no por su centro.** Soltar en el centro deja la
+            // consola justo donde ya estaba -- y una prueba cuyo movimiento no mueve nada no distingue
+            // "se movió bien" de "no se movió".
+            egui::pos2(rectangulos[1].right() - 12.0, rectangulos[1].center().y),
         );
 
         assert_eq!(
@@ -7966,21 +8360,20 @@ mod tests {
         // Lo que sostiene que el usuario vea el destino **antes** de soltar. Se afirma sobre lo que la
         // función devuelve en vuelo porque es lo único que el pintado recibe.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
 
         let ctx = egui::Context::default();
         let en_vuelo = arrastrar_una_consola(
             &mut ventana,
             &ctx,
             &[izquierda, derecha],
-            egui::pos2(100.0, 150.0),
-            egui::pos2(300.0, 150.0),
+            egui::pos2(200.0, 150.0),
+            egui::pos2(600.0, 150.0),
         );
 
         assert_eq!(
             en_vuelo,
-            Some(1),
+            Some((1, Lado::Izquierda)),
             "arrastrando sobre la consola de la derecha no se señaló a la derecha"
         );
     }
@@ -8008,14 +8401,14 @@ mod tests {
 
         assert_eq!(
             en_vuelo,
-            Some(2),
+            Some((2, Lado::Izquierda)),
             "arrastrando sobre la tercera consola se señaló su nombre en vez de su sitio"
         );
         // Y que el gesto llegó de verdad hasta el final del reparto, y no solo hasta la vecina de al lado.
         assert_eq!(
             nombres_en_orden(&ventana),
-            [0, 1, 2],
-            "soltar sobre la consola del otro extremo no las cambió de sitio"
+            [1, 2, 0],
+            "soltar sobre el borde izquierdo de la consola del otro extremo no la recolocó ahí"
         );
     }
 
@@ -8025,17 +8418,16 @@ mod tests {
         // quedar igual**, y sobre todo ninguna consola puede perderse por el camino — soltarla mataría su
         // programa.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
 
         let ctx = egui::Context::default();
         let en_vuelo = arrastrar_una_consola(
             &mut ventana,
             &ctx,
             &[izquierda, derecha],
-            egui::pos2(100.0, 150.0),
+            egui::pos2(200.0, 150.0),
             // Muy a la derecha de las dos: fuera de cualquier rectángulo.
-            egui::pos2(900.0, 150.0),
+            egui::pos2(1500.0, 150.0),
         );
 
         assert_eq!(
@@ -8054,16 +8446,15 @@ mod tests {
         // Un gesto de un segundo: agarrar y soltar sin llegar a otra consola. Se mueve dentro del mismo
         // rectángulo lo bastante para que egui lo dé por arrastre y no por clic.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
 
         let ctx = egui::Context::default();
         let en_vuelo = arrastrar_una_consola(
             &mut ventana,
             &ctx,
             &[izquierda, derecha],
-            egui::pos2(20.0, 150.0),
-            egui::pos2(180.0, 150.0),
+            egui::pos2(40.0, 150.0),
+            egui::pos2(360.0, 150.0),
         );
 
         assert_eq!(
@@ -8087,7 +8478,7 @@ mod tests {
         // Aquí se agarra la del sitio **2** y se suelta dentro de ella misma, moviendo 160 puntos —de
         // sobra para que egui lo dé por arrastre y no por clic— sin salir de su rectángulo. Se afirma sobre
         // lo que se señala **en vuelo** porque es la mitad que distingue: dejar de descartar el propio sitio
-        // no cambia la disposición —`intercambiar` rechaza el mismo nombre dos veces— pero sí le promete al
+        // no cambia la disposición —`mover` rechaza el mismo nombre dos veces— pero sí le promete al
         // usuario un destino que no existe.
         let (mut ventana, rectangulos) = tres_consolas_con_los_extremos_cruzados();
         let suya = rectangulos[2];
@@ -8142,7 +8533,10 @@ mod tests {
             "la preparación no dejó los nombres cruzados respecto a los sitios"
         );
 
-        let ancho = 200.0;
+        // **Cuatrocientos y no doscientos**: recibir a otra consola por un lado exige que las dos quepan con
+        // su suelo de columnas, y con doscientos puntos el movimiento se rechaza -- con razón, pero
+        // entonces la prueba no comprueba lo que dice.
+        let ancho = 400.0;
         let rectangulos: Vec<egui::Rect> = (0..3)
             .map(|cual| {
                 egui::Rect::from_min_size(
@@ -8167,7 +8561,9 @@ mod tests {
             &ctx,
             &rectangulos,
             rectangulos[0].center(),
-            rectangulos[1].center(),
+            // Por el borde derecho de la del medio: soltar en su centro dejaría la consola donde ya
+            // estaba, y una prueba cuyo movimiento no mueve nada no distingue nada.
+            egui::pos2(rectangulos[1].right() - 12.0, rectangulos[1].center().y),
         );
 
         assert_eq!(
@@ -8188,8 +8584,7 @@ mod tests {
         // Lo que hace honesta a esta prueba es que aquí no hay nada más que pueda mover el contador —la
         // llamada es directa, no una pasada de interfaz entera—, así que lo que sube solo puede ser esto.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        let izquierda = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let [izquierda, derecha] = dos_consolas_anchas();
 
         assert_eq!(
             ventana.cronometrado_aparte,
@@ -8199,7 +8594,11 @@ mod tests {
 
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            ventana.atender_el_raton(ui, &[izquierda, derecha]);
+            ventana.atender_el_raton(
+                ui,
+                &[izquierda, derecha],
+                &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+            );
         })
         .drop_without_applying_deltas();
 
@@ -8224,7 +8623,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            ventana.pintar_el_arrastre(ui, derecha);
+            ventana.pintar_el_arrastre(ui, derecha, Lado::Izquierda);
         })
         .drop_without_applying_deltas();
 
@@ -8232,6 +8631,606 @@ mod tests {
             ventana.cronometrado_aparte > Duration::ZERO,
             "pintar el velo del destino no declaró nada de lo que gastó"
         );
+    }
+
+    /// Si en algún sitio del árbol hay una rama dentro de otra **del mismo sentido**.
+    ///
+    /// **Es la forma que D14 existe para no repetir**: dos ramas del mismo sentido anidadas devuelven la
+    /// frontera que arrastra un bloque de dos consolas, que es lo que más se le critica a `tmux`. Partir no
+    /// puede llegar a ella; cerrar sí, y por eso `absorber` la deshace. **Mover hace las dos cosas**, así
+    /// que hereda el riesgo entero y hay que comprobarlo, no suponerlo.
+    fn hay_anidamiento_del_mismo_sentido(nodo: &Nodo) -> bool {
+        let Nodo::Rama { orientacion, hijos } = nodo else {
+            return false;
+        };
+        hijos.iter().any(|hijo| {
+            matches!(&hijo.nodo, Nodo::Rama { orientacion: dentro, .. } if dentro == orientacion)
+                || hay_anidamiento_del_mismo_sentido(&hijo.nodo)
+        })
+    }
+
+    /// Si en algún sitio del árbol hay una rama con **una sola hija**.
+    ///
+    /// **Es la otra mitad de la regla 4 de D14, y la que se olvida**: una rama de una hija no se distingue
+    /// en pantalla —le da su área entera y no le pone divisor— pero hace que partir en ese sentido inserte
+    /// *dentro* de ella en vez de al lado, y de ahí sale el anidamiento. Sin comprobarla, una operación que
+    /// se saltara `colapsar` pasaría desapercibida hasta el gesto siguiente.
+    fn hay_una_rama_de_una_sola_hija(nodo: &Nodo) -> bool {
+        let Nodo::Rama { hijos, .. } = nodo else {
+            return false;
+        };
+        hijos.len() == 1
+            || hijos
+                .iter()
+                .any(|hijo| hay_una_rama_de_una_sola_hija(&hijo.nodo))
+    }
+
+    /// Una consola con directorio de verdad, para poder mirarle la identidad.
+    fn con_identidad(nombre: usize) -> Division {
+        let mut division = division_con("sleep 30", nombre);
+        division.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
+        division
+    }
+
+    /// `Columnas[5, Filas[6, Columnas[8, 9]]]` — la forma donde sacar una hoja obliga a **absorber**.
+    ///
+    /// **Es la que hacía falta y no la que había.** Con `Columnas[5, Filas[6, 7]]`, quitar la 5 deja la
+    /// raíz con una sola hija y solo corre `colapsar`; `absorber` —que es quien de verdad impide el
+    /// anidamiento— no llega a ejecutarse nunca, así que la prueba pasaba igual con `mover` llamando a
+    /// `quitar` en vez de a `cerrar`. Aquí, sacar la **6** deja la rama de filas con una sola hija que es
+    /// a su vez una rama de columnas dentro de otra de columnas: exactamente lo que hay que deshacer.
+    fn un_grupo_que_obliga_a_absorber() -> Nodo {
+        Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 5)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Rama {
+                        orientacion: Orientacion::Filas,
+                        hijos: vec![
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 6)),
+                            },
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Rama {
+                                    orientacion: Orientacion::Columnas,
+                                    hijos: vec![
+                                        Hijo {
+                                            peso: peso(1.0),
+                                            nodo: Nodo::Hoja(division_con("sleep 30", 8)),
+                                        },
+                                        Hijo {
+                                            peso: peso(1.0),
+                                            nodo: Nodo::Hoja(division_con("sleep 30", 9)),
+                                        },
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        }
+    }
+
+    /// `Columnas[5, Filas[6, 7]]` — una fila con un grupo partido dentro.
+    fn una_columna_y_un_grupo() -> Nodo {
+        Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 5)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Rama {
+                        orientacion: Orientacion::Filas,
+                        hijos: vec![
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 6)),
+                            },
+                            Hijo {
+                                peso: peso(1.0),
+                                nodo: Nodo::Hoja(division_con("sleep 30", 7)),
+                            },
+                        ],
+                    },
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn no_se_suelta_donde_la_consola_no_cabria_con_su_suelo() {
+        // **AC6.** Recibir a otra consola sube en uno los hijos de la rama de destino, exactamente igual
+        // que partirla, así que hace falta la misma guarda: si las dos no caben con su mínimo, no se
+        // suelta y la disposición se queda como estaba.
+        //
+        // **La mitad que hace la prueba honesta es la de control**: primero se comprueba que con sitio de
+        // sobra el movimiento sí ocurre. Sin ella, una implementación que no soltara nunca pasaría igual.
+        let ancho_de_sobra =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(900.0, 300.0));
+        let estrecho = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 300.0));
+
+        let mut cabiendo = ventana_con("sleep 30", "sleep 30");
+        con_metrica(|metrica| {
+            cabiendo.soltar_una_division(0, 1, Lado::Derecha, ancho_de_sobra, metrica);
+        });
+        assert_eq!(
+            nombres_en_orden(&cabiendo),
+            [1, 0],
+            "con sitio de sobra el movimiento no ocurrió, así que la prueba de abajo no probaría nada"
+        );
+
+        let mut sin_caber = ventana_con("sleep 30", "sleep 30");
+        con_metrica(|metrica| {
+            sin_caber.soltar_una_division(0, 1, Lado::Derecha, estrecho, metrica);
+        });
+        assert_eq!(
+            nombres_en_orden(&sin_caber),
+            [0, 1],
+            "se soltó en una consola que no puede darle a las dos su mínimo de columnas"
+        );
+    }
+
+    #[test]
+    fn al_soltar_se_rehace_el_reparto_y_a_cada_consola_se_le_anuncia_su_rejilla_nueva() {
+        // **El defecto que esto ata no se ve en la disposición, se ve en el programa de dentro.** Soltar
+        // reordena el árbol; si el fotograma se pinta con los rectángulos de antes, `pintar_division` le
+        // anota a cada consola la rejilla **vieja**, y es esa la que el bombeo le anuncia a su programa en
+        // el fotograma siguiente. Resultado: un reajuste doble, visible en cualquier programa de pantalla
+        // completa — el mismo defecto que este fichero ya documenta para el arrastre de fronteras.
+        //
+        // Se afirma sobre `medido`, que es literalmente lo que se le va a anunciar al pseudoterminal.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let area = area_de(900.0);
+        let ctx = egui::Context::default();
+
+        // Una pasada para que existan las regiones, y de paso para saber dónde cae cada consola.
+        pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+        let partes =
+            con_metrica(|metrica| ventana.activa().raiz.colocar(area, metrica.ancho()).partes);
+        let [izquierda, derecha] = [partes[0], partes[1]];
+        assert!(
+            izquierda.right() <= derecha.left(),
+            "la ventana no abrió con las dos una al lado de la otra"
+        );
+
+        let anchos_antes: Vec<u16> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.medido.cols)
+            .collect();
+
+        // Agarrar la izquierda y soltarla por el borde de **arriba** de la derecha: quedan apiladas, y
+        // apiladas cada una se lleva el ancho entero.
+        let arriba_de_la_derecha = egui::pos2(derecha.center().x, derecha.top() + 10.0);
+        for entrada in [
+            mover(izquierda.center()),
+            pulsar(izquierda.center()),
+            mover(arriba_de_la_derecha),
+            soltar(arriba_de_la_derecha),
+        ] {
+            pasada_de_interfaz(&mut ventana, &ctx, area, entrada);
+        }
+
+        let anchos_ahora: Vec<u16> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.medido.cols)
+            .collect();
+
+        assert_eq!(anchos_ahora.len(), 2, "una consola se perdió por el camino");
+        assert_eq!(
+            anchos_ahora[0], anchos_ahora[1],
+            "tras apilarlas no se les anunció el mismo ancho: se pintó con el reparto de antes"
+        );
+        assert!(
+            anchos_ahora[0] > anchos_antes[0],
+            "tras apilarlas se les siguió anunciando el ancho de cuando estaban lado a lado \
+             ({anchos_antes:?} → {anchos_ahora:?})"
+        );
+    }
+
+    #[test]
+    fn no_se_señala_un_destino_donde_soltar_se_va_a_rechazar() {
+        // **El velo es una promesa.** Si se pinta sobre una consola que luego no puede recibir a nadie
+        // —porque las dos no caben con su suelo de columnas—, el usuario ve la mitad marcada, suelta, y no
+        // pasa nada: el aviso solo sale por la salida de errores, que nadie está mirando.
+        //
+        // La mitad de control va primero: con sitio de sobra, el mismo gesto **sí** señala destino. Sin
+        // ella, una implementación que no señalara nunca pasaría igual.
+        let [ancha_izquierda, ancha_derecha] = dos_consolas_anchas();
+        let mut con_sitio = ventana_con("sleep 30", "sleep 30");
+        let ctx_control = egui::Context::default();
+        let señalado = arrastrar_una_consola(
+            &mut con_sitio,
+            &ctx_control,
+            &[ancha_izquierda, ancha_derecha],
+            ancha_izquierda.center(),
+            ancha_derecha.center(),
+        );
+        assert!(
+            señalado.is_some(),
+            "con sitio de sobra no se señaló destino, así que la prueba de abajo no distingue nada"
+        );
+
+        // Doscientos puntos: dos consolas de veinte columnas no caben ahí.
+        let estrecha_izquierda =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let estrecha_derecha =
+            egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let mut sin_sitio = ventana_con("sleep 30", "sleep 30");
+        let ctx = egui::Context::default();
+        let en_vuelo = arrastrar_una_consola(
+            &mut sin_sitio,
+            &ctx,
+            &[estrecha_izquierda, estrecha_derecha],
+            estrecha_izquierda.center(),
+            estrecha_derecha.center(),
+        );
+
+        assert_eq!(
+            en_vuelo, None,
+            "se señaló un destino donde soltar se iba a rechazar"
+        );
+        assert_eq!(
+            nombres_en_orden(&sin_sitio),
+            [0, 1],
+            "se soltó donde no cabía"
+        );
+    }
+
+    #[test]
+    fn el_velo_marca_la_mitad_que_va_a_ocupar_y_no_la_consola_entera() {
+        // Lo que el velo promete es **dónde** va a quedar, no solo *sobre cuál*. Velando el rectángulo
+        // entero, soltar por la izquierda y por la derecha se verían idénticos y el usuario no tendría
+        // forma de saber cuál de los dos está pidiendo.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let destino = egui::Rect::from_min_size(egui::pos2(200.0, 0.0), egui::vec2(200.0, 300.0));
+        let media_izquierda =
+            egui::Rect::from_min_size(egui::pos2(200.0, 0.0), egui::vec2(100.0, 300.0));
+
+        let ctx = egui::Context::default();
+        let salida = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ventana.pintar_el_arrastre(ui, destino, Lado::Izquierda);
+        });
+        let formas = salida.shapes.clone();
+        salida.drop_without_applying_deltas();
+
+        let velados: Vec<egui::Rect> = formas
+            .iter()
+            .filter_map(|forma| match &forma.shape {
+                egui::epaint::Shape::Rect(rect) => Some(rect.rect),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            velados.contains(&media_izquierda),
+            "el velo no cubrió la mitad izquierda de la consola de destino; se encoló {velados:?}"
+        );
+        assert!(
+            !velados.contains(&destino),
+            "el velo cubrió la consola entera, así que no dice por qué lado se va a soltar"
+        );
+    }
+
+    #[test]
+    fn mover_no_deja_dos_ramas_del_mismo_sentido_anidadas() {
+        // **La invariante que este PR puede romper, y la razón de que vaya solo en su entrega.** Se prueban
+        // los cuatro lados sobre la forma mínima donde el anidamiento es alcanzable, porque cuál de ellos
+        // lo crea no es evidente: el lado decide el sentido del corte, y el sentido decide si insertar
+        // entra como hermana o crea una rama nueva.
+        for lado in [Lado::Izquierda, Lado::Derecha, Lado::Arriba, Lado::Abajo] {
+            // **Dos escenarios y no uno**, y el segundo es el que de verdad pesa: en el primero, quitar la
+            // hoja deja la raíz con una sola hija y solo corre `colapsar`, así que `absorber` —quien
+            // impide el anidamiento— no llega a ejecutarse. Comprobado mutándolo: con solo ese escenario,
+            // cambiar `cerrar` por `quitar` dentro de `mover` dejaba la prueba en verde.
+            for (nombre, arbol) in [
+                (7, una_columna_y_un_grupo()),
+                (6, un_grupo_que_obliga_a_absorber()),
+            ] {
+                assert!(
+                    !hay_anidamiento_del_mismo_sentido(&arbol)
+                        && !hay_una_rama_de_una_sola_hija(&arbol),
+                    "el escenario ya nacía roto, así que no probaría nada"
+                );
+
+                let (arbol, movido) = arbol.mover(5, nombre, lado);
+                assert!(
+                    movido,
+                    "no se movió la 5 junto a la {nombre} con el lado {lado:?}"
+                );
+                assert!(
+                    !hay_anidamiento_del_mismo_sentido(&arbol),
+                    "mover la 5 junto a la {nombre} con el lado {lado:?} dejó dos ramas del mismo \
+                     sentido anidadas"
+                );
+                assert!(
+                    !hay_una_rama_de_una_sola_hija(&arbol),
+                    "mover la 5 junto a la {nombre} con el lado {lado:?} dejó una rama de una sola \
+                     hija, que es por donde vuelve el anidamiento al gesto siguiente"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn mover_una_de_tres_reparte_su_sitio_entre_las_que_quedan_en_proporcion() {
+        // La otra mitad de la invariante: las hermanas que **no** participan no se enteran. Con pesos 1, 2
+        // y 3, sacar la primera tiene que dejar a las otras dos repartiéndose el hueco como 2 a 3 — no a
+        // partes iguales, que es lo que saldría si quitar tocara los pesos de las demás.
+        let arbol = tres_en_fila_con_pesos_distintos();
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 300.0));
+
+        // La 5 se va al otro extremo, **debajo** de la 7: así el reparto de la fila queda solo entre 6 y 7.
+        let (arbol, movido) = arbol.mover(5, 7, Lado::Abajo);
+        assert!(movido, "no se movió");
+
+        let Nodo::Rama { hijos, .. } = &arbol else {
+            panic!("la raíz dejó de ser una rama");
+        };
+        assert_eq!(hijos.len(), 2, "la fila no se quedó con dos hijas");
+        let partes = arbol.colocar(area, 0.0).partes;
+        assert_eq!(partes.len(), 3, "una consola se perdió por el camino");
+
+        // La 6 se lleva dos quintos del ancho útil y el grupo de la derecha tres quintos: exactamente lo
+        // que ya tenían entre ellas. A partes iguales darían la mitad cada una.
+        let util = 1200.0 - GROSOR_DEL_DIVISOR;
+        assert!(
+            (partes[0].width() - util * 2.0 / 5.0).abs() < 0.01,
+            "las que quedaron no se repartieron el hueco en proporción: {partes:?}"
+        );
+    }
+
+    #[test]
+    fn absorber_conserva_la_geometria_de_las_consolas_que_no_se_mueven() {
+        // **La otra mitad de la regla 4 de D14, y la que no ataba nada.** La prueba de la invariante de
+        // arriba comprueba la FORMA que deja `absorber` —subir las nietas a hermanas cuando una rama se
+        // queda con una sola hija— pero no los PESOS con que las sube, y ese escalado es el motivo entero
+        // de que la operación exista: solo es correcta si lo que ya estaba pintado **no se mueve**.
+        //
+        // Se escribe porque una mutación sobrevivió a las 383 pruebas del crate: sustituyendo
+        // `suyo * hijo.peso / suma` por el peso de dentro tal cual, la suite seguía en verde y las
+        // consolas de al lado se encogían un tercio en pantalla.
+        let arbol = Nodo::Rama {
+            orientacion: Orientacion::Filas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 4)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: un_grupo_que_obliga_a_absorber(),
+                },
+            ],
+        };
+        // Con suelo cero a propósito: lo que se compara son los pesos convertidos en puntos, y un suelo
+        // que recortara alguna franja mediría el suelo en vez del peso.
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 600.0));
+        // **Por nombre y no por sitio**, que es el disfraz que este proyecto tiene fichado: tras mover, el
+        // orden del recorrido no es el de antes, y comparar dos listas en orden de recorrido compararía
+        // consolas distintas entre sí.
+        let franjas = |arbol: &Nodo| -> Vec<(usize, f32, f32)> {
+            let partes = arbol.colocar(area, 0.0).partes;
+            let mut suyas: Vec<(usize, f32, f32)> = arbol
+                .hojas()
+                .iter()
+                .zip(partes)
+                .map(|(hoja, parte)| (hoja.nombre, parte.left(), parte.right()))
+                .filter(|(nombre, _, _)| ![4, 6].contains(nombre))
+                .collect();
+            suyas.sort_by_key(|(nombre, _, _)| *nombre);
+            suyas
+        };
+
+        let antes = franjas(&arbol);
+        assert_eq!(
+            antes.len(),
+            3,
+            "el escenario no tiene las tres consolas ajenas al gesto"
+        );
+
+        // **La 6 se va ARRIBA de la 4**, y las dos mitades de esa elección importan. Arriba de la 4 es un
+        // corte en filas, o sea el mismo sentido que la raíz, así que entra como hermana y **solo reparte
+        // altura**: los anchos de las demás no tienen por qué enterarse de nada. Y sacarla de donde estaba
+        // deja a su rama con una sola hija, que es lo que obliga a colapsar y, con ello, a absorber.
+        let (arbol, movido) = arbol.mover(6, 4, Lado::Arriba);
+        assert!(movido, "no se movió la 6");
+
+        // **Que `absorber` haya corrido de verdad**, o esto compararía dos árboles iguales. Si solo hubiera
+        // colapsado, la única hija —una rama de columnas— quedaría dentro de la rama de columnas de fuera,
+        // y eso es justo lo que este ayudante detecta.
+        assert!(
+            !hay_anidamiento_del_mismo_sentido(&arbol),
+            "no llegó a ejecutarse absorber, así que la comparación de abajo no prueba nada"
+        );
+
+        // **Se comparan las PROPORCIONES entre ellas y no los puntos, y la razón se descubrió midiendo.**
+        // En puntos, la 5 pasa de 599 a 598: `absorber` sube las nietas al nivel de arriba, así que el
+        // divisor que antes se descontaba **dentro** del grupo pasa a descontarse del área de la rama
+        // entera, y ese punto se reparte distinto. Es un punto y es inevitable; lo que la invariante
+        // promete —y lo que hace que no se mueva nada apreciable en pantalla— es que **el reparto entre
+        // ellas siga siendo el mismo**: la 5 el doble que la 8 y que la 9.
+        //
+        // Con el escalado roto, las tres se van a un tercio del ancho cada una: la razón cae de 2 a 1, o
+        // sea 200 puntos en esta área. El margen de 0,05 está elegido entre las dos cosas y no al tanteo:
+        // el punto del divisor desvía la razón 0,007 y el defecto la desvía 1,0.
+        let proporciones = |franjas: &[(usize, f32, f32)]| -> Vec<f32> {
+            let unidad = franjas
+                .iter()
+                .find(|(nombre, _, _)| *nombre == 8)
+                .map(|(_, izquierda, derecha)| derecha - izquierda)
+                .expect("la 8 está en el escenario");
+            franjas
+                .iter()
+                .map(|(_, izquierda, derecha)| (derecha - izquierda) / unidad)
+                .collect()
+        };
+
+        let esperadas = proporciones(&antes);
+        assert!(
+            (esperadas[0] - 2.0).abs() < 0.05,
+            "el escenario no nacía con la 5 al doble que la 8, así que no probaría el escalado: \
+             {esperadas:?}"
+        );
+
+        let quedaron = proporciones(&franjas(&arbol));
+        for ((nombre, _, _), (ahora, antes)) in antes.iter().zip(quedaron.iter().zip(&esperadas)) {
+            assert!(
+                (ahora - antes).abs() < 0.05,
+                "la consola {nombre} cambió de tamaño al subir las nietas a hermanas: ocupaba {antes} \
+                 veces la 8 y ahora ocupa {ahora}"
+            );
+        }
+    }
+
+    #[test]
+    fn mover_conserva_el_programa_y_la_identidad_de_las_consolas() {
+        // AC2 para la operación de verdad: la que se mueve tiene que llegar entera al otro sitio. Una
+        // implementación que rehiciera las hojas dejaría los nombres idénticos y los programas muertos.
+        let arbol = Nodo::Rama {
+            orientacion: Orientacion::Columnas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(con_identidad(5)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(con_identidad(6)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(con_identidad(7)),
+                },
+            ],
+        };
+        let identidad = |arbol: &Nodo| -> Vec<(usize, String)> {
+            let mut suyas: Vec<(usize, String)> = arbol
+                .hojas()
+                .iter()
+                .map(|hoja| {
+                    (
+                        hoja.nombre,
+                        hoja.panel
+                            .as_ref()
+                            .expect("nace con directorio")
+                            .id()
+                            .to_owned(),
+                    )
+                })
+                .collect();
+            suyas.sort_by_key(|(nombre, _)| *nombre);
+            suyas
+        };
+
+        let antes = identidad(&arbol);
+        let (arbol, movido) = arbol.mover(5, 7, Lado::Abajo);
+        assert!(movido, "no se movió");
+
+        assert_eq!(
+            identidad(&arbol),
+            antes,
+            "mover una consola le cambió la identidad: no se movió, se rehizo"
+        );
+        for hoja in arbol.hojas() {
+            assert!(
+                hoja.puente.sigue_vivo(),
+                "el programa de una consola murió al moverla"
+            );
+        }
+    }
+
+    #[test]
+    fn mover_a_un_nombre_que_no_existe_no_toca_el_arbol_y_no_pierde_ninguna_consola() {
+        // El caso que muerde: el destino se cerró entre agarrar y soltar. Lo que **no** puede pasar es
+        // quedarse a medias, con la consola fuera del árbol y su programa vivo.
+        let arbol = tres_en_fila_con_pesos_distintos();
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 300.0));
+        let antes = arbol.colocar(area, 0.0).partes;
+
+        let (arbol, movido) = arbol.mover(5, 99, Lado::Derecha);
+
+        assert!(
+            !movido,
+            "dijo que había movido algo hacia un nombre que no existe"
+        );
+        assert_eq!(
+            arbol.hojas().iter().map(|h| h.nombre).collect::<Vec<_>>(),
+            [5, 6, 7],
+            "un destino inexistente descolocó las consolas que sí existían"
+        );
+        assert_eq!(
+            arbol.colocar(area, 0.0).partes,
+            antes,
+            "un destino inexistente cambió el reparto"
+        );
+    }
+
+    #[test]
+    fn mover_una_consola_sobre_si_misma_no_hace_nada() {
+        let arbol = tres_en_fila_con_pesos_distintos();
+        let (arbol, movido) = arbol.mover(6, 6, Lado::Arriba);
+
+        assert!(!movido, "moverse sobre sí misma dijo que había hecho algo");
+        assert_eq!(
+            arbol.hojas().iter().map(|h| h.nombre).collect::<Vec<_>>(),
+            [5, 6, 7],
+            "moverse sobre sí misma descolocó el árbol"
+        );
+    }
+
+    #[test]
+    fn en_una_pestaña_de_una_sola_consola_mover_no_hace_nada() {
+        let arbol = Nodo::Hoja(division_con("sleep 30", 5));
+        let (arbol, movido) = arbol.mover(5, 5, Lado::Abajo);
+
+        assert!(!movido, "con una sola consola dijo que había movido algo");
+        assert!(
+            matches!(arbol, Nodo::Hoja(_)),
+            "la única consola dejó de ser la raíz"
+        );
+    }
+
+    #[test]
+    fn el_lado_sale_del_borde_mas_cercano_en_proporcion_y_no_en_puntos() {
+        // **Sin normalizar, una consola ancha y baja solo se dejaría soltar arriba o abajo**: en puntos sus
+        // bordes horizontales están mucho más cerca de cualquier punto que los verticales. El rectángulo de
+        // abajo mide 1000×100 a propósito, que es donde las dos lecturas se separan.
+        let ancha = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 100.0));
+
+        // A 40 puntos del borde izquierdo y a 50 del de arriba: en puntos gana arriba, en proporción gana
+        // la izquierda (40/1000 contra 50/100).
+        assert_eq!(
+            lado_de(ancha, egui::pos2(40.0, 50.0)),
+            Lado::Izquierda,
+            "el lado se eligió por la distancia en puntos y no en proporción"
+        );
+
+        for (punto, espera) in [
+            (egui::pos2(950.0, 50.0), Lado::Derecha),
+            (egui::pos2(500.0, 5.0), Lado::Arriba),
+            (egui::pos2(500.0, 95.0), Lado::Abajo),
+        ] {
+            assert_eq!(
+                lado_de(ancha, punto),
+                espera,
+                "el lado de {punto:?} no fue {espera:?}"
+            );
+        }
     }
 
     /// Tres hermanas en fila con pesos **distintos**, para que el reparto las distinga.
@@ -8256,106 +9255,6 @@ mod tests {
                     nodo: Nodo::Hoja(division_con("sleep 30", 7)),
                 },
             ],
-        }
-    }
-
-    #[test]
-    fn intercambiar_dos_consolas_las_cambia_de_sitio_y_deja_los_pesos_donde_estaban() {
-        let mut arbol = tres_en_fila_con_pesos_distintos();
-        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 300.0));
-        let antes: Vec<egui::Rect> = arbol.colocar(area, 0.0).partes;
-
-        assert!(
-            arbol.intercambiar(5, 7),
-            "no encontró dos consolas que están las dos en el árbol"
-        );
-
-        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
-        assert_eq!(
-            nombres,
-            [7, 6, 5],
-            "las consolas no se cambiaron de sitio en el árbol"
-        );
-
-        // **Aquí está lo que de verdad se afirma.** Si el intercambio se llevara también el peso, la
-        // primera pasaría de una sexta parte del ancho a la mitad y la última al revés, moviendo además a
-        // la de en medio, que nadie ha tocado.
-        assert_eq!(
-            arbol.colocar(area, 0.0).partes,
-            antes,
-            "intercambiar dos consolas movió el reparto: los pesos se fueron con ellas"
-        );
-    }
-
-    #[test]
-    fn intercambiar_mueve_las_consolas_sin_tocar_su_programa_ni_su_identidad() {
-        // **El criterio por el que existe el hito, y el diseño avisaba de su disfraz**: comprobar que el
-        // campo `nombre` no cambió NO prueba que el proceso siga vivo. Una implementación que rehiciera
-        // las hojas en vez de moverlas dejaría los nombres idénticos, los rectángulos idénticos y **los
-        // dos programas muertos** — y las demás pruebas de este PR seguirían todas en verde.
-        //
-        // Lo que se ata aquí es la identidad: el `PANEL_ID` y el directorio son de la consola, se crean
-        // una sola vez y una consola rehecha tendría otros. Más que el programa siga vivo después.
-        // Se montan a mano y con **directorio de verdad**: las consolas del ayudante de siempre no
-        // publican identidad, y sin ella la comparación de abajo pasaría sin comparar nada.
-        let con_identidad = |nombre: usize| {
-            let mut division = division_con("sleep 30", nombre);
-            division.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
-            division
-        };
-        let mut arbol = Nodo::Rama {
-            orientacion: Orientacion::Columnas,
-            hijos: vec![
-                Hijo {
-                    peso: peso(1.0),
-                    nodo: Nodo::Hoja(con_identidad(5)),
-                },
-                Hijo {
-                    peso: peso(1.0),
-                    nodo: Nodo::Hoja(con_identidad(6)),
-                },
-            ],
-        };
-
-        let identidad_de = |arbol: &Nodo| -> Vec<(usize, String)> {
-            let mut suyas: Vec<(usize, String)> = arbol
-                .hojas()
-                .iter()
-                .map(|hoja| {
-                    (
-                        hoja.nombre,
-                        hoja.panel
-                            .as_ref()
-                            .expect("la consola de la prueba nace con directorio")
-                            .id()
-                            .to_owned(),
-                    )
-                })
-                .collect();
-            // Ordenado por nombre para comparar **cada consola consigo misma** y no con la que ocupa su
-            // hueco: el sitio cambia a propósito, y es lo único que debía cambiar.
-            suyas.sort_by_key(|(nombre, _)| *nombre);
-            suyas
-        };
-
-        let antes = identidad_de(&arbol);
-        assert!(arbol.intercambiar(5, 6), "no se pudieron cruzar las dos");
-
-        assert_eq!(
-            identidad_de(&arbol),
-            antes,
-            "cruzar dos consolas les cambió la identidad: no se movieron, se rehicieron"
-        );
-        assert_eq!(
-            arbol.hojas().iter().map(|h| h.nombre).collect::<Vec<_>>(),
-            [6, 5],
-            "las consolas no llegaron a cambiarse de sitio"
-        );
-        for hoja in arbol.hojas() {
-            assert!(
-                hoja.puente.sigue_vivo(),
-                "el programa de una consola murió al cruzarla de sitio"
-            );
         }
     }
 
@@ -8388,92 +9287,6 @@ mod tests {
             nombres_en_orden(&ventana),
             [0],
             "arrastrar la única consola de la pestaña la descolocó"
-        );
-    }
-
-    #[test]
-    fn intercambiar_una_consola_consigo_misma_no_hace_nada() {
-        let mut arbol = tres_en_fila_con_pesos_distintos();
-
-        assert!(
-            !arbol.intercambiar(6, 6),
-            "intercambiar una consola consigo misma dijo que había hecho algo"
-        );
-
-        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
-        assert_eq!(
-            nombres,
-            [5, 6, 7],
-            "intercambiar una consola consigo misma descolocó el árbol"
-        );
-    }
-
-    #[test]
-    fn intercambiar_con_un_nombre_que_no_existe_deja_el_arbol_entero() {
-        // El caso que muerde de verdad: el destino dejó de existir entre agarrar y soltar. Lo que no puede
-        // pasar es que se quede a medias — una consola movida y la otra no, o peor, una perdida.
-        let mut arbol = tres_en_fila_con_pesos_distintos();
-        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 300.0));
-        let antes: Vec<egui::Rect> = arbol.colocar(area, 0.0).partes;
-
-        assert!(
-            !arbol.intercambiar(5, 99),
-            "intercambiar con un nombre que no existe dijo que había hecho algo"
-        );
-
-        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
-        assert_eq!(
-            nombres,
-            [5, 6, 7],
-            "intercambiar con un nombre que no existe descolocó las que sí existían"
-        );
-        assert_eq!(
-            arbol.colocar(area, 0.0).partes,
-            antes,
-            "intercambiar con un nombre que no existe cambió el reparto"
-        );
-    }
-
-    #[test]
-    fn intercambiar_alcanza_consolas_de_ramas_distintas() {
-        // Sin esto, el gesto solo funcionaría entre hermanas — que es justo la disposición en la que menos
-        // falta hace, porque ahí las dos ya están juntas.
-        let mut arbol = Nodo::Rama {
-            orientacion: Orientacion::Columnas,
-            hijos: vec![
-                Hijo {
-                    peso: peso(1.0),
-                    nodo: Nodo::Hoja(division_con("sleep 30", 5)),
-                },
-                Hijo {
-                    peso: peso(1.0),
-                    nodo: Nodo::Rama {
-                        orientacion: Orientacion::Filas,
-                        hijos: vec![
-                            Hijo {
-                                peso: peso(1.0),
-                                nodo: Nodo::Hoja(division_con("sleep 30", 6)),
-                            },
-                            Hijo {
-                                peso: peso(1.0),
-                                nodo: Nodo::Hoja(division_con("sleep 30", 7)),
-                            },
-                        ],
-                    },
-                },
-            ],
-        };
-
-        assert!(
-            arbol.intercambiar(5, 7),
-            "no encontró una consola que está dentro de otra rama"
-        );
-
-        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.nombre).collect();
-        assert_eq!(
-            nombres,
-            [7, 6, 5],
-            "la consola de la columna no se cambió con la de dentro de la rama"
         );
     }
 
@@ -8776,7 +9589,11 @@ mod tests {
                 // El mismo orden que la pasada de verdad: primero las fronteras, después el ratón sobre
                 // las consolas.
                 ventana.arrastrar_la_frontera(ui, 0, frontera);
-                ventana.atender_el_raton(ui, &rectangulos);
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
             })
             .drop_without_applying_deltas();
         };
