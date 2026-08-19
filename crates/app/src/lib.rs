@@ -199,7 +199,13 @@ struct ArrastresInyectados {
     /// siempre `pedidos − hechos` —las dos escrituras estaban pegadas— y dos fuentes del mismo dato son una
     /// invariante que alguien romperá.
     hechos: usize,
-    /// Soltados que el árbol **aceptó**, o sea los que de verdad reordenaron la disposición.
+    /// Cuántas veces el gesto **cambió algo de verdad**: soltados que el árbol aceptó, o fotogramas en que
+    /// un arrastre le movió el ancho a un panel.
+    ///
+    /// **Puede ser mayor que los inyectados con el gesto del panel**, y no es un error de cuenta: un solo
+    /// arrastre cruza varias fronteras de celda y cada cruce cambia el ancho. Por eso el informe publica las
+    /// dos cifras **una al lado de la otra y no como una fracción** — la primera versión imprimió
+    /// «423 de 211», que es un número imposible de leer bien.
     ///
     /// **No es lo mismo que los inyectados, y confundirlos deja pasar una tanda vacía.** Mandar el evento de
     /// soltar no significa que la disposición cambie: el suelo geométrico rechaza el soltado cuando la
@@ -213,8 +219,19 @@ struct ArrastresInyectados {
     /// **Un soltado que deja el orden como estaba también cuenta**, y es lo correcto: el árbol se
     /// reconstruye igual —quitar, insertar y rehacer el reparto— y ese es el trabajo que la tanda mide. Lo
     /// que no cuenta es el que **no ocurre**.
-    reordenaciones: usize,
-    /// Si el gesto en curso suelta por la derecha del destino o por su izquierda.
+    con_efecto: usize,
+    /// Qué gesto se inyecta. Ver [`Gesto`].
+    que: Gesto,
+    /// Lo que mide una celda de la fuente, para el gesto del panel: su recorrido se cuenta en celdas.
+    ///
+    /// **Y llega vacío a propósito, porque al arrancar no se puede saber.** egui **no tiene fuentes hasta
+    /// la primera pasada** —`Context::fonts_mut` entra en pánico con «No fonts available until first call
+    /// to Context::run()»— y la primera versión de esto la pedía en el constructor de la ventana: **la
+    /// tanda moría antes de abrir**, y lo destapó la primera corrida de verdad. La rellena el pintado, que
+    /// es donde la métrica existe, y hasta entonces el gesto del panel no manda nada.
+    celda: Option<f32>,
+    /// Si el gesto en curso va hacia un lado o hacia el otro. Para el de la consola, si suelta por la
+    /// derecha del destino o por su izquierda; para el del panel, si lo estrecha o lo ensancha.
     por_la_derecha: bool,
     /// El último fotograma en el que se avanzó, y **nada** mientras no se haya avanzado en ninguno.
     ///
@@ -225,21 +242,34 @@ struct ArrastresInyectados {
 }
 
 impl ArrastresInyectados {
-    /// Cuántos pidió la tanda, y nada si no pidió ninguno.
-    fn nuevos(cuantos: usize) -> Option<Self> {
+    /// Cuántos pidió la tanda y de qué clase, y nada si no pidió ninguno.
+    fn nuevos(cuantos: usize, que: Gesto) -> Option<Self> {
         (cuantos > 0).then_some(Self {
             pedidos: cuantos,
             paso: 0,
             hechos: 0,
-            reordenaciones: 0,
+            con_efecto: 0,
+            que,
+            celda: None,
             por_la_derecha: true,
             ultimo_fotograma: None,
         })
     }
 
-    /// Apunta que un soltado reordenó la disposición de verdad. Ver [`Self::reordenaciones`].
-    fn una_reordenacion_mas(&mut self) {
-        self.reordenaciones += 1;
+    /// Apunta que un gesto surtió efecto de verdad. Ver [`Self::con_efecto`].
+    fn uno_con_efecto_mas(&mut self) {
+        self.con_efecto += 1;
+    }
+
+    /// Lo mismo, con un total ya contado. **Y no un bucle que llame al de arriba**: los incrementos no son
+    /// sucesos distintos, son una suma que ya está hecha.
+    fn varios_con_efecto_mas(&mut self, cuantos: usize) {
+        self.con_efecto += cuantos;
+    }
+
+    /// Le dice cuánto mide una celda, desde donde la métrica ya existe. Ver [`Self::celda`].
+    fn ya_sabe_la_celda(&mut self, celda: f32) {
+        self.celda = Some(celda);
     }
 
     /// Los eventos que le tocan a este fotograma, y avanza el gesto.
@@ -248,13 +278,119 @@ impl ArrastresInyectados {
     /// destino. Se devuelve la lista vacía en vez de saltarse el paso para que una tanda mal pedida
     /// —arrastres con una sola división— declare **cero gestos hechos** y el guion la pueda invalidar,
     /// en vez de publicar unos tramos que nadie sabría que no llevan ningún arrastre dentro.
-    fn eventos(&mut self, rectangulos: &[egui::Rect], fotograma: u64) -> Vec<egui::Event> {
+    fn eventos(
+        &mut self,
+        pintado: &[(egui::Rect, Option<f32>)],
+        fotograma: u64,
+    ) -> Vec<egui::Event> {
         if self.hechos == self.pedidos || self.ultimo_fotograma == Some(fotograma) {
             return Vec::new();
         }
-        let (Some(origen), Some(destino)) = (rectangulos.first(), rectangulos.get(1)) else {
+        match self.que {
+            Gesto::MoverLaConsola => self.mover_una_consola(pintado, fotograma),
+            Gesto::EstrecharElPanel => self.estrechar_un_panel(pintado, fotograma),
+        }
+    }
+
+    /// El gesto de la frontera del panel: agarrarla y llevarla adentro y afuera, sin parar.
+    ///
+    /// **Alterna el lado a propósito, y con eso el ancho vuelve a donde estaba cada dos gestos.** Una tanda
+    /// que solo estrechara acabaría con el panel en su mínimo a los pocos gestos y estaría midiendo un
+    /// régimen distinto —panel diminuto, consola ancha— durante casi toda la corrida. Alternando, la
+    /// disposición que se mide es la de partida.
+    ///
+    /// **No se pliega nunca**, y es deliberado: plegar deja la división sin frontera de panel, así que el
+    /// gesto siguiente no tendría dónde agarrar por este camino y la tanda se quedaría quieta a mitad.
+    fn estrechar_un_panel(
+        &mut self,
+        pintado: &[(egui::Rect, Option<f32>)],
+        fotograma: u64,
+    ) -> Vec<egui::Event> {
+        // **Hace falta una división con panel a la vista.** Sin ella se devuelve la lista vacía en vez de
+        // saltarse el paso, para que la tanda declare **cero gestos** y el guion la pueda invalidar — igual
+        // que cuando se piden arrastres de consola con una sola división.
+        let Some((division, frontera)) = pintado.first().copied() else {
             return Vec::new();
         };
+        let Some(frontera) = frontera else {
+            // **Si la frontera desaparece a mitad de un gesto, se suelta y se cierra.** Sin esto el gesto se
+            // quedaba parado para siempre con el botón apretado —nunca mandaba el soltar, nunca avanzaba el
+            // paso— y la tanda seguía publicando miles de fotogramas sin gesto dentro bajo su etiqueta. El
+            // guion solo invalida cuando no hubo **ninguno**, así que una corrida que se cuelga a los tres
+            // gestos se publicaba como buena. Pasa en cuanto el panel queda por debajo del asidero: una
+            // ventana más pequeña, o cuatro divisiones.
+            if self.paso == 0 {
+                return Vec::new();
+            }
+            self.paso = 0;
+            self.hechos += 1;
+            self.por_la_derecha = !self.por_la_derecha;
+            self.ultimo_fotograma = Some(fotograma);
+            return vec![egui::Event::PointerButton {
+                pos: egui::pos2(division.right(), division.center().y),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }];
+        };
+        // Sin celda todavía no hay recorrido que calcular: es el primer fotograma, antes de que la métrica
+        // exista. Se devuelve vacío **sin avanzar el gesto**, para no contar uno que no ocurrió.
+        let Some(celda) = self.celda else {
+            return Vec::new();
+        };
+        self.ultimo_fotograma = Some(fotograma);
+
+        // A media altura, que es donde el asidero es más ancho de agarrar y donde no compite con nada.
+        let alto = division.center().y;
+        // **Un recorrido en celdas y no en fracción del ancho.** Lo que el gesto tiene que cruzar son
+        // fronteras de celda, porque es ahí donde el ancho del panel cambia de verdad y donde su maqueta se
+        // rehace; medido en fracción, la misma tanda en otra ventana cruzaría otro número de ellas.
+        let recorrido = CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL * celda;
+        let hasta = if self.por_la_derecha {
+            frontera + recorrido
+        } else {
+            frontera - recorrido
+        };
+
+        let paso = self.paso;
+        self.paso += 1;
+        if paso == 0 {
+            return vec![
+                egui::Event::PointerMoved(egui::pos2(frontera, alto)),
+                egui::Event::PointerButton {
+                    pos: egui::pos2(frontera, alto),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+        }
+        if paso <= FOTOGRAMAS_ARRASTRANDO {
+            return vec![egui::Event::PointerMoved(egui::pos2(hasta, alto))];
+        }
+
+        self.paso = 0;
+        self.hechos += 1;
+        self.por_la_derecha = !self.por_la_derecha;
+        vec![egui::Event::PointerButton {
+            pos: egui::pos2(hasta, alto),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    fn mover_una_consola(
+        &mut self,
+        pintado: &[(egui::Rect, Option<f32>)],
+        fotograma: u64,
+    ) -> Vec<egui::Event> {
+        let (Some((origen, _)), Some((destino, _))) =
+            (pintado.first().copied(), pintado.get(1).copied())
+        else {
+            return Vec::new();
+        };
+        let (origen, destino) = (&origen, &destino);
         self.ultimo_fotograma = Some(fotograma);
 
         // **Cerca del borde y a media altura, para que el lado que elige el gesto sea el horizontal.** La
@@ -323,6 +459,25 @@ impl ArrastresInyectados {
             modifiers: egui::Modifiers::NONE,
         }]
     }
+}
+
+/// Lo que la ventana se lleva de haber pintado una división.
+///
+/// **Tiene nombre y no es una pareja suelta**, por lo mismo que [`Reparto`] y [`Hueco`]: dos valores que se
+/// devuelven juntos y significan cosas distintas se intercambian en la llamada sin que el compilador diga
+/// nada, y aquí uno de los dos alimenta el informe de una tanda de medida.
+struct DeLaDivision {
+    /// Dónde quedó la frontera de su panel, o nada si no tenía panel a la vista. Lo necesita el gesto que
+    /// una tanda se inyecta: su enganche corre **antes** de la pasada de interfaz, así que no puede
+    /// calcularlo sin duplicar el reparto.
+    frontera_del_panel: Option<f32>,
+    /// Si el gesto de la frontera del panel llegó a cambiarle el ancho **en este fotograma**.
+    ///
+    /// **Es lo que separa «se inyectó un gesto» de «el gesto sirvió de algo»**, y sin ese segundo número una
+    /// tanda donde ninguno cuajara se publicaría como «el gesto no cuesta nada». Es la misma disciplina que
+    /// el soltado de una consola, que cuenta las reordenaciones que el árbol acepta y no los soltados que se
+    /// mandan.
+    cambio_el_ancho: bool,
 }
 
 /// Con qué reparto abre la ventana: las dos consolas iguales.
@@ -395,6 +550,57 @@ const VARIABLE_DE_LAS_DIVISIONES: &str = "MEDIR_DIVISIONES";
 /// Se escribe sin eñe por lo mismo que sus tres hermanas: es lo que un guion de shell puede teclear sin
 /// sorpresas de codificación.
 const VARIABLE_DE_LOS_ARRASTRES: &str = "MEDIR_ARRASTRES";
+
+/// Qué gesto se inyecta cuando una tanda pide arrastres.
+///
+/// **Son dos y no uno desde F2.4**, porque hay dos fronteras que se arrastran y no cuestan lo mismo: la
+/// que reparte consolas —que reordena el árbol al soltar— y la del panel, que solo cambia el ancho de una
+/// división y rehace su maqueta al cruzar cada celda.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Gesto {
+    /// Agarrar una consola y soltarla sobre otra: el gesto de F2.3.
+    MoverLaConsola,
+    /// Agarrar la frontera del panel y llevarla adentro y afuera: el de F2.4.
+    EstrecharElPanel,
+}
+
+impl Gesto {
+    /// Cómo se llama en el informe.
+    ///
+    /// **Va al informe porque los dos gestos no cuestan lo mismo**: el de la consola reordena el árbol al
+    /// soltar, el del panel rehace la maqueta de uno al cruzar cada celda. Dos tandas de clases distintas
+    /// no se comparan, y sin esta palabra en la cabecera nadie sabría cuál está leyendo.
+    fn como_se_publica(self) -> &'static str {
+        match self {
+            Self::MoverLaConsola => "moviendo consolas",
+            Self::EstrecharElPanel => "estrechando el panel",
+        }
+    }
+}
+
+/// Cuál de los dos gestos pide la tanda, y `consola` cuando no se dice nada.
+///
+/// **Por omisión el de la consola**, para que las tandas que ya existían sigan midiendo exactamente lo que
+/// median: una tanda vieja que de pronto arrastrara paneles publicaría sus números bajo la misma letra.
+const VARIABLE_DEL_GESTO: &str = "MEDIR_GESTO";
+
+/// Cuántas celdas empuja la frontera del panel **cada fotograma de arrastre** del gesto inyectado.
+///
+/// **Por fotograma y no por gesto, y eso se supo sondeando.** El punto al que el gesto lleva el puntero se
+/// calcula desde donde está la frontera **ahora**, así que con dos fotogramas de arrastre un gesto entero la
+/// mueve el doble: el ancho va de 36 a 28 y de 28 a 20. Es un arrastre realista —un ratón que se mueve
+/// mientras el botón está apretado hace exactamente eso— pero la cuenta hay que hacerla con el número de
+/// fotogramas delante, o el anexo publica un recorrido que no es el que ocurrió.
+///
+/// **En celdas y no en puntos, porque lo que el gesto tiene que cruzar son fronteras de celda:** es ahí
+/// donde el ancho del panel cambia de verdad y donde su maqueta se rehace. Medido en puntos o en fracción
+/// del ancho, la misma tanda en otra ventana o con otra letra cruzaría otro número de ellas y sus números
+/// no se podrían comparar.
+///
+/// Ocho: bastante para cruzar varias en cada gesto, y poco para que el panel no llegue a su mínimo ni al
+/// techo con el ancho de fábrica — llegar a un extremo convertiría la mitad de los gestos en un no-op y
+/// la tanda mediría dos regímenes.
+const CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL: f32 = 8.0;
 
 /// Cuántos fotogramas dura el tramo de arrastre de un gesto inyectado, entre apretar y soltar.
 ///
@@ -989,6 +1195,23 @@ fn arrastres_al_arrancar() -> usize {
     cuantos_arrastres(std::env::var(VARIABLE_DE_LOS_ARRASTRES).ok().as_deref())
 }
 
+/// Qué gesto pide la tanda: `panel` para la frontera del panel, cualquier otra cosa el de la consola.
+///
+/// **Lo que no se entiende cae en el de la consola**, igual que las otras variables de medida: abortar el
+/// arranque por una palabra mal escrita sería peor, y el informe publica cuál se inyectó, así que quien
+/// mide se entera comparando lo que pidió con lo que sale.
+fn gesto_de(valor: Option<&str>) -> Gesto {
+    match valor.map(str::trim) {
+        Some("panel") => Gesto::EstrecharElPanel,
+        _ => Gesto::MoverLaConsola,
+    }
+}
+
+/// Lo que la variable de entorno dice, ya resuelto.
+fn gesto_al_arrancar() -> Gesto {
+    gesto_de(std::env::var(VARIABLE_DEL_GESTO).ok().as_deref())
+}
+
 /// Aparta de arriba el sitio de la barra, y devuelve lo que le queda a las consolas.
 ///
 /// **Con una sola pestaña no hay barra, y eso no es una comodidad estética.** Es lo que deja la rejilla
@@ -1062,8 +1285,10 @@ pub fn arrancar() -> eframe::Result {
         opciones,
         Box::new(move |cc| {
             let mut ventana = Ventana::con_pestañas(&cc.egui_ctx, cuantas, disposicion, pedido)?;
-            // Solo una tanda de medida los pide, así que se ponen aquí y no en el constructor.
-            ventana.arrastres = ArrastresInyectados::nuevos(arrastres);
+            // Solo una tanda de medida los pide, así que se ponen aquí y no en el constructor. La celda se
+            // mide ya: el gesto del panel cuenta su recorrido en celdas y su enganche corre antes de la
+            // pasada que mide la fuente.
+            ventana.arrastres = ArrastresInyectados::nuevos(arrastres, gesto_al_arrancar());
             Ok(Box::new(ventana))
         }),
     )
@@ -1410,6 +1635,7 @@ impl Division {
         division: egui::Rect,
         panel: Option<egui::Rect>,
         metrica: &Metrica,
+        ahora: SystemTime,
     ) -> bool {
         // **Plegado no hay panel, y aun así hay que dejar dónde agarrar**: si la frontera se fuera con
         // él, el gesto que lo cerró no se podría deshacer con el ratón. El asidero se queda pegado al
@@ -1429,7 +1655,19 @@ impl Division {
             // revisión, con la prueba del cero exacto en verde.
             Some(sitio) if sitio.width() <= AGARRE_DEL_PANEL => return false,
             Some(sitio) => sitio.left(),
-            None if self.plegado => division.right() - AGARRE_DEL_PANEL,
+            // **Plegado hay asidero, pero solo si hay panel que desplegar.** Si el productor dejó de
+            // publicar mientras estaba plegado no queda nada que enseñar, y reservar ahí una banda de ocho
+            // puntos le quitaría a la consola su borde derecho —el sitio por donde se agarra para
+            // llevársela— a cambio de desplegar un panel que no existe.
+            None if self.plegado && self.estado_del_panel.se_ve(ahora) => {
+                // **Y se retira un grosor de divisor del borde**, para que la banda no llegue al punto
+                // donde ese divisor empieza. Los rectángulos de egui contienen sus dos extremos y los
+                // empates los gana el último registrado, que es éste: sin el retiro, el punto exacto del
+                // borde redimensionaba el panel en vez de mover el reparto de consolas. Es el mismo empate
+                // que la guarda del panel estrecho evita, y el precio que D10 declara es solo sobre la
+                // consola, no sobre el divisor.
+                division.right() - AGARRE_DEL_PANEL - GROSOR_DEL_DIVISOR
+            }
             // Sin panel y sin plegar no hay nada que enseñar ni que ajustar: es una consola cuyo
             // productor no ha publicado nada.
             None => return false,
@@ -1516,19 +1754,34 @@ impl Division {
         // Los cuatro dan el resultado correcto o no ocurren, así que la guarda sería un mecanismo sin
         // escenario. Su hermano el arrastre de fronteras sí la necesita, y por eso la tiene: allí el
         // estado es una fracción y un recorte sobre un `NaN` lo devuelve intacto.
-        let pedido = ((division.right() - puntero.x) / metrica.ancho()).round() as usize;
-
-        // **Y lo que separa «he pulsado aquí» de «quiero esto de ancho» no puede ser que el ratón se haya
-        // movido un punto.** El asidero se dibuja donde el reparto **recorta** el panel, que en una
-        // división estrecha no es el ancho que el usuario pidió; con un temblor de un punto durante un
-        // clic, el corte recortado se leería como intención y machacaría para siempre lo que había
-        // pedido con la ventana ancha. Lo que se exige es que el ancho pedido **se aparte del que se está
-        // pintando**: si coincide, el gesto no está diciendo nada nuevo.
-        let pintado =
-            ((panel.map_or(0.0, |sitio| sitio.width())) / metrica.ancho()).round() as usize;
-        if pedido == pintado && pedido != self.ancho_del_panel {
+        // **Lo que separa «he pulsado aquí» de «quiero esto de ancho»: que el puntero haya cruzado al menos
+        // media celda desde donde el panel está cortado ahora.** Y hay que decir por qué es *esto* y no lo
+        // que la revisión propuso, porque las dos cosas se probaron.
+        //
+        // **El agujero era real.** El asidero se dibuja donde el reparto **recorta** el panel, que en una
+        // división estrecha no es el ancho que el usuario pidió; leer la posición del puntero como
+        // intención convierte un apretón en «quiero el ancho recortado» y machaca para siempre lo que había
+        // pedido con la ventana ancha. La primera protección exigía que el ancho pedido *se apartara* del
+        // pintado, y **solo movía el agujero**: un temblor de media celda ya los hace distintos, y las dos
+        // pruebas que lo vigilaban usaban cero y un punto — la suite estaba verde con el defecto dentro, que
+        // es el disfraz del margen pequeño que la regla dura del proyecto nombra.
+        //
+        // **Y el arreglo que la revisión propuso —anclar al ancho guardado y sumarle el desplazamiento— se
+        // implementó, se mutó y NO cambiaba ningún resultado.** La razón se puede seguir con lápiz: cuando
+        // el reparto recorta, lo que pinta **es** el techo (`cabe - CONSOLA_MINIMA`), así que la lectura
+        // directa da `techo + desplazamiento` y el ancla da `guardado + desplazamiento`, y el `min(techo)`
+        // de abajo deja las dos en `techo`. Y donde no hay recorte, las dos coinciden por construcción. Un
+        // mecanismo que no puede cambiar un resultado es un mecanismo sin escenario, así que fuera.
+        //
+        // Lo que de verdad cierra el agujero es la guarda de aquí: sin media celda cruzada no se toca el
+        // estado, **sea el temblor de un punto o de cuatro**.
+        let corte_pintado = panel.map_or(division.right(), |sitio| sitio.left());
+        if ((corte_pintado - puntero.x) / metrica.ancho()).round() == 0.0 {
             return false;
         }
+        // Lo negativo y lo que no es número caen en cero al convertirse a entero, que es lo que hace que
+        // empujar más allá del borde derecho pida cero — o sea, pedir plegar.
+        let pedido = ((division.right() - puntero.x) / metrica.ancho()).round() as usize;
 
         // **Plegar es arrastrar hasta el final, que es como lo define la decisión escrita del proyecto:
         // pedir menos que el suelo.** Y desplegar es lo simétrico — tirar del asidero hacia dentro.
@@ -2586,14 +2839,18 @@ struct Ventana {
     /// trabajo ocurrió después de que terminara. El resto de aquel saldría corto y el de éste, inflado.
     /// Se aparca aquí y se declara al fotograma que empieza, que es el que lo pagó.
     gastado_inyectando: std::time::Duration,
-    /// Los rectángulos con los que se pintó el último fotograma.
+    /// Con qué se pintó el último fotograma: el rectángulo de cada división y **dónde quedó la frontera de
+    /// su panel**, o nada si esa división no tenía panel a la vista.
     ///
     /// **Existe para el gesto inyectado y nada más**, y por eso guarda lo ya calculado en vez de volver a
     /// repartir: el enganche de la entrada cruda corre **antes** de la pasada de interfaz, así que en ese
     /// momento el reparto de este fotograma todavía no existe. Repartir por su cuenta sería una segunda
     /// copia del cálculo que decide dónde está cada consola, y las dos podrían discrepar justamente en la
     /// tanda que mide.
-    ultimos_rectangulos: Vec<egui::Rect>,
+    ///
+    /// **Una lista de parejas y no dos listas**, por lo mismo que el nombre de una división vive dentro de
+    /// ella: dos vectores que hay que mantener alineados son una invariante que alguien romperá.
+    ultimo_pintado: Vec<(egui::Rect, Option<f32>)>,
     /// El nombre que llevará la próxima pestaña que se abra. Ver [`Pestaña::nombre`].
     ///
     /// Vive en la ventana y no se deduce de la lista **porque la lista se queda corta en cuanto se cierra
@@ -2711,7 +2968,7 @@ impl Ventana {
             // `None` pelados en más de treinta llamadas — dos huecos que no dicen cuál es cuál.
             arrastres: None,
             gastado_inyectando: std::time::Duration::ZERO,
-            ultimos_rectangulos: Vec::new(),
+            ultimo_pintado: Vec::new(),
             // **Del largo de la lista y no del parámetro `cuantas`, aunque aquí valgan lo mismo.** Son
             // dos fuentes para el mismo dato, y con dos se puede coger la que no toca: poner un cero o
             // el parámetro equivocado hace que la siguiente pestaña que se abra **se llame igual que
@@ -2913,7 +3170,8 @@ impl Ventana {
             self.activa().nombre,
             self.arrastres.as_ref().map(|arrastres| medida::Arrastres {
                 inyectados: arrastres.hechos,
-                reordenaron: arrastres.reordenaciones,
+                con_efecto: arrastres.con_efecto,
+                gesto: arrastres.que.como_se_publica(),
             }),
         )?;
 
@@ -3372,7 +3630,7 @@ impl Ventana {
         // el informe de una tanda tiene que declarar no es cuántos gestos se inyectaron sino cuántos
         // **cambiaron la disposición**: mandar el evento de soltar no significa que el árbol lo acepte, y una
         // tanda donde ninguno cuaje mediría el gesto tanto como una sin gestos. Ver
-        // [`ArrastresInyectados::reordenaciones`].
+        // [`ArrastresInyectados::con_efecto`].
         //
         // Y vive en esta función y no en el pintado por lo que este proyecto tiene fichado sobre las pruebas:
         // atándolo donde el pintado se enteraba, la única prueba posible llamaba al contador a mano y no
@@ -3386,7 +3644,7 @@ impl Ventana {
         // el defecto que esta cuenta viene a corregir. Es el mismo trato que el proyecto ya aceptó para
         // recoger la consola si insertar fallara.
         if movio && let Some(arrastres) = self.arrastres.as_mut() {
-            arrastres.una_reordenacion_mas();
+            arrastres.uno_con_efecto_mas();
         }
         movio
     }
@@ -3940,13 +4198,14 @@ impl Ventana {
     /// **El recorte no es cosmético.** El pintor no recorta los glifos a propósito —para que un carácter
     /// más ancho que su celda se vea salir— y sin recortar por consola ese glifo del borde derecho
     /// aparecería dentro de la consola vecina, pintado por un programa que no es el suyo.
+    /// Devuelve lo que la ventana necesita saber de esta división después de pintarla. Ver [`DeLaDivision`].
     fn pintar_division(
         ui: &egui::Ui,
         division: &mut Division,
         rect: egui::Rect,
         tema: &Tema,
         metrica: &Metrica,
-    ) {
+    ) -> DeLaDivision {
         // **El panel se cronometra aparte del encolado de la consola, con dos relojes que se suman:
         // uno alrededor de leer y repartir, y otro alrededor de pintarlo.** Son dos y no uno porque el
         // pintado de la consola queda justo en medio y tiene su propio tramo. Para la resta del
@@ -3979,9 +4238,15 @@ impl Ventana {
         // es el coste del framework de interfaz, la cifra sobre la que D3 tiene que decidir.
         // **Se llama también sin panel, y eso es lo que permite desplegar**: plegado no hay rectángulo de
         // panel, pero sí un asidero pegado al borde por el que volver a abrirlo.
-        if division.arrastrar_la_frontera_de_su_panel(ui, rect, hueco.panel, metrica) {
+        // **Se compara el ancho antes y después, y no se cree lo que el gesto devuelve.** El gesto devuelve
+        // «he cambiado algo», y plegar y desplegar también cambian algo — sin tocar el ancho. Como el número
+        // que este dato alimenta se publica en el informe con la etiqueta «efectos» y el anexo lo interpreta
+        // como repartos y maquetados, contar ahí un plegado sería publicar trabajo que no ocurrió.
+        let ancho_antes = division.ancho_del_panel;
+        if division.arrastrar_la_frontera_de_su_panel(ui, rect, hueco.panel, metrica, ahora) {
             hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
         }
+        let cambio_el_ancho = division.ancho_del_panel != ancho_antes;
         let coste_de_leer = antes_del_panel.elapsed();
 
         division.medido = metrica.celdas_en(hueco.consola.size());
@@ -4008,6 +4273,15 @@ impl Ventana {
             );
         }
         let coste_del_panel = coste_de_leer + antes_de_pintarlo.elapsed();
+        // **Solo se reporta la frontera si hay asidero detrás.** Con el panel recortado por debajo del
+        // asidero el gesto no registra ningún control —para no robarle el punto al divisor del árbol—, y
+        // reportar la frontera igual hacía que el gesto inyectado apretara justo en el borde de ese divisor:
+        // la tanda pasaba su vida arrastrando el reparto de consolas **bajo la etiqueta del gesto del
+        // panel**. El guion la invalidaba por no haber efectos, pero culpando a la ventana.
+        let frontera_del_panel = hueco
+            .panel
+            .filter(|sitio| sitio.width() > AGARRE_DEL_PANEL)
+            .map(|sitio| sitio.left());
 
         // El cierre de la vuelta va aquí y no en el bucle de arriba porque **el encolado hay que
         // declararlo siempre**, también cuando a esta consola no le llegó salida: se pintó igual, y su
@@ -4022,6 +4296,11 @@ impl Ventana {
                 encolado,
                 coste_del_panel,
             ));
+        }
+
+        DeLaDivision {
+            frontera_del_panel,
+            cambio_el_ancho,
         }
     }
 }
@@ -4047,7 +4326,7 @@ impl eframe::App for Ventana {
         // **El fotograma y no la pasada**, que es la trampa que este proyecto ya tiene pagada: egui puede
         // repetir la pasada sobre la misma entrada, y con el número de pasada el gesto avanzaría dos veces
         // en el mismo fotograma.
-        let eventos = arrastres.eventos(&self.ultimos_rectangulos, ctx.cumulative_frame_nr());
+        let eventos = arrastres.eventos(&self.ultimo_pintado, ctx.cumulative_frame_nr());
         raw_input.events.extend(eventos);
 
         // **Y NO se piden fotogramas, aunque queden gestos. Eso lo intentó la primera versión y falseaba
@@ -4277,12 +4556,31 @@ impl eframe::App for Ventana {
 
         // Se indexa a mano en vez de pasar por `activa_mut`, que prestaría la ventana entera: el tema
         // hace falta a la vez y es otro campo.
+        // **La lista se prepara solo cuando hay gesto inyectado que la vaya a leer.** Sin tanda que
+        // arrastre no se reserva nada: es el camino de quien usa la aplicación, y una reserva por fotograma
+        // que nadie declara acabaría publicada como coste del framework.
+        // **Una sola pregunta y no dos.** Se resolvía dos veces —una para dimensionar la lista y otra por
+        // división— y eran dos sitios donde la condición podía separarse: dimensionada para una tanda cuyas
+        // entradas nunca se meten, o al revés.
+        let hay_gesto = self.arrastres.is_some();
+        let mut pintado = if hay_gesto {
+            Vec::with_capacity(rectangulos.len())
+        } else {
+            Vec::new()
+        };
+        let mut con_efecto = 0usize;
         for (division, rect) in self.pestañas[self.activa]
             .divisiones_mut()
             .into_iter()
             .zip(rectangulos.iter().copied())
         {
-            Self::pintar_division(ui, division, rect, &self.tema, &metrica);
+            let suyo = Self::pintar_division(ui, division, rect, &self.tema, &metrica);
+            if hay_gesto {
+                pintado.push((rect, suyo.frontera_del_panel));
+                if suyo.cambio_el_ancho {
+                    con_efecto += 1;
+                }
+            }
         }
 
         // El realce va al final para que quede por encima del contenido: un borde tapado a medias por
@@ -4318,8 +4616,12 @@ impl eframe::App for Ventana {
         // dura del proyecto describe: lo que no se declara se publica como coste del framework, la cifra con
         // la que D3 juzga a egui, y encima en la única tanda que recorre este camino. Moviendo el vector no
         // hay nada que declarar, porque no queda trabajo que hacer.
-        if self.arrastres.is_some() {
-            self.ultimos_rectangulos = rectangulos;
+        if let Some(arrastres) = self.arrastres.as_mut() {
+            // **Aquí y no al arrancar**: es el primer sitio donde la métrica de la fuente existe. Ver
+            // [`ArrastresInyectados::celda`].
+            arrastres.ya_sabe_la_celda(metrica.ancho());
+            self.ultimo_pintado = pintado;
+            arrastres.varios_con_efecto_mas(con_efecto);
         }
 
         // Las que no se pintan no tienen otro sitio donde enterarse de su tamaño: ésta es la única
@@ -4694,7 +4996,7 @@ mod tests {
             // pruebas, que es la única forma de comprobar el gesto sin abrir ventana.
             arrastres: None,
             gastado_inyectando: std::time::Duration::ZERO,
-            ultimos_rectangulos: Vec::new(),
+            ultimo_pintado: Vec::new(),
             siguiente_nombre,
             siguiente_nombre_de_division,
             cerrada_alguna_a_mano: false,
@@ -7828,7 +8130,7 @@ mod tests {
         );
         assert_eq!(cuantos_arrastres(Some("20")), 20, "no se leyó el número");
         assert!(
-            ArrastresInyectados::nuevos(0).is_none(),
+            ArrastresInyectados::nuevos(0, Gesto::MoverLaConsola).is_none(),
             "con cero pedidos se montó la máquina del gesto igualmente"
         );
     }
@@ -8897,7 +9199,7 @@ mod tests {
         // podía hacer era llamar al contador a mano, y eso no caza que producción deje de llamarlo — el
         // disfraz que este proyecto tiene fichado como «una prueba que ata al ayudante no ata el camino».
         let mut ventana = ventana_con("sleep 30", "sleep 30");
-        ventana.arrastres = ArrastresInyectados::nuevos(5);
+        ventana.arrastres = ArrastresInyectados::nuevos(5, Gesto::MoverLaConsola);
         let [izquierda, derecha] = dos_consolas_anchas();
         let ctx = egui::Context::default();
 
@@ -8914,7 +9216,7 @@ mod tests {
                 .arrastres
                 .as_ref()
                 .expect("los acabo de poner")
-                .reordenaciones,
+                .con_efecto,
             1,
             "un soltado que el árbol aceptó no se contó como reordenación"
         );
@@ -8933,7 +9235,7 @@ mod tests {
                 .arrastres
                 .as_ref()
                 .expect("siguen puestos")
-                .reordenaciones,
+                .con_efecto,
             1,
             "un soltado que el suelo geométrico rechazó se contó igual, así que el informe no distingue una \
              tanda que midió el gesto de una donde ninguno cuajó"
@@ -9836,10 +10138,30 @@ mod tests {
         ]
     }
 
+    /// Lo mismo, como lo recibe el gesto inyectado: **sin panel a la vista en ninguna**.
+    ///
+    /// Es el estado normal de una consola en este proyecto —casi ninguna tiene `panel.json` publicado— y es
+    /// lo que las pruebas del gesto de mover consolas necesitan: si alguna trajera frontera de panel, el
+    /// gesto del panel tendría dónde agarrar y estas pruebas medirían otra cosa.
+    fn dos_al_lado_pintadas() -> Vec<(egui::Rect, Option<f32>)> {
+        dos_al_lado().into_iter().map(|rect| (rect, None)).collect()
+    }
+
+    /// Los eventos de un gesto entero del panel, fotograma a fotograma.
+    fn un_gesto_del_panel(
+        gesto: &mut ArrastresInyectados,
+        pintado: &[(egui::Rect, Option<f32>)],
+        desde: u64,
+    ) -> Vec<Vec<egui::Event>> {
+        (0..=FOTOGRAMAS_ARRASTRANDO + 1)
+            .map(|paso| gesto.eventos(pintado, desde + paso as u64))
+            .collect()
+    }
+
     /// Los eventos de un gesto entero, fotograma a fotograma, con un número de fotograma distinto cada vez.
     fn un_gesto(arrastres: &mut ArrastresInyectados, desde: u64) -> Vec<Vec<egui::Event>> {
         (0..=FOTOGRAMAS_ARRASTRANDO + 1)
-            .map(|paso| arrastres.eventos(&dos_al_lado(), desde + paso as u64))
+            .map(|paso| arrastres.eventos(&dos_al_lado_pintadas(), desde + paso as u64))
             .collect()
     }
 
@@ -9849,7 +10171,8 @@ mod tests {
         // el puntero se mueve por encima de un umbral **después** de apretar, y el velo del destino solo
         // se pinta mientras está en vuelo: un gesto que apretara y soltara en el sitio mediría un clic y
         // el trabajo que este hito añade no se ejercería nunca.
-        let mut arrastres = ArrastresInyectados::nuevos(1).expect("uno es más que ninguno");
+        let mut arrastres =
+            ArrastresInyectados::nuevos(1, Gesto::MoverLaConsola).expect("uno es más que ninguno");
         let fotogramas = un_gesto(&mut arrastres, 10);
 
         assert!(
@@ -9912,7 +10235,8 @@ mod tests {
         // sobre el punto de soltado, que es lo que decide el lado, y no sobre la bandera: afirmar sobre el
         // campo donde se apunta un valor en vez de sobre su efecto es el disfraz que este proyecto tiene
         // fichado.
-        let mut arrastres = ArrastresInyectados::nuevos(2).expect("dos son más que ninguno");
+        let mut arrastres =
+            ArrastresInyectados::nuevos(2, Gesto::MoverLaConsola).expect("dos son más que ninguno");
         let destino = dos_al_lado()[1];
 
         let primero = un_gesto(&mut arrastres, 100);
@@ -9943,11 +10267,12 @@ mod tests {
         // entrada, y el enganche de la entrada cruda corre una vez por pasada. Sin la cuenta del fotograma,
         // una pasada repetida mandaría dos veces el «botón apretado» del mismo gesto y el arrastre que egui
         // sostiene entre fotogramas se quedaría a mitad.
-        let mut arrastres = ArrastresInyectados::nuevos(1).expect("uno es más que ninguno");
+        let mut arrastres =
+            ArrastresInyectados::nuevos(1, Gesto::MoverLaConsola).expect("uno es más que ninguno");
 
-        let primera = arrastres.eventos(&dos_al_lado(), 7);
-        let repetida = arrastres.eventos(&dos_al_lado(), 7);
-        let siguiente = arrastres.eventos(&dos_al_lado(), 8);
+        let primera = arrastres.eventos(&dos_al_lado_pintadas(), 7);
+        let repetida = arrastres.eventos(&dos_al_lado_pintadas(), 7);
+        let siguiente = arrastres.eventos(&dos_al_lado_pintadas(), 8);
 
         assert!(!primera.is_empty(), "la primera pasada no mandó nada");
         assert!(
@@ -9965,10 +10290,11 @@ mod tests {
         // **Una tanda mal pedida tiene que quedar en evidencia, no publicar tramos sin arrastre dentro.**
         // Con una sola consola no hay a dónde soltar, y el gesto no se inventa un destino: se queda a cero
         // hechos, que es lo que el guion lee para invalidar la corrida.
-        let mut arrastres = ArrastresInyectados::nuevos(3).expect("tres son más que ninguno");
-        let una_sola = vec![egui::Rect::from_min_size(
-            egui::pos2(0.0, 0.0),
-            egui::vec2(600.0, 600.0),
+        let mut arrastres = ArrastresInyectados::nuevos(3, Gesto::MoverLaConsola)
+            .expect("tres son más que ninguno");
+        let una_sola = vec![(
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 600.0)),
+            None,
         )];
 
         for fotograma in 0..20 {
@@ -9985,7 +10311,7 @@ mod tests {
         // `pedidos − hechos == 3`, y la revisión pilló que eso no puede fallar por su cuenta —`pedidos` es 3
         // por construcción y el aserto de arriba ya fija `hechos` en 0—, así que no cubría nada.
         for fotograma in 100..(100 + FOTOGRAMAS_ARRASTRANDO as u64 + 2) {
-            arrastres.eventos(&dos_al_lado(), fotograma);
+            arrastres.eventos(&dos_al_lado_pintadas(), fotograma);
         }
         assert_eq!(
             arrastres.hechos, 1,
@@ -10066,8 +10392,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
             .expect("no se pudo abrir la ventana");
-        ventana.arrastres = ArrastresInyectados::nuevos(4);
-        ventana.ultimos_rectangulos = dos_al_lado();
+        ventana.arrastres = ArrastresInyectados::nuevos(4, Gesto::MoverLaConsola);
+        ventana.ultimo_pintado = dos_al_lado_pintadas();
 
         let mut lote = egui::RawInput::default();
         eframe::App::raw_input_hook(&mut ventana, &ctx, &mut lote);
@@ -10096,23 +10422,23 @@ mod tests {
     }
 
     #[test]
-    fn el_informe_declara_los_arrastres_inyectados_y_los_que_reordenaron() {
+    fn el_informe_declara_los_gestos_inyectados_y_los_que_surtieron_efecto() {
         // **La línea es un contrato con `scripts/medir-fotograma.sh`**, que la lee para invalidar una tanda
         // que pidió arrastres y no llegó a hacer ninguno. Los dos números hacen falta: con solo los hechos
         // no se distingue una tanda sin arrastres de una que los pidió y no pudo.
         let ctx = egui::Context::default();
         let mut ventana = Ventana::con_pestañas(&ctx, 1, Disposicion::DE_SIEMPRE, None)
             .expect("no se pudo abrir la ventana");
-        ventana.arrastres = ArrastresInyectados::nuevos(9);
-        // Tres gestos enteros y **dos** reordenaciones, a propósito distintos: si los dos números fueran
+        ventana.arrastres = ArrastresInyectados::nuevos(9, Gesto::MoverLaConsola);
+        // Tres gestos enteros y **dos** con efecto, a propósito distintos: si los dos números fueran
         // iguales, esta prueba no distinguiría publicar uno de publicar el otro — que es el disfraz que este
         // proyecto tiene fichado. Se avanza el gesto directamente porque el enganche ya tiene su prueba.
         let arrastres = ventana.arrastres.as_mut().expect("los acabo de poner");
         for fotograma in 0..(3 * (FOTOGRAMAS_ARRASTRANDO as u64 + 2)) {
-            arrastres.eventos(&dos_al_lado(), fotograma);
+            arrastres.eventos(&dos_al_lado_pintadas(), fotograma);
         }
-        arrastres.una_reordenacion_mas();
-        arrastres.una_reordenacion_mas();
+        arrastres.uno_con_efecto_mas();
+        arrastres.uno_con_efecto_mas();
         // Sin nada medido el informe no se publica, y entonces esto pasaría por no encontrar una línea en
         // un texto vacío.
         ventana.pestañas[0].divisiones_mut()[0]
@@ -10126,7 +10452,7 @@ mod tests {
         let informe = String::from_utf8(salida).expect("el informe es texto");
 
         assert!(
-            informe.contains("arrastres:    3 inyectados, 2 reordenaron"),
+            informe.contains("arrastres:    3 inyectados · 2 efectos (moviendo consolas)"),
             "el informe no declara los arrastres inyectados y los que reordenaron:\n{informe}"
         );
         assert!(
@@ -15078,14 +15404,28 @@ mod tests {
         let alto = area.center().y;
         un_fotograma_en(&mut ventana, &ctx, area, en(corte, alto));
         un_fotograma_en(&mut ventana, &ctx, area, boton(corte, alto, true));
-        // El temblor: **un punto**, muy por debajo de una celda.
-        un_fotograma_en(&mut ventana, &ctx, area, en(corte + 1.0, alto));
-        un_fotograma_en(&mut ventana, &ctx, area, boton(corte + 1.0, alto, false));
+        // **El temblor va justo por debajo de media celda, que es donde el umbral anterior dejaba pasar.**
+        // La primera versión de esta prueba usaba un punto, y con un punto pasaba **también** con el
+        // agujero dentro: lo que discriminaba era «el ancho pedido difiere del pintado», y cualquier
+        // movimiento de media celda ya los hace distintos. Con el ancla al ancho guardado, ningún temblor
+        // por debajo de media celda escribe nada, sea de uno o de cuatro puntos.
+        let temblor = con_metrica(Metrica::ancho) / 2.0 - 0.5;
+        assert!(
+            temblor > 1.0,
+            "el temblor de esta prueba mide {temblor} puntos: con uno solo, pasaría igual con el defecto"
+        );
+        un_fotograma_en(&mut ventana, &ctx, area, en(corte + temblor, alto));
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area,
+            boton(corte + temblor, alto, false),
+        );
 
         assert_eq!(
             ventana.activa().divisiones()[0].ancho_del_panel,
             panel::ANCHO_DE_FABRICA,
-            "un temblor de un punto se leyó como «quiero este ancho» y borró el que había pedido"
+            "un temblor de {temblor} puntos se leyó como «quiero este ancho» y borró el que había pedido"
         );
     }
 
@@ -15142,5 +15482,297 @@ mod tests {
              causas: {:?}",
             limpio.repaint_causes()
         );
+    }
+
+    /// Dos divisiones **con panel a la vista**, como las recibe el gesto del panel.
+    fn dos_con_panel() -> Vec<(egui::Rect, Option<f32>)> {
+        dos_al_lado()
+            .into_iter()
+            // La frontera a 36 celdas de 8 puntos del borde derecho, que es el ancho de fábrica.
+            .map(|rect| (rect, Some(rect.right() - 288.0)))
+            .collect()
+    }
+
+    #[test]
+    fn el_gesto_del_panel_agarra_su_frontera_y_la_lleva_de_un_lado_a_otro() {
+        // **El gesto que mide F2.4, y lo que se ata es que entra por donde entra el del ratón de verdad:**
+        // agarra en la frontera del panel, la mueve, y suelta. Si agarrara en cualquier otro punto, el
+        // `interact` del asidero no lo vería y la tanda se publicaría sin gesto dentro.
+        let mut gesto = ArrastresInyectados::nuevos(2, Gesto::EstrecharElPanel)
+            .expect("dos son más que ninguno");
+        // **Sin esto no manda nada, y es el contrato**: al arrancar no se puede medir la fuente, así que la
+        // celda la pone el pintado en el primer fotograma. Ver `ArrastresInyectados::celda`.
+        gesto.ya_sabe_la_celda(8.0);
+        let pintado = dos_con_panel();
+        let frontera = pintado[0].1.expect("la primera tiene panel");
+        let recorrido = CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL * 8.0;
+
+        let primero = un_gesto_del_panel(&mut gesto, &pintado, 0);
+
+        // El apretón cae **en la frontera**, no en el centro de la consola.
+        assert!(
+            primero[0].iter().any(|evento| matches!(
+                evento,
+                egui::Event::PointerButton { pos, pressed: true, .. } if pos.x == frontera
+            )),
+            "el gesto no agarró la frontera del panel: {:?}",
+            primero[0]
+        );
+        // Y el movimiento se va **hacia dentro del panel**, cruzando celdas.
+        assert!(
+            primero.iter().flatten().any(|evento| matches!(
+                evento,
+                egui::Event::PointerMoved(pos) if pos.x == frontera + recorrido
+            )),
+            "el gesto no llevó la frontera las celdas que dice recorrer"
+        );
+
+        // **Y el segundo gesto va al otro lado**, que es lo que devuelve el ancho a donde estaba y evita
+        // que la tanda acabe midiendo un panel pegado a su mínimo durante casi toda la corrida.
+        let segundo = un_gesto_del_panel(&mut gesto, &pintado, 100);
+        assert!(
+            segundo.iter().flatten().any(|evento| matches!(
+                evento,
+                egui::Event::PointerMoved(pos) if pos.x == frontera - recorrido
+            )),
+            "el segundo gesto no fue hacia el otro lado: la tanda acabaría con el panel en un extremo"
+        );
+    }
+
+    #[test]
+    fn el_gesto_del_panel_no_manda_nada_si_ninguna_division_tiene_panel() {
+        // **Se devuelve la lista vacía en vez de saltarse el paso**, para que la tanda declare cero gestos y
+        // el guion la pueda invalidar. Sin panel publicado no hay frontera que agarrar, y una tanda que se
+        // quedara quieta publicaría sus tramos como si el gesto no costara nada.
+        let mut gesto = ArrastresInyectados::nuevos(3, Gesto::EstrecharElPanel)
+            .expect("tres son más que ninguno");
+        // Se le da la celda **a propósito**: sin ella el gesto tampoco mandaría nada, y entonces esta prueba
+        // pasaría por la razón equivocada — lo que tiene que atar es que **no hay panel**, no que falte la
+        // métrica.
+        gesto.ya_sabe_la_celda(8.0);
+        let sin_panel = dos_al_lado_pintadas();
+
+        for fotograma in 0..20 {
+            assert!(
+                gesto.eventos(&sin_panel, fotograma).is_empty(),
+                "sin panel a la vista se mandó algún evento"
+            );
+        }
+        assert_eq!(gesto.hechos, 0, "se contó algún gesto sin haberlo mandado");
+    }
+
+    #[test]
+    fn un_gesto_del_panel_cuenta_los_efectos_que_de_verdad_provoca() {
+        // **El número que el informe publica al lado de los gestos, atado.** Las dos corridas de la tanda
+        // dieron **exactamente el doble** de efectos que de gestos —1.344 para 671 y 1.756 para 878—, y una
+        // proporción tan redonda pide comprobar de dónde sale antes de publicarla en un anexo: si fuese un
+        // conteo doble del mismo cambio, el anexo estaría diciendo que el gesto provoca el doble de trabajo
+        // del que provoca.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        ventana.arrastres = ArrastresInyectados::nuevos(1, Gesto::EstrecharElPanel);
+        // Un fotograma para que el pintado le diga la celda y guarde las fronteras.
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        // El gesto entero, por el camino real: el enganche de la entrada cruda lo inyecta en cada fotograma.
+        let mut frame = eframe::Frame::_new_kittest();
+        for _ in 0..=FOTOGRAMAS_ARRASTRANDO + 1 {
+            let mut entrada = egui::RawInput {
+                screen_rect: Some(area),
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(&mut ventana, &ctx, &mut entrada);
+            eframe::App::logic(&mut ventana, &ctx, &mut frame);
+            ctx.run_ui(entrada, |ui| eframe::App::ui(&mut ventana, ui, &mut frame))
+                .drop_without_applying_deltas();
+        }
+
+        let arrastres = ventana.arrastres.as_ref().expect("la tanda pidió gestos");
+        assert_eq!(arrastres.hechos, 1, "no se completó el gesto entero");
+        assert!(
+            arrastres.con_efecto > 0,
+            "el gesto se inyectó y no cambió ningún ancho: la tanda no mediría nada"
+        );
+        // **El número exacto, y sondeando se supo de dónde sale.** Un gesto provoca **dos** cambios de ancho
+        // porque hay dos fotogramas de arrastre y cada uno empuja la frontera otras
+        // `CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL`: el ancho va 36 → 28 → 20. Es trabajo que ocurrió de verdad
+        // —dos repartos y dos maquetados—, no la misma cosa contada dos veces, y por eso el informe puede
+        // publicar más efectos que gestos sin estar inflando nada.
+        assert_eq!(
+            arrastres.con_efecto, FOTOGRAMAS_ARRASTRANDO,
+            "un gesto provocó {} efectos y los fotogramas de arrastre son {FOTOGRAMAS_ARRASTRANDO}: si no \
+             coinciden, o hay un cambio que no ocurrió o hay uno que no se cuenta",
+            arrastres.con_efecto
+        );
+        // **Y el ancho acabó donde la cuenta dice**, que es lo que impide que la tanda mida otro régimen sin
+        // avisar: dos empujones de ocho celdas desde el ancho de fábrica.
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA - 2 * CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL as usize,
+            "el gesto no dejó el ancho donde la cuenta de celdas dice"
+        );
+    }
+
+    #[test]
+    fn plegar_no_cuenta_como_un_cambio_de_ancho_en_el_informe() {
+        // **El número que el informe publica como «efectos» tiene que ser trabajo que ocurrió.** Plegar y
+        // desplegar cambian algo —el estado de plegado— pero **no tocan el ancho**, y el anexo interpreta
+        // ese número como repartos y maquetados. Contar ahí un plegado sería publicar trabajo inventado.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        ventana.arrastres = ArrastresInyectados::nuevos(1, Gesto::EstrecharElPanel);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        let antes = ventana.arrastres.as_ref().expect("hay gestos").con_efecto;
+
+        // Un plegado a mano, por el camino del gesto, sin inyector: se arrastra más allá del borde.
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
+        assert!(ventana.activa().divisiones()[0].plegado, "no se plegó");
+
+        assert_eq!(
+            ventana.arrastres.as_ref().expect("hay gestos").con_efecto,
+            antes,
+            "plegar se contó como un cambio de ancho: el informe publicaría repartos y maquetados que no \
+             ocurrieron"
+        );
+    }
+
+    #[test]
+    fn el_gesto_del_panel_suelta_y_cierra_si_pierde_su_frontera_a_mitad() {
+        // **Sin esto la tanda se cuelga en silencio.** Si el panel deja de tener frontera agarrable a mitad
+        // de un gesto —una ventana más pequeña, cuatro divisiones—, el gesto se quedaba parado para siempre
+        // con el botón apretado: nunca mandaba el soltar, nunca avanzaba, y la tanda seguía publicando miles
+        // de fotogramas **sin gesto dentro** bajo su etiqueta. El guion solo invalida cuando no hubo
+        // ninguno, así que una corrida colgada a los tres gestos se publicaba como buena.
+        let mut gesto = ArrastresInyectados::nuevos(3, Gesto::EstrecharElPanel)
+            .expect("tres son más que ninguno");
+        gesto.ya_sabe_la_celda(8.0);
+        let con_panel = dos_con_panel();
+        let sin_panel = dos_al_lado_pintadas();
+
+        // Se empieza el gesto con panel a la vista…
+        let primero = gesto.eventos(&con_panel, 0);
+        assert!(!primero.is_empty(), "el gesto no llegó a empezar");
+        assert_eq!(gesto.hechos, 0, "el gesto se contó antes de acabar");
+
+        // …y a mitad desaparece la frontera.
+        let cierre = gesto.eventos(&sin_panel, 1);
+
+        assert!(
+            cierre
+                .iter()
+                .any(|evento| matches!(evento, egui::Event::PointerButton { pressed: false, .. })),
+            "el gesto no soltó el botón al perder su frontera: la tanda se queda colgada"
+        );
+        assert_eq!(
+            gesto.hechos, 1,
+            "el gesto no se cerró, así que la cuenta de inyectados no avanza y la tanda parece viva"
+        );
+    }
+
+    #[test]
+    fn con_el_panel_por_debajo_del_asidero_no_se_reporta_su_frontera() {
+        // **Lo que el gesto inyectado lee tiene que corresponder a un asidero que EXISTE.** Con el panel
+        // recortado por debajo del asidero, el gesto no registra ningún control —para no robarle el punto al
+        // divisor del árbol— pero el rectángulo del panel sigue estando; reportar su borde igual hacía que
+        // el gesto inyectado apretara justo donde empieza ese divisor, y la tanda pasaba su vida arrastrando
+        // el reparto de consolas **bajo la etiqueta del gesto del panel**. El guion la invalidaba por no
+        // haber efectos, pero culpando a la ventana en vez de al asidero.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let celda = con_metrica(Metrica::ancho);
+        // Al panel le sobran dos puntos: más que cero, menos que el asidero.
+        let area = area_de(2.0 * (panel::CONSOLA_MINIMA * celda + 1.0) + GROSOR_DEL_DIVISOR);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        // Hace falta que la tanda pida gestos, porque es lo único que hace guardar lo pintado.
+        ventana.arrastres = ArrastresInyectados::nuevos(1, Gesto::EstrecharElPanel);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let ancho = ventana.activa().divisiones()[0]
+            .repartir_con_su_panel(suya, celda, SystemTime::now())
+            .panel
+            .expect("el rectángulo del panel existe")
+            .width();
+        assert!(
+            ancho > 0.0 && ancho <= AGARRE_DEL_PANEL,
+            "el panel mide {ancho} puntos: fuera del hueco entre el cero y el asidero, así que la prueba no \
+             plantea el caso"
+        );
+
+        assert_eq!(
+            ventana
+                .ultimo_pintado
+                .first()
+                .and_then(|(_, frontera)| *frontera),
+            None,
+            "se reportó una frontera sin asidero detrás: el gesto inyectado apretaría sobre el divisor del \
+             árbol y la tanda mediría el gesto equivocado"
+        );
+    }
+
+    #[test]
+    fn un_panel_plegado_cuyo_productor_se_calla_deja_de_reservar_asidero() {
+        // **Las dos formas de no tener panel, y la prueba hermana solo cubría una.** Plegado, el asidero se
+        // reserva para poder volver a abrirlo; pero si el productor deja de publicar mientras está plegado no
+        // queda nada que enseñar, y esa banda de ocho puntos le estaría quitando a la consola el borde por el
+        // que se agarra para llevársela — a cambio de desplegar un panel que no existe.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
+        assert!(ventana.activa().divisiones()[0].plegado, "no se plegó");
+
+        // El productor desaparece: sin directorio no hay nada que enseñar.
+        ventana.activa_mut().divisiones_mut()[0].panel = None;
+        ventana.activa_mut().divisiones_mut()[0].estado_del_panel = panel::Estado::default();
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let borde = suya.right() - AGARRE_DEL_PANEL;
+        let alto = suya.center().y;
+        un_fotograma_en(&mut ventana, &ctx, area, en(borde, alto));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(borde, alto, true));
+        un_fotograma_en(&mut ventana, &ctx, area, en(borde - 30.0 * celda, alto));
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area,
+            boton(borde - 30.0 * celda, alto, false),
+        );
+
+        assert!(
+            ventana.activa().divisiones()[0].plegado,
+            "se desplegó un panel que ya no existe: había un asidero reservado donde no hace falta"
+        );
+    }
+
+    #[test]
+    fn la_variable_del_gesto_y_las_palabras_que_publica_son_el_contrato_con_el_guion() {
+        // **Nada ataba esto, y el agujero es silencioso: un cambio de nombre deja cada tanda K midiendo la J
+        // bajo cabecera de K.** El guion pone `MEDIR_GESTO=panel` y luego **parsea la palabra** que el
+        // informe publica para decirla por pantalla y para invalidar la corrida; el anexo la cita. Son tres
+        // sitios que tienen que decir lo mismo y ninguna prueba los sujetaba.
+        assert_eq!(VARIABLE_DEL_GESTO, "MEDIR_GESTO");
+        assert_eq!(gesto_de(Some("panel")), Gesto::EstrecharElPanel);
+        // Con espacios alrededor, que es lo que deja un guion de shell al componer la variable.
+        assert_eq!(gesto_de(Some("  panel  ")), Gesto::EstrecharElPanel);
+        // **Y lo que no se entiende cae en el de la consola**, que es lo documentado: es lo que hace que un
+        // error de escritura mida el otro gesto en vez de abortar el arranque.
+        assert_eq!(gesto_de(Some("panelito")), Gesto::MoverLaConsola);
+        assert_eq!(gesto_de(Some("")), Gesto::MoverLaConsola);
+        assert_eq!(gesto_de(None), Gesto::MoverLaConsola);
+
+        // Las dos palabras del informe, tal como el guion las espera.
+        assert_eq!(
+            Gesto::EstrecharElPanel.como_se_publica(),
+            "estrechando el panel"
+        );
+        assert_eq!(Gesto::MoverLaConsola.como_se_publica(), "moviendo consolas");
     }
 }

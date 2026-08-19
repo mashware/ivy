@@ -934,9 +934,81 @@ tiene que seguir sin empujar el texto fuera del panel.
 
 **Cuándo dejaría de valer.** Lo de las cuatro divisiones ya está medido y respondido en el anexo de esta
 misma decisión, y el issue [#33](https://github.com/mashware/agent-terminal/issues/33) quedó cerrado con
-esos números. Lo que sigue sin medirse es **el coste del propio gesto**: cuánto cuesta un fotograma
-mientras alguien arrastra la frontera del panel, y si rehacer la maqueta al cruzar cada celda se nota. Esa
-tanda es lo que cierra F2.4.
+esos números. Y el coste del propio gesto también está medido: ver «Medido — lo que cuesta el gesto del
+panel», abajo.
+
+### Medido — lo que cuesta el gesto del panel (19 de agosto de 2026)
+
+**Cuatro corridas con el binario que se entrega**: dos de la tanda **K** —dos divisiones, las dos volcando,
+y la frontera del panel de la izquierda arrastrándose sin parar— y dos de la **C**, idéntica pero sin gesto.
+`scripts/medir-fotograma.sh K` y `... C`, ventana de 1280×800 puntos.
+
+> **Y son las de después de la revisión, no las primeras.** La revisión de este PR cambió el binario —cuatro
+> defectos en el gesto y en lo que el informe publica— así que las cuatro corridas anteriores describían un
+> programa que no es el que se entrega. Es la segunda vez que pasa en este proyecto y la lección es la misma:
+> **la tanda se corre al final, después de la revisión**.
+
+> **El control está DENTRO de cada corrida, y eso es lo que hace la resta honesta.** El gesto solo agarra la
+> frontera de la división **izquierda**; la derecha tiene su panel publicado y no lo toca nadie. Así que las
+> dos comparten fotograma, máquina y momento, y la diferencia entre sus tramos de panel es lo que cuesta el
+> gesto — sin depender de comparar dos corridas distintas.
+
+| Corrida | Gestos · efectos | Panel, división **con** gesto | Panel, división **sin** gesto | Diferencia |
+|---|---|---|---|---|
+| K, 1.ª | 958 · 1.918 | **35,562 µs** (107,3 el 95 %) | 12,238 µs (7,2 el 95 %) | 23,3 µs |
+| K, 2.ª | 870 · 1.740 | **33,721 µs** (97,3 el 95 %) | 2,821 µs | 30,9 µs |
+| C, 1.ª | — | 4,264 µs | 2,615 µs | 1,6 µs |
+| C, 2.ª | — | 3,632 µs | 2,190 µs | 1,4 µs |
+
+**Lo que el gesto cuesta: entre 23 y 31 µs por fotograma**, en la división que lo recibe. Sobre el hueco de
+60 Hz son **dos décimas del 1 %**; sobre el de 120 Hz, cuatro. Y el tramo cubre las tres cosas del gesto:
+atender la frontera, volver a repartir el ancho y **rehacer la maqueta del panel**.
+
+**La horquilla es ancha a propósito, y el motivo está en la tabla.** En la primera K la división **sin**
+gesto marca 12,2 µs de media con un 95 % de 7,2: la media por encima de su propio percentil es la firma de
+un pico único, no de un régimen. Con un suelo que se mueve así, publicar «el gesto cuesta 30,9 µs» con tres
+cifras sería fingir precisión.
+
+**La vecina no paga el gesto.** 2,2 a 2,8 µs en tres de las cuatro corridas, con gesto y sin él; la cuarta
+es el pico de arriba. Estrechar un panel no le cuesta al panel de al lado, que es lo que cabía esperar de un
+ancho que es de cada división.
+
+**Los efectos son el doble que los gestos, y conviene saber por qué antes de leer el número:** 1.740 para
+870 —el doble exacto— y **1.918 para 958, que son dos de más**. **No es un conteo doble** — se sondeó porque
+una proporción tan redonda lo parecía, y hay una prueba que fija el número por gesto. Un gesto tiene dos
+fotogramas de arrastre y **cada uno empuja la frontera otras ocho celdas**, porque el punto al que va el
+puntero se calcula desde donde la frontera está *ahora*: el ancho recorre 36 → 28 → 20 y vuelve con el gesto
+siguiente. Así que son **dos repartos y dos maquetados reales por gesto**, y esos 30 µs ya los incluyen.
+
+> **Y los dos que sobran tienen explicación, que es lo que hay que decir cuando un número no cuadra.** El
+> informe cuenta los gestos **completos**, o sea los que llegaron a soltar el botón; los efectos se cuentan
+> por fotograma. Un gesto que produjo sus dos fotogramas de arrastre y al que la ventana cerró antes de
+> soltar deja sus dos efectos contados y su propio gesto sin contar. La corrida de 870 acabó entre dos
+> gestos; la de 958, a mitad de uno.
+
+> **Lo que esta tanda NO mide, y hay que decirlo:** el gesto avanza a saltos de ocho celdas, así que **no hay
+> ningún fotograma en que la frontera cruce una sola celda**, que es lo que hace un ratón humano moviéndose
+> despacio. Lo medido es el arrastre rápido: menos maquetados, cada uno con un salto de ancho grande. Un
+> arrastre lento haría más maquetados de menos recorrido cada uno, y esa forma no está en estos números.
+
+> **AVISO, el mismo que lleva el anexo del gesto de F2.3 y por la misma razón: las medias por fotograma de K
+> y C NO se comparan entre sí.** Inyectar entrada mantiene la ventana despierta, así que K corrió 3.844 y
+> 3.490 fotogramas contra los 468 y 376 de C — de ocho a diez veces más. Se ve en el «resto del fotograma»,
+> que en K sale **más barato** (144 y 135 µs) que en C (240 y 232 µs) simplemente porque se reparte entre
+> miles de fotogramas sin trabajo de consola dentro. Lo que sí se compara es lo de la tabla: dos divisiones
+> del **mismo** fotograma.
+
+**Un punto ciego que esta tanda hace visible.** La rejilla que el informe publica es la del **último**
+fotograma, y en una tanda con este gesto el ancho de la consola izquierda está oscilando: las dos corridas
+de K acabaron con 47 y 39 columnas para la misma división. No es una anomalía, es el punto ciego del
+instrumento que ya estaba declarado — y aquí obliga a algo práctico: **el comparador de corridas rechaza dos
+tandas K por rejillas distintas, y hace bien**. Dos K no se promedian; se leen por separado.
+
+**La vuelta completa no se mueve:** 75,1 y 74,9 ms con gesto, 73,7 y 74,0 sin él. Está dominada por la
+espera en la cola —72 de los 75— así que el gesto no aparece ahí, ni tendría por qué: treinta microsegundos
+sobre setenta y cinco milisegundos son cuatro diezmilésimas.
+
+---
 
 ## D12 — El pseudoterminal se queda con el procesamiento de salida del núcleo, aunque cueste
 

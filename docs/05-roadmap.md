@@ -220,7 +220,7 @@ Lo que convierte el prototipo en algo que se usa a diario.
 | **F2.1** ✅ | Pestañas — **cerrado el 16 de agosto de 2026**. Ocho entregas; el fotograma medido con una y dos pestañas en el anexo de [D13](02-decisiones.md) |
 | **F2.2** ✅ | Divisiones arbitrarias — **cerrado el 17 de agosto de 2026**. Siete entregas; el árbol n-ario con pesos y los tres acordes en [D14](02-decisiones.md), y el fotograma medido con dos y con cuatro divisiones en su anexo |
 | **F2.3** ✅ | **Arrastrar divisiones con el ratón** para recolocarlas — **cerrado el 18 de agosto de 2026**. Tres entregas; el gesto, su atomicidad y la identidad del arrastre en [D15](02-decisiones.md), y el fotograma medido arrastrando sin parar en su anexo |
-| **F2.4** | Plegar el panel por división, y **estrechar su ancho arrastrando** — el mismo gesto sobre la misma frontera, así que van juntos ([02-decisiones.md](02-decisiones.md) → D10) |
+| **F2.4** ✅ | Plegar el panel por división y **estrechar su ancho arrastrando** — **cerrado el 19 de agosto de 2026**. Tres entregas; el ancho por división, el mínimo del gesto y el plegado como estado aparte en [D10](02-decisiones.md), y lo que cuesta el gesto medido en su anexo |
 | **F2.5** | Guardar y restaurar la disposición al abrir |
 | **F2.6** | Scrollback, selección y **copiar** — pegar se adelantó fuera de fase ([#46](https://github.com/mashware/agent-terminal/issues/46)), porque no necesita nada de lo demás y su ausencia hacía que la aplicación se sintiera rota. Ver D11 |
 | **F2.7** | Primera compilación y prueba real en **macOS y Windows** |

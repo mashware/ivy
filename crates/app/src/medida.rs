@@ -483,8 +483,19 @@ pub struct EnPuntos {
 pub struct Arrastres {
     /// Gestos enteros que se inyectaron: los que llegaron a mandar su evento de soltar.
     pub inyectados: usize,
-    /// De ésos, los que el árbol **aceptó**, o sea los que reordenaron la disposición de verdad.
-    pub reordenaron: usize,
+    /// Cuántas veces el gesto **cambió algo de verdad**: soltados que el árbol aceptó, o fotogramas en que
+    /// un arrastre le movió el ancho a un panel.
+    ///
+    /// **Puede ser MAYOR que los inyectados, y no es un error de cuenta.** Con el gesto del panel, un solo
+    /// arrastre cruza varias fronteras de celda y cada cruce cambia el ancho, así que un gesto produce
+    /// varios efectos —y con dos divisiones a la vista, los de las dos—. Por eso las dos cifras se publican
+    /// **una al lado de la otra y no como una fracción**: la primera dice cuántos gestos ocurrieron, la
+    /// segunda cuánto trabajo provocaron. La primera versión las imprimía como «N de M» y publicó
+    /// «423 de 211», que es un número imposible de leer bien.
+    pub con_efecto: usize,
+    /// Qué gesto se inyectó, tal como se publica. **Va en el informe** porque los dos gestos no cuestan lo
+    /// mismo y una tanda no se compara con otra de la otra clase.
+    pub gesto: &'static str,
 }
 
 /// La cabecera del informe: dónde y cómo se midió — cuántas pestañas había, cuál se veía y con qué
@@ -555,8 +566,8 @@ pub fn cabecera(
         }
     }
     // **Los gestos que la tanda se inyectó, y solo si pidió alguno.** Dos números, y los dos tienen señal:
-    // los **inyectados** dicen que el gesto ocurrió, y los que **reordenaron** dicen que el árbol los
-    // aceptó. Hacen falta los dos porque no son lo mismo: el suelo geométrico rechaza el soltado cuando la
+    // los **inyectados** dicen que el gesto ocurrió, y los que **surtieron efecto** dicen que llegó a
+    // cambiar algo. Hacen falta los dos porque no son lo mismo: el suelo geométrico rechaza el soltado cuando la
     // consola de destino no puede darle su mínimo a las dos, y en una ventana estrecha eso pasa en todos —
     // la tanda inyecta mil gestos y no reordena ni uno. Con un solo número, esa corrida se leería como «el
     // gesto no cuesta nada» en vez de como «no pasó nada», que es el disfraz de declarar cero que este
@@ -574,8 +585,8 @@ pub fn cabecera(
     if let Some(arrastres) = arrastres {
         writeln!(
             a,
-            "arrastres:    {} inyectados, {} reordenaron",
-            arrastres.inyectados, arrastres.reordenaron
+            "arrastres:    {} inyectados · {} efectos ({})",
+            arrastres.inyectados, arrastres.con_efecto, arrastres.gesto
         )?;
     }
     writeln!(a, "renderizador: glow")?;
@@ -701,11 +712,12 @@ mod tests {
             0,
             Some(Arrastres {
                 inyectados: 1720,
-                reordenaron: 1719,
+                con_efecto: 1719,
+                gesto: "moviendo consolas",
             }),
         );
         assert!(
-            con_gesto.contains("arrastres:    1720 inyectados, 1719 reordenaron"),
+            con_gesto.contains("arrastres:    1720 inyectados · 1719 efectos (moviendo consolas)"),
             "la cabecera no declaró los arrastres de la tanda:\n{con_gesto}"
         );
 

@@ -34,6 +34,17 @@
 #              cuatro en fila sobre 1.200 puntos, la primera consola pasa de 298,5 a 119,4 puntos en un
 #              solo ciclo. Cada fotograma mediría una ventana distinta y la media no describiría ninguna.
 #              Atado por `el_ciclo_de_dos_gestos_vuelve_a_la_forma_de_partida_solo_con_dos_consolas`.
+#              Con UNA pestaña y DOS divisiones, y la FRONTERA DEL PANEL arrastrándose, la que F2.4 añade —
+#              también en el régimen de la C:
+#                K = como la C, y además la ventana agarra la frontera del panel de la consola izquierda y
+#                    la lleva adentro y afuera sin parar, alternando el lado para que el ancho vuelva. La
+#                    consola DERECHA no se toca: es la tanda de control **dentro de la misma corrida**, y
+#                    la diferencia entre los tramos de panel de las dos es lo que cuesta el gesto
+#
+#              **Dos corridas de K no se promedian**, y el comparador las rechaza con razón: la rejilla que
+#              el informe publica es la del último fotograma, y en esta tanda el ancho de la consola
+#              izquierda está oscilando, así que dos corridas acaban con distinto número de columnas. Se
+#              leen por separado.
 #     [mib]    tamaño de la carga por consola, 44 por defecto
 #
 #   El modo `comparar` no mide: lee dos informes de la misma tanda y dice si se pueden promediar.
@@ -195,7 +206,7 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
 fi
 
 # ── Modo tanda ──────────────────────────────────────────────────────────────────
-TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I o J}
+TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J o K}
 MIB=${2:-44}
 SALIDA="$RAIZ/target/medidas"
 mkdir -p "$SALIDA"
@@ -216,19 +227,20 @@ rm -f "$TESTIGO"
 # segundo con cero gestos — o sea que una tanda nueva pensada para arrastrar se quedaría quieta y el guion la
 # invalidaría por no declarar arrastres, en vez de simplemente funcionar.
 case "$TANDA" in
-    A|B|C|D) PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0 ;;
-    F)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0 ;;   # la de fondo, quieta: no vuelca ninguna
-    G)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=4; ARRASTRES=0 ;;   # la de fondo, volcando como la de delante
-    H)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0 ;;   # cuatro en fila: el peor caso del panel (#33)
-    I)       PESTANAS=1; DIVISIONES=2x2; VUELCAN=4; ARRASTRES=0 ;;   # cuatro en cuadro
-    J)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000 ;;   # dos, y arrastrándose: el gesto de F2.3
-    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I o J" >&2; exit 2 ;;
+    A|B|C|D) PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola ;;
+    F)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola ;;   # la de fondo, quieta: no vuelca ninguna
+    G)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=4; ARRASTRES=0; GESTO=consola ;;   # la de fondo, volcando como la de delante
+    H)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=consola ;;   # cuatro en fila: el peor caso del panel (#33)
+    I)       PESTANAS=1; DIVISIONES=2x2; VUELCAN=4; ARRASTRES=0; GESTO=consola ;;   # cuatro en cuadro
+    J)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=consola ;;   # dos, y arrastrándose: el gesto de F2.3
+    K)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=panel ;;     # dos, y estrechando el panel sin parar: el gesto de F2.4
+    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J o K" >&2; exit 2 ;;
 esac
 # **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
 # que caben, porque lo que hace falta es que el gesto dure **de principio a fin**. Una tanda que se queda sin
 # gestos a mitad promedia dos regímenes distintos y publica la media de los dos como si fuera uno. Cuántos
 # ocurrieron de verdad lo dice el informe, y **ése** es el número que vale: el informe publica los inyectados
-# y los que reordenaron, no los pedidos.
+# y los efectos que provocaron, no los pedidos.
 
 # Las consolas por pestaña salen de la disposición, que es «columnas por filas».
 POR_PESTANA=$(( ${DIVISIONES%x*} * ${DIVISIONES#*x} ))
@@ -332,7 +344,7 @@ sembrar() {
 case "$TANDA" in
     A) : ;;                       # sin panel: nadie publica nada
     B) sembrar quieto & ;;
-    C|D|F|G|H|I|J) sembrar hablador & ;;
+    C|D|F|G|H|I|J|K) sembrar hablador & ;;
 esac
 
 echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIRECTORIOS consolas volcando $MIB MiB · ventana $TAMANO · no toques la máquina hasta que cierre" >&2
@@ -343,7 +355,7 @@ INFORME="$SALIDA/tanda-$TANDA-$(date +%H%M%S).txt"
 MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
     MEDIR_TURNOS="$TURNOS" MEDIR_VUELCAN="$VUELCAN" \
     MEDIR_PESTANAS="$PESTANAS" MEDIR_DIVISIONES="$DIVISIONES" \
-    MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" \
+    MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" MEDIR_GESTO="$GESTO" \
     SHELL="$RAIZ/scripts/medir-fotograma.sh" \
     "$APP" > "$INFORME"
 
@@ -374,23 +386,25 @@ fi
 # —un cambio de nombre, un binario viejo—, si la disposición tiene una sola consola, o si la ventana se
 # cierra antes de completar el primero.
 if [ "$ARRASTRES" != 0 ]; then
-    INYECTADOS=$(sed -n 's/^arrastres: *\([0-9]*\) inyectados, [0-9]* reordenaron$/\1/p' "$INFORME" | head -1)
-    REORDENARON=$(sed -n 's/^arrastres: *[0-9]* inyectados, \([0-9]*\) reordenaron$/\1/p' "$INFORME" | head -1)
+    INYECTADOS=$(sed -n 's/^arrastres: *\([0-9]*\) inyectados · [0-9]* efectos .*$/\1/p' "$INFORME" | head -1)
+    CON_EFECTO=$(sed -n 's/^arrastres: *[0-9]* inyectados · \([0-9]*\) efectos .*$/\1/p' "$INFORME" | head -1)
+    QUE_GESTO=$(sed -n 's/^arrastres: *[0-9]* inyectados · [0-9]* efectos (\(.*\))$/\1/p' "$INFORME" | head -1)
     if [ -z "$INYECTADOS" ]; then
         invalidar "se pidieron arrastres y el informe no declara ninguna línea de arrastres"
     fi
     if [ "$INYECTADOS" = 0 ]; then
         invalidar "se pidieron arrastres y el informe dice que no se inyectó ninguno entero"
     fi
-    # **Y que alguno haya REORDENADO, que es lo que de verdad mide la tanda.** Mandar el evento de soltar no
-    # significa que la disposición cambie: el suelo geométrico lo rechaza cuando la consola de destino no
-    # puede darle su mínimo a las dos, y con una ventana estrecha eso pasa en todos. Esa corrida inyecta mil
-    # gestos, no reordena ni uno, y sin esta comprobación se publicaría como «el gesto no cuesta nada».
-    if [ "$REORDENARON" = 0 ]; then
-        invalidar "se inyectaron $INYECTADOS arrastres y ninguno reordenó nada: la ventana es demasiado \
-estrecha para que el suelo geométrico acepte el soltado, así que esta tanda no mide el gesto"
+    # **Y que alguno haya SURTIDO EFECTO, que es lo que de verdad mide la tanda.** Inyectar el gesto no
+    # significa que cambie nada: el suelo geométrico rechaza el soltado de una consola cuando el destino no
+    # puede darle su mínimo a las dos, y el techo del panel deja el ancho igual si ya estaba en su límite.
+    # Con una ventana estrecha eso pasa en **todos**: la corrida inyecta mil gestos, no cambia nada, y sin
+    # esta comprobación se publicaría como «el gesto no cuesta nada».
+    if [ "$CON_EFECTO" = 0 ]; then
+        invalidar "se inyectaron $INYECTADOS gestos ($QUE_GESTO) y ninguno cambió nada: la ventana es \
+demasiado estrecha para que la operación se acepte, así que esta tanda no mide el gesto"
     fi
-    echo "arrastres durante la tanda: $INYECTADOS inyectados, $REORDENARON reordenaron" >&2
+    echo "gestos durante la tanda: $INYECTADOS inyectados, $CON_EFECTO efectos ($QUE_GESTO)" >&2
 fi
 
 # **Que las consolas fueran las que se pidieron.** Con la variable de la disposición sin llegar, la
