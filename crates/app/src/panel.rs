@@ -27,10 +27,9 @@ use crate::tema::Tema;
 /// **De fábrica, no fijo**: desde que se puede arrastrar la frontera del panel, esto es solo el valor
 /// con el que empieza una división que nadie ha tocado. El que manda es el de cada división.
 ///
-/// Por qué en celdas y por qué el que cede es el panel está en D10 de `docs/02-decisiones.md`. **Lo que
-/// D10 todavía no cuenta es esto**: que el ancho dejó de ser fijo, que es de cada división y con qué
-/// suelo se arrastra. Esa decisión se escribe allí cuando el hito se cierre con su medida — hasta
-/// entonces, D10 describe el estado anterior y aquí queda dicho para que nadie la lea como al día.
+/// El razonamiento entero —por qué en celdas, por qué el que cede es el panel, que el ancho es de cada
+/// división, qué es el mínimo del gesto y por qué plegar es un estado aparte— está en **D10** de
+/// `docs/02-decisiones.md`, con lo que se descartó en cada caso.
 pub(crate) const ANCHO_DE_FABRICA: usize = 36;
 
 /// Lo menos que se le deja a la consola cuando su panel le quita sitio, en celdas.
@@ -56,11 +55,10 @@ pub(crate) const CONSOLA_MINIMA: f32 = 20.0;
 /// que `apartar` no devuelve nunca es *ningún* panel una vez se le pide un ancho: en el caso extremo
 /// devuelve el rectángulo vacío, y su prueba lo dice así.)
 ///
-/// **Y esto es lo que hoy impide plegar del todo arrastrando**, que es como D10 y el roadmap describen el
-/// plegado: «arrastrar hasta el final». Queda a medias a propósito y con el orden pensado — llegar a cero
-/// exige que la frontera siga agarrable **sin** panel debajo, y eso es un mecanismo distinto del que hay
-/// aquí. Mientras no exista, el suelo es lo que garantiza que todo lo que este gesto hace se puede
-/// deshacer con el mismo gesto.
+/// **Y desde que se puede plegar, esto es exactamente la raya entre estrechar y plegar**: pedir menos que
+/// esto es lo que el gesto lee como «ciérralo». Antes de que el plegado existiera, este mismo número
+/// servía para lo contrario —impedir llegar a cero, porque la frontera se habría ido con el panel— y esa
+/// razón ya no es la suya: ahora lo que sostiene el regreso es el asidero que sobrevive al plegado.
 pub(crate) const SUELO_AL_ARRASTRAR: usize = 1;
 
 /// Lo que se deja de margen a la izquierda del texto, en celdas.

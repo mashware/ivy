@@ -91,7 +91,12 @@ const REJILLA_INICIAL: Size = Size { rows: 24, cols: 80 };
 /// esperar—; se escribe para que nadie lo lea como una garantía que no existe.
 const GROSOR_DEL_DIVISOR: f32 = 2.0;
 
-/// Cuánto se agarra a cada lado de la frontera del panel, en puntos.
+/// Lo que se agarra de la frontera del panel, en puntos.
+///
+/// **Se usa de dos maneras y conviene no confundirlas al tocar el número:** con panel a la vista, a cada
+/// lado del corte —una banda del doble de esto, a caballo—; **plegado**, entera hacia dentro desde el
+/// borde derecho, que son también el doble pero **todos dentro de la consola**. Esa segunda es la banda
+/// que, según el comentario del propio gesto, impide agarrar ahí la consola para llevársela de sitio.
 ///
 /// **Más ancho que la línea de un divisor del árbol, y a propósito.** Un divisor **se pinta**, así que se
 /// ve dónde apuntar; la frontera del panel no pinta nada —ver
@@ -1150,6 +1155,13 @@ struct Division {
     /// y estrecho el que no. Un ancho de la aplicación tendría además que ceder al mínimo de la
     /// división más estrecha, o mentir en las demás.
     ancho_del_panel: usize,
+    /// Si el panel de esta consola está plegado.
+    ///
+    /// **Va aparte del ancho y no dentro de él, y eso es la decisión.** Un «ancho cero» que además
+    /// significara plegado perdería el ancho de trabajo, y desplegar tendría que inventarse un valor —
+    /// cuando lo que el usuario espera es volver **al suyo**. Con dos campos, plegar no toca el ancho:
+    /// se deja de pedir, y al desplegar sigue ahí.
+    plegado: bool,
 }
 
 /// Un directorio que no se pudo crear **no impide abrir la consola**.
@@ -1253,6 +1265,7 @@ impl Division {
             pendiente_de_medir: None,
             panel_sin_pintar: std::time::Duration::ZERO,
             ancho_del_panel: panel::ANCHO_DE_FABRICA,
+            plegado: false,
         })
     }
 
@@ -1356,12 +1369,14 @@ impl Division {
         // llamadores.** Uno mide la rejilla de las consolas que no se pintan y el otro pinta la que se
         // ve; si el ancho viajara por parámetro, cada uno podría traer el suyo y una consola de fondo
         // volvería a medirse con un ancho que no es el suyo — el defecto que ya costó 36 columnas.
+        //
+        // **Plegado no pide ancho, y por eso plegar deja a la consola el rectángulo entero**: es el mismo
+        // camino por el que pasa una división cuyo productor no ha publicado nada, así que las dos se ven
+        // igual sin que haya dos formas de no tener panel.
         panel::apartar(
             rect,
             ancho_de_celda,
-            self.estado_del_panel
-                .se_ve(ahora)
-                .then_some(self.ancho_del_panel),
+            (!self.plegado && self.estado_del_panel.se_ve(ahora)).then_some(self.ancho_del_panel),
         )
     }
 
@@ -1393,16 +1408,36 @@ impl Division {
         &mut self,
         ui: &egui::Ui,
         division: egui::Rect,
-        panel: egui::Rect,
+        panel: Option<egui::Rect>,
         metrica: &Metrica,
     ) -> bool {
-        if panel.width() <= 0.0 {
-            return false;
-        }
+        // **Plegado no hay panel, y aun así hay que dejar dónde agarrar**: si la frontera se fuera con
+        // él, el gesto que lo cerró no se podría deshacer con el ratón. El asidero se queda pegado al
+        // borde derecho de la división, **hacia dentro**.
+        //
+        // **Hacia dentro y no a caballo, a diferencia del de una frontera con panel.** El borde derecho
+        // de una división es donde empieza el divisor que reparte consolas, y este control se registra
+        // después: a caballo le ganaría el empate y dejaría muerta la frontera que sí mueve algo. El
+        // precio de meterlo hacia dentro está declarado y es pequeño: en una consola plegada, la banda
+        // del borde derecho agarra su panel y no la consola, así que ahí no se la puede coger para
+        // llevársela de sitio.
+        let corte = match panel {
+            // **Un panel más estrecho que el propio asidero no es agarrable por su frontera**, y el
+            // umbral es el asidero y no el cero: con el cero, un panel de dos puntos dejaba la banda de
+            // ocho **tapando el divisor** que reparte las consolas, y como este control se registra
+            // después le ganaba el empate — la consola no se podía volver a ensanchar. Lo encontró la
+            // revisión, con la prueba del cero exacto en verde.
+            Some(sitio) if sitio.width() <= AGARRE_DEL_PANEL => return false,
+            Some(sitio) => sitio.left(),
+            None if self.plegado => division.right() - AGARRE_DEL_PANEL,
+            // Sin panel y sin plegar no hay nada que enseñar ni que ajustar: es una consola cuyo
+            // productor no ha publicado nada.
+            None => return false,
+        };
 
         let asidero = egui::Rect::from_min_max(
-            egui::pos2(panel.left() - AGARRE_DEL_PANEL, division.top()),
-            egui::pos2(panel.left() + AGARRE_DEL_PANEL, division.bottom()),
+            egui::pos2(corte - AGARRE_DEL_PANEL, division.top()),
+            egui::pos2(corte + AGARRE_DEL_PANEL, division.bottom()),
         );
 
         // `Sense::DRAG` y no `Sense::drag()`: el segundo añade `FOCUSABLE`, o sea que la frontera
@@ -1449,20 +1484,80 @@ impl Division {
         // pedido.** Sin gesto no se pasa por aquí, así que un panel de treinta y seis celdas guardado en
         // una ventana ancha sobrevive a una estrecha: se pinta recortado y vuelve entero al ensanchar.
         //
-        // El número de celdas de la división sale de [`Metrica::celdas_en`] y no de una división a mano,
-        // porque esa función ya trae el tope que filtra un rectángulo que no corresponde a ninguna
-        // ventana — los diez mil puntos de reserva de egui mientras el escritorio no ha dicho su tamaño,
-        // que en celdas son más de mil y **no** los recorta ninguna conversión a entero.
+        // El número de celdas de la división sale de [`Metrica::celdas_en`] para no repetir aquí una
+        // conversión que esa función ya hace con su suelo y su techo. **Pero su tope no es el que hace
+        // falta y conviene decirlo:** son mil columnas, un límite de rejilla, no «el rectángulo
+        // corresponde a una ventana de verdad». Con los diez mil puntos de reserva que egui devuelve
+        // mientras el escritorio no ha dicho su tamaño, este techo sale de casi mil celdas y **deja
+        // pasar** un ancho que ninguna ventana real va a tener. Lo que de verdad impide que eso se
+        // guarde es la guarda de abajo: un arrastre exige que el puntero se haya movido, y en esos dos
+        // primeros fotogramas no hay nadie arrastrando.
         let cabe = metrica.celdas_en(division.size()).cols as usize;
         let techo = cabe
             .saturating_sub(panel::CONSOLA_MINIMA as usize)
             .max(panel::SUELO_AL_ARRASTRAR);
 
-        // Lo negativo y lo que no es número caen en cero al convertirse a entero —comprobado, y es el
-        // mismo mecanismo que `celdas_en` documenta— y el suelo los sube.
+        // **Sin guarda contra un valor no finito, y esta vez con los cuatro caminos enumerados.** La
+        // revisión avisó de que, desde que pedir menos que el suelo significa **plegar**, un cero ya no lo
+        // sube el suelo: plegaría el panel. El aviso es correcto en su razonamiento y el escenario **no es
+        // alcanzable**; se puso la guarda, se mutó, y **la mutación sobrevivió**. Enumerando de dónde
+        // podría salir un valor no finito:
+        //
+        // - **El rectángulo de la división sin número.** El asidero se construye con sus coordenadas, así
+        //   que sale sin número también, y egui **no entrega el arrastre de un control así** — comprobado:
+        //   el método sale por la puerta del «no me están arrastrando» y nunca llega hasta aquí.
+        // - **La posición del puntero sin número.** Imposible: `interact_pointer_pos` devuelve `None`
+        //   cuando la posición tiene un `NaN` (`response.rs:545-548`), y de ahí ya se ha vuelto.
+        // - **Celda de ancho cero, con el puntero en cualquier sitio menos el borde.** Da infinito, que al
+        //   convertirse a entero satura al máximo y el techo lo baja. No pliega.
+        // - **Celda de ancho cero, con el puntero justo en el borde derecho.** Da `NaN`, que cae en cero y
+        //   pliega — y **pedir cero desde el borde derecho es exactamente pedir que se pliegue**.
+        //
+        // Los cuatro dan el resultado correcto o no ocurren, así que la guarda sería un mecanismo sin
+        // escenario. Su hermano el arrastre de fronteras sí la necesita, y por eso la tiene: allí el
+        // estado es una fracción y un recorte sobre un `NaN` lo devuelve intacto.
         let pedido = ((division.right() - puntero.x) / metrica.ancho()).round() as usize;
-        let nuevo = pedido.clamp(panel::SUELO_AL_ARRASTRAR, techo);
 
+        // **Y lo que separa «he pulsado aquí» de «quiero esto de ancho» no puede ser que el ratón se haya
+        // movido un punto.** El asidero se dibuja donde el reparto **recorta** el panel, que en una
+        // división estrecha no es el ancho que el usuario pidió; con un temblor de un punto durante un
+        // clic, el corte recortado se leería como intención y machacaría para siempre lo que había
+        // pedido con la ventana ancha. Lo que se exige es que el ancho pedido **se aparte del que se está
+        // pintando**: si coincide, el gesto no está diciendo nada nuevo.
+        let pintado =
+            ((panel.map_or(0.0, |sitio| sitio.width())) / metrica.ancho()).round() as usize;
+        if pedido == pintado && pedido != self.ancho_del_panel {
+            return false;
+        }
+
+        // **Plegar es arrastrar hasta el final, que es como lo define la decisión escrita del proyecto:
+        // pedir menos que el suelo.** Y desplegar es lo simétrico — tirar del asidero hacia dentro.
+        //
+        // **Ni una cosa ni la otra toca el ancho guardado, y ahí está el detalle que hace que desplegar
+        // devuelva lo que el usuario pidió.** Plegar solo deja de pedirlo; desplegar vuelve a pedir **el
+        // mismo**, así que el panel reaparece con su ancho de antes y no con el de fábrica. Desde ese
+        // fotograma el arrastre sigue mandando, que es lo que se decidió: tu ancho, y el ratón manda
+        // desde ahí.
+        //
+        // > **Punto ciego declarado:** egui puede repetir la pasada sobre la misma entrada, y la segunda
+        // > ya no ve el panel plegado, así que escribe el ancho del puntero en vez de conservar el
+        // > guardado. Las dos son mitades de lo decidido —el ancho de antes, y el ratón mandando— así que
+        // > no se inventa estado propio para forzar una de las dos. Queda dicho porque es la clase de
+        // > diferencia entre fotogramas que este proyecto ya pagó una vez sin verla.
+        if pedido < panel::SUELO_AL_ARRASTRAR {
+            let cambio = !self.plegado;
+            self.plegado = true;
+            return cambio;
+        }
+        if self.plegado {
+            self.plegado = false;
+            return true;
+        }
+
+        // `min` y no `clamp`: el suelo ya lo aplicó la rama de plegar, siete líneas arriba. Un `clamp`
+        // aquí leería como si esta línea lo defendiera, y no defiende nada — de paso desaparece la forma
+        // que entra en pánico cuando el mínimo supera al máximo.
+        let nuevo = pedido.min(techo);
         let cambio = nuevo != self.ancho_del_panel;
         self.ancho_del_panel = nuevo;
         cambio
@@ -2727,6 +2822,11 @@ impl Ventana {
             .activa()
             .divisiones()
             .into_iter()
+            // **Un panel plegado no despierta a nadie**, por la misma razón por la que no despierta el de
+            // una pestaña que no se mira: el aviso de que su contenido está rancio **no se pinta**, así
+            // que gastar un fotograma en él es gastarlo en algo que nadie va a ver. Sin esto, plegar una
+            // consola cuyo productor se calla deja la ventana despertándose cada minuto para nada.
+            .filter(|division| !division.plegado)
             .filter_map(|division| division.estado_del_panel.cuanto_falta_para_avisar(ahora))
             .min()
         {
@@ -3877,9 +3977,9 @@ impl Ventana {
         // El tramo cronometrado lo encierra por lo mismo que encierra leer el fichero y repartir el
         // ancho: es trabajo del panel, y lo que no se declara se lo lleva la resta del fotograma — que
         // es el coste del framework de interfaz, la cifra sobre la que D3 tiene que decidir.
-        if let Some(sitio) = hueco.panel
-            && division.arrastrar_la_frontera_de_su_panel(ui, rect, sitio, metrica)
-        {
+        // **Se llama también sin panel, y eso es lo que permite desplegar**: plegado no hay rectángulo de
+        // panel, pero sí un asidero pegado al borde por el que volver a abrirlo.
+        if division.arrastrar_la_frontera_de_su_panel(ui, rect, hueco.panel, metrica) {
             hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
         }
         let coste_de_leer = antes_del_panel.elapsed();
@@ -4514,6 +4614,7 @@ mod tests {
             pendiente_de_medir: None,
             panel_sin_pintar: std::time::Duration::ZERO,
             ancho_del_panel: panel::ANCHO_DE_FABRICA,
+            plegado: false,
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
@@ -14239,15 +14340,21 @@ mod tests {
         division.refrescar_su_panel();
     }
 
-    /// Dónde está la frontera del panel de una división, en puntos, tal como la ve el pintado.
+    /// Dónde se agarra la frontera del panel de una división, en puntos.
+    ///
+    /// **Plegado no hay panel y el asidero está pegado al borde**, así que el punto se calcula igual que
+    /// en el pintado. Si producción moviera ese sitio, las pruebas del desplegado agarrarían donde ya no
+    /// hay nada y caerían — que es lo que se quiere de un ayudante que replica una posición.
     fn corte_del_panel(ventana: &Ventana, cual: usize, area: egui::Rect) -> f32 {
         let ancho_de_celda = con_metrica(Metrica::ancho);
         let suya = ventana.activa().raiz.colocar(area, ancho_de_celda).partes[cual];
-        ventana.activa().divisiones()[cual]
+        match ventana.activa().divisiones()[cual]
             .repartir_con_su_panel(suya, ancho_de_celda, SystemTime::now())
             .panel
-            .expect("el panel se llegó a leer, así que hay frontera")
-            .left()
+        {
+            Some(sitio) => sitio.left(),
+            None => suya.right() - AGARRE_DEL_PANEL,
+        }
     }
 
     /// El puntero, moviéndose a un punto.
@@ -14347,69 +14454,51 @@ mod tests {
     }
 
     #[test]
-    fn arrastrar_hasta_el_borde_derecho_le_deja_al_panel_una_celda_para_agarrarlo() {
-        // **El suelo del gesto, y no es prudencia: es lo que impide un viaje sin billete de vuelta.**
-        // Llegando a cero celdas la frontera se iría con el panel, y el mismo gesto que lo cerró no
-        // podría deshacerlo con el ratón. Se arrastra **más allá** del borde a propósito, que es donde un
-        // ancho negativo se convertiría en un número absurdo.
+    fn arrastrar_hasta_el_borde_derecho_pliega_el_panel_y_el_mismo_gesto_lo_devuelve() {
+        // **Plegar es arrastrar hasta el final, y lo que esta prueba ata es que el viaje tiene vuelta.**
+        // Antes de que existiera el plegado, este mismo gesto dejaba una celda de panel por la misma
+        // razón: que la frontera no se fuera con él. Ahora sí se pliega del todo, y lo que sostiene el
+        // regreso es el asidero pegado al borde. Se arrastra **más allá** del borde a propósito, que es
+        // donde un ancho negativo se convertiría en un número absurdo.
         let ctx = egui::Context::default();
         let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
         let area = area_de_celdas(200.0);
         con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
         un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
 
+        let pedido = ventana.activa().divisiones()[0].ancho_del_panel;
         arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
 
-        // **Se afirma el viaje de vuelta, no el valor del suelo.** Comparar el ancho contra la propia
-        // constante deja la prueba moviéndose con el defecto: bajando el suelo a cero, las dos mitades de
-        // la igualdad bajan juntas y la prueba sigue en verde. Lo que hay que atar es lo que el suelo
-        // existe para conseguir — que después de cerrarlo a tope **el mismo gesto lo pueda reabrir**.
-        let celda = con_metrica(Metrica::ancho);
-        let cerrado = ventana.activa().divisiones()[0].ancho_del_panel;
-        assert!(
-            cerrado >= 1,
-            "el panel se quedó con {cerrado} celdas: sin ancho no hay frontera que agarrar"
-        );
-
-        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
-        arrastrar_el_panel(&mut ventana, &ctx, area, 0, suya.right() - 20.0 * celda);
-
-        assert!(
-            ventana.activa().divisiones()[0].ancho_del_panel > cerrado,
-            "el panel se cerró a {cerrado} celdas y el mismo gesto ya no lo reabre: quedó sin asidero"
-        );
-    }
-
-    #[test]
-    fn arrastrar_hasta_el_borde_izquierdo_no_deja_guardado_un_ancho_mayor_que_su_division() {
-        // **El techo protege el ESTADO, no la geometría**, y la diferencia es la prueba entera. Que a la
-        // consola le queden sus columnas ya lo garantiza `panel::apartar`, que recorta lo que pinta; sin
-        // techo, lo que se guarda es el disparate, y volvería a aparecer en cuanto la ventana se
-        // ensanchara. Así que se afirma sobre el ancho guardado y no sobre el rectángulo pintado.
-        let ctx = egui::Context::default();
-        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
-        let area = area_de_celdas(200.0);
-        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
-        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
-
-        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.left() - 5000.0);
-
+        // **Plegado, a la consola le queda el rectángulo entero** — igual que a una cuyo productor no ha
+        // publicado nada, que es lo que hace que no haya dos formas distintas de no tener panel.
         let celda = con_metrica(Metrica::ancho);
         let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
-        let en_celdas = (suya.width() / celda) as usize;
-        assert!(
-            ventana.activa().divisiones()[0].ancho_del_panel <= en_celdas,
-            "se guardaron {} celdas de panel en una división de {}: el techo no lo recortó",
-            ventana.activa().divisiones()[0].ancho_del_panel,
-            en_celdas
-        );
+        assert!(ventana.activa().divisiones()[0].plegado, "no se plegó");
         let hueco =
             ventana.activa().divisiones()[0].repartir_con_su_panel(suya, celda, SystemTime::now());
         assert!(
-            hueco.consola.width() >= panel::CONSOLA_MINIMA * celda,
-            "a la consola le quedaron {} puntos, menos que las {} celdas de su suelo",
-            hueco.consola.width(),
-            panel::CONSOLA_MINIMA
+            hueco.panel.is_none(),
+            "plegado sigue reservándose sitio para el panel"
+        );
+        assert_eq!(
+            hueco.consola, suya,
+            "plegado, la consola no se quedó con el rectángulo entero de su división"
+        );
+
+        // **Y el viaje de vuelta, tirando del asidero que queda pegado al borde.** Sin él, el gesto que
+        // plegó no se podría deshacer con el ratón: un viaje sin billete de vuelta.
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, suya.right() - 20.0 * celda);
+
+        assert!(
+            !ventana.activa().divisiones()[0].plegado,
+            "el panel se plegó y el mismo gesto ya no lo reabre: quedó sin asidero"
+        );
+        // **Y vuelve al ancho que el usuario pidió, no al de fábrica.** Es la razón de que el plegado sea
+        // un campo aparte y no un «ancho cero»: un cero que además significara plegado habría perdido esto.
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            pedido,
+            "desplegar devolvió un ancho que el usuario no había pedido"
         );
     }
 
@@ -14760,7 +14849,8 @@ mod tests {
         let corte = corte_del_panel(&ventana, 0, area);
 
         // Se arrastra la frontera **hasta dentro de la consola de al lado**, que es donde soltar una
-        // consola la reordenaría.
+        // consola la reordenaría. Pasar del borde derecho de su división pliega el panel, y eso viene
+        // bien: el gesto llega hasta el final y hay efecto que comprobar.
         arrastrar_el_panel(&mut ventana, &ctx, area, 0, corte + 60.0 * celda);
 
         let despues: Vec<usize> = ventana
@@ -14773,10 +14863,284 @@ mod tests {
             antes, despues,
             "arrastrar la frontera del panel reordenó las consolas"
         );
-        assert_ne!(
+        assert!(
+            ventana.activa().divisiones()[0].plegado,
+            "el gesto no llegó a tener efecto, así que la prueba no plantea el caso"
+        );
+    }
+
+    #[test]
+    fn cada_division_pliega_su_panel_y_no_el_de_su_hermana() {
+        // El plegado es de la consola, como su ancho: el sentido de poder plegar es cerrar el panel del
+        // script y dejar abierto el del agente, en la misma pestaña.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["la primera"]}"#);
+        con_panel_puesto(&mut ventana, 1, r#"{"lines":["la segunda"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
+
+        assert!(ventana.activa().divisiones()[0].plegado);
+        assert!(
+            !ventana.activa().divisiones()[1].plegado,
+            "plegar el panel de una división plegó también el de su hermana"
+        );
+    }
+
+    #[test]
+    fn plegar_no_toca_el_ancho_guardado() {
+        // **La razón de que el plegado sea un campo aparte y no un «ancho cero».** Si plegar escribiera
+        // cero en el ancho, el ancho de trabajo se perdería y desplegar tendría que inventarse un valor.
+        // Se afirma sobre el ancho **mientras está plegado**, que es donde un cero se vería.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let corte = corte_del_panel(&ventana, 0, area);
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, corte + 9.0 * celda);
+        let pedido = ventana.activa().divisiones()[0].ancho_del_panel;
+        assert_eq!(pedido, panel::ANCHO_DE_FABRICA - 9);
+
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
+
+        assert!(ventana.activa().divisiones()[0].plegado, "no se plegó");
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            pedido,
+            "plegar machacó el ancho de trabajo, así que desplegar ya no puede devolverlo"
+        );
+    }
+
+    #[test]
+    fn el_plegado_sobrevive_a_mover_la_division_de_sitio() {
+        // Lo mismo que ya se ata para el ancho: el plegado es de la consola, no del sitio que ocupa.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
+        assert!(ventana.activa().divisiones()[0].plegado, "no se plegó");
+        let quien = ventana.activa().divisiones()[0].nombre;
+        let otra = ventana.activa().divisiones()[1].nombre;
+
+        let celda = con_metrica(Metrica::ancho);
+        let suyo = ventana.activa().raiz.colocar(area, celda).partes[1];
+        let movio = con_metrica(|metrica| {
+            ventana.soltar_una_division(quien, otra, Lado::Abajo, suyo, metrica)
+        });
+        assert!(
+            movio,
+            "la consola no se movió, así que la prueba no plantea el caso"
+        );
+
+        assert!(
+            ventana
+                .activa()
+                .divisiones()
+                .into_iter()
+                .find(|division| division.nombre == quien)
+                .expect("la consola sigue viva")
+                .plegado,
+            "mover la consola de sitio le desplegó el panel"
+        );
+    }
+
+    #[test]
+    fn una_consola_sin_panel_no_atiende_ninguna_frontera() {
+        // **El escenario más común de la aplicación, y por eso el que más importa:** casi ninguna consola
+        // tiene `panel.json` publicado. Sin la guarda que se salta el asidero cuando no hay panel **ni**
+        // plegado, se registraría un control invisible en el borde derecho de **todas** las consolas,
+        // compitiendo por el punto con la propia consola y con el divisor que la separa de su vecina.
+        //
+        // **Y el gesto se hace por el camino real, con sus cuatro fotogramas, porque en uno solo no se
+        // puede.** Un control **recién registrado** nunca está «arrastrado» en su primera pasada: egui
+        // resuelve la interacción al principio del fotograma con los controles del anterior. La primera
+        // versión de esta prueba llamaba al método una vez y pasaba **por construcción** — con la guarda y
+        // sin ella. Es el tercer disfraz fichado del proyecto, y aquí lo destapó la mutación.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        // A propósito: **ninguna consola publica nada**.
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        // Justo donde estaría el asidero si esta consola tuviera panel, y arrastrando de verdad.
+        let borde = suya.right() - AGARRE_DEL_PANEL;
+        let alto = suya.center().y;
+        un_fotograma_en(&mut ventana, &ctx, area, en(borde, alto));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(borde, alto, true));
+        un_fotograma_en(&mut ventana, &ctx, area, en(borde - 30.0 * celda, alto));
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area,
+            boton(borde - 30.0 * celda, alto, false),
+        );
+
+        assert_eq!(
             ventana.activa().divisiones()[0].ancho_del_panel,
             panel::ANCHO_DE_FABRICA,
-            "el gesto no llegó a mover el ancho, así que la prueba no plantea el caso"
+            "el gesto sobre una consola sin panel le cambió el ancho: hay un asidero donde no debería"
+        );
+        assert!(
+            !ventana.activa().divisiones()[0].plegado,
+            "el gesto sobre una consola sin panel la plegó"
+        );
+    }
+
+    #[test]
+    fn con_el_panel_mas_estrecho_que_su_asidero_el_divisor_del_arbol_sigue_moviendose() {
+        // **La revisión encontró que la guarda del cero exacto no bastaba, y este es el caso que dejaba
+        // pasar.** Con un panel de dos puntos —más que cero, así que la guarda vieja no saltaba— la banda
+        // de agarre de ocho puntos tapa entera la línea del divisor que reparte las consolas; y como este
+        // control se registra después, en egui le gana el empate. Resultado: la consola no se puede
+        // volver a ensanchar, y quien lo intenta redimensiona un panel de dos puntos que no ve.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let celda = con_metrica(Metrica::ancho);
+        // Cada división se queda con el suelo de la consola más un pelo: al panel le sobran dos puntos.
+        let area = area_de(2.0 * (panel::CONSOLA_MINIMA * celda + 1.0) + GROSOR_DEL_DIVISOR);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let ancho_del_panel = ventana.activa().divisiones()[0]
+            .repartir_con_su_panel(suya, celda, SystemTime::now())
+            .panel
+            .expect("el rectángulo del panel existe")
+            .width();
+        assert!(
+            ancho_del_panel > 0.0 && ancho_del_panel <= AGARRE_DEL_PANEL,
+            "el panel mide {ancho_del_panel} puntos: fuera del hueco entre el cero y el asidero, así que \
+             la prueba no plantea el caso que la revisión encontró"
+        );
+
+        let antes = ventana.activa().fracciones_de_las_fronteras()[0];
+        let divisor = ventana.activa().raiz.colocar(area, celda).divisores[0];
+        let agarre = divisor.rect.center();
+        un_fotograma_en(&mut ventana, &ctx, area, en(agarre.x, agarre.y));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(agarre.x, agarre.y, true));
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area,
+            en(agarre.x + 6.0 * celda, agarre.y),
+        );
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area,
+            boton(agarre.x + 6.0 * celda, agarre.y, false),
+        );
+
+        assert_ne!(
+            ventana.activa().fracciones_de_las_fronteras()[0],
+            antes,
+            "el divisor del árbol dejó de moverse: la banda de agarre del panel le ganó el punto"
+        );
+    }
+
+    #[test]
+    fn un_temblor_de_un_punto_al_pulsar_no_machaca_el_ancho_que_el_usuario_pidio() {
+        // **El agujero que la revisión encontró en la protección del clic seco.** Exigir «que el ratón se
+        // haya movido» no basta si un punto cuenta como movimiento: el asidero se dibuja donde el reparto
+        // **recorta** el panel, así que el temblor de la mano al pulsar leería ese corte como intención y
+        // el ancho pedido con la ventana ancha se perdería para siempre.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        // Estrecha a propósito: al panel de 36 le recortan hasta lo que sobra del suelo de la consola.
+        let area = area_de_celdas(56.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let pintado = ventana.activa().divisiones()[0]
+            .repartir_con_su_panel(suya, celda, SystemTime::now())
+            .panel
+            .expect("hay panel")
+            .width()
+            / celda;
+        assert!(
+            pintado < panel::ANCHO_DE_FABRICA as f32,
+            "el panel no está recortado ({pintado} celdas), así que la prueba no plantea el caso"
+        );
+
+        let corte = corte_del_panel(&ventana, 0, area);
+        let alto = area.center().y;
+        un_fotograma_en(&mut ventana, &ctx, area, en(corte, alto));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(corte, alto, true));
+        // El temblor: **un punto**, muy por debajo de una celda.
+        un_fotograma_en(&mut ventana, &ctx, area, en(corte + 1.0, alto));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(corte + 1.0, alto, false));
+
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA,
+            "un temblor de un punto se leyó como «quiero este ancho» y borró el que había pedido"
+        );
+    }
+
+    #[test]
+    fn un_panel_plegado_no_despierta_a_la_ventana_por_estar_rancio() {
+        // **La misma regla que ya vale para las pestañas que no se miran**, y su propio doc la enuncia:
+        // despertar la ventana por un aviso que nadie va a ver es gastar un fotograma en nada. Plegado, el
+        // panel no se pinta, así que su aviso de rancio tampoco — y sin esto, plegar una consola cuyo
+        // productor se calla deja la ventana despertándose cada minuto para siempre.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(
+            &mut ventana,
+            0,
+            r#"{"stale_after_minutes":10,"lines":["trabajando"]}"#,
+        );
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        // **Con el panel a la vista SÍ se arma**, o lo de abajo no distinguiría nada.
+        assert!(
+            ventana.activa().divisiones()[0]
+                .estado_del_panel
+                .cuanto_falta_para_avisar(SystemTime::now())
+                .is_some(),
+            "este panel no tiene plazo de rancio, así que la prueba no plantea el caso"
+        );
+
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
+        assert!(ventana.activa().divisiones()[0].plegado, "no se plegó");
+        assert!(
+            ventana.activa().divisiones()[0]
+                .estado_del_panel
+                .cuanto_falta_para_avisar(SystemTime::now())
+                .is_some(),
+            "el panel dejó de tener plazo por otra razón, así que lo de abajo no prueba el plegado"
+        );
+
+        // Se deja el contexto en reposo y se corre solo la mitad que arma el despertador.
+        let limpio = egui::Context::default();
+        for _ in 0..4 {
+            let _ = limpio.run_logic(&egui::RawInput::default(), |_| {});
+        }
+        assert!(
+            !limpio.has_requested_repaint(),
+            "el contexto no llega a estar en reposo, causas: {:?}",
+            limpio.repaint_causes()
+        );
+        ventana.poner_el_despertador(&limpio);
+
+        assert!(
+            !limpio.has_requested_repaint(),
+            "plegado, la ventana sigue programando un despertar para un aviso que no se pinta, \
+             causas: {:?}",
+            limpio.repaint_causes()
         );
     }
 }

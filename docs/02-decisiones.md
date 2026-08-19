@@ -857,12 +857,43 @@ pantalla.
 
 ---
 
-## D10 — El ancho del panel: fijo en celdas hoy, ajustable con el plegado
+## D10 — El ancho del panel: en celdas, de cada división, y plegable con el mismo gesto
 
-**Decisión.** El panel se lleva **36 celdas de la fuente** —ni una fracción del ancho de la división ni
-un número de puntos— y **hoy no se puede arrastrar**. Cuando no cabe todo, el que cede es el panel: se
-estrecha hasta desaparecer y la consola conserva un suelo de veinte columnas. Ajustarlo a mano llega en
-**F2.4**, junto al plegado.
+**Decisión.** El panel se cuenta **en celdas de la fuente** —ni una fracción del ancho de la división ni
+un número de puntos— y **es de cada división**: nace con 36 y desde ahí lo mueve quien mira la ventana,
+arrastrando la frontera que separa el panel de su consola. Cuando no cabe todo, el que cede es el panel:
+se estrecha hasta desaparecer y la consola conserva su suelo de veinte columnas.
+
+> **Actualizada en F2.4 (agosto de 2026).** Antes decía que el ancho era fijo y no se podía arrastrar.
+> Lo que sigue en pie es lo que de verdad decidía —contarlo en celdas y que el que cede sea el panel—; lo
+> que cambia es que el número dejó de ser el ancho y pasó a ser **con cuántas celdas nace** una división
+> que nadie ha tocado. Las tres decisiones nuevas están abajo, en «Lo que F2.4 añadió».
+
+### Lo que F2.4 añadió, con su razón y lo descartado
+
+**1. El ancho es de cada división, no de la aplicación.** Cuatro divisiones son cuatro productores
+publicando cosas de tamaños distintos, y el sentido de poder estrechar el panel es dejar ancho el que
+cuenta algo y estrecho el que no. *Descartado:* un ancho global — tendría que ceder al mínimo de la
+división más estrecha o mentir en las demás, y el suelo de la consola es por división.
+
+**2. Plegar es un estado aparte, no «ancho cero».** Plegado, la división deja de **pedir** ancho, así que
+su consola se queda con el rectángulo entero por el **mismo camino** que una cuyo productor no ha
+publicado nada — no hay dos formas de no tener panel que alguien tenga que mantener de acuerdo.
+*Descartado:* guardar un cero en el ancho. Perdería el ancho de trabajo, y desplegar tendría que
+inventarse un valor cuando lo que el usuario espera es volver **al suyo**.
+
+**3. El gesto tiene un mínimo, y ese mínimo es la raya entre estrechar y plegar.** Pedir menos que una
+celda es lo que el gesto lee como «ciérralo». Y plegado **queda un asidero** pegado al borde derecho de
+la división, hacia dentro: sin él, la frontera se iría con el panel y el gesto que lo cerró no se podría
+deshacer con el ratón. *Descartado:* que el asidero fuera a caballo del borde, como el de una frontera
+con panel a la vista — ahí empieza el divisor que reparte las consolas, y al registrarse después le
+ganaría el empate y lo dejaría muerto. *Precio aceptado y declarado:* en una consola plegada, esa banda
+del borde derecho agarra su panel y no la consola, así que ahí no se la puede coger para llevársela.
+
+**Y lo que no se pinta, a propósito:** la frontera del panel **no tiene línea**. Pintarla descontaría su
+grosor del reparto y movería la rejilla de todas las consolas, con lo que las medidas dejarían de ser
+comparables con los anexos anteriores — se perdería la comparación para ganar un adorno. Lo que la hace
+encontrable es el cursor, y por eso su banda de agarre es más ancha que la línea de un divisor.
 
 **Por qué en celdas y no en puntos.** La petición fue «ancho fijo, sin plegar», y se cumple en lo que
 quería decir —no depende del ancho de la ventana y no se arrastra— pero **medido en celdas**. Un ancho
@@ -898,12 +929,14 @@ tiene que seguir sin empujar el texto fuera del panel.
   se leían enteras dejarían de leerse sin que nadie tocara nada.
 - **Ancho en puntos** — arriba: fijo en puntos no es fijo en columnas.
 - **Que ceda la consola** — arriba.
-- **Hacerlo arrastrable ya en F1.6.** Es trabajo de Fase 2 dentro del hito que tenía que responder si el
-  panel merece existir, y la respuesta a eso no depende de poder estrecharlo.
+- **Hacerlo arrastrable ya en F1.6.** Era trabajo de Fase 2 dentro del hito que tenía que responder si el
+  panel merece existir, y la respuesta a eso no dependía de poder estrecharlo. Llegó en F2.4.
 
-**Cuándo dejaría de valer.** Al usarlo con cuatro divisiones: treinta y seis celdas caben holgadas en
-dos, y en cuatro la cuenta puede salir distinta — es la misma revisión pendiente que el fotograma
-([#33](https://github.com/mashware/agent-terminal/issues/33)).
+**Cuándo dejaría de valer.** Lo de las cuatro divisiones ya está medido y respondido en el anexo de esta
+misma decisión, y el issue [#33](https://github.com/mashware/agent-terminal/issues/33) quedó cerrado con
+esos números. Lo que sigue sin medirse es **el coste del propio gesto**: cuánto cuesta un fotograma
+mientras alguien arrastra la frontera del panel, y si rehacer la maqueta al cruzar cada celda se nota. Esa
+tanda es lo que cierra F2.4.
 
 ## D12 — El pseudoterminal se queda con el procesamiento de salida del núcleo, aunque cueste
 

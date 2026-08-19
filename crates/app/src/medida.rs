@@ -134,7 +134,7 @@ pub struct Tramos {
     /// Lo que costó mirar si el `panel.json` de esta consola cambió, leerlo e interpretarlo si
     /// cambió, repartir el ancho, **atender la frontera del panel** y **pintarlo**.
     ///
-    /// **Las cinco cosas, y decirlo entero importa.** El número lo componen **dos tramos disjuntos** de
+    /// **Las seis cosas, y decirlo entero importa.** El número lo componen **dos tramos disjuntos** de
     /// `Ventana::pintar_division`, sumados: uno antes de pintar la consola —mirar la fecha, leer si
     /// cambió, repartir el ancho, atender el arrastre de su frontera y volver a repartir si el ancho
     /// cambió— y otro después —pintar el panel—. Lo que queda **en medio**, que es
