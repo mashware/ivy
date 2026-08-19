@@ -17,19 +17,21 @@ use panel_contract::{Line, Mark, Panel, Problem, Style};
 use crate::pintor::Metrica;
 use crate::tema::Tema;
 
-/// Lo que se lleva el panel de ancho, en celdas de la fuente.
+/// Con cuántas celdas de la fuente nace el panel de una división.
 ///
-/// **En celdas y no en puntos fijos**, aunque la decisión del usuario fuera «ancho fijo, sin plegar»:
-/// un ancho en puntos se estrecha en columnas al subir el aumento del escritorio, y lo que el panel
-/// tiene que conservar es **cuántos caracteres caben**, que es lo que decide si su texto se lee. Fijo
-/// sigue siendo: no depende del ancho de la ventana ni se puede arrastrar.
+/// **En celdas y no en puntos**: un ancho en puntos se estrecha en columnas al subir el aumento del
+/// escritorio, y lo que el panel tiene que conservar es **cuántos caracteres caben**, que es lo que
+/// decide si su texto se lee. Con treinta y seis caben las líneas de los `panel.json` reales del repo
+/// sin que la consola se quede sin sus ochenta columnas de siempre en una ventana normal.
 ///
-/// Con treinta y seis caben las líneas de los `panel.json` reales del repo sin que la consola se quede
-/// sin sus ochenta columnas de siempre en una ventana normal.
+/// **De fábrica, no fijo**: desde que se puede arrastrar la frontera del panel, esto es solo el valor
+/// con el que empieza una división que nadie ha tocado. El que manda es el de cada división.
 ///
-/// **Poder ajustarlo a mano llega en F2.4**, con el plegado y por el mismo gesto: ver D10 en
-/// `docs/02-decisiones.md`, que es donde está el razonamiento entero y lo que se descartó.
-const ANCHO: f32 = 36.0;
+/// Por qué en celdas y por qué el que cede es el panel está en D10 de `docs/02-decisiones.md`. **Lo que
+/// D10 todavía no cuenta es esto**: que el ancho dejó de ser fijo, que es de cada división y con qué
+/// suelo se arrastra. Esa decisión se escribe allí cuando el hito se cierre con su medida — hasta
+/// entonces, D10 describe el estado anterior y aquí queda dicho para que nadie la lea como al día.
+pub(crate) const ANCHO_DE_FABRICA: usize = 36;
 
 /// Lo menos que se le deja a la consola cuando su panel le quita sitio, en celdas.
 ///
@@ -41,6 +43,25 @@ const ANCHO: f32 = 36.0;
 /// donde hace falta saber cuándo una consola deja de servir. Son la misma pregunta, así que son la misma
 /// constante: dos números para «lo menos que necesita una consola» acabarían diciendo cosas distintas.
 pub(crate) const CONSOLA_MINIMA: f32 = 20.0;
+
+/// Lo menos que se le deja al panel cuando se arrastra su frontera, en celdas.
+///
+/// **Con una celda el panel casi no se ve, y eso es lo que se busca: que siempre quede dónde agarrar.**
+/// Llegando a cero, la frontera se iría con el panel y el gesto que lo cerró no se podría deshacer con
+/// el ratón — un viaje sin billete de vuelta.
+///
+/// Es el suelo del **gesto**, no del reparto: [`apartar`] sigue pudiendo devolver un panel **más estrecho
+/// que esto** —hasta de ancho cero— cuando la división no da para más. Son dos preguntas distintas, lo
+/// que el usuario pide y lo que cabe, y confundirlas dejaría a la consola por debajo de su mínimo. (Lo
+/// que `apartar` no devuelve nunca es *ningún* panel una vez se le pide un ancho: en el caso extremo
+/// devuelve el rectángulo vacío, y su prueba lo dice así.)
+///
+/// **Y esto es lo que hoy impide plegar del todo arrastrando**, que es como D10 y el roadmap describen el
+/// plegado: «arrastrar hasta el final». Queda a medias a propósito y con el orden pensado — llegar a cero
+/// exige que la frontera siga agarrable **sin** panel debajo, y eso es un mecanismo distinto del que hay
+/// aquí. Mientras no exista, el suelo es lo que garantiza que todo lo que este gesto hace se puede
+/// deshacer con el mismo gesto.
+pub(crate) const SUELO_AL_ARRASTRAR: usize = 1;
 
 /// Lo que se deja de margen a la izquierda del texto, en celdas.
 ///
@@ -68,21 +89,31 @@ pub struct Hueco {
 /// creería tener columnas que el panel le ha quitado y escribiría debajo de él.
 ///
 /// Sin panel que pintar, la consola se queda con todo y no hay segundo rectángulo: es lo que hace que
-/// una división cuyo productor no ha publicado nada se vea exactamente igual que antes de este hito.
+/// una división cuyo productor no ha publicado nada se vea exactamente igual que antes de que el panel
+/// existiera.
 ///
 /// Con panel, el hueco es lo que sobre después del suelo de la consola, así que en una ventana
 /// estrecha el que se estrecha es el panel y puede llegar a desaparecer. Nunca al revés.
-pub fn apartar(division: Rect, ancho_de_celda: f32, hay_panel: bool) -> Hueco {
-    if !hay_panel {
+///
+/// **`celdas_del_panel` lleva las dos cosas en un solo parámetro, y no es por brevedad.** «Si hay algo
+/// que enseñar» y «cuánto ancho se lleva» son la misma decisión tomada en el mismo sitio: con dos
+/// parámetros existe el estado escribible «no hay panel, pero con treinta y seis celdas», y este
+/// módulo ya pagó una vez tener **dos criterios paralelos** para si el panel se ve — uno en el reparto
+/// del ancho y otro en el pintado, que se contradecían.
+///
+/// El nombre dice la unidad a propósito: aquí conviven celdas y puntos, y un mismo nombre para las dos
+/// deja al lector sin saber cuál está mirando.
+pub fn apartar(division: Rect, ancho_de_celda: f32, celdas_del_panel: Option<usize>) -> Hueco {
+    let Some(celdas) = celdas_del_panel else {
         return Hueco {
             consola: division,
             panel: None,
         };
-    }
+    };
 
-    let pedido = ANCHO * ancho_de_celda;
+    let en_puntos = celdas as f32 * ancho_de_celda;
     let disponible = (division.width() - CONSOLA_MINIMA * ancho_de_celda).max(0.0);
-    let corte = division.right() - pedido.min(disponible);
+    let corte = division.right() - en_puntos.min(disponible);
 
     Hueco {
         consola: Rect::from_min_max(division.left_top(), Pos2::new(corte, division.bottom())),
@@ -730,10 +761,10 @@ mod tests {
 
     #[test]
     fn el_panel_se_lleva_su_ancho_y_la_consola_el_resto() {
-        let hueco = apartar(division_de(800.0), ANCHO_DE_CELDA, true);
+        let hueco = apartar(division_de(800.0), ANCHO_DE_CELDA, Some(ANCHO_DE_FABRICA));
         let panel = hueco.panel.expect("hay panel");
 
-        assert_eq!(panel.width(), ANCHO * ANCHO_DE_CELDA);
+        assert_eq!(panel.width(), ANCHO_DE_FABRICA as f32 * ANCHO_DE_CELDA);
         assert_eq!(
             hueco.consola.width() + panel.width(),
             800.0,
@@ -753,7 +784,11 @@ mod tests {
     fn en_una_division_estrecha_el_panel_cede_y_la_consola_conserva_su_suelo() {
         let estrecha = (CONSOLA_MINIMA + 4.0) * ANCHO_DE_CELDA;
 
-        let hueco = apartar(division_de(estrecha), ANCHO_DE_CELDA, true);
+        let hueco = apartar(
+            division_de(estrecha),
+            ANCHO_DE_CELDA,
+            Some(ANCHO_DE_FABRICA),
+        );
 
         assert_eq!(
             hueco.panel.expect("hay panel").width(),
@@ -767,7 +802,7 @@ mod tests {
     /// que devolver un rectángulo invertido, que es lo que haría una resta sin suelo.
     #[test]
     fn en_una_division_mas_estrecha_que_el_suelo_el_panel_se_queda_sin_ancho() {
-        let hueco = apartar(division_de(16.0), ANCHO_DE_CELDA, true);
+        let hueco = apartar(division_de(16.0), ANCHO_DE_CELDA, Some(ANCHO_DE_FABRICA));
         let panel = hueco.panel.expect("el rectángulo existe, aunque vacío");
 
         assert_eq!(panel.width(), 0.0);
@@ -784,23 +819,23 @@ mod tests {
     fn el_ancho_del_panel_se_cuenta_en_celdas_y_no_en_puntos() {
         // El doble de aumento, que es el salto que hace un escritorio al pasar a una pantalla densa.
         for celda in [ANCHO_DE_CELDA, ANCHO_DE_CELDA * 2.0] {
-            let hueco = apartar(division_de(1600.0), celda, true);
+            let hueco = apartar(division_de(1600.0), celda, Some(ANCHO_DE_FABRICA));
 
             assert_eq!(
                 hueco.panel.expect("hay panel").width() / celda,
-                ANCHO,
+                ANCHO_DE_FABRICA as f32,
                 "con celdas de {celda} puntos el panel dejó de medir sus columnas"
             );
         }
     }
 
-    /// **La garantía de este PR.** Sin nada que pintar no se descuenta ancho y no hay segundo
+    /// Sin nada que pintar no se descuenta ancho y no hay segundo
     /// rectángulo: la división se ve exactamente como antes de que existiera el panel.
     #[test]
     fn sin_panel_que_pintar_la_consola_se_queda_con_todo() {
         let entera = division_de(800.0);
 
-        let hueco = apartar(entera, ANCHO_DE_CELDA, false);
+        let hueco = apartar(entera, ANCHO_DE_CELDA, None);
 
         assert_eq!(hueco.consola, entera);
         assert!(hueco.panel.is_none());
@@ -2213,5 +2248,47 @@ mod tests {
     fn el_texto_normal_pasa_intacto() {
         let tal_cual = "F1.6: el panel · 35.392 tokens — 18 %";
         assert_eq!(sanear(tal_cual), tal_cual);
+    }
+
+    /// **Lo que el gesto de estrechar el panel vuelve alcanzable.** Antes de que su frontera se pudiera
+    /// arrastrar, un panel de una o dos celdas solo aparecía en una ventana absurdamente estrecha; ahora
+    /// se llega ahí con un gesto, y el suelo del arrastre deja exactamente ese caso.
+    ///
+    /// **Medido, y el número es el que decide:** la cabeza de una fila —el hueco del símbolo, la columna
+    /// de la referencia y su separador— ocupa **siete columnas que no se pueden comprimir**, así que con
+    /// el panel por debajo de eso no hay texto legible que quepa. Lo que esta prueba ata es que ese caso
+    /// **no rompe nada**: se maqueta y se recorta sin pánico. Que además no se pinte fuera del panel lo
+    /// garantiza el recortador del pintor, que es de quien llama.
+    ///
+    /// Lo que **no** se arregla aquí, y queda dicho: entre una y siete celdas el panel es una franja sin
+    /// información. Es la pregunta que D10 dejó abierta —qué se deja de pintar en un panel muy estrecho—
+    /// y su respuesta cambia con el plegado, no con esto.
+    ///
+    /// **Y lo que esta prueba NO afirma, para que nadie la lea como más fuerte de lo que es.** Llevaba una
+    /// comprobación de que la cuenta del aviso cuadraba y se quitó al mutarla: `visibles + sobran` es
+    /// igual al total con el recorte bueno **y con el roto**, porque las dos versiones reparten las mismas
+    /// filas entre los dos números. El recorte lo atan sus propias pruebas; aquí lo que se demuestra es
+    /// que el camino se recorre entero sin romperse.
+    #[test]
+    fn con_el_panel_al_minimo_se_maqueta_y_se_recorta_sin_panico() {
+        let tema = Tema::default();
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r##"{"lines":[{"ref":"#12","text":"una linea larga que no cabe de ninguna manera","mark":"current","indent":8},{"text":"otra"},{"text":"y otra"}]}"##,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        for ancho in [0usize, 1, 2, 3] {
+            let filas = estado
+                .maquetar_si_hace_falta("sonda", ancho, &tema, None)
+                .expect("hay panel que maquetar");
+            assert!(
+                !filas.is_empty(),
+                "con un panel de {ancho} celdas no se maquetó ninguna fila"
+            );
+            recortar(filas, 1);
+        }
     }
 }

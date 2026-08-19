@@ -91,6 +91,18 @@ const REJILLA_INICIAL: Size = Size { rows: 24, cols: 80 };
 /// esperar—; se escribe para que nadie lo lea como una garantía que no existe.
 const GROSOR_DEL_DIVISOR: f32 = 2.0;
 
+/// Cuánto se agarra a cada lado de la frontera del panel, en puntos.
+///
+/// **Más ancho que la línea de un divisor del árbol, y a propósito.** Un divisor **se pinta**, así que se
+/// ve dónde apuntar; la frontera del panel no pinta nada —ver
+/// [`Division::arrastrar_la_frontera_de_su_panel`]— y con dos puntos habría que barrer la consola para
+/// encontrarla. Y el margen de gracia de egui no ayuda: su `interact_radius` ensancha el conjunto de
+/// candidatos cercanos, pero el arrastre se resuelve por contención exacta del rectángulo.
+///
+/// Ensanchar **no descuenta nada** del reparto, porque este rectángulo no se pinta: es solo dónde el
+/// ratón cuenta.
+const AGARRE_DEL_PANEL: f32 = 4.0;
+
 /// A qué lado de una consola se pone la que llega.
 ///
 /// **Existe para que insertar sepa decir «antes» además de «después».** Partir siempre pone la nueva
@@ -253,6 +265,14 @@ impl ArrastresInyectados {
         let paso = self.paso;
         self.paso += 1;
         if paso == 0 {
+            // **Se agarra por el centro de la consola, y eso hay que vigilarlo desde que el panel tiene
+            // frontera propia.** Su asidero está a `36 · celda` del borde derecho de la división, así que
+            // con la ventana de referencia y dos divisiones queda a unos dieciséis puntos del centro — de
+            // sobra. Pero si el centro cayera dentro del asidero, el agarre se lo llevaría el panel: el
+            // arrastre de la consola no empezaría, ningún soltado reordenaría nada y **la tanda entera se
+            // publicaría como inválida sin una línea que apunte al panel**. Quien cambie el ancho de
+            // fábrica, el cuerpo de la letra o el tamaño de la ventana tiene que volver a hacer esta
+            // cuenta.
             return vec![
                 egui::Event::PointerMoved(origen.center()),
                 egui::Event::PointerButton {
@@ -1118,6 +1138,18 @@ struct Division {
     /// que una pasada repetida vuelve a bombear y vuelve a dejar vuelta pendiente. Nunca hay una
     /// lectura esperando a una vuelta que no llega.
     panel_sin_pintar: std::time::Duration,
+    /// Cuántas celdas de ancho se lleva el panel de **esta** consola.
+    ///
+    /// **En celdas y no en puntos, y por eso es un entero.** Lo que el panel tiene que conservar al
+    /// cambiar el aumento del escritorio es cuántos caracteres caben, no cuántos puntos ocupa (D10). Y
+    /// el entero paga solo: la maqueta del panel ya se guarda **por celdas enteras**, así que arrastrar
+    /// no la rehace en cada punto sino al cruzar una celda.
+    ///
+    /// **Es de la división y no de la ventana.** Cuatro divisiones son cuatro productores publicando
+    /// cosas de tamaños distintos, y el sentido de poder estrecharlo es dejar ancho el que cuenta algo
+    /// y estrecho el que no. Un ancho de la aplicación tendría además que ceder al mínimo de la
+    /// división más estrecha, o mentir en las demás.
+    ancho_del_panel: usize,
 }
 
 /// Un directorio que no se pudo crear **no impide abrir la consola**.
@@ -1220,6 +1252,7 @@ impl Division {
             medida: Medida::default(),
             pendiente_de_medir: None,
             panel_sin_pintar: std::time::Duration::ZERO,
+            ancho_del_panel: panel::ANCHO_DE_FABRICA,
         })
     }
 
@@ -1319,7 +1352,120 @@ impl Division {
         ancho_de_celda: f32,
         ahora: SystemTime,
     ) -> panel::Hueco {
-        panel::apartar(rect, ancho_de_celda, self.estado_del_panel.se_ve(ahora))
+        // **El ancho sale de la propia división, y eso es lo que mantiene de acuerdo a los dos
+        // llamadores.** Uno mide la rejilla de las consolas que no se pintan y el otro pinta la que se
+        // ve; si el ancho viajara por parámetro, cada uno podría traer el suyo y una consola de fondo
+        // volvería a medirse con un ancho que no es el suyo — el defecto que ya costó 36 columnas.
+        panel::apartar(
+            rect,
+            ancho_de_celda,
+            self.estado_del_panel
+                .se_ve(ahora)
+                .then_some(self.ancho_del_panel),
+        )
+    }
+
+    /// Atiende la frontera entre esta consola y su panel, y devuelve si el ancho cambió.
+    ///
+    /// **El identificador lleva el nombre de la división, nunca su sitio.** egui sostiene un arrastre
+    /// entre fotogramas por ese identificador, y este dura lo que dure el botón apretado. Los acordes de
+    /// partir, cerrar y cambiar de pestaña se aplican **al principio de la misma pasada**, mucho antes de
+    /// que se atienda el ratón: con la posición dentro, agarrar esta frontera y pulsar uno de esos
+    /// acordes sin soltar estrecharía el panel de otra consola. El razonamiento que sí permite indexar
+    /// las fronteras del árbol por posición —que su arrastre se resuelve dentro del mismo fotograma— no
+    /// vale aquí.
+    ///
+    /// **El asidero es una franja invisible a caballo del corte**, más ancha que la línea que un divisor
+    /// del árbol pinta pero sin pintar ninguna. Ni la geometría ni el aspecto cambian: entre la consola y
+    /// su panel no hay línea, y meter una descontaría su grosor del reparto y movería la rejilla de todas
+    /// las consolas — se perdería la comparación con las medidas anteriores para ganar un adorno.
+    ///
+    /// **Y no se monta si el panel no tiene ancho.** Ahí su frontera coincide con el borde de la división,
+    /// o sea con el divisor que reparte consolas; como este control se registra después, ganaría el
+    /// empate y dejaría muerta la frontera que sí mueve algo — a cambio de redimensionar un panel que no
+    /// se ve.
+    ///
+    /// **El ancho se pide en celdas desde la posición del puntero, no acumulando su desplazamiento.** Un
+    /// acumulador se desincroniza del ratón en cuanto el suelo o el techo recortan un fotograma: el
+    /// puntero seguiría bajando y el panel ya no, y al volver habría que desandar todo ese trecho antes
+    /// de que la frontera se moviera.
+    fn arrastrar_la_frontera_de_su_panel(
+        &mut self,
+        ui: &egui::Ui,
+        division: egui::Rect,
+        panel: egui::Rect,
+        metrica: &Metrica,
+    ) -> bool {
+        if panel.width() <= 0.0 {
+            return false;
+        }
+
+        let asidero = egui::Rect::from_min_max(
+            egui::pos2(panel.left() - AGARRE_DEL_PANEL, division.top()),
+            egui::pos2(panel.left() + AGARRE_DEL_PANEL, division.bottom()),
+        );
+
+        // `Sense::DRAG` y no `Sense::drag()`: el segundo añade `FOCUSABLE`, o sea que la frontera
+        // pediría el foco de teclado de egui y competiría con el enrutado geográfico de la aplicación.
+        //
+        // **Y agarrar esta frontera no le da el foco a su consola, al contrario que agarrar la consola.**
+        // Es deliberado y va con las otras fronteras: mover el divisor que reparte dos consolas tampoco
+        // cambia a quién van las teclas. Lo que da el foco es agarrar **una consola**, porque eso sí dice
+        // en cuál quieres trabajar; ajustar el ancho de un panel no lo dice.
+        let id = ui.id().with(("frontera-del-panel", self.nombre));
+        let respuesta = ui
+            .interact(asidero, id, egui::Sense::DRAG)
+            // También mientras se arrastra, y sobre todo en el fotograma en que se suelta: ahí el
+            // arrastre ya terminó y el puntero puede haber quedado fuera del asidero, donde el cursor
+            // parpadearía a flecha justo al acabar la maniobra.
+            .on_hover_and_drag_cursor(Orientacion::Columnas.cursor());
+
+        // **Solo el botón primario, y solo si el puntero se ha movido.** Las dos condiciones tapan dos
+        // agujeros distintos, y las dos están en el fuente de egui 0.36.1:
+        //
+        // - `interaction.rs:162` casa `PointerEvent::Pressed { .. }` **sin mirar qué botón fue**, así que
+        //   el central —el pegado de X11— y el derecho —la selección en casi cualquier terminal— también
+        //   arman el arrastre. Es la misma guarda que el arrastre de consolas ya tiene y documenta.
+        // - Un control que solo siente arrastres se marca como arrastrado **en la propia pulsación**, sin
+        //   movimiento (`interaction.rs:219-220`, con su comentario). Y eso, sobre una división donde el
+        //   reparto está recortando el panel, es destructivo: el asidero se pinta en el corte **recortado**,
+        //   así que un clic seco leería ese corte como intención y machacaría el ancho que el usuario
+        //   había pedido cuando la ventana era más ancha. Exigir movimiento es lo que separa «he pulsado
+        //   aquí» de «quiero esto de ancho».
+        if !respuesta.dragged_by(egui::PointerButton::Primary) || respuesta.drag_delta().x == 0.0 {
+            return false;
+        }
+
+        let Some(puntero) = respuesta.interact_pointer_pos() else {
+            return false;
+        };
+
+        // **El techo es lo que el reparto puede honrar hoy, no lo que mide la división.** Durante un
+        // gesto lo que el usuario pide es lo que ve, y el reparto no le va a dar más de lo que sobra
+        // después del suelo de la consola: guardar más sería guardar un ancho que nunca vio, y que
+        // aparecería de golpe al ensanchar la ventana.
+        //
+        // **Y el techo se aplica solo al escribir, que es lo que hace que encoger la ventana no borre lo
+        // pedido.** Sin gesto no se pasa por aquí, así que un panel de treinta y seis celdas guardado en
+        // una ventana ancha sobrevive a una estrecha: se pinta recortado y vuelve entero al ensanchar.
+        //
+        // El número de celdas de la división sale de [`Metrica::celdas_en`] y no de una división a mano,
+        // porque esa función ya trae el tope que filtra un rectángulo que no corresponde a ninguna
+        // ventana — los diez mil puntos de reserva de egui mientras el escritorio no ha dicho su tamaño,
+        // que en celdas son más de mil y **no** los recorta ninguna conversión a entero.
+        let cabe = metrica.celdas_en(division.size()).cols as usize;
+        let techo = cabe
+            .saturating_sub(panel::CONSOLA_MINIMA as usize)
+            .max(panel::SUELO_AL_ARRASTRAR);
+
+        // Lo negativo y lo que no es número caen en cero al convertirse a entero —comprobado, y es el
+        // mismo mecanismo que `celdas_en` documenta— y el suelo los sube.
+        let pedido = ((division.right() - puntero.x) / metrica.ancho()).round() as usize;
+        let nuevo = pedido.clamp(panel::SUELO_AL_ARRASTRAR, techo);
+
+        let cambio = nuevo != self.ancho_del_panel;
+        self.ancho_del_panel = nuevo;
+        cambio
     }
 
     /// Manda al programa lo que se ha tecleado en este pase, y mide cuánto se tarda.
@@ -3717,7 +3863,25 @@ impl Ventana {
         // Un solo reloj para repartir y para pintar: si el panel envejeciera entre las dos preguntas,
         // se reservaría una franja para un aviso que no llega a pintarse.
         let ahora = SystemTime::now();
-        let hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
+        let mut hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
+
+        // **La frontera del panel se atiende aquí, antes de medir la rejilla, y el reparto se rehace en
+        // este mismo pase.** Con el gesto atendido después, el fotograma pintaría el panel en el sitio
+        // viejo y —peor— le anunciaría a su programa la rejilla vieja, que es la que el bombeo le manda
+        // al fotograma siguiente: un reajuste doble y visible en cualquier programa de pantalla completa.
+        //
+        // **Y no hace falta rehacer el reparto del árbol.** Este gesto reparte *dentro* de una división,
+        // no entre divisiones: los rectángulos de las demás no se enteran. Es lo que lo distingue de
+        // arrastrar una frontera del árbol o de soltar una consola sobre otra, que sí lo cambian.
+        //
+        // El tramo cronometrado lo encierra por lo mismo que encierra leer el fichero y repartir el
+        // ancho: es trabajo del panel, y lo que no se declara se lo lleva la resta del fotograma — que
+        // es el coste del framework de interfaz, la cifra sobre la que D3 tiene que decidir.
+        if let Some(sitio) = hueco.panel
+            && division.arrastrar_la_frontera_de_su_panel(ui, rect, sitio, metrica)
+        {
+            hueco = division.repartir_con_su_panel(rect, metrica.ancho(), ahora);
+        }
         let coste_de_leer = antes_del_panel.elapsed();
 
         division.medido = metrica.celdas_en(hueco.consola.size());
@@ -3949,6 +4113,16 @@ impl eframe::App for Ventana {
         // Se recorre sobre una copia de la lista —las fronteras son `Copy`— porque atender una puede
         // cambiar el reparto, y **basta con que se mueva una**: dos fronteras no pueden arrastrarse en
         // el mismo fotograma, así que en cuanto una responde se rehace el reparto y se deja de mirar.
+        //
+        // **Hueco de medida conocido, y aquí declarado en vez de tapado:** de este bucle se cronometra
+        // *rehacer el reparto*, pero no las llamadas a `interact` que atienden cada frontera, así que
+        // esas se publican dentro del «resto del fotograma» — o sea como coste del framework. Es
+        // anterior a que el panel tuviera frontera propia y no crece con ella: la del panel se atiende
+        // en `pintar_division`, **dentro** del tramo que ya se declara. Se deja declarado y sin arreglar
+        // por lo mismo que el punto ciego del tamaño de ventana: un hueco dicho no miente, y taparlo a
+        // medias sí. Lo que costaría cerrarlo es partir esta función como está partida
+        // `atender_el_raton`, para que la región cronometrada sea la llamada entera y encogerla deje de
+        // ser mover una línea.
         let fronteras = reparto.divisores.clone();
         for (cual, frontera) in fronteras.into_iter().enumerate() {
             if self.arrastrar_la_frontera(ui, cual, frontera) {
@@ -4339,6 +4513,7 @@ mod tests {
             medida: Medida::default(),
             pendiente_de_medir: None,
             panel_sin_pintar: std::time::Duration::ZERO,
+            ancho_del_panel: panel::ANCHO_DE_FABRICA,
             recibido: Vec::new(),
             pulsaciones: Vec::new(),
             medido: REJILLA_INICIAL,
@@ -14047,6 +14222,561 @@ mod tests {
             ventana.activa().divisiones()[1].medido,
             metrica.celdas_en(reparto.partes[1].size()),
             "la consola derecha se midió con el reparto de antes del arrastre"
+        );
+    }
+
+    /// Deja una división con panel publicado y leído, lista para que su frontera se pueda agarrar.
+    ///
+    /// **Que el panel esté de verdad puesto es la condición de todas las pruebas del gesto**: sin él no
+    /// hay frontera que atender, así que un gesto sobre nada pasaría por «el arrastre no movió el ancho»
+    /// y la prueba diría que el suelo funciona cuando lo que ocurre es que no hay panel.
+    fn con_panel_puesto(ventana: &mut Ventana, cual: usize, contenido: &str) {
+        let mut suyas = ventana.activa_mut().divisiones_mut();
+        let division = &mut suyas[cual];
+        division.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
+        publicar_en(division, contenido);
+        division.por_releer.levantar();
+        division.refrescar_su_panel();
+    }
+
+    /// Dónde está la frontera del panel de una división, en puntos, tal como la ve el pintado.
+    fn corte_del_panel(ventana: &Ventana, cual: usize, area: egui::Rect) -> f32 {
+        let ancho_de_celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, ancho_de_celda).partes[cual];
+        ventana.activa().divisiones()[cual]
+            .repartir_con_su_panel(suya, ancho_de_celda, SystemTime::now())
+            .panel
+            .expect("el panel se llegó a leer, así que hay frontera")
+            .left()
+    }
+
+    /// El puntero, moviéndose a un punto.
+    fn en(x: f32, y: f32) -> Vec<egui::Event> {
+        vec![egui::Event::PointerMoved(egui::pos2(x, y))]
+    }
+
+    /// El botón primario, bajando o subiendo en un punto.
+    fn boton(x: f32, y: f32, apretado: bool) -> Vec<egui::Event> {
+        con_boton(egui::PointerButton::Primary, x, y, apretado)
+    }
+
+    /// Lo mismo con el botón que se diga, para los que no deben mover nada.
+    fn con_boton(cual: egui::PointerButton, x: f32, y: f32, apretado: bool) -> Vec<egui::Event> {
+        vec![egui::Event::PointerButton {
+            pos: egui::pos2(x, y),
+            button: cual,
+            pressed: apretado,
+            modifiers: egui::Modifiers::default(),
+        }]
+    }
+
+    /// Un gesto entero sobre la frontera del panel de una división: agarrar donde está y soltar en
+    /// `hasta`, pasando por el camino de verdad — la pasada de interfaz completa, no el método a pelo.
+    fn arrastrar_el_panel(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        cual: usize,
+        hasta: f32,
+    ) {
+        let corte = corte_del_panel(ventana, cual, area);
+        let alto = area.center().y;
+        un_fotograma_en(ventana, ctx, area, en(corte, alto));
+        un_fotograma_en(ventana, ctx, area, boton(corte, alto, true));
+        un_fotograma_en(ventana, ctx, area, en(hasta, alto));
+        un_fotograma_en(ventana, ctx, area, boton(hasta, alto, false));
+    }
+
+    #[test]
+    fn arrastrar_la_frontera_del_panel_lo_estrecha_y_le_da_las_columnas_a_su_consola() {
+        // **Las dos mitades, y la segunda es la que de verdad importa.** Que el ancho guardado baje se
+        // puede cumplir con el pintado y el aviso al programa mirando todavía al reparto viejo, que es el
+        // reajuste doble que se ve en cualquier programa de pantalla completa. Así que se afirma también
+        // sobre `medido`, que es el número que el bombeo le manda al pseudoterminal.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+
+        // Un fotograma antes del gesto, para que la consola haya medido con el panel ya puesto.
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        let antes = ventana.activa().divisiones()[0].medido.cols;
+        let celda = con_metrica(Metrica::ancho);
+        let corte = corte_del_panel(&ventana, 0, area);
+
+        // Diez celdas hacia la derecha: el panel se estrecha y la consola se ensancha en lo mismo.
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, corte + 10.0 * celda);
+
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA - 10,
+            "el panel no se quedó con las celdas que el puntero le dejó"
+        );
+        assert_eq!(
+            ventana.activa().divisiones()[0].medido.cols,
+            antes + 10,
+            "el ancho bajó pero a la consola se le siguió anunciando la rejilla de antes del gesto"
+        );
+    }
+
+    #[test]
+    fn el_ancho_del_panel_es_de_cada_division_y_no_de_la_ventana() {
+        // Cuatro divisiones son cuatro productores publicando cosas de tamaños distintos, y el sentido de
+        // poder estrechar el panel es dejar ancho el que cuenta algo y estrecho el que no. Con un ancho
+        // de la aplicación, arrastrar en una lo movería en todas.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["la primera"]}"#);
+        con_panel_puesto(&mut ventana, 1, r#"{"lines":["la segunda"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let corte = corte_del_panel(&ventana, 0, area);
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, corte + 8.0 * celda);
+
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA - 8
+        );
+        assert_eq!(
+            ventana.activa().divisiones()[1].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA,
+            "arrastrar la frontera de una división le cambió el ancho a su hermana"
+        );
+    }
+
+    #[test]
+    fn arrastrar_hasta_el_borde_derecho_le_deja_al_panel_una_celda_para_agarrarlo() {
+        // **El suelo del gesto, y no es prudencia: es lo que impide un viaje sin billete de vuelta.**
+        // Llegando a cero celdas la frontera se iría con el panel, y el mismo gesto que lo cerró no
+        // podría deshacerlo con el ratón. Se arrastra **más allá** del borde a propósito, que es donde un
+        // ancho negativo se convertiría en un número absurdo.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.right() + 500.0);
+
+        // **Se afirma el viaje de vuelta, no el valor del suelo.** Comparar el ancho contra la propia
+        // constante deja la prueba moviéndose con el defecto: bajando el suelo a cero, las dos mitades de
+        // la igualdad bajan juntas y la prueba sigue en verde. Lo que hay que atar es lo que el suelo
+        // existe para conseguir — que después de cerrarlo a tope **el mismo gesto lo pueda reabrir**.
+        let celda = con_metrica(Metrica::ancho);
+        let cerrado = ventana.activa().divisiones()[0].ancho_del_panel;
+        assert!(
+            cerrado >= 1,
+            "el panel se quedó con {cerrado} celdas: sin ancho no hay frontera que agarrar"
+        );
+
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, suya.right() - 20.0 * celda);
+
+        assert!(
+            ventana.activa().divisiones()[0].ancho_del_panel > cerrado,
+            "el panel se cerró a {cerrado} celdas y el mismo gesto ya no lo reabre: quedó sin asidero"
+        );
+    }
+
+    #[test]
+    fn arrastrar_hasta_el_borde_izquierdo_no_deja_guardado_un_ancho_mayor_que_su_division() {
+        // **El techo protege el ESTADO, no la geometría**, y la diferencia es la prueba entera. Que a la
+        // consola le queden sus columnas ya lo garantiza `panel::apartar`, que recorta lo que pinta; sin
+        // techo, lo que se guarda es el disparate, y volvería a aparecer en cuanto la ventana se
+        // ensanchara. Así que se afirma sobre el ancho guardado y no sobre el rectángulo pintado.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.left() - 5000.0);
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let en_celdas = (suya.width() / celda) as usize;
+        assert!(
+            ventana.activa().divisiones()[0].ancho_del_panel <= en_celdas,
+            "se guardaron {} celdas de panel en una división de {}: el techo no lo recortó",
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            en_celdas
+        );
+        let hueco =
+            ventana.activa().divisiones()[0].repartir_con_su_panel(suya, celda, SystemTime::now());
+        assert!(
+            hueco.consola.width() >= panel::CONSOLA_MINIMA * celda,
+            "a la consola le quedaron {} puntos, menos que las {} celdas de su suelo",
+            hueco.consola.width(),
+            panel::CONSOLA_MINIMA
+        );
+    }
+
+    #[test]
+    fn el_ancho_del_panel_sobrevive_a_partir_la_division() {
+        // El ancho es de la consola, no del sitio que ocupa: partir la ventana la coloca en otro
+        // rectángulo y con otra hermana al lado, y lo que el usuario pidió sigue siendo lo que pidió.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let corte = corte_del_panel(&ventana, 0, area);
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, corte + 6.0 * celda);
+        let pedido = ventana.activa().divisiones()[0].ancho_del_panel;
+        assert_ne!(
+            pedido,
+            panel::ANCHO_DE_FABRICA,
+            "el gesto no cambió el ancho, así que partir no tiene nada que conservar"
+        );
+
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::D));
+
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            pedido,
+            "partir la ventana le devolvió al panel el ancho de fábrica"
+        );
+    }
+
+    #[test]
+    fn el_arrastre_del_panel_va_por_el_nombre_de_su_division_y_no_por_su_sitio() {
+        // **El defecto que este identificador evita ya ocurrió en este proyecto, con las consolas.** egui
+        // sostiene un arrastre entre fotogramas por el identificador de su control, y los acordes de
+        // partir, cerrar y cambiar de pestaña se aplican **al principio de la misma pasada**, antes de que
+        // se atienda el ratón. Con el sitio dentro del identificador, agarrar la frontera y cambiar de
+        // pestaña sin soltar continuaría el arrastre sobre la división que ahora ocupa ese sitio — la de
+        // la pestaña de destino.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["la de delante"]}"#);
+        ventana.activa = 1;
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["la de detras"]}"#);
+        ventana.activa = 0;
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let corte = corte_del_panel(&ventana, 0, area);
+        let alto = area.center().y;
+
+        // Se agarra la frontera de la pestaña de delante…
+        un_fotograma_en(&mut ventana, &ctx, area, en(corte, alto));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(corte, alto, true));
+        // …y sin soltar se cambia de pestaña y se mueve el puntero bien lejos.
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::ArrowRight));
+        un_fotograma_en(&mut ventana, &ctx, area, en(corte + 15.0 * celda, alto));
+
+        assert_eq!(
+            ventana.activa, 1,
+            "el acorde no cambió de pestaña, así que la prueba no llegó a plantear el caso"
+        );
+        assert_eq!(
+            ventana.pestañas[1].divisiones()[0].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA,
+            "el arrastre en vuelo se llevó por delante el panel de la pestaña de destino"
+        );
+    }
+
+    #[test]
+    fn el_reparto_lee_el_ancho_de_su_division_y_no_el_de_fabrica() {
+        // El eslabón entre el ancho guardado y lo que se ve. `panel::apartar` tiene sus propias pruebas,
+        // pero pasarle la constante en vez del campo dejaría todas en verde y el gesto sin efecto: es el
+        // patrón de la prueba que ata al ayudante y no al camino, fichado nueve veces en este proyecto.
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let de_fabrica = ventana.activa().divisiones()[0]
+            .repartir_con_su_panel(suya, celda, SystemTime::now())
+            .panel
+            .expect("hay panel")
+            .width();
+
+        ventana.activa_mut().divisiones_mut()[0].ancho_del_panel = 12;
+        let a_medida = ventana.activa().divisiones()[0]
+            .repartir_con_su_panel(suya, celda, SystemTime::now())
+            .panel
+            .expect("hay panel")
+            .width();
+
+        assert_eq!(de_fabrica, panel::ANCHO_DE_FABRICA as f32 * celda);
+        assert_eq!(
+            a_medida,
+            12.0 * celda,
+            "el reparto siguió usando el ancho de fábrica en vez del de esta división"
+        );
+    }
+
+    #[test]
+    fn solo_el_boton_primario_estrecha_el_panel() {
+        // **El botón central es el pegado de X11 y el derecho es la selección en casi cualquier
+        // terminal**, así que ninguno de los dos puede mover una frontera. Y no es una precaución: en el
+        // fuente de egui, `PointerEvent::Pressed { .. }` casa **sin mirar qué botón fue**
+        // (`interaction.rs:162`), y un control que solo siente arrastres se marca como arrastrado en la
+        // propia pulsación (`interaction.rs:219-220`). El arrastre de consolas ya lleva esta misma guarda.
+        for cual in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+            let ctx = egui::Context::default();
+            let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+            let area = area_de_celdas(200.0);
+            con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+            un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+            let celda = con_metrica(Metrica::ancho);
+            let corte = corte_del_panel(&ventana, 0, area);
+            let alto = area.center().y;
+            un_fotograma_en(&mut ventana, &ctx, area, en(corte, alto));
+            un_fotograma_en(&mut ventana, &ctx, area, con_boton(cual, corte, alto, true));
+            un_fotograma_en(&mut ventana, &ctx, area, en(corte + 12.0 * celda, alto));
+            un_fotograma_en(
+                &mut ventana,
+                &ctx,
+                area,
+                con_boton(cual, corte + 12.0 * celda, alto, false),
+            );
+
+            assert_eq!(
+                ventana.activa().divisiones()[0].ancho_del_panel,
+                panel::ANCHO_DE_FABRICA,
+                "el panel se movió con un botón que no es el primario"
+            );
+        }
+    }
+
+    #[test]
+    fn una_pulsacion_sin_mover_no_machaca_el_ancho_que_el_usuario_pidio() {
+        // **El caso destructivo, y hace falta una división donde el reparto esté recortando.** Con el
+        // panel pedido a treinta y seis celdas en una división que solo puede darle unas pocas, el
+        // asidero se pinta en el corte **recortado**; si una pulsación seca contara como intención, se
+        // guardaría ese corte y el ancho que el usuario pidió cuando la ventana era ancha se perdería
+        // para siempre — al ensanchar volvería el recortado, no el suyo.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        // Estrecha a propósito: a cada división le tocan unas 27 celdas, así que al panel de 36 le
+        // recortan hasta lo que sobra del suelo de la consola.
+        let area = area_de_celdas(56.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let hueco =
+            ventana.activa().divisiones()[0].repartir_con_su_panel(suya, celda, SystemTime::now());
+        let pintado = hueco.panel.expect("hay panel").width() / celda;
+        assert!(
+            pintado < panel::ANCHO_DE_FABRICA as f32,
+            "el panel no está recortado ({pintado} celdas), así que la prueba no plantea el caso"
+        );
+
+        let corte = corte_del_panel(&ventana, 0, area);
+        let alto = area.center().y;
+        un_fotograma_en(&mut ventana, &ctx, area, en(corte, alto));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(corte, alto, true));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(corte, alto, false));
+
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA,
+            "una pulsación sin mover se leyó como «quiero este ancho» y borró el que había pedido"
+        );
+    }
+
+    #[test]
+    fn el_ancho_guardado_nunca_pasa_de_lo_que_el_reparto_puede_dar() {
+        // **El techo es lo que se puede honrar, no lo que mide la división**, y la diferencia se ve al
+        // ensanchar la ventana. Arrastrando a tope a la izquierda, lo que el usuario ve es un panel
+        // limitado por el suelo de la consola; si se guardara el ancho entero de la división, al ensanchar
+        // aparecería de golpe un panel que nunca vio.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, area.left() - 5000.0);
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let de_la_division = con_metrica(|m| m.celdas_en(suya.size()).cols) as usize;
+        let cabe = de_la_division - panel::CONSOLA_MINIMA as usize;
+        assert_eq!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            cabe,
+            "se guardaron {} celdas cuando el reparto solo puede dar {cabe} de las {de_la_division} de \
+             la división",
+            ventana.activa().divisiones()[0].ancho_del_panel
+        );
+    }
+
+    #[test]
+    fn con_el_panel_sin_ancho_el_divisor_del_arbol_sigue_moviendose() {
+        // **Lo que el asidero del panel vuelve alcanzable, y es el patrón de siempre en este proyecto: el
+        // defecto no está en el código nuevo, está en lo que el código nuevo pone a un gesto de
+        // distancia.** En una división más estrecha que el suelo de su consola el reparto deja el panel con
+        // ancho cero, pegado al borde derecho — que es exactamente donde empieza el divisor que reparte
+        // las dos consolas. El asidero del panel se registra **después** que ese divisor, y en egui los
+        // empates los gana el último, así que sin la guarda el punto pasaría a redimensionar un panel
+        // invisible y la frontera que sí mueve algo se quedaría muerta.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        // Cada división se queda por debajo del suelo de la consola, así que su panel no tiene ancho.
+        let area = area_de_celdas(2.0 * panel::CONSOLA_MINIMA - 4.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let suya = ventana.activa().raiz.colocar(area, celda).partes[0];
+        let hueco =
+            ventana.activa().divisiones()[0].repartir_con_su_panel(suya, celda, SystemTime::now());
+        assert_eq!(
+            hueco
+                .panel
+                .expect("el rectángulo existe, aunque vacío")
+                .width(),
+            0.0,
+            "el panel tiene ancho, así que su asidero no cae sobre el divisor y la prueba no plantea el caso"
+        );
+
+        let antes = ventana.activa().fracciones_de_las_fronteras()[0];
+        let divisor = ventana.activa().raiz.colocar(area, celda).divisores[0];
+        let agarre = divisor.rect.center();
+        let alto = agarre.y;
+        un_fotograma_en(&mut ventana, &ctx, area, en(agarre.x, alto));
+        un_fotograma_en(&mut ventana, &ctx, area, boton(agarre.x, alto, true));
+        un_fotograma_en(&mut ventana, &ctx, area, en(agarre.x - 6.0 * celda, alto));
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area,
+            boton(agarre.x - 6.0 * celda, alto, false),
+        );
+
+        assert_ne!(
+            ventana.activa().fracciones_de_las_fronteras()[0],
+            antes,
+            "el divisor del árbol dejó de moverse: el asidero del panel le ganó el punto"
+        );
+    }
+
+    #[test]
+    fn el_ancho_del_panel_sobrevive_a_cambiar_de_pestana_y_a_mover_la_division() {
+        // **Las otras dos mitades del criterio.** Que el ancho aguante partir ya está probado; estas dos
+        // son las que de verdad podrían perderlo, porque **mueven la consola de sitio**: cambiar de
+        // pestaña la deja de fondo un rato, y soltarla sobre otra la saca del árbol y la vuelve a meter.
+        // Si el ancho viviera en una lista paralela indexada por posición, aquí es donde se descolgaría.
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let celda = con_metrica(Metrica::ancho);
+        let corte = corte_del_panel(&ventana, 0, area);
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, corte + 7.0 * celda);
+        let pedido = ventana.activa().divisiones()[0].ancho_del_panel;
+        assert_ne!(
+            pedido,
+            panel::ANCHO_DE_FABRICA,
+            "el gesto no cambió el ancho, así que no hay nada que conservar"
+        );
+        let quien = ventana.activa().divisiones()[0].nombre;
+
+        // Ida y vuelta a la otra pestaña: la consola pasa un rato de fondo.
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::ArrowRight));
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        un_fotograma_en(&mut ventana, &ctx, area, acorde_con(egui::Key::ArrowLeft));
+        assert_eq!(ventana.activa, 0, "no se volvió a la pestaña de partida");
+        // **Se mira el ancho con el que su panel se REPARTE, no solo el número guardado.** Afirmar sobre
+        // el campo demostraría que el campo sobrevive; lo que hay que demostrar es que el panel se sigue
+        // viendo con ese ancho, que es lo que el usuario pidió. Es el primer disfraz que la regla de
+        // mutar las pruebas nombra, y en este proyecto ya se ha colado.
+        let de_esa_consola = |ventana: &Ventana| {
+            let celda = con_metrica(Metrica::ancho);
+            let reparto = ventana.activa().raiz.colocar(area, celda);
+            let (cual, division) = ventana
+                .activa()
+                .divisiones()
+                .into_iter()
+                .enumerate()
+                .find(|(_, division)| division.nombre == quien)
+                .expect("la consola sigue viva");
+            let ancho = division
+                .repartir_con_su_panel(reparto.partes[cual], celda, SystemTime::now())
+                .panel
+                .expect("su panel sigue teniendo sitio")
+                .width();
+            (division.ancho_del_panel, (ancho / celda).round() as usize)
+        };
+        assert_eq!(
+            de_esa_consola(&ventana),
+            (pedido, pedido),
+            "cambiar de pestaña y volver le devolvió al panel el ancho de fábrica"
+        );
+
+        // Y ahora se la lleva de sitio: se suelta sobre su hermana, que reordena el árbol.
+        let otra = ventana.activa().divisiones()[1].nombre;
+        let suyo = ventana.activa().raiz.colocar(area, celda).partes[1];
+        let movio = con_metrica(|metrica| {
+            ventana.soltar_una_division(quien, otra, Lado::Abajo, suyo, metrica)
+        });
+        assert!(
+            movio,
+            "la consola no se pudo mover, así que la prueba no plantea el caso"
+        );
+
+        assert_eq!(
+            de_esa_consola(&ventana),
+            (pedido, pedido),
+            "mover la consola de sitio le devolvió al panel el ancho de fábrica"
+        );
+    }
+
+    #[test]
+    fn arrastrar_la_frontera_del_panel_no_mueve_la_division_de_sitio() {
+        // **La otra mitad de que las dos cosas no se confundan.** El asidero de la frontera está encima
+        // de la consola, y la consola siente arrastres desde que se pueden mover de sitio: el mismo
+        // apretón llega a dos controles. Si la consola le ganara el gesto, estrechar el panel acabaría
+        // recolocando la ventana; si lo ganaran los dos, las dos cosas pasarían a la vez.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let antes: Vec<usize> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.nombre)
+            .collect();
+        let celda = con_metrica(Metrica::ancho);
+        let corte = corte_del_panel(&ventana, 0, area);
+
+        // Se arrastra la frontera **hasta dentro de la consola de al lado**, que es donde soltar una
+        // consola la reordenaría.
+        arrastrar_el_panel(&mut ventana, &ctx, area, 0, corte + 60.0 * celda);
+
+        let despues: Vec<usize> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.nombre)
+            .collect();
+        assert_eq!(
+            antes, despues,
+            "arrastrar la frontera del panel reordenó las consolas"
+        );
+        assert_ne!(
+            ventana.activa().divisiones()[0].ancho_del_panel,
+            panel::ANCHO_DE_FABRICA,
+            "el gesto no llegó a mover el ancho, así que la prueba no plantea el caso"
         );
     }
 }

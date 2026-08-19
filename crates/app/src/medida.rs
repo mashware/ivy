@@ -19,10 +19,10 @@
 //! 2. **Interpretar** — meterlo en la rejilla del terminal.
 //! 3. **Encolar** — la llamada al pintor. Se llama así porque eso es lo que hace: apila formas y
 //!    vuelve.
-//! 4. **El panel de estado** — mirar si su fichero cambió, leerlo e interpretarlo cuando cambia, y
-//!    encolar su pintado. Va aparte del tramo anterior aunque los dos sean trabajo del mismo
-//!    fotograma: **agruparlos daría la misma resta con una etiqueta falsa**, y aquí eso ya costó una
-//!    medida entera.
+//! 4. **El panel de estado** — mirar si su fichero cambió, leerlo e interpretarlo cuando cambia,
+//!    repartir cuánto ancho se lleva, **atender el arrastre de su frontera** y encolar su pintado. Va
+//!    aparte del tramo anterior aunque los dos sean trabajo del mismo fotograma: **agruparlos daría la
+//!    misma resta con una etiqueta falsa**, y aquí eso ya costó una medida entera.
 //! 5. **El resto del fotograma** — teselar esas formas —**las de las consolas y las de los
 //!    paneles**—, dibujarlas, y todo el armazón que egui monta alrededor: recoger la entrada del
 //!    escritorio, abrir y cerrar la pasada, medir la fuente, subir texturas. Es lo que queda del
@@ -132,11 +132,12 @@ pub struct Tramos {
     interpretado: Duration,
     encolado: Duration,
     /// Lo que costó mirar si el `panel.json` de esta consola cambió, leerlo e interpretarlo si
-    /// cambió, **y pintarlo**.
+    /// cambió, repartir el ancho, **atender la frontera del panel** y **pintarlo**.
     ///
-    /// **Las tres cosas, y decirlo entero importa.** El número lo componen **dos tramos disjuntos** de
+    /// **Las cinco cosas, y decirlo entero importa.** El número lo componen **dos tramos disjuntos** de
     /// `Ventana::pintar_division`, sumados: uno antes de pintar la consola —mirar la fecha, leer si
-    /// cambió, y repartir el ancho— y otro después —pintar el panel—. Lo que queda **en medio**, que es
+    /// cambió, repartir el ancho, atender el arrastre de su frontera y volver a repartir si el ancho
+    /// cambió— y otro después —pintar el panel—. Lo que queda **en medio**, que es
     /// encolar el pintado de la consola, tiene su propio campo y no entra aquí. Describir el conjunto
     /// como «leer» dejaría el pintado del panel sin dueño declarado, y un tramo sin dueño se lo lleva
     /// el que se calcula restando — que aquí es el framework de interfaz, o sea justo la cifra sobre
@@ -216,7 +217,8 @@ pub struct Medida {
     esperar: Serie,
     interpretar: Serie,
     encolar: Serie,
-    /// Mirar la fecha del `panel.json`, leerlo e interpretarlo cuando ha cambiado, **y pintarlo**.
+    /// Mirar la fecha del `panel.json`, leerlo e interpretarlo cuando ha cambiado, repartir el ancho,
+    /// **atender el arrastre de su frontera** y **pintarlo**.
     panel: Serie,
     vuelta: Serie,
     /// Los tramos del fotograma anterior, esperando a que `eframe` publique lo que costó.
@@ -395,7 +397,9 @@ const EXPLICACION_DEL_PANEL: &str = "\
     \x20   leer, interpretar y rehacer la maqueta (los de publicación): la media describe\n\
     \x20   el primero, el 95 % el segundo\n\
     \x20   son dos relojes, uno antes y otro después del pintado de la consola —que queda\n\
-    \x20   fuera—: este tramo INCLUYE pintar el panel, no solo leerlo";
+    \x20   fuera—: este tramo INCLUYE pintar el panel, no solo leerlo\n\
+    \x20   y también atender el arrastre de su frontera y repartir el ancho otra vez si\n\
+    \x20   cambió: el gesto de estrechar el panel se paga aquí, no en el resto del fotograma";
 
 /// El resto del fotograma: lo que costó la pasada y nadie cronometró.
 ///
@@ -908,6 +912,12 @@ mod tests {
         assert!(
             informe.contains("el panel de estado:"),
             "el informe no publica el tramo del panel:\n{informe}"
+        );
+        assert!(
+            informe.contains("atender el arrastre de su frontera"),
+            "el informe publica el tramo del panel sin decir que ahí dentro se paga el gesto de \
+             estrecharlo: quien lea la tanda creerá que ese coste está en el resto del fotograma, o sea \
+             atribuido al framework de interfaz:\n{informe}"
         );
         assert!(
             informe.contains("INCLUYE pintar el panel"),

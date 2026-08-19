@@ -35,7 +35,11 @@ feature_id: feat_panel-contract_8y2gc0
 
 **Dos decisiones de producto sobre el reparto del ancho, las dos con su razón.**
 
-**1. Fijo, pero en celdas.** La decisión del usuario fue «ancho fijo en puntos, sin plegar», y se cumple en lo que quería decir —no depende del ancho de la ventana y no se puede arrastrar— pero **se cuenta en celdas de la fuente y no en puntos**. Un ancho en puntos se estrecha en columnas al subir el aumento del escritorio, y lo que el panel tiene que conservar es **cuántos caracteres caben**, que es lo que decide si su texto se lee. Un panel que en una pantalla enseña las líneas enteras y en otra las corta no es el mismo panel.
+**1. En celdas, no en puntos.** La decisión del usuario fue «ancho fijo en puntos, sin plegar», y se cumplió en lo que quería decir —no depende del ancho de la ventana— pero **contado en celdas de la fuente y no en puntos**.
+
+> **Actualización (F2.4, agosto de 2026): la parte de «no se puede arrastrar» ya NO es cierta.** El ancho pasó a ser **de cada división** y su frontera se arrastra; lo que sigue intacto es todo lo demás de esta ficha, que es lo que importaba: se cuenta en **celdas**, el que cede sigue siendo el panel, y el descuento sigue yendo antes de medir la rejilla. La constante de 36 dejó de ser el ancho y pasó a ser **con cuántas celdas nace** una división que nadie ha tocado. Ver [[la-cache-de-la-maqueta-se-invalida-por-celdas-no-por-puntos]] para el coste del gesto.
+
+Lo de contarlo en celdas y no en puntos es lo que sigue mandando: Un ancho en puntos se estrecha en columnas al subir el aumento del escritorio, y lo que el panel tiene que conservar es **cuántos caracteres caben**, que es lo que decide si su texto se lee. Un panel que en una pantalla enseña las líneas enteras y en otra las corta no es el mismo panel.
 
 > Ojo con probarlo: con una celda de 8 puntos, «36 celdas» y «288 puntos» dan el mismo número. Una prueba escrita con ese ancho no distingue las dos implementaciones — hay que variar el tamaño de la celda para que la diferencia aparezca.
 
