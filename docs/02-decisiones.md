@@ -1470,3 +1470,235 @@ y con eso la tanda dejaba de ser «la de comparación más el gesto» para ser o
 fotogramas** con el resto en **163 y 103 µs**, o sea el gesto *abaratando* el fotograma a la mitad—. La
 segunda: contar los gestos inyectados como si fueran reordenaciones, que es la que habría dejado pasar la
 tanda vacía de más arriba. Las dos las cazó la revisión de este PR, no la medida.
+
+---
+
+## D16 — La disposición se guarda en un fichero propio, y lo que no se entiende abre de fábrica
+
+**Qué se decidió.** Al cerrar la ventana y volver a abrirla vuelven **las pestañas, el árbol de
+divisiones con sus pesos, y por cada consola el ancho de su panel y si estaba plegada**. Se guarda en
+un fichero JSON propio, `$XDG_CONFIG_HOME/agent-terminal/disposicion.json` —con caída a
+`$HOME/.config/…`—, y **nada más**: ni el directorio de trabajo de cada consola, ni el tamaño de la
+ventana, ni qué pestaña estaba activa. Nueve decisiones lo definen:
+
+1. **Fichero propio, y uno solo para toda la máquina.** No una disposición por directorio de
+   lanzamiento: eso metería «el proyecto» como concepto y ninguna fase lo ha definido.
+2. **La ruta tiene que ser absoluta, o no se persiste.** Solo se acepta una variable de entorno **no
+   vacía y absoluta**; si ninguna resuelve, **no se lee ni se escribe nada** y la ventana abre de
+   fábrica. **No hay caída a un directorio temporal**, al contrario de lo que hace el contrato del
+   panel.
+3. **Se escribe con retardo de 500 ms, contado desde el primer cambio no escrito**, no desde el último.
+   Y hacen falta **dos** referencias, con papeles distintos: el plazo se **arma** cuando la disposición
+   difiere de la **última vista** —o sea cuando algo cambia—, y al vencer se **escribe** si difiere de la
+   **última escrita con éxito**. Con una sola no funciona ninguno de los dos extremos: comparando
+   siempre contra lo último escrito, un directorio no escribible deja la diferencia puesta y la ventana
+   no se duerme nunca; y guardando el intento fallido como si hubiera salido bien, **un fallo no se
+   reintenta jamás** si la disposición no vuelve a cambiar, y se pierde todo desde la última escritura
+   buena en vez de medio segundo.
+4. **La escritura es atómica**: se escribe un temporal en el **mismo directorio** que el destino
+   —`disposicion.json.<pid>`, para que dos instancias no se pisen el temporal, y **creado en
+   exclusiva**: si ese nombre ya existe **no se adopta**, porque el temporal es lo que se renombra
+   encima del destino y un enlace plantado ahí se escribiría a través— y se renombra encima.
+   El destino nunca contiene un documento a medias. Permisos `0600` en el fichero y `0700` en su
+   directorio. Si el renombrado falla, se borra el temporal y se avisa **una vez por sesión y por
+   motivo**; lo que reintenta es el cambio siguiente.
+5. **Una consola restaurada estrena identidad**: `PANEL_ID` y `PANEL_DIR` nuevos, panel vacío hasta que
+   alguien publique.
+6. **Tolerancia por documento, no por campo.** Lo que no se entiende se descarta **entero** y la
+   ventana abre de fábrica —una pestaña, una consola— sin impedir el arranque.
+7. **La versión del formato es obligatoria.** Una **mayor** que la conocida **no se sobrescribe en toda
+   la sesión**. Una **conocida y más vieja** se lee con el lector de esa versión y se reescribe en la
+   nueva al primer guardado — y **retirar el soporte de una versión vieja es una decisión aparte, que se
+   escribe**. Sin esa segunda regla, un fichero de la versión anterior caería en «forma inválida» y se
+   machacaría, que es el daño exacto que la versión existe para evitar.
+8. **Dos techos y ninguno más**: **64 KiB** de fichero —porque tiene tamaño arbitrario, y leerlo sin
+   tope es reservar sin tope en el arranque— y **128 hojas** de documento, comprobadas **recorriendo el
+   árbol antes del primer `fork`**. Y **si un `fork` falla a mitad, no se instala nada**: la ventana abre
+   de fábrica, la misma atomicidad que D15 — media ventana restaurada es un estado que nadie ha
+   diseñado. En el documento, **hoja y rama llevan etiqueta explícita** (`hoja` / `rama`), no se deducen
+   de qué clave está presente: así el fallo dice qué y dónde.
+9. **El fichero guarda geometría y nunca instrucciones.**
+
+**Por qué.** Hoy la ventana abre siempre igual, así que todo el trabajo de F2.1 a F2.4 —pestañas por
+contexto, las divisiones que quieras colocadas como quieras, cada panel con su ancho— **se pierde en
+cada cierre**, y colocar la ventana es un gesto que hay que repetir cada mañana.
+
+Y las decisiones de arriba no son gustos. Cada una tiene detrás algo ya medido en este proyecto:
+
+- **El retardo son 500 ms, y el número no es al azar**: es el mismo que el respiro con el que la ventana
+  relee los paneles cuando el vigilante se ha quedado ciego, que ya está en el código. Con él, un
+  arrastre continuo escribe **dos veces por segundo** en vez de sesenta, y lo que se pierde al morir
+  —medio segundo de gesto— no se nota.
+- **El retardo se cuenta desde el primer cambio y no desde el último porque, contado desde el último,
+  no escribe nunca mientras el usuario arrastra.** La disposición cambia **una y otra vez mientras el
+  botón sigue apretado**: mover una frontera reparte pesos en cuanto el puntero se mueve, y la del
+  panel en cuanto cruza una celda —su ancho se cuenta en celdas enteras, así que no cambia en cada
+  fotograma, pero sí muchas veces por gesto—. Rearmar el plazo en cada cambio lo empuja mientras el
+  gesto dure: uno de diez segundos se pierde entero. Contado desde el primero, ese mismo gesto escribe
+  una vez por retardo.
+- **La escritura es atómica porque no existe un cierre limpio garantizado.** La aplicación se cierra
+  por el gestor de ventanas o por señal, y **cerrar una consola congela la ventana 50,7 ms de mediana**
+  —una pestaña de dos consolas, unos 101 ms; y **404 ms esa misma consola** si el programa de dentro
+  ignora la señal de cuelgue— y puede colgarla
+  ([#62](https://github.com/mashware/agent-terminal/issues/62)). Guardar solo al salir habría
+  perdido la sesión entera en el caso normal.
+- **La identidad es nueva porque conservarla sería deducir el estado.** Un panel restaurado con el
+  `panel.json` de ayer pintaría **como actual** el último estado de un agente que ya no existe:
+  «compilando» de una compilación que murió anoche. La app no deduce el estado (**D6**), y esto sería
+  deducirlo por omisión.
+- **La tolerancia es por documento porque este fichero lo escribe siempre la aplicación.** Es lo
+  contrario de lo que hace el contrato del panel, y a propósito: aquel lo escribe un tercero a mano y
+  perder el panel entero por un campo que nadie mira sería lo peor posible; aquí **adivinar media
+  disposición es peor que no restaurarla**.
+- **La versión entra el primer día porque el fichero congela la forma del árbol en disco.** Sin ella,
+  el primer cambio de forma mete al fichero viejo en el mismo cajón que al corrupto y **lo borra en
+  silencio**. Sube solo con lo que un lector viejo malinterpretaría; añadir una clave opcional no la
+  sube. Y una versión mayor no se sobrescribe porque tener dos binarios en la máquina no es raro, y
+  machacar el fichero sería que el viejo se lleve por delante la disposición del nuevo.
+- **El techo de hojas existe aunque D14 descartara un techo al número de divisiones, y no la
+  contradice.** Partir exige un gesto humano y **la geometría se niega antes de crear nada**; restaurar
+  bifurca N shells **antes de que exista geometría** —al abrir no se sabe el tamaño de la ventana—. El
+  suelo que protege a partir está **aguas abajo del `fork`**. Es techo **del documento**, no de
+  divisiones.
+- **Y el techo de hojas no se deriva de una geometría concreta**, porque no la hay: sale de que el
+  techo de bytes deja pasar **del orden de un millar de hojas** —entre seiscientas y mil según lo
+  compacto que venga el documento—, y **el número se elige contra el recurso que el techo guarda, no
+  contra lo que cabe en pantalla**. Cada hoja restaurada es un proceso, un pseudoterminal, sus
+  descriptores y ~1,06 MiB de colas: mil hojas serían más de un gigabyte de colas **antes de que exista
+  geometría**, o sea el techo convertido en el desastre que venía a evitar. **128 hojas** son unos 136
+  MiB, un número acotado y declarado, y siguen estando por encima de las **del orden de cien consolas**
+  que caben en la ventana con la que se mide —siete columnas de veinte celdas por quince filas de tres,
+  con el cuerpo de 14—, que es la única ventana de la que este proyecto tiene un tamaño escrito. **No se
+  publica una cifra exacta de hojas por byte a propósito**: depende de la
+  forma del documento, no de su tamaño.
+- **El fichero no guarda instrucciones porque ahí está la frontera de lo sensible.** El lanzamiento de
+  una consola deja de ser inofensivo «en cuanto el programa o sus argumentos procedan de
+  **configuración**», y este fichero es configuración. Guarda geometría; el tipo con el que se lee **no
+  tiene ni un campo de texto libre**, y restaurar llama al constructor que lanza el shell del usuario,
+  nunca al que acepta un programa por parámetro. El día que algo de eso cambie, hay que revisar el
+  lanzamiento como superficie sensible y tratarlo como un `panel.json` ajeno.
+
+**Lo que se descartó, y por qué:**
+
+- **El almacén de persistencia que trae el framework de interfaz.** Cede **la ruta del fichero y la
+  cadencia del guardado** —las dos cosas que este hito decide— y mete el estado del producto dentro de
+  la pieza que **D3** declara sustituible. Además exigiría **activar una funcionalidad que hoy no está
+  pedida** —no viene de serie— y que arrastra al árbol un formato de serialización y un resolutor de
+  directorios que nada más necesita.
+- **Guardar el registro de gestos que construyó el árbol** en vez del árbol. Tentador porque las
+  operaciones ya rechazan lo que no cabe, así que validar saldría gratis. **No cubre la mitad del
+  hito**: el ancho y el plegado del panel no nacen de partir ni de mover, viven en la consola
+  (**D10**), así que el espejo por consola hace falta igual.
+- **Tolerancia por campo**, por lo dicho arriba.
+- **Un techo de profundidad del árbol.** El intérprete de JSON ya corta en 128 niveles, y **la opción
+  que desactiva ese corte no está pedida en ningún manifiesto del repo**, así que un techo propio
+  **pasaría su prueba por construcción** — el disfraz que este proyecto ya tiene fichado. Y con la invariante «una rama tiene
+  dos hijos o más», el techo de 128 hojas ya acota profundidad, nodos, pestañas e hijos por rama: **un
+  número hace los cuatro trabajos**.
+- **Un tope al ancho de panel leído.** El reparto ya lo recorta y hay prueba que lo ata.
+- **Una guarda contra el valor sin número en los pesos.** JSON no tiene literal para él, y el tipo del
+  peso ya rechaza lo no finito y lo no positivo, así que **la suma cero no se puede construir**.
+- **Forzar la escritura a disco antes de renombrar.** La garantía que hace falta es «nunca se ve medio
+  fichero», y eso lo da el renombrado solo; sobrevivir a un corte de luz no lo pidió nadie, y ese
+  empujón dentro del fotograma son milisegundos en un disco ocupado.
+- **Borrar el directorio de panel de la sesión anterior.** En la rama normal vive bajo el directorio de
+  ejecución del usuario, que **el sistema vacía al cerrar sesión**, así que no hay nada que limpiar y
+  construir la limpieza sería un mecanismo sin escenario. **Donde no hay tal directorio** —macOS, o
+  Linux sin gestor de sesión— **cae al temporal del sistema, que NO se vacía**: lo dice el propio
+  destructor del tipo, que avisa precisamente por eso. Y ese destructor **no corre cuando la aplicación
+  se mata o la cierra el gestor de ventanas**, que es el modo de cierre en el que esta decisión se apoya
+  más arriba. Así que en esa rama **se acumulan directorios vacíos**, y eso va escrito abajo como límite
+  en vez de taparse con una limpieza que la rama normal no necesita.
+- **Una variable de entorno propia para que las tandas de medida no toquen el fichero real.** Basta con
+  que el guion apunte la variable del directorio de configuración al de la corrida: nada más en el
+  código la lee. Una variable menos y un contrato menos.
+- **Guardar el tamaño y la posición de la ventana.** Restaurarlos devolvería el tamaño a algo que
+  cambia entre sesiones, y de ahí salieron **tres rejillas distintas el mismo día**, que es lo que hace
+  incomparables las medidas de las que vive D3. Conviene no confundirlo con lo que ya pasa: **hoy no
+  hay tamaño por defecto** —si nadie lo pide, lo elige el escritorio—, y los 1280×800 son de la tanda
+  de medida, no del arranque.
+- **Guardar el directorio de trabajo de cada consola.** Saber dónde está un proceso hijo se lee del
+  sistema de ficheros virtual de Linux y no existe igual en macOS ni Windows: adelantaría trabajo de
+  F2.7 o abriría una vía por plataforma. Y sería **una ruta del fichero que acaba en el lanzamiento**,
+  o sea la línea de arriba.
+- **Guardar qué pestaña estaba activa y qué consola tenía el foco.** Abre en la primera.
+
+**Lo que el hito añade al informe de medida, y por qué se decide aquí y no al implementarlo.** El coste
+del fotograma se reparte **por resta**, así que todo trabajo que no se declara se publica como coste del
+framework — la cifra exacta con la que D3 juzga a egui. Este hito abre dos caminos dentro del fotograma
+y los dos se declaran:
+
+- **Comparar el espejo de la ventana con lo último escrito**, que corre **en cada pasada de interfaz y
+  sobre la ventana entera**.
+- **Escribir el fichero** cuando vence el plazo. Su cronómetro abarca **desde resolver la ruta hasta que
+  el renombrado vuelve** —o hasta que el temporal queda borrado, si falló—, no solo la llamada de
+  escribir.
+
+**Y cada uno necesita DOS cosas, no una, porque restar y publicar son mecanismos distintos.** El resto
+del fotograma se calcula restándole a lo que costó entero **lo que los tramos declararon**, y lo que
+alimenta esa resta son los tramos de cada división más el acumulador de la ventana. **Una serie solo
+guarda muestras para imprimirlas: no resta nada.** Así que un tramo con serie y sin acumulador queda
+publicado y **sin descontar** —su coste sigue apareciendo como coste del framework—, y un tramo en el
+acumulador y sin serie queda descontado y **sin ninguna fila que auditar**. Los dos caminos nuevos
+entran **en el acumulador y además con serie propia**.
+
+**Y el precedente del tramo del panel no se hereda, conviene decirlo:** ese viaja **dentro de los tramos
+de una división**, que es un campo por división; el espejo es de **la ventana entera** y no tiene ese
+vehículo. Quien lea «como el panel» hará lo que hizo el panel y se quedará sin la resta.
+
+**El del espejo, además, acumula por pasada y anota una sola muestra al cerrar el fotograma**: anotarla
+por pasada mete dos muestras en el fotograma que egui repite, y entonces la media describe «por pasada»
+y no «por fotograma».
+
+Y **leer el fichero al arrancar no entra en ningún fotograma**, a propósito: se interpreta antes de que
+la ventana exista. No hay tramo que declarar porque no hay coste que atribuir.
+
+**Y la tanda tiene que poder delatarse, con el reparto que este proyecto ya usa: el informe declara, el
+guion invalida.** El **informe** publica cuántas veces se escribió el fichero —ese número vive dentro
+del proceso y el guion no puede saberlo—, y el **guion** invalida la corrida si no se escribió ninguna,
+igual que ya invalida la que no publicó ningún panel o la que no completó ningún arrastre: sin ese
+número, una serie vacía se lee como «esto no cuesta nada». El guion apunta además el directorio de
+configuración **al de la corrida y lo borra al empezar cada una**, o la corrida siguiente arranca con la
+disposición que dejó la anterior. Y **lo que la tanda pide explícitamente manda sobre lo que se
+restauró**: si la corrida pide dos pestañas y cuatro divisiones, eso es lo que abre, aunque el fichero
+diga otra cosa.
+
+**Dos consecuencias de eso, y las dos hay que escribirlas porque si no se descubren tarde:**
+
+- **El plazo del guardado es una razón nueva para que la ventana despierte**, y eso cambia **cuántos
+  fotogramas tiene una corrida**. El anexo de D15 ya avisa de que una tanda con más fotogramas **no
+  compara sus medias por fotograma**; este hito reintroduce ese mismo confundido, así que se declara en
+  el anexo en vez de descubrirse leyéndolo.
+- **Con las dos reglas de arriba juntas, ninguna corrida restaura nada** —se borra el directorio, y lo
+  que la tanda pide manda—, así que **el camino más caro que añade el hito quedaría excluido de la medida
+  por construcción**. Hace falta **una tanda propia** que escriba un fichero de disposición conocido
+  **antes** de abrir y lance **sin pedir pestañas ni divisiones**, para que gane el fichero, y cuyo
+  informe declare **cuántas consolas se restauraron** y lo que costó restaurarlas. Sin ella, «el coste de
+  bifurcar N consolas ya está pagado» es una afirmación que **ninguna corrida sostiene**.
+
+**Tres límites aceptados, escritos porque ninguno se mitiga y los tres se descubren usándolo:**
+
+- **Dos instancias abiertas se machacan la disposición**: la última que guarde se lleva el fichero. Es
+  consecuencia directa de que la disposición sea una y global, y ponerle un cerrojo entre procesos
+  sería un mecanismo mayor que el hito.
+- **Restaurar no revalida la geometría.** Un árbol guardado en una pantalla grande y abierto en una
+  pequeña deja consolas apretadas por debajo de sus mínimos. Se acepta porque la alternativa
+  —revalidar y caer a fábrica— **tiraría la disposición del usuario por abrir el portátil sin el
+  monitor**, que es peor producto; y hay atenuante ya construido: **el que cede es el panel** (D10), así
+  que la consola conserva su suelo mientras el panel tenga algo que dar.
+- **Quien abre la aplicación desde un icono del escritorio no ve la salida de error**, así que para él
+  todos los fallos de lectura son silenciosos. Es carencia aceptada: F2.5 no estrena interfaz, y es la
+  razón de no ampliar el conjunto de fallos más allá de lo que cabe en una línea.
+- **Cada consola vuelve en el directorio desde el que se lanzó la aplicación, no donde estaba.** Es lo
+  primero que nota cualquiera: con cuatro consolas en cuatro repositorios vuelve el árbol exacto y los
+  anchos exactos, y cuatro shells en el sitio equivocado. Y la razón de dejarlo fuera **no** es que
+  adelantaría otro hito: es que **saber dónde está un proceso hijo se lee de una interfaz que solo
+  existe en Linux**, así que hacerlo crearía trabajo por plataforma — que es precisamente lo que F2.7
+  existe para acotar. Y sería además **una ruta que sale del fichero y acaba en el lanzamiento**, o sea
+  la línea de arriba.
+- **En una máquina sin directorio de ejecución de sesión** —macOS, o Linux sin gestor— **los directorios
+  de panel se acumulan**: ahí el respaldo es el temporal del sistema, que no se vacía, y el destructor
+  que los borra no corre cuando la aplicación se mata o la cierra el gestor de ventanas. Con identidad
+  nueva por consola restaurada, son tantos directorios vacíos como consolas por arranque. No se mitiga
+  aquí porque en la rama normal no hay nada que mitigar, y una limpieza propia sería un mecanismo sin
+  escenario en el 99 % de los casos.
