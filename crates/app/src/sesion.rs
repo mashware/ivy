@@ -59,23 +59,6 @@ pub const VERSION: u64 = 1;
 /// arbitrario, y leerlo sin tope es reservar sin tope en el arranque**.
 pub const BYTES_MAXIMOS: usize = 64 * 1024;
 
-/// El peso más pequeño que se acepta; ver [`PESO_MAXIMO`].
-pub const PESO_MINIMO: f32 = 1e-6;
-
-/// El peso más grande que se acepta.
-///
-/// **El rango existe porque el reparto MULTIPLICA dos pesos, y eso no se ve mirando un peso a la vez.**
-/// Al cerrar una división, las nietas suben a hermanas con el peso escalado —`w · suyo / suma`—, y el
-/// producto de dos pesos válidos puede **subdesbordar a cero**: comprobado ejecutándolo,
-/// `1·10⁻⁴⁰ · 1·10⁻⁴⁰ / 2·10⁻⁴⁰` da **exactamente cero**, y un peso cero es lo que [`crate::Peso`] existe
-/// para hacer imposible. Un fichero puede traer esos números; **ningún gesto los produce**.
-///
-/// **Y el número sale de la multiplicación, no del gusto.** Con los pesos dentro de este rango, el
-/// producto de dos cualesquiera cae entre 10⁻¹² y 10¹², holgadamente representable. Los que los gestos
-/// producen van del orden de una centésima a la centena —el reparto de fábrica y el suelo del 1 % que el
-/// arrastre respeta—, así que el rango los contiene con seis órdenes de margen a cada lado.
-pub const PESO_MAXIMO: f32 = 1e6;
-
 /// Lo que se guarda de una consola, y es todo lo que se guarda de ella.
 ///
 /// De los quince campos de una división viva, dos. Los otros trece no, y cada uno por su razón: el
@@ -259,6 +242,12 @@ pub enum Problema {
     /// cada peso por la suma de su rama**, así que con una suma infinita a **todas** les toca cero — dos
     /// pesos de 3·10³⁸ son cada uno finito y positivo, y sumados desbordan. La otra dirección **no hace
     /// falta comprobarla**: dos números positivos no pueden sumar cero.
+    ///
+    /// **Y es la puerta que sostiene el formato entero desde que no hay rango propio de pesos.** La suma de
+    /// una rama es lo único que los gestos **no** hacen crecer —arrastrar la conserva, partir divide en dos
+    /// mitades que suman lo mismo, cerrar reparte el peso del grupo entre sus nietas—, así que exigirla
+    /// finita aquí es exigir exactamente la invariante que el árbol vivo mantiene. Ni una condición más ni
+    /// una menos: eso es lo que hace que la ida y vuelta no pueda perder una disposición.
     SumaQueNoEsUnNumero { pestaña: usize },
     /// Más consolas de las que se aceptan abrir de golpe.
     DemasiadasHojas { cuantas: usize },
@@ -291,8 +280,7 @@ impl std::fmt::Display for Problema {
             ),
             Self::PesoInvalido { pestaña } => write!(
                 f,
-                "la pestaña {pestaña} trae un peso que no puede serlo, o fuera del rango \
-                 [{PESO_MINIMO:e}, {PESO_MAXIMO:e}] que el reparto puede multiplicar"
+                "la pestaña {pestaña} trae un peso que no puede serlo: ni cero, ni negativo, ni infinito"
             ),
             Self::SumaQueNoEsUnNumero { pestaña } => write!(
                 f,
@@ -420,12 +408,15 @@ fn revisar(nodo: &Nodo, de_fuera: Option<Orientacion>, pestaña: usize) -> Resul
 
     let mut hojas = 0;
     for hijo in hijos {
-        // **El peso pasa por el constructor del tipo vivo, y ADEMÁS por el rango.** Lo primero, porque es
-        // la única forma de que no haya dos implementaciones de la misma invariante — la de allí ya está
-        // probada. Lo segundo, porque ese constructor mira **un** peso y el reparto **multiplica dos**:
-        // ver [`PESO_MAXIMO`].
-        let fuera_de_rango = hijo.peso < PESO_MINIMO || hijo.peso > PESO_MAXIMO;
-        if crate::Peso::nuevo(hijo.peso).is_none() || fuera_de_rango {
+        // **Una sola puerta por peso, la del tipo vivo, y ninguna propia.** Es la única forma de que no
+        // haya dos implementaciones de la misma invariante —la de allí ya está probada— y, sobre todo, de
+        // que **lo que el árbol puede tener se pueda volver a leer**: hubo un rango propio, `[1e-6, 1e6]`,
+        // y los dos extremos rechazaban estados a los que se llega **arrastrando**. Por abajo, porque el
+        // arrastre recorta la *fracción* y no el peso; por arriba, porque lo que conserva es la **suma del
+        // par**, así que un peso sube hasta el 99 % de lo que sumaban dos vecinos. Lo que el reparto
+        // necesita de verdad no es un peso acotado: es **una suma de rama finita**, y eso se comprueba
+        // abajo.
+        if crate::Peso::nuevo(hijo.peso).is_none() {
             return Err(Problema::PesoInvalido { pestaña });
         }
         hojas += revisar(&hijo.nodo, Some(*orientacion), pestaña)?;
@@ -1123,11 +1114,13 @@ mod tests_de_los_techos {
     }
 
     #[test]
-    fn dos_pesos_que_el_constructor_acepta_y_cuyo_producto_seria_cero_se_rechazan() {
-        // **El agujero que una comprobación peso a peso no puede ver.** Al cerrar una división, las
-        // nietas suben con el peso escalado —`w · suyo / suma`— y el producto de dos pesos válidos puede
-        // subdesbordar: comprobado ejecutándolo, `1e-40 · 1e-40 / 2e-40` da **cero**, y un peso cero es lo
-        // que `Peso` existe para hacer imposible. Un fichero puede traerlos; ningún gesto los produce.
+    fn dos_pesos_cuyo_producto_seria_cero_se_aceptan_porque_el_cero_lo_impide_quien_reescala() {
+        // **Esta prueba afirmaba lo contrario, y estaba mal.** El agujero es real —al cerrar una división
+        // las nietas suben con el peso escalado, `w · suyo / suma`, y ese producto **subdesborda**:
+        // comprobado ejecutándolo, `1e-40 · 1e-40 / 2e-40` da **cero**— pero cerrarlo aquí, rechazando el
+        // documento, era cerrarlo en el sitio equivocado: **a estos números se llega arrastrando**, así que
+        // lo que este rechazo tiraba era la disposición de quien había usado la aplicación. La respuesta
+        // vive ahora donde el producto ocurre, en `Peso::escalado`, y por eso aquí se aceptan.
         let diminuto = 1.0e-40_f32;
         assert!(
             crate::Peso::nuevo(diminuto).is_some(),
@@ -1139,10 +1132,7 @@ mod tests_de_los_techos {
             "y su escalado tiene que dar cero, o tampoco"
         );
 
-        assert_eq!(
-            validar(con_pesos(&[diminuto, diminuto])),
-            Err(Problema::PesoInvalido { pestaña: 0 })
-        );
+        assert!(validar(con_pesos(&[diminuto, diminuto])).is_ok());
     }
 
     #[test]
@@ -1157,28 +1147,40 @@ mod tests_de_los_techos {
             "y su suma tiene que desbordar"
         );
 
-        // Con el rango, este cae por el rango antes que por la suma — y las dos cosas son correctas: lo
-        // que importa es que **no se acepta**. La guarda de la suma sigue puesta porque el rango puede
-        // ampliarse y ella no depende de él.
-        assert!(matches!(
+        // **Y cae por la suma, no por el peso.** Desde que no hay rango propio, ésta es la puerta que
+        // sostiene el formato: se afirma la variante exacta porque confundirlas sería no saber cuál de las
+        // dos comprobaciones está trabajando.
+        assert_eq!(
             validar(con_pesos(&[al_limite, al_limite])),
-            Err(Problema::PesoInvalido { .. }) | Err(Problema::SumaQueNoEsUnNumero { .. })
-        ));
+            Err(Problema::SumaQueNoEsUnNumero { pestaña: 0 })
+        );
     }
 
     #[test]
-    fn los_extremos_del_rango_de_pesos_se_aceptan() {
-        // **La mitad de aceptar, y hace falta.** Sin ella, poner el rango en `[1, 1]` pasaría la prueba
-        // de rechazo y dejaría fuera cualquier disposición real.
-        assert!(validar(con_pesos(&[PESO_MINIMO, PESO_MAXIMO])).is_ok());
-        // Y lo que los gestos producen de verdad, con mucho margen dentro.
-        assert!(validar(con_pesos(&[0.5, 1.5])).is_ok());
-        assert!(validar(con_pesos(&[100.0, 0.01])).is_ok());
+    fn se_acepta_cualquier_peso_que_el_arbol_vivo_pueda_tener() {
+        // **Y esto arregla un defecto en vez de evitarlo.** Hubo un rango propio, `[1e-6, 1e6]`, y los dos
+        // extremos rechazaban disposiciones a las que se llega **arrastrando**: por abajo el arrastre recorta
+        // la fracción y no el peso, y por arriba lo que conserva es la suma del par, así que un peso sube
+        // hasta el 99 % de lo que sumaban dos vecinos. Cualquiera de los dos rechazos perdía la colocación
+        // del usuario al reabrir, sin que nada se hubiera visto en pantalla.
+        for pesos in [
+            [1.0, 1e-30],
+            [1.0, f32::MIN_POSITIVE],
+            [1.0, 1e30],
+            [0.5, 1.5],
+            [100.0, 0.01],
+        ] {
+            assert!(
+                validar(con_pesos(&pesos)).is_ok(),
+                "{pesos:?} tenía que valer"
+            );
+        }
     }
 
     #[test]
-    fn un_peso_fuera_del_rango_se_rechaza_por_los_dos_lados() {
-        for malo in [PESO_MINIMO / 2.0, PESO_MAXIMO * 2.0] {
+    fn lo_que_no_es_un_peso_se_sigue_rechazando() {
+        // La puerta que queda, y es la del tipo vivo: ni cero, ni negativo, ni infinito.
+        for malo in [0.0, -1.0, f32::INFINITY] {
             assert_eq!(
                 validar(con_pesos(&[1.0, malo])),
                 Err(Problema::PesoInvalido { pestaña: 0 }),

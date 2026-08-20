@@ -768,6 +768,57 @@ impl Peso {
         (valor.is_finite() && valor > 0.0).then_some(Self(valor))
     }
 
+    /// El peso más pequeño que se deja construir al reescalar; ver [`Peso::escalado`].
+    ///
+    /// **El más pequeño normal y no el más pequeño representable**: por debajo de éste están los
+    /// subnormales, que son pesos válidos —positivos y finitos— pero cuyo producto llega a cero **en un
+    /// solo paso**, así que aceptarlos solo aplaza el problema un reparto.
+    const MINIMO: f32 = f32::MIN_POSITIVE;
+
+    /// El peso que sale de reescalar otro, **siempre**.
+    ///
+    /// **Existe porque el reparto multiplica dos pesos y el producto puede dejar de ser un peso.** Cerrar
+    /// una división sube las nietas a hermanas con el peso escalado —`w · suyo / suma`—, y ese producto
+    /// **subdesborda a cero** con números pequeños: comprobado ejecutándolo, `1·10⁻⁴⁰ · 1·10⁻⁴⁰ / 2·10⁻⁴⁰`
+    /// da **exactamente cero**. Y a esos números se llega **con gestos**, no solo con un fichero: el
+    /// arrastre recorta la **fracción** al uno por ciento, no el peso, así que lo que deja es el uno por
+    /// ciento de lo que suman los dos vecinos — una suma que encoge con cada arrastre y **no tiene suelo**.
+    ///
+    /// **Antes esto era un `expect` con un comentario que afirmaba que ningún gesto llegaba ahí, y era
+    /// falso.** El daño no era el pánico —para eso hacen falta pesos de 10⁻⁴⁰— sino el de al lado: mientras
+    /// el suelo de columnas rescata en pantalla a la consola colapsada, **el peso de verdad sigue
+    /// bajando**, y un formato que lo rechazara tiraría la disposición del usuario sin que nada se viera.
+    /// Con la respuesta aquí, el estado imposible deja de existir en el sitio donde se produce y quien
+    /// guarda o valida no tiene que saber nada de esto.
+    ///
+    /// **Suelo y no recorte por los dos lados, y la razón NO es que los pesos no crezcan.** Eso se afirmó
+    /// primero y es falso: lo que un arrastre conserva es **la suma del par**, así que un peso individual
+    /// sube hasta el 99 % de lo que sumaban los dos vecinos —dos pesos de un millón dan 1,98 millones en un
+    /// solo arrastre, medido con `f32` de verdad—. Lo que de verdad no crece es **la suma de una rama**:
+    /// arrastrar la conserva, partir divide un peso en dos mitades que suman lo mismo, y cerrar reparte el
+    /// peso del grupo entre sus nietas. Y esa es la cantidad de la que depende el reparto, que divide cada
+    /// peso por la suma de su rama.
+    ///
+    /// Con la suma acotada y con el reescalado de cerrar escrito como `suyo · (w / suma)` en vez de
+    /// `(suyo · w) / suma` —el factor de la izquierda no pasa de uno, así que el producto no puede pasar de
+    /// `suyo`—, **no queda ningún camino que desborde por arriba**, y un tope sería un mecanismo sin
+    /// escenario.
+    ///
+    /// Y el suelo cubre de paso lo que no es un número, porque `max` con un `NaN` devuelve el otro operando.
+    /// Recortar por abajo no mueve ninguna consola de forma perceptible: el suelo de columnas manda muchos
+    /// órdenes de magnitud antes.
+    ///
+    /// **Lo no finito se recorta aunque no haya camino que llegue aquí con un infinito**, y la razón no es
+    /// defensiva: es que **este tipo no puede tener dos nociones de peso válido**. `nuevo` exige finito, así
+    /// que un `escalado` que dejara pasar un infinito construiría lo que el otro constructor rechaza, y la
+    /// invariante pasaría a depender de por qué puerta se entró.
+    fn escalado(valor: f32) -> Self {
+        if !valor.is_finite() {
+            return Self(Self::MINIMO);
+        }
+        Self(valor.max(Self::MINIMO))
+    }
+
     fn valor(self) -> f32 {
         self.0
     }
@@ -2272,13 +2323,11 @@ impl Nodo {
                     .flatten();
 
                 if let Some(donde) = hermana {
-                    // La mitad de un peso positivo y finito lo sigue siendo, y el suelo geométrico que
-                    // exige [`cabe_partir`] impide llegar a los pesos diminutos donde eso dejaría de ser
-                    // verdad: harían falta más particiones sucesivas de la misma hoja que píxeles tiene
-                    // ninguna pantalla. Un `expect` es lo que hace que una llamada que se saltara esa
-                    // guarda caiga aquí y no en un reparto silencioso.
-                    let mitad = Peso::nuevo(hijos[donde].peso.valor() / 2.0)
-                        .expect("la mitad de un peso válido sigue siéndolo");
+                    // La mitad de un peso positivo y finito lo sigue siendo **mientras el peso de partida
+                    // no sea diminuto**, y a los diminutos se llega arrastrando: ver [`Peso::escalado`],
+                    // que es quien pone el suelo. El suelo geométrico de [`cabe_partir`] acota lo que se
+                    // ve, no el número.
+                    let mitad = Peso::escalado(hijos[donde].peso.valor() / 2.0);
                     hijos[donde].peso = mitad;
                     // **El lado decide de qué parte del hueco sale la nueva**, y solo eso: las hermanas de
                     // los dos extremos no se enteran, porque lo que se reparte es el peso de una sola.
@@ -2574,9 +2623,11 @@ impl Nodo {
         let subidas: Vec<Hijo> = dentro
             .into_iter()
             .map(|hijo| Hijo {
-                peso: Peso::nuevo(suyo * hijo.peso.valor() / suma).expect(
-                    "una parte de un peso positivo entre la suma de los suyos sigue siendo un peso",
-                ),
+                // **Se divide antes de multiplicar, y no es cosmético.** `(suyo · w) / suma` puede
+                // desbordar en el producto intermedio aunque el resultado sea representable; dividiendo
+                // primero, el factor no pasa de uno y el resultado no pasa de `suyo`. Y el suelo, porque
+                // por abajo sí llega a cero: ver [`Peso::escalado`].
+                peso: Peso::escalado(suyo * (hijo.peso.valor() / suma)),
                 nodo: hijo.nodo,
             })
             .collect();
@@ -2783,13 +2834,18 @@ impl Pestaña {
                 let entre_los_dos = hijos[corte].peso.valor() + hijos[corte + 1].peso.valor();
                 let [primero, segundo] =
                     pesos_de(fraccion).map(|peso| peso.valor() * entre_los_dos);
-                let cambia = hijos[corte].peso.valor() != primero;
+                // **Se compara con lo que se va a guardar, no con lo que se acaba de calcular.** Con un
+                // peso ya en el suelo, el cálculo da un número más pequeño y el suelo lo devuelve al mismo
+                // sitio: comparando contra el cálculo, cada fotograma del arrastre diría «cambió» y
+                // rehacería el reparto para dejar todo igual.
+                let cambia = hijos[corte].peso != Peso::escalado(primero);
 
-                // Los dos pesos vienen de `pesos_de`, que ya recorta la fracción a un rango donde
-                // ninguno puede ser cero, y multiplicarlos por una suma positiva conserva esa propiedad.
-                hijos[corte].peso =
-                    Peso::nuevo(primero).expect("la fracción recortada da pesos válidos");
-                hijos[corte + 1].peso = Peso::nuevo(segundo).expect("y su complemento también");
+                // **La fracción está recortada; el producto no basta con eso.** `pesos_de` garantiza que
+                // ninguna de las dos fracciones es cero, pero lo que se guarda es la fracción **por lo que
+                // suman los dos vecinos**, y esa suma encoge con cada arrastre: es justamente el camino
+                // que lleva a los pesos diminutos. El suelo lo pone [`Peso::escalado`].
+                hijos[corte].peso = Peso::escalado(primero);
+                hijos[corte + 1].peso = Peso::escalado(segundo);
 
                 return Some(cambia);
             }
@@ -15992,7 +16048,196 @@ mod tests {
         // **Un programa de prueba y no el del usuario.** Con `Division::nueva` estas pruebas abrirían un
         // shell interactivo de quien las corre por cada hoja —veintitantos por corrida de la suite—, con
         // sus ficheros de arranque y sus enganches. Eso no prueba este código.
-        Ventana::materializar(ctx, &leido, "sleep 30").expect("las consolas de vuelta se abren")
+        //
+        // **Y una palabra sola, no una orden con argumentos.** El lanzamiento de una consola restaurada no
+        // pasa por ningún shell: la cadena entera se busca como ejecutable. Con `"sleep 30"` no se
+        // encontraba nada, cada hoja **caía al shell de respaldo** —lo contrario de lo que dice el párrafo
+        // de arriba— y cada corrida escupía una línea de aviso por consola. Lo destaparon dos revisiones
+        // del hito, y se arregla aquí porque es el fichero que este cambio ya toca.
+        Ventana::materializar(ctx, &leido, "cat").expect("las consolas de vuelta se abren")
+    }
+
+    /// Arrastra cada frontera de la raíz a su tope, tantas pasadas como se le diga.
+    ///
+    /// **Es el gesto que produce los pesos diminutos, y no hay otro más corto**: el arrastre recorta la
+    /// *fracción*, así que lo que deja es una parte de lo que suman los dos vecinos — y esa suma encoge
+    /// pasada a pasada. Con una sola pasada no se llega; el número de pasadas **es** el mecanismo.
+    fn arrastrar_todas_las_fronteras_al_tope(ventana: &mut Ventana, pasadas: usize) {
+        let cuantas = pesos_de_la_raiz(ventana).len() - 1;
+        for _ in 0..pasadas {
+            for frontera in 0..cuantas {
+                ventana.activa_mut().mover_la_frontera(frontera, 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn una_ventana_arrastrada_hasta_los_topes_se_sigue_pudiendo_guardar_y_leer() {
+        // **AC11, y es la prueba que faltaba: nadie ataba que lo que la ventana describe se pueda volver a
+        // leer.** Las demás idas y vueltas parten de árboles escritos a mano con pesos razonables. Con
+        // gestos de verdad se llega a pesos que el formato rechazaba, la ventana se seguía viendo bien
+        // —el suelo de columnas rescata a la consola colapsada— y la disposición se habría perdido al
+        // reabrir, en silencio.
+        let ctx = egui::Context::default();
+        // **Cinco hermanas y no cuatro, y el número importa.** Arrastrar todas las fronteras al tope
+        // converge a un punto fijo donde cada peso es **la noventa y nueve ava parte del siguiente** —la
+        // razón medida es 99,0 exacta—, así que el más pequeño vale `suma · 98/(99ⁿ − 1)`: con cuatro se
+        // queda en 4,1·10⁻⁶ —por encima del mínimo que el formato exigía, con lo que la prueba no
+        // distinguiría nada— y con cinco baja a 5,2·10⁻⁸. Más pasadas no arreglan cuatro: el punto fijo no
+        // depende de ellas.
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0, 1.0, 1.0]);
+
+        arrastrar_todas_las_fronteras_al_tope(&mut ventana, 6);
+
+        // Primero, que la prueba está en el terreno que dice: sin un peso por debajo del mínimo que el
+        // formato exigía, esto no distinguiría nada.
+        let pesos = pesos_de_la_raiz(&ventana);
+        assert!(
+            pesos.iter().any(|peso| *peso < 1.0e-6),
+            "los arrastres no llegaron a pesos diminutos, así que esta prueba no prueba nada: {pesos:?}"
+        );
+
+        let escrito =
+            sesion::escribir(&ventana.describir()).expect("una ventana viva se puede describir");
+        let leido = sesion::interpretar(&escrito)
+            .expect("lo que la ventana describe se tiene que poder volver a leer");
+        assert_eq!(leido.hojas(), 5);
+        // Y de vuelta a consolas, que es el camino entero.
+        let vueltas =
+            Ventana::materializar(&ctx, &leido, "cat").expect("las consolas de vuelta se abren");
+        assert_eq!(vueltas.len(), 1);
+    }
+
+    #[test]
+    fn un_arrastre_que_hace_crecer_un_peso_no_deja_la_disposicion_sin_guardar() {
+        // **El otro lado del mismo defecto, y lo destapó una revisión adversaria.** Lo que un arrastre
+        // conserva es **la suma del par**, no cada peso: el que gana sube hasta el 99 % de lo que sumaban
+        // los dos. Con dos pesos grandes venidos de un fichero, un solo arrastre deja uno **por encima de
+        // cualquier tope absoluto** —dos de un millón dan 1,98 millones, medido—, y mientras el formato
+        // tuvo tope, eso era otra disposición perdida en silencio al reabrir.
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0e6, 1.0e6]);
+
+        assert!(ventana.activa_mut().mover_la_frontera(0, 0.0));
+
+        let pesos = pesos_de_la_raiz(&ventana);
+        assert!(
+            pesos.iter().any(|peso| *peso > 1.0e6),
+            "el arrastre no hizo crecer ningún peso, así que esta prueba no prueba nada: {pesos:?}"
+        );
+        let escrito =
+            sesion::escribir(&ventana.describir()).expect("una ventana viva se puede describir");
+        sesion::interpretar(&escrito)
+            .expect("lo que la ventana describe se tiene que poder volver a leer");
+    }
+
+    #[test]
+    fn arrastrar_sin_parar_una_fila_larga_no_deja_ningun_peso_por_debajo_del_suelo() {
+        // **La otra mitad de AC11: el arrastre es lo que EMPUJA los pesos hacia abajo, y no tiene freno
+        // propio.** El punto fijo deja cada peso en la noventa y nueve ava parte del siguiente, así que el
+        // más pequeño vale `suma · 98/(99ⁿ − 1)`: con veintidós hermanas eso es 2,7·10⁻⁴¹, o sea **por
+        // debajo del mínimo normal** — números cuyo producto llega a cero en un solo reparto, y de ahí al
+        // peso cero que la ventana no sobrevive.
+        //
+        // Veintidós consolas es mucho y a propósito: es el número con el que el suelo **hace algo**. Con
+        // cinco el arrastre se queda en 10⁻⁸ y esta prueba pasaría sin suelo, que es lo que la haría inútil.
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0; 22]);
+
+        arrastrar_todas_las_fronteras_al_tope(&mut ventana, 30);
+
+        let pesos = pesos_de_la_raiz(&ventana);
+        assert!(
+            pesos.iter().all(|peso| peso.is_normal()),
+            "el arrastre dejó pesos que el reparto puede llevar a cero: {pesos:?}"
+        );
+        assert!(
+            pesos.contains(&Peso::MINIMO),
+            "el arrastre no llegó al suelo, así que esta prueba no distingue tenerlo de no tenerlo: {pesos:?}"
+        );
+
+        // **Y partir la que se quedó en el suelo, que es el gesto siguiente y el otro sitio donde el peso
+        // se hace más pequeño.** Partir divide entre dos: la mitad de un peso que ya está en el suelo cae
+        // por debajo, y ahí es donde el suelo tiene que volver a actuar. Sin él, la ventana se queda con
+        // dos consolas cuyo peso el reparto puede llevar a cero.
+        ventana
+            .activa_mut()
+            .raiz
+            .partir(0, Lado::Derecha, division_con("cat", 100));
+
+        let despues = pesos_de_la_raiz(&ventana);
+        assert_eq!(despues.len(), 23, "la consola nueva no entró como hermana");
+        assert!(
+            despues.iter().all(|peso| peso.is_normal()),
+            "partir la consola del suelo dejó pesos que el reparto puede llevar a cero: {despues:?}"
+        );
+    }
+
+    #[test]
+    fn cerrar_una_division_de_pesos_diminutos_no_deja_a_ninguna_hermana_sin_peso() {
+        // **AC12.** Cerrar sube las nietas a hermanas con el peso escalado —`w · suyo / suma`—, y ese
+        // producto **subdesborda a cero** con números pequeños. Un peso cero es lo que el tipo del peso
+        // existe para hacer imposible: metido en el reparto, pone un valor que no es número en un
+        // rectángulo y la ventana deja de pintar. Antes esto era un `expect`, y el comentario que lo
+        // acompañaba afirmaba que ningún gesto llegaba a esos números.
+        // **El camino es el de verdad y no una llamada directa**, porque lo que hace falta atar es que el
+        // reescalado ocurra: cerrar la hoja de fuera deja a su rama con una sola hija, esa rama se sustituye
+        // por ella, y entonces la de dentro **es del mismo sentido que la raíz** y sus hijas suben a
+        // hermanas con el peso escalado. Ese es el producto que subdesborda.
+        // **Los dos extremos del producto, y los dos vienen de un fichero que el formato acepta.** Por
+        // abajo el producto llega a cero; por arriba, `suyo · w` desborda a infinito **aunque el resultado
+        // sea representable** —10²⁰ · 10²⁰ no cabe en un `f32`, y el reparto correcto es 5·10¹⁹—, que es por
+        // lo que se divide antes de multiplicar. El mínimo que se espera de vuelta distingue las dos cosas:
+        // un peso recortado al suelo es tan inservible como un cero, solo que sin pánico.
+        for (suyo, dentro, minimo_esperado) in
+            [(1.0e-40_f32, 1.0e-40_f32, 0.0_f32), (1.0e20, 1.0e20, 1.0)]
+        {
+            let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, suyo]);
+            let Nodo::Rama { hijos, .. } = &mut ventana.activa_mut().raiz else {
+                panic!("la ventana de hermanas nace con una rama");
+            };
+            hijos[1].nodo = Nodo::Rama {
+                orientacion: Orientacion::Filas,
+                hijos: vec![
+                    Hijo {
+                        peso: peso(1.0),
+                        nodo: Nodo::Rama {
+                            orientacion: Orientacion::Columnas,
+                            hijos: vec![
+                                Hijo {
+                                    peso: peso(dentro),
+                                    nodo: Nodo::Hoja(division_con("cat", 10)),
+                                },
+                                Hijo {
+                                    peso: peso(dentro),
+                                    nodo: Nodo::Hoja(division_con("cat", 11)),
+                                },
+                            ],
+                        },
+                    },
+                    Hijo {
+                        peso: peso(1.0),
+                        nodo: Nodo::Hoja(division_con("cat", 12)),
+                    },
+                ],
+            };
+
+            ventana
+                .activa_mut()
+                .raiz
+                .cerrar(12)
+                .expect("la consola estaba en el árbol");
+
+            let pesos = pesos_de_la_raiz(&ventana);
+            assert_eq!(pesos.len(), 3, "las nietas no subieron a hermanas");
+            assert!(
+                pesos.iter().all(|peso| peso.is_normal() && *peso > 0.0),
+                "reescalar {suyo:e} sobre {dentro:e} dejó un peso que no puede serlo: {pesos:?}"
+            );
+            // Las dos que subieron son las dos últimas; la primera es la hermana que no se toca.
+            assert!(
+                pesos[1] > minimo_esperado && pesos[2] > minimo_esperado,
+                "reescalar {suyo:e} sobre {dentro:e} recortó donde no hacía falta: {pesos:?}"
+            );
+        }
     }
 
     #[test]

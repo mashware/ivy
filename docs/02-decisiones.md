@@ -1244,6 +1244,18 @@ en la lista del fotograma, como ya hacía el clic. Los atajos son `Ctrl+Mayúscu
   no finito y lo no positivo, así que la suma cero **no se puede construir**; y arrastrar no deja bajar a
   ningún vecino del 1 % de la suma de los dos. Ese suelo es relativo a los dos vecinos y no al área, así
   que no hornea la geometría de hoy en el estado.
+
+  **Corrección, hecha al implementar F2.5, y hace falta escribirla porque el párrafo de arriba se lee como
+  si el 1 % fuera un suelo y no lo es.** El uno por ciento es de **la fracción**, así que el peso que deja
+  un arrastre es el uno por ciento de lo que suman los dos vecinos — y esa suma **encoge con cada
+  arrastre**. Arrastrando todas las fronteras de una fila al tope, los pesos convergen a un punto fijo
+  donde cada uno es la centésima parte del siguiente: **con veintidós consolas en fila, el más pequeño
+  vale 10⁻⁴¹**, y de ahí el reparto —que multiplica dos pesos— llega a cero en un solo paso. Medido, no
+  razonado. Así que **el reescalado lleva suelo propio** (`Peso::escalado`): los tres sitios donde un peso
+  sale de otro —arrastrar, partir y el reescalado de cerrar— recortan el resultado al menor peso normal.
+  El estado imposible deja de existir donde se produce, que es lo que este proyecto prefiere a una guarda
+  aguas abajo. Y la consecuencia que se descubrió con esto: **el formato en disco no puede exigir un
+  mínimo mayor**, o rechazaría disposiciones que un gesto produce — ver D16.
 - **Copiar los acordes de otro terminal para partir.** No se puede: **no coinciden entre ellos** — lo que
   en uno parte al lado, en otro parte debajo. Se eligieron por lo que significan aquí (*derecha*, *bajo*).
   Para cerrar sí hay precedente que no se contradice —la `x` de `tmux` y de Zellij matan el panel—, así
@@ -1604,6 +1616,15 @@ Y las decisiones de arriba no son gustos. Cada una tiene detrás algo ya medido 
 - **Un tope al ancho de panel leído.** El reparto ya lo recorta y hay prueba que lo ata.
 - **Una guarda contra el valor sin número en los pesos.** JSON no tiene literal para él, y el tipo del
   peso ya rechaza lo no finito y lo no positivo, así que **la suma cero no se puede construir**.
+- **Un mínimo propio para los pesos leídos.** Lo hubo —`1e-6`— y **era un defecto, no una guarda**:
+  rechazaba disposiciones **que un gesto produce**. Arrastrar recorta la *fracción* al uno por ciento, no
+  el peso, así que lo que deja es una parte de lo que suman los dos vecinos, y esa suma encoge con cada
+  arrastre; con una fila larga se baja de `1e-6` sin esfuerzo, y **el suelo de columnas hace que en
+  pantalla no se note nada**. O sea: la ventana se veía bien, el fichero se escribía, y al reabrir se
+  descartaba entero con un aviso que quien abre desde un icono no ve. La razón por la que ese mínimo
+  existía —que el reparto multiplica dos pesos y el producto puede subdesbordar— **es cierta, y su sitio
+  es el reescalado**, no el lector: ver la corrección de D14. **El tope por arriba se queda**, porque un
+  fichero escrito a mano sí puede traer un peso que ningún gesto produce.
 - **Forzar la escritura a disco antes de renombrar.** La garantía que hace falta es «nunca se ve medio
   fichero», y eso lo da el renombrado solo; sobrevivir a un corte de luz no lo pidió nadie, y ese
   empujón dentro del fotograma son milisegundos en un disco ocupado.
@@ -1682,7 +1703,7 @@ diga otra cosa.
   informe declare **cuántas consolas se restauraron** y lo que costó restaurarlas. Sin ella, «el coste de
   bifurcar N consolas ya está pagado» es una afirmación que **ninguna corrida sostiene**.
 
-**Tres límites aceptados, escritos porque ninguno se mitiga y los tres se descubren usándolo:**
+**Cinco límites aceptados, escritos porque ninguno se mitiga y todos se descubren usándolo:**
 
 - **Dos instancias abiertas se machacan la disposición**: la última que guarde se lleva el fichero. Es
   consecuencia directa de que la disposición sea una y global, y ponerle un cerrojo entre procesos
