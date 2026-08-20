@@ -56,6 +56,13 @@
 #     solas. `host-load --at 30` las arranca a la vez sin que se conozcan.
 #   - Cuando **las dos** consolas terminan, la ventana se cierra sola y publica el informe por su
 #     salida estándar. Matarla con una señal NO publica nada: el informe se imprime en `on_exit`.
+#   - **La corrida no toca la configuración de quien mide**: se lanza con `XDG_CONFIG_HOME` apuntando a
+#     un directorio propio dentro de `target/medidas`, y ese directorio **se borra al empezar cada
+#     corrida**. Hace falta desde el momento en que la aplicación guarde la disposición: sin él, una
+#     tanda machacaría la ventana del usuario y, peor, **abriría con las consolas que él dejó en vez de
+#     con las que la tanda pide** — y con la misma cuenta de consolas ninguna de las guardas de abajo
+#     salta. Y la salida de error de la aplicación va a `<informe>.err` en vez de al terminal, porque
+#     escribir en el terminal ocurre **dentro de un fotograma medido**.
 #
 # EL TAMAÑO DE LA VENTANA SE PIDE, Y ANTES NO SE PEDÍA. Sin pedirlo lo decide el escritorio, y eso hacía
 # la medida **irreproducible sin que nada lo dijera**: el 17 de agosto de 2026, tres corridas de la tanda A
@@ -252,6 +259,7 @@ TURNOS="$SALIDA/.turnos"
 rm -rf "$TURNOS"
 mkdir -p "$TURNOS"
 
+
 # **Los dos binarios, antes de nada.** Sin `host-load` las dos consolas mueren en el acto y la ventana
 # se cierra: sale un informe con cabecera y sin tramos, que a simple vista parece una corrida válida.
 # Y si la aplicación no puede lanzar este guion como shell, cae al de respaldo del sistema y las dos
@@ -272,6 +280,32 @@ fi
 # Ahora sí: lo que quede es de una corrida anterior. Un panel viejo falsearía la tanda A entera —que
 # es la referencia— y en las demás daría un panel que no es el que esta corrida quiere medir.
 rm -rf /run/user/"$(id -u)"/agent-terminal-* 2>/dev/null || true
+
+# **Y la corrida tiene su propio directorio de configuración, por dos razones distintas.** Va aquí abajo
+# y no junto al de turnos **a propósito**: esto borra, y el guion no borra nada hasta haber comprobado que
+# no hay una ventana abierta. (El de turnos sí se borra antes de esa comprobación; es anterior a esta
+# línea y no se toca aquí.) La primera es
+# de respeto: en cuanto la aplicación guarde y restaure la disposición, una tanda que use el directorio
+# del usuario **le machacaría la suya** y además abriría con las consolas que él dejó, no con las que la
+# tanda pide. La segunda es la de siempre en este guion: **limpio por corrida**, porque si no, la segunda
+# corrida de una tanda arrancaría con lo que dejó la primera —misma cuenta de consolas, así que ninguna
+# guarda salta— y estaría midiendo una disposición que nadie le pidió.
+#
+# **Lo que aísla es el fichero de disposición de este proyecto** —el que D16 pone en
+# `$XDG_CONFIG_HOME/agent-terminal/`— y no «la configuración» en general. Dicho así porque la
+# persistencia que trae `eframe` de serie resuelve otra variable, `XDG_DATA_HOME`
+# (`eframe/src/native/file_storage.rs`), y **no se cubre a propósito**: D16 descartó ese almacén, así que
+# taparlo sería un mecanismo sin escenario. Si algún día se usara, **esta línea dejaría de aislar sin
+# decirlo** y hay que volver aquí.
+#
+# **Ningún código nuestro lee esta variable** —comprobado: la única XDG que lee el proyecto es
+# `XDG_RUNTIME_DIR`, en `panel-contract`— pero **el proceso sí la lee**, por librerías del sistema que se
+# cargan solas: `strace` sobre el binario da cuatro accesos, a `XCompose` de libX11, a `dconf/user` y a
+# los dos de fontconfig. Da igual para lo que aquí importa, y eso **está medido, no razonado**: cuatro
+# corridas de la tanda A, dos con esta línea y dos sin ella, dieron la misma ventana y la misma rejilla.
+CONFIG="$SALIDA/.config"
+rm -rf "$CONFIG"
+mkdir -p "$CONFIG"
 
 publicar() {  # publicar <directorio> <n>
     # **Dónde cae el temporal NO importa, y la tanda D existe para haberlo comprobado.** La sospecha
@@ -352,21 +386,67 @@ echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIREC
 # Ruta absoluta a propósito: la consola no hereda el directorio desde el que se lanzó la tanda, y
 # un `$0` relativo dejaría a la aplicación buscando un shell que no existe.
 INFORME="$SALIDA/tanda-$TANDA-$(date +%H%M%S).txt"
+# **Se captura el estado de salida, y hace falta desde que la salida de error va a un fichero.** Con
+# `set -e` un estado distinto de cero cortaba el guion **en la línea del lanzamiento**: ni el aviso de
+# abajo ni la invalidación llegaban a correr, y el pánico —que antes se leía en el terminal— se quedaba en
+# un fichero que nadie nombraba.
+ESTADO=0
 MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
     MEDIR_TURNOS="$TURNOS" MEDIR_VUELCAN="$VUELCAN" \
     MEDIR_PESTANAS="$PESTANAS" MEDIR_DIVISIONES="$DIVISIONES" \
     MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" MEDIR_GESTO="$GESTO" \
+    XDG_CONFIG_HOME="$CONFIG" \
     SHELL="$RAIZ/scripts/medir-fotograma.sh" \
-    "$APP" > "$INFORME"
+    "$APP" > "$INFORME" 2> "$INFORME.err" || ESTADO=$?
 
 wait 2>/dev/null || true
 
+# **La salida de error va a un fichero y no al terminal.** Escribir por ahí ocurre **dentro de la pasada
+# del fotograma**, y cuesta lo que tarde quien lea al otro lado del tubo: un terminal, mucho más que un
+# fichero. Ojo con el porqué, que es más flojo de lo que parece y conviene no exagerarlo: de los avisos
+# que la aplicación manda por ahí, **uno declara su coste** —el del tamaño que el escritorio no respeta,
+# que se cronometra a propósito— y **los demás no**. Así que esto no «tapa una fuga»: abarata las dos
+# clases. En la práctica son **una línea por corrida** —medido: cuatro corridas, una línea cada una—, así
+# que la diferencia es despreciable; pero **una tanda tomada después de esta línea no es estrictamente
+# comparable** con los anexos anteriores, que se tomaron con la salida de error en un terminal.
+#
+# No invalida la corrida: un aviso puede ser legítimo —la primera corrida no tiene fichero que leer— y
+# decidir cuáles importan es del hito que los estrene. Aquí solo se dice que están, para que nadie los
+# descubra al revés, sospechando de un número.
+if [ -s "$INFORME.err" ]; then
+    # **Una sola línea se vuelca entera, y no se cuenta.** Medido: las cuatro corridas de prueba
+    # escribieron exactamente una, siempre la misma. Un aviso que sale en todas no avisa de nada, y
+    # cambiar un mensaje que se leía por un número es perder información a cambio de nada.
+    LINEAS=$(grep -c "" "$INFORME.err")
+    if [ "$LINEAS" = 1 ]; then
+        echo "la corrida dijo por la salida de error: $(cat "$INFORME.err")" >&2
+    else
+        # **Sin nombrar el fichero**: si alguna guarda de abajo invalida la corrida, el `.err` se
+        # renombra con el informe, y el nombre que se hubiera impreso aquí ya no existiría.
+        echo "la corrida escribió $LINEAS líneas por la salida de error, en el fichero .err junto al informe" >&2
+    fi
+else
+    rm -f "$INFORME.err"
+fi
+
 invalidar() {
     mv "$INFORME" "$INFORME.INVALIDA"
+    # La salida de error acompaña al informe: si se queda con el nombre bueno mientras el informe pasa a
+    # inválido, el par deja de leerse como un par y el fichero suelto parece de otra corrida.
+    # No existe en el caso normal: se borra unas líneas más arriba cuando sale vacío.
+    if [ -f "$INFORME.err" ]; then
+        mv "$INFORME.err" "$INFORME.INVALIDA.err"
+    fi
     echo "TANDA INVÁLIDA: $1" >&2
     echo "Informe marcado como $INFORME.INVALIDA" >&2
     exit 1
 }
+
+# La aplicación publica el informe al salir, así que si terminó mal el informe está a medias — y a simple
+# vista un informe truncado se parece bastante a uno bueno.
+if [ "$ESTADO" != 0 ]; then
+    invalidar "la aplicación terminó con estado $ESTADO; lo que dijo queda en el .err de al lado"
+fi
 
 if [ "$TANDA" != A ] && [ ! -f "$TESTIGO" ]; then
     invalidar "nadie llegó a publicar un panel, así que esto es una tanda A con otro nombre"
@@ -417,7 +497,8 @@ fi
 
 # **Que la ventana abriera con el tamaño que se le pidió.** Es la comprobación que faltaba y la razón por
 # la que tres corridas de la misma tanda pudieron dar tres rejillas: si el escritorio impone el suyo, la
-# aplicación lo dice por su salida de errores **y** publica el que tuvo, así que aquí se ve sin adivinar.
+# aplicación lo dice por su salida de errores —que desde que va a un fichero se lee en el `.err` de al
+# lado y ya no en el terminal— **y** publica el que tuvo, así que aquí se ve sin adivinar.
 #
 # **Con margen y no con una comparación exacta**, y el margen es el de `parecido`, que es el de la
 # aplicación: el compositor entrega el tamaño con fracción y no siempre la misma, así que una comparación
