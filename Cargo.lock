@@ -118,6 +118,8 @@ dependencies = [
  "eframe",
  "notify",
  "panel-contract",
+ "serde",
+ "serde_json",
  "term-core",
  "winit",
 ]

@@ -21,6 +21,7 @@ pub mod medida;
 pub mod panel;
 pub mod pintor;
 pub mod puente;
+pub mod sesion;
 pub mod teclado;
 
 pub mod tema;
@@ -750,7 +751,7 @@ impl Orientacion {
 /// ser una invariante que alguien romperá. Con pesos, quitar una parte es quitarla de la lista y las
 /// demás conservan su proporción sin tocar ningún número.
 #[derive(Clone, Copy, PartialEq, Debug)]
-struct Peso(f32);
+pub(crate) struct Peso(f32);
 
 impl Peso {
     /// Un peso, si el número puede serlo.
@@ -758,7 +759,12 @@ impl Peso {
     /// **Rechaza el cero, los negativos y lo que no es un número.** El cero porque una parte sin peso no
     /// es una parte; los negativos porque invertirían el orden de los cortes; y `NaN` o infinito porque
     /// contaminan la suma y con ella el reparto entero.
-    fn nuevo(valor: f32) -> Option<Self> {
+    ///
+    /// **Visible en la caja entera desde que la disposición se guarda**, para que el módulo que valida lo
+    /// leído del disco pase por aquí en vez de reimplementar la comprobación. Dos copias de esta
+    /// invariante es una de más: la suma de pesos igual a cero pone un `NaN` en un rectángulo, y este tipo
+    /// existe para que no se pueda construir.
+    pub(crate) fn nuevo(valor: f32) -> Option<Self> {
         (valor.is_finite() && valor > 0.0).then_some(Self(valor))
     }
 
@@ -1032,17 +1038,37 @@ fn en_disposicion(divisiones: Vec<Division>, filas: usize) -> Nodo {
 }
 
 /// Una rama con esos hijos a partes iguales, o el hijo suelto si es uno solo.
+///
+/// **Delega en [`en_rama_con_pesos`] en vez de repetir su cuerpo**, y eso lo pidió una revisión: las dos
+/// tenían la misma línea de colapsar la rama de un solo hijo, que es **la invariante que hace que cada
+/// frontera mueva solo a sus dos vecinas**. Dos copias de una invariante son una de más — el día que esa
+/// regla cambie, se arregla una y la otra se queda.
 fn en_rama(orientacion: Orientacion, hijos: Vec<Nodo>) -> Nodo {
+    en_rama_con_pesos(
+        orientacion,
+        pesos_para(hijos.len()).into_iter().zip(hijos).collect(),
+    )
+}
+
+/// Una rama con esos hijos y **esos pesos**, o el hijo suelto si es uno solo.
+///
+/// **El hermano de [`en_rama`], que reparte a partes iguales.** Hace falta desde que una disposición
+/// puede venir de un fichero: los pesos de un árbol que el usuario dejó colocado **no son los de
+/// fábrica**, y reconstruirlo con los de fábrica devolvería una ventana que se parece a la suya sin
+/// serlo — el peor resultado posible, porque no se nota que ha fallado.
+///
+/// Colapsa la rama de un solo hijo por lo mismo que la otra: es la invariante que hace que cada frontera
+/// mueva solo a sus dos vecinas.
+fn en_rama_con_pesos(orientacion: Orientacion, hijos: Vec<(Peso, Nodo)>) -> Nodo {
     let mut hijos = hijos;
     if hijos.len() == 1 {
-        return hijos.remove(0);
+        return hijos.remove(0).1;
     }
 
     Nodo::Rama {
         orientacion,
-        hijos: pesos_para(hijos.len())
+        hijos: hijos
             .into_iter()
-            .zip(hijos)
             .map(|(peso, nodo)| Hijo { peso, nodo })
             .collect(),
     }
@@ -4659,6 +4685,183 @@ impl eframe::App for Ventana {
         // panel: sin esto asoma el gris por defecto de eframe. Y es el mismo fondo que el pintor
         // da por puesto: las celdas que lo llevan no se dibujan.
         self.tema.fondo().to_normalized_gamma_f32()
+    }
+}
+
+// ── La disposición, de ida y de vuelta ──────────────────────────────────────────────────────────
+//
+// **Las dos conversiones viven aquí y no en `sesion`, y la frontera es a propósito.** Los campos de una
+// división son privados de este módulo, y materializar es **bifurcar un proceso por hoja**: dejarlo en un
+// solo sitio es lo que hace que el otro módulo se pueda probar entero sin abrir un pseudoterminal.
+//
+// **Y el programa se recibe, no se lee del entorno aquí.** Es la regla que el arranque ya sigue cinco
+// veces —la función pura recibe el valor, la envoltura de una línea lee el entorno—, y aquí tiene dos
+// razones más: leer `SHELL` una vez por hoja lo leería ciento veintiocho veces en el peor caso, y una
+// prueba que dependiera de él **no probaría este código, probaría la configuración de quien la corre**.
+// Eso último ya está escrito en `Division::lanzando`, que existe exactamente para esto.
+//
+// **Y todo este bloque va tras la bandera de pruebas, que es lo que corresponde HOY y no para siempre.**
+// Nadie lo llama en producción todavía: quien lo va a llamar es el arranque, cuando aprenda a restaurar,
+// y **ese cambio incluye quitar esta bandera**. Se pone porque es el idioma que esta caja ya usa para lo
+// que solo tocan las pruebas, y porque la alternativa era publicar como API de la caja unos tipos que no
+// lo son solo para callar un aviso — que es hornear una señal falsa en la interfaz. Un `allow` no, que
+// aquí no hay ni uno.
+
+#[cfg(test)]
+impl From<Orientacion> for sesion::Orientacion {
+    fn from(orientacion: Orientacion) -> Self {
+        match orientacion {
+            Orientacion::Columnas => Self::Columnas,
+            Orientacion::Filas => Self::Filas,
+        }
+    }
+}
+
+#[cfg(test)]
+impl From<sesion::Orientacion> for Orientacion {
+    fn from(orientacion: sesion::Orientacion) -> Self {
+        match orientacion {
+            sesion::Orientacion::Columnas => Self::Columnas,
+            sesion::Orientacion::Filas => Self::Filas,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Nodo {
+    /// Cómo se describe este nodo para poder volver a construirlo.
+    fn describir(&self) -> sesion::Nodo {
+        match self {
+            Self::Hoja(division) => sesion::Nodo::Hoja(sesion::Hoja {
+                ancho_del_panel: division.ancho_del_panel,
+                plegado: division.plegado,
+            }),
+            Self::Rama { orientacion, hijos } => sesion::Nodo::Rama {
+                orientacion: (*orientacion).into(),
+                hijos: hijos
+                    .iter()
+                    .map(|hijo| sesion::Hijo {
+                        peso: hijo.peso.valor(),
+                        nodo: hijo.nodo.describir(),
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    /// El árbol que describe eso, **abriendo una consola por hoja**.
+    ///
+    /// **Es el único sitio del programa donde una descripción se convierte en procesos**, y por eso recibe
+    /// un [`sesion::Valido`] por la raíz y no un nodo cualquiera: la forma ya está comprobada antes de
+    /// llegar aquí, así que este camino no puede construir una rama de un hijo ni un peso imposible.
+    ///
+    /// **Si una hoja no se puede abrir, no se instala ninguna.** El error sube y quien llamó no se queda
+    /// con media pestaña — la misma atomicidad que ya tiene abrir la ventana, y la misma que pide **D15**
+    /// para mover una división.
+    fn materializar(
+        ctx: &egui::Context,
+        guardado: &sesion::Nodo,
+        programa: &str,
+        siguiente_nombre: &mut usize,
+    ) -> term_core::Result<Self> {
+        match guardado {
+            sesion::Nodo::Hoja(hoja) => {
+                let mut division = Division::lanzando(ctx, programa, *siguiente_nombre)?;
+                *siguiente_nombre += 1;
+                division.ancho_del_panel = hoja.ancho_del_panel;
+                division.plegado = hoja.plegado;
+                Ok(Self::Hoja(division))
+            }
+            sesion::Nodo::Rama { orientacion, hijos } => {
+                let mut partes = Vec::with_capacity(hijos.len());
+                for hijo in hijos {
+                    // El peso vuelve a pasar por su constructor. Ya se validó, así que aquí no puede
+                    // fallar; `expect` en vez de un respaldo porque un respaldo silencioso convertiría
+                    // un imposible en un reparto que nadie pidió.
+                    // **Un error y no un `expect`, y eso lo pidió una revisión.** El comentario decía
+                    // que el peso llega validado porque la raíz recibe un documento válido, y **es
+                    // verdad solo para la raíz**: estas dos funciones recursivas reciben nodos pelados,
+                    // así que el día que otro camino de la caja llame aquí con algo que no pasó por la
+                    // validación, un fichero con `"peso": 0` **tiraba la aplicación**. Es la invariante
+                    // que depende de la memoria de quien escribe, que es justo lo que este módulo
+                    // rechaza por doctrina.
+                    let peso = Peso::nuevo(hijo.peso)
+                        .ok_or("la disposición trae un peso que no puede serlo")?;
+                    partes.push((
+                        peso,
+                        Self::materializar(ctx, &hijo.nodo, programa, siguiente_nombre)?,
+                    ));
+                }
+                Ok(en_rama_con_pesos((*orientacion).into(), partes))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Pestaña {
+    /// Cómo se describe esta pestaña.
+    ///
+    /// **Ni el foco ni el nombre**: la ventana abre en la primera pestaña, y los nombres los reparte un
+    /// contador de la ventana que no reutiliza ninguno — restaurar uno viejo haría que el informe le
+    /// pusiera a una tabla de números el nombre de otra consola.
+    fn describir(&self) -> sesion::Pestaña {
+        sesion::Pestaña {
+            raiz: self.raiz.describir(),
+        }
+    }
+
+    /// La pestaña que describe eso, con sus consolas abiertas.
+    fn materializar(
+        ctx: &egui::Context,
+        guardada: &sesion::Pestaña,
+        programa: &str,
+        siguiente_nombre: &mut usize,
+        nombre: usize,
+    ) -> term_core::Result<Self> {
+        let raiz = Nodo::materializar(ctx, &guardada.raiz, programa, siguiente_nombre)?;
+        // **El foco a la primera, igual que al abrir una pestaña nueva**, y por la misma razón: teclear
+        // antes del primer clic ocurre siempre, y con un foco que no apunte a nadie esas teclas se
+        // perderían. Que hay al menos una hoja lo garantiza la validación del documento.
+        let foco = raiz
+            .hojas()
+            .first()
+            .ok_or("una pestaña restaurada sin ninguna consola")?
+            .nombre;
+
+        Ok(Self { raiz, foco, nombre })
+    }
+}
+
+#[cfg(test)]
+impl Ventana {
+    /// Cómo se describe la disposición de esta ventana, para poder volver a encontrarla.
+    pub(crate) fn describir(&self) -> sesion::Documento {
+        sesion::Documento {
+            v: sesion::VERSION,
+            pestañas: self.pestañas.iter().map(Pestaña::describir).collect(),
+        }
+    }
+
+    /// Las pestañas que describe un documento ya validado, con sus consolas abiertas.
+    ///
+    /// **Devuelve las pestañas y no una ventana**, para que quien abra la ventana siga siendo el único que
+    /// arma el resto de su estado — los cronómetros, el vigilante y los contadores salen de la lista
+    /// construida, no de lo que el fichero dijera.
+    pub(crate) fn materializar(
+        ctx: &egui::Context,
+        valido: &sesion::Valido,
+        programa: &str,
+    ) -> term_core::Result<Vec<Pestaña>> {
+        let mut siguiente_division = 0;
+        valido
+            .pestañas()
+            .iter()
+            .enumerate()
+            .map(|(cual, pestaña)| {
+                Pestaña::materializar(ctx, pestaña, programa, &mut siguiente_division, cual)
+            })
+            .collect()
     }
 }
 
@@ -15774,5 +15977,296 @@ mod tests {
             "estrechando el panel"
         );
         assert_eq!(Gesto::MoverLaConsola.como_se_publica(), "moviendo consolas");
+    }
+
+    /// La disposición de esta ventana, escrita y vuelta a leer **pasando por el texto**.
+    ///
+    /// Se va por el camino largo —describir, escribir, interpretar, materializar— y no por el corto
+    /// —describir y validar— a propósito: el texto es lo que de verdad viaja, y una ida y vuelta que se
+    /// salte el JSON no ataría ni la etiqueta ni los nombres de las claves.
+    fn dar_la_vuelta(ventana: &Ventana, ctx: &egui::Context) -> Vec<Pestaña> {
+        let escrito =
+            sesion::escribir(&ventana.describir()).expect("una ventana viva se puede describir");
+        let leido =
+            sesion::interpretar(&escrito).expect("lo que la ventana describe se vuelve a leer");
+        // **Un programa de prueba y no el del usuario.** Con `Division::nueva` estas pruebas abrirían un
+        // shell interactivo de quien las corre por cada hoja —veintitantos por corrida de la suite—, con
+        // sus ficheros de arranque y sus enganches. Eso no prueba este código.
+        Ventana::materializar(ctx, &leido, "sleep 30").expect("las consolas de vuelta se abren")
+    }
+
+    #[test]
+    fn la_ida_y_vuelta_conserva_las_proporciones_del_arbol() {
+        // **Los pesos de partida son desiguales a propósito**, y con dos niveles: con pesos iguales, «se
+        // conservan los pesos» y «se reparte a partes iguales» dan exactamente el mismo árbol, y la
+        // prueba se quedaría verde con una implementación que tirara los pesos a la basura — que es justo
+        // el defecto que más caro sale aquí, porque la ventana se parece a la del usuario sin serlo.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[3.0, 1.0]);
+        // Y dentro de la segunda, otro corte con pesos distintos: así se ata también que la proporción
+        // sobrevive **anidada**, y no solo en la raíz.
+        let Nodo::Rama { hijos, .. } = &mut ventana.activa_mut().raiz else {
+            panic!("la ventana de hermanas nace con una rama");
+        };
+        hijos[1].nodo = Nodo::Rama {
+            orientacion: Orientacion::Filas,
+            hijos: vec![
+                Hijo {
+                    peso: peso(2.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 7)),
+                },
+                Hijo {
+                    peso: peso(1.0),
+                    nodo: Nodo::Hoja(division_con("sleep 30", 8)),
+                },
+            ],
+        };
+
+        let vueltas = dar_la_vuelta(&ventana, &ctx);
+
+        let Nodo::Rama {
+            orientacion, hijos, ..
+        } = &vueltas[0].raiz
+        else {
+            panic!("la pestaña de vuelta tiene que traer su rama");
+        };
+        assert_eq!(*orientacion, Orientacion::Columnas);
+        assert_eq!(
+            hijos.iter().map(|h| h.peso.valor()).collect::<Vec<_>>(),
+            vec![3.0, 1.0],
+            "los pesos de la raíz tienen que volver como estaban"
+        );
+
+        let Nodo::Rama {
+            orientacion, hijos, ..
+        } = &hijos[1].nodo
+        else {
+            panic!("el corte de dentro tiene que volver siendo un corte");
+        };
+        assert_eq!(*orientacion, Orientacion::Filas);
+        assert_eq!(
+            hijos.iter().map(|h| h.peso.valor()).collect::<Vec<_>>(),
+            vec![2.0, 1.0],
+            "y los de dentro también"
+        );
+    }
+
+    #[test]
+    fn la_ida_y_vuelta_conserva_el_ancho_y_el_plegado_de_cada_consola() {
+        // **Cuatro anchos distintos, y uno de ellos el de fábrica a propósito.** Con los cuatro distintos
+        // del de fábrica, una implementación que restaurara bien tres y se dejara una seguiría cayendo;
+        // pero con ninguno igual al de fábrica, **una que no restaurara nada y dejara los cuatro de
+        // fábrica** también caería por la razón equivocada. Con uno igual, la prueba distingue «restauró»
+        // de «salió el de fábrica».
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0, 1.0, 1.0]);
+        let anchos = [52, panel::ANCHO_DE_FABRICA, 24, 40];
+        let plegados = [false, false, true, false];
+        for (cual, division) in ventana
+            .activa_mut()
+            .divisiones_mut()
+            .into_iter()
+            .enumerate()
+        {
+            division.ancho_del_panel = anchos[cual];
+            division.plegado = plegados[cual];
+        }
+
+        let vueltas = dar_la_vuelta(&ventana, &ctx);
+
+        let de_vuelta = vueltas[0].divisiones();
+        assert_eq!(
+            de_vuelta
+                .iter()
+                .map(|division| division.ancho_del_panel)
+                .collect::<Vec<_>>(),
+            anchos.to_vec(),
+            "cada consola tiene que volver con SU ancho, no con uno para todas"
+        );
+        assert_eq!(
+            de_vuelta
+                .iter()
+                .map(|division| division.plegado)
+                .collect::<Vec<_>>(),
+            plegados.to_vec(),
+            "y con su plegado, que va aparte del ancho"
+        );
+    }
+
+    #[test]
+    fn las_pestañas_vuelven_todas_y_en_su_orden() {
+        // **Cada pestaña tiene una forma distinta, y eso lo pidió una revisión.** La primera versión
+        // montaba tres pestañas idénticas y afirmaba que sus nombres eran `[0, 1, 2]` — pero esos nombres
+        // **los reparte el propio bucle que materializa**, así que se cumplían aunque las pestañas
+        // volvieran del revés. Era afirmar sobre el campo donde se escribe el valor y no sobre su efecto,
+        // que es el primer disfraz que este proyecto tiene fichado. Con anchos de panel distintos, el
+        // orden se lee de la **forma** y una inversión cae.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([
+            ["sleep 30", "sleep 30"],
+            ["sleep 30", "sleep 30"],
+            ["sleep 30", "sleep 30"],
+        ]);
+        let marcas = [21, 22, 23];
+        for (cual, pestaña) in ventana.pestañas.iter_mut().enumerate() {
+            for division in pestaña.divisiones_mut() {
+                division.ancho_del_panel = marcas[cual];
+            }
+        }
+
+        let vueltas = dar_la_vuelta(&ventana, &ctx);
+
+        assert_eq!(vueltas.len(), 3);
+        let como_volvieron: Vec<usize> = vueltas
+            .iter()
+            .map(|pestaña| pestaña.divisiones()[0].ancho_del_panel)
+            .collect();
+        assert_eq!(
+            como_volvieron,
+            marcas.to_vec(),
+            "las pestañas tienen que volver en su orden"
+        );
+        // Y los nombres los reparte la ventana, no el fichero: lo que importa es que **no se repite
+        // ninguno**, porque un nombre repetido hace que el informe publique dos bloques de números con la
+        // misma etiqueta.
+        let mut nombres: Vec<usize> = vueltas.iter().map(|pestaña| pestaña.nombre).collect();
+        let cuantas = nombres.len();
+        nombres.sort_unstable();
+        nombres.dedup();
+        assert_eq!(nombres.len(), cuantas, "hay pestañas que se llaman igual");
+    }
+
+    #[test]
+    fn ninguna_consola_restaurada_se_llama_como_otra() {
+        let ctx = egui::Context::default();
+        let ventana = ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+
+        let vueltas = dar_la_vuelta(&ventana, &ctx);
+
+        let mut nombres: Vec<usize> = vueltas
+            .iter()
+            .flat_map(|pestaña| pestaña.divisiones().into_iter().map(|d| d.nombre))
+            .collect();
+        let cuantas = nombres.len();
+        nombres.sort_unstable();
+        nombres.dedup();
+        assert_eq!(
+            nombres.len(),
+            cuantas,
+            "hay nombres repetidos entre consolas"
+        );
+    }
+
+    #[test]
+    fn el_foco_de_una_pestaña_restaurada_apunta_a_una_consola_suya() {
+        // **No se guarda el foco, así que vuelve en la primera** — y eso hay que atarlo, porque un foco
+        // que apunte a un nombre que no está en esa pestaña manda las teclas a donde nadie las espera. Es
+        // el mismo defecto que el cero como respaldo ya causó al abrir una pestaña.
+        let ctx = egui::Context::default();
+        let ventana = ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+
+        let vueltas = dar_la_vuelta(&ventana, &ctx);
+
+        for pestaña in &vueltas {
+            let suyas: Vec<usize> = pestaña.divisiones().iter().map(|d| d.nombre).collect();
+            assert!(
+                suyas.contains(&pestaña.foco),
+                "el foco {} no es de ninguna consola de esta pestaña ({suyas:?})",
+                pestaña.foco
+            );
+            // **Y es LA PRIMERA, no una cualquiera de las suyas.** Con la comprobación de pertenencia
+            // sola, poner el foco en la última pasaba — y la promesa es la misma que al abrir una pestaña
+            // nueva: teclear antes del primer clic tiene que llegar a la de la izquierda.
+            assert_eq!(
+                pestaña.foco, suyas[0],
+                "el foco tiene que quedar en la primera consola de la pestaña"
+            );
+        }
+    }
+
+    #[test]
+    fn el_sentido_que_se_escribe_en_el_disco_es_el_que_tiene_el_arbol() {
+        // **La ida y vuelta NO puede atar esto, y por eso hace falta esta prueba aparte.** Si se
+        // intercambian **las dos** conversiones de orientación a la vez, el error es simétrico: describir
+        // escribe «filas» donde hay columnas, materializar lo lee al revés, y la vuelta da el árbol
+        // correcto. Todo verde — y el fichero **incompatible con cualquier otro binario**, que es lo peor
+        // que le puede pasar a un formato. Lo único que lo caza es afirmar sobre el **texto**.
+        for (orientacion, esperado) in [
+            (Orientacion::Columnas, "\"orientacion\":\"columnas\""),
+            (Orientacion::Filas, "\"orientacion\":\"filas\""),
+        ] {
+            let ventana = ventana_de_hermanas(orientacion, &[1.0, 1.0]);
+
+            let escrito = sesion::escribir(&ventana.describir())
+                .expect("una ventana viva se puede describir");
+
+            assert!(
+                escrito.contains(esperado),
+                "un árbol de {orientacion:?} tiene que escribir {esperado} y escribió {escrito}"
+            );
+        }
+    }
+
+    #[test]
+    fn una_clave_que_el_formato_no_conoce_se_ignora_a_proposito() {
+        // **Se ignora, y eso es una decisión y no un descuido**: D16 dice que **añadir una clave opcional
+        // no sube la versión del formato**, así que un binario viejo tiene que poder leer un documento de
+        // uno nuevo que traiga una clave de más. Rechazarlas sería más estricto y contradiría eso.
+        //
+        // Sin esta prueba, alguien «arregla» el formato poniéndole el rechazo de claves desconocidas y
+        // rompe esa compatibilidad sin que nada se queje.
+        let con_una_de_mas = r#"{"v":1,"pestañas":[{"raiz":{"hoja":{"ancho_del_panel":36,"plegado":false,"lo_que_venga_manana":7}}}]}"#;
+
+        let leido =
+            sesion::interpretar(con_una_de_mas).expect("una clave de más no invalida el documento");
+        assert_eq!(leido.hojas(), 1);
+    }
+
+    #[test]
+    fn la_descripcion_no_lleva_mas_claves_que_las_previstas() {
+        // **La línea que mantiene el lanzamiento fuera de terreno sensible**: el documento guarda
+        // geometría y **nunca instrucciones** — ni programa, ni argumentos, ni entorno, ni directorio de
+        // trabajo, ni rutas.
+        //
+        // **Se afirma sobre el CONJUNTO de claves y no sobre lo que el texto no contiene**, y eso lo
+        // decidió una revisión. La primera versión comprobaba que no apareciera ninguna barra ni la
+        // palabra del programa de prueba, y eso **no habría cazado el caso que dice cazar**: un campo
+        // `programa` con «bash» dentro no tiene barras ni se llama como el programa de la prueba. Con la
+        // lista blanca, cualquier campo nuevo rompe esta prueba, que es exactamente para lo que está.
+        let ventana = ventana_de_hermanas(Orientacion::Columnas, &[1.0, 1.0]);
+
+        let escrito =
+            sesion::escribir(&ventana.describir()).expect("una ventana viva se puede describir");
+
+        let previstas = [
+            "v",
+            "pestañas",
+            "raiz",
+            "rama",
+            "hoja",
+            "orientacion",
+            "hijos",
+            "peso",
+            "nodo",
+            "ancho_del_panel",
+            "plegado",
+        ];
+        // Las claves de un JSON sin espacios son lo que va entre comillas y antes de dos puntos.
+        let claves: Vec<&str> = escrito
+            .match_indices("\":")
+            .filter_map(|(fin, _)| escrito[..fin].rfind('"').map(|ini| &escrito[ini + 1..fin]))
+            .collect();
+
+        for clave in &claves {
+            assert!(
+                previstas.contains(clave),
+                "el documento trae una clave que nadie declaró: «{clave}» en {escrito}"
+            );
+        }
+        // Y la lista blanca no puede ser una lista vacía disfrazada: el documento tiene que traer claves.
+        assert!(
+            claves.len() > previstas.len(),
+            "no se leyó ninguna clave: {escrito}"
+        );
     }
 }

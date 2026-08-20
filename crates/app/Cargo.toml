@@ -15,6 +15,24 @@ panel-contract = { path = "../panel-contract" }
 # no añaden nada: lo que entra es `inotify`, `mio`, `walkdir` y `notify-types`.
 notify = "8.2"
 
+# Para el formato con el que la disposición de la ventana va y vuelve de disco.
+#
+# **No añaden ni un paquete al árbol, y conviene decirlo porque la intuición dice lo contrario.** El
+# `Cargo.toml` de la raíz razona feature por feature lo que quita para que `clippy --workspace
+# --all-targets` no se alargue, así que «meter `derive`» suena a ir contra esa política. No lo es: la
+# política razona sobre **lo que entra al árbol**, y `serde` con `derive` ya se compila aquí por rebote
+# del motor de terminal — comprobado con `cargo tree -i serde_derive`, que da
+# `serde_derive → serde → alacritty_terminal → term-core → app`. `serde_json` también, por
+# `panel-contract`.
+#
+# **Y se usa `derive`, al contrario que en `panel-contract`, por una razón y no por gusto.** Aquella caja
+# lee con `Value` porque tolera **por campo** —siete opcionales, y líneas que son cadena o objeto—; este
+# fichero lo escribe siempre la aplicación y **se tolera por documento**, así que no hay nada que tolerar
+# a mano. Lo único que se compraría escribiéndolo a mano es el recorrido de un árbol recursivo, que es
+# justo donde un intérprete a mano falla.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 # No se usa desde el código: está solo para reponer una feature que se cayó al quitar los defaults
 # de eframe. Sin ella, en Wayland la ventana la decora el marco de reserva de SCTK —que su propio
 # autor llama «el marco feo por defecto»— y este hito existe para juzgar cómo pinta egui, así que
