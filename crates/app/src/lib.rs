@@ -45,6 +45,17 @@ const NOMBRE: &str = "agent-terminal";
 /// Existe en todo sistema donde esto puede correr, que es lo que se le pide a un respaldo.
 const SHELL_DE_RESPALDO: &str = "/bin/sh";
 
+/// Cuánto se espera desde el primer cambio sin escribir hasta escribir la disposición.
+///
+/// **Medio segundo, y el número tiene dos razones.** Es el mismo orden que el respiro del modo degradado del
+/// vigilante, que ya está en el código y por el mismo motivo: es lo que se nota poco y no deja la ventana
+/// despierta. Y con él, **un arrastre continuo escribe dos veces por segundo en vez de sesenta**, mientras
+/// que lo que se pierde al morir —medio segundo de colocación— no se echa de menos.
+///
+/// **Es un tope contado desde el primer cambio, no un aplazamiento.** La diferencia decide si el hito
+/// funciona: rearmando el plazo en cada cambio, un arrastre de diez segundos no escribiría ni una vez.
+const RETARDO_AL_GUARDAR: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// El cuerpo de la letra, en puntos.
 const CUERPO: f32 = 14.0;
 
@@ -1380,17 +1391,22 @@ pub fn arrancar() -> eframe::Result {
     // dentro del camino que se mide metería una espera de disco en el fotograma a cambio de nada. Lo que se
     // lee entra por el `move` del cierre de abajo, ya interpretado y ya validado.
     //
-    // **Y aquí se suelta lo que leyó, que es deuda declarada y no descuido.** El tipo dice en su doc que la
-    // que carga y la que guarda tienen que ser la misma, porque el veto de una versión más nueva vive ahí;
-    // hoy nadie guarda, así que conservarla sería un campo que nadie lee — código muerto, que en esta caja
-    // no se tapa con un `allow`. **Quien añada el guardado tiene que conservarla**, y si no lo hace, un
-    // binario viejo se lleva por delante la disposición del nuevo.
-    let guardada = sesion::Persistencia::del_entorno().cargar();
-    let con_que = con_que_abrir(
-        std::env::var(VARIABLE_DE_LAS_PESTAÑAS).ok().as_deref(),
-        std::env::var(VARIABLE_DE_LAS_DIVISIONES).ok().as_deref(),
-        guardada,
-    );
+    // **Y la que carga es la que se queda con la ventana**, que era la deuda que el PR anterior dejó
+    // escrita: el veto de una versión más nueva vive en ella, así que una segunda instancia lo perdería y
+    // machacaría la disposición de un binario más nuevo.
+    let mut persistencia = sesion::Persistencia::del_entorno();
+    let guardada = persistencia.cargar();
+
+    // **Una sesión de medida no pisa la disposición de quien mide.** Las dos variables de abajo abren lo que
+    // la tanda diga en vez de lo que el usuario dejó, así que guardar escribiría encima **la disposición de
+    // la tanda**. El guion de medida ya aísla el directorio de configuración, pero quien lanza el binario a
+    // mano con esas variables —que es como la documentación dice abrir una disposición concreta— no.
+    let pestañas = std::env::var(VARIABLE_DE_LAS_PESTAÑAS).ok();
+    let divisiones = std::env::var(VARIABLE_DE_LAS_DIVISIONES).ok();
+    if pestañas.is_some() || divisiones.is_some() {
+        persistencia.no_pisar_porque("esta sesión la pidió una tanda de medida");
+    }
+    let con_que = con_que_abrir(pestañas.as_deref(), divisiones.as_deref(), guardada);
 
     let mut opciones = eframe::NativeOptions::default();
     // **Se pide el tamaño solo si alguien lo pidió**, y por eso no hay un tamaño por defecto aquí: sin
@@ -1407,8 +1423,13 @@ pub fn arrancar() -> eframe::Result {
         NOMBRE,
         opciones,
         Box::new(move |cc| {
-            let mut ventana =
-                Ventana::abriendo(&cc.egui_ctx, con_que, &shell_del_usuario(), pedido)?;
+            let mut ventana = Ventana::abriendo(
+                &cc.egui_ctx,
+                con_que,
+                &shell_del_usuario(),
+                pedido,
+                persistencia,
+            )?;
             // Solo una tanda de medida los pide, así que se ponen aquí y no en el constructor. La celda se
             // mide ya: el gesto del panel cuenta su recorrido en celdas y su enganche corre antes de la
             // pasada que mide la fuente.
@@ -2962,6 +2983,33 @@ struct Ventana {
     /// se **reste**, y una serie más para un suceso que pasa cuando el usuario pulsa un atajo diría muy
     /// poco y habría que explicarla entera.
     cronometrado_aparte: std::time::Duration,
+    /// Dónde va la disposición, y lo que esta sesión ya sabe de ese fichero.
+    ///
+    /// **Es la misma que cargó al arrancar, y eso es una regla y no una casualidad**: el veto de una
+    /// versión más nueva vive aquí, así que una segunda instancia lo perdería y machacaría la disposición
+    /// de un binario más nuevo. Lo dice el doc del tipo, y era la deuda con nombre que dejó el PR que
+    /// aprendió a restaurar.
+    persistencia: sesion::Persistencia,
+    /// El espejo del fotograma anterior. **Contra él se arma el plazo**, así que el plazo se rearma
+    /// **cuando algo cambia** y no cuando algo está sin escribir: sin esto, un directorio no escribible
+    /// dejaría la diferencia puesta y **la ventana no se dormiría nunca**.
+    ultimo_visto: Option<sesion::Documento>,
+    /// Lo último que llegó al disco **de verdad**. Contra él se decide si hay que escribir, así que un
+    /// fallo **se reintenta con el cambio siguiente** sin guardar el error ni inventar ninguna espera.
+    ultimo_escrito: Option<sesion::Documento>,
+    /// Cuándo vence el plazo, contado desde el **primer** cambio sin escribir.
+    ///
+    /// **Un tope y no un aplazamiento**, y la diferencia es la que hace que el hito funcione: rearmando en
+    /// cada cambio, un arrastre de diez segundos no escribiría **ni una vez** —cada fotograma empujaría el
+    /// plazo—, y lo que el ticket promete es perder como mucho medio segundo.
+    pendiente_de_guardar: Option<Instant>,
+    /// Lo que ha costado comparar el espejo en este fotograma, **sumando sus pasadas**.
+    ///
+    /// egui repite la pasada de interfaz, así que anotar por pasada haría que la media describiera «por
+    /// pasada» en vez de «por fotograma». Se acumula aquí y se anota **una vez al cerrar**.
+    espejo_del_fotograma: std::time::Duration,
+    /// Los dos tramos que cuesta guardar, con sus dos filas en el informe.
+    guardado: medida::Guardado,
     /// Los gestos de arrastre que la tanda de medida se hace a sí misma, si pidió alguno.
     ///
     /// **Nada cuando nadie los pide**, que es siempre salvo en una tanda: así el camino no llega a correr
@@ -3088,30 +3136,52 @@ impl Ventana {
         con_que: ConQueAbrir,
         programa: &str,
         tamaño: Option<egui::Vec2>,
+        persistencia: sesion::Persistencia,
     ) -> term_core::Result<Self> {
         // **El programa se recibe, y lo usa la rama que restaura.** La de fábrica abre el shell del usuario
         // como lo ha hecho siempre, igual que las tres decenas de pruebas que la llaman: pasarlo hasta ahí
         // sería tocar la firma de un constructor con treinta y tres llamadas para el único camino que este
         // PR no estrena. Se dice porque el comentario anterior afirmaba que **ninguna** rama leía el
         // entorno, y era falso justo para la de fábrica — lo cazaron las dos revisiones.
-        let guardada = match con_que {
+        let mut no_pisar = None;
+        let abierta = match con_que {
             ConQueAbrir::DeFabrica {
                 pestañas,
                 disposicion,
-            } => return Self::con_pestañas(ctx, pestañas, disposicion, tamaño),
-            ConQueAbrir::Restaurada(guardada) => guardada,
+            } => Self::con_pestañas(ctx, pestañas, disposicion, tamaño),
+            ConQueAbrir::Restaurada(guardada) => {
+                let cuantas = guardada.hojas();
+                match Self::materializar(ctx, &guardada, programa) {
+                    Ok(pestañas) => Self::con_estas_pestañas(ctx, pestañas, tamaño),
+                    Err(fallo) => {
+                        eprintln!(
+                            "no se pudo abrir la disposición guardada de {cuantas} consolas ({fallo}); \
+                             se abre de fábrica y no se sobrescribe lo guardado"
+                        );
+                        // **Y esta sesión no pisa el fichero, que es lo que evita perder la disposición
+                        // para siempre.** Lo que queda en pantalla es una ventana de fábrica; con el
+                        // guardado automático encendido, el primer cambio del usuario la escribiría encima
+                        // de sus veinte consolas. Antes de este hito el fichero sobrevivía a un arranque
+                        // fallido y el siguiente lo recuperaba: esto conserva esa propiedad.
+                        no_pisar = Some("no se pudo abrir la disposición que había guardada");
+                        Self::con_pestañas(ctx, 1, Disposicion::DE_SIEMPRE, tamaño)
+                    }
+                }
+            }
         };
 
-        let cuantas = guardada.hojas();
-        match Self::materializar(ctx, &guardada, programa) {
-            Ok(pestañas) => Self::con_estas_pestañas(ctx, pestañas, tamaño),
-            Err(fallo) => {
-                eprintln!(
-                    "no se pudo abrir la disposición guardada de {cuantas} consolas ({fallo}); se abre de fábrica"
-                );
-                Self::con_pestañas(ctx, 1, Disposicion::DE_SIEMPRE, tamaño)
+        // **La que cargó al arrancar se queda con la ventana, y esto era una deuda con nombre.** El veto de
+        // una versión más nueva vive en ella: construir una segunda a mitad de sesión lo perdería y
+        // sobrescribiría la disposición de un binario más nuevo, que es el daño exacto que la versión del
+        // formato existe para evitar. Se instala aquí, después de construir, en vez de bajarla por los tres
+        // constructores: al de fábrica lo llaman treinta y tres pruebas que no guardan nada.
+        abierta.map(|mut ventana| {
+            ventana.persistencia = persistencia;
+            if let Some(razon) = no_pisar {
+                ventana.persistencia.no_pisar_porque(razon);
             }
-        }
+            ventana
+        })
     }
 
     /// El resto de la ventana, que es el mismo se haya restaurado o no.
@@ -3132,7 +3202,7 @@ impl Ventana {
             .map(|pestaña| pestaña.divisiones().len())
             .sum();
 
-        Ok(Self {
+        let mut ventana = Self {
             // **Sobre las divisiones de todas las pestañas, no solo la primera.** Una pestaña de fondo
             // sin vigilar no volvería a releer su panel hasta que alguien la mire, que es justamente lo
             // contrario de lo que este hito promete.
@@ -3150,6 +3220,12 @@ impl Ventana {
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
+            persistencia: sesion::Persistencia::en(None),
+            ultimo_visto: None,
+            ultimo_escrito: None,
+            pendiente_de_guardar: None,
+            espejo_del_fotograma: std::time::Duration::ZERO,
+            guardado: medida::Guardado::default(),
             // **Nada de entrada, y lo pone quien mide.** Era un parámetro más de este constructor, y la
             // revisión lo tiró con un argumento que las propias pruebas ya demostraban: nadie salvo una
             // tanda lo pone, y a cambio la firma acababa en dos `Option` seguidos que se rellenaban con dos
@@ -3176,7 +3252,16 @@ impl Ventana {
                 cuanto,
                 intentos: INSISTENCIAS_CON_EL_TAMAÑO,
             }),
-        })
+        };
+
+        // **La ventana se describe una vez al nacer, y con eso el plazo no se arma solo.** Sin esto, el
+        // espejo del primer fotograma difiere de «nada» y toda sesión escribiría el fichero medio segundo
+        // después de abrir, sin que el usuario hubiera colocado nada. Lo último **escrito** se deja en nada a
+        // propósito: lo que hay en disco puede no ser exactamente esto —un ancho por debajo del suelo vuelve
+        // recortado—, así que el primer cambio de verdad reescribe el fichero entero y lo deja al día.
+        ventana.ultimo_visto = Some(ventana.describir());
+
+        Ok(ventana)
     }
 
     /// La pestaña que se ve y a la que va el teclado.
@@ -3263,6 +3348,18 @@ impl Ventana {
     /// volver a esa pestaña el aviso sale en ese mismo fotograma.
     fn poner_el_despertador(&self, ctx: &egui::Context) {
         let ahora = SystemTime::now();
+
+        // **El plazo del guardado despierta a la ventana, y las dos mitades tienen que pedirlo.** La mitad
+        // lógica empieza poniendo el plazo a lo más largo posible y es la única que corre con la ventana
+        // tapada: sin la llamada de allí, cada vuelta de ventana oculta borraría esta alarma y la
+        // disposición no se guardaría hasta que alguien moviera el ratón.
+        //
+        // **Y esto cambia cuántos fotogramas tiene una corrida de medida**, así que va declarado en el
+        // anexo: una ventana que se despierta dos veces por segundo mientras se arrastra no tiene el mismo
+        // número de fotogramas que una que solo responde a la entrada.
+        if let Some(cuando) = self.pendiente_de_guardar {
+            ctx.request_repaint_after(cuando.saturating_duration_since(Instant::now()));
+        }
 
         if let Some(falta) = self
             .activa()
@@ -3458,7 +3555,11 @@ impl Ventana {
             }
         }
 
-        self.resto_del_fotograma.publicar(a)
+        self.resto_del_fotograma.publicar(a)?;
+        // **Los dos tramos de guardar van después del resto, y con su propia fila cada uno.** Están
+        // descontados de ese resto —entran en el acumulador de la ventana—, así que sin estas filas el
+        // número existiría y **nadie podría auditarlo**.
+        self.guardado.publicar(a)
     }
 
     /// Le da a las consolas de las pestañas que no se ven la rejilla que tendrían si se vieran.
@@ -3577,6 +3678,101 @@ impl Ventana {
         }
     }
 
+    /// Construye el espejo de la disposición y **arma el plazo si algo cambió**.
+    ///
+    /// **Lo que cuesta se cronometra y se declara por los dos sitios**: entra en el acumulador que la
+    /// ventana resta —o su trabajo se publicaría como coste del framework, la cifra con la que D3 decide— y
+    /// además tiene serie propia en el informe, porque ese acumulador **resta pero no publica ninguna
+    /// fila**. Son dos mecanismos y hacen falta los dos.
+    fn mirar_si_la_disposicion_cambio(&mut self) {
+        let empezo = Instant::now();
+
+        let ahora = self.describir();
+        if self.ultimo_visto.as_ref() != Some(&ahora) {
+            self.ultimo_visto = Some(ahora);
+            // **Solo si estaba vacío**, que es la diferencia entre un tope y un aplazamiento: durante un
+            // arrastre la disposición cambia en cada fotograma, y rearmando aquí no se escribiría nunca.
+            if self.pendiente_de_guardar.is_none() {
+                self.pendiente_de_guardar = Some(Instant::now() + RETARDO_AL_GUARDAR);
+            }
+        }
+
+        self.espejo_del_fotograma += empezo.elapsed();
+    }
+
+    /// Escribe la disposición si el plazo venció y hay algo distinto de lo último que llegó al disco.
+    ///
+    /// **Se llama en la mitad lógica y DESPUÉS de cerrar el fotograma**, y el orden importa: cerrar vacía
+    /// lo que la ventana cronometró aparte, así que escribir antes le cargaría su coste al fotograma
+    /// anterior — que es exactamente la clase de error que este instrumento persigue.
+    fn guardar_si_toca(&mut self) {
+        let Some(cuando) = self.pendiente_de_guardar else {
+            return;
+        };
+        if Instant::now() < cuando {
+            return;
+        }
+        self.guardar_ahora();
+    }
+
+    /// Escribe lo pendiente **sin mirar el reloj**.
+    ///
+    /// **Existe para el cierre limpio de la ventana, y lo pidió una revisión.** El retardo acepta perder
+    /// medio segundo «al morir», y cerrar la ventana a mano **no es morir**: es el único final en el que la
+    /// pérdida se puede evitar, y evitarla no cuesta nada porque ahí ya no queda ningún fotograma que medir.
+    fn guardar_ahora(&mut self) {
+        if self.pendiente_de_guardar.is_none() {
+            return;
+        }
+        self.pendiente_de_guardar = None;
+
+        // **El reloj arranca aquí, antes de copiar y comparar.** Copiar el documento entero y compararlo a
+        // fondo cuesta, ocurre en cada plazo vencido —dos veces por segundo mientras se arrastra— y en el
+        // camino en que no hay nada que escribir **es todo el coste**: dejarlo fuera del reloj lo publicaría
+        // como coste del framework, que es la fuga que la regla dura del proyecto nombra.
+        let empezo = Instant::now();
+
+        // Lo que se va a escribir es lo último visto: se acaba de construir en la pasada de interfaz, así
+        // que recorrer el árbol otra vez sería pagar dos veces por el mismo dato.
+        let Some(documento) = self.ultimo_visto.clone() else {
+            self.espejo_del_fotograma += empezo.elapsed();
+            return;
+        };
+        if self.ultimo_escrito.as_ref() == Some(&documento) {
+            // **Va al tramo del espejo y no al de la escritura, porque es lo que es**: comparar dos
+            // espejos. Contarlo como escritura metería en esa media unas muestras que no escribieron nada.
+            self.espejo_del_fotograma += empezo.elapsed();
+            return;
+        }
+        // **Por el tipo validado, que es lo que hace imposible escribir algo que no se sepa volver a
+        // leer.** Y lo que no pasa la validación **se avisa una vez**: el caso real es tener más consolas
+        // abiertas que las que el formato admite —el techo existe para acotar el `fork` del arranque, así
+        // que no se puede quitar—, y sin este aviso el usuario perdería su disposición sin ninguna señal.
+        let valido = match sesion::validar(documento.clone()) {
+            Ok(valido) => valido,
+            Err(problema) => {
+                self.persistencia
+                    .avisar_de_lo_que_no_se_puede_guardar(&problema);
+                // **Esto no es una escritura y no se cuenta como tal, ni siquiera como intento.** No se
+                // resolvió ninguna ruta ni se tocó el disco: lo que corrió es validar, que es del mismo
+                // tipo de trabajo que comparar el espejo. Contarlo en el tramo de la escritura metería en
+                // esa media unas muestras que son **todas** validación, y el número dejaría de describir
+                // lo que cuesta escribir.
+                self.espejo_del_fotograma += empezo.elapsed();
+                return;
+            }
+        };
+
+        let escrito = self.persistencia.guardar(&valido);
+        let cuanto = empezo.elapsed();
+        self.cronometrado_aparte += cuanto;
+        self.guardado.anotar_escritura(cuanto, escrito);
+
+        if escrito {
+            self.ultimo_escrito = Some(documento);
+        }
+    }
+
     /// Cierra el fotograma anterior: cada consola cierra sus tramos y la ventana se queda con lo que
     /// ninguna cronometró.
     fn cerrar_fotograma(&mut self, coste_cpu: std::time::Duration) {
@@ -3590,6 +3786,15 @@ impl Ventana {
         // instrumento persigue. Ver [`Ventana::cronometrado_aparte`] por qué existe.
         let aparte = std::mem::take(&mut self.cronometrado_aparte);
 
+        // **El espejo entra en la resta Y en su serie, y hacen falta las dos.** El acumulador de arriba
+        // descuenta pero no publica ninguna fila; una serie publica pero no descuenta nada. Con solo una de
+        // las dos, este trabajo —recorrer el árbol de todas las pestañas, en cada fotograma— acabaría
+        // dentro de la cifra con la que D3 juzga al framework, o auditable pero sin restar.
+        let espejo = std::mem::take(&mut self.espejo_del_fotograma);
+        if !espejo.is_zero() {
+            self.guardado.anotar_espejo(espejo);
+        }
+
         // **Y lo del enganche de la entrada cruda se declara aquí, DESPUÉS de vaciar.** Ver
         // [`Ventana::gastado_inyectando`]: corrió después de que el fotograma que se cierra terminara, así
         // que es del que empieza. Sumarlo arriba lo restaría del que no lo pagó.
@@ -3599,7 +3804,7 @@ impl Ventana {
         // serie acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
         if let Some(cronometrado) = cronometrado {
             self.resto_del_fotograma
-                .anotar(coste_cpu, cronometrado + aparte);
+                .anotar(coste_cpu, cronometrado + aparte + espejo);
         }
     }
 
@@ -4570,6 +4775,9 @@ impl eframe::App for Ventana {
             self.cerrar_fotograma(std::time::Duration::from_secs_f32(segundos));
         }
 
+        // **Después de cerrar, no antes**: ver [`Ventana::guardar_si_toca`].
+        self.guardar_si_toca();
+
         // **Sin quien avise se vuelve a mirar en cada fotograma**, que es como se hacía antes de que
         // hubiera vigilante. No es prudencia: cuando se pierde el seguimiento —el usuario borra desde
         // su propia consola el directorio que se vigilaba, o el vigilante entrega un fallo— nadie
@@ -4820,6 +5028,21 @@ impl eframe::App for Ventana {
         // Ya se ha pintado, así que lo que siga pendiente es de una consola que no se pintó.
         self.cerrar_las_vueltas_no_pintadas();
 
+        // **El espejo se compara aquí, al final de la pasada de interfaz, y no en la mitad lógica.** Las
+        // mutaciones que cambian la disposición ocurren **en esta mitad** —partir, cerrar, mover una
+        // consola, arrastrar una frontera, arrastrar o plegar un panel—, y verlas un fotograma tarde es no
+        // verlas: en una ventana reactiva el fotograma siguiente puede no llegar nunca.
+        //
+        // **Cambiar de pestaña no está en esa lista, y conviene decirlo**: el espejo no guarda ni el foco
+        // ni cuál pestaña se ve, así que ese gesto no arma ningún plazo. Un comentario anterior lo
+        // incluía y era falso.
+        //
+        // **Y es idempotente ante la pasada repetida**, que es lo que permite que no haya banderas en esos
+        // nueve sitios: egui repite `logic` **y** `ui` en la misma vuelta, y comparar el mismo estado dos
+        // veces da el mismo resultado. Un mecanismo que exigiera acordarse de avisar en nueve caminos ya
+        // sabemos cómo acaba aquí.
+        self.mirar_si_la_disposicion_cambio();
+
         // **Y ahora sí, con los paneles ya releídos.** Ver [`Ventana::poner_el_despertador`]: la mitad
         // lógica lo pide con el estado de antes de leer, así que el fotograma en que un panel aparece
         // por primera vez se dormiría sin haber programado nada.
@@ -4838,6 +5061,11 @@ impl eframe::App for Ventana {
     /// Lo que lo tapa hoy no es una prueba, es el uso: quien mide se encuentra el fichero de la tanda
     /// vacío en cuanto lo abre. Por eso aquí no puede haber **nada** más que la llamada.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // **Lo pendiente se escribe antes de irse.** Cerrar la ventana a mano no es morir, y es el único
+        // final en el que el medio segundo que el retardo acepta perder **se puede** no perder. Aquí ya no
+        // queda ningún fotograma que medir, así que no hay coste que declarar.
+        self.guardar_ahora();
+
         self.publicar_informe(&mut std::io::stdout().lock())
             .expect("escribir el informe por la salida estándar");
     }
@@ -4868,10 +5096,9 @@ impl eframe::App for Ventana {
 // idioma de esta caja para eso es la bandera y no un `allow`; quien lo llama ahora es `Ventana::abriendo`,
 // así que la bandera se va y el compilador vuelve a cubrir este camino en la compilación de entrega.
 //
-// **La mitad de ida sigue siendo solo de pruebas**, y hay que decirlo porque el compilador no lo dirá: las
-// conversiones son implementaciones de un rasgo, y sobre ésas no salta el aviso de código sin usar. La que
-// convierte hacia el formato la llama únicamente `describir`, que conserva su bandera hasta que alguien
-// guarde.
+// **Y las dos mitades ya se usan en producción**: materializar la llama el arranque, y describir la llama
+// el disparo que guarda. Ninguna conversión se queda sin consumidor, que es lo que hacía falta para que
+// esto no fuera una superficie pública sin razón.
 
 impl From<Orientacion> for sesion::Orientacion {
     fn from(orientacion: Orientacion) -> Self {
@@ -4894,11 +5121,6 @@ impl From<sesion::Orientacion> for Orientacion {
 impl Nodo {
     /// Cómo se describe este nodo para poder volver a construirlo.
     ///
-    /// **Tras la bandera de pruebas mientras nadie guarde.** La otra mitad de este puente —materializar—
-    /// ya la llama el arranque; ésta la llamará el PR que guarda, y **ese cambio incluye quitar la
-    /// bandera**. Es el idioma de esta caja para lo que solo tocan las pruebas, y la alternativa era
-    /// publicarla como API de la caja solo para callar un aviso, que es hornear una señal falsa.
-    #[cfg(test)]
     fn describir(&self) -> sesion::Nodo {
         match self {
             Self::Hoja(division) => sesion::Nodo::Hoja(sesion::Hoja {
@@ -4975,13 +5197,11 @@ impl Nodo {
 }
 
 impl Pestaña {
-    /// Cómo se describe esta pestaña. Tras la bandera de pruebas hasta que alguien guarde, como
-    /// [`Nodo::describir`].
+    /// Cómo se describe esta pestaña.
     ///
     /// **Ni el foco ni el nombre**: la ventana abre en la primera pestaña, y los nombres los reparte un
     /// contador de la ventana que no reutiliza ninguno — restaurar uno viejo haría que el informe le
     /// pusiera a una tabla de números el nombre de otra consola.
-    #[cfg(test)]
     fn describir(&self) -> sesion::Pestaña {
         sesion::Pestaña {
             raiz: self.raiz.describir(),
@@ -5011,9 +5231,7 @@ impl Pestaña {
 }
 
 impl Ventana {
-    /// Cómo se describe la disposición de esta ventana, para poder volver a encontrarla. Tras la bandera de
-    /// pruebas hasta que alguien guarde, como [`Nodo::describir`].
-    #[cfg(test)]
+    /// Cómo se describe la disposición de esta ventana, para poder volver a encontrarla.
     pub(crate) fn describir(&self) -> sesion::Documento {
         sesion::Documento {
             v: sesion::VERSION,
@@ -5352,7 +5570,7 @@ mod tests {
             .map(|pestaña| pestaña.divisiones().len())
             .sum();
 
-        Ventana {
+        let mut ventana = Ventana {
             // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
             // arma igual —sobre una lista vacía— para que la ventana de las pruebas no se declare
             // ciega y active el respaldo, que es un camino con su propia prueba.
@@ -5373,6 +5591,12 @@ mod tests {
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
+            persistencia: sesion::Persistencia::en(None),
+            ultimo_visto: None,
+            ultimo_escrito: None,
+            pendiente_de_guardar: None,
+            espejo_del_fotograma: std::time::Duration::ZERO,
+            guardado: medida::Guardado::default(),
             // Una ventana de prueba no inyecta gestos: los suyos los manda la prueba por el `Ui` de
             // pruebas, que es la única forma de comprobar el gesto sin abrir ventana.
             arrastres: None,
@@ -5385,7 +5609,13 @@ mod tests {
             // Una ventana de prueba no pide tamaño, igual que la de verdad cuando nadie exporta la
             // variable: así ninguna prueba manda órdenes de redimensionado al contexto.
             tamaño_pedido: None,
-        }
+        };
+
+        // Lo mismo que en el constructor de verdad: la ventana se describe al nacer, o el primer fotograma
+        // armaría el plazo de guardado sin que nadie hubiera colocado nada. Aquí importa además porque hay
+        // pruebas que afirman que la ventana **se queda en reposo**.
+        ventana.ultimo_visto = Some(ventana.describir());
+        ventana
     }
 
     /// Aplica una orden a la que la geometría no le dice nada: cambiar de pestaña, o cerrarla.
@@ -15845,6 +16075,11 @@ mod tests {
             "el panel dejó de tener plazo por otra razón, así que lo de abajo no prueba el plegado"
         );
 
+        // **Se quita el plazo del guardado, que también despierta a la ventana.** Plegar el panel cambia la
+        // disposición, así que arma ese plazo — a propósito, y declarado en D16. Esta prueba es sobre el
+        // aviso del panel: sin quitarlo mediría dos cosas y no distinguiría cuál de las dos despertó.
+        ventana.pendiente_de_guardar = None;
+
         // Se deja el contexto en reposo y se corre solo la mitad que arma el despertador.
         let limpio = egui::Context::default();
         for _ in 0..4 {
@@ -16541,6 +16776,403 @@ mod tests {
         .expect("el documento de prueba es válido")
     }
 
+    /// Un directorio propio, y la ventana apuntando a un fichero dentro de él.
+    fn ventana_que_guarda(nombre: &str) -> (Ventana, std::path::PathBuf, std::path::PathBuf) {
+        let base = std::env::temp_dir().join(format!(
+            "agent-terminal-guardado-{}-{nombre}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
+        let ruta = sesion::ruta_de(Some(base.join("config").as_os_str()), None)
+            .expect("la ruta de la prueba es absoluta");
+
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.persistencia = sesion::Persistencia::en(Some(ruta.clone()));
+        (ventana, base, ruta)
+    }
+
+    #[test]
+    fn el_plazo_se_cuenta_desde_el_primer_cambio_y_no_se_aplaza() {
+        // **Un tope y no un aplazamiento, y es la diferencia entre guardar y no guardar nunca.** Durante un
+        // arrastre la disposición cambia en **cada** fotograma; rearmando el plazo en cada cambio, un gesto
+        // de diez segundos no escribiría ni una vez, y lo que el hito promete es perder medio segundo como
+        // mucho.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+
+        ventana.activa_mut().mover_la_frontera(0, 0.3);
+        ventana.mirar_si_la_disposicion_cambio();
+        let primero = ventana
+            .pendiente_de_guardar
+            .expect("el primer cambio arma el plazo");
+
+        ventana.activa_mut().mover_la_frontera(0, 0.6);
+        ventana.mirar_si_la_disposicion_cambio();
+
+        assert_eq!(
+            ventana.pendiente_de_guardar,
+            Some(primero),
+            "el segundo cambio aplazó el plazo en vez de dejarlo"
+        );
+    }
+
+    #[test]
+    fn sin_cambios_no_se_arma_ningun_plazo() {
+        // La otra mitad: si mirar armara el plazo siempre, la ventana escribiría dos veces por segundo
+        // **para siempre**, sin que nadie hubiera tocado nada.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+
+        ventana.mirar_si_la_disposicion_cambio();
+
+        assert_eq!(ventana.pendiente_de_guardar, None);
+    }
+
+    #[test]
+    fn al_vencer_el_plazo_la_disposicion_acaba_en_el_disco() {
+        let (mut ventana, base, ruta) = ventana_que_guarda("vence");
+
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        // El plazo se pone en el pasado en vez de esperar medio segundo de verdad: lo que se prueba es qué
+        // pasa **al vencer**, no el reloj.
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+        ventana.guardar_si_toca();
+
+        let leido = sesion::leer(&ruta).expect("lo que se guardó se vuelve a leer");
+        assert_eq!(
+            leido.pestañas(),
+            ventana.describir().pestañas.as_slice(),
+            "en el disco no está la disposición que hay en pantalla"
+        );
+        assert_eq!(ventana.guardado.escrituras(), 1);
+        // Y el plazo se consume: si se quedara puesto, escribiría en cada fotograma.
+        assert_eq!(ventana.pendiente_de_guardar, None);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn lo_mismo_no_se_escribe_dos_veces() {
+        // **Contra lo último escrito con éxito, que es la segunda referencia.** Sin ella, cada plazo
+        // reescribiría el mismo documento, y con un arrastre que vuelve a su sitio se escribiría sin que
+        // nada hubiera cambiado de verdad.
+        let (mut ventana, base, _) = ventana_que_guarda("dos-veces");
+
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+        ventana.guardar_si_toca();
+
+        // Otro plazo vencido sin ningún cambio en medio.
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+        ventana.guardar_si_toca();
+
+        assert_eq!(
+            ventana.guardado.escrituras(),
+            1,
+            "se reescribió lo mismo que ya estaba en disco"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn un_fallo_al_escribir_se_reintenta_con_el_cambio_siguiente() {
+        // **Las dos referencias, y por qué son dos.** El plazo se arma contra lo último **visto** —así un
+        // directorio no escribible no mantiene la ventana despierta— y se escribe contra lo último
+        // **escrito con éxito** —así un fallo se reintenta con el cambio siguiente, sin guardar el error ni
+        // inventar ninguna espera—.
+        let base = std::env::temp_dir().join(format!(
+            "agent-terminal-guardado-{}-imposible",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
+        // Un fichero donde tendría que ir el directorio: crear el directorio falla y no hay forma de
+        // escribir.
+        let estorbo = base.join("config");
+        std::fs::write(&estorbo, "no soy un directorio").expect("plantar el estorbo");
+        let ruta = sesion::ruta_de(Some(estorbo.as_os_str()), None).expect("es absoluta");
+
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.persistencia = sesion::Persistencia::en(Some(ruta));
+
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+        ventana.guardar_si_toca();
+
+        assert_eq!(
+            ventana.guardado.escrituras(),
+            0,
+            "se contó como escritura algo que no llegó al disco"
+        );
+        assert!(
+            ventana.ultimo_escrito.is_none(),
+            "se dio por escrito lo que falló, así que el cambio siguiente no lo reintentaría"
+        );
+
+        // Y el cambio siguiente vuelve a intentarlo.
+        ventana.activa_mut().mover_la_frontera(0, 0.6);
+        ventana.mirar_si_la_disposicion_cambio();
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+        ventana.guardar_si_toca();
+        assert_eq!(
+            ventana.guardado.intentos(),
+            2,
+            "el cambio siguiente no volvió a intentarlo: sin esto, el fallo de las diez se quedaría sin \
+             reintentar para siempre"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn una_sesion_que_no_pudo_restaurar_no_pisa_lo_guardado() {
+        // **El caso de pérdida de datos que destapó la revisión, y es el peor del hito.** Si la aplicación
+        // lee bien el fichero y **no puede abrirlo** —un descriptor agotado, un pseudoterminal que el
+        // sistema no concede—, en pantalla queda una ventana de fábrica. Con el guardado automático, el
+        // primer cambio del usuario la escribiría **encima de sus veinte consolas**, y no habría vuelta:
+        // antes de este hito el fichero sobrevivía a un arranque fallido y el siguiente lo recuperaba.
+        let (mut ventana, base, ruta) = ventana_que_guarda("no-se-pudo-restaurar");
+        // Lo que había guardado, escrito antes: es lo que no se puede perder.
+        let antes = sesion::escribir(&ventana.describir()).expect("se describe");
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::write(&ruta, &antes).expect("escribir lo que había");
+
+        ventana
+            .persistencia
+            .no_pisar_porque("no se pudo abrir la disposición que había guardada");
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+        ventana.guardar_si_toca();
+
+        assert_eq!(
+            std::fs::read_to_string(&ruta).expect("sigue estando"),
+            antes,
+            "una sesión que no pudo restaurar pisó la disposición que no supo abrir"
+        );
+        assert_eq!(ventana.guardado.escrituras(), 0);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn al_cerrar_la_ventana_se_escribe_lo_que_quedaba_pendiente() {
+        // **Cerrar la ventana a mano no es morir**, y es el único final en el que el medio segundo que el
+        // retardo acepta perder se puede no perder. Sin esto, colocar algo y cerrar en el acto tira el
+        // cambio, que es justo el gesto de quien acaba de dejar la ventana como la quiere.
+        let (mut ventana, base, ruta) = ventana_que_guarda("al-cerrar");
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        assert!(!ruta.exists(), "se escribió antes de tiempo");
+
+        // El plazo NO ha vencido: es lo que hace que esta prueba distinga vaciar de esperar.
+        ventana.guardar_ahora();
+
+        let leido = sesion::leer(&ruta).expect("al cerrar se escribió lo pendiente");
+        assert_eq!(leido.pestañas(), ventana.describir().pestañas.as_slice());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn antes_de_que_venza_el_plazo_no_se_escribe_nada() {
+        // **El plazo en sí no lo ataba ninguna prueba, y lo destapó una revisión.** Las otras lo ponen en el
+        // pasado para probar qué pasa al vencer; borrando la comprobación del reloj, la ventana escribiría
+        // **sesenta veces por segundo** durante un arrastre y la suite seguía en verde.
+        let (mut ventana, base, ruta) = ventana_que_guarda("aun-no");
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+
+        ventana.guardar_si_toca();
+
+        assert_eq!(
+            ventana.guardado.escrituras(),
+            0,
+            "se escribió antes de que venciera el plazo"
+        );
+        assert!(!ruta.exists(), "el fichero apareció antes de tiempo");
+        assert!(
+            ventana.pendiente_de_guardar.is_some(),
+            "el plazo se consumió sin haber vencido, así que no volverá a intentarlo"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn el_plazo_del_guardado_despierta_a_la_ventana() {
+        // **El ángulo que no tenía prueba**, y sin él la ventana no guardaría nada estando tapada: la mitad
+        // lógica es la única que corre entonces, y empieza poniendo el plazo al máximo. Borrando la petición
+        // de repintado, la suite seguía verde y el guardado se quedaría esperando a que alguien moviera el
+        // ratón.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let limpio = egui::Context::default();
+        for _ in 0..4 {
+            let _ = limpio.run_logic(&egui::RawInput::default(), |_| {});
+        }
+        assert!(
+            !limpio.has_requested_repaint(),
+            "el contexto no llega a estar en reposo, causas: {:?}",
+            limpio.repaint_causes()
+        );
+
+        // Sin plazo puesto, la ventana no tiene por qué despertarse.
+        ventana.poner_el_despertador(&limpio);
+        assert!(
+            !limpio.has_requested_repaint(),
+            "la ventana se despierta sin tener nada que guardar, causas: {:?}",
+            limpio.repaint_causes()
+        );
+
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        ventana.poner_el_despertador(&limpio);
+
+        assert!(
+            limpio.has_requested_repaint(),
+            "con un cambio sin guardar, la ventana no programa despertarse"
+        );
+    }
+
+    #[test]
+    fn una_ventana_recien_abierta_no_tiene_nada_que_guardar() {
+        // **Sobre el camino de producción y no sobre el ayudante**, que es lo que pedía la revisión: el
+        // ayudante de pruebas duplica la línea que siembra el espejo, así que borrarla del constructor de
+        // verdad dejaba la suite en verde — y **toda sesión escribiría el fichero medio segundo después de
+        // abrir**, sin que nadie hubiera colocado nada.
+        let ctx = egui::Context::default();
+        let mut ventana = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::DeFabrica {
+                pestañas: 1,
+                disposicion: Disposicion::DE_SIEMPRE,
+            },
+            "cat",
+            None,
+            sesion::Persistencia::en(None),
+        )
+        .expect("de fábrica se abre");
+
+        ventana.mirar_si_la_disposicion_cambio();
+
+        assert_eq!(
+            ventana.pendiente_de_guardar, None,
+            "una ventana recién abierta arma un plazo sin que nadie haya tocado nada"
+        );
+    }
+
+    #[test]
+    fn el_tramo_de_la_escritura_se_descuenta_del_resto_del_fotograma() {
+        // **El hueco que una auditoría de la medida destapó, y era el asimétrico exacto**: el tramo del
+        // espejo tenía prueba de que se descuenta y el de la escritura no, así que borrar su línea de la
+        // resta dejaba la suite en verde **y la fila del informe seguía diciendo que estaba descontado**.
+        // El camino más caro del hito —copiar, validar, serializar, escribir y renombrar— se publicaría como
+        // coste del framework.
+        let (mut ventana, base, _) = ventana_que_guarda("descuento");
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+
+        ventana.guardar_si_toca();
+
+        let apartado = ventana.cronometrado_aparte;
+        assert!(
+            !apartado.is_zero(),
+            "escribir no dejó nada apartado, así que no hay nada que restar"
+        );
+        // Y ahora que el fotograma se cierre y lo descuente de verdad.
+        let coste = std::time::Duration::from_millis(50);
+        ventana.activa_mut().divisiones_mut()[0]
+            .medida
+            .anotar_vuelta(medida::Tramos::de_una_vuelta(
+                Some(Instant::now()),
+                Instant::now(),
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+            ));
+        let espejo = ventana.espejo_del_fotograma;
+
+        ventana.cerrar_fotograma(coste);
+
+        assert_eq!(
+            ventana.resto_del_fotograma.media(),
+            coste - apartado - espejo,
+            "lo que costó escribir no se descontó del resto"
+        );
+        assert!(
+            ventana.guardado.escrituras() == 1,
+            "la fila del informe no publica la escritura que se acaba de hacer"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn lo_que_cuesta_decidir_que_no_hay_nada_que_guardar_tambien_se_declara() {
+        // **El otro hueco de la misma auditoría.** Cuando el plazo vence y resulta que no hay nada nuevo,
+        // copiar el documento y compararlo a fondo **es todo el coste** — y ocurre dos veces por segundo
+        // mientras se arrastra. Sin declararlo, se publica como coste del framework.
+        let (mut ventana, base, _) = ventana_que_guarda("sin-nada-nuevo");
+        ventana.activa_mut().mover_la_frontera(0, 0.25);
+        ventana.mirar_si_la_disposicion_cambio();
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+        ventana.guardar_si_toca();
+        // Ya está escrito; el plazo vuelve a vencer sin que nada haya cambiado.
+        ventana.espejo_del_fotograma = std::time::Duration::ZERO;
+        ventana.pendiente_de_guardar = Some(Instant::now() - RETARDO_AL_GUARDAR);
+
+        ventana.guardar_si_toca();
+
+        assert!(
+            !ventana.espejo_del_fotograma.is_zero(),
+            "comparar para decidir que no hay nada que guardar se quedó sin declarar"
+        );
+        assert_eq!(
+            ventana.guardado.escrituras(),
+            1,
+            "se contó como escritura un plazo en el que no se escribió nada"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn el_tramo_del_espejo_se_descuenta_del_resto_del_fotograma() {
+        // **La regla dura del proyecto**: lo que no se declara se publica como coste del framework, que es
+        // la cifra con la que se juzga a egui. Comparar el espejo se paga en **todos** los fotogramas, así
+        // que sin descontarlo el residuo lo absorbería entero.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let espejo = std::time::Duration::from_millis(3);
+        let coste = std::time::Duration::from_millis(10);
+        ventana.espejo_del_fotograma = espejo;
+        // Un tramo cualquiera de una consola, o el cierre no anota ningún resto.
+        ventana.activa_mut().divisiones_mut()[0]
+            .medida
+            .anotar_vuelta(medida::Tramos::de_una_vuelta(
+                Some(Instant::now()),
+                Instant::now(),
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+            ));
+
+        ventana.cerrar_fotograma(coste);
+
+        assert_eq!(
+            ventana.resto_del_fotograma.media(),
+            coste - espejo,
+            "el tramo del espejo no se descontó del resto"
+        );
+        assert!(
+            ventana.guardado.hay_algo(),
+            "el tramo del espejo no tiene fila en el informe"
+        );
+    }
+
     #[test]
     fn la_ventana_abre_con_la_disposicion_guardada() {
         // **La prueba del hito entero visto desde fuera**: abrir con un fichero delante devuelve las
@@ -16554,6 +17186,7 @@ mod tests {
             ConQueAbrir::Restaurada(guardado_de_dos_pestañas()),
             "cat",
             None,
+            sesion::Persistencia::en(None),
         )
         .expect("la disposición guardada se abre");
 
@@ -16593,8 +17226,14 @@ mod tests {
         })
         .expect("un cero es un documento válido: el formato no mira el ancho");
 
-        let ventana = Ventana::abriendo(&ctx, ConQueAbrir::Restaurada(guardado), "cat", None)
-            .expect("la disposición guardada se abre");
+        let ventana = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::Restaurada(guardado),
+            "cat",
+            None,
+            sesion::Persistencia::en(None),
+        )
+        .expect("la disposición guardada se abre");
 
         let restaurada = ventana.pestañas[0].divisiones();
         assert_eq!(
@@ -16617,6 +17256,7 @@ mod tests {
             ConQueAbrir::Restaurada(guardado_de_dos_pestañas()),
             "cat",
             None,
+            sesion::Persistencia::en(None),
         )
         .expect("la disposición guardada se abre");
 
@@ -16636,6 +17276,7 @@ mod tests {
             },
             "cat",
             None,
+            sesion::Persistencia::en(None),
         )
         .expect("de fábrica se abre");
 

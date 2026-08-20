@@ -572,6 +572,20 @@ pub(crate) enum Fallo {
     Escribiendo(std::io::Error),
     /// No se pudo renombrar el temporal encima del destino. **El destino se queda como estaba.**
     Renombrando(std::io::Error),
+    /// Esta sesión **no debe pisar** lo que hay en disco, y trae por qué.
+    ///
+    /// **Existe porque no todas las razones para no escribir son del fichero.** Dos, hoy: que la aplicación
+    /// **no pudiera abrir** la disposición guardada —entonces lo que hay en pantalla es una ventana de
+    /// fábrica, y escribirla se llevaría por delante la del usuario **para siempre**— y que la sesión la
+    /// haya pedido una tanda de medida, que abre lo que la tanda diga y no lo que el usuario dejó.
+    NoSePisa(&'static str),
+    /// Lo que hay en pantalla **no cabe en el formato**: hoy, más consolas que las que se aceptan abrir
+    /// de golpe.
+    ///
+    /// **Variante propia y no compartida con otro motivo**, que es lo que el contrato de este enum exige:
+    /// el aviso se suprime **por motivo**, así que dos cosas que se arreglan de forma distinta —cerrar
+    /// consolas, y que el disco vuelva— no pueden gastar la misma ranura.
+    NoCabe,
 }
 
 impl std::fmt::Display for Fallo {
@@ -595,6 +609,8 @@ impl std::fmt::Display for Fallo {
             Self::Renombrando(fallo) => {
                 write!(f, "no se pudo poner el fichero en su sitio ({fallo})")
             }
+            Self::NoSePisa(razon) => write!(f, "no se pisa lo que hay guardado: {razon}"),
+            Self::NoCabe => write!(f, "la disposición de ahora no cabe en el formato"),
         }
     }
 }
@@ -619,6 +635,12 @@ pub struct Persistencia {
     /// puede restaurarla —no sabe su forma— y tampoco debe machacarla: tener dos versiones instaladas en
     /// la misma máquina no es raro, y el daño sería silencioso y en el sitio que más se nota.
     veto: Option<u64>,
+    /// Por qué esta sesión no debe escribir, si hay razón. Ver [`Fallo::NoSePisa`].
+    ///
+    /// **Aparte del veto de versión a propósito**: aquel trae un número y viene de lo que había en disco;
+    /// éste viene de lo que le pasó a esta sesión. Juntarlos en un campo obligaría a inventar un número
+    /// para el segundo caso.
+    no_pisar: Option<&'static str>,
     /// De qué motivos ya se avisó. Un disco lleno imprimiría una línea por cada plazo vencido, o sea
     /// dos por segundo mientras la ventana se use.
     avisados: HashSet<std::mem::Discriminant<Fallo>>,
@@ -644,9 +666,21 @@ impl Persistencia {
         Self {
             ruta,
             veto: None,
+            no_pisar: None,
             avisados: HashSet::new(),
             intentos: 0,
         }
+    }
+
+    /// Deja dicho que esta sesión **no puede pisar** lo que hay guardado, y por qué.
+    ///
+    /// **Es lo que impide la pérdida de datos que una revisión destapó.** Si la aplicación leyó bien el
+    /// fichero y **no pudo abrirlo** —un descriptor agotado, un pseudoterminal que no se concede—, lo que
+    /// queda en pantalla es una ventana de fábrica; sin esto, el primer cambio del usuario la escribiría
+    /// encima y su disposición de veinte consolas desaparecería **para siempre**, cuando antes de guardar
+    /// automáticamente el fichero sobrevivía y el arranque siguiente la recuperaba.
+    pub fn no_pisar_porque(&mut self, razon: &'static str) {
+        self.no_pisar = Some(razon);
     }
 
     /// La disposición guardada, si hay alguna que se entienda.
@@ -701,6 +735,8 @@ impl Persistencia {
         self.intentos = self.intentos.wrapping_add(1);
         let intento = if let Some(hallada) = self.veto {
             Err(Fallo::Vetado { hallada })
+        } else if let Some(razon) = self.no_pisar {
+            Err(Fallo::NoSePisa(razon))
         } else if let Some(ruta) = &self.ruta {
             guardar_en(ruta, self.intentos, &disposicion.documento)
         } else {
@@ -713,6 +749,19 @@ impl Persistencia {
                 self.avisar(fallo);
                 false
             }
+        }
+    }
+
+    /// Avisa de que lo que hay en pantalla **no se puede guardar**, una vez por sesión.
+    ///
+    /// **Existe porque el formato tiene un techo que la ventana no tiene.** No se aceptan más de
+    /// [`HOJAS_MAXIMAS`] consolas en un documento —el techo acota el `fork` del arranque, así que no puede
+    /// quitarse—, y en cambio nadie impide abrir más pestañas de las que caben ahí. Sin este aviso, quien
+    /// llegue a ese número perdería su disposición **sin ninguna señal**: se dejaría de guardar y lo notaría
+    /// al reabrir, un día después, sin causa visible.
+    pub fn avisar_de_lo_que_no_se_puede_guardar(&mut self, problema: &Problema) {
+        if self.hay_que_avisar(&Fallo::NoCabe) {
+            eprintln!("la disposición de ahora no se puede guardar: {problema}");
         }
     }
 

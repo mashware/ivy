@@ -1657,9 +1657,15 @@ y los dos se declaran:
 
 - **Comparar el espejo de la ventana con lo último escrito**, que corre **en cada pasada de interfaz y
   sobre la ventana entera**.
-- **Escribir el fichero** cuando vence el plazo. Su cronómetro abarca **desde resolver la ruta hasta que
-  el renombrado vuelve** —o hasta que el temporal queda borrado, si falló—, no solo la llamada de
-  escribir.
+- **Escribir el fichero** cuando vence el plazo. Su cronómetro abarca **desde copiar la disposición hasta
+  que el renombrado vuelve** —o hasta que el temporal queda borrado, si falló—: la copia, la validación y
+  la serialización van dentro, no solo la llamada de escribir. **Se precisó al implementar**, porque el
+  texto anterior decía «desde resolver la ruta» y con cien consolas la copia y el recorrido de validación
+  pueden dominar la muestra: un tramo mal delimitado se acaba atribuyendo al disco.
+- Y el reparto entre los dos: **lo que no llega a tocar el disco no es una escritura**. Un plazo que vence
+  sin nada nuevo que guardar, y una disposición que el formato no admite, se cuentan en el tramo del
+  espejo, que es lo que son —comparar y validar—. Así el tramo de la escritura describe **solo** lo que
+  cuesta escribir, y el informe puede publicar «tantas escrituras de tantos intentos» sin mezclar.
 
 **Y cada uno necesita DOS cosas, no una, porque restar y publicar son mecanismos distintos.** El resto
 del fotograma se calcula restándole a lo que costó entero **lo que los tramos declararon**, y lo que
@@ -1703,7 +1709,13 @@ diga otra cosa.
   informe declare **cuántas consolas se restauraron** y lo que costó restaurarlas. Sin ella, «el coste de
   bifurcar N consolas ya está pagado» es una afirmación que **ninguna corrida sostiene**.
 
-**Cinco límites aceptados, escritos porque ninguno se mitiga y todos se descubren usándolo:**
+**Seis límites aceptados, escritos porque ninguno se mitiga y todos se descubren usándolo:**
+
+- **Un fallo de escritura solo se reintenta con el cambio siguiente, no con el tiempo.** Es la cara buena
+  de las dos referencias —lo que reintenta es el cambio, así que la ventana no se queda despierta
+  reintentando ni hace falta inventar una espera—, y su precio: si el disco falla a las diez y el usuario
+  **no vuelve a mover nada**, la colocación de ese día no llega nunca al fichero. Lo dice una línea por la
+  salida de error, que quien abre desde un icono no ve.
 
 - **Dos instancias abiertas se machacan la disposición**: la última que guarde se lleva el fichero. Es
   consecuencia directa de que la disposición sea una y global, y ponerle un cerrojo entre procesos

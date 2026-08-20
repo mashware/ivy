@@ -487,6 +487,26 @@ demasiado estrecha para que la operación se acepte, así que esta tanda no mide
     echo "gestos durante la tanda: $INYECTADOS inyectados, $CON_EFECTO efectos ($QUE_GESTO)" >&2
 fi
 
+# **Que el guardado de la disposición llegara a ocurrir, en las tandas que lo ejercitan.** Es el mismo
+# engaño que el testigo evita con los paneles y con los gestos: si nadie escribió, el informe declara el
+# coste de escribir en **cero** y la tanda se lee como «guardar no cuesta nada» en vez de como «no se
+# guardó». Pasa si el plazo no vence antes de cerrar la ventana, si la disposición vuelve a la de partida
+# —el ciclo del gesto lo hace con dos consolas— o si el directorio de la corrida no se puede escribir.
+#
+# **Solo se exige donde la tanda mueve la disposición**, que son las que inyectan gestos: en una tanda
+# quieta no hay nada que guardar y exigirlo invalidaría corridas correctas.
+if [ "$ARRASTRES" != 0 ]; then
+    ESCRITURAS=$(sed -n 's/^escribir la disposición en disco *(\([0-9]*\) escrituras de [0-9]* intentos)$/\1/p' "$INFORME" | head -1)
+    if [ -z "$ESCRITURAS" ]; then
+        invalidar "se pidieron arrastres y el informe no declara ninguna escritura de la disposición"
+    fi
+    if [ "$ESCRITURAS" = 0 ]; then
+        invalidar "se movió la disposición y no se guardó ni una vez: el coste de escribir se publicaría \
+como cero, que se lee como «guardar no cuesta nada»"
+    fi
+    echo "escrituras de la disposición durante la tanda: $ESCRITURAS" >&2
+fi
+
 # **Que las consolas fueran las que se pidieron.** Con la variable de la disposición sin llegar, la
 # aplicación abre dos columnas y el informe sale con forma de tanda de dos divisiones bajo etiqueta de
 # cuatro. Se cuentan las líneas de división, que es lo que el informe publica de verdad.

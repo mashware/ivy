@@ -468,6 +468,106 @@ impl RestoDelFotograma {
     }
 }
 
+/// Los dos tramos que **la ventana** paga por guardar su disposición: mirar si cambió, y escribirla.
+///
+/// **Vive aquí y no en la división por lo mismo que el resto del fotograma**: son de la ventana entera, no
+/// de una consola, así que no tienen el vehículo que llevan los tramos de una división.
+///
+/// **Y hacen falta las DOS cosas, que es el hallazgo que costó una revisión entera.** Una serie **solo
+/// guarda muestras para imprimirlas**: no descuenta nada. El resto del fotograma se calcula restándole al
+/// coste todo lo que se cronometró, y a ese saco hay que entrar aparte. Con serie y sin resta, estos dos
+/// tramos se publicarían con su fila **y a la vez** dentro de la cifra que D3 usa para juzgar al framework.
+#[derive(Default)]
+pub struct Guardado {
+    espejo: Serie,
+    escritura: Serie,
+    /// Cuántas veces se ha escrito el fichero de disposición.
+    ///
+    /// **Lo publica el informe y no lo puede saber el guion**, que es la misma partición que el proyecto ya
+    /// usa con los gestos inyectados: este número vive dentro del proceso. El guion invalida la corrida si es
+    /// cero, porque una tanda que dice medir el guardado y no guarda nada publicaría el coste de un camino
+    /// que no se recorrió.
+    escrituras: usize,
+}
+
+impl Guardado {
+    /// Anota lo que costó comparar el espejo en **un fotograma entero**.
+    ///
+    /// Quien llama acumula por pasada y anota **una vez al cerrar**: egui repite la pasada de interfaz, y
+    /// anotar por pasada haría que la media describiera «por pasada» en vez de «por fotograma» — el inverso
+    /// exacto del sesgo que este instrumento ya se comió una vez.
+    pub fn anotar_espejo(&mut self, cuanto: Duration) {
+        self.espejo.anotar(cuanto);
+    }
+
+    /// Anota lo que costó **un intento** de escritura: desde resolver la ruta hasta que el renombrado
+    /// vuelve, o hasta que el temporal queda borrado si falló.
+    ///
+    /// **El tiempo se anota siempre y la cuenta solo cuando llegó al disco**, y la distinción no es
+    /// quisquillosa: el trabajo ocurrió dentro del fotograma en los dos casos y hay que descontarlo, pero
+    /// publicar los intentos fallidos como escrituras diría que la disposición está guardada cuando no lo
+    /// está. Un disco lleno publicaría «mil escrituras» sin haber escrito ninguna.
+    pub fn anotar_escritura(&mut self, cuanto: Duration, llego_al_disco: bool) {
+        self.escritura.anotar(cuanto);
+        if llego_al_disco {
+            self.escrituras += 1;
+        }
+    }
+
+    /// Cuántas veces se escribió **de verdad**, para que el informe lo declare y el guion pueda invalidar
+    /// una corrida que dice medir el guardado y no guardó nada.
+    pub fn escrituras(&self) -> usize {
+        self.escrituras
+    }
+
+    /// Cuántas veces se **intentó** escribir en el disco, para pruebas.
+    ///
+    /// Existe porque el contador de arriba solo cuenta las que llegaron, así que sin esto una prueba no
+    /// puede distinguir «se reintentó y volvió a fallar» de «no se reintentó» — que es exactamente el hueco
+    /// que una revisión encontró en la prueba del reintento.
+    #[cfg(test)]
+    pub fn intentos(&self) -> usize {
+        self.escritura.total
+    }
+
+    /// Lo que llevan anotado los dos tramos, **solo para pruebas**: es lo que permite afirmar que el camino
+    /// real los declara, y no solo que la anotación funciona cuando se la llama a mano.
+    #[cfg(test)]
+    pub fn hay_algo(&self) -> bool {
+        self.espejo.hay() || self.escritura.hay()
+    }
+
+    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if self.espejo.hay() {
+            writeln!(
+                a,
+                "\nmirar si la disposición cambió — de la ventana   ({} fotogramas con pasada)",
+                self.espejo.total
+            )?;
+            writeln!(a, "  {}", self.espejo)?;
+            writeln!(
+                a,
+                "  recorre el árbol de todas las pestañas y construye su espejo para compararlo: se paga en\n                   todos los fotogramas que pintan, y por eso está descontado del resto. Incluye\n                   también comparar contra lo último escrito al vencer el plazo cuando no hay nada\n                   nuevo que guardar: es el mismo trabajo"
+            )?;
+        }
+
+        if self.escritura.hay() {
+            writeln!(
+                a,
+                "\nescribir la disposición en disco   ({} escrituras de {} intentos)",
+                self.escrituras, self.escritura.total
+            )?;
+            writeln!(a, "  {}", self.escritura)?;
+            writeln!(
+                a,
+                "  abarca copiar la disposición, VALIDARLA, serializarla, resolver la ruta, crear el directorio\n                   la primera vez, escribir el temporal y renombrarlo encima; y si algo falla, borrar el\n                   temporal y decir la línea del fallo. Solo ocurre cuando vence el plazo, no en cada\n                   fotograma: un intento que no llega al disco es casi todo validación"
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
 /// Lo grande que es la ventana, en la unidad en la que se le pide que abra.
 ///
 /// **Dos campos con nombre y no una pareja de números**, por lo mismo que los tramos de la tabla llevan
