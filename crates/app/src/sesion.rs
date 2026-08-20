@@ -606,6 +606,11 @@ impl std::fmt::Display for Fallo {
 /// de una versión más nueva, los motivos de los que ya se ha avisado, y la cuenta de intentos. Con esos
 /// datos en los parámetros de una función libre, quien llama tendría que llevarlos —y eso es exactamente
 /// la clase de invariante que este módulo se niega a dejar en la memoria de quien escribe.
+///
+/// **Y de ahí la regla para quien la use: la que carga al arrancar y la que guarda después tienen que ser
+/// LA MISMA.** Crear una segunda a mitad de sesión **pierde el veto**, y perder el veto significa
+/// sobrescribir la disposición de una versión más nueva, que es el daño exacto que la versión del formato
+/// existe para evitar.
 pub struct Persistencia {
     ruta: Option<PathBuf>,
     /// La versión hallada en disco que impide sobrescribirlo.

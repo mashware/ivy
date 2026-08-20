@@ -1200,9 +1200,46 @@ fn disposicion_de(valor: Option<&str>) -> Disposicion {
     pedida.unwrap_or(Disposicion::DE_SIEMPRE)
 }
 
-/// Lo que la variable de entorno dice, ya resuelto.
-fn disposicion_al_arrancar() -> Disposicion {
-    disposicion_de(std::env::var(VARIABLE_DE_LAS_DIVISIONES).ok().as_deref())
+/// Con qué abre la ventana: lo que la medida pide, o lo que se guardó, o lo de fábrica.
+enum ConQueAbrir {
+    /// Tantas pestañas de tantas consolas, que es lo que hace la aplicación desde F1.
+    DeFabrica {
+        pestañas: usize,
+        disposicion: Disposicion,
+    },
+    /// La disposición que quedó guardada la última vez.
+    Restaurada(sesion::Valido),
+}
+
+/// La decisión, con los valores dados: **lo que una tanda de medida pide gana a lo guardado**.
+///
+/// **La precedencia va escrita porque sin ella una corrida mide una disposición que nadie le pidió.** Las
+/// tandas piden pestañas y divisiones por variable de entorno, y el informe declara lo que se pidió para que
+/// el guion invalide la corrida si no cuadra; con el fichero ganando, una tanda de dos consolas abriría las
+/// nueve que el usuario dejó colocadas y el testigo no vería nada raro.
+///
+/// **Basta con que la variable ESTÉ, aunque no se entienda.** Una tanda que la escribe mal ha pedido algo, y
+/// lo que la propia corrida hace con un valor ilegible ya está decidido —se queda el de siempre— y su guion
+/// lo caza comparando con lo que el informe declara. Mirar si además se entiende sería una segunda regla que
+/// no protege de nada.
+fn con_que_abrir(
+    pestañas: Option<&str>,
+    divisiones: Option<&str>,
+    guardada: Option<sesion::Valido>,
+) -> ConQueAbrir {
+    let de_fabrica = ConQueAbrir::DeFabrica {
+        pestañas: cuantas_pestañas(pestañas),
+        disposicion: disposicion_de(divisiones),
+    };
+
+    if pestañas.is_some() || divisiones.is_some() {
+        return de_fabrica;
+    }
+
+    match guardada {
+        Some(valido) => ConQueAbrir::Restaurada(valido),
+        None => de_fabrica,
+    }
 }
 
 /// Con cuántas pestañas abre la ventana, a partir de lo que dijera la variable.
@@ -1217,17 +1254,12 @@ fn disposicion_al_arrancar() -> Disposicion {
 /// es comportamiento indefinido, no solo la de esta clave. Y en esta suite las hay a mansalva —
 /// `Division::nueva` lee `SHELL`, y `portable_pty` recorre `std::env::vars_os()` al construir **cada**
 /// consola—, con las pruebas corriendo en hilos a la vez. La única línea que queda sin cubrir es la de
-/// [`pestañas_al_arrancar`], por lo mismo que las de `on_exit`.
+/// [`arrancar`], por lo mismo que las de `on_exit`.
 fn cuantas_pestañas(valor: Option<&str>) -> usize {
     valor
         .and_then(|valor| valor.parse().ok())
         .unwrap_or(1)
         .max(1)
-}
-
-/// Lo que la variable de entorno dice, ya resuelto.
-fn pestañas_al_arrancar() -> usize {
-    cuantas_pestañas(std::env::var(VARIABLE_DE_LAS_PESTAÑAS).ok().as_deref())
 }
 
 /// Con qué tamaño abrir la ventana, a partir de lo que dijera la variable.
@@ -1341,16 +1373,30 @@ fn ficha(barra: egui::Rect, cual: usize, cuantas: usize) -> egui::Rect {
 /// **Aquí se lee el entorno, y en ningún otro sitio.** [`Ventana::con_pestañas`] recibe el número ya
 /// resuelto para que ninguna prueba dependa de lo que haya exportado la sesión que la lanza; el precio
 /// es que esta línea, como la de [`eframe::App::on_exit`], no la cubre ninguna prueba: cambiar el `1` de
-/// [`pestañas_al_arrancar`] por un fijo dejaría la suite entera en verde y la medida sin su puerta.
+/// [`con_que_abrir`] por un fijo dejaría la suite entera en verde y la medida sin su puerta.
 /// Quien mide se entera en cuanto abre la ventana y ve una sola pestaña.
 pub fn arrancar() -> eframe::Result {
-    let cuantas = pestañas_al_arrancar();
+    // **El fichero se lee AQUÍ y no dentro del primer fotograma**, y es una decisión: leer del disco
+    // dentro del camino que se mide metería una espera de disco en el fotograma a cambio de nada. Lo que se
+    // lee entra por el `move` del cierre de abajo, ya interpretado y ya validado.
+    //
+    // **Y aquí se suelta lo que leyó, que es deuda declarada y no descuido.** El tipo dice en su doc que la
+    // que carga y la que guarda tienen que ser la misma, porque el veto de una versión más nueva vive ahí;
+    // hoy nadie guarda, así que conservarla sería un campo que nadie lee — código muerto, que en esta caja
+    // no se tapa con un `allow`. **Quien añada el guardado tiene que conservarla**, y si no lo hace, un
+    // binario viejo se lleva por delante la disposición del nuevo.
+    let guardada = sesion::Persistencia::del_entorno().cargar();
+    let con_que = con_que_abrir(
+        std::env::var(VARIABLE_DE_LAS_PESTAÑAS).ok().as_deref(),
+        std::env::var(VARIABLE_DE_LAS_DIVISIONES).ok().as_deref(),
+        guardada,
+    );
 
     let mut opciones = eframe::NativeOptions::default();
     // **Se pide el tamaño solo si alguien lo pidió**, y por eso no hay un tamaño por defecto aquí: sin
     // la variable, `NativeOptions::default()` no lleva `inner_size` y el escritorio decide, que es el
-    // comportamiento de siempre. Ver [`VARIABLE_DEL_TAMAÑO`].
-    let disposicion = disposicion_al_arrancar();
+    // comportamiento de siempre. Restaurar **no toca esto**: el tamaño de la ventana no se guarda, porque
+    // dejárselo al escritorio es lo que hace comparables las medidas. Ver [`VARIABLE_DEL_TAMAÑO`].
     let pedido = tamaño_al_arrancar();
     let arrastres = arrastres_al_arrancar();
     if let Some(tamaño) = pedido {
@@ -1361,7 +1407,8 @@ pub fn arrancar() -> eframe::Result {
         NOMBRE,
         opciones,
         Box::new(move |cc| {
-            let mut ventana = Ventana::con_pestañas(&cc.egui_ctx, cuantas, disposicion, pedido)?;
+            let mut ventana =
+                Ventana::abriendo(&cc.egui_ctx, con_que, &shell_del_usuario(), pedido)?;
             // Solo una tanda de medida los pide, así que se ponen aquí y no en el constructor. La celda se
             // mide ya: el gesto del panel cuenta su recorrido en celdas y su enganche corre antes de la
             // pasada que mide la fuente.
@@ -1369,6 +1416,20 @@ pub fn arrancar() -> eframe::Result {
             Ok(Box::new(ventana))
         }),
     )
+}
+
+/// El programa que abre una consola: el shell de quien lanzó la aplicación.
+///
+/// **Es lo que hace un terminal**: sin esto se abre un shell sin prompt ni historial, y este proyecto
+/// existe para mirar lo que sale en pantalla. Sigue sin ser una entrada ajena —es la sesión del propio
+/// usuario—, pero el día en que el programa venga de **configuración** o de un fichero de fuera, esta línea
+/// pasa a ser superficie sensible y hay que revisarla como tal. Por eso el fichero de disposición **no
+/// guarda ningún campo de texto**: si el tipo no lo tiene, no hay nada que conectar aquí.
+///
+/// **Está en una función propia desde que restaurar existe**, y no por gusto: restaurar abre N consolas de
+/// una vez, y leer el entorno dentro de cada una lo leería ciento veintiocho veces en el peor caso.
+fn shell_del_usuario() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| SHELL_DE_RESPALDO.to_owned())
 }
 
 /// Una consola y todo lo que hace falta para sostenerla.
@@ -1501,14 +1562,7 @@ fn identidad_de(panel: Option<&PanelDir>) -> [(&'static str, Option<&std::ffi::O
 impl Division {
     /// Lanza el shell de esta división y la deja lista para el primer fotograma.
     fn nueva(ctx: &egui::Context, nombre: usize) -> term_core::Result<Self> {
-        // El shell sale del entorno de quien lanza la aplicación, que es lo que hace un terminal:
-        // sin esto se abre un shell sin prompt ni historial, y este hito existe para mirar lo que
-        // sale en pantalla. Sigue sin ser una entrada ajena —es la sesión del propio usuario—,
-        // pero el día en que el programa venga de configuración o de un `panel.json` de fuera,
-        // esta línea pasa a ser superficie sensible y hay que revisarla como tal.
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| SHELL_DE_RESPALDO.to_owned());
-
-        Self::lanzando(ctx, &shell, nombre)
+        Self::lanzando(ctx, &shell_del_usuario(), nombre)
     }
 
     /// Lo mismo, con el programa dicho a mano.
@@ -3018,6 +3072,58 @@ impl Ventana {
         let pestañas: Vec<Pestaña> = (0..cuantas)
             .map(|nombre| Pestaña::nueva(ctx, nombre, nombre * por_pestaña, &disposicion))
             .collect::<term_core::Result<_>>()?;
+
+        Self::con_estas_pestañas(ctx, pestañas, tamaño)
+    }
+
+    /// La ventana que abre la aplicación: de fábrica, o con lo que quedó guardado.
+    ///
+    /// **Y si restaurar falla, se abre de fábrica en vez de no abrir.** Es la tolerancia por documento de
+    /// este formato llevada hasta el final: lo que puede fallar aquí es abrir N consolas de golpe —un
+    /// descriptor, un proceso—, y ante eso «la ventana de siempre» es una respuesta mucho mejor que una
+    /// aplicación que no arranca. La atomicidad la da el escalón de abajo: si una hoja no se puede abrir,
+    /// **no se instala ninguna**, así que aquí nunca llega media disposición.
+    fn abriendo(
+        ctx: &egui::Context,
+        con_que: ConQueAbrir,
+        programa: &str,
+        tamaño: Option<egui::Vec2>,
+    ) -> term_core::Result<Self> {
+        // **El programa se recibe, y lo usa la rama que restaura.** La de fábrica abre el shell del usuario
+        // como lo ha hecho siempre, igual que las tres decenas de pruebas que la llaman: pasarlo hasta ahí
+        // sería tocar la firma de un constructor con treinta y tres llamadas para el único camino que este
+        // PR no estrena. Se dice porque el comentario anterior afirmaba que **ninguna** rama leía el
+        // entorno, y era falso justo para la de fábrica — lo cazaron las dos revisiones.
+        let guardada = match con_que {
+            ConQueAbrir::DeFabrica {
+                pestañas,
+                disposicion,
+            } => return Self::con_pestañas(ctx, pestañas, disposicion, tamaño),
+            ConQueAbrir::Restaurada(guardada) => guardada,
+        };
+
+        let cuantas = guardada.hojas();
+        match Self::materializar(ctx, &guardada, programa) {
+            Ok(pestañas) => Self::con_estas_pestañas(ctx, pestañas, tamaño),
+            Err(fallo) => {
+                eprintln!(
+                    "no se pudo abrir la disposición guardada de {cuantas} consolas ({fallo}); se abre de fábrica"
+                );
+                Self::con_pestañas(ctx, 1, Disposicion::DE_SIEMPRE, tamaño)
+            }
+        }
+    }
+
+    /// El resto de la ventana, que es el mismo se haya restaurado o no.
+    ///
+    /// **Existe para que abrir de fábrica y restaurar compartan todo lo que no es la lista de pestañas.**
+    /// Los contadores, el vigilante y los cronómetros salen **de la lista construida** y no de lo que nadie
+    /// pidiera: con dos caminos armando este estado por su cuenta, el segundo se olvidaría de uno.
+    fn con_estas_pestañas(
+        ctx: &egui::Context,
+        pestañas: Vec<Pestaña>,
+        tamaño: Option<egui::Vec2>,
+    ) -> term_core::Result<Self> {
         let siguiente_nombre = pestañas.len();
         // **Contadas de la lista y no del parámetro**, por lo mismo que se explica abajo para el nombre
         // de pestaña: son dos fuentes para el mismo dato y con dos se puede coger la que no toca.
@@ -3056,7 +3162,8 @@ impl Ventana {
             // el parámetro equivocado hace que la siguiente pestaña que se abra **se llame igual que
             // una que ya existe**, y el informe publique dos bloques de números con la misma etiqueta.
             // Comprobado mutándolo, y no lo caza ninguna prueba: este constructor lanza consolas de
-            // verdad leyendo `SHELL`, así que solo se ejercita al arrancar la aplicación. Derivarlo de
+            // verdad leyendo `SHELL`. Desde que restaurar existe **sí lo caza una prueba**: la que abre con
+            // dos pestañas guardadas afirma los dos contadores. Derivarlo de
             // la lista es lo que hace que no haya nada que confundir.
             siguiente_nombre,
             siguiente_nombre_de_division,
@@ -4454,7 +4561,7 @@ impl eframe::App for Ventana {
         // camino `cerrar_fotograma` no llega a llamarse nunca desde una prueba. Lo que sí está probado
         // es el contrato de egui del que depende la guarda, y el cierre en sí entra por
         // [`Ventana::cerrar_fotograma`], que las pruebas llaman directamente. Es la misma frontera
-        // declarada de [`Ventana::on_exit`] y [`pestañas_al_arrancar`].
+        // declarada de [`Ventana::on_exit`] y de las lecturas de entorno de [`arrancar`].
         let fotograma = ctx.cumulative_frame_nr();
         if fotograma != self.ultimo_fotograma_cerrado
             && let Some(segundos) = frame.info().cpu_usage
@@ -4756,14 +4863,16 @@ impl eframe::App for Ventana {
 // prueba que dependiera de él **no probaría este código, probaría la configuración de quien la corre**.
 // Eso último ya está escrito en `Division::lanzando`, que existe exactamente para esto.
 //
-// **Y todo este bloque va tras la bandera de pruebas, que es lo que corresponde HOY y no para siempre.**
-// Nadie lo llama en producción todavía: quien lo va a llamar es el arranque, cuando aprenda a restaurar,
-// y **ese cambio incluye quitar esta bandera**. Se pone porque es el idioma que esta caja ya usa para lo
-// que solo tocan las pruebas, y porque la alternativa era publicar como API de la caja unos tipos que no
-// lo son solo para callar un aviso — que es hornear una señal falsa en la interfaz. Un `allow` no, que
-// aquí no hay ni uno.
+// **Y este bloque ya no va tras la bandera de pruebas, que es lo que el arranque acaba de cambiar.** La
+// llevó desde que se escribió, con la razón escrita de que nadie lo llamaba en producción y de que el
+// idioma de esta caja para eso es la bandera y no un `allow`; quien lo llama ahora es `Ventana::abriendo`,
+// así que la bandera se va y el compilador vuelve a cubrir este camino en la compilación de entrega.
+//
+// **La mitad de ida sigue siendo solo de pruebas**, y hay que decirlo porque el compilador no lo dirá: las
+// conversiones son implementaciones de un rasgo, y sobre ésas no salta el aviso de código sin usar. La que
+// convierte hacia el formato la llama únicamente `describir`, que conserva su bandera hasta que alguien
+// guarde.
 
-#[cfg(test)]
 impl From<Orientacion> for sesion::Orientacion {
     fn from(orientacion: Orientacion) -> Self {
         match orientacion {
@@ -4773,7 +4882,6 @@ impl From<Orientacion> for sesion::Orientacion {
     }
 }
 
-#[cfg(test)]
 impl From<sesion::Orientacion> for Orientacion {
     fn from(orientacion: sesion::Orientacion) -> Self {
         match orientacion {
@@ -4783,9 +4891,14 @@ impl From<sesion::Orientacion> for Orientacion {
     }
 }
 
-#[cfg(test)]
 impl Nodo {
     /// Cómo se describe este nodo para poder volver a construirlo.
+    ///
+    /// **Tras la bandera de pruebas mientras nadie guarde.** La otra mitad de este puente —materializar—
+    /// ya la llama el arranque; ésta la llamará el PR que guarda, y **ese cambio incluye quitar la
+    /// bandera**. Es el idioma de esta caja para lo que solo tocan las pruebas, y la alternativa era
+    /// publicarla como API de la caja solo para callar un aviso, que es hornear una señal falsa.
+    #[cfg(test)]
     fn describir(&self) -> sesion::Nodo {
         match self {
             Self::Hoja(division) => sesion::Nodo::Hoja(sesion::Hoja {
@@ -4824,7 +4937,14 @@ impl Nodo {
             sesion::Nodo::Hoja(hoja) => {
                 let mut division = Division::lanzando(ctx, programa, *siguiente_nombre)?;
                 *siguiente_nombre += 1;
-                division.ancho_del_panel = hoja.ancho_del_panel;
+                // **El ancho se sube al suelo del arrastre, y esto lo pidió una revisión.** Un fichero
+                // puede traer un cero, y **ningún gesto puede dejarlo**: pedir menos que el suelo significa
+                // plegar, así que el arrastre nunca guarda un ancho por debajo. Un cero con `plegado` en
+                // falso deja un panel de cero puntos que **no se puede volver a agarrar** —el agarre exige
+                // ancho— y, como el único que escribe este campo es el propio arrastre, se queda así para
+                // siempre y en cada sesión. Recortando aquí, lo que vuelve del disco es siempre un estado
+                // que un gesto podría haber dejado.
+                division.ancho_del_panel = hoja.ancho_del_panel.max(panel::SUELO_AL_ARRASTRAR);
                 division.plegado = hoja.plegado;
                 Ok(Self::Hoja(division))
             }
@@ -4854,13 +4974,14 @@ impl Nodo {
     }
 }
 
-#[cfg(test)]
 impl Pestaña {
-    /// Cómo se describe esta pestaña.
+    /// Cómo se describe esta pestaña. Tras la bandera de pruebas hasta que alguien guarde, como
+    /// [`Nodo::describir`].
     ///
     /// **Ni el foco ni el nombre**: la ventana abre en la primera pestaña, y los nombres los reparte un
     /// contador de la ventana que no reutiliza ninguno — restaurar uno viejo haría que el informe le
     /// pusiera a una tabla de números el nombre de otra consola.
+    #[cfg(test)]
     fn describir(&self) -> sesion::Pestaña {
         sesion::Pestaña {
             raiz: self.raiz.describir(),
@@ -4889,9 +5010,10 @@ impl Pestaña {
     }
 }
 
-#[cfg(test)]
 impl Ventana {
-    /// Cómo se describe la disposición de esta ventana, para poder volver a encontrarla.
+    /// Cómo se describe la disposición de esta ventana, para poder volver a encontrarla. Tras la bandera de
+    /// pruebas hasta que alguien guarde, como [`Nodo::describir`].
+    #[cfg(test)]
     pub(crate) fn describir(&self) -> sesion::Documento {
         sesion::Documento {
             v: sesion::VERSION,
@@ -16379,6 +16501,177 @@ mod tests {
         nombres.sort_unstable();
         nombres.dedup();
         assert_eq!(nombres.len(), cuantas, "hay pestañas que se llaman igual");
+    }
+
+    /// Un documento válido de dos pestañas: la primera con dos consolas de anchos distintos y una plegada,
+    /// la segunda con una sola.
+    fn guardado_de_dos_pestañas() -> sesion::Valido {
+        sesion::validar(sesion::Documento {
+            v: sesion::VERSION,
+            pestañas: vec![
+                sesion::Pestaña {
+                    raiz: sesion::Nodo::Rama {
+                        orientacion: sesion::Orientacion::Columnas,
+                        hijos: vec![
+                            sesion::Hijo {
+                                peso: 3.0,
+                                nodo: sesion::Nodo::Hoja(sesion::Hoja {
+                                    ancho_del_panel: 52,
+                                    plegado: false,
+                                }),
+                            },
+                            sesion::Hijo {
+                                peso: 1.0,
+                                nodo: sesion::Nodo::Hoja(sesion::Hoja {
+                                    ancho_del_panel: 24,
+                                    plegado: true,
+                                }),
+                            },
+                        ],
+                    },
+                },
+                sesion::Pestaña {
+                    raiz: sesion::Nodo::Hoja(sesion::Hoja {
+                        ancho_del_panel: 36,
+                        plegado: false,
+                    }),
+                },
+            ],
+        })
+        .expect("el documento de prueba es válido")
+    }
+
+    #[test]
+    fn la_ventana_abre_con_la_disposicion_guardada() {
+        // **La prueba del hito entero visto desde fuera**: abrir con un fichero delante devuelve las
+        // pestañas, la forma del árbol y **el panel de cada consola**. Los tres anchos son distintos y uno
+        // está plegado a propósito: con todos iguales, una implementación que se dejara los paneles por el
+        // camino pasaría igual.
+        let ctx = egui::Context::default();
+
+        let ventana = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::Restaurada(guardado_de_dos_pestañas()),
+            "cat",
+            None,
+        )
+        .expect("la disposición guardada se abre");
+
+        assert_eq!(ventana.pestañas.len(), 2, "no volvieron las dos pestañas");
+        assert_eq!(ventana.activa, 0, "no abre en la primera pestaña");
+        let primera: Vec<(usize, bool)> = ventana.pestañas[0]
+            .divisiones()
+            .into_iter()
+            .map(|division| (division.ancho_del_panel, division.plegado))
+            .collect();
+        assert_eq!(primera, vec![(52, false), (24, true)]);
+        let segunda: Vec<(usize, bool)> = ventana.pestañas[1]
+            .divisiones()
+            .into_iter()
+            .map(|division| (division.ancho_del_panel, division.plegado))
+            .collect();
+        assert_eq!(segunda, vec![(36, false)]);
+        // Y las proporciones del árbol de la primera, que es lo que decide los anchos de las consolas.
+        assert_eq!(pesos_de_la_raiz(&ventana), vec![3.0, 1.0]);
+    }
+
+    #[test]
+    fn un_ancho_de_panel_que_ningun_gesto_puede_dejar_vuelve_agarrable() {
+        // **Un cero es lo que un fichero puede traer y un gesto no**: pedir menos que el suelo del arrastre
+        // significa **plegar**, así que el gesto nunca guarda un ancho por debajo. Restaurado tal cual, con
+        // el plegado en falso, deja un panel de cero puntos que no se puede volver a agarrar —el agarre
+        // exige ancho— y el único que escribe ese campo es el propio arrastre: se queda así para siempre.
+        let ctx = egui::Context::default();
+        let guardado = sesion::validar(sesion::Documento {
+            v: sesion::VERSION,
+            pestañas: vec![sesion::Pestaña {
+                raiz: sesion::Nodo::Hoja(sesion::Hoja {
+                    ancho_del_panel: 0,
+                    plegado: false,
+                }),
+            }],
+        })
+        .expect("un cero es un documento válido: el formato no mira el ancho");
+
+        let ventana = Ventana::abriendo(&ctx, ConQueAbrir::Restaurada(guardado), "cat", None)
+            .expect("la disposición guardada se abre");
+
+        let restaurada = ventana.pestañas[0].divisiones();
+        assert_eq!(
+            restaurada[0].ancho_del_panel,
+            panel::SUELO_AL_ARRASTRAR,
+            "el panel volvió con un ancho que no se puede agarrar"
+        );
+        assert!(!restaurada[0].plegado, "el plegado no era lo que se guardó");
+    }
+
+    #[test]
+    fn la_ventana_restaurada_arma_sus_contadores_de_lo_que_abrio() {
+        // **Los contadores salen de la lista construida y no de lo que el fichero dijera**, y esto lo ata:
+        // con tres consolas restauradas, la siguiente que se abra no puede llamarse como ninguna de ellas.
+        // Un contador que arrancara en cero le pondría a una tabla del informe el nombre de otra consola.
+        let ctx = egui::Context::default();
+
+        let ventana = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::Restaurada(guardado_de_dos_pestañas()),
+            "cat",
+            None,
+        )
+        .expect("la disposición guardada se abre");
+
+        assert_eq!(ventana.siguiente_nombre_de_division, 3);
+        assert_eq!(ventana.siguiente_nombre, 2);
+    }
+
+    #[test]
+    fn sin_nada_guardado_la_ventana_abre_de_fabrica() {
+        let ctx = egui::Context::default();
+
+        let ventana = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::DeFabrica {
+                pestañas: 1,
+                disposicion: Disposicion::DE_SIEMPRE,
+            },
+            "cat",
+            None,
+        )
+        .expect("de fábrica se abre");
+
+        assert_eq!(ventana.pestañas.len(), 1);
+        assert_eq!(ventana.pestañas[0].divisiones().len(), 2);
+    }
+
+    #[test]
+    fn lo_que_una_tanda_de_medida_pide_gana_a_lo_guardado() {
+        // **Sin esta precedencia, una corrida mide una disposición que nadie le pidió.** Y lo que decide es
+        // que la variable ESTÉ: una tanda que la escribe mal ha pedido algo, y su guion ya invalida la
+        // corrida comparando lo pedido con lo que el informe declara.
+        let restaurable = || Some(guardado_de_dos_pestañas());
+
+        assert!(matches!(
+            con_que_abrir(Some("4"), None, restaurable()),
+            ConQueAbrir::DeFabrica { pestañas: 4, .. }
+        ));
+        assert!(matches!(
+            con_que_abrir(None, Some("2x2"), restaurable()),
+            ConQueAbrir::DeFabrica { .. }
+        ));
+        assert!(matches!(
+            con_que_abrir(Some("no es un número"), None, restaurable()),
+            ConQueAbrir::DeFabrica { pestañas: 1, .. }
+        ));
+        // Y sin ninguna de las dos, manda el fichero.
+        assert!(matches!(
+            con_que_abrir(None, None, restaurable()),
+            ConQueAbrir::Restaurada(_)
+        ));
+        // Sin fichero y sin variables, lo de siempre.
+        assert!(matches!(
+            con_que_abrir(None, None, None),
+            ConQueAbrir::DeFabrica { pestañas: 1, .. }
+        ));
     }
 
     #[test]
