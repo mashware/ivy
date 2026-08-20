@@ -9,8 +9,17 @@
 //! [`crate::Nodo`] no debe cambiar lo que hay escrito en el disco de nadie; el precio es una conversión
 //! de ida y otra de vuelta, y lo que compra es que las dos formas evolucionen por separado. La única
 //! excepción, y por su razón, es el peso: ver [`Hijo::peso`].
+//!
+//! **La segunda mitad del módulo sí toca el disco**, y también sin abrir ninguna consola: dónde vive el
+//! fichero ([`ruta_de`]), cómo se lee ([`leer`]) y cómo se sustituye sin poder dejarlo a medias
+//! ([`Persistencia::guardar`]). Está aquí y no en quien arranca porque el nombre del fichero, su techo y su
+//! versión **son el formato**: quien los mirara por su cuenta los estaría escribiendo por segunda vez.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 /// Cuántas hojas se aceptan en un documento entero.
 ///
@@ -186,8 +195,37 @@ impl Valido {
 /// respuesta correcta y barata** y adivinar media disposición es peor que no restaurarla.
 ///
 /// Cada variante lleva **qué** y **dónde**, porque el único canal para decirlo es una línea.
+///
+/// **Un solo tipo para los fallos del fichero y los de la forma, y eso lo decide el molde.** El contrato
+/// del panel reúne los suyos igual —«no está», «no es un fichero», «no se entiende»— en un enum
+/// (`crates/panel-contract/src/panel.rs:121`), y por la razón que aquí vale doble: quien lee no puede
+/// hacer nada distinto con un fichero ausente y con uno corrupto salvo **abrir de fábrica**, así que
+/// partirlos en dos tipos daría dos caminos que acaban en la misma línea de aviso. El techo de bytes ya
+/// estaba en este enum antes de que hubiera fichero, que es la misma frontera.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Problema {
+    /// No hay fichero todavía. **Es el primer arranque de todos, así que no se avisa de él**: la
+    /// distinción con «hay algo y no se entiende» es justo lo que hace que el caso normal sea callado.
+    Ausente,
+    /// Hay algo con ese nombre y no es un fichero.
+    ///
+    /// **Se comprueba antes de abrir**, con los datos que hacía falta pedir de todas formas —son la
+    /// pista de reserva de [`leer`]—, así que la rama es gratis. Y lo que evita importa: una tubería con
+    /// nombre ahí **bloquearía la apertura**, y esto ocurre antes de que la ventana exista, así que no
+    /// abriría nunca.
+    ///
+    /// **Cubre el descuido, no una carrera**, igual que en el molde: pedir los datos y abrir son dos
+    /// resoluciones distintas de la misma ruta, y entre las dos cabe una sustitución. Quien pueda hacerla
+    /// es el propio usuario en su propio directorio de configuración.
+    NoEsFichero,
+    /// No se pudo abrir o leer.
+    ///
+    /// **Lleva el motivo como texto y no como el error del sistema**, para que este enum siga siendo
+    /// comparable consigo mismo: el error de entrada y salida no se puede clonar ni comparar, y las
+    /// pruebas de la tabla de fallos afirman sobre el problema entero.
+    Ilegible(String),
+    /// Se leyó, y los bytes no son texto.
+    NoEsTexto,
     /// No es JSON, o no encaja en la forma. Trae el motivo tal como lo da el intérprete, que ya nombra
     /// la clave y la posición.
     NoSeEntiende(String),
@@ -225,12 +263,16 @@ pub enum Problema {
     /// Más consolas de las que se aceptan abrir de golpe.
     DemasiadasHojas { cuantas: usize },
     /// Más bytes de los que se aceptan interpretar.
-    DemasiadoGrande { bytes: usize },
+    DemasiadoGrande { bytes: u64 },
 }
 
 impl std::fmt::Display for Problema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Ausente => write!(f, "no hay ninguna disposición guardada"),
+            Self::NoEsFichero => write!(f, "hay algo ahí que no es un fichero"),
+            Self::Ilegible(motivo) => write!(f, "no se pudo leer ({motivo})"),
+            Self::NoEsTexto => write!(f, "no es texto UTF-8"),
             Self::NoSeEntiende(motivo) => write!(f, "no se entiende: {motivo}"),
             Self::Version { hallada } => {
                 write!(
@@ -269,12 +311,38 @@ impl std::fmt::Display for Problema {
     }
 }
 
+/// Lo único que se le exige a un documento **antes** de exigirle su forma.
+///
+/// **Existe porque mirar la versión después de encajar la forma es no tener versión.** La versión sube
+/// justo con lo que un lector viejo malinterpretaría —una clave renombrada, quitada, o con otro
+/// significado—, o sea **precisamente con lo que hace fallar al intérprete de la forma**. Leyéndola
+/// después, un fichero de la versión 2 con una clave nueva no se distingue de uno nuestro estropeado, y el
+/// camino que guarda lo sobrescribe: un binario viejo llevándose por delante la disposición del nuevo, que
+/// es el daño exacto que la versión existe para evitar.
+#[derive(Deserialize)]
+struct Sonda {
+    v: u64,
+}
+
 /// Lo que dice un documento, si dice algo que se pueda construir.
 pub fn interpretar(texto: &str) -> Result<Valido, Problema> {
     // **El techo se aplica ANTES de interpretar, no después.** Interpretar reserva el árbol entero, así
     // que comprobar el tamaño al final es no tener techo: el gasto ya ocurrió.
     if texto.len() > BYTES_MAXIMOS {
-        return Err(Problema::DemasiadoGrande { bytes: texto.len() });
+        return Err(Problema::DemasiadoGrande {
+            bytes: texto.len() as u64,
+        });
+    }
+
+    // Dos pasadas del intérprete a propósito, y la primera es sobre un molde de un campo: cuesta lo que
+    // cuesta recorrer el texto una vez —una vez al arrancar— y es lo que hace que la versión mande sobre
+    // la forma en vez de al revés. Que `v` falte o no sea un número entra por aquí como «no se entiende»,
+    // que es lo que corresponde: un fichero sin versión no es de una versión que no conozcamos, es un
+    // fichero nuestro estropeado, y se sobrescribe.
+    let sonda: Sonda =
+        serde_json::from_str(texto).map_err(|fallo| Problema::NoSeEntiende(fallo.to_string()))?;
+    if sonda.v != VERSION {
+        return Err(Problema::Version { hallada: sonda.v });
     }
 
     let documento: Documento =
@@ -371,6 +439,406 @@ fn revisar(nodo: &Nodo, de_fuera: Option<Orientacion>, pestaña: usize) -> Resul
     }
 
     Ok(hojas)
+}
+
+// ── El fichero: dónde vive, cómo se lee y cómo se sustituye ─────────────────────────────────────
+
+/// El directorio propio dentro del de configuración del usuario.
+pub const DIRECTORIO: &str = "agent-terminal";
+
+/// El nombre del fichero, **fijo**.
+///
+/// Que no dependa de nada es lo que hace que la disposición sea una, global, como decidió el ticket. Y
+/// es también de dónde sale el límite aceptado: dos instancias abiertas escriben el mismo destino y **la
+/// última que guarde se lo lleva**.
+pub const FICHERO: &str = "disposicion.json";
+
+/// Dónde vive la disposición, leyendo el entorno.
+///
+/// **La envoltura de una línea, y el trabajo en [`ruta_de`]**, que es el patrón que el arranque ya sigue
+/// cinco veces: `std::env::set_var` tiene contrato sobre todo el proceso y esta suite corre en paralelo
+/// lanzando procesos, así que una prueba que quisiera fijar estas variables sería comportamiento
+/// indefinido.
+pub fn ruta() -> Option<PathBuf> {
+    ruta_de(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )
+}
+
+/// La decisión, con los dos valores dados: **el fichero, o nada si no hay sitio de fiar**.
+///
+/// **Nada significa que no se persiste: ni se lee ni se escribe, y no se cae a un directorio temporal.**
+/// La caída existe en la caja hermana (`crates/panel-contract/src/lib.rs:186`) y allí es correcta porque
+/// aquel directorio **debe** vaciarse al cerrar la sesión; aquí sería restaurar desde un fichero que el
+/// sistema borra, o sea una máquina de fallos silenciosos.
+///
+/// **Y una variable definida y vacía no es una ruta.** Es la trampa ya pagada de la caja hermana: dejarla
+/// pasar da una ruta relativa y el directorio se crea dentro del directorio de trabajo **sin fallar**, que
+/// con un nombre de fichero fijo acaba dentro de cualquier repositorio que alguien clone. Aquí lo dice la
+/// misma comprobación que rechaza lo relativo, porque la cadena vacía tampoco es absoluta.
+pub fn ruta_de(config: Option<&OsStr>, casa: Option<&OsStr>) -> Option<PathBuf> {
+    // El orden es el del estándar del escritorio: la variable propia manda, y donde no hay se usa
+    // `.config` de la casa. Que una de las dos no sirva **no descarta la otra**: lo que descarta es que
+    // no sirva ninguna.
+    let base = absoluta(config).or_else(|| absoluta(casa).map(|casa| casa.join(".config")))?;
+    Some(base.join(DIRECTORIO).join(FICHERO))
+}
+
+/// La ruta que trae una variable, si es de fiar.
+fn absoluta(variable: Option<&OsStr>) -> Option<PathBuf> {
+    let ruta = PathBuf::from(variable?);
+    ruta.is_absolute().then_some(ruta)
+}
+
+/// Lee la disposición guardada en esa ruta.
+///
+/// **El orden es el del molde y no es casual** (`crates/panel-contract/src/panel.rs:199`): pedir los
+/// datos del fichero, comprobar que es un fichero, abrir, leer acotado, aplicar el techo **sobre bytes**
+/// y solo entonces mirar si es texto.
+pub fn leer(ruta: &Path) -> Result<Valido, Problema> {
+    let datos = match std::fs::metadata(ruta) {
+        Ok(datos) => datos,
+        Err(fallo) if fallo.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Problema::Ausente);
+        }
+        Err(fallo) => return Err(Problema::Ilegible(fallo.to_string())),
+    };
+    if !datos.is_file() {
+        return Err(Problema::NoEsFichero);
+    }
+
+    let fichero =
+        std::fs::File::open(ruta).map_err(|fallo| Problema::Ilegible(fallo.to_string()))?;
+    let bytes = leer_acotado(fichero, datos.len())
+        .map_err(|fallo| Problema::Ilegible(fallo.to_string()))?;
+
+    // **El techo se aplica aquí y no solo dentro de [`interpretar`], y esa aparente duplicación es el
+    // arreglo de un fallo con nombre en el molde.** La lectura corta un byte por encima del techo, y ese
+    // corte **parte un carácter de varios bytes**: sin esta comprobación, un fichero enorme con un acento
+    // en el sitio justo saldría como «no es texto» en vez de «se pasa del techo», y el camino del techo
+    // casi nunca se alcanzaría. El número es el mismo del formato; lo que se decide dos veces es *cuándo*.
+    //
+    // **Lo que DECIDE es lo leído, y el número que se dice es el mayor de los dos.** Decidir con el dato
+    // del disco sería fiarse de una cifra que ya puede ser vieja —el fichero se sustituye por renombrado, y
+    // entre pedir los datos y leer puede haber cambiado— y además trunca en objetivos de 32 bits; lo leído
+    // está acotado por definición y no puede ni mentir ni desbordar. Para el mensaje, en cambio, lo leído
+    // se queda corto por construcción: diría «ocupa 65537» de un fichero de un mega.
+    if bytes.len() > BYTES_MAXIMOS {
+        return Err(Problema::DemasiadoGrande {
+            bytes: datos.len().max(bytes.len() as u64),
+        });
+    }
+
+    let texto = String::from_utf8(bytes).map_err(|_| Problema::NoEsTexto)?;
+    interpretar(&texto)
+}
+
+/// Lee como mucho un byte más que el techo.
+///
+/// El byte de más es lo que distingue «ocupa justo el techo» de «se pasa». Y `esperado` es **pista de
+/// reserva y no comprobación**: nadie decide nada con ese número, solo evita que la lectura crezca
+/// duplicando desde treinta y dos bytes. El techo lo sigue poniendo el corte.
+fn leer_acotado(fichero: std::fs::File, esperado: u64) -> std::io::Result<Vec<u8>> {
+    let techo = BYTES_MAXIMOS as u64;
+    let mut bytes = Vec::with_capacity(esperado.min(techo) as usize + 1);
+    fichero.take(techo + 1).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// Si un problema al cargar merece una línea.
+///
+/// **La única excepción es el caso normal**: que no haya fichero es el primer arranque de todos, y avisar
+/// de eso pondría una línea de error en la primera vez de cada usuario. Está separado de quien la imprime
+/// **porque la decisión es lo único que se puede afirmar**: escribir a la salida de error no se observa
+/// desde dentro del proceso, así que una prueba sobre el aviso solo puede mirar esto.
+fn merece_aviso(problema: &Problema) -> bool {
+    !matches!(problema, Problema::Ausente)
+}
+
+/// Por qué no se guardó la disposición.
+///
+/// **Cada variante es un motivo distinto, y eso tiene una consecuencia visible**: el aviso se suprime
+/// **por motivo** ([`Persistencia::guardar`]), así que dos fallos que el usuario no puede distinguir no deben
+/// ser dos variantes, y dos que pide arreglar de forma distinta —un directorio que no se puede crear y un
+/// renombrado que no se puede hacer— no deben ser una.
+#[derive(Debug)]
+pub(crate) enum Fallo {
+    /// No hay sitio de fiar donde ponerlo: ver [`ruta_de`]. **Lo usa también el camino que carga**, con su
+    /// propio verbo, porque la causa es la misma y el usuario no tiene dos cosas que arreglar.
+    SinSitio,
+    /// En disco hay una disposición de una versión **más nueva**, y no se pisa.
+    Vetado { hallada: u64 },
+    /// El documento no se pudo describir. **Inalcanzable con estos tipos**, y aun así una variante y no
+    /// un `unwrap`: lo que hay en disco es lo que el usuario colocó a mano.
+    NoSeDescribe,
+    /// No se pudo crear el directorio.
+    Directorio(std::io::Error),
+    /// No se pudo crear el temporal **en exclusiva**. Que ya exista entra por aquí, y es lo que impide
+    /// escribir a través de lo que otro haya plantado con ese nombre.
+    Temporal(std::io::Error),
+    /// No se pudo escribir el temporal.
+    Escribiendo(std::io::Error),
+    /// No se pudo renombrar el temporal encima del destino. **El destino se queda como estaba.**
+    Renombrando(std::io::Error),
+}
+
+impl std::fmt::Display for Fallo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SinSitio => write!(
+                f,
+                "no hay ningún sitio donde ponerla: ni $XDG_CONFIG_HOME ni $HOME dan una ruta absoluta"
+            ),
+            Self::Vetado { hallada } => write!(
+                f,
+                "en disco hay una disposición de la versión {hallada} del formato y esta conoce la \
+                 {VERSION}, así que no se sobrescribe"
+            ),
+            Self::NoSeDescribe => write!(f, "no se pudo describir la disposición"),
+            Self::Directorio(fallo) => write!(f, "no se pudo crear el directorio ({fallo})"),
+            Self::Temporal(fallo) => write!(f, "no se pudo crear el fichero temporal ({fallo})"),
+            Self::Escribiendo(fallo) => {
+                write!(f, "no se pudo escribir el fichero temporal ({fallo})")
+            }
+            Self::Renombrando(fallo) => {
+                write!(f, "no se pudo poner el fichero en su sitio ({fallo})")
+            }
+        }
+    }
+}
+
+/// La política de guardado **de una sesión**: dónde va, si se puede escribir, y de qué ya se avisó.
+///
+/// **No es un fichero y por eso no se llama así.** No tiene descriptor, no abre nada y sobrevive a todas
+/// las lecturas y escrituras; lo que guarda es lo que dura **hasta que la aplicación se cierre**: el veto
+/// de una versión más nueva, los motivos de los que ya se ha avisado, y la cuenta de intentos. Con esos
+/// datos en los parámetros de una función libre, quien llama tendría que llevarlos —y eso es exactamente
+/// la clase de invariante que este módulo se niega a dejar en la memoria de quien escribe.
+pub struct Persistencia {
+    ruta: Option<PathBuf>,
+    /// La versión hallada en disco que impide sobrescribirlo.
+    ///
+    /// **Se pone al leer y no se quita.** Un binario viejo abierto sobre la disposición de uno nuevo no
+    /// puede restaurarla —no sabe su forma— y tampoco debe machacarla: tener dos versiones instaladas en
+    /// la misma máquina no es raro, y el daño sería silencioso y en el sitio que más se nota.
+    veto: Option<u64>,
+    /// De qué motivos ya se avisó. Un disco lleno imprimiría una línea por cada plazo vencido, o sea
+    /// dos por segundo mientras la ventana se use.
+    avisados: HashSet<std::mem::Discriminant<Fallo>>,
+    /// Cuántas veces se ha intentado guardar. **Va en el nombre del temporal, y eso lo pidió una
+    /// revisión.**
+    ///
+    /// Con el nombre dependiendo solo del número de proceso, un temporal que sobreviviera a una muerte
+    /// violenta —entre crearlo y renombrarlo— dejaría **sin guardar a toda sesión futura** a la que el
+    /// sistema le diera ese mismo número, porque crear en exclusiva fallaría siempre y adoptar lo que
+    /// hay está prohibido con razón. Contando los intentos, un temporal plantado estorba **un intento**
+    /// y no una sesión.
+    intentos: usize,
+}
+
+impl Persistencia {
+    /// El fichero que dice el entorno.
+    pub fn del_entorno() -> Self {
+        Self::en(ruta())
+    }
+
+    /// El de una ruta dada, o el de ninguna. **Nada aquí toca el disco todavía.**
+    pub fn en(ruta: Option<PathBuf>) -> Self {
+        Self {
+            ruta,
+            veto: None,
+            avisados: HashSet::new(),
+            intentos: 0,
+        }
+    }
+
+    /// La disposición guardada, si hay alguna que se entienda.
+    ///
+    /// **Todo lo que falla devuelve nada y deja arrancar**, que es la tolerancia por documento de este
+    /// formato: adivinar media disposición es peor que no restaurarla. Se avisa de todo salvo de que no
+    /// haya fichero.
+    pub fn cargar(&mut self) -> Option<Valido> {
+        let Some(ruta) = self.ruta.clone() else {
+            // **Con su propio verbo, y sin tocar la lista de motivos ya avisados, y las dos cosas las
+            // pidió una revisión.** Decir «no se guardó» antes de haber intentado guardar nada es un
+            // mensaje que no corresponde a su camino; y gastar aquí el motivo dejaría **mudo** al primer
+            // fallo de guardado de verdad, que es el que el usuario necesita ver.
+            eprintln!("no se restauró la disposición: {}", Fallo::SinSitio);
+            return None;
+        };
+
+        match leer(&ruta) {
+            Ok(valido) => Some(valido),
+            Err(problema) if !merece_aviso(&problema) => None,
+            Err(problema) => {
+                // **Una versión que no es la nuestra no es un fichero roto, y la regla depende de por qué
+                // lado no lo es.** Más nueva: la escribió una versión que sabe algo que ésta no, así que
+                // se veta la escritura para toda la sesión. Más vieja **y conocida**: se leería con el
+                // lector de esa versión y se reescribiría en la nueva al primer guardado —hoy solo existe
+                // la 1, así que no hay caso, pero retirar el soporte de una versión vieja es una decisión
+                // aparte y se escribe—. Y lo que no es ninguna de las dos, como un cero, es un fichero
+                // nuestro estropeado: de fábrica, y se sobrescribe.
+                if let Problema::Version { hallada } = problema
+                    && hallada > VERSION
+                {
+                    self.veto = Some(hallada);
+                }
+                eprintln!("no se restauró la disposición: {problema}");
+                None
+            }
+        }
+    }
+
+    /// Deja en disco esa disposición, y dice si lo consiguió.
+    ///
+    /// **Recibe lo ya validado y no un documento cualquiera, y eso lo pidió una revisión.** Sin eso, el
+    /// camino que escribe aceptaba exactamente lo que el camino que lee rechazaría: se podría dejar en
+    /// disco un fichero que al reabrir se descarta, y el usuario perdería su disposición **sin que nada lo
+    /// dijera** —el fallo aparecería un arranque más tarde y sin causa visible—. Pasando por el mismo tipo
+    /// que la lectura exige, lo que se escribe se puede volver a leer **por construcción**.
+    ///
+    /// **Cada fallo se avisa una vez por motivo, y el reintento no se suprime**: quien llama vuelve a
+    /// intentarlo con el cambio siguiente, así que un disco que se vacía se recupera solo sin haber
+    /// llenado la salida de error mientras estaba lleno.
+    pub fn guardar(&mut self, disposicion: &Valido) -> bool {
+        self.intentos = self.intentos.wrapping_add(1);
+        let intento = if let Some(hallada) = self.veto {
+            Err(Fallo::Vetado { hallada })
+        } else if let Some(ruta) = &self.ruta {
+            guardar_en(ruta, self.intentos, &disposicion.documento)
+        } else {
+            Err(Fallo::SinSitio)
+        };
+
+        match intento {
+            Ok(()) => true,
+            Err(fallo) => {
+                self.avisar(fallo);
+                false
+            }
+        }
+    }
+
+    /// Dice la línea, si de ese motivo no se ha dicho ya.
+    fn avisar(&mut self, fallo: Fallo) {
+        if self.hay_que_avisar(&fallo) {
+            eprintln!("no se guardó la disposición: {fallo}");
+        }
+    }
+
+    /// La decisión, aparte de decir la línea: **es lo único que tiene contenido que afirmar**, porque
+    /// escribir a la salida de error no se puede observar desde dentro del proceso.
+    fn hay_que_avisar(&mut self, fallo: &Fallo) -> bool {
+        self.avisados.insert(std::mem::discriminant(fallo))
+    }
+}
+
+/// Escribe el documento en esa ruta **sustituyéndola de golpe**.
+fn guardar_en(ruta: &Path, intento: usize, documento: &Documento) -> Result<(), Fallo> {
+    guardar_lo_descrito(ruta, intento, escribir(documento))
+}
+
+/// La escritura, recibiendo ya el texto **o la falta de él**.
+///
+/// **Que reciba `Option` es lo que hace comprobable la promesa central de este camino**: sin texto no se
+/// renombra nada, así que lo que ya estaba guardado sobrevive. Con la llamada dentro, la única forma de
+/// llegar a ese caso sería un fallo que estos tipos no pueden producir, y la promesa se quedaría escrita
+/// en un comentario.
+///
+/// **Sin `fsync`, y es una decisión con su límite.** Con el sistema en marcha, «nunca se ve medio fichero»
+/// lo da el renombrado solo. Tras un corte de corriente **sí** puede quedar un destino truncado, según el
+/// sistema de ficheros: eso sale al reabrir como un fichero que no se entiende, o sea abrir de fábrica, que
+/// es lo que ya está aceptado para el último plazo perdido. Lo que el renombrado garantiza es que **nadie
+/// lo ve a medias mientras la máquina funciona**; no es un diario.
+fn guardar_lo_descrito(ruta: &Path, intento: usize, descrito: Option<String>) -> Result<(), Fallo> {
+    let texto = descrito.ok_or(Fallo::NoSeDescribe)?;
+    // Sin directorio, o sin nombre de fichero, no hay sitio donde poner nada. Solo se llega con una ruta
+    // que no salió de `ruta_de` —la raíz, por ejemplo—, y el motivo es el mismo que el de no tener
+    // directorio de configuración: no hay dónde. De ahí que la variante sea una y su línea las cubra.
+    let directorio = ruta.parent().ok_or(Fallo::SinSitio)?;
+    crear_el_directorio(directorio).map_err(Fallo::Directorio)?;
+
+    let temporal = temporal_de(ruta, intento).ok_or(Fallo::SinSitio)?;
+    let mut fichero = crear_en_exclusiva(&temporal).map_err(Fallo::Temporal)?;
+
+    // A partir de aquí hay un fichero de más en el directorio, y **cada salida tiene que llevárselo**.
+    // Dejarlo no rompe el guardado siguiente —el nombre lleva la cuenta de intentos—, pero se acumularía
+    // uno por fallo en el directorio de configuración del usuario, que es basura sin techo.
+    if let Err(fallo) = fichero.write_all(texto.as_bytes()) {
+        borrar(&temporal);
+        return Err(Fallo::Escribiendo(fallo));
+    }
+    // Cerrado antes de renombrar. No hay nada que vaciar —esto escribe directo, sin memoria intermedia—,
+    // así que cerrar es solo devolver el descriptor.
+    drop(fichero);
+
+    if let Err(fallo) = std::fs::rename(&temporal, ruta) {
+        borrar(&temporal);
+        return Err(Fallo::Renombrando(fallo));
+    }
+    Ok(())
+}
+
+/// El temporal al lado del destino, con el número de este proceso y el del intento.
+///
+/// **En el mismo directorio y no en el temporal del sistema**, porque ése sería otro sistema de ficheros
+/// con toda probabilidad, el renombrado fallaría por cruzarlos, y el respaldo —copiar y truncar— ya no
+/// sería atómico. La tentación es real y está en el repo: la caja hermana cae ahí a propósito.
+///
+/// **El número de proceso porque nada impide dos instancias abiertas**: con un nombre fijo las dos
+/// escribirían el mismo temporal, se entrelazarían los bytes y se renombraría un documento corrupto encima
+/// del bueno. **Y el del intento porque el del proceso se recicla**: un temporal que sobreviva a una muerte
+/// violenta no lo limpia nadie, y con el nombre dependiendo solo del proceso dejaría sin guardar, para
+/// siempre, a toda sesión a la que el sistema le diera ese número.
+fn temporal_de(ruta: &Path, intento: usize) -> Option<PathBuf> {
+    let mut nombre = ruta.file_name()?.to_os_string();
+    nombre.push(format!(".{}.{intento}", std::process::id()));
+    Some(ruta.with_file_name(nombre))
+}
+
+/// Crea el directorio si no está, **solo para el usuario**.
+///
+/// Sin el modo, el permiso lo decide la máscara de la sesión: medida en esta máquina en `0002`, un
+/// directorio saldría `0775` —legible y recorrible por todo el mundo— y este fichero cuenta cómo trabaja el
+/// usuario: qué tenía abierto y cómo lo tenía colocado.
+///
+/// **Con tramos intermedios y sin protestar si ya existe**, y las dos cosas hacen falta: el directorio de
+/// configuración puede no existir en una cuenta recién hecha, y a partir del segundo guardado el nuestro
+/// ya está. El modo solo se aplica a lo que **esta** llamada cree; un directorio que ya estaba conserva
+/// sus permisos, y por eso lo único que protege al temporal es crearlo en exclusiva.
+fn crear_el_directorio(ruta: &Path) -> std::io::Result<()> {
+    let mut como = std::fs::DirBuilder::new();
+    como.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        como.mode(0o700);
+    }
+    como.create(ruta)
+}
+
+/// Crea el temporal **y falla si ya existe**.
+///
+/// El nombre es predecible, así que sin esto un enlace plantado ahí se abriría y **se escribiría a
+/// través**: el destino está protegido por no abrirse nunca para escribir, y el temporal solo por esto.
+fn crear_en_exclusiva(ruta: &Path) -> std::io::Result<std::fs::File> {
+    let mut como = std::fs::OpenOptions::new();
+    como.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        como.mode(0o600);
+    }
+    como.open(ruta)
+}
+
+/// Se lleva el temporal, y se calla si no puede.
+///
+/// Lo que se está reportando es el fallo de antes; un segundo aviso por no haber podido limpiar diría dos
+/// cosas de las que solo una se puede arreglar.
+fn borrar(temporal: &Path) {
+    let _ = std::fs::remove_file(temporal);
 }
 
 #[cfg(test)]
@@ -729,7 +1197,7 @@ mod tests_de_los_techos {
         assert_eq!(
             interpretar(&enorme),
             Err(Problema::DemasiadoGrande {
-                bytes: BYTES_MAXIMOS + 1
+                bytes: BYTES_MAXIMOS as u64 + 1
             })
         );
     }
@@ -785,5 +1253,753 @@ mod tests_de_los_techos {
 
         let valido = validar(dos_y_tres).expect("el documento es válido");
         assert_eq!(valido.hojas(), 3);
+    }
+}
+
+#[cfg(test)]
+mod tests_del_fichero {
+    use super::*;
+
+    /// El directorio de una prueba, que se lleva al acabar lo que la prueba escribió.
+    ///
+    /// **Uno por prueba y con el número de proceso**, porque la suite corre en paralelo y el nombre del
+    /// fichero es fijo: dos pruebas que compartieran directorio se leerían la disposición la una a la
+    /// otra y fallarían solo a veces.
+    struct Directorio(PathBuf);
+
+    impl Directorio {
+        fn nueva(nombre: &str) -> Self {
+            let ruta = std::env::temp_dir().join(format!(
+                "agent-terminal-prueba-{}-{nombre}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&ruta);
+            std::fs::create_dir_all(&ruta).expect("crear el directorio de la prueba");
+            Self(ruta)
+        }
+
+        /// El fichero donde la aplicación lo pondría.
+        ///
+        /// **Con el directorio de configuración sin crear, y no solo el propio de la aplicación**: en una
+        /// cuenta recién hecha tampoco existe, así que cada prueba que guarda ejercita la creación de los
+        /// dos tramos. Con el de arriba ya hecho, una creación que no admitiera tramos intermedios pasaría
+        /// estas pruebas y fallaría en la máquina de quien estrena la aplicación.
+        fn fichero(&self) -> PathBuf {
+            ruta_de(Some(self.0.join("config").as_os_str()), None)
+                .expect("la ruta de la prueba es absoluta")
+        }
+    }
+
+    impl Drop for Directorio {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Un documento con dos consolas de anchos distintos, una plegada y con pesos desiguales.
+    ///
+    /// **Nada de un documento mínimo**: con una sola consola de ancho de fábrica, una ida y vuelta que
+    /// perdiera los anchos, los pesos o la orientación seguiría pasando.
+    /// Lo mismo, ya validado: es lo que el camino que guarda exige.
+    fn disposicion_de_prueba() -> Valido {
+        validar(documento_de_prueba()).expect("el documento de prueba es válido")
+    }
+
+    fn documento_de_prueba() -> Documento {
+        Documento {
+            v: VERSION,
+            pestañas: vec![Pestaña {
+                raiz: Nodo::Rama {
+                    orientacion: Orientacion::Filas,
+                    hijos: vec![
+                        Hijo {
+                            peso: 3.0,
+                            nodo: Nodo::Hoja(Hoja {
+                                ancho_del_panel: 52,
+                                plegado: false,
+                            }),
+                        },
+                        Hijo {
+                            peso: 1.0,
+                            nodo: Nodo::Hoja(Hoja {
+                                ancho_del_panel: 24,
+                                plegado: true,
+                            }),
+                        },
+                    ],
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn la_ruta_sale_del_directorio_de_configuracion() {
+        assert_eq!(
+            ruta_de(Some(OsStr::new("/casa/config")), Some(OsStr::new("/casa"))),
+            Some(PathBuf::from(
+                "/casa/config/agent-terminal/disposicion.json"
+            ))
+        );
+    }
+
+    #[test]
+    fn sin_directorio_de_configuracion_se_cae_a_la_casa() {
+        assert_eq!(
+            ruta_de(None, Some(OsStr::new("/casa"))),
+            Some(PathBuf::from(
+                "/casa/.config/agent-terminal/disposicion.json"
+            ))
+        );
+    }
+
+    #[test]
+    fn una_variable_vacia_o_relativa_no_es_una_ruta_y_no_descarta_la_otra() {
+        // La casa es distinta de las dos variables de arriba a propósito: si la vacía o la relativa se
+        // colaran, la ruta no sería ésta.
+        for variable in ["", "config", "./config", "~/config"] {
+            assert_eq!(
+                ruta_de(Some(OsStr::new(variable)), Some(OsStr::new("/casa"))),
+                Some(PathBuf::from(
+                    "/casa/.config/agent-terminal/disposicion.json"
+                )),
+                "con {variable:?} no se cayó a la casa"
+            );
+        }
+    }
+
+    #[test]
+    fn sin_ninguna_ruta_absoluta_no_se_persiste() {
+        assert_eq!(ruta_de(None, None), None);
+        assert_eq!(ruta_de(Some(OsStr::new("")), Some(OsStr::new(""))), None);
+        assert_eq!(
+            ruta_de(Some(OsStr::new("config")), Some(OsStr::new("casa"))),
+            None
+        );
+    }
+
+    #[test]
+    fn lo_guardado_se_vuelve_a_encontrar() {
+        let directorio = Directorio::nueva("ida-y-vuelta");
+        let ruta = directorio.fichero();
+
+        assert!(
+            Persistencia::en(Some(ruta.clone())).guardar(&disposicion_de_prueba()),
+            "no se guardó"
+        );
+
+        let leido = leer(&ruta).expect("lo que se acaba de guardar se lee");
+        assert_eq!(leido.pestañas(), documento_de_prueba().pestañas.as_slice());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn el_destino_se_sustituye_entero_y_nunca_se_escribe_encima() {
+        use std::os::unix::fs::MetadataExt;
+
+        // **La promesa central del hito, y solo esto la ata.** Copiar el texto encima del destino dejaría
+        // las mismas tres pruebas de resultado final en verde —el fichero acaba con el contenido correcto
+        // y sin temporales al lado— y sin embargo habría un instante en que lo que hay en disco es medio
+        // documento. Lo que distingue sustituir de escribir encima es que **el destino es otro fichero**:
+        // con renombrado cambia de nodo, copiando no.
+        let directorio = Directorio::nueva("sustitucion");
+        let ruta = directorio.fichero();
+        let mut persistencia = Persistencia::en(Some(ruta.clone()));
+
+        assert!(persistencia.guardar(&disposicion_de_prueba()));
+        let primero = std::fs::metadata(&ruta).expect("existe").ino();
+        assert!(persistencia.guardar(&disposicion_de_prueba()));
+        let segundo = std::fs::metadata(&ruta).expect("existe").ino();
+
+        assert_ne!(
+            primero, segundo,
+            "el destino se escribió encima en vez de sustituirse"
+        );
+    }
+
+    #[test]
+    fn el_guardado_no_deja_ningun_temporal_detras() {
+        let directorio = Directorio::nueva("sin-restos");
+        let ruta = directorio.fichero();
+        let mut fichero = Persistencia::en(Some(ruta.clone()));
+
+        // Dos veces, porque el segundo guardado es el que encuentra el directorio y el destino ya
+        // hechos: es el camino que se recorre de verdad, dos veces por segundo mientras se arrastra.
+        assert!(fichero.guardar(&disposicion_de_prueba()));
+        assert!(fichero.guardar(&disposicion_de_prueba()));
+
+        let dentro: Vec<_> = std::fs::read_dir(ruta.parent().expect("el directorio propio"))
+            .expect("leer el directorio")
+            .map(|entrada| entrada.expect("una entrada").file_name())
+            .collect();
+        assert_eq!(dentro, vec![std::ffi::OsString::from(FICHERO)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn el_directorio_y_el_fichero_nacen_solo_para_el_usuario() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directorio = Directorio::nueva("permisos");
+        let ruta = directorio.fichero();
+        assert!(Persistencia::en(Some(ruta.clone())).guardar(&disposicion_de_prueba()));
+
+        let modo = |ruta: &Path| {
+            std::fs::metadata(ruta)
+                .expect("existe")
+                .permissions()
+                .mode()
+                & 0o777
+        };
+        assert_eq!(
+            modo(ruta.parent().expect("el directorio propio")),
+            0o700,
+            "el directorio queda abierto a la máscara de la sesión"
+        );
+        assert_eq!(modo(&ruta), 0o600, "el fichero queda legible por otros");
+    }
+
+    #[test]
+    fn un_fichero_ausente_no_restaura_nada_y_deja_arrancar() {
+        let directorio = Directorio::nueva("ausente");
+        let ruta = directorio.fichero();
+
+        assert_eq!(leer(&ruta), Err(Problema::Ausente));
+        assert!(Persistencia::en(Some(ruta)).cargar().is_none());
+    }
+
+    #[test]
+    fn lo_que_no_es_un_fichero_se_rechaza_antes_de_abrirlo() {
+        let directorio = Directorio::nueva("no-es-fichero");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(&ruta).expect("plantar un directorio con el nombre del fichero");
+
+        assert_eq!(leer(&ruta), Err(Problema::NoEsFichero));
+    }
+
+    #[test]
+    fn un_fichero_que_se_pasa_del_techo_se_rechaza_por_su_tamaño_y_no_por_su_codificacion() {
+        let directorio = Directorio::nueva("demasiado-grande");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        // **Acentos, y no letras sueltas, y ahí está el defecto que esto ata.** La lectura corta un byte
+        // por encima del techo; con caracteres de dos bytes ese corte parte uno por la mitad, así que sin
+        // la comprobación del tamaño esto saldría como «no es texto» y el techo no se alcanzaría nunca.
+        let gordo = "á".repeat(BYTES_MAXIMOS);
+        std::fs::write(&ruta, &gordo).expect("escribir el fichero gordo");
+
+        assert_eq!(
+            leer(&ruta),
+            Err(Problema::DemasiadoGrande {
+                bytes: gordo.len() as u64
+            })
+        );
+    }
+
+    #[test]
+    fn justo_en_el_techo_se_lee_y_un_byte_mas_no() {
+        let directorio = Directorio::nueva("en-el-techo");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        let documento = escribir(&documento_de_prueba()).expect("se describe");
+
+        // El relleno son espacios, que el intérprete acepta al final: así el documento sigue siendo
+        // válido y lo único que cambia entre las dos mitades de esta prueba es **un byte de tamaño**.
+        // Sin la mitad de abajo, un techo que no acotara nada pasaría igual.
+        let en_el_techo = format!("{documento}{}", " ".repeat(BYTES_MAXIMOS - documento.len()));
+        std::fs::write(&ruta, &en_el_techo).expect("escribir");
+        assert!(
+            leer(&ruta).is_ok(),
+            "lo que ocupa justo el techo no se leyó"
+        );
+
+        std::fs::write(&ruta, format!("{en_el_techo} ")).expect("escribir uno más");
+        assert_eq!(
+            leer(&ruta),
+            Err(Problema::DemasiadoGrande {
+                bytes: BYTES_MAXIMOS as u64 + 1
+            })
+        );
+    }
+
+    #[test]
+    fn lo_que_no_es_texto_se_rechaza() {
+        let directorio = Directorio::nueva("no-es-texto");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::write(&ruta, [0xff, 0xfe, b'{', b'}']).expect("escribir bytes que no son texto");
+
+        assert_eq!(leer(&ruta), Err(Problema::NoEsTexto));
+    }
+
+    #[test]
+    fn sin_texto_que_escribir_no_se_renombra_nada() {
+        // **Ésta es la razón de que la escritura reciba el texto ya descrito.** Si describir fallara y el
+        // camino renombrara igual, el destino quedaría con cero bytes: la disposición que el usuario
+        // colocó a mano, borrada por un fallo al guardar.
+        let directorio = Directorio::nueva("sin-texto");
+        let ruta = directorio.fichero();
+        let mut fichero = Persistencia::en(Some(ruta.clone()));
+        assert!(fichero.guardar(&disposicion_de_prueba()));
+        let antes = std::fs::read_to_string(&ruta).expect("hay algo guardado");
+
+        let fallo = guardar_lo_descrito(&ruta, 1, None);
+
+        assert!(matches!(fallo, Err(Fallo::NoSeDescribe)), "{fallo:?}");
+        assert_eq!(
+            std::fs::read_to_string(&ruta).expect("sigue estando"),
+            antes,
+            "se perdió la disposición que había guardada"
+        );
+        let dentro = std::fs::read_dir(ruta.parent().expect("el directorio propio"))
+            .expect("leer el directorio")
+            .count();
+        assert_eq!(dentro, 1, "quedó algo más en el directorio");
+    }
+
+    #[test]
+    fn un_temporal_que_ya_existe_no_se_adopta() {
+        let directorio = Directorio::nueva("temporal-plantado");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        let temporal = temporal_de(&ruta, 1).expect("el temporal tiene nombre");
+        std::fs::write(&temporal, "de otro").expect("plantar el temporal");
+
+        let fallo = guardar_en(&ruta, 1, &documento_de_prueba());
+
+        assert!(matches!(fallo, Err(Fallo::Temporal(_))), "{fallo:?}");
+        assert!(!ruta.exists(), "se escribió el destino de todas formas");
+        assert_eq!(
+            std::fs::read_to_string(&temporal).expect("sigue estando"),
+            "de otro",
+            "se escribió a través de lo que había plantado"
+        );
+    }
+
+    #[test]
+    fn si_no_se_puede_poner_en_su_sitio_no_queda_el_temporal() {
+        // El destino es un directorio con algo dentro, que es una forma de que el renombrado falle sin
+        // tocar los permisos de nadie. Lo que se ata es la limpieza: un temporal que sobreviva a un fallo
+        // **deja a esta misma sesión sin poder crear el suyo en exclusiva**, así que el primer fallo
+        // sería el último intento.
+        let directorio = Directorio::nueva("renombrado-imposible");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.join("dentro"))
+            .expect("plantar un directorio con algo dentro");
+
+        let fallo = guardar_en(&ruta, 1, &documento_de_prueba());
+
+        assert!(matches!(fallo, Err(Fallo::Renombrando(_))), "{fallo:?}");
+        assert!(
+            !temporal_de(&ruta, 1)
+                .expect("el temporal tiene nombre")
+                .exists(),
+            "quedó el temporal, y con él la sesión se queda sin poder guardar"
+        );
+    }
+
+    #[test]
+    fn una_version_mas_nueva_no_se_toca_en_toda_la_sesion() {
+        let directorio = Directorio::nueva("version-mas-nueva");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        // **La forma es la que una versión 2 tendría de verdad: una clave renombrada.** Y eso es el
+        // corazón de esta prueba, no un detalle. La versión sube **justo** con lo que un lector viejo
+        // malinterpretaría —una clave renombrada, quitada, o con otro significado—, o sea con lo que hace
+        // fallar al intérprete de la forma. Con un fichero de la versión 2 que conservara la forma de la 1,
+        // esta prueba pasa incluso mirando la versión **después** de exigir la forma, que es exactamente el
+        // defecto que se colaba: el fichero del futuro se leía como «no se entiende» y se sobrescribía.
+        let del_futuro = r#"{"v":2,"solapas":[{"raiz":{"hoja":{"ancho":36,"plegado":false}}}]}"#;
+        std::fs::write(&ruta, del_futuro).expect("escribir el fichero del futuro");
+        let mut fichero = Persistencia::en(Some(ruta.clone()));
+
+        assert!(
+            fichero.cargar().is_none(),
+            "se restauró una forma que no se conoce"
+        );
+        // Dos intentos, porque el veto es de la sesión y no del intento: con uno, un veto que solo
+        // valiera para el primero pasaría igual.
+        assert!(!fichero.guardar(&disposicion_de_prueba()));
+        assert!(!fichero.guardar(&disposicion_de_prueba()));
+        assert_eq!(
+            std::fs::read_to_string(&ruta).expect("sigue estando"),
+            del_futuro,
+            "un binario viejo se llevó por delante la disposición del nuevo"
+        );
+    }
+
+    #[test]
+    fn un_fichero_sin_version_es_uno_nuestro_estropeado_y_se_sobrescribe() {
+        // La otra mitad del veto, y la que distingue «no sé qué versión es esto» de «esto lo escribió algo
+        // que sabe más que yo». Un fichero **sin** versión no puede ser de una versión futura —todas la
+        // llevan—, así que es nuestro y está roto: se abre de fábrica y se sustituye.
+        let directorio = Directorio::nueva("sin-version");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::write(
+            &ruta,
+            r#"{"pestañas":[{"raiz":{"hoja":{"ancho_del_panel":36,"plegado":false}}}]}"#,
+        )
+        .expect("escribir");
+        let mut persistencia = Persistencia::en(Some(ruta.clone()));
+
+        assert!(persistencia.cargar().is_none());
+        assert!(
+            persistencia.guardar(&disposicion_de_prueba()),
+            "un fichero sin versión se trató como del futuro"
+        );
+        assert_eq!(
+            leer(&ruta).expect("se lee").pestañas(),
+            documento_de_prueba().pestañas.as_slice()
+        );
+    }
+
+    #[test]
+    fn una_version_que_no_se_conoce_y_no_es_mas_nueva_se_sobrescribe() {
+        let directorio = Directorio::nueva("version-cero");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::write(&ruta, r#"{"v":0,"pestañas":[]}"#).expect("escribir");
+        let mut fichero = Persistencia::en(Some(ruta.clone()));
+
+        assert!(fichero.cargar().is_none());
+        assert!(
+            fichero.guardar(&disposicion_de_prueba()),
+            "un fichero nuestro estropeado no se sustituye"
+        );
+        assert_eq!(
+            leer(&ruta).expect("se lee").pestañas(),
+            documento_de_prueba().pestañas.as_slice()
+        );
+    }
+
+    #[test]
+    fn sin_sitio_donde_ponerlo_no_se_lee_ni_se_escribe() {
+        let mut fichero = Persistencia::en(None);
+
+        assert!(fichero.cargar().is_none());
+        assert!(!fichero.guardar(&disposicion_de_prueba()));
+    }
+
+    #[test]
+    fn de_cada_motivo_se_avisa_una_vez_y_de_los_demas_igual() {
+        let mut fichero = Persistencia::en(None);
+        let otro = || std::io::Error::other("otro");
+
+        assert!(fichero.hay_que_avisar(&Fallo::Renombrando(otro())));
+        assert!(
+            !fichero.hay_que_avisar(&Fallo::Renombrando(std::io::Error::other("distinto"))),
+            "el mismo motivo con otro error del sistema se avisó dos veces"
+        );
+        assert!(
+            fichero.hay_que_avisar(&Fallo::Directorio(otro())),
+            "un motivo nuevo se calló porque ya se había avisado de otro"
+        );
+    }
+
+    #[test]
+    fn del_unico_fallo_que_es_normal_no_se_avisa_y_de_los_demas_si() {
+        // El aviso es una línea a la salida de error, que no se puede observar desde dentro del proceso:
+        // lo que se puede afirmar es **la decisión**, y por eso vive aparte de quien la imprime.
+        assert!(
+            !merece_aviso(&Problema::Ausente),
+            "el primer arranque de cada usuario saldría con una línea de error"
+        );
+        for problema in [
+            Problema::NoEsFichero,
+            Problema::NoEsTexto,
+            Problema::Ilegible("cualquiera".to_owned()),
+            Problema::Version { hallada: 2 },
+            Problema::DemasiadoGrande { bytes: 1 },
+            Problema::SinPestañas,
+        ] {
+            assert!(merece_aviso(&problema), "se calla: {problema}");
+        }
+    }
+
+    #[test]
+    fn el_temporal_lleva_el_proceso_y_el_intento() {
+        // **Una afirmación sobre el nombre, y no sobre el efecto, porque el efecto no cabe en un proceso**:
+        // lo que el nombre evita es que dos instancias compartan temporal y que un temporal huérfano de una
+        // muerte violenta deje sin guardar a la sesión que reciba ese mismo número de proceso.
+        let ruta = PathBuf::from("/casa/.config/agent-terminal/disposicion.json");
+        let pid = std::process::id();
+
+        let primero = temporal_de(&ruta, 1).expect("tiene nombre");
+        let segundo = temporal_de(&ruta, 2).expect("tiene nombre");
+
+        assert_eq!(
+            primero,
+            PathBuf::from(format!(
+                "/casa/.config/agent-terminal/disposicion.json.{pid}.1"
+            ))
+        );
+        assert_ne!(primero, segundo, "dos intentos comparten temporal");
+        assert_eq!(
+            primero.parent(),
+            ruta.parent(),
+            "el temporal no está al lado del destino, así que el renombrado puede cruzar volúmenes"
+        );
+    }
+
+    #[test]
+    fn un_temporal_huerfano_estorba_un_intento_y_no_la_sesion() {
+        // El escenario: la aplicación murió entre crear el temporal y renombrarlo, así que quedó uno en
+        // disco que nadie limpia; y esta sesión recibió el mismo número de proceso. Adoptarlo está
+        // prohibido —se escribiría a través de lo que otro plantó—, así que lo que tiene que ocurrir es que
+        // el intento siguiente use otro nombre. Sin eso, esta sesión **no guardaría nunca nada**.
+        let directorio = Directorio::nueva("huerfano");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::write(
+            temporal_de(&ruta, 1).expect("tiene nombre"),
+            "el que dejó el muerto",
+        )
+        .expect("plantar el huérfano");
+        let mut persistencia = Persistencia::en(Some(ruta.clone()));
+
+        assert!(
+            !persistencia.guardar(&disposicion_de_prueba()),
+            "se adoptó el temporal que había"
+        );
+        assert!(
+            persistencia.guardar(&disposicion_de_prueba()),
+            "un huérfano dejó a la sesión entera sin poder guardar"
+        );
+        assert_eq!(
+            leer(&ruta).expect("se lee").pestañas(),
+            documento_de_prueba().pestañas.as_slice()
+        );
+    }
+
+    #[test]
+    fn leer_no_reserva_lo_que_el_fichero_dice_ocupar() {
+        // **El techo existe para acotar la reserva, no solo el intérprete**, y eso es lo único que esta
+        // prueba mira: la capacidad. Con el tamaño del fichero como reserva y sin acotarlo, un fichero que
+        // dice ocupar diez gigas los pide al arrancar, y el techo del formato no llega a mirarse.
+        let directorio = Directorio::nueva("reserva");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        let fichero = std::fs::File::create(&ruta).expect("crear");
+        // Un agujero, no cuatro megas de ceros escritos: lo que importa es lo que dicen los datos del
+        // fichero, que es de donde sale la reserva.
+        fichero
+            .set_len(64 * BYTES_MAXIMOS as u64)
+            .expect("agrandarlo sin escribir");
+        drop(fichero);
+
+        let bytes = leer_acotado(
+            std::fs::File::open(&ruta).expect("abrir"),
+            std::fs::metadata(&ruta).expect("datos").len(),
+        )
+        .expect("leer");
+
+        assert!(
+            bytes.capacity() <= BYTES_MAXIMOS + 1,
+            "reservó {} bytes para un techo de {BYTES_MAXIMOS}",
+            bytes.capacity()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn una_tuberia_con_nombre_se_rechaza_sin_quedarse_esperando() {
+        // **Es el caso que la comprobación de «es un fichero» existe para evitar, y el único que un
+        // directorio plantado no enseña**: abrir una tubería sin nadie al otro lado no falla, **espera**, y
+        // esto ocurre antes de que la ventana exista. El plazo es el testigo: sin la comprobación la lectura
+        // no vuelve nunca, y lo que esta prueba puede contar es que no volvió.
+        let directorio = Directorio::nueva("tuberia");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        let plantada = std::process::Command::new("mkfifo")
+            .arg(&ruta)
+            .status()
+            .expect("lanzar mkfifo");
+        assert!(plantada.success(), "no se pudo plantar la tubería");
+
+        // En otro hilo a propósito: si la apertura se queda esperando, el que espera es él. Se queda
+        // colgado y se lo lleva el final del proceso.
+        let (dice, escucha) = std::sync::mpsc::channel();
+        let suya = ruta.clone();
+        std::thread::spawn(move || dice.send(leer(&suya)));
+
+        match escucha.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(resultado) => assert_eq!(resultado, Err(Problema::NoEsFichero)),
+            Err(_) => panic!("abrir la tubería se quedó esperando: la ventana no llegaría a abrir"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_fichero_que_no_se_deja_leer_no_impide_arrancar_ni_veta_la_escritura() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // El único fallo del sistema que la lectura puede dar y que nadie ejercita. Y lo que importa no es
+        // la variante: es que **no se confunde con una versión del futuro**, así que la sesión sigue
+        // pudiendo guardar. Un permiso mal puesto no debe dejar a nadie sin escribir el resto de la sesión.
+        //
+        // **Esta prueba supone que la suite no corre como administrador**, que se salta los permisos: ahí
+        // el fichero se leería y la prueba fallaría al no encontrar el fallo. Se deja fallar en vez de
+        // saltarse sola, porque una prueba que se desactiva según quién la corre no se distingue de una
+        // que pasa.
+        let directorio = Directorio::nueva("ilegible");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::write(&ruta, r#"{"v":1,"pestañas":[]}"#).expect("escribir");
+        std::fs::set_permissions(&ruta, std::fs::Permissions::from_mode(0o000))
+            .expect("quitarle todos los permisos");
+
+        let problema = leer(&ruta);
+        assert!(
+            matches!(problema, Err(Problema::Ilegible(_))),
+            "{problema:?}"
+        );
+
+        let mut persistencia = Persistencia::en(Some(ruta.clone()));
+        assert!(persistencia.cargar().is_none());
+        assert!(
+            persistencia.guardar(&disposicion_de_prueba()),
+            "un fichero que no se pudo leer se trató como uno del futuro"
+        );
+        assert_eq!(
+            leer(&ruta).expect("se lee").pestañas(),
+            documento_de_prueba().pestañas.as_slice()
+        );
+    }
+
+    #[test]
+    fn una_forma_invalida_de_la_version_conocida_no_impide_arrancar_y_se_sustituye() {
+        // **La versión es la nuestra y la forma no vale**, que es lo que distingue este camino de los otros
+        // dos ficheros rotos: ahí falla el intérprete, y aquí encaja todo y lo que no se sostiene es el
+        // árbol. Sin esto, un lector que se olvidara de validar lo que interpreta pasaría igual: las
+        // pruebas de la forma llaman a `validar` a mano, así que ninguna ata que el camino del disco pase
+        // por ahí.
+        let directorio = Directorio::nueva("forma-invalida");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        // Un corte con un solo hijo: la forma que hace que una frontera arrastre un bloque de dos.
+        std::fs::write(
+            &ruta,
+            r#"{"v":1,"pestañas":[{"raiz":{"rama":{"orientacion":"columnas","hijos":[
+                 {"peso":1.0,"nodo":{"hoja":{"ancho_del_panel":36,"plegado":false}}}]}}}]}"#,
+        )
+        .expect("escribir");
+        let mut persistencia = Persistencia::en(Some(ruta.clone()));
+
+        assert_eq!(leer(&ruta), Err(Problema::RamaDeUnHijo { pestaña: 0 }));
+        assert!(
+            persistencia.cargar().is_none(),
+            "se restauró un árbol que la validación rechaza"
+        );
+        assert!(
+            persistencia.guardar(&disposicion_de_prueba()),
+            "un fichero nuestro con una forma que no vale se trató como uno del futuro"
+        );
+        assert_eq!(
+            leer(&ruta).expect("se lee").pestañas(),
+            documento_de_prueba().pestañas.as_slice()
+        );
+    }
+
+    #[test]
+    fn si_el_directorio_no_se_puede_crear_se_dice_por_ese_motivo_y_no_por_otro() {
+        // **La variante importa porque el aviso se suprime por motivo**: un directorio que no se puede
+        // crear y un temporal que no se puede crear se arreglan en sitios distintos, así que llegar aquí
+        // como lo segundo dejaría al usuario mirando donde no es.
+        let directorio = Directorio::nueva("directorio-imposible");
+        std::fs::write(directorio.0.join("config"), "no soy un directorio")
+            .expect("plantar un fichero donde iría el directorio de configuración");
+        let ruta = directorio.fichero();
+
+        let fallo = guardar_en(&ruta, 1, &documento_de_prueba());
+
+        assert!(matches!(fallo, Err(Fallo::Directorio(_))), "{fallo:?}");
+        assert!(
+            !Persistencia::en(Some(ruta.clone())).guardar(&disposicion_de_prueba()),
+            "se dio por guardado sin haber dónde ponerlo"
+        );
+        assert!(!ruta.exists(), "algo acabó en el sitio del fichero");
+    }
+
+    #[test]
+    fn una_ruta_que_no_nombra_un_fichero_no_tumba_el_guardado() {
+        // Ninguna de las dos sale de `ruta_de`, así que solo se llega colocándolas a mano. Lo que se ata es
+        // que este camino no tiene ningún desenvolver que tumbe la ventana en vez de decir que no pudo:
+        // guardar corre dos veces por segundo mientras se arrastra una frontera.
+        let sin_directorio = guardar_en(Path::new("/"), 1, &documento_de_prueba());
+        assert!(
+            matches!(sin_directorio, Err(Fallo::SinSitio)),
+            "{sin_directorio:?}"
+        );
+        assert!(!Persistencia::en(Some(PathBuf::from("/"))).guardar(&disposicion_de_prueba()));
+
+        let directorio = Directorio::nueva("sin-nombre");
+        let subiendo = directorio
+            .fichero()
+            .parent()
+            .expect("el directorio propio")
+            .join("..");
+        let sin_nombre = guardar_en(&subiendo, 1, &documento_de_prueba());
+        assert!(matches!(sin_nombre, Err(Fallo::SinSitio)), "{sin_nombre:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_enlace_plantado_en_el_destino_no_se_escribe_a_traves() {
+        // El destino se protege **no abriéndolo nunca para escribir**, y esto es lo que eso compra: un
+        // enlace con su nombre no lleva la escritura a donde apunte. Que el destino cambie de nodo lo ata
+        // otra prueba; ésta ata que el fichero de fuera no se toca.
+        let directorio = Directorio::nueva("enlace-en-el-destino");
+        let ruta = directorio.fichero();
+        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
+        let victima = directorio.0.join("victima");
+        std::fs::write(&victima, "lo que había fuera").expect("escribir la víctima");
+        std::os::unix::fs::symlink(&victima, &ruta).expect("plantar el enlace");
+
+        assert!(Persistencia::en(Some(ruta.clone())).guardar(&disposicion_de_prueba()));
+
+        assert_eq!(
+            std::fs::read_to_string(&victima).expect("sigue estando"),
+            "lo que había fuera",
+            "se escribió a través del enlace, o sea fuera del directorio de configuración"
+        );
+        assert!(
+            !std::fs::symlink_metadata(&ruta)
+                .expect("existe")
+                .is_symlink(),
+            "el enlace sigue en el sitio del fichero"
+        );
+    }
+
+    #[test]
+    fn un_guardado_que_falla_gasta_el_aviso_de_su_motivo() {
+        // **Ata que la supresión la aplica el camino que guarda**, y no solo que la lista de motivos
+        // funcione. Con el aviso impreso sin consultarla, un disco lleno diría dos líneas por segundo
+        // mientras la ventana se use, que es lo que la lista existe para evitar.
+        let mut fichero = Persistencia::en(None);
+
+        assert!(!fichero.guardar(&disposicion_de_prueba()));
+
+        assert!(
+            !fichero.hay_que_avisar(&Fallo::SinSitio),
+            "el fallo del guardado no pasó por la supresión"
+        );
+        assert!(
+            fichero.hay_que_avisar(&Fallo::Directorio(std::io::Error::other("otro"))),
+            "gastó también el aviso de motivos que no han fallado"
+        );
+    }
+
+    #[test]
+    fn cargar_sin_sitio_no_gasta_el_aviso_del_guardado() {
+        // Los dos caminos comparten el motivo y no el mensaje. Si cargar gastara el aviso, el primer fallo
+        // de guardado de verdad —el que el usuario necesita ver— saldría mudo.
+        let mut fichero = Persistencia::en(None);
+
+        assert!(fichero.cargar().is_none());
+
+        assert!(
+            fichero.hay_que_avisar(&Fallo::SinSitio),
+            "cargar gastó el aviso y el primer fallo al guardar se quedaría sin decirse"
+        );
     }
 }

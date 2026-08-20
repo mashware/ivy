@@ -1496,9 +1496,15 @@ ventana, ni qué pestaña estaba activa. Nueve decisiones lo definen:
    reintenta jamás** si la disposición no vuelve a cambiar, y se pierde todo desde la última escritura
    buena en vez de medio segundo.
 4. **La escritura es atómica**: se escribe un temporal en el **mismo directorio** que el destino
-   —`disposicion.json.<pid>`, para que dos instancias no se pisen el temporal, y **creado en
+   —`disposicion.json.<pid>.<intento>`, para que dos instancias no se pisen el temporal, y **creado en
    exclusiva**: si ese nombre ya existe **no se adopta**, porque el temporal es lo que se renombra
    encima del destino y un enlace plantado ahí se escribiría a través— y se renombra encima.
+   El número de intento se añadió al implementar, y por un escenario que esta decisión no había visto:
+   **el número de proceso se recicla**. Un temporal que sobreviviera a una muerte violenta —entre crearlo
+   y renombrarlo— no lo limpia nadie, así que con el nombre dependiendo solo del proceso, **toda sesión
+   futura a la que el sistema le diera ese número se quedaría sin poder guardar nada**, para siempre y con
+   un solo aviso que quien abre desde un icono no ve. Contando los intentos, un temporal huérfano estorba
+   **un intento** y no una sesión; y no se adopta ninguno, que era el punto.
    El destino nunca contiene un documento a medias. Permisos `0600` en el fichero y `0700` en su
    directorio. Si el renombrado falla, se borra el temporal y se avisa **una vez por sesión y por
    motivo**; lo que reintenta es el cambio siguiente.
