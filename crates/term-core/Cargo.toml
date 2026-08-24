@@ -6,3 +6,11 @@ edition.workspace = true
 [dependencies]
 alacritty_terminal = "0.26"
 portable-pty = "0.9"
+
+# **El motor, otra vez y a propósito.** Los bancos de `examples/` miden el motor **por debajo de la
+# fachada** de esta caja: un ejemplo compila como su propio binario y no ve las dependencias normales
+# del crate. Sin esto, medir lo que cuesta el historial exigiría abrirle un hueco a la API de
+# producción para un instrumento — que es justo al revés de como se decide aquí: primero se mide, y el
+# número decide qué API hace falta.
+[dev-dependencies]
+alacritty_terminal = "0.26"

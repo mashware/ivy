@@ -2155,3 +2155,123 @@ fondo—, y eso es precisamente lo que hace que este listón sea corto.
 **Cuándo se revisa esta decisión:** cuando haya usuarios que no seas tú, o cuando alguno de la lista
 de arriba publique un contrato abierto con cuerpo. Lo primero cambia a quién hay que convencer; lo
 segundo cambia si hay algo que defender.
+
+---
+
+## D20 — El botón izquierdo dentro de una consola selecciona; mover la división pasa a `Ctrl+Mayúsculas`
+
+**Decisión.** Arrastrar con el botón primario **dentro del cuerpo de una consola selecciona texto**.
+Para **mover la división de sitio** —el gesto de **D15**— hay que arrastrar con **`Ctrl+Mayúsculas`**
+apretado. Y cuando el programa de dentro pide el ratón, **`Mayúsculas` sola fuerza la selección del
+terminal**, que es la convención de `xterm` y de todos los que vinieron después.
+
+**Por qué se toca un gesto ya entregado y medido.** Hasta aquí el primario reclamaba el rectángulo
+entero de cada consola y **movía la división**. Eso convertía «seleccionar texto» —lo que se hace
+todos los días en un terminal— en algo que había que aprender, y dejaba el gesto libre para lo que se
+hace de vez en cuando. El listón de **D19** es un usuario de WezTerm, y ahí arrastrar selecciona: un
+terminal donde arrastrar mueve paneles no pasa ese listón, por mucho que mover paneles sea lo que más
+nos diferencia.
+
+**Por qué `Ctrl+Mayúsculas` y no otra tecla.**
+
+- Es **el prefijo que la aplicación ya usa para todo lo suyo**: partir, cerrar, cambiar de pestaña,
+  pegar. Mover una división es de esa familia; darle otro prefijo sería inventar un segundo idioma.
+- Deja **`Mayúsculas` sola libre**, y hace falta: es lo que fuerza la selección cuando el programa
+  reclama el ratón. Gastarla en mover haría imposible seleccionar dentro de `vim`.
+- Deja **`Ctrl` y `Alt` libres**, que es donde los demás terminales ponen la **selección en bloque**.
+- **`Super` queda descartada** aparte: en GNOME y en KDE arrastra la ventana entera.
+
+**Lo que se descartó, y por qué.**
+
+- **Dejar el primario moviendo y cualificar la selección.** Es lo que había, y es lo contrario de lo
+  que pide el listón: el gesto diario detrás de una tecla y el raro en el gesto libre.
+- **Una cabecera por división, al estilo de Tilix**, que fuera el asidero para arrastrar y llevara el
+  botón de cerrar. **Buena idea, y por eso no se descarta del todo: pasa a ser su propio hito** (ver el
+  roadmap). Aquí se descarta **como parte de F2.6** por su precio: una cabecera **le quita alto a todas
+  las consolas, siempre**, y este proyecto ya tomó esa decisión en sentido contrario cuando dejó de
+  pintar la barra de pestañas con una sola pestaña — precisamente para que la rejilla fuera idéntica a
+  la de antes y las medidas se pudieran comparar. Con cabecera, **las tandas de control publicadas
+  dejan de comparar con nada**. Y no resuelve el problema entero: `Mayúsculas` seguiría haciendo falta
+  para forzar la selección dentro de un programa que pide el ratón.
+- **Un asidero invisible en el borde superior**, sin fila propia. No cuesta alto, pero hay que
+  descubrirlo y no da sitio a un botón de cerrar. Queda como opción para el hito de la cabecera.
+
+**Y los dos caminos conviven.** Elegir el modificador ahora no cierra la puerta a la cabecera después:
+Tilix tiene las dos cosas. Lo que este hito no hace es meter una decisión de disposición dentro de un
+hito de historial y selección.
+
+**Lo que arrastra, y está en el diseño del hito:**
+
+- **El significado del arrastre se fija al empezar**, leyéndolo del propio evento de pulsación. El
+  estado de modificadores de un fotograma describe **el final del lote**, no el instante del clic.
+- **La tanda `J` del guion de medida deja de medir lo que dice.** Inyecta arrastres primarios pelados,
+  así que con el primario seleccionando mediría selección y declararía cero reordenaciones — y el guion
+  la invalidaría sola. Se le añade el acorde al inyector.
+
+---
+
+## D21 — El historial son 3 500 líneas por consola: lo elige el listón, y las medidas descartan el resto
+
+**Decisión.** Cada consola guarda **3 500 líneas** de historial. El número lo pone este proyecto y **no
+se hereda** el del motor —10 000—. El **3 500 sale del listón**: es el defecto de WezTerm, que es contra
+quien **D19** dice que nos medimos. Lo que las medidas hacen es **descartar los demás** y poner precio
+al elegido.
+
+**Lo medido**, con `cargo run --release --example historial -p term-core`, rejilla de 49×180, volcado de
+8 MiB, **cinco muestras por punto** y publicando la mediana:
+
+| Techo | Techo de memoria por consola | Recolocar: líneas cortas | Recolocar: **líneas que envuelven** | Leer 8 MiB |
+|---|---|---|---|---|
+| 0 (lo de hoy) | 0 | 7,7 µs | 6,4 µs | **44,1 ms** · 182 MiB/s |
+| 1 000 | hasta 4,1 MiB | 72 µs | 148 µs | 46,4 ms · 173 MiB/s **(+5 %)** |
+| **3 500** | hasta **14,4 MiB** | 280 µs | **984 µs** | **81,6 ms** · 98 MiB/s **(+85 %)** |
+| 10 000 (el del motor) | hasta 41,2 MiB | 1,70 ms | **4,07 ms** | 89,9 ms · 89 MiB/s (+104 %) |
+
+Una celda ocupa **24 B** — preguntado, no derivado sumando campos.
+
+**Dos avisos sobre esa tabla, porque una revisión los tuvo que sacar:**
+
+1. **La columna de memoria es una cuenta, no una medida, y es un TECHO.** El motor **no reserva el
+   historial de antemano**: su almacenamiento crece al llenarse. Esas cifras son lo que una consola
+   puede llegar a ocupar con el historial lleno, no lo que ocupa al abrirse.
+2. **Las dos columnas de recolocar son dos regímenes reales, y la que decide es la de la derecha.** Una
+   línea **más corta que la rejilla no se recoloca**: al estrechar, el motor la empuja entera y sale por
+   la puerta barata. La primera versión de este banco medía **solo** líneas cortas y publicó un número
+   **cuatro veces menor** que el real. Una sesión de terminal tiene de los dos, así que el techo se
+   elige contra el caro.
+
+**Por qué se descarta el del motor.** Con 10 000 y contenido que envuelve, recolocar cuesta **4,07 ms
+por consola**, y una frontera del árbol mueve **dos**: son **8,1 ms por fotograma** mientras se
+arrastra, o sea **la mitad del presupuesto a 60 Hz**, en un gesto que dura lo que dure el botón
+apretado. Y hasta 165 MiB con cuatro consolas, sin que nada acote cuántas hay (**D14**).
+
+**El precio de 3 500, dicho entero y aceptado.**
+
+- **Arrastrar una frontera cuesta ~2 ms por fotograma** con dos consolas de contenido que envuelve — un
+  **12 %** del presupuesto. Solo se paga **mientras se arrastra**, y solo en los fotogramas que cruzan
+  un borde de celda: el reparto sale temprano cuando la rejilla no cambia.
+- **Leer un volcado se encarece un 85 %**: de 182 a 98 MiB/s. Con el presupuesto de bombeo de 128 KiB
+  por fotograma son alrededor de **medio milisegundo más por consola que vuelque**, sobre los 5,78 ms
+  que hoy cuesta un fotograma con dos volcando.
+- **Hasta 14,4 MiB por consola** de historial lleno, 58 con cuatro.
+
+Es el precio de que un terminal recuerde lo que salió, y se declara en vez de esconderse.
+
+**Y obliga a volver a tomar las medidas publicadas.** Todas las tablas de los anexos —D3, D13, D14,
+D15, D16, D18— se tomaron con el historial **apagado**. En cuanto se encienda, su tramo «interpretando»
+describe otro régimen. **Volver a tomarlas es parte del hito**: un anexo que mide un régimen bajo la
+etiqueta de otro es exactamente el número mal etiquetado que este proyecto no publica.
+
+**Lo que se descartó, y por qué.**
+
+- **Heredar las 10 000 del motor.** Es lo que habría pasado por no tocar una línea, y cuesta la mitad
+  del fotograma en un gesto normal. El defecto de una dependencia no es una decisión de este proyecto.
+- **1 000 líneas.** Casi gratis —+5 % al leer, 1,8 % del fotograma al arrastrar— pero son veinte
+  pantallas: sirven para mirar atrás, no para buscar algo de hace un rato. No pasa el listón.
+- **Que lo elija quien usa la aplicación.** Es lo correcto **a medio plazo** y está en el roadmap
+  (**F2.10**, la configuración), pero hoy no hay dónde ponerlo: adelantar media configuración dentro de
+  este hito es meter otro hito dentro.
+
+**Cuándo dejaría de valer.** Si cambia la versión del motor —los números son suyos—, si llega la
+configuración de F2.10, o si alguien mide que recolocar dejó de crecer con el historial. El banco está
+en el repositorio para volver a tomarlos en un minuto.
