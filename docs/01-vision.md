@@ -27,6 +27,21 @@ Gente que trabaja con varios agentes de terminal en paralelo y necesita saber, d
 - cuánto lleva gastado cada una
 - qué está bloqueado y por qué
 
+## Contra quién se compite
+
+**Contra emuladores de terminal** —WezTerm, Ghostty, Kitty, iTerm2, Windows Terminal—, no contra
+orquestadores de agentes ([02-decisiones.md](02-decisiones.md) → **D19**). El usuario a convencer es
+el que ya tiene uno de esos abierto con agentes dentro.
+
+Eso decide el listón: hay que darle lo que da por hecho —scrollback, copiar, buscar, **sus fuentes**,
+**poder configurarlo**, el ratón dentro de `vim`, y que corra en su máquina— y **nada de la liga de
+al lado**: ni navegador integrado, ni app móvil, ni editor, ni tablero. Contra terminales el panel no
+tiene competencia: ninguno tiene estado por división. Contra orquestadores serías el mismo producto
+con menos cosas.
+
+Las funciones de entorno de desarrollo son **la evolución, no el precio de entrada**, y llegan si
+esto tiene usuarios.
+
 ## Qué lo diferencia
 
 Contrastado contra ocho competidores en agosto de 2026

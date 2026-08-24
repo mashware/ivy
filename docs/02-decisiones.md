@@ -1891,3 +1891,79 @@ su barra lateral contesta esa pregunta mejor que la nuestra ([07-panorama.md](07
   cuando el campo tenga productores: notificar es interrumpir, y una interrupción falsa cuesta mucho
   más que un indicador falso. El indicador entra ahora; el aviso, cuando se sepa que el campo se
   publica bien.
+
+---
+
+## D19 — Nos posicionamos contra emuladores de terminal, no contra orquestadores de agentes
+
+**Qué se decidió.** El usuario al que hay que ganarle es **el que hoy tiene WezTerm, Ghostty, Kitty,
+iTerm2 o Windows Terminal abierto con agentes dentro** — no el que usa Orca, Superset o Conductor. La
+evolución hacia funciones de entorno de desarrollo queda **después**, y condicionada a que esto tenga
+usuarios.
+
+**Por qué, y son tres razones independientes:**
+
+- **Contra terminales el panel no tiene competencia.** Ningún emulador tiene estado por división: la
+  comparación es «lo que ya tienes, **más** una cosa que no tiene ninguno». Contra orquestadores la
+  comparación es una lista de quince funciones donde siempre vas detrás, y **un producto con el 70 %
+  de Orca y nada propio es peor que Orca**.
+- **La carrera de superficie no se gana.** Orca lleva desde marzo de 2026 con equipo y empujes
+  diarios; su navegador Chromium por worktree, su app móvil y su integración con Linear son proyectos
+  enteros cada uno ([07-panorama.md](07-panorama.md) → E7).
+- **El reloj corre al revés.** Cada mes gastado en paridad es un mes en que a Herdr le puede aparecer
+  el campo que le falta para llevarse la única pata que queda (E8). Y hay precedente del año en
+  curso: **Herdr salió con mucho menos que tmux en superficie y llegó a 31.888 estrellas en cinco
+  meses**, por hacer una cosa que tmux no hacía. La adopción no vino de la paridad.
+
+**El listón que sí hay que pasar**, y sale de esta liga y no de la otra:
+
+| Qué da por hecho un usuario de terminal | Estado |
+|---|---|
+| Scrollback, selección, copiar, buscar | **F2.6** |
+| Pegar | hecho — **D11** |
+| Corre en su máquina: macOS y Windows | **F2.7** |
+| **Que se vean sus fuentes** — CJK y los iconos de un `ls` moderno | **no tenía hito hasta hoy → F2.9** |
+| **Poder configurarlo** — fuente, tamaño, colores, atajos | **no tenía hito hasta hoy → F2.10** |
+| Que el ratón llegue al programa de dentro (`vim`, `htop`) | dentro de **F2.6**, ahora explícito |
+| Enlaces clicables (OSC 8) | pendiente, no descalificatorio |
+| Ligaduras, protocolo gráfico de Kitty | **fuera**, y se declara |
+| Latencia y coste por fotograma | medidos y publicados — **D3**, D13, D14, D15 |
+
+**Las tres que no tenían sitio en ninguna fase, y la razón de que aparezcan al cambiar de liga:**
+
+1. **Las fuentes del sistema.** En un entorno de desarrollo es una pega; **en un terminal
+   descalifica**. El usuario abre, hace `ls`, ve cuadros vacíos y cierra. Ya estaba escrito en D3 con
+   estas palabras —*«es lo que separa esto de ser usable a diario»*— y llevaba desde agosto sin hito.
+2. **La configuración.** Cero menciones en el roadmap antes de hoy. Es **la primera cosa que hace
+   cualquiera** al instalar un terminal, y sin ella no hay adopción que valga.
+3. **El ratón dentro de la TUI.** Los informes SGR/X10 no están implementados, así que hoy no se puede
+   hacer clic dentro de un programa de texto. Estaba fichado como materia de F2.6, pero como nota
+   dentro de otro hito y no como algo que alguien fuera a comprobar.
+
+**Lo que queda fuera del listón, y con quién lo hace** — está aquí para saberlo, no para hacerlo:
+
+| | Quién lo tiene |
+|---|---|
+| **Abanico**: el mismo encargo a N agentes en N worktrees, comparar y quedarse con el ganador | Orca |
+| Navegador integrado; señalar un elemento de la interfaz y mandárselo al agente | Orca (*Design Mode*), Superset |
+| Editor de ficheros dentro; diff con anotaciones; atribución de lo que escribió el agente | Orca, Superset |
+| Commit, push y abrir la MR/PR desde la app; cola de revisión | Orca, Conductor, Vibe Kanban |
+| App móvil de acompañamiento | Orca |
+| Worktrees remotos por SSH o en un VPS | Orca, Superset, Herdr |
+| Restaurar sesiones de agente tras reiniciar; hibernar las inactivas | Orca, Herdr |
+| Integración con Linear y Jira; registro de habilidades instalables | Orca, Superset |
+| Tablero de tareas y cadenas de dependencias | Cline Kanban, Vibe Kanban — ver «Ideas sin fase» en [05-roadmap.md](05-roadmap.md) |
+
+**El criterio para dejar entrar algo de esa lista antes de tiempo: que sirva al contrato, no que lo
+tenga el vecino.** A favor, los worktrees remotos: un productor publicando desde otra máquina es
+exactamente el caso que el fichero gana y el socket de Herdr pierde (**D17**). En contra, el *Design
+Mode*: es magnífico y no le sirve de nada a lo que aquí diferencia.
+
+**Lo que esta decisión NO cambia, y conviene no reabrirlo:** **seguimos sin competir con tmux ni con
+Zellij** ([01-vision.md](01-vision.md)). Posicionarse contra emuladores no arrastra lo más caro de la
+liga de al lado —que la sesión sobreviva a cerrar la ventana, adjuntar y desacoplar, un servidor de
+fondo—, y eso es precisamente lo que hace que este listón sea corto.
+
+**Cuándo se revisa esta decisión:** cuando haya usuarios que no seas tú, o cuando alguno de la lista
+de arriba publique un contrato abierto con cuerpo. Lo primero cambia a quién hay que convencer; lo
+segundo cambia si hay algo que defender.

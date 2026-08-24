@@ -40,6 +40,11 @@ pegar, buscar, subir por el historial. Plegar el panel, o darle el ancho que qui
 **Y cuando algo te reclama en una pestaña que no estás mirando, la ficha de esa pestaña te lo dice** —
 si te espera a ti, si está atascada, o si terminó y nadie lo ha visto.
 
+**Y lo que un terminal da por hecho, porque es contra terminales contra quien se compite** (**D19**):
+que se vean tus fuentes —los iconos de un `ls` y el japonés, no cuadros vacíos—, que puedas cambiarle
+la fuente, el tamaño, los colores y los atajos, y que el ratón llegue al programa de dentro para
+poder hacer clic en `vim`.
+
 **Lo que falta:** el panel sigue siendo de solo lectura. Cuenta cosas, no puedes hacer nada
 desde él.
 
@@ -230,9 +235,16 @@ Lo que convierte el prototipo en algo que se usa a diario.
 | **F2.3** ✅ | **Arrastrar divisiones con el ratón** para recolocarlas — **cerrado el 18 de agosto de 2026**. Tres entregas; el gesto, su atomicidad y la identidad del arrastre en [D15](02-decisiones.md), y el fotograma medido arrastrando sin parar en su anexo |
 | **F2.4** ✅ | Plegar el panel por división y **estrechar su ancho arrastrando** — **cerrado el 19 de agosto de 2026**. Tres entregas; el ancho por división, el mínimo del gesto y el plegado como estado aparte en [D10](02-decisiones.md), y lo que cuesta el gesto medido en su anexo |
 | **F2.5** | Guardar y restaurar la disposición al abrir |
-| **F2.6** | Scrollback, selección y **copiar** — pegar se adelantó fuera de fase ([#46](https://github.com/mashware/agent-terminal/issues/46)), porque no necesita nada de lo demás y su ausencia hacía que la aplicación se sintiera rota. Ver D11 |
+| **F2.6** | Scrollback, selección y **copiar** — pegar se adelantó fuera de fase ([#46](https://github.com/mashware/agent-terminal/issues/46)), porque no necesita nada de lo demás y su ausencia hacía que la aplicación se sintiera rota. Ver D11. **Y el reenvío del ratón al programa de dentro**: hoy no llega, así que no se puede hacer clic dentro de `vim` ni de `htop` |
 | **F2.7** | Primera compilación y prueba real en **macOS y Windows** |
 | **F2.8** | **El panel dice cuándo te reclama, y la pestaña lo acumula** — el campo `attention` del contrato (**D18**), el indicador en la ficha de la pestaña, y nada más: el aviso del sistema se queda fuera hasta que el campo tenga productores |
+| **F2.9** | **Las fuentes del sistema** — registrar al arrancar las que tenga la máquina, para que CJK y los iconos de un `ls` moderno dejen de salir como cuadros vacíos. Escrito en **D3** desde agosto como «lo que separa esto de ser usable a diario», y sin hito hasta **D19** |
+| **F2.10** | **Configuración** — fuente, tamaño, colores y atajos. Es la primera cosa que hace cualquiera al instalar un terminal, y hasta **D19** no aparecía en este roadmap |
+
+**De dónde sale esta lista, desde D19.** El listón que hay que pasar antes de publicar es el de un
+usuario de WezTerm, Ghostty o Kitty — **no** el de un usuario de Orca. Eso es lo que mete a F2.9 y
+F2.10 en la fase y lo que deja fuera el navegador integrado, la app móvil, el editor y el abanico de
+agentes: la lista entera de lo que queda fuera, con quién lo tiene, está en **D19**.
 
 **F2.8 se hace antes que F2.6 y F2.7, y el número no se recicla.** Los identificadores de hito viven
 en commits, decisiones y en el almacén de conocimiento, así que renumerar sale más caro que aceptar

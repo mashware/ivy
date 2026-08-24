@@ -732,6 +732,12 @@ mirando el mismo problema, uno con el canal abierto por accidente y el otro con 
 propósito, con identidad por división y esquema publicado. **A Herdr le falta un campo; a nosotros nos
 falta el producto.** Esa es la carrera, dicha en una línea.
 
+**Y contra quién se compite de verdad, desde D19:** contra **emuladores de terminal**, no contra los
+ocho de este panorama. Este documento sigue siendo el mapa de la liga de al lado —hay que saber qué
+hacen y qué robarles— pero **el listón que decide si se publica lo pone un usuario de WezTerm, no uno
+de Orca**. La lista de lo que queda fuera, con quién lo tiene, está en
+[02-decisiones.md](02-decisiones.md) → D19.
+
 **Consecuencia para priorizar, y es la razón de que este resumen esté escrito:** el contrato no es la
 última pata que implementar cuando el terminal esté pulido. Es **la única que sostiene el proyecto**,
 y todo lo que se haga antes que ella se hace sabiendo que no diferencia.
