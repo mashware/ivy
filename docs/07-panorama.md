@@ -274,9 +274,11 @@ panel cerrado, porque su estado solo lo sabe Cline.
   sabe por cuál de sus ocho terminales va cada cosa.
 - **Confirma D4 desde fuera**: construyeron la orquestación lanzando los binarios oficiales de
   cada agente en un proceso, no llamando a modelos por API. Es la única vía que preserva la
-  suscripción, y la tomó una empresa con dinero encima. *(Pendiente de verificar en la política
-  oficial: en abril de 2026 las cuotas de suscripción habrían dejado de cubrir herramientas de
-  terceros. Si es cierto, refuerza D4 y deja fuera a Cline IDE.)*
+  suscripción, y la tomó una empresa con dinero encima. **Verificado en agosto de 2026, y era
+  cierto:** desde el **4 de abril de 2026** las suscripciones Pro, Max y Team **no cubren** el uso a
+  través de herramientas de terceros —opencode, OpenClaw y cualquiera que enrute por OAuth—, y quien
+  integre Claude necesita clave de API con facturación por uso. La cronología entera y lo que
+  significa para este proyecto, en [02-decisiones.md](02-decisiones.md) → D4.
 
 Y dejan el hueco por escrito: *«We're not trying to replace your terminal.»* Son una capa encima.
 Nosotros somos la capa de abajo. Las tres diferencias que quedan, y que son la razón de ser del

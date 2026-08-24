@@ -292,6 +292,13 @@ dirige a los demás.
 Lo importante: **la infraestructura es la misma que la Fase 3**. Los botones y el supervisor usan
 el mismo canal. Si nunca se hace, no se ha perdido nada.
 
+> **Y ahora hay una razón externa para que siga siendo así.** El supervisor **no puede ser una
+> llamada nuestra a un modelo**: desde el **4 de abril de 2026** las suscripciones de Claude no
+> cubren las herramientas de terceros, así que un agente que la app llamara por API lo pagaría el
+> usuario aparte — justo lo que **D4** existe para evitar. El supervisor tiene que ser **otro agente
+> de consola**, en su división, hablando por MCP como cualquier otro. Ver
+> [02-decisiones.md](02-decisiones.md) → D4.
+
 ---
 
 ## Pendientes sueltos
@@ -302,7 +309,12 @@ el mismo canal. Si nunca se hace, no se ha perdido nada.
 - [ ] Cerrar dos cabos del contrato: `actions`, y que `header: false` no dependa de `meta.json`
       (ver [04-contrato-panel.md](04-contrato-panel.md))
 - [ ] Revisar términos de uso antes de distribuir a terceros (automatizar sesiones de
-      suscripción es zona gris; ver [02-decisiones.md](02-decisiones.md) → D4)
+      suscripción es zona gris; ver [02-decisiones.md](02-decisiones.md) → D4). **Más agudo desde
+      abril de 2026**: hospedar el binario oficial está claramente dentro —él usa su propia sesión y
+      nosotros no tocamos su token— pero **automatizarlo** desde fuera no está resuelto por escrito
+- [ ] **Un puente entre opencode y `panel.json`** — su backend expone HTTP con eventos y su barra
+      lateral ya calcula lo que el panel quiere pintar. Sería el segundo productor del contrato sin
+      tocarle una línea a su código (ver [06-referencias.md](06-referencias.md))
 
 ~~Instalar `inotify-tools`~~ — cae con F1.6: el crate `notify` hace lo mismo y además en macOS
 y Windows. Mientras el panel siga corriendo sobre WezTerm, el sondeo por `mtime` cada segundo

@@ -46,6 +46,21 @@ de actividad, la distinción anclado/efímero, y que el panel sea plegable desde
 **Qué no:** duplica el plan en el flujo de mensajes *y* en la barra lateral. El panel existe
 precisamente para que el estado no se repita en la conversación.
 
+**Qué modelo usa, porque cambia quién paga:** es **el más agnóstico de todos** —más de 75
+proveedores: Anthropic, OpenAI, Copilot, Gemini, Bedrock, Groq, DeepSeek, Ollama y modelos locales—,
+y por eso es el agente open source más popular por mucha diferencia. Pero **con Claude va por API y
+tokens desde el 4 de abril de 2026**, cuando las suscripciones dejaron de cubrir herramientas de
+terceros ([02-decisiones.md](02-decisiones.md) → D4). Como agente hospedado aquí, su usuario de
+Claude paga por uso; con Copilot u Ollama, no.
+
+**Y no es competencia: es el mejor candidato a segundo productor.** Su barra lateral ya calcula
+exactamente lo que nuestro contrato quiere pintar —tokens, porcentaje, coste, el plan con sus pasos,
+MCP, LSP, directorio— solo que encerrado en su propia interfaz. Y su arquitectura lo pone a tiro:
+**el backend expone HTTP con eventos**, así que un puente pequeño que escuche esos eventos y escriba
+`panel.json` publicaría sin tocarle una línea a su código. Hoy el contrato tiene **un** productor
+(`flow`); esta es la vía más barata que hay para que tenga dos, y tener productores es «lo único que
+puede convertirse en foso» ([01-vision.md](01-vision.md)).
+
 **Dónde se diferencia — y por qué es nuestro hueco:** su barra lateral solo sabe de opencode.
 Y sus peticiones abiertas más votadas son [panel colapsable con multiventana](https://github.com/anomalyco/opencode/issues/19388)
 y [pestañas de sesión ancladas](https://github.com/anomalyco/opencode/issues/24451) — la gente

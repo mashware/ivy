@@ -598,6 +598,43 @@ sesión de la suscripción, pero hay issues abiertos reportando facturación de 
 [#37686](https://github.com/anthropics/claude-code/issues/37686) — 1.800 $ en dos días).
 **No construir sobre ese camino sin verificarlo con gasto pequeño y vigilado.**
 
+### Confirmado por la vía dura — Anthropic lo prohibió, y con fecha
+
+Esto era la suposición sobre la que descansaba toda la decisión, y **dejó de ser una suposición en
+2026**. La cronología, verificada en agosto de 2026:
+
+| Cuándo | Qué |
+|---|---|
+| Enero de 2026 | Anthropic **bloquea** los tokens OAuth de suscripción fuera de sus aplicaciones oficiales, sin aviso previo. Marcha atrás tras las protestas |
+| Febrero de 2026 | Lo **prohíbe formalmente**: los tokens de Free, Pro y Max no pueden usarse en herramientas de terceros ni en el SDK de agentes |
+| **4 de abril de 2026** | **Entra en vigor.** Pro, Max y Team dejan de cubrir el uso a través de herramientas de terceros — **opencode**, OpenClaw, NanoClaw y cualquier otra que enrute peticiones por OAuth. Compensación: un crédito equivalente a un mes de suscripción |
+
+> **Una suscripción de Claude Code no es una credencial de desarrollador.** Lo que se compra es el
+> derecho de uso de **dos productos** —Claude Code y `claude.ai`—, no un token que se enchufa a
+> cualquier orquestador. Quien integre Claude en su producto necesita clave de API y facturación por
+> uso.
+
+**Qué significa para este proyecto, y es la línea que lo separa todo:** **nosotros no usamos el token
+de nadie.** Lanzamos el binario oficial en un pseudoterminal y él se autentica con su propia sesión,
+igual que si el usuario lo hubiera escrito a mano. Por eso la app **hospeda** agentes en lugar de
+llamarlos, y por eso `ANTHROPIC_API_KEY` está prohibida: no es higiene, es la diferencia entre estar
+dentro o fuera de la política. La regla dura sigue exactamente igual, con una razón externa detrás.
+
+**Y una consecuencia para la Fase 5 que no estaba escrita.** El supervisor —«un agente que observa a
+los demás y avisa»— **no puede ser una llamada nuestra a un modelo**: eso sería la app consumiendo
+API, o sea el usuario pagando aparte por lo que ya paga. Tiene que ser **otro agente de consola**, en
+su división, hablando por MCP como cualquier otro. El roadmap dice que la Fase 5 «no necesita ninguna
+pieza nueva»; sigue siendo cierto, y **esta es la razón por la que tiene que seguir siéndolo**.
+
+**Y sobre opencode en concreto** ([06-referencias.md](06-referencias.md)): admite más de 75
+proveedores —es el más agnóstico de todos— pero **con Claude va por API y tokens desde el 4 de abril
+de 2026**. Como *productor* de panel es perfecto; como agente hospedado, su usuario de Claude paga
+por uso.
+
+Fuentes: [alternativeto.net](https://alternativeto.net/news/2026/2/anthropic-officially-bans-using-subscription-authentication-for-third-party-claude-use) ·
+[winbuzzer.com](https://winbuzzer.com/2026/02/19/anthropic-bans-claude-subscription-oauth-in-third-party-apps-xcxwbn/) ·
+[yage.ai — «A Claude Code Subscription Is Not a Developer Credential»](https://yage.ai/share/claude-code-subscription-not-a-developer-credential-en-20260321.html)
+
 ---
 
 ## D5 — Tres canales, no uno
