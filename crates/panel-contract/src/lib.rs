@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 mod panel;
 
 pub use panel::{
-    Line, MAX_BYTES, MAX_INDENT, Mark, Panel, Problem, STALE_AFTER, Style, read, read_if_newer,
+    Attention, Line, MAX_BYTES, MAX_INDENT, Mark, Panel, Problem, STALE_AFTER, Style, read,
+    read_if_newer,
 };
 
 /// El único fichero que el contrato pone dentro del directorio. Lo escribe quien hace el trabajo,

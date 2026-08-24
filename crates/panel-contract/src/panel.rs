@@ -59,6 +59,18 @@ pub struct Panel {
     pub header: bool,
     /// Cuánto silencio tolera este productor antes de que su panel se marque como viejo.
     pub stale_after: Duration,
+    /// Si esta división **reclama algo**, y de qué clase. Nada = no reclama.
+    ///
+    /// **Es el único campo del contrato que la aplicación interpreta**, y eso es deliberado: responde
+    /// la única pregunta que necesita para navegar —¿tengo que ir ahí?— y de ahí salen el indicador
+    /// del panel y el de la ficha de su pestaña. El resto del vocabulario —las marcas, los estilos, la
+    /// fase— **se guarda y se pinta**, porque traducirlo sería que la aplicación decida qué significa
+    /// el trabajo de otro.
+    ///
+    /// **No se deduce del cuerpo**: una línea con [`Mark::Block`] es contenido del resumen, no una
+    /// señal. Deducirlo de ahí sería frágil de la forma más tonta — un «esperé aprobación el martes»
+    /// marcaría la pestaña para siempre.
+    pub attention: Option<Attention>,
     /// El cuerpo.
     pub lines: Vec<Line>,
     /// Cuándo se escribió el fichero, **que es de donde sale la antigüedad**.
@@ -99,6 +111,53 @@ pub enum Mark {
     Wait,
     Block,
     Info,
+}
+
+/// Qué reclama una división, cuando reclama algo.
+///
+/// **Se ordena por la prioridad que el contrato declara**, no por el sitio en que estén escritas las
+/// variantes: cuando una pestaña tiene varias divisiones, «lo que más reclama» es el máximo de sus
+/// reclamos. [`Attention::Wait`] es el mayor porque **es lo único que se desatasca contigo delante ahora
+/// mismo**; una división atascada por un tercero puede esperar cinco minutos más, y una que terminó y
+/// nadie ha mirado, todo el día.
+///
+/// **El orden se escribe, no se deriva, y la diferencia importa el día que haya un cuarto valor.** Un
+/// `Ord` derivado ordena por la posición de las variantes en el fichero: quien añadiera una en medio
+/// cambiaría la prioridad **en silencio**, sin que fallara la compilación ni ninguna prueba. Con el
+/// `match` de abajo, esa cuarta variante **no compila** hasta que alguien decida qué prioridad tiene —
+/// que es exactamente la conversación que hay que tener. Y las variantes pueden entonces declararse en
+/// **el orden del contrato**, como las de [`Mark`], en vez de al revés para que el derive salga.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attention {
+    /// **Te espera a ti**: una pregunta, un permiso, una decisión.
+    Wait,
+    /// Atascada por algo que no eres tú.
+    Block,
+    /// Terminó, y nadie lo ha mirado.
+    Done,
+}
+
+impl Attention {
+    /// Cuánto reclama, para poder comparar dos. Números sin más significado que su orden.
+    fn prioridad(self) -> u8 {
+        match self {
+            Self::Done => 0,
+            Self::Block => 1,
+            Self::Wait => 2,
+        }
+    }
+}
+
+impl Ord for Attention {
+    fn cmp(&self, otro: &Self) -> std::cmp::Ordering {
+        self.prioridad().cmp(&otro.prioridad())
+    }
+}
+
+impl PartialOrd for Attention {
+    fn partial_cmp(&self, otro: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(otro))
+    }
 }
 
 /// Cómo se pinta una línea. Los siete del contrato.
@@ -281,6 +340,7 @@ fn interpretar(texto: &str) -> Result<Panel, Problem> {
             .map_or(STALE_AFTER, |minutos| {
                 Duration::from_secs(minutos.saturating_mul(60))
             }),
+        attention: cadena_cruda(&crudo, "attention").and_then(atencion),
         lines: lineas.iter().filter_map(linea).collect(),
         written_at: None,
     })
@@ -305,9 +365,9 @@ fn linea(crudo: &serde_json::Value) -> Option<Line> {
 
     Some(Line {
         text: cadena(crudo, "text").unwrap_or_default(),
-        mark: cadena(crudo, "mark").as_deref().and_then(marca),
+        mark: cadena_cruda(crudo, "mark").and_then(marca),
         reference: cadena(crudo, "ref"),
-        style: cadena(crudo, "style").as_deref().and_then(estilo),
+        style: cadena_cruda(crudo, "style").and_then(estilo),
         // Acotada **aquí**, que es la frontera con lo que viene de fuera: quien pinte va a repetir
         // ese número de espacios, y un valor absurdo sería un pánico por reservar memoria. El techo
         // también evita que la conversión trunque en silencio donde el entero de máquina sea menor.
@@ -321,10 +381,26 @@ fn linea(crudo: &serde_json::Value) -> Option<Line> {
 }
 
 fn cadena(crudo: &serde_json::Value, campo: &str) -> Option<String> {
-    crudo
-        .get(campo)
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
+    cadena_cruda(crudo, campo).map(str::to_owned)
+}
+
+/// Lo mismo, **sin copiar**: para los campos cuyo valor se traduce a un tipo propio y se tira.
+///
+/// **Existe porque esta caja mide lo que reserva.** Los tres vocabularios cerrados —la marca, el estilo
+/// y el reclamo— convierten la cadena en un `enum` que cabe en un byte y sueltan el texto una llamada
+/// después; pedir memoria para eso son tres reservas por línea que nadie llega a usar, en una caja con
+/// un módulo entero dedicado a contar reservas y una tabla de picos en su documentación.
+fn cadena_cruda<'a>(crudo: &'a serde_json::Value, campo: &str) -> Option<&'a str> {
+    crudo.get(campo).and_then(serde_json::Value::as_str)
+}
+
+fn atencion(nombre: &str) -> Option<Attention> {
+    match nombre {
+        "wait" => Some(Attention::Wait),
+        "block" => Some(Attention::Block),
+        "done" => Some(Attention::Done),
+        _ => None,
+    }
 }
 
 fn marca(nombre: &str) -> Option<Mark> {
@@ -438,12 +514,16 @@ mod tests {
         let dir = PanelDir::create().expect("crear el directorio");
         let panel = panel_en(
             &dir,
-            r#"{"v":"uno","header":"sí","stale_after_minutes":-5,
+            r#"{"v":"uno","header":"sí","stale_after_minutes":-5,"attention":3,
                 "lines":[{"text":"vale","mark":"inventada","style":42,"indent":"mucha"}]}"#,
         )
         .expect("un campo malo no invalida el panel");
 
         assert_eq!(panel.version, None);
+        assert_eq!(
+            panel.attention, None,
+            "un reclamo que no es ni siquiera una cadena tiene que caer en «no reclama», no explotar"
+        );
         assert!(
             panel.header,
             "un valor que no es booleano cae en el de omisión"
@@ -705,6 +785,93 @@ mod tests {
         assert_eq!(panel.stale_after, Duration::from_secs(u64::MAX));
     }
 
+    /// Las tres palabras con las que un productor dice que su división reclama algo.
+    #[test]
+    fn las_tres_clases_de_reclamo_se_leen() {
+        let dir = PanelDir::create().expect("crear el directorio");
+
+        for (escrito, esperado) in [
+            ("wait", Attention::Wait),
+            ("block", Attention::Block),
+            ("done", Attention::Done),
+        ] {
+            let panel = panel_en(&dir, &format!(r#"{{"attention":"{escrito}","lines":[]}}"#))
+                .expect("leer");
+
+            assert_eq!(panel.attention, Some(esperado), "con «{escrito}»");
+        }
+    }
+
+    /// **La prioridad es el orden del tipo, y de eso depende lo que enseñe una ficha de pestaña.**
+    ///
+    /// Se afirma sobre el **máximo de una lista**, que es como la va a usar quien acumule, y no sobre
+    /// comparaciones sueltas: con `a < b` a pares, un orden mal declarado puede seguir pasando si las
+    /// parejas que se prueban no son las que mandan.
+    ///
+    /// **Lo que esta prueba NO puede cubrir, y por eso la prioridad se escribe a mano**: una cuarta
+    /// clase de reclamo que alguien añadiera mañana no aparecería en ninguna de estas listas, así que la
+    /// prueba seguiría en verde con la prioridad nueva sin decidir. Lo que lo impide es que el `match`
+    /// de `prioridad` deja de compilar.
+    #[test]
+    fn lo_que_mas_reclama_es_el_maximo() {
+        use Attention::{Block, Done, Wait};
+
+        assert_eq!([Done, Block, Wait].into_iter().max(), Some(Wait));
+        assert_eq!([Block, Wait].into_iter().max(), Some(Wait));
+        assert_eq!([Done, Block].into_iter().max(), Some(Block));
+        assert_eq!([Done].into_iter().max(), Some(Done));
+    }
+
+    /// Lo escribe un tercero a mano, así que una palabra que no existe es cuestión de tiempo — y el
+    /// resto de su panel no tiene la culpa.
+    #[test]
+    fn un_reclamo_que_no_existe_se_lee_como_si_no_hubiera_dicho_nada() {
+        let dir = PanelDir::create().expect("crear el directorio");
+
+        let panel = panel_en(
+            &dir,
+            r#"{"attention":"waiting","phase":"validate","lines":[{"text":"algo"}]}"#,
+        )
+        .expect("leer");
+
+        assert_eq!(panel.attention, None);
+        assert_eq!(
+            panel.phase.as_deref(),
+            Some("validate"),
+            "un campo mal escrito se llevó por delante el resto del panel"
+        );
+        assert_eq!(panel.lines.len(), 1, "y también el cuerpo");
+    }
+
+    /// **El cuerpo no es una señal, y esto es la mitad del hito que vive en esta caja.** Bastaría un
+    /// «esperé aprobación el martes» para dejar una pestaña marcada para siempre.
+    ///
+    /// **Es una prueba de regresión, no de cobertura, y conviene saber qué la hace caer**: hoy no hay
+    /// ningún camino que derive el reclamo del cuerpo, así que la afirmación se cumple por ausencia. Cae
+    /// **cuando alguien escribe ese camino** — comprobado añadiendo a la lectura un `or_else` que
+    /// buscara la primera línea con marca de espera o de bloqueo. Ése es exactamente el atajo que este
+    /// hito existe para que nadie tome.
+    #[test]
+    fn una_marca_del_cuerpo_no_es_un_reclamo_de_la_division() {
+        let dir = PanelDir::create().expect("crear el directorio");
+
+        let panel = panel_en(
+            &dir,
+            r#"{"lines":[{"text":"esperé aprobación el martes","mark":"wait"},{"text":"y esto","mark":"block"}]}"#,
+        )
+        .expect("leer");
+
+        assert_eq!(
+            panel.lines[0].mark,
+            Some(Mark::Wait),
+            "el cuerpo sí la trae"
+        );
+        assert_eq!(
+            panel.attention, None,
+            "el cuerpo produjo un reclamo de la división entera"
+        );
+    }
+
     /// La sangría viene de fuera y quien pinta repetirá esos espacios.
     #[test]
     fn una_sangria_absurda_se_acota() {
@@ -948,6 +1115,7 @@ mod tests {
             phase: None,
             header: true,
             stale_after: STALE_AFTER,
+            attention: None,
             lines: Vec::new(),
             written_at: None,
         }
