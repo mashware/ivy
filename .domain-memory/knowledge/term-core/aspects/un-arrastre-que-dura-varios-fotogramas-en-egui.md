@@ -2,23 +2,25 @@
 id: asp_un-arrastre-que-dura-varios-fotogramas-en-egui_a1f1w9
 slug: un-arrastre-que-dura-varios-fotogramas-en-egui
 name: >-
-  Un arrastre que dura varios fotogramas: el identificador lleva el NOMBRE,
-  Escape lo termina sin soltar, ningún botón está cualificado, y se marca como
-  arrastrado SIN MOVERSE
+  Arrastre de varios fotogramas en egui: el identificador lleva el NOMBRE,
+  Escape termina sin soltar, ningún botón cualifica, se marca arrastrado SIN
+  MOVERSE, y el empate lo gana el ÚLTIMO
 type: aspect
 status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-08-17T20:07:30.328Z'
-updated_at: '2026-08-19T15:29:24.626Z'
-last_verified: '2026-08-19T15:29:24.626Z'
+updated_at: '2026-08-24T22:29:27.895Z'
+last_verified: '2026-08-24T22:29:27.895Z'
 file_paths:
   - crates/app/src/lib.rs
 symbols:
   - atender_el_raton
   - arrastrar_la_frontera_de_su_panel
+  - arrastrar_la_frontera
+  - mover_una_frontera
 content_hashes:
-  crates/app/src/lib.rs: 'sha256:67dfdfc9bad7c0d618f018577eecd1de410625cc5cf9347f593360fff275852e'
+  crates/app/src/lib.rs: 'sha256:8f5d9220dadc886213f3207269ffaf9502f3454547843a94c9aa6e24dedbb2d5'
 tags:
   - egui
   - entrada
@@ -29,7 +31,7 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-**Cuatro cosas de egui 0.36 que su nombre no anuncia. Las tres primeras costaron un defecto real en F2.3; la cuarta, en F2.4 — y la tercera lo costó DOS VECES, ver el aviso del final.**
+**Cinco cosas de egui 0.36 que su nombre no anuncia. Las tres primeras costaron un defecto real en F2.3; la cuarta, en F2.4; la quinta, en F2.6 — y la tercera lo costó DOS VECES, ver el aviso del final.**
 
 **1. El identificador del control tiene que llevar el NOMBRE de lo que se arrastra, nunca su SITIO.** egui sostiene el arrastre entre fotogramas por ese identificador. Con la posición dentro, cualquier cosa que renumere **mientras el botón sigue apretado** hace que el arrastre en vuelo apunte a otra cosa — y en esta aplicación los acordes de cambiar de pestaña, partir y cerrar **se aplican al principio de la misma pasada de interfaz**, mucho antes de que se atienda el ratón. El caso que se coló: agarrar una consola, pulsar `Ctrl+Mayús+→` sin soltar, y soltar — se reordenaban dos consolas de **la pestaña de destino**.
 
@@ -45,12 +47,18 @@ feature_id: feat_term-core_nx0g1r
 
 **Por qué el 4 es el peligroso, con su caso concreto.** El asidero de la frontera del panel se dibuja donde el reparto **recorta** el panel, que en una división estrecha no es el ancho que el usuario pidió. Sin exigir movimiento, **un clic seco leía ese corte como intención** y machacaba para siempre el ancho pedido con la ventana ancha. Exigir movimiento es lo que separa «he pulsado aquí» de «quiero esto de ancho».
 
+**5. Cuando varios controles se tocan, el empate lo gana el ÚLTIMO registrado — y la prueba de acierto de egui NO es contención exacta.** Su `interact_radius` (5 puntos por defecto) mete en el conjunto de candidatos a todo lo que esté cerca, no solo a lo que contiene el punto. Un divisor del árbol mide **dos puntos** y las dos consolas lo tocan: las tres son candidatas, y las consolas se registran **después** del divisor, así que ganan ellas.
+
+> **El caso, en F2.6, y es de los que se publican como otro número.** El gesto que una tanda de medida se inyecta llevaba el puntero a la línea del divisor y apretaba **en el mismo fotograma**. Resultado: el empate se lo llevaba una consola, el gesto **la arrastraba a ella**, el soltado la recolocaba y el reparto volvía a mitad y mitad. La tanda medía el gesto de **D15** —mover una consola— bajo la etiqueta del gesto de la frontera, con el informe declarando efectos igual, así que ninguna guarda del guion lo cazaba.
+
+> **Lo que lo arregla es hacer lo que hace una mano: llegar, pararse y apretar después.** Acercar el puntero en un fotograma y pulsar en el **siguiente** — comprobado que un arrastre humano gana siempre, y que el inyectado solo ganaba el primero de la corrida. La causa de fondo es la misma que [[una-prueba-de-arrastre-necesita-dos-pasadas-como-minimo]]: egui resuelve la interacción al principio del fotograma con lo registrado en el **anterior**. **A quien usa la aplicación no le pasa**, y eso está medido, no razonado.
+
 **Y una que sí sale gratis:** `interact_pointer_pos()` **sigue valiendo en el fotograma en que se suelta**, a propósito y con comentario de los autores. Por eso un gesto así **no necesita estado propio** entre fotogramas; un campo con «qué estoy arrastrando» sería una segunda copia de algo ya guardado, y las dos podrían discrepar.
 
 **Bonus:** **`Sense::CLICK_AND_DRAG` no existe**. Solo el método `click_and_drag()`, y ese añade `FOCUSABLE` — la trampa que ya se pagó con el clic y con la frontera. Lo correcto es `Sense::CLICK | Sense::DRAG`.
 
-> **EL AVISO QUE MÁS VALE DE ESTA FICHA, y es sobre la ficha misma.** El punto 3 estaba escrito aquí **antes** de F2.4, con su ejemplo del pegado de X11 y todo — y en F2.4 se volvió a cometer: la frontera del panel se movía con el botón derecho. Tener el conocimiento guardado **no basta** si el camino nuevo se escribe copiando una pieza hermana en vez de repasando esta lista. Ver [[el-molde-del-hermano-trae-sus-decisiones-y-sus-huecos]]. Cada control de arrastre nuevo se revisa contra los cuatro puntos, uno por uno.
+> **EL AVISO QUE MÁS VALE DE ESTA FICHA, y es sobre la ficha misma.** El punto 3 estaba escrito aquí **antes** de F2.4, con su ejemplo del pegado de X11 y todo — y en F2.4 se volvió a cometer: la frontera del panel se movía con el botón derecho. Tener el conocimiento guardado **no basta** si el camino nuevo se escribe copiando una pieza hermana en vez de repasando esta lista. Ver [[el-molde-del-hermano-trae-sus-decisiones-y-sus-huecos]]. Cada control de arrastre nuevo se revisa contra los cinco puntos, uno por uno.
 
 ## Where it lives
 
-Leído en el fuente de egui 0.36.1 del registro local de cargo (`sense.rs`, `response.rs`, `interaction.rs`, `context.rs`), no supuesto. Implementado en `Ventana::atender_el_raton` y en `Division::arrastrar_la_frontera_de_su_panel` (`crates/app/src/lib.rs`), y cada punto atado con una prueba que cae al revertirlo — comprobado mutándolas una a una.
+Leído en el fuente de egui 0.36.1 del registro local de cargo (`sense.rs`, `response.rs`, `interaction.rs`, `context.rs`, `hit_test.rs`), no supuesto. Implementado en `Ventana::atender_el_raton`, `Ventana::arrastrar_la_frontera` y `Division::arrastrar_la_frontera_de_su_panel` (`crates/app/src/lib.rs`); el gesto inyectado del punto 5 vive en `ArrastresInyectados::mover_una_frontera`, en el mismo fichero. Cada punto atado con una prueba que cae al revertirlo — comprobado mutándolas una a una; la del punto 5 es `el_ciclo_del_gesto_de_la_frontera_devuelve_el_reparto_al_de_partida`, que fue **la que lo encontró**.
