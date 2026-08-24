@@ -473,6 +473,17 @@ impl ArrastresInyectados {
     }
 }
 
+/// Lo que la ventana se lleva de haber pintado la barra de pestañas.
+///
+/// **Los dos valen para el informe, y por eso viajan juntos**: el coste se resta del fotograma y las
+/// fichas marcadas son lo que distingue una tanda que midió la barra **con** su trabajo nuevo de una que
+/// la midió sin él.
+struct DeLaBarra {
+    costo: std::time::Duration,
+    /// Cuántas fichas llevaban símbolo en esta pasada.
+    marcadas: usize,
+}
+
 /// Lo que la ventana se lleva de haber pintado una división.
 ///
 /// **Tiene nombre y no es una pareja suelta**, por lo mismo que [`Reparto`] y [`Hueco`]: dos valores que se
@@ -2848,6 +2859,22 @@ impl Pestaña {
         self.raiz.hojas_mut()
     }
 
+    /// Lo que más reclaman las consolas de esta pestaña, si alguna reclama algo.
+    ///
+    /// **Es el máximo, y el orden lo pone el propio tipo**: `wait` gana a `block` y `block` a `done`,
+    /// como dice el contrato, y a igualdad de clase gana el que alguien sostiene. Decidirlo aquí con un
+    /// `if` sería una segunda copia de esa regla.
+    ///
+    /// **Se aplanan los que no reclaman antes de comparar.** Buscar el máximo sobre los `Option` tal
+    /// cual devuelve «algo que no contiene nada» cuando ninguna reclama —un `Some(None)`— y quien lo
+    /// leyera preguntando si hay algo marcaría la ficha de una pestaña donde nadie reclama.
+    fn reclamo(&self, ahora: SystemTime) -> Option<panel::Reclamo> {
+        self.divisiones()
+            .iter()
+            .filter_map(|division| division.estado_del_panel.reclamo(ahora))
+            .max()
+    }
+
     /// Dónde cae la consola que tiene el teclado dentro de la lista pintada, si sigue viva.
     ///
     /// **Devuelve una posición y no la consola** porque quien pregunta necesita casarla con la geometría,
@@ -2999,6 +3026,19 @@ struct Ventana {
     /// se **reste**, y una serie más para un suceso que pasa cuando el usuario pulsa un atajo diría muy
     /// poco y habría que explicarla entera.
     cronometrado_aparte: std::time::Duration,
+    /// Lo que ha costado pintar la barra **en el fotograma que está en curso**, todavía sin anotar.
+    ///
+    /// **Existe porque egui repite la pasada** sobre la misma entrada, y las dos pasadas pintan de
+    /// verdad. Anotando en cada una, el contador diría «fotogramas» y contaría pasadas, y la media que
+    /// el informe publica saldría diluida bajo una etiqueta que promete otra cosa. El trabajo repetido
+    /// **sí** se suma —ocurrió dos veces—, pero el fotograma sigue siendo uno.
+    barra_de_este_fotograma: std::time::Duration,
+    /// Lo que ha costado pintar la barra de pestañas, para que el informe lo publique con su nombre.
+    ///
+    /// **Va aparte del cajón de arriba aunque también se sume a él.** El cajón es lo que se resta del
+    /// fotograma —ahí dentro no se distingue quién puso qué—, y esto es lo que el informe **nombra**: sin
+    /// nombrarlo, la única forma de saber lo que cuesta la barra sería restar dos tandas distintas.
+    coste_de_la_barra: medida::Barra,
     /// Dónde va la disposición, y lo que esta sesión ya sabe de ese fichero.
     ///
     /// **Es la misma que cargó al arrancar, y eso es una regla y no una casualidad**: el veto de una
@@ -3265,6 +3305,8 @@ impl Ventana {
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
+            barra_de_este_fotograma: std::time::Duration::ZERO,
+            coste_de_la_barra: medida::Barra::default(),
             persistencia: sesion::Persistencia::en(None),
             restauracion: None,
             ultimo_visto: None,
@@ -3506,6 +3548,7 @@ impl Ventana {
                 gesto: arrastres.que.como_se_publica(),
             }),
             self.restauracion,
+            self.coste_de_la_barra,
         )?;
 
         // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo
@@ -3842,6 +3885,15 @@ impl Ventana {
             self.guardado.anotar_espejo(espejo);
         }
 
+        // **La barra se anota aquí y no donde se pinta**, por lo mismo que el espejo: lo de arriba
+        // ocurre una vez por **pasada** y esto una vez por **fotograma**, así que contar allí publicaría
+        // una media por pasada bajo la etiqueta «por fotograma». Lo que se suma es el trabajo de las dos
+        // pasadas, que ocurrió entero.
+        let barra = std::mem::take(&mut self.barra_de_este_fotograma);
+        if !barra.is_zero() {
+            self.coste_de_la_barra.anotar(barra);
+        }
+
         // **Y lo del enganche de la entrada cruda se declara aquí, DESPUÉS de vaciar.** Ver
         // [`Ventana::gastado_inyectando`]: corrió después de que el fotograma que se cierra terminara, así
         // que es del que empieza. Sumarlo arriba lo restaría del que no lo pagó.
@@ -4148,7 +4200,32 @@ impl Ventana {
     ///
     /// El recorte a la ficha es lo que sostiene el reparto a partes iguales sin desplazamiento: cuando el
     /// número deja de caber se corta en su ficha en vez de invadir a la vecina.
-    fn pintar_la_barra(&self, ui: &egui::Ui, barra: egui::Rect, metrica: &Metrica) {
+    ///
+    /// **Y cada ficha dice si esa pestaña te reclama**, con el mismo símbolo y el mismo color que el
+    /// panel de la división que lo reclama. **El símbolo va pegado a la izquierda y el número se queda
+    /// donde estaba**: centrar los dos juntos movería el número cada vez que un productor publica o deja
+    /// de publicar, y una ficha cuyo número baila se lee peor que una con un hueco a la izquierda.
+    ///
+    /// **Un solo reloj para todas las fichas**, pasado desde fuera. No es el mismo que el de los
+    /// paneles —cada división toma el suyo al pintarse, y las de fondo comparten otro—, y no hace falta
+    /// que lo sea: lo que esto evita es que **dos fichas de la misma barra** discrepen en el minuto en
+    /// que una de ellas se vuelve rancia.
+    ///
+    /// **Devuelve lo que costó, y el cronómetro vive aquí dentro y no en quien llama.** Este proyecto ya
+    /// rechazó dos veces el reloj en el llamador, con el motivo medido: desde fuera, el tramo abarca la
+    /// llamada entera se haga lo que se haga dentro, así que **sacar trabajo de la región medida no
+    /// rompe ninguna prueba**. Comprobado otra vez aquí — con el reloj fuera, mover el recorrido de los
+    /// reclamos afuera dejaba la suite entera en verde, y ese recorrido es la mitad que este hito
+    /// añadió.
+    fn pintar_la_barra(
+        &self,
+        ui: &egui::Ui,
+        barra: egui::Rect,
+        metrica: &Metrica,
+        ahora: SystemTime,
+    ) -> DeLaBarra {
+        let empezo = Instant::now();
+        let mut marcadas = 0;
         ui.painter_at(barra)
             .rect_filled(barra, 0.0, self.tema.fondo());
 
@@ -4178,6 +4255,41 @@ impl Ventana {
                     self.tema.primer_plano()
                 },
             );
+
+            // **También la activa se marca.** En la pestaña que miras el reclamo puede ser de la
+            // división de al lado, y no marcarla sería una regla condicional más que mantener.
+            if let Some(reclamo) = self.pestañas[que_pestaña].reclamo(ahora) {
+                // **El símbolo se pinta sobre el fondo de la barra, también en la ficha activa.** Esa
+                // ficha está rellena con el color del foco, y encima de él estos colores **no se ven**:
+                // medido, el rojo del bloqueo da 1,01 de contraste y el amarillo atenuado 1,02 — o sea,
+                // el mismo color a efectos de leerlo. El número de al lado ya se invierte por esta misma
+                // razón, pero invertir el símbolo no valdría: **su color es la clase**, y cambiarlo
+                // diría otra cosa. Lo que se cambia es lo de detrás.
+                if es_la_activa {
+                    pintor.rect_filled(
+                        egui::Rect::from_min_size(
+                            sitio.left_top(),
+                            egui::vec2(2.0 * MARGEN_DE_LA_BARRA + metrica.ancho(), sitio.height()),
+                        ),
+                        0.0,
+                        self.tema.fondo(),
+                    );
+                }
+                pintor.text(
+                    egui::pos2(sitio.left() + MARGEN_DE_LA_BARRA, sitio.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    panel::simbolo_del_reclamo(reclamo.clase),
+                    metrica.fuente(),
+                    self.tema
+                        .color_del_reclamo(reclamo.clase, reclamo.sostenido),
+                );
+                marcadas += 1;
+            }
+        }
+
+        DeLaBarra {
+            costo: empezo.elapsed(),
+            marcadas,
         }
     }
 
@@ -4991,13 +5103,6 @@ impl eframe::App for Ventana {
         // arrastre sigue en vuelo, y en ese fotograma nadie ha soltado, así que el árbol no cambió.
         let destino_del_arrastre = del_raton.destino;
 
-        // La barra se pinta antes que las consolas por lo mismo que el divisor: lo que se pinte después
-        // queda por encima, y el glifo del borde de una consola que se saliera ya lo corta su recorte.
-        // Su clic se atendió mucho antes, con el resto de lo que puede cambiar de pestaña.
-        if let Some(barra) = barra {
-            self.pintar_la_barra(ui, barra, &metrica);
-        }
-
         // Se indexa a mano en vez de pasar por `activa_mut`, que prestaría la ventana entera: el tema
         // hace falta a la vez y es otro campo.
         // **La lista se prepara solo cuando hay gesto inyectado que la vaya a leer.** Sin tanda que
@@ -5071,6 +5176,36 @@ impl eframe::App for Ventana {
         // Las que no se pintan no tienen otro sitio donde enterarse de su tamaño: ésta es la única
         // mitad del fotograma que conoce el área que les tocaría.
         self.medir_las_que_no_se_ven(area, &metrica);
+
+        // **La barra se pinta aquí, la última, y eso es una invariante del hito y no una preferencia.**
+        // Su ficha dice lo que reclaman las divisiones de cada pestaña, y los paneles de este fotograma
+        // no están releídos hasta esta línea: los de la pestaña que se ve, al pintarlos justo arriba; los
+        // de las demás, en `medir_las_que_no_se_ven`. Pintándola antes, la ficha iría **un fotograma por
+        // detrás** — y en una ventana reactiva eso no es «un fotograma», es para siempre: el fotograma
+        // que pidió el vigilante se gastaría pintando la ficha vieja y nadie pediría otro.
+        //
+        // **Bajarla aquí no cambia lo que se ve**: la barra y las consolas ocupan rectángulos disjuntos
+        // —`apartar_la_barra` corta la ventana en dos— y cada uno pinta con su recorte, así que quién
+        // vaya encima no decide nada. Su clic se sigue atendiendo mucho antes, con el resto de lo que
+        // puede cambiar de pestaña.
+        //
+        // **Y se declara entera —acumular y pintar—, no solo el recorrido.** Declarar la mitad dejaría el
+        // símbolo nuevo en el residuo del framework, que es la cifra con la que D3 juzga a egui.
+        if let Some(barra) = barra {
+            // **Anotar y restar son la misma decisión, así que se toman en la misma línea.** Con dos
+            // sentencias separadas se puede hacer una y olvidar la otra, y las dos formas de olvidarla
+            // son caras: sin restar, la barra se publica como coste del framework; sin anotar, el
+            // informe no la nombra y hay que restar dos tandas para saber lo que vale.
+            //
+            // **Se acumula por pasada y se anota al cerrar el fotograma**, como el espejo de la
+            // disposición: egui repite la pasada sobre la misma entrada, así que contar aquí publicaría
+            // una media **por pasada** bajo una etiqueta que dice «por fotograma». El trabajo repetido
+            // sí se suma —ocurrió dos veces— pero el fotograma sigue siendo uno.
+            let suyo = self.pintar_la_barra(ui, barra, &metrica, SystemTime::now());
+            self.barra_de_este_fotograma += suyo.costo;
+            self.cronometrado_aparte += suyo.costo;
+            self.coste_de_la_barra.vio_marcadas(suyo.marcadas);
+        }
 
         // Ya se ha pintado, así que lo que siga pendiente es de una consola que no se pintó.
         self.cerrar_las_vueltas_no_pintadas();
@@ -5638,6 +5773,8 @@ mod tests {
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
+            barra_de_este_fotograma: std::time::Duration::ZERO,
+            coste_de_la_barra: medida::Barra::default(),
             persistencia: sesion::Persistencia::en(None),
             restauracion: None,
             ultimo_visto: None,
@@ -17617,6 +17754,498 @@ mod tests {
         assert!(
             claves.len() > previstas.len(),
             "no se leyó ninguna clave: {escrito}"
+        );
+    }
+
+    /// Le da a una división de una pestaña dónde publicar, publica ahí, y **deja la bandera levantada
+    /// como la deja el vigilante**: la lectura ocurre entonces dentro del fotograma, que es lo que estas
+    /// pruebas necesitan mirar.
+    fn publicar_en_la_pestaña(
+        ventana: &mut Ventana,
+        pestaña: usize,
+        cual: usize,
+        contenido: &str,
+    ) {
+        let mut divisiones = ventana.pestañas[pestaña].divisiones_mut();
+        let division = &mut divisiones[cual];
+        division.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
+        publicar_en(division, contenido);
+        division.por_releer.levantar();
+    }
+
+    /// Manda hacia atrás la fecha del `panel.json` de una división, para que su panel nazca **rancio de
+    /// forma determinista**.
+    ///
+    /// **Y no un `stale_after_minutes: 0`**, que es lo que había: con plazo cero, que el panel cuente
+    /// como viejo depende de que el reloj avance entre escribir el fichero y pintar, y eso **no siempre
+    /// pasa** — la prueba que lo usaba falló una vez de cada dieciséis corridas. Una hora de margen
+    /// contra el plazo de serie no depende de nada.
+    fn envejecer_el_panel(ventana: &mut Ventana, pestaña: usize, cual: usize) {
+        let divisiones = ventana.pestañas[pestaña].divisiones_mut();
+        let ruta = divisiones[cual]
+            .panel
+            .as_ref()
+            .expect("la división tiene directorio")
+            .path()
+            .join(panel_contract::FICHERO_DEL_PANEL);
+        std::fs::File::open(&ruta)
+            .expect("abrir el panel")
+            .set_modified(SystemTime::now() - std::time::Duration::from_secs(60 * 60))
+            .expect("mover la fecha hacia atrás");
+    }
+
+    /// Los símbolos de reclamo que quedaron encolados en la barra, con la ficha en la que cayó cada uno.
+    ///
+    /// Se reconocen por su recorte, igual que los números: cada ficha se pinta con su propio pintor.
+    fn reclamos_en_la_barra(
+        formas: &[egui::epaint::ClippedShape],
+        barra: egui::Rect,
+    ) -> Vec<(egui::Rect, String, egui::Color32)> {
+        formas
+            .iter()
+            .filter_map(|recortada| match &recortada.shape {
+                egui::Shape::Text(texto)
+                    if barra.contains_rect(recortada.clip_rect)
+                        && !texto.galley.text().chars().all(|c| c.is_ascii_digit()) =>
+                {
+                    Some((
+                        recortada.clip_rect,
+                        texto.galley.text().to_owned(),
+                        texto.fallback_color,
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// La barra de una ventana de tantas pestañas, en el área de estas pruebas.
+    fn barra_de(cuantas: usize, area: egui::Rect) -> egui::Rect {
+        con_metrica(|metrica| {
+            apartar_la_barra(area, cuantas, metrica)
+                .0
+                .expect("con dos pestañas o más tiene que haber barra")
+        })
+    }
+
+    /// **La invariante del hito, y corre UN SOLO fotograma a propósito.**
+    ///
+    /// La ficha de una pestaña dice lo que reclaman sus divisiones, y los paneles de este fotograma no
+    /// están releídos hasta el final de la pasada: los de la pestaña que se ve, al pintarlos; los de las
+    /// demás, al medirlas. Con la barra pintándose antes —como estaba— la ficha va **un fotograma por
+    /// detrás**, y en una ventana reactiva eso no es «un fotograma»: es para siempre, porque el fotograma
+    /// que pidió el vigilante se gasta pintando la ficha vieja y nadie pide otro.
+    ///
+    /// **Con dos fotogramas esta prueba pasa con el defecto puesto**, que es justo lo que la hace
+    /// necesaria: el segundo pinta lo que el primero leyó.
+    #[test]
+    fn la_ficha_de_una_pestaña_de_fondo_reclama_en_el_mismo_fotograma_en_que_su_productor_publica()
+    {
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let area = area_de(800.0);
+        publicar_en_la_pestaña(
+            &mut ventana,
+            1,
+            0,
+            r#"{"attention":"wait","lines":["lo que sea"]}"#,
+        );
+
+        let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+        let barra = barra_de(2, area);
+        assert_eq!(
+            reclamos_en_la_barra(&formas, barra),
+            vec![(
+                ficha(barra, 1, 2),
+                "?".to_owned(),
+                ventana
+                    .tema
+                    .color_del_reclamo(panel_contract::Attention::Wait, true)
+            )],
+            "la ficha de la pestaña de fondo no dijo que su consola te reclama, y no hizo falta abrirla"
+        );
+    }
+
+    /// **La ficha enseña lo que MÁS reclaman sus divisiones**, que es la regla del contrato: lo que te
+    /// espera a ti gana a lo atascado, y lo atascado a lo terminado. Entra por el pintado y no por el
+    /// ayudante que compara: lo que se ve es lo que hay que atar.
+    #[test]
+    fn la_ficha_ensena_lo_que_mas_reclaman_sus_consolas() {
+        let area = area_de(800.0);
+        let barra = barra_de(2, area);
+
+        for (una, otra, gana, simbolo) in [
+            ("done", "block", panel_contract::Attention::Block, "⊘"),
+            ("block", "wait", panel_contract::Attention::Wait, "?"),
+            ("done", "done", panel_contract::Attention::Done, "∎"),
+        ] {
+            let ctx = egui::Context::default();
+            let mut ventana =
+                ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+            for (cual, que) in [una, otra].into_iter().enumerate() {
+                publicar_en_la_pestaña(
+                    &mut ventana,
+                    0,
+                    cual,
+                    &format!(r#"{{"attention":"{que}","lines":["x"]}}"#),
+                );
+            }
+
+            let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+            assert_eq!(
+                reclamos_en_la_barra(&formas, barra),
+                vec![(
+                    ficha(barra, 0, 2),
+                    simbolo.to_owned(),
+                    ventana.tema.color_del_reclamo(gana, true)
+                )],
+                "con «{una}» y «{otra}» en la misma pestaña tenía que ganar «{gana:?}»"
+            );
+        }
+    }
+
+    /// **A igualdad de clase gana el que alguien sostiene.** Con dos consolas esperándote y una de ellas
+    /// muerta, la ficha tiene que decir que hay alguien esperando **de verdad**: pintar el atenuado
+    /// mandaría a la que ya no contesta, que es el peor sitio al que puede mandarte una barra.
+    #[test]
+    fn entre_dos_reclamos_iguales_la_ficha_ensena_el_que_alguien_sostiene() {
+        // **Los dos órdenes, y ésa es la mitad que faltaba.** Buscar el máximo de una lista devuelve el
+        // **último** de los empatados, así que con el vivo siempre en la segunda división la prueba
+        // pasaba **por la posición** y no por la regla: quitando el desempate del orden del tipo seguía
+        // en verde. Comprobado.
+        for muerto in [0, 1] {
+            let ctx = egui::Context::default();
+            let mut ventana =
+                ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+            let area = area_de(800.0);
+            publicar_en_la_pestaña(
+                &mut ventana,
+                0,
+                muerto,
+                r#"{"attention":"wait","lines":["x"]}"#,
+            );
+            envejecer_el_panel(&mut ventana, 0, muerto);
+            publicar_en_la_pestaña(
+                &mut ventana,
+                0,
+                1 - muerto,
+                r#"{"attention":"wait","lines":["y"]}"#,
+            );
+
+            let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+            let barra = barra_de(2, area);
+            let en_la_barra = reclamos_en_la_barra(&formas, barra);
+            let [(_, _, color)] = en_la_barra.as_slice() else {
+                panic!("tenía que haber exactamente un reclamo en la barra: {en_la_barra:?}");
+            };
+            assert_eq!(
+                *color,
+                ventana
+                    .tema
+                    .color_del_reclamo(panel_contract::Attention::Wait, true),
+                "con el muerto en la división {muerto}, ganó el reclamo que nadie sostiene y la ficha \
+                 manda a la consola que ya no contesta"
+            );
+        }
+    }
+
+    /// **La pestaña que estás mirando se marca igual que las demás.** En ella el reclamo puede ser de la
+    /// división de al lado, y no marcarla sería una regla condicional más — con su prueba y su forma de
+    /// quedarse coja.
+    #[test]
+    fn la_ficha_de_la_pestaña_activa_se_marca_igual_que_las_demas() {
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let area = area_de(800.0);
+        publicar_en_la_pestaña(&mut ventana, 0, 1, r#"{"attention":"block","lines":["x"]}"#);
+
+        let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+        let barra = barra_de(2, area);
+        assert_eq!(ventana.activa, 0, "la prueba mira la activa, y es la cero");
+        assert_eq!(
+            reclamos_en_la_barra(&formas, barra),
+            vec![(
+                ficha(barra, 0, 2),
+                "⊘".to_owned(),
+                ventana
+                    .tema
+                    .color_del_reclamo(panel_contract::Attention::Block, true)
+            )]
+        );
+    }
+
+    /// **Sin nadie que reclame, ninguna ficha se marca.** El atajo obvio para acumular —buscar el máximo
+    /// sobre los `Option` tal cual— devuelve «algo que no contiene nada» cuando todas callan, y quien lo
+    /// leyera preguntando si hay algo marcaría **todas** las pestañas de una ventana en reposo.
+    #[test]
+    fn sin_reclamos_ninguna_ficha_se_marca() {
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let area = area_de(800.0);
+        // Con panel publicado y sin el campo: es el caso que distingue «no reclama» de «no hay panel».
+        publicar_en_la_pestaña(
+            &mut ventana,
+            0,
+            0,
+            r#"{"lines":[{"text":"x","mark":"block"}]}"#,
+        );
+
+        let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+        assert_eq!(
+            reclamos_en_la_barra(&formas, barra_de(2, area)),
+            vec![],
+            "alguien marcó una ficha sin que ninguna consola reclamara nada"
+        );
+    }
+
+    /// Un reclamo que nadie sostiene llega a la ficha **atenuado**, igual que al panel: reclama, y no hay
+    /// nadie detrás. Apagarlo del todo escondería la pestaña, y este panel confiesa en vez de esconder.
+    #[test]
+    fn un_reclamo_sin_sostener_llega_atenuado_a_la_ficha() {
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let area = area_de(800.0);
+        publicar_en_la_pestaña(&mut ventana, 1, 0, r#"{"attention":"wait","lines":["x"]}"#);
+        envejecer_el_panel(&mut ventana, 1, 0);
+
+        let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+        let barra = barra_de(2, area);
+        let en_la_barra = reclamos_en_la_barra(&formas, barra);
+        let [(_, simbolo, color)] = en_la_barra.as_slice() else {
+            panic!("tenía que haber exactamente un reclamo en la barra");
+        };
+        assert_eq!(simbolo, "?");
+        assert_eq!(
+            *color,
+            ventana
+                .tema
+                .color_del_reclamo(panel_contract::Attention::Wait, false),
+            "el reclamo de un panel que ya nace rancio llegó a la ficha como si alguien lo sostuviera"
+        );
+    }
+
+    /// **Lo que cuesta la barra se declara, y el informe lo nombra.** El coste del fotograma se reparte
+    /// por resta, así que un tramo que nadie declara se publica como coste del framework — la cifra con
+    /// la que D3 juzga a egui. Y nombrarlo es la otra mitad: metido solo en el cajón que se resta, para
+    /// saber lo que vale la barra habría que restar dos tandas distintas.
+    ///
+    /// **Con una sola pestaña no hay barra, y ése es el control**: sin él, esta prueba pasaría con el
+    /// pintado de la barra quitado.
+    #[test]
+    fn lo_que_cuesta_la_barra_se_declara_y_el_informe_lo_nombra() {
+        let ctx = egui::Context::default();
+        let area = area_de(800.0);
+
+        let mut sola = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        pasada_de_interfaz(&mut sola, &ctx, area, egui::RawInput::default());
+        assert!(
+            sola.barra_de_este_fotograma.is_zero() && sola.coste_de_la_barra.fotogramas == 0,
+            "con una sola pestaña no hay barra que pintar, así que no hay nada que declarar"
+        );
+
+        let mut dos = ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        pasada_de_interfaz(&mut dos, &ctx, area, egui::RawInput::default());
+
+        // Lo pintado en esta pasada está **o pendiente de anotar, o ya anotado** según haya llegado a
+        // cerrarse el fotograma; lo que la prueba afirma es que se midió, no en cuál de los dos sitios
+        // cayó.
+        assert!(
+            dos.barra_de_este_fotograma + dos.coste_de_la_barra.total > std::time::Duration::ZERO,
+            "la barra se pintó en cero tiempo, que es lo que publica un tramo que no se llegó a medir"
+        );
+        assert!(
+            dos.cronometrado_aparte >= dos.barra_de_este_fotograma,
+            "lo que costó la barra no está dentro de lo que se resta del fotograma: se publicaría como \
+             coste del framework"
+        );
+    }
+
+    /// **Que el informe publique lo que la ventana midió, y no una tabla en blanco.** El formateo de la
+    /// línea tiene su prueba en la caja de la medida; lo que ésta ata es **el cable**: pasarle a la
+    /// cabecera una cuenta vacía en vez de la de la ventana dejaba la suite entera en verde, el informe
+    /// salía sin la línea, y el guion de la tanda la invalidaba sin que nadie supiera por qué.
+    #[test]
+    fn el_informe_publica_la_cuenta_de_la_barra_que_la_ventana_llevo() {
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        ventana
+            .coste_de_la_barra
+            .anotar(std::time::Duration::from_millis(7));
+        ventana.coste_de_la_barra.vio_marcadas(2);
+        // Sin nada medido el informe no se publica, y entonces esto pasaría por no encontrar una línea
+        // en un texto vacío.
+        ventana.pestañas[0].divisiones_mut()[0]
+            .medida
+            .anotar_ida(std::time::Duration::from_micros(10));
+
+        let informe = informe_de(&ventana);
+
+        assert!(
+            informe.contains("barra:        1 fotogramas · 7ms en total"),
+            "el informe no publicó la cuenta que llevaba la ventana:\n{informe}"
+        );
+        assert!(
+            informe.contains("2 fichas marcadas"),
+            "el informe no dijo si la barra llegó a marcar alguna ficha:\n{informe}"
+        );
+    }
+
+    /// **El símbolo tiene que verse también en la ficha activa, y por poco no se veía.** Esa ficha se
+    /// rellena con el color del foco, y sobre él los colores del reclamo dan **1,01 de contraste** el
+    /// rojo del bloqueo y 1,02 el amarillo atenuado: el mismo color, a efectos de leerlo. La promesa de
+    /// que «también la activa se marca» se cumplía en la cola de formas y **no en la pantalla**.
+    ///
+    /// Se comprueba que detrás del símbolo se pinta el fondo de la barra, que es sobre lo que se lee en
+    /// todas las demás fichas. Afirmar solo el color del texto —como hacía la prueba de al lado— pasa
+    /// con el defecto puesto.
+    #[test]
+    fn el_simbolo_de_la_ficha_activa_se_pinta_sobre_el_fondo_y_no_sobre_el_realce() {
+        let ctx = egui::Context::default();
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let area = area_de(800.0);
+        publicar_en_la_pestaña(&mut ventana, 0, 0, r#"{"attention":"block","lines":["x"]}"#);
+
+        let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+        let barra = barra_de(2, area);
+        let suya = ficha(barra, 0, 2);
+        let fondos: Vec<egui::Rect> = formas
+            .iter()
+            .filter_map(|recortada| match &recortada.shape {
+                egui::Shape::Rect(pintada)
+                    if pintada.fill == ventana.tema.fondo() && suya.contains_rect(pintada.rect) =>
+                {
+                    Some(pintada.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        let [chip] = fondos.as_slice() else {
+            panic!("detrás del símbolo de la ficha activa no se pintó el fondo: {fondos:?}");
+        };
+        assert_eq!(chip.left(), suya.left(), "el chip no arranca en su ficha");
+        assert!(
+            chip.contains(egui::pos2(
+                suya.left() + MARGEN_DE_LA_BARRA + 1.0,
+                suya.center().y
+            )),
+            "el chip no cubre donde cae el símbolo: {chip:?}"
+        );
+        assert!(
+            chip.width() < suya.width() / 2.0,
+            "el chip se comió la ficha entera y tapó el realce de la activa: {chip:?}"
+        );
+    }
+
+    /// **Con TRES consolas reclamando cosas distintas, la ficha sigue enseñando la que manda.** Las
+    /// demás pruebas del reparto miran **parejas**, y una pareja no distingue «lo que más reclaman
+    /// todas» de «lo que más reclaman las dos primeras» ni de «lo que reclama la última»: con `wait`
+    /// siempre en el mismo sitio, media docena de formas de acumular mal se quedan en verde.
+    ///
+    /// Por eso van **las seis ordenaciones y no una**: lo que se ata es la regla, no la posición — el
+    /// mismo disfraz que ya se coló una vez en la prueba del desempate de al lado.
+    #[test]
+    fn con_tres_consolas_la_ficha_ensena_el_reclamo_que_manda() {
+        for orden in [
+            ["done", "block", "wait"],
+            ["done", "wait", "block"],
+            ["block", "done", "wait"],
+            ["block", "wait", "done"],
+            ["wait", "done", "block"],
+            ["wait", "block", "done"],
+        ] {
+            let ctx = egui::Context::default();
+            let mut ventana =
+                ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+            // La ayuda de las pestañas monta dos divisiones por pestaña; la tercera se pone aquí,
+            // que es lo único que este criterio pide y lo que las parejas no llegan a decir.
+            ventana.pestañas[0] = Pestaña::con(
+                (0..3).map(|n| division_con("sleep 30", n)).collect(),
+                &Disposicion::DE_SIEMPRE,
+                0,
+            );
+            let area = area_de(800.0);
+            for (cual, que) in orden.into_iter().enumerate() {
+                publicar_en_la_pestaña(
+                    &mut ventana,
+                    0,
+                    cual,
+                    &format!(r#"{{"attention":"{que}","lines":["x"]}}"#),
+                );
+            }
+
+            let formas = pasada_de_interfaz(&mut ventana, &ctx, area, egui::RawInput::default());
+
+            let barra = barra_de(2, area);
+            assert_eq!(
+                reclamos_en_la_barra(&formas, barra),
+                vec![(
+                    ficha(barra, 0, 2),
+                    "?".to_owned(),
+                    ventana
+                        .tema
+                        .color_del_reclamo(panel_contract::Attention::Wait, true)
+                )],
+                "con «{orden:?}» en la misma pestaña tenía que ganar «wait»"
+            );
+        }
+    }
+
+    /// **Cuántas fichas llegó a marcar la barra lo cuenta el pintado, y el informe lo publica.** Es la
+    /// mitad de la declaración que dice si una tanda midió la barra **con** el trabajo que este hito le
+    /// añadió: sin ese número, una corrida cuyos productores no publicaran el campo publica el coste de
+    /// la barra sin el símbolo y se lee igual que una buena.
+    ///
+    /// Sin esta prueba el contador se puede dejar clavado en cero —comprobado, la suite entera sigue en
+    /// verde—, porque la única que mira el número se lo pone a mano antes de pedir el informe.
+    ///
+    /// **El control va dentro**: una ventana en reposo recorre la barra igual y no marca nada, así que
+    /// un contador que contara fichas en vez de reclamos también cae aquí.
+    #[test]
+    fn la_barra_cuenta_las_fichas_que_llego_a_marcar() {
+        let area = area_de(800.0);
+
+        let mut callada =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        pasada_de_interfaz(
+            &mut callada,
+            &egui::Context::default(),
+            area,
+            egui::RawInput::default(),
+        );
+        assert_eq!(
+            callada.coste_de_la_barra.fichas_marcadas, 0,
+            "sin nadie que reclame, la barra dijo haber marcado fichas"
+        );
+
+        let mut ventana =
+            ventana_de_pestañas([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        publicar_en_la_pestaña(&mut ventana, 0, 0, r#"{"attention":"wait","lines":["x"]}"#);
+        publicar_en_la_pestaña(&mut ventana, 1, 1, r#"{"attention":"block","lines":["x"]}"#);
+
+        pasada_de_interfaz(
+            &mut ventana,
+            &egui::Context::default(),
+            area,
+            egui::RawInput::default(),
+        );
+
+        assert_eq!(
+            ventana.coste_de_la_barra.fichas_marcadas, 2,
+            "la barra marcó las dos fichas y no lo declaró: el informe publica su coste como si no \
+             hubiera habido ningún reclamo que acumular ni ningún símbolo que pintar"
         );
     }
 }

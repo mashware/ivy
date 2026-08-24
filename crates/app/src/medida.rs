@@ -578,6 +578,60 @@ pub struct EnPuntos {
     pub alto: f32,
 }
 
+/// Lo que ha costado pintar la barra de pestañas a lo largo de la sesión.
+///
+/// **Se declara porque el fotograma se reparte por resta**: lo que nadie nombra se publica como coste
+/// del framework, que es la cifra con la que D3 juzga a egui. La barra no es de ninguna consola —no
+/// tiene dónde caer salvo aquí— y desde que su ficha dice lo que reclaman las divisiones de cada
+/// pestaña, además **recorre**: no declararla sería regalarle ese recorrido al framework.
+///
+/// **El tramo es la barra entera —acumular y pintar—, y decirlo entero importa.** Declarar solo el
+/// recorrido dejaría el pintado de las fichas sin dueño, que es la misma frontera a medias que este
+/// proyecto ya pagó una vez.
+#[derive(Clone, Copy, Default)]
+pub struct Barra {
+    /// En cuántos fotogramas se llegó a pintar.
+    ///
+    /// **Cero no es «no costó nada», es «no hubo barra»** —con una sola pestaña no se pinta—, y son dos
+    /// cosas que un total a cero no distingue. Es también lo que hace comparable la tanda: sin este
+    /// número, una corrida de una sola pestaña publicaría «la barra no cuesta nada» con el código
+    /// quitado.
+    pub fotogramas: usize,
+    /// Lo que costaron todos ellos juntos.
+    pub total: Duration,
+    /// Lo más que llegaron a marcarse fichas a la vez.
+    ///
+    /// **Cero significa que la barra recorrió y no marcó nada.** El recorrido ocurre haya reclamo o no,
+    /// así que sin este número una tanda cuyos productores no publicaran el campo publicaría el coste de
+    /// la barra **sin la mitad que hay que medir**, y se leería igual que una buena.
+    pub fichas_marcadas: usize,
+}
+
+impl Barra {
+    /// Anota lo que costó pintarla **en un fotograma**, ya sumadas sus pasadas.
+    ///
+    /// Quien llama es el cierre del fotograma, no el pintado: egui repite la pasada sobre la misma
+    /// entrada y las dos pintan de verdad, así que anotar por pasada daría una media por pasada bajo
+    /// una etiqueta que dice «por fotograma».
+    pub fn anotar(&mut self, cuanto: Duration) {
+        self.fotogramas += 1;
+        self.total += cuanto;
+    }
+
+    /// Se queda con lo más que llegaron a marcarse fichas a la vez.
+    ///
+    /// **El máximo y no lo último**: en el último fotograma pueden haber caducado todas, y lo que hay
+    /// que poder decir es si llegó a marcarse alguna en toda la corrida.
+    pub fn vio_marcadas(&mut self, cuantas: usize) {
+        self.fichas_marcadas = self.fichas_marcadas.max(cuantas);
+    }
+
+    /// Lo que costó de media, o nada si no llegó a pintarse.
+    fn por_fotograma(&self) -> Option<Duration> {
+        self.total.checked_div(self.fotogramas as u32)
+    }
+}
+
 /// Lo que costó abrir la ventana con la disposición que había guardada.
 ///
 /// **Se publica fuera de la tabla de tramos y no se resta de ningún fotograma**, y eso es lo que hay que
@@ -663,6 +717,7 @@ pub fn cabecera(
     visible: usize,
     arrastres: Option<Arrastres>,
     restauracion: Option<Restauracion>,
+    barra: Barra,
 ) -> std::io::Result<()> {
     let perfil = if cfg!(debug_assertions) {
         "depuración — el número que vale es el de --release"
@@ -741,6 +796,17 @@ pub fn cabecera(
             "restauradas:  {} consolas · {leer} en leer y validar · {:?} en abrirlas (antes del primer \
              fotograma, no se resta de ninguno)",
             restauracion.consolas, restauracion.abrirlas
+        )?;
+    }
+    // **Solo cuando la hubo.** Con una sola pestaña no hay barra que pintar, y publicar «0 fotogramas»
+    // invita a leer que no cuesta nada.
+    if let Some(media) = barra.por_fotograma() {
+        writeln!(
+            a,
+            "barra:        {} fotogramas · {:?} en total · {media:?} por fotograma · {} fichas \
+             marcadas a la vez como mucho (acumular los reclamos y pintar las fichas; se resta de su \
+             fotograma)",
+            barra.fotogramas, barra.total, barra.fichas_marcadas
         )?;
     }
     writeln!(a, "renderizador: glow")?;
@@ -853,6 +919,24 @@ mod tests {
         arrastres: Option<Arrastres>,
         restauracion: Option<Restauracion>,
     ) -> String {
+        con_barra(
+            ventana,
+            rejillas,
+            visible,
+            arrastres,
+            restauracion,
+            Barra::default(),
+        )
+    }
+
+    fn con_barra(
+        ventana: EnPuntos,
+        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+        visible: usize,
+        arrastres: Option<Arrastres>,
+        restauracion: Option<Restauracion>,
+        barra: Barra,
+    ) -> String {
         let mut salida = Vec::new();
         cabecera(
             &mut salida,
@@ -861,6 +945,7 @@ mod tests {
             visible,
             arrastres,
             restauracion,
+            barra,
         )
         .expect("escribir a memoria no falla");
         String::from_utf8(salida).expect("la cabecera es texto")
@@ -1432,5 +1517,54 @@ mod tests {
 
         assert_eq!(serie.muestras.len(), MUESTRAS);
         assert_eq!(serie.total, MUESTRAS + 10);
+    }
+
+    /// **La línea que dice lo que cuesta la barra, y que solo sale cuando la hubo.** Sin ella, lo que
+    /// cuesta pintar las fichas —y desde este hito, acumular lo que reclaman sus divisiones— solo se
+    /// podría averiguar restando dos tandas distintas, que es como se publican los números que no se
+    /// pueden defender. Y el guion invalida la corrida leyendo justo esta línea.
+    #[test]
+    fn la_cabecera_dice_lo_que_costo_la_barra_solo_cuando_hubo_barra() {
+        let ventana = EnPuntos {
+            ancho: 1280.0,
+            alto: 800.0,
+        };
+        let rejillas = &[
+            (0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))]),
+            (1, vec![(2, rejilla(49, 39)), (3, rejilla(49, 39))]),
+        ];
+
+        let con = con_barra(
+            ventana,
+            rejillas,
+            0,
+            None,
+            None,
+            Barra {
+                fotogramas: 100,
+                total: Duration::from_micros(3_600),
+                fichas_marcadas: 2,
+            },
+        );
+        assert!(
+            con.contains("barra:        100 fotogramas") && con.contains("36µs por fotograma"),
+            "la cabecera no declaró lo que costó la barra ni su media:\n{con}"
+        );
+
+        let sin = con_barra(
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            rejillas,
+            0,
+            None,
+            None,
+            Barra::default(),
+        );
+        assert!(
+            !sin.contains("barra:"),
+            "sin barra que pintar, la cabecera publicó un tramo que nadie midió:\n{sin}"
+        );
     }
 }

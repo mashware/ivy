@@ -71,6 +71,12 @@ contestar para navegar: *¿tengo que ir ahí?* La decisión completa, con lo des
 - **Ausente es ausente.** Sin este campo la división no se marca, y la app **no** lo deduce del
   cuerpo, ni de `phase`, ni de si la consola escribe. Una línea con `mark: block` es contenido del
   resumen, no una señal: un «esperé aprobación el martes» marcaría la pestaña para siempre.
+- **Cómo se ve**, para que sepas lo que estás pidiendo: en el panel de la división aparece una fila de
+  la aplicación —`? te espera a ti`, `⊘ atascada por algo que no eres tú`, `∎ terminó y nadie lo ha
+  mirado`—, **por encima del cuerpo y también con `header: false`**, porque esta señal no la esconde el
+  productor. Y en la ficha de su pestaña aparece **solo el símbolo**.
+- **Y si dejas de publicar, el reclamo se ve atenuado**: sigue ahí, y dice que nadie lo sostiene. Con una
+  excepción: `done` **no** se atenúa por callar, porque callar es lo que hace quien terminó (D18).
 - **No dice qué hace el programa.** Para «trabajando» o «en reposo» no hay campo y no lo va a haber:
   eso o lo deduce la app o lo declara un harness que no conoce la pregunta
   ([02-decisiones.md](02-decisiones.md) → D6).

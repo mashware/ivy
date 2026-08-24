@@ -2032,6 +2032,54 @@ detrás de un resumen plausible, que es lo que este panel existe para no hacer.
 
 **Lo encontró la revisión, no el diseño.** El diseño escribió «el rancio se atenúa» para las tres sin
 mirar qué significa el silencio en cada una.
+
+### Medido — 24 agosto 2026: lo que cuesta la barra desde que su ficha acumula
+
+**La ficha de cada pestaña dice lo que más reclaman sus divisiones, así que pintar la barra ahora
+recorre.** Ese trabajo **se declara** —tiene su línea propia en la cabecera del informe— y por tanto
+**no** se publica como coste del framework, que es la cifra con la que **D3** juzga a egui.
+
+Cuatro corridas, dos de la tanda `F` (la pestaña de fondo quieta) y dos de la `G` (la de fondo volcando
+como la de delante), con ventana de 1280×800 y **las cuatro consolas publicando un reclamo** —la mitad
+`wait` y la mitad `done`—, con las **dos fichas marcadas** en las cuatro corridas.
+
+| Corrida | Fotogramas con barra | La barra, por fotograma | El resto del fotograma |
+|---|---|---|---|
+| `F` #1 | 512 | **2,346 µs** | 256,2 µs |
+| `F` #2 | 479 | **2,689 µs** | 268,1 µs |
+| `G` #1 | 553 | **2,689 µs** | 290,0 µs |
+| `G` #2 | 552 | **2,398 µs** | 293,9 µs |
+
+**Entre 2,35 y 2,69 µs**, o sea **una centésima y media del 1 %** del presupuesto de 16,7 ms a 60 Hz —
+con dos pestañas y cuatro consolas reclamando. Las dos corridas de cada tanda **se pueden promediar**
+según el comparador del guion.
+
+**Qué entra en ese número y qué no.** Entra el recorrido que acumula los reclamos de cada pestaña y el
+pintado de sus fichas: el cronómetro vive **dentro** de la función que las pinta, no en quien la llama,
+porque desde fuera el tramo abarca la llamada entera se haga lo que se haga dentro — y entonces sacar
+trabajo de la región medida no rompe ninguna prueba. **No entra atender el clic de la barra**, que
+corre en otro punto de la pasada y **sigue sin declararse desde antes de este hito**: es una fuga
+conocida, pequeña y anterior, y arreglarla aquí habría arriesgado contar dos veces lo que el cambio de
+pestaña ya declara por su cuenta.
+
+**Y el número describe el camino sano**: productores vivos, publicando dentro de plazo. Con paneles
+rancios o rotos, la pregunta que la ficha hace compone además el texto del aviso de cada división, y eso
+no está medido — sigue dentro del tramo declarado, así que no se le regala a nadie, pero no es este
+número.
+
+**Por qué se mide con dos pestañas y no con una.** Con una sola pestaña **no hay barra**, así que una
+tanda de una pestaña afirmaría «el coste está declarado» **con el código quitado**. El guion lo impide
+por su cuenta desde este hito: en una tanda de dos pestañas o más, la corrida se marca `.INVALIDA` si el
+informe no trae la línea de la barra **o si la barra no llegó a marcar ni una ficha** — porque el
+recorrido ocurre haya reclamo o no, y sin esa segunda guarda una corrida cuyos productores no
+publicaran el campo mediría la mitad del trabajo y se leería igual que una buena. Es la misma guarda que
+ya evita publicar como buenas las tandas sin panel, sin gestos o sin restaurar.
+
+**Lo que este número NO dice.** No se compara con las corridas `F`/`G` del anexo de **D13**: son de otro
+día y de otro binario, y ahí el resto del fotograma salió entre 386 y 466 µs. Lo que se sostiene es lo de
+dentro de esta tabla — que el tramo existe, que está separado, y que es **dos órdenes de magnitud menor**
+que el residuo del que se le habría restado.
+
 ---
 
 ## D19 — Nos posicionamos contra emuladores de terminal, no contra orquestadores de agentes

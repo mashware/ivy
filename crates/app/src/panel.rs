@@ -144,6 +144,33 @@ pub struct Reclamo {
     pub sostenido: bool,
 }
 
+/// Cuál de dos reclamos gana cuando hay que enseñar **uno solo** — la ficha de una pestaña tiene un
+/// símbolo y sus divisiones pueden reclamar cosas distintas.
+///
+/// **Manda la clase, y a igualdad de clase gana el que alguien sostiene.** Con dos divisiones esperándote
+/// y una de ellas viva, la ficha tiene que decir que hay alguien esperando de verdad: pintar el
+/// atenuado sería mandarte a la que está muerta.
+///
+/// **A mano y no derivado**, por lo mismo que el orden de [`Attention`]: un `Ord` derivado ordena por el
+/// orden de los campos en el fichero, así que quien los reordenara —o metiera uno en medio— cambiaría
+/// cuál gana **en silencio**.
+impl Ord for Reclamo {
+    fn cmp(&self, otro: &Self) -> std::cmp::Ordering {
+        // **Se destructura para que un campo nuevo no compile.** Comparando por `self.campo` a mano, el
+        // día que este tipo gane un tercer campo el orden lo ignoraría en silencio y dejaría de ser
+        // coherente con el `Eq` derivado — que es justo lo que el orden de [`Attention`] evita con su
+        // `match` exhaustivo, y la razón de que aquí no haya un `derive`.
+        let Self { clase, sostenido } = self;
+        clase.cmp(&otro.clase).then(sostenido.cmp(&otro.sostenido))
+    }
+}
+
+impl PartialOrd for Reclamo {
+    fn partial_cmp(&self, otro: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(otro))
+    }
+}
+
 /// Lo que una división sabe del panel de su productor.
 ///
 /// **Guarda el último panel bueno a propósito.** El productor machaca el fichero entero en cada
@@ -467,7 +494,7 @@ fn simbolo(marca: Mark) -> char {
 ///
 /// `?` porque te preguntan a ti, `⊘` porque algo la tiene parada, y `∎` porque ahí ya no queda nada
 /// por hacer más que mirarlo.
-fn simbolo_del_reclamo(clase: Attention) -> char {
+pub(crate) fn simbolo_del_reclamo(clase: Attention) -> char {
     match clase {
         Attention::Wait => '?',
         Attention::Block => '⊘',

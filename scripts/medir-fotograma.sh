@@ -402,7 +402,7 @@ if [ "$RESTAURA" = 1 ]; then
     sembrar_disposicion
 fi
 
-publicar() {  # publicar <directorio> <n>
+publicar() {  # publicar <directorio> <n> <cuál de las consolas>
     # **Dónde cae el temporal NO importa, y la tanda D existe para haberlo comprobado.** La sospecha
     # era que un temporal dentro del directorio vigilado despertase a la ventana por su cuenta al
     # cerrarse, doblando los despertares por publicación. Es falso por construcción: `vigilante::repartir`
@@ -414,8 +414,14 @@ publicar() {  # publicar <directorio> <n>
     else
         tmp="$1/.medida.json"
     fi
+    # **El reclamo va en lo que se siembra desde que la ficha lo enseña.** Sin él, la barra se pintaría
+    # con lo que reclama nadie: recorrería igual —el recorrido no depende de que haya reclamo— pero no
+    # pintaría ni un símbolo, y la tanda publicaría lo que cuesta la barra **sin la mitad que este hito
+    # añadió**. Se reparte por consola para que en una pestaña convivan clases distintas, que es lo que
+    # obliga a la ficha a comparar: la que hace de turno impar espera, la par se da por terminada.
+    if [ $(( $3 % 2 )) = 0 ]; then reclamo=done; else reclamo=wait; fi
     cat > "$tmp" <<JSON
-{"v":1,"stale_after_minutes":600,"lines":[
+{"v":1,"stale_after_minutes":600,"attention":"$reclamo","lines":[
   {"text":"Tanda $TANDA · publicación $2","style":"title"},
   "",
   {"ref":"carga","text":"$MIB MiB por consola, volcado tipo TUI","mark":"current"},
@@ -452,7 +458,7 @@ sembrar() {
 
     if [ "$modo" = quieto ]; then
         n=0
-        for d in $dirs; do n=$((n + 1)); publicar "$d" "$n"; done
+        for d in $dirs; do n=$((n + 1)); publicar "$d" "$n" "$n"; done
         : > "$TESTIGO"
         return 0
     fi
@@ -464,7 +470,8 @@ sembrar() {
     n=0
     while pgrep -x app > /dev/null 2>&1; do
         n=$((n + 1))
-        for d in $dirs; do publicar "$d" "$n"; done
+        cual=0
+        for d in $dirs; do cual=$((cual + 1)); publicar "$d" "$n" "$cual"; done
         : > "$TESTIGO"
         sleep 1
     done
@@ -634,6 +641,33 @@ la ventana abrió de fábrica, así que esto es una tanda H con otro nombre"
         invalidar "el informe dice que restauró $RESTAURADAS consolas y se sembraron $DIRECTORIOS"
     fi
     echo "consolas restauradas del fichero: $RESTAURADAS" >&2
+fi
+
+# **Que la barra se pintara y lo declarara, en las tandas que la tienen.** Con dos pestañas o más hay
+# barra, y desde que su ficha dice lo que reclaman las divisiones de cada pestaña, pintarla **recorre**.
+# Si ese tramo no se declara, se lo lleva la resta y se publica como coste del framework — la cifra con la
+# que D3 juzga a egui. Sin esta guarda, una tanda de dos pestañas cuya barra dejara de declararse pasaría
+# por buena y el anexo publicaría el trabajo de la barra bajo la etiqueta de egui.
+#
+# **Solo donde hay barra**: con una sola pestaña no se pinta, y exigir la línea invalidaría corridas
+# correctas. Es la misma regla que la guarda de los arrastres.
+if [ "$PESTANAS" -gt 1 ]; then
+    FOTOGRAMAS_CON_BARRA=$(sed -n 's/^barra: *\([0-9]*\) fotogramas .*$/\1/p' "$INFORME" | head -1)
+    if [ -z "$FOTOGRAMAS_CON_BARRA" ]; then
+        invalidar "esta tanda tiene $PESTANAS pestañas y el informe no declara lo que costó la barra: su \
+trabajo se publicaría como coste del framework"
+    fi
+    # **Y que llegara a marcar alguna ficha.** El recorrido que acumula los reclamos ocurre **haya
+    # reclamo o no**, así que una corrida en la que el `attention` sembrado no llegara a la ficha —el
+    # campo mal escrito, la siembra a destiempo— mediría la barra **sin la mitad que este hito le
+    # añadió** y se leería exactamente igual que una buena. Es el mismo engaño que el testigo evita con
+    # los paneles y la cuenta de efectos con los gestos.
+    MARCADAS=$(sed -n 's/^barra: .* · \([0-9]*\) fichas marcadas a la vez como mucho .*$/\1/p' "$INFORME" | head -1)
+    if [ "${MARCADAS:-0}" = 0 ]; then
+        invalidar "la barra se pintó $FOTOGRAMAS_CON_BARRA veces y no marcó ni una ficha: esta tanda \
+mide el recorrido sin lo que se recorre"
+    fi
+    echo "fotogramas con barra pintada: $FOTOGRAMAS_CON_BARRA · fichas marcadas a la vez: $MARCADAS" >&2
 fi
 
 # **Que las consolas fueran las que se pidieron.** Con la variable de la disposición sin llegar, la
