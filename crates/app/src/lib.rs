@@ -34,7 +34,7 @@ use pintor::Metrica;
 use puente::Puente;
 use std::time::{Instant, SystemTime};
 use tema::Tema;
-use term_core::{Pty, Screen, Size};
+use term_core::{Desplazamiento, Pty, Screen, Size};
 use vigilante::{Bandera, Vigilante};
 
 /// El nombre con el que la ventana se presenta al escritorio.
@@ -245,6 +245,16 @@ struct ArrastresInyectados {
     /// Si el gesto en curso va hacia un lado o hacia el otro. Para el de la consola, si suelta por la
     /// derecha del destino o por su izquierda; para el del panel, si lo estrecha o lo ensancha.
     por_la_derecha: bool,
+    /// Dónde estaba la frontera del árbol cuando este gesto la agarró, y **nada** fuera de un gesto en
+    /// curso.
+    ///
+    /// **El recorrido se cuenta desde aquí y no desde donde la frontera esté ahora, y eso es lo que hace
+    /// que la ida y la vuelta se cancelen.** Pedirle a la frontera que se ponga donde está el puntero la
+    /// deja con su borde izquierdo ahí, o sea con su centro medio grosor más allá: agarrarla por el centro
+    /// le regala ese medio grosor **en la misma dirección** vaya el gesto donde vaya. Medido con la prueba
+    /// del ciclo: cuatro puntos por gesto, que en una corrida de cien gestos mueven el reparto del 50 % al
+    /// 73 % y dejan una consola pegada a su mínimo — dos regímenes bajo la misma etiqueta.
+    origen: Option<f32>,
     /// El último fotograma en el que se avanzó, y **nada** mientras no se haya avanzado en ninguno.
     ///
     /// **egui puede repetir la pasada sobre la misma entrada**, y el enganche de la entrada cruda corre
@@ -263,6 +273,7 @@ impl ArrastresInyectados {
             con_efecto: 0,
             que,
             celda: None,
+            origen: None,
             por_la_derecha: true,
             ultimo_fotograma: None,
         })
@@ -301,7 +312,119 @@ impl ArrastresInyectados {
         match self.que {
             Gesto::MoverLaConsola => self.mover_una_consola(pintado, fotograma),
             Gesto::EstrecharElPanel => self.estrechar_un_panel(pintado, fotograma),
+            Gesto::MoverLaFronteraDelArbol => self.mover_una_frontera(pintado, fotograma),
         }
+    }
+
+    /// El gesto de la frontera que reparte dos consolas: agarrarla y llevarla a un lado y al otro.
+    ///
+    /// **La frontera se deriva de los dos rectángulos, no se vuelve a repartir.** El hueco que queda entre
+    /// el borde derecho de una consola y el izquierdo de la siguiente **es** el divisor: [`repartir`] lo
+    /// construye justo ahí y con ese grosor. Repartir por segunda vez sería una copia del cálculo que
+    /// decide dónde está cada consola, y las dos podrían discrepar precisamente en la tanda que mide.
+    ///
+    /// **Solo con dos consolas una al lado de otra**, que es la disposición de la tanda. Con cualquier otra
+    /// se devuelve la lista vacía en vez de inventarse una frontera: la tanda declara **cero gestos** y el
+    /// guion la puede invalidar, en lugar de publicar unos tramos que nadie sabría que van vacíos.
+    ///
+    /// **Alterna el lado, y con eso la disposición vuelve a la de partida cada dos gestos.** Un gesto que
+    /// solo empujara hacia un lado dejaría a una consola en su mínimo a los pocos gestos y estaría midiendo
+    /// un régimen distinto —una consola ancha y otra en el suelo— durante casi toda la corrida.
+    ///
+    /// **Se acerca el puntero en un fotograma y se aprieta en el SIGUIENTE, y no es cosmética.** Es la
+    /// única de las tres puertas donde el punto de agarre está **disputado**: el divisor mide dos puntos y
+    /// las dos consolas lo tocan, así que las tres entran en el radio de gracia de egui y quien gana el
+    /// empate es el último registrado — las consolas, que se atienden después. Con el acercamiento y el
+    /// apretón en el mismo fotograma, el empate se lo llevaba una consola: el gesto **la arrastraba a
+    /// ella**, el soltado la recolocaba, y el reparto volvía a mitad y mitad. La tanda habría publicado el
+    /// gesto de F2.3 bajo la etiqueta de ésta, que es el mismo número mal etiquetado que este proyecto
+    /// persigue en el informe. Sondeado, no razonado: un arrastre humano —que llega, se para y aprieta—
+    /// gana siempre, y el inyectado solo ganaba el primero de la corrida.
+    fn mover_una_frontera(
+        &mut self,
+        pintado: &[(egui::Rect, Option<f32>)],
+        fotograma: u64,
+    ) -> Vec<egui::Event> {
+        let (Some((izquierda, _)), Some((derecha, _))) =
+            (pintado.first().copied(), pintado.get(1).copied())
+        else {
+            return Vec::new();
+        };
+        // Una al lado de otra, que es lo único que este gesto sabe agarrar. Partidas en horizontal el hueco
+        // de arriba no existe y el punto caería dentro de una consola, o sea que el gesto arrastraría **la
+        // consola** y la tanda mediría el gesto de al lado bajo esta etiqueta.
+        if derecha.left() < izquierda.right() {
+            return Vec::new();
+        }
+        // Sin celda todavía no hay recorrido que calcular: es el primer fotograma, antes de que la métrica
+        // exista. Se devuelve vacío **sin avanzar el gesto**, para no contar uno que no ocurrió.
+        let Some(celda) = self.celda else {
+            return Vec::new();
+        };
+        self.ultimo_fotograma = Some(fotograma);
+
+        // **El centro de la línea, que es el único punto que gana el empate.** Por su borde izquierdo el
+        // empate se lo lleva la consola de al lado —comprobado: el gesto no movía nada— porque ese borde
+        // *es* su borde derecho y quien empata gana es el último registrado.
+        let centro = (izquierda.right() + derecha.left()) / 2.0;
+        // A media altura de las dos, que es donde la línea es más larga de agarrar.
+        let alto = izquierda.center().y;
+        // **Un recorrido en celdas y no en fracción del ancho**, por lo mismo que en el gesto del panel: lo
+        // que hay que cruzar son fronteras de celda, porque es ahí donde la rejilla de las dos consolas
+        // cambia de verdad y donde su texto se recoloca.
+        let recorrido = CELDAS_QUE_CRUZA_EL_GESTO_DE_LA_FRONTERA * celda;
+
+        let paso = self.paso;
+        self.paso += 1;
+        // El acercamiento, solo. El porqué de que vaya en su propio fotograma, en la cabecera.
+        if paso == 0 {
+            return vec![egui::Event::PointerMoved(egui::pos2(centro, alto))];
+        }
+        if paso == 1 {
+            // De dónde sale este gesto, apuntado **antes** de que el apretón mueva nada. Ver
+            // [`Self::origen`].
+            self.origen = Some(centro);
+            return vec![egui::Event::PointerButton {
+                pos: egui::pos2(centro, alto),
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }];
+        }
+        // **Cada fotograma de arrastre apunta a un sitio absoluto contado desde el origen**, y no a
+        // «donde esté ahora más el recorrido». Las dos formas mueven lo mismo por fotograma; la
+        // diferencia es que ésta no acumula el medio grosor que la frontera se lleva cada vez que
+        // persigue al puntero, y por eso la vuelta cae exactamente donde empezó la ida.
+        // **Sin valor de reserva a propósito.** El apretón del paso 1 lo deja puesto y los pasos de
+        // arrastre solo se alcanzan después de él, así que un `unwrap_or` aquí no protegería de nada:
+        // taparía una invariante rota en vez de decirla, y la tanda publicaría un recorrido medido desde
+        // un sitio que no es el que se agarró.
+        let origen = self
+            .origen
+            .expect("el arrastre solo llega aquí después del apretón, que apunta de dónde sale");
+        let cuantos = (paso - 1).min(FOTOGRAMAS_ARRASTRANDO) as f32;
+        let andado = if self.por_la_derecha {
+            cuantos * recorrido
+        } else {
+            -cuantos * recorrido
+        };
+        // Y se apunta medio grosor **antes** del sitio que se quiere, porque la frontera se planta con su
+        // borde izquierdo donde está el puntero: su centro acaba medio grosor más allá.
+        let hasta = origen + andado - GROSOR_DEL_DIVISOR / 2.0;
+        if paso <= FOTOGRAMAS_ARRASTRANDO + 1 {
+            return vec![egui::Event::PointerMoved(egui::pos2(hasta, alto))];
+        }
+
+        self.paso = 0;
+        self.hechos += 1;
+        self.origen = None;
+        self.por_la_derecha = !self.por_la_derecha;
+        vec![egui::Event::PointerButton {
+            pos: egui::pos2(hasta, alto),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
     }
 
     /// El gesto de la frontera del panel: agarrarla y llevarla adentro y afuera, sin parar.
@@ -473,6 +596,27 @@ impl ArrastresInyectados {
     }
 }
 
+/// Lo que la rueda ha pedido en un fotograma, **antes de convertirlo a movimiento entero**.
+///
+/// **En crudo y no ya en [`Desplazamiento`], y ahí estaba el defecto que la revisión encontró.** Un panel
+/// táctil manda **puntos**, y un roce son unos pocos: divididos por el alto de una celda dan **menos de
+/// una línea**. Convirtiendo aquí mismo a un entero, esa fracción se truncaba a cero, el resto se tiraba y
+/// el evento se consumía igual — o sea que **arrastrar dos dedos despacio no movía el historial nunca**, y
+/// girando rápido se perdía hasta una línea por fotograma siempre en contra del movimiento. Quien lo mira
+/// no tiene forma de notarlo salvo probando a girar muy fuerte.
+///
+/// Sale de aquí en crudo para que lo sume [`Division::desplazar_con_la_rueda`], que es quien guarda el
+/// resto de un fotograma para el siguiente.
+///
+/// **Dos campos con nombre y no una pareja de números**, por lo mismo que el resto de este fichero: dos
+/// `f32` seguidos se intercambian en la llamada sin que el compilador diga nada, y aquí uno vale una línea
+/// y el otro una pantalla entera.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+struct DeLaRueda {
+    lineas: f32,
+    paginas: f32,
+}
+
 /// Lo que la ventana se lleva de haber pintado la barra de pestañas.
 ///
 /// **Los dos valen para el informe, y por eso viajan juntos**: el coste se resta del fotograma y las
@@ -579,29 +723,39 @@ const VARIABLE_DE_LOS_ARRASTRES: &str = "MEDIR_ARRASTRES";
 /// **Son dos y no uno desde F2.4**, porque hay dos fronteras que se arrastran y no cuestan lo mismo: la
 /// que reparte consolas —que reordena el árbol al soltar— y la del panel, que solo cambia el ancho de una
 /// división y rehace su maqueta al cruzar cada celda.
+///
+/// **Y tres desde que hay historial**, porque las dos anteriores dejan fuera el peor caso del hito: la del
+/// panel le cambia el ancho a **una** consola y la de la consola no cruza celdas mientras vuela. La
+/// frontera del árbol es la única que le cambia el ancho a **dos** a la vez, y recolocar el texto se paga
+/// por consola.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Gesto {
     /// Agarrar una consola y soltarla sobre otra: el gesto de F2.3.
     MoverLaConsola,
     /// Agarrar la frontera del panel y llevarla adentro y afuera: el de F2.4.
     EstrecharElPanel,
+    /// Agarrar la frontera que reparte dos consolas y llevarla a un lado y al otro: el de F2.2, y el
+    /// único que le cambia el ancho a las dos a la vez.
+    MoverLaFronteraDelArbol,
 }
 
 impl Gesto {
     /// Cómo se llama en el informe.
     ///
-    /// **Va al informe porque los dos gestos no cuestan lo mismo**: el de la consola reordena el árbol al
-    /// soltar, el del panel rehace la maqueta de uno al cruzar cada celda. Dos tandas de clases distintas
-    /// no se comparan, y sin esta palabra en la cabecera nadie sabría cuál está leyendo.
+    /// **Va al informe porque los tres gestos no cuestan lo mismo**: el de la consola reordena el árbol al
+    /// soltar, el del panel rehace la maqueta de uno al cruzar cada celda, y el de la frontera del árbol
+    /// recoloca el texto de dos. Dos tandas de clases distintas no se comparan, y sin esta palabra en la
+    /// cabecera nadie sabría cuál está leyendo.
     fn como_se_publica(self) -> &'static str {
         match self {
             Self::MoverLaConsola => "moviendo consolas",
             Self::EstrecharElPanel => "estrechando el panel",
+            Self::MoverLaFronteraDelArbol => "moviendo la frontera del árbol",
         }
     }
 }
 
-/// Cuál de los dos gestos pide la tanda, y `consola` cuando no se dice nada.
+/// Cuál de los tres gestos pide la tanda, y `consola` cuando no se dice nada.
 ///
 /// **Por omisión el de la consola**, para que las tandas que ya existían sigan midiendo exactamente lo que
 /// median: una tanda vieja que de pronto arrastrara paneles publicaría sus números bajo la misma letra.
@@ -624,6 +778,24 @@ const VARIABLE_DEL_GESTO: &str = "MEDIR_GESTO";
 /// techo con el ancho de fábrica — llegar a un extremo convertiría la mitad de los gestos en un no-op y
 /// la tanda mediría dos regímenes.
 const CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL: f32 = 8.0;
+
+/// Cuántas celdas empuja la frontera del árbol **cada fotograma de arrastre** del gesto inyectado.
+///
+/// **Por fotograma y no por gesto**, y en celdas y no en fracción, por las dos razones que ya justifican
+/// su hermana la del panel: el punto se calcula desde donde la frontera está **ahora**, y lo que hay que
+/// cruzar son bordes de celda.
+///
+/// **Ocho es el mismo número y no la misma cuenta, y aquí el margen es estrecho.** El suelo no es el
+/// ancho mínimo del panel sino [`panel::CONSOLA_MINIMA`]: con la ventana de la tanda y dos divisiones con
+/// panel, un gesto entero mueve la frontera dieciséis celdas y la consola que se estrecha baja de 39
+/// columnas a **23** — tres por encima de sus veinte. **Con diez ya toca el suelo**, medido, y entonces la
+/// mitad de los gestos serían no-ops contra él y la tanda promediaría dos regímenes bajo la misma
+/// etiqueta, con el informe declarando efectos igual: ninguna guarda del guion lo cazaría.
+///
+/// Por eso no se sube sin volver aquí, y lo mismo vale para el tamaño de la ventana, el cuerpo de la letra
+/// y el ancho de fábrica del panel. Atado por
+/// `el_vaiven_del_gesto_de_la_frontera_no_deja_ninguna_consola_en_su_suelo`.
+const CELDAS_QUE_CRUZA_EL_GESTO_DE_LA_FRONTERA: f32 = 8.0;
 
 /// Cuántos fotogramas dura el tramo de arrastre de un gesto inyectado, entre apretar y soltar.
 ///
@@ -1326,7 +1498,8 @@ fn arrastres_al_arrancar() -> usize {
     cuantos_arrastres(std::env::var(VARIABLE_DE_LOS_ARRASTRES).ok().as_deref())
 }
 
-/// Qué gesto pide la tanda: `panel` para la frontera del panel, cualquier otra cosa el de la consola.
+/// Qué gesto pide la tanda: `panel` para la frontera del panel, `frontera` para la que reparte consolas,
+/// cualquier otra cosa el de la consola.
 ///
 /// **Lo que no se entiende cae en el de la consola**, igual que las otras variables de medida: abortar el
 /// arranque por una palabra mal escrita sería peor, y el informe publica cuál se inyectó, así que quien
@@ -1334,6 +1507,7 @@ fn arrastres_al_arrancar() -> usize {
 fn gesto_de(valor: Option<&str>) -> Gesto {
     match valor.map(str::trim) {
         Some("panel") => Gesto::EstrecharElPanel,
+        Some("frontera") => Gesto::MoverLaFronteraDelArbol,
         _ => Gesto::MoverLaConsola,
     }
 }
@@ -1554,6 +1728,20 @@ struct Division {
     /// que una pasada repetida vuelve a bombear y vuelve a dejar vuelta pendiente. Nunca hay una
     /// lectura esperando a una vuelta que no llega.
     panel_sin_pintar: std::time::Duration,
+    /// Lo que ha costado recolocar el texto de esta consola en este fotograma, a la espera de que la
+    /// ventana lo recoja.
+    ///
+    /// **Vive aquí y no en la ventana porque el trabajo es de la consola** —lo dispara su ancho— pero
+    /// **lo publica la ventana**, que es quien tiene el informe. Se acumula en vez de sustituirse por lo
+    /// mismo que los tramos de la vuelta: una pasada repetida vuelve a pasar por aquí y el trabajo
+    /// ocurrió las dos veces.
+    recolocado: std::time::Duration,
+    /// Lo que la rueda ha pedido y **todavía no llega a un movimiento entero**.
+    ///
+    /// **Es de la división y no de la ventana**, porque la rueda va a la consola bajo el puntero: guardado
+    /// en la ventana, pasar el ratón por encima de otra consola le regalaría el resto acumulado en la
+    /// primera.
+    rueda_pendiente: DeLaRueda,
     /// Cuántas celdas de ancho se lleva el panel de **esta** consola.
     ///
     /// **En celdas y no en puntos, y por eso es un entero.** Lo que el panel tiene que conservar al
@@ -1668,9 +1856,43 @@ impl Division {
             medida: Medida::default(),
             pendiente_de_medir: None,
             panel_sin_pintar: std::time::Duration::ZERO,
+            recolocado: std::time::Duration::ZERO,
+            rueda_pendiente: DeLaRueda::default(),
             ancho_del_panel: panel::ANCHO_DE_FABRICA,
             plegado: false,
         })
+    }
+
+    /// Mueve el historial con lo que la rueda ha pedido, **guardando lo que no llega a una línea**.
+    ///
+    /// **El resto se acumula de un fotograma para otro, y ahí estaba el defecto.** Un panel táctil manda
+    /// puntos: cada roce vale una fracción de línea, y truncar sin guardar el resto dejaba el historial
+    /// **quieto para siempre** con dos dedos arrastrando despacio. Con rueda de muescas se notaba menos
+    /// —cada muesca es una línea entera— pero perdía la fracción de todas formas, siempre en contra del
+    /// movimiento.
+    ///
+    /// **Se trunca hacia cero y el resto conserva su signo**, así que cambiar de sentido a mitad no
+    /// arrastra deuda del sentido anterior: la fracción que quedaba se gasta contra el movimiento nuevo,
+    /// que es lo que hace la mano.
+    fn desplazar_con_la_rueda(&mut self, pedido: DeLaRueda) {
+        self.rueda_pendiente.lineas += pedido.lineas;
+        self.rueda_pendiente.paginas += pedido.paginas;
+
+        let lineas = self.rueda_pendiente.lineas.trunc();
+        let paginas = self.rueda_pendiente.paginas.trunc();
+        self.rueda_pendiente.lineas -= lineas;
+        self.rueda_pendiente.paginas -= paginas;
+
+        // **Solo lo que mueve algo.** Un `Lineas(0)` no es inocuo de balde: es una orden al motor que no
+        // hace nada, y publicarla haría creer a quien lea el código que el fotograma desplazó.
+        if lineas != 0.0 {
+            self.pantalla
+                .desplazar(Desplazamiento::Lineas(lineas as i32));
+        }
+        if paginas != 0.0 {
+            self.pantalla
+                .desplazar(Desplazamiento::Paginas(paginas as i32));
+        }
     }
 
     /// Aplica el tamaño que midió el último pase de interfaz.
@@ -1684,6 +1906,14 @@ impl Division {
             return;
         }
 
+        // **Recolocar el texto se cronometra desde que hay historial**, y hasta este hito no lo
+        // declaraba nadie: corre en la mitad lógica, donde no hay pintado que lo envuelva, así que se
+        // lo llevaba la resta — o sea el framework. Con el historial apagado eran 7 µs; con las líneas
+        // que se guardan ahora, casi un milisegundo cada vez (**D21**).
+        //
+        // **El tramo es el cuerpo entero**, avisar al programa incluido: es lo que cuesta atender un
+        // cambio de tamaño, y partirlo dejaría media operación sin dueño.
+        let antes = Instant::now();
         self.pantalla.resize(self.medido);
         if let Err(fallo) = self.pty.resize(self.medido) {
             // La rejilla ya cambió y el programa no se ha enterado: lo que se ve a partir de aquí
@@ -1691,6 +1921,7 @@ impl Division {
             // aquí, pero callarlo dejaría una pantalla torcida sin ninguna explicación.
             eprintln!("no se pudo avisar al programa del tamaño nuevo: {fallo}");
         }
+        self.recolocado += antes.elapsed();
     }
 
     /// Se lleva lo que el programa ha escrito, hasta el presupuesto, y lo mete en la rejilla.
@@ -2035,6 +2266,7 @@ impl Division {
         let marcado = self.pantalla.pegado_marcado();
         let mut pegado = false;
         let mut ordenes = Vec::new();
+        let mut historial: Vec<Desplazamiento> = Vec::new();
 
         // Los eventos que van al programa **se consumen**, no se leen y se dejan. Un fotograma
         // puede correr más de un pase sobre la misma entrada —egui lo hace cuando algo pide
@@ -2052,6 +2284,7 @@ impl Division {
             let mut pego = false;
             let mut pedidas = Vec::new();
             let mut abiertas = pestañas_abiertas;
+            let mut subidas = Vec::new();
 
             estado.events.retain(|evento| {
                 if let egui::Event::ModifiersChanged(nuevos) = evento {
@@ -2181,6 +2414,33 @@ impl Division {
                     }
                 }
 
+                // **Mirar el historial es del terminal, no del programa**, así que estas cuatro se
+                // consumen aquí y no se traducen a bytes. Con `Mayúsculas`, que es lo que hacen todos:
+                // sin ella, `RePág` es del programa —un paginador la usa— y quitársela sería romper
+                // `less` dentro de nuestra ventana.
+                //
+                // **Y la repetición vale**: mantener `RePág` para subir es el gesto normal, al revés
+                // que crear o cerrar una pestaña, donde repetir destruye.
+                if let egui::Event::Key {
+                    key, pressed: true, ..
+                } = evento
+                    && acorde.shift
+                    && !acorde.ctrl
+                    && !acorde.alt
+                {
+                    let cuanto = match key {
+                        egui::Key::PageUp => Some(Desplazamiento::Paginas(1)),
+                        egui::Key::PageDown => Some(Desplazamiento::Paginas(-1)),
+                        egui::Key::Home => Some(Desplazamiento::AlPrincipio),
+                        egui::Key::End => Some(Desplazamiento::AlFinal),
+                        _ => None,
+                    };
+                    if let Some(cuanto) = cuanto {
+                        subidas.push(cuanto);
+                        return false;
+                    }
+                }
+
                 match teclado::bytes(evento) {
                     Some(bytes) => {
                         self.pulsaciones.extend_from_slice(&bytes);
@@ -2193,13 +2453,28 @@ impl Division {
             *modificadores = acorde;
             pegado = pego;
             ordenes = pedidas;
+            historial = subidas;
         });
+
+        // **Se aplican fuera del cierre de la entrada**, no dentro: ahí dentro el préstamo de la
+        // pantalla convive con el de los eventos, y este módulo ya paga bastante por mantener esos dos
+        // préstamos separados.
+        for cuanto in historial {
+            self.pantalla.desplazar(cuanto);
+        }
 
         // Una orden sale igual aunque no se haya tecleado nada para el programa, que es el caso normal:
         // el acorde de cambiar de pestaña no manda ningún byte.
         if self.pulsaciones.is_empty() {
             return ordenes;
         }
+
+        // **Teclear devuelve la vista a donde el programa escribe**, y es lo que hace cualquier
+        // terminal. Sin esto, quien se para a leer algo del historial y luego escribe **no ve lo que
+        // está escribiendo**: el programa responde abajo, fuera de la pantalla, y la ventana parece
+        // colgada. Va aquí y no en cada tecla porque la condición es exactamente ésta — que algo haya
+        // salido hacia el programa.
+        self.pantalla.desplazar(Desplazamiento::AlFinal);
         if let Err(fallo) = self.pty.write(&self.pulsaciones) {
             // Lo que se acaba de teclear no ha llegado. Una tecla que se pierde en silencio es de
             // los fallos que más tardan en entenderse desde el otro lado de la pantalla.
@@ -3039,6 +3314,12 @@ struct Ventana {
     /// fotograma —ahí dentro no se distingue quién puso qué—, y esto es lo que el informe **nombra**: sin
     /// nombrarlo, la única forma de saber lo que cuesta la barra sería restar dos tandas distintas.
     coste_de_la_barra: medida::Barra,
+    /// Lo que ha costado recolocar el texto de las consolas al cambiar su ancho.
+    ///
+    /// **Vive en la ventana y no en cada división aunque el trabajo sea de la consola**, porque lo que
+    /// hay que poder leer es cuántas veces se recolocó **en la sesión** y cuánto costó cada vez: una
+    /// media por consola repartida entre sus miles de fotogramas quietos diría que no cuesta nada.
+    recolocar: medida::Reflujo,
     /// Dónde va la disposición, y lo que esta sesión ya sabe de ese fichero.
     ///
     /// **Es la misma que cargó al arrancar, y eso es una regla y no una casualidad**: el veto de una
@@ -3307,6 +3588,7 @@ impl Ventana {
             cronometrado_aparte: std::time::Duration::ZERO,
             barra_de_este_fotograma: std::time::Duration::ZERO,
             coste_de_la_barra: medida::Barra::default(),
+            recolocar: medida::Reflujo::default(),
             persistencia: sesion::Persistencia::en(None),
             restauracion: None,
             ultimo_visto: None,
@@ -3542,13 +3824,16 @@ impl Ventana {
             },
             &rejillas,
             self.activa().nombre,
-            self.arrastres.as_ref().map(|arrastres| medida::Arrastres {
-                inyectados: arrastres.hechos,
-                con_efecto: arrastres.con_efecto,
-                gesto: arrastres.que.como_se_publica(),
-            }),
-            self.restauracion,
-            self.coste_de_la_barra,
+            medida::DeLaSesion {
+                arrastres: self.arrastres.as_ref().map(|arrastres| medida::Arrastres {
+                    inyectados: arrastres.hechos,
+                    con_efecto: arrastres.con_efecto,
+                    gesto: arrastres.que.como_se_publica(),
+                }),
+                restauracion: self.restauracion,
+                barra: self.coste_de_la_barra,
+                reflujo: self.recolocar,
+            },
         )?;
 
         // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo
@@ -3932,14 +4217,28 @@ impl Ventana {
             todas_terminadas: true,
         };
 
+        // **Lo que costó recolocar se recoge aquí y se anota en la ventana**, que es quien publica el
+        // informe. Se suma lo de **todas** las consolas del fotograma y se anota **una vez**: lo que hay
+        // que poder leer es lo que le costó a un fotograma atender un cambio de ancho, y una frontera
+        // mueve dos consolas a la vez.
+        let mut recolocado = std::time::Duration::ZERO;
+
         for division in self.todas_las_divisiones_mut() {
             // Primero se interpreta lo pendiente y después se cambia de tamaño: esos bytes los
             // escribió el programa para las dimensiones que todavía no sabe que han cambiado.
             let queda_cola = division.bombear();
             division.redimensionar();
+            recolocado += std::mem::take(&mut division.recolocado);
 
             bombeo.alguna_dejo_cola |= queda_cola;
             bombeo.todas_terminadas &= division.terminada(queda_cola);
+        }
+
+        // **Solo cuando hubo recolocación de verdad.** Anotar un cero en los miles de fotogramas
+        // quietos hundiría la media y haría decir a este tramo lo contrario de lo que vale.
+        if !recolocado.is_zero() {
+            self.recolocar.anotar(recolocado);
+            self.cronometrado_aparte += recolocado;
         }
 
         bombeo
@@ -4000,6 +4299,15 @@ impl Ventana {
 
         let mut destino = None;
         let mut cambio_el_arbol = false;
+
+        // **La rueda va a la consola bajo el puntero, no a la del foco.** Es lo que hace cualquier
+        // terminal, y lo contrario sorprende a diario: se mira una consola, se gira la rueda, y se
+        // movería otra.
+        //
+        // **Se recoge una sola vez y antes del bucle**: dentro se leería por cada división y el
+        // desplazamiento se aplicaría tantas veces como consolas haya. Y se **consume**, por lo mismo que
+        // el teclado: un fotograma puede correr dos pasadas sobre la misma entrada.
+        let rueda = Self::recoger_la_rueda(ui, metrica);
 
         // **Los rectángulos y los nombres se recorren emparejados, no indexando uno con el otro.** Son
         // dos listas que salen del mismo árbol y siempre miden lo mismo; emparejarlas hace imposible el
@@ -4074,10 +4382,64 @@ impl Ventana {
             }
         }
 
+        // **Después del bucle, y no dentro**: dentro, `self` está prestado por el recorrido del árbol.
+        if let Some((puntero, pedido)) = rueda
+            && let Some(donde) = rectangulos.iter().position(|rect| rect.contains(puntero))
+            && let Some(&nombre) = nombres.get(donde)
+            && let Some(division) = self
+                .activa_mut()
+                .divisiones_mut()
+                .into_iter()
+                .find(|division| division.nombre == nombre)
+        {
+            division.desplazar_con_la_rueda(pedido);
+        }
+
         DelRaton {
             destino,
             cambio_el_arbol,
         }
+    }
+
+    /// Recoge lo que la rueda pida en este fotograma, **en crudo**.
+    ///
+    /// **Las tres unidades de egui, no dos.** Además de líneas y puntos existe **páginas**, y caerla en
+    /// un comodín daría un salto silenciosamente equivocado — de los que no fallan, solo se portan mal.
+    /// Se devuelven por separado en vez de convertirlas todas a líneas porque una página **la decide la
+    /// rejilla de la consola**, que aquí todavía no se sabe cuál es.
+    ///
+    /// **En fracción y no en líneas enteras**: quien las convierte es la división, que es quien guarda el
+    /// resto. Ver [`DeLaRueda`], donde está el defecto que obligó a partirlo así.
+    ///
+    /// Devuelve también **dónde** estaba el puntero, que es lo que decide a qué consola le toca, y
+    /// devuelve algo **también cuando la rueda no pide nada**: el evento existe y hay que consumirlo, o el
+    /// framework lo interpretaría por su cuenta.
+    ///
+    /// **No es método de la ventana**: no lee nada de ella, y un receptor promete una dependencia que no
+    /// existe.
+    fn recoger_la_rueda(ui: &egui::Ui, metrica: &Metrica) -> Option<(egui::Pos2, DeLaRueda)> {
+        ui.ctx().input_mut(|estado| {
+            let puntero = estado.pointer.hover_pos()?;
+            let mut pedido = DeLaRueda::default();
+            let mut hubo = false;
+
+            estado.events.retain(|evento| {
+                let egui::Event::MouseWheel { unit, delta, .. } = evento else {
+                    return true;
+                };
+                hubo = true;
+                match unit {
+                    egui::MouseWheelUnit::Line => pedido.lineas += delta.y,
+                    // El panel táctil manda puntos: se convierten con el alto de una celda, que es lo
+                    // que mide una línea en pantalla.
+                    egui::MouseWheelUnit::Point => pedido.lineas += delta.y / metrica.alto(),
+                    egui::MouseWheelUnit::Page => pedido.paginas += delta.y,
+                }
+                false
+            });
+
+            hubo.then_some((puntero, pedido))
+        })
     }
 
     /// Deja una consola al lado de otra, si cabe.
@@ -4367,6 +4729,13 @@ impl Ventana {
     /// Vive aparte del pintado por lo mismo que [`Self::atender_el_raton`]: mandarlo a las dos escribiría
     /// la misma tecla en dos programas, que es exactamente lo que «sin que se pisen» prohíbe, y dentro
     /// de la pasada de interfaz esa decisión no se puede comprobar sin abrir una ventana.
+    /// **Hueco de medida conocido, y aquí declarado en vez de tapado.** Nada de lo que se hace aquí se
+    /// cronometra —traducir el lote a bytes, y desde este hito también devolver la vista abajo—, así que
+    /// se publica dentro del «resto del fotograma», o sea como coste del framework. **Hoy no contamina
+    /// ninguna cifra publicada porque en las tandas no teclea nadie**: son gestos de ratón y volcados. El
+    /// día en que una tanda escriba —y una que mida la selección o el ratón al programa lo hará— hay que
+    /// cerrarlo, y cerrarlo es partir esta función como está partida `atender_el_raton`, para que la
+    /// región cronometrada sea la llamada entera y encogerla deje de ser mover una línea.
     fn teclear_la_del_foco(&mut self, ctx: &egui::Context) -> Vec<Orden> {
         let empezo = self.empezo_el_fotograma;
         // La semilla se saca y se vuelve a meter porque la división y el campo son dos préstamos
@@ -5064,6 +5433,15 @@ impl eframe::App for Ventana {
                 let rehacer = Instant::now();
                 reparto = reparto_de(self);
                 self.cronometrado_aparte += rehacer.elapsed();
+                // **Y aquí es donde el gesto de la frontera declara que sirvió de algo.** Es el mismo
+                // número que el del panel cuenta con `cambio_el_ancho` y el de la consola con las
+                // reordenaciones que el árbol acepta: mandar los eventos no significa que nada se mueva
+                // —si el asidero no se agarra, `arrastrar_la_frontera` no devuelve nada en ningún
+                // fotograma—, y sin separarlos una corrida donde ninguno cuajara publicaría «el gesto no
+                // cuesta nada».
+                if let Some(arrastres) = self.arrastres.as_mut() {
+                    arrastres.uno_con_efecto_mas();
+                }
                 break;
             }
         }
@@ -5696,6 +6074,8 @@ mod tests {
             medida: Medida::default(),
             pendiente_de_medir: None,
             panel_sin_pintar: std::time::Duration::ZERO,
+            recolocado: std::time::Duration::ZERO,
+            rueda_pendiente: DeLaRueda::default(),
             ancho_del_panel: panel::ANCHO_DE_FABRICA,
             plegado: false,
             recibido: Vec::new(),
@@ -5775,6 +6155,7 @@ mod tests {
             cronometrado_aparte: std::time::Duration::ZERO,
             barra_de_este_fotograma: std::time::Duration::ZERO,
             coste_de_la_barra: medida::Barra::default(),
+            recolocar: medida::Reflujo::default(),
             persistencia: sesion::Persistencia::en(None),
             restauracion: None,
             ultimo_visto: None,
@@ -16474,6 +16855,344 @@ mod tests {
         );
     }
 
+    /// Cuántos fotogramas dura un gesto entero de la frontera del árbol: acercarse, apretar, arrastrar y
+    /// soltar. **El acercamiento va aparte del apretón**, y el porqué está en `mover_una_frontera`.
+    const FOTOGRAMAS_DE_UN_GESTO_DE_LA_FRONTERA: usize = FOTOGRAMAS_ARRASTRANDO + 3;
+
+    /// Los eventos de un gesto entero de la frontera del árbol, fotograma a fotograma.
+    fn un_gesto_de_la_frontera(
+        gesto: &mut ArrastresInyectados,
+        pintado: &[(egui::Rect, Option<f32>)],
+        desde: u64,
+    ) -> Vec<Vec<egui::Event>> {
+        (0..FOTOGRAMAS_DE_UN_GESTO_DE_LA_FRONTERA)
+            .map(|paso| gesto.eventos(pintado, desde + paso as u64))
+            .collect()
+    }
+
+    #[test]
+    fn el_gesto_de_la_frontera_agarra_entre_las_dos_consolas_y_alterna_el_lado() {
+        // **Lo que se ata es DÓNDE aprieta**, porque los tres gestos entran por el mismo sitio y se
+        // distinguen solo por el punto: el centro de una consola se lo lleva el arrastre que la mueve, y
+        // un punto dentro de la derecha se lo lleva el asidero del panel. Solo el hueco entre las dos
+        // llega al divisor del árbol, que es lo único que le cambia el ancho a las DOS.
+        let mut gesto = ArrastresInyectados::nuevos(2, Gesto::MoverLaFronteraDelArbol)
+            .expect("dos son más que ninguno");
+        // Sin esto no manda nada: la celda la pone el pintado en el primer fotograma. Ver
+        // `ArrastresInyectados::celda`.
+        gesto.ya_sabe_la_celda(8.0);
+        let pintado = dos_al_lado_pintadas();
+        let frontera = (pintado[0].0.right() + pintado[1].0.left()) / 2.0;
+        let recorrido = CELDAS_QUE_CRUZA_EL_GESTO_DE_LA_FRONTERA * 8.0;
+
+        let primero = un_gesto_de_la_frontera(&mut gesto, &pintado, 0);
+
+        // **El acercamiento va SOLO en el primer fotograma**, sin el apretón: es lo que hace que el
+        // divisor gane el empate contra las consolas. Ver `mover_una_frontera`.
+        assert!(
+            matches!(
+                primero[0].as_slice(),
+                [egui::Event::PointerMoved(pos)] if pos.x == frontera
+            ),
+            "el primer fotograma no fue solo el acercamiento a la frontera: {:?}",
+            primero[0]
+        );
+        assert!(
+            matches!(
+                primero[1].as_slice(),
+                [egui::Event::PointerButton { pos, pressed: true, .. }] if pos.x == frontera
+            ),
+            "el gesto no agarró la frontera del árbol en el fotograma siguiente: {:?}",
+            primero[1]
+        );
+        // **Y no en el centro de ninguna consola**, que es donde agarra el gesto de moverlas: si cayera
+        // ahí, la tanda mediría el gesto de F2.3 bajo la etiqueta de ésta y el anexo publicaría el coste
+        // de reordenar el árbol como si fuera el de recolocar el texto.
+        for (division, _) in &pintado {
+            assert!(
+                !primero.iter().flatten().any(|evento| matches!(
+                    evento,
+                    egui::Event::PointerButton { pos, pressed: true, .. }
+                        if pos.x == division.center().x
+                )),
+                "el gesto agarró por el centro de una consola: eso es el arrastre que la mueve de sitio"
+            );
+        }
+        // **El recorrido entero, y contado desde donde el gesto agarró.** Son las celdas de cada
+        // fotograma de arrastre por los fotogramas que dura, menos el medio grosor con el que la frontera
+        // se planta: ahí es donde acaba su centro.
+        let entero = FOTOGRAMAS_ARRASTRANDO as f32 * recorrido - GROSOR_DEL_DIVISOR / 2.0;
+        assert!(
+            primero.iter().flatten().any(|evento| matches!(
+                evento,
+                egui::Event::PointerMoved(pos) if pos.x == frontera + entero
+            )),
+            "el gesto no llevó la frontera las celdas que dice recorrer: {primero:?}"
+        );
+
+        // **Y el segundo va al otro lado**, que es lo que devuelve el reparto a donde estaba y evita que
+        // la tanda acabe midiendo una consola pegada a su mínimo durante casi toda la corrida.
+        let segundo = un_gesto_de_la_frontera(&mut gesto, &pintado, 100);
+        assert!(
+            segundo.iter().flatten().any(|evento| matches!(
+                evento,
+                egui::Event::PointerMoved(pos)
+                    if pos.x == frontera - FOTOGRAMAS_ARRASTRANDO as f32 * recorrido
+                        - GROSOR_DEL_DIVISOR / 2.0
+            )),
+            "el segundo gesto no fue hacia el otro lado: la tanda acabaría con el reparto en un extremo"
+        );
+    }
+
+    #[test]
+    fn el_gesto_de_la_frontera_no_manda_nada_sin_dos_consolas_una_al_lado_de_otra() {
+        // **Se devuelve la lista vacía en vez de agarrar donde sea**, para que la tanda declare cero
+        // gestos y el guion la pueda invalidar. Los dos casos que no valen, y los dos son alcanzables
+        // pidiendo otra disposición: una sola consola —no hay frontera— y dos partidas en horizontal, donde
+        // el punto de arriba caería DENTRO de una consola y el gesto arrastraría la consola.
+        let una_sola = vec![dos_al_lado_pintadas()[0]];
+        let una_encima_de_otra = vec![
+            (
+                egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 300.0)),
+                None,
+            ),
+            (
+                egui::Rect::from_min_size(egui::pos2(0.0, 300.0), egui::vec2(1200.0, 300.0)),
+                None,
+            ),
+        ];
+
+        for (como, pintado) in [("una sola", una_sola), ("una encima", una_encima_de_otra)] {
+            let mut gesto = ArrastresInyectados::nuevos(3, Gesto::MoverLaFronteraDelArbol)
+                .expect("tres son más que ninguno");
+            // Se le da la celda **a propósito**: sin ella tampoco mandaría nada, y la prueba pasaría por la
+            // razón equivocada.
+            gesto.ya_sabe_la_celda(8.0);
+
+            for fotograma in 0..20 {
+                assert!(
+                    gesto.eventos(&pintado, fotograma).is_empty(),
+                    "con {como} se mandó algún evento"
+                );
+            }
+            assert_eq!(gesto.hechos, 0, "con {como} se contó un gesto sin mandarlo");
+        }
+    }
+
+    #[test]
+    fn el_gesto_de_la_frontera_le_cambia_el_ancho_a_las_dos_y_recoloca_su_texto() {
+        // **La razón de ser de la tanda, atada por el efecto y no por el campo donde se apunta.** Ni el
+        // gesto del panel ni el de mover consolas ejercitan esto: el primero le cambia el ancho a UNA, y el
+        // segundo reordena el árbol sin cruzar bordes de celda. Recolocar el texto se paga **por consola**
+        // y desde el historial cuesta casi un milisegundo cada vez, así que el peor caso —dos a la vez— es
+        // el único número que vale para el anexo.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        // **Dos fotogramas quietos antes de agarrar nada, y hacen falta los dos.** El primero mide la
+        // rejilla y le dice la celda al gesto; el segundo es el que se la **aplica** a la consola, porque
+        // el tamaño que mide la pasada de interfaz se entrega en la mitad lógica del siguiente. Con uno
+        // solo, la foto de «antes» era la rejilla de fábrica —80 columnas— y las dos consolas salían
+        // creciendo, así que la comprobación de que una gana lo que la otra pierde no ataba nada.
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        ventana.arrastres = ArrastresInyectados::nuevos(1, Gesto::MoverLaFronteraDelArbol);
+        // Y uno más con el gesto ya puesto, para que el pintado le diga la celda y guarde los rectángulos.
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        let antes: Vec<_> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.pantalla.size())
+            .collect();
+        let reparto_antes = ventana.activa().fracciones_de_las_fronteras();
+        let recolocadas_antes = ventana.recolocar.fotogramas;
+
+        // El gesto entero, por el camino real: el enganche de la entrada cruda lo inyecta en cada fotograma.
+        let mut frame = eframe::Frame::_new_kittest();
+        for _ in 0..FOTOGRAMAS_DE_UN_GESTO_DE_LA_FRONTERA {
+            let mut entrada = egui::RawInput {
+                screen_rect: Some(area),
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(&mut ventana, &ctx, &mut entrada);
+            eframe::App::logic(&mut ventana, &ctx, &mut frame);
+            ctx.run_ui(entrada, |ui| eframe::App::ui(&mut ventana, ui, &mut frame))
+                .drop_without_applying_deltas();
+        }
+        // Un fotograma más: el tamaño que mide la pasada de interfaz se le aplica a la consola en la mitad
+        // lógica del SIGUIENTE, que es donde se recoloca.
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let arrastres = ventana.arrastres.as_ref().expect("la tanda pidió gestos");
+        assert_eq!(arrastres.hechos, 1, "no se completó el gesto entero");
+        assert!(
+            arrastres.con_efecto > 0,
+            "el gesto se inyectó y no movió la frontera: la tanda no mediría nada"
+        );
+        assert_ne!(
+            ventana.activa().fracciones_de_las_fronteras(),
+            reparto_antes,
+            "la frontera no se movió, así que el gesto entró por otro sitio"
+        );
+
+        let despues: Vec<_> = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.pantalla.size())
+            .collect();
+        // **Una ensancha y la otra estrecha, que es lo que mover una frontera significa**: lo que una gana
+        // se lo quita a la otra. Comprobar solo que «las dos cambiaron» dejaría pasar un cambio de tamaño
+        // de la ventana, que las mueve a las dos en el mismo sentido y no es este gesto.
+        let [
+            (izquierda_antes, izquierda_despues),
+            (derecha_antes, derecha_despues),
+        ] = <[_; 2]>::try_from(antes.into_iter().zip(despues).collect::<Vec<_>>())
+            .expect("la pestaña de la tanda abre con dos consolas");
+        assert!(
+            (izquierda_despues.cols > izquierda_antes.cols)
+                != (derecha_despues.cols > derecha_antes.cols),
+            "las dos consolas fueron en el mismo sentido —de {izquierda_antes:?} y {derecha_antes:?} a \
+             {izquierda_despues:?} y {derecha_despues:?}—: eso es un cambio de tamaño de la ventana, no \
+             una frontera que se mueve"
+        );
+        assert_ne!(
+            izquierda_antes.cols, izquierda_despues.cols,
+            "la consola izquierda conservó sus columnas: este gesto tiene que cambiar el ancho de las DOS, \
+             que es lo único que lo distingue del de estrechar el panel"
+        );
+        assert_ne!(
+            derecha_antes.cols, derecha_despues.cols,
+            "la consola derecha conservó sus columnas: este gesto tiene que cambiar el ancho de las DOS, \
+             que es lo único que lo distingue del de estrechar el panel"
+        );
+        assert!(
+            ventana.recolocar.fotogramas > recolocadas_antes,
+            "no se declaró ninguna recolocación: el trabajo que el historial encareció se publicaría como              coste del framework"
+        );
+    }
+
+    #[test]
+    fn el_vaiven_del_gesto_de_la_frontera_no_deja_ninguna_consola_en_su_suelo() {
+        // **El número de celdas del recorrido tiene que dejar margen, y el margen se mide.** Si el vaivén
+        // llevara a una consola a sus veinte columnas, la mitad de los gestos serían no-ops contra el
+        // suelo geométrico y la tanda promediaría dos regímenes bajo la misma etiqueta — con el informe
+        // declarando efectos igual, así que ninguna guarda del guion lo cazaría. La corrida de verdad
+        // deja la consola estrecha en 23 columnas: tres por encima del suelo, o sea que este número **no
+        // se sube sin volver aquí**, y con el panel de fábrica más ancho tampoco.
+        //
+        // Se mide con la ventana de la tanda —los 1.280 puntos de `TAMANO`—, porque el margen depende de
+        // cuántas celdas hay que repartir.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de(1280.0);
+        // **Con panel publicado en las dos, y ahí está el margen entero.** Sin panel la consola se queda
+        // con la división completa y el suelo no se ve ni de lejos: la primera versión de esta prueba
+        // pasaba con el recorrido subido a catorce celdas —el doble de lo que se publica—, o sea que no
+        // ataba nada. La tanda siembra panel en todas sus consolas, y es el panel el que se come el
+        // margen.
+        con_panel_puesto(&mut ventana, 0, r#"{"lines":["trabajando"]}"#);
+        con_panel_puesto(&mut ventana, 1, r#"{"lines":["trabajando"]}"#);
+        ventana.arrastres = ArrastresInyectados::nuevos(2, Gesto::MoverLaFronteraDelArbol);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut lo_menos = u16::MAX;
+        for _ in 0..2 * FOTOGRAMAS_DE_UN_GESTO_DE_LA_FRONTERA {
+            let mut entrada = egui::RawInput {
+                screen_rect: Some(area),
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(&mut ventana, &ctx, &mut entrada);
+            eframe::App::logic(&mut ventana, &ctx, &mut frame);
+            ctx.run_ui(entrada, |ui| eframe::App::ui(&mut ventana, ui, &mut frame))
+                .drop_without_applying_deltas();
+            lo_menos = lo_menos.min(
+                ventana
+                    .activa()
+                    .divisiones()
+                    .iter()
+                    .map(|division| division.pantalla.size().cols)
+                    .min()
+                    .expect("la pestaña abre con dos consolas"),
+            );
+        }
+
+        assert!(
+            f32::from(lo_menos) > panel::CONSOLA_MINIMA,
+            "el vaivén dejó una consola en {lo_menos} columnas y su suelo son {}: la mitad de los gestos \
+             chocarían contra él y la tanda mediría dos regímenes",
+            panel::CONSOLA_MINIMA
+        );
+    }
+
+    #[test]
+    fn el_ciclo_del_gesto_de_la_frontera_devuelve_el_reparto_al_de_partida() {
+        // **Sin esto la tanda mide dos regímenes y publica la media de los dos**, y no es hipotético: es
+        // la prueba que destapó que el apretón perdía el empate contra la consola de al lado. Cuando eso
+        // pasaba, el gesto arrastraba una consola, el soltado la recolocaba y el reparto se quedaba en
+        // mitad y mitad haga lo que haga el gesto — una corrida entera midiendo el gesto de F2.3 bajo la
+        // etiqueta de ésta.
+        //
+        // Es la misma disciplina que `el_ciclo_de_dos_gestos_vuelve_a_la_forma_de_partida_solo_con_dos_consolas`
+        // impone al gesto de mover consolas.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+        let area = area_de_celdas(200.0);
+        // Cuatro gestos: dos ciclos enteros, para distinguir «vuelve» de «vuelve la primera vez».
+        ventana.arrastres = ArrastresInyectados::nuevos(4, Gesto::MoverLaFronteraDelArbol);
+        un_fotograma_en(&mut ventana, &ctx, area, Vec::new());
+        let de_partida = ventana.activa().fracciones_de_las_fronteras();
+
+        // **Con margen y no con igualdad exacta, y el margen dice de qué tamaño es.** La fracción es un
+        // `f32` que sale de una división, así que la ida y la vuelta no dan el mismo bit; lo que hay que
+        // atar es que no se **acumule** nada. Una diezmilésima son menos de dos décimas de punto en la
+        // ventana de esta prueba —la línea que se arrastra mide diez veces más— y el defecto que esto
+        // persigue movía cuarenta y siete veces eso en un solo ciclo.
+        let vuelve = |ahora: &[f32], de_partida: &[f32]| {
+            ahora.len() == de_partida.len()
+                && std::iter::zip(ahora, de_partida).all(|(a, b)| (a - b).abs() < 1e-4)
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut idas = Vec::new();
+        for gesto in 0..4 {
+            for _ in 0..FOTOGRAMAS_DE_UN_GESTO_DE_LA_FRONTERA {
+                let mut entrada = egui::RawInput {
+                    screen_rect: Some(area),
+                    ..Default::default()
+                };
+                eframe::App::raw_input_hook(&mut ventana, &ctx, &mut entrada);
+                eframe::App::logic(&mut ventana, &ctx, &mut frame);
+                ctx.run_ui(entrada, |ui| eframe::App::ui(&mut ventana, ui, &mut frame))
+                    .drop_without_applying_deltas();
+            }
+            let ahora = ventana.activa().fracciones_de_las_fronteras();
+            if gesto % 2 == 0 {
+                // El de ida tiene que haber movido algo, o la vuelta de abajo se cumpliría sin gesto.
+                assert!(
+                    !vuelve(&ahora, &de_partida),
+                    "el gesto {gesto} no movió la frontera, así que la vuelta no prueba nada"
+                );
+                idas.push(ahora);
+            } else {
+                assert!(
+                    vuelve(&ahora, &de_partida),
+                    "tras el ciclo {} la frontera quedó en {ahora:?} y salió de {de_partida:?}: la tanda \
+                     acabaría con una consola pegada a su mínimo y mediría dos regímenes",
+                    gesto / 2
+                );
+            }
+        }
+        assert!(
+            vuelve(&idas[0], &idas[1]),
+            "los dos ciclos no llegaron al mismo sitio —{:?} y {:?}—: el gesto arrastra el reparto poco a \
+             poco y la tanda acabaría en otro régimen del que empezó",
+            idas[0],
+            idas[1]
+        );
+    }
+
     #[test]
     fn con_el_panel_por_debajo_del_asidero_no_se_reporta_su_frontera() {
         // **Lo que el gesto inyectado lee tiene que corresponder a un asidero que EXISTE.** Con el panel
@@ -16561,20 +17280,29 @@ mod tests {
         // sitios que tienen que decir lo mismo y ninguna prueba los sujetaba.
         assert_eq!(VARIABLE_DEL_GESTO, "MEDIR_GESTO");
         assert_eq!(gesto_de(Some("panel")), Gesto::EstrecharElPanel);
+        assert_eq!(gesto_de(Some("frontera")), Gesto::MoverLaFronteraDelArbol);
         // Con espacios alrededor, que es lo que deja un guion de shell al componer la variable.
         assert_eq!(gesto_de(Some("  panel  ")), Gesto::EstrecharElPanel);
+        assert_eq!(
+            gesto_de(Some("  frontera  ")),
+            Gesto::MoverLaFronteraDelArbol
+        );
         // **Y lo que no se entiende cae en el de la consola**, que es lo documentado: es lo que hace que un
         // error de escritura mida el otro gesto en vez de abortar el arranque.
         assert_eq!(gesto_de(Some("panelito")), Gesto::MoverLaConsola);
         assert_eq!(gesto_de(Some("")), Gesto::MoverLaConsola);
         assert_eq!(gesto_de(None), Gesto::MoverLaConsola);
 
-        // Las dos palabras del informe, tal como el guion las espera.
+        // Las tres palabras del informe, tal como el guion las espera.
         assert_eq!(
             Gesto::EstrecharElPanel.como_se_publica(),
             "estrechando el panel"
         );
         assert_eq!(Gesto::MoverLaConsola.como_se_publica(), "moviendo consolas");
+        assert_eq!(
+            Gesto::MoverLaFronteraDelArbol.como_se_publica(),
+            "moviendo la frontera del árbol"
+        );
     }
 
     /// La disposición de esta ventana, escrita y vuelta a leer **pasando por el texto**.
@@ -18246,6 +18974,573 @@ mod tests {
             ventana.coste_de_la_barra.fichas_marcadas, 2,
             "la barra marcó las dos fichas y no lo declaró: el informe publica su coste como si no \
              hubiera habido ningún reclamo que acumular ni ningún símbolo que pintar"
+        );
+    }
+
+    /// **Mirar el historial es del terminal: al programa no le llega nada.** Es lo que separa esto de
+    /// mandarle las flechas, y es la mitad del criterio que da sentido al hito — un historial que
+    /// mueve el cursor del editor de dentro no sirve para leer nada.
+    #[test]
+    fn subir_por_el_historial_no_le_manda_nada_al_programa() {
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+        for n in 0..80 {
+            division
+                .pantalla
+                .advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        // **`Mayúsculas` sola, que es la convención de todos los terminales.** `Ctrl+Mayúsculas` es
+        // aquí el prefijo de la ventana —partir, cerrar, cambiar de pestaña—, así que meter el
+        // historial ahí sería mezclar dos idiomas.
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+                egui::Event::Key {
+                    key: egui::Key::PageUp,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::SHIFT,
+                },
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+
+        assert!(
+            division.pulsaciones.is_empty(),
+            "al programa le llegó {:?} por subir por el historial",
+            String::from_utf8_lossy(&division.pulsaciones)
+        );
+        assert!(
+            division.pantalla.view().desplazamiento() > 0,
+            "y la vista tenía que haber subido"
+        );
+    }
+
+    /// **Teclear devuelve la vista a donde el programa escribe.** Sin esto, quien se para a leer algo
+    /// del historial y luego escribe **no ve lo que escribe**: el programa responde abajo, fuera de la
+    /// pantalla, y la ventana parece colgada.
+    #[test]
+    fn teclear_devuelve_la_vista_a_donde_el_programa_escribe() {
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+        for n in 0..80 {
+            division
+                .pantalla
+                .advance(format!("linea {n}\r\n").as_bytes());
+        }
+        division
+            .pantalla
+            .desplazar(term_core::Desplazamiento::AlPrincipio);
+        assert!(division.pantalla.view().desplazamiento() > 0);
+
+        encolar(&ctx, vec![egui::Event::Text("a".to_owned())]);
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+
+        assert_eq!(
+            division.pantalla.view().desplazamiento(),
+            0,
+            "se tecleó y la vista se quedó arriba: no se vería lo que se escribe"
+        );
+    }
+
+    /// Una consola con ochenta líneas de historial detrás.
+    fn division_con_historial() -> Division {
+        let mut division = division_con("sleep 30", 0);
+        for n in 0..80 {
+            division
+                .pantalla
+                .advance(format!("linea {n}\r\n").as_bytes());
+        }
+        division
+    }
+
+    /// Un evento de rueda de la unidad y el desplazamiento que se pidan.
+    fn rueda(unit: egui::MouseWheelUnit, y: f32) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit,
+            delta: egui::vec2(0.0, y),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }
+    }
+
+    /// Una pulsación de tecla con los modificadores dados.
+    fn tecla(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn un_panel_tactil_sube_por_el_historial_aunque_cada_roce_valga_menos_de_una_linea() {
+        // **El defecto que este caso persigue dejaba el historial QUIETO PARA SIEMPRE con panel táctil.**
+        // Un panel táctil manda **puntos**, no muescas: cada fotograma de un arrastre lento vale una
+        // fracción de línea. Truncando sin guardar el resto, cada uno de esos fotogramas desplazaba cero
+        // y el evento se consumía igual, así que dos dedos arrastrando despacio no movían nada — y no hay
+        // forma de notarlo salvo probando a girar muy fuerte, que es cuando la fracción sí llega a uno.
+        // **Por la pasada de interfaz entera**, que es donde vive la conversión de puntos a líneas: una
+        // prueba que llamara al desplazamiento directo dejaría pasar que los puntos no se dividan por el
+        // alto de una celda.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let area = area_de(1200.0);
+        for division in ventana.activa_mut().divisiones_mut() {
+            for n in 0..80 {
+                division
+                    .pantalla
+                    .advance(format!("linea {n}\r\n").as_bytes());
+            }
+        }
+        let alto = con_metrica(Metrica::alto);
+        let encima = egui::pos2(area.left() + area.width() / 4.0, area.center().y);
+        // Un tercio de línea por fotograma, **un fotograma cada uno**: es lo que hace un dedo que
+        // arrastra despacio, y es lo que el defecto tiraba entero.
+        let un_tercio = alto / 3.0;
+
+        for _ in 0..3 {
+            let entrada = egui::RawInput {
+                screen_rect: Some(area),
+                events: vec![
+                    egui::Event::PointerMoved(encima),
+                    rueda(egui::MouseWheelUnit::Point, un_tercio),
+                ],
+                ..Default::default()
+            };
+            pasada_de_interfaz(&mut ventana, &ctx, area, entrada);
+        }
+
+        assert_eq!(
+            ventana.activa().divisiones()[0]
+                .pantalla
+                .view()
+                .desplazamiento(),
+            1,
+            "tres roces de un tercio de línea tenían que subir exactamente una: el resto se está tirando"
+        );
+    }
+
+    #[test]
+    fn el_resto_de_la_rueda_es_de_cada_consola_y_no_se_regala_a_la_vecina() {
+        // **El resto acumulado es estado, y guardarlo en la ventana lo movería de consola con el ratón.**
+        // Quien pasa el puntero por encima de otra consola no espera que ésta salte media línea por lo
+        // que él hizo en la primera.
+        let mut izquierda = division_con_historial();
+        let mut derecha = division_con_historial();
+        let medio = DeLaRueda {
+            lineas: 0.5,
+            paginas: 0.0,
+        };
+
+        izquierda.desplazar_con_la_rueda(medio);
+        derecha.desplazar_con_la_rueda(medio);
+
+        assert_eq!(
+            (
+                izquierda.pantalla.view().desplazamiento(),
+                derecha.pantalla.view().desplazamiento()
+            ),
+            (0, 0),
+            "media línea movió algo: se está redondeando en vez de guardar el resto"
+        );
+
+        izquierda.desplazar_con_la_rueda(medio);
+
+        assert_eq!(
+            (
+                izquierda.pantalla.view().desplazamiento(),
+                derecha.pantalla.view().desplazamiento()
+            ),
+            (1, 0),
+            "el resto de una consola se le contó a la otra"
+        );
+    }
+
+    #[test]
+    fn la_rueda_de_paginas_mueve_una_pantalla_y_la_de_lineas_una_linea() {
+        // **Las tres unidades de egui, y dos de ellas no las ejercitaba nadie.** Comprobado mutando: con
+        // `Page` ignorada del todo y con `Point` sin convertir, la suite seguía verde porque la única
+        // prueba de la rueda mandaba `Line`. Un salto de página que no salta —o que salta una línea— es
+        // de los defectos que no fallan, solo se portan mal.
+        // **Por la pasada de interfaz entera**, que es donde cada unidad se separa de las otras: llamando
+        // al desplazamiento directo, ignorar la unidad de páginas no rompía nada.
+        let ctx = egui::Context::default();
+        let area = area_de(1200.0);
+        let encima = egui::pos2(area.left() + area.width() / 4.0, area.center().y);
+        let girar = |unidad, cuanto| {
+            let mut ventana = ventana_con("sleep 30", "sleep 30");
+            for division in ventana.activa_mut().divisiones_mut() {
+                for n in 0..80 {
+                    division
+                        .pantalla
+                        .advance(format!("linea {n}\r\n").as_bytes());
+                }
+            }
+            let entrada = egui::RawInput {
+                screen_rect: Some(area),
+                events: vec![egui::Event::PointerMoved(encima), rueda(unidad, cuanto)],
+                ..Default::default()
+            };
+            pasada_de_interfaz(&mut ventana, &ctx, area, entrada);
+            let division = &ventana.activa().divisiones()[0];
+            (
+                division.pantalla.view().desplazamiento(),
+                division.pantalla.size().rows,
+            )
+        };
+
+        let (una_linea, _) = girar(egui::MouseWheelUnit::Line, 1.0);
+        let (una_pagina, filas) = girar(egui::MouseWheelUnit::Page, 1.0);
+        assert_eq!(una_linea, 1, "una muesca de rueda no subió una línea");
+        assert!(
+            una_pagina > una_linea,
+            "una página subió {una_pagina} líneas y una línea subió {una_linea}: la unidad de páginas \
+             está cayendo en el mismo camino que la de líneas"
+        );
+        // Y una página es la pantalla menos una de contexto, que es lo que hace cualquier paginador.
+        assert_eq!(
+            una_pagina,
+            usize::from(filas - 1),
+            "una página no fue la pantalla menos una línea de contexto"
+        );
+    }
+
+    #[test]
+    fn las_cuatro_teclas_del_historial_hacen_cada_una_lo_suyo() {
+        // **Solo `RePág` estaba ejercitada, y las otras tres se podían cruzar sin que nada cayera.**
+        // Comprobado mutando: con `Inicio` llevando al final y `Fin` al principio, la suite seguía verde.
+        let ctx = egui::Context::default();
+        let arriba = {
+            let mut division = division_con_historial();
+            division
+                .pantalla
+                .desplazar(term_core::Desplazamiento::AlPrincipio);
+            division.pantalla.view().desplazamiento()
+        };
+        assert!(arriba > 0, "la consola de prueba no tiene historial detrás");
+
+        // Cada tecla, desde el estado en el que significa algo, y lo que tiene que dejar.
+        let casos: [(egui::Key, usize, usize); 4] = [
+            // Desde abajo, `RePág` sube una página; `AvPág` desde abajo no puede bajar más.
+            (egui::Key::PageUp, 0, usize::MAX),
+            (egui::Key::PageDown, arriba, usize::MAX),
+            (egui::Key::Home, 0, arriba),
+            (egui::Key::End, arriba, 0),
+        ];
+
+        for (key, desde, esperado) in casos {
+            let mut division = division_con_historial();
+            let mut modificadores = egui::Modifiers::NONE;
+            division
+                .pantalla
+                .desplazar(term_core::Desplazamiento::Lineas(desde as i32));
+            let antes = division.pantalla.view().desplazamiento();
+
+            encolar(
+                &ctx,
+                vec![
+                    egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+                    tecla(key, egui::Modifiers::SHIFT),
+                ],
+            );
+            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+            let despues = division.pantalla.view().desplazamiento();
+
+            if esperado == usize::MAX {
+                // Las dos de página no van a un sitio fijo: lo que se ata es el SENTIDO, que es lo que
+                // una prueba con las teclas cruzadas dejaría pasar.
+                let sube = key == egui::Key::PageUp;
+                assert_eq!(
+                    despues > antes,
+                    sube,
+                    "{key:?} fue en el sentido contrario: de {antes} a {despues}"
+                );
+            } else {
+                assert_eq!(despues, esperado, "{key:?} no dejó la vista donde le toca");
+            }
+        }
+    }
+
+    #[test]
+    fn sin_mayusculas_las_teclas_del_historial_siguen_siendo_del_programa() {
+        // **`RePág` a secas es de quien corre dentro** —un paginador la usa—, y quitársela sería romper
+        // `less` dentro de nuestra ventana. Comprobado mutando: borrando el requisito de `Mayúsculas` la
+        // suite seguía verde, porque nada cubría este lado.
+        let ctx = egui::Context::default();
+
+        for key in [
+            egui::Key::PageUp,
+            egui::Key::PageDown,
+            egui::Key::Home,
+            egui::Key::End,
+        ] {
+            let mut division = division_con_historial();
+            let mut modificadores = egui::Modifiers::NONE;
+            division
+                .pantalla
+                .desplazar(term_core::Desplazamiento::Lineas(3));
+            let antes = division.pantalla.view().desplazamiento();
+
+            encolar(&ctx, vec![tecla(key, egui::Modifiers::NONE)]);
+            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+
+            assert_eq!(
+                division.pantalla.view().desplazamiento(),
+                antes,
+                "{key:?} sin Mayúsculas movió el historial: se la hemos quitado al programa de dentro"
+            );
+        }
+    }
+
+    #[test]
+    fn las_teclas_del_historial_no_bajan_a_traducirse_a_bytes() {
+        // **Se consumen, y eso no lo ataba nada.** Comprobado mutando: borrando el consumo, la prueba que
+        // afirmaba «al programa no le llegó nada» seguía verde — porque esas cuatro teclas **no tienen
+        // bytes** en la tabla de este hito, así que el defecto y el arreglo daban el mismo resultado. Lo
+        // que hay que atar es que el evento **desaparece de la cola**: el día que la tabla las traduzca,
+        // dejarlas ahí se las manda al programa.
+        let ctx = egui::Context::default();
+        let mut division = division_con_historial();
+        let mut modificadores = egui::Modifiers::NONE;
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+                tecla(egui::Key::PageUp, egui::Modifiers::SHIFT),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+
+        let quedan = ctx.input(|entrada| entrada.events.clone());
+        assert!(
+            !quedan.iter().any(
+                |evento| matches!(evento, egui::Event::Key { key, .. } if *key == egui::Key::PageUp)
+            ),
+            "la tecla del historial se quedó en la cola: quien la mire después se la manda al programa"
+        );
+    }
+
+    /// **La rueda mueve la consola que está BAJO EL PUNTERO, no la que tiene el teclado.** Es lo que
+    /// hace cualquier terminal; lo contrario sorprende a diario, porque mirar una consola y usar otra
+    /// es el caso normal cuando hay varias.
+    #[test]
+    fn la_rueda_sube_por_el_historial_de_la_consola_bajo_el_puntero() {
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let area = area_de(1200.0);
+        // El teclado se queda en la izquierda a propósito: si la rueda fuera al foco, la prueba pasaría
+        // moviendo la consola equivocada.
+        assert_eq!(ventana.activa().foco, 0);
+        for division in ventana.activa_mut().divisiones_mut() {
+            for n in 0..80 {
+                division
+                    .pantalla
+                    .advance(format!("linea {n}\r\n").as_bytes());
+            }
+        }
+
+        // El puntero, sobre la mitad derecha.
+        let derecha = egui::pos2(area.right() - area.width() / 4.0, area.center().y);
+        let entrada = egui::RawInput {
+            screen_rect: Some(area),
+            events: vec![
+                egui::Event::PointerMoved(derecha),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, 3.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                },
+            ],
+            ..Default::default()
+        };
+        pasada_de_interfaz(&mut ventana, &ctx, area, entrada);
+
+        let divisiones = ventana.activa().divisiones();
+        assert_eq!(
+            divisiones[0].pantalla.view().desplazamiento(),
+            0,
+            "la rueda movió la consola del foco en vez de la que estaba bajo el puntero"
+        );
+        assert!(
+            divisiones[1].pantalla.view().desplazamiento() > 0,
+            "la consola bajo el puntero no subió por su historial"
+        );
+    }
+
+    /// **Recolocar el texto se declara, y hasta este hito no lo hacía nadie.** Corre en la mitad lógica
+    /// del fotograma, donde no hay pintado que lo envuelva, así que se lo llevaba la resta — o sea el
+    /// framework, que es la cifra con la que **D3** juzga a egui. Con el historial apagado costaba 7 µs
+    /// y se perdía en el ruido; con las líneas que ahora se guardan, casi un milisegundo cada vez.
+    ///
+    /// **Y solo se anota cuando ocurre**: un cero apuntado en los miles de fotogramas quietos hundiría
+    /// la media y haría decir a este tramo lo contrario de lo que vale.
+    #[test]
+    fn recolocar_el_texto_se_declara_y_solo_cuando_ocurre() {
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+
+        // Un fotograma quieto: nadie cambia de tamaño, así que no hay nada que anotar.
+        un_fotograma_con(&mut ventana, &ctx, Vec::new());
+        assert_eq!(
+            ventana.recolocar.fotogramas, 0,
+            "sin cambiar de ancho no se recoloca nada, y anotarlo hundiría la media"
+        );
+
+        // Y ahora uno que sí: la ventana cambia de tamaño, así que las dos consolas se recolocan.
+        let antes = ventana.cronometrado_aparte;
+        un_fotograma_en(&mut ventana, &ctx, area_de(700.0), Vec::new());
+
+        assert_eq!(
+            ventana.recolocar.fotogramas, 1,
+            "cambió el ancho de las consolas y no se anotó"
+        );
+        assert!(
+            ventana.recolocar.total > std::time::Duration::ZERO,
+            "se anotó en cero tiempo, que es lo que publica un tramo que no se llegó a medir"
+        );
+        // **Se comprueba que entró ESO, no que el acumulador subiera.** Comprobado mutando: borrando la
+        // línea que suma lo recolocado, la comprobación de «subió» seguía verde, porque en el mismo
+        // fotograma suman también el espejo de la disposición y el ratón. Un tramo que se declara y no se
+        // resta es exactamente el número mal etiquetado que este proyecto persigue.
+        assert!(
+            ventana.cronometrado_aparte >= antes + ventana.recolocar.total,
+            "lo que se resta del fotograma subió {:?} y recolocar costó {:?}: no entró, así que se \
+             publicaría como coste del framework",
+            ventana.cronometrado_aparte - antes,
+            ventana.recolocar.total
+        );
+    }
+
+    /// **El cronómetro de recolocar tiene que cubrir la recolocación, no solo el aviso al programa.**
+    /// Comprobado mutando: subiendo la lectura del reloj una línea —dejando fuera el `resize` de la
+    /// pantalla, que es donde vive el milisegundo de **D21** y donde el historial se recorre entero— la
+    /// suite seguía verde, porque la prueba de arriba solo pide que el total sea mayor que cero. Y ese es
+    /// justo el defecto que la regla dura describe: la región cronometrada se encoge y el trabajo que
+    /// queda fuera pasa a publicarse como coste del framework.
+    #[test]
+    fn el_cronometro_de_recolocar_cubre_recolocar_el_texto_y_no_solo_avisar_al_programa() {
+        // Dos consolas iguales salvo en **cuánto texto hay que recolocar**: una con historial que
+        // envuelve y otra recién abierta. Si el reloj cubriera lo mismo en las dos, las dos medirían lo
+        // mismo.
+        let mut con_texto = division_con("sleep 30", 0);
+        let ancha = con_texto.pantalla.size();
+        // Líneas más largas que la rejilla, que son las que de verdad se recolocan al estrechar: una que
+        // cabe entera se empuja de un tirón y sale por la puerta barata.
+        let larga = "x".repeat(usize::from(ancha.cols) * 3);
+        for _ in 0..term_core::HISTORIAL {
+            con_texto.pantalla.advance(larga.as_bytes());
+            con_texto.pantalla.advance(b"\r\n");
+        }
+
+        let mut vacia = division_con("sleep 30", 1);
+        assert_eq!(
+            vacia.pantalla.size(),
+            ancha,
+            "las dos consolas tienen que partir de la misma rejilla o no se comparan"
+        );
+
+        let estrecha = term_core::Size {
+            rows: ancha.rows,
+            cols: ancha.cols / 2,
+        };
+        for division in [&mut con_texto, &mut vacia] {
+            division.medido = estrecha;
+            division.redimensionar();
+        }
+
+        assert!(
+            con_texto.recolocado > vacia.recolocado * 5,
+            "recolocar {} líneas que envuelven costó {:?} y hacerlo sin nada que recolocar {:?}: el \
+             cronómetro no está cubriendo el recorrido del historial",
+            term_core::HISTORIAL,
+            con_texto.recolocado,
+            vacia.recolocado
+        );
+    }
+
+    /// Lo que la consola **enseña** ahora mismo, no lo que el programa tiene escrito.
+    ///
+    /// Va por la foto y no por `to_text`, que devuelve siempre el área activa: con el historial subido
+    /// las dos cosas son distintas, y la que hay que mirar es la que se ve.
+    fn texto_visible(division: &Division) -> String {
+        let vista = division.pantalla.view();
+        (0..vista.size().rows)
+            .map(|fila| {
+                vista
+                    .row(fila)
+                    .expect("la fila está dentro de la foto")
+                    .iter()
+                    .map(|celda| celda.c)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// **Lo que el programa siga escribiendo no te devuelve abajo**, y esa es la mitad del criterio que
+    /// hace útil el historial: pararse a leer algo **mientras** un agente vuelca es exactamente el caso
+    /// en el que hace falta, y un historial que se cae al final en cuanto entra una línea no sirve para
+    /// eso.
+    ///
+    /// **Se prueba por el bombeo de la consola y no por la pantalla.** La pantalla ya tiene su prueba en
+    /// `term-core`; lo que aquí se ata es que el camino por el que la salida del programa entra en la
+    /// aplicación no arrastre la vista al final — un `desplazar(AlFinal)` de más en `bombear`, que es la
+    /// forma más natural de escribir «que se vea siempre lo último», deja el historial inservible y no
+    /// rompe ninguna prueba de `term-core`.
+    ///
+    /// **Y se afirma sobre el texto que se ve**, no solo sobre el número de líneas subidas: es lo que
+    /// distingue «la vista no se movió» de «el contador quedó en algo distinto de cero».
+    #[test]
+    fn el_bombeo_de_la_consola_no_devuelve_el_historial_a_donde_el_programa_escribe() {
+        let mut division = division_con("printf 'RECIEN ESCRITO\\n'; sleep 30", 0);
+        for n in 0..80 {
+            division
+                .pantalla
+                .advance(format!("linea {n}\r\n").as_bytes());
+        }
+        division
+            .pantalla
+            .desplazar(term_core::Desplazamiento::AlPrincipio);
+        let mirando = texto_visible(&division);
+        assert!(
+            mirando.contains("linea 0"),
+            "la prueba no llegó a subir hasta lo viejo, así que no compara nada: {mirando:?}"
+        );
+
+        // Bombear hasta que lo que el programa escribió esté **dentro** de la consola: es el momento en
+        // el que un bombeo que arrastrara la vista ya lo habría hecho. `to_text` da el área activa, así
+        // que ve llegar la línea sin depender de dónde esté la vista.
+        let limite = Instant::now() + Duration::from_secs(30);
+        while !division.pantalla.to_text().contains("RECIEN ESCRITO") {
+            assert!(
+                Instant::now() < limite,
+                "el programa de la consola no llegó a escribir nada, así que el bombeo no metió nada"
+            );
+            division.bombear();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(
+            texto_visible(&division),
+            mirando,
+            "entró salida por el bombeo y lo que se ve cambió: quien se pare a leer algo mientras un \
+             programa escribe se queda sin poder leerlo"
+        );
+        assert!(
+            division.pantalla.view().desplazamiento() > 0,
+            "el bombeo devolvió el desplazamiento a cero"
         );
     }
 }

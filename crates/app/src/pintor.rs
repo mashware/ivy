@@ -199,13 +199,19 @@ fn pintar_glifo(painter: &Painter, celda: &ViewCell, tema: &Tema, metrica: &Metr
 }
 
 fn pintar_cursor(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica, origen: Pos2) {
-    let cursor = vista.cursor();
+    // **Sin cursor no se pinta cursor**, y desde que hay historial ese caso ocurre de verdad: subiendo
+    // lo bastante, el cursor se queda en el área activa, por debajo de lo que se mira. La foto lo dice
+    // en vez de recortarlo, que es lo que este sitio anunciaba desde F1.3.
+    //
+    // **Y la guarda de abajo no cubría esto**, aunque su comentario dijera que sí: la fila llegaba
+    // recortada, así que siempre estaba dentro de la rejilla y `cell` nunca devolvía nada. Se habría
+    // pintado un cursor fantasma en la última fila.
+    let Some(cursor) = vista.cursor() else {
+        return;
+    };
     if cursor.shape == CursorShape::Hidden {
         return;
     }
-    // Fuera de la rejilla no se pinta nada. Hoy no puede pasar —la caja recorta— pero cuando la
-    // Fase 2 traiga historial el cursor sí caerá fuera de lo visible, y dibujarlo recortado sería
-    // ponerlo en un sitio donde no está.
     let Some(debajo) = vista.cell(cursor.row, cursor.col) else {
         return;
     };
@@ -322,5 +328,66 @@ mod tests {
             );
             pantalla.resize(rejilla);
         }
+    }
+
+    /// Lo que `pintar_cursor` deja dibujado, contado en formas.
+    ///
+    /// **Se cuenta lo que se PINTA, no lo que la foto dice.** Que la vista devuelva `None` es la mitad
+    /// del criterio; la otra —la que se comprueba aquí— es que este pintor no dibuje nada con ese
+    /// `None`. Se pinta sobre una capa propia y vacía, así que lo que salga es exactamente lo de este
+    /// pintor y nada más.
+    fn formas_del_cursor(vista: &View) -> usize {
+        let ctx = Context::default();
+        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("solo el cursor"),
+            ));
+            pintar_cursor(
+                &painter,
+                vista,
+                &Tema::default(),
+                &metrica(10.0, 20.0),
+                Pos2::ZERO,
+            );
+        });
+        let formas = salida.shapes.len();
+        salida.drop_without_applying_deltas();
+        formas
+    }
+
+    #[test]
+    fn subido_el_historial_no_se_pinta_ningun_cursor() {
+        // **La otra mitad de «el cursor no se ve», y no la ataba nadie.** Que la foto devuelva `None`
+        // se comprueba en `term-core`; que este pintor no dibuje igualmente un bloque en la última
+        // fila, no se comprobaba en ninguna parte. La guarda de más abajo —la que mira si la celda
+        // existe— no cubría esto aunque su comentario dijera que sí: la fila llegaba recortada, así que
+        // siempre caía dentro de la rejilla y se habría pintado un **cursor fantasma** en un sitio
+        // donde el programa no escribe.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..40 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        // Al día, el cursor se ve y se pinta: sin esto, un pintor que no dibujara nunca nada pasaría.
+        assert!(
+            formas_del_cursor(&pantalla.view()) > 0,
+            "con la pantalla al día no se pintó ningún cursor, así que la comprobación de abajo no \
+             distingue nada"
+        );
+
+        pantalla.desplazar(term_core::Desplazamiento::AlPrincipio);
+        assert_eq!(
+            pantalla.view().cursor(),
+            None,
+            "la prueba no llegó a dejar el cursor fuera de lo que se mira"
+        );
+
+        assert_eq!(
+            formas_del_cursor(&pantalla.view()),
+            0,
+            "se pintó un cursor con la foto diciendo que no se ve: es un cursor fantasma en la última \
+             fila, y quien mire creerá que el programa escribe ahí"
+        );
     }
 }

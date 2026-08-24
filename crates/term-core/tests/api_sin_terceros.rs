@@ -26,7 +26,9 @@
 //! Por eso la traducción vive en funciones `pub(crate)` y no en `impl From`: no es estilo, es lo
 //! que hace la fuga **imposible** en vez de dejarla en manos de acordarse de mirar.
 
-use term_core::{CellWidth, CursorShape, Screen, Size, TermColor, Underline, ViewCell};
+use term_core::{
+    CellWidth, CursorShape, Desplazamiento, Screen, Size, TermColor, Underline, ViewCell,
+};
 
 /// Recorre todas las variantes de color sin nombrar el enum de la librería de debajo.
 fn describir(color: TermColor) -> &'static str {
@@ -102,8 +104,60 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
         let _ = (c, inverse, bold, dim, italic, strikeout, hidden);
     }
 
-    assert!(!describir_cursor(vista.cursor().shape).is_empty());
+    assert!(
+        !describir_cursor(
+            vista
+                .cursor()
+                .expect("con la pantalla al día el cursor se ve")
+                .shape
+        )
+        .is_empty()
+    );
     assert_eq!(vista.size(), Size { rows: 4, cols: 20 });
     assert_eq!(vista.cells().len(), 80);
-    assert_eq!(vista.cursor().row, 0);
+    assert_eq!(
+        vista
+            .cursor()
+            .expect("con la pantalla al día el cursor se ve")
+            .row,
+        0
+    );
+}
+
+/// Que **mirar el historial** también se pide y se lee con tipos propios.
+///
+/// Va aparte de la vista porque es superficie nueva y **la prueba de arriba no la custodiaba**: el motor
+/// de debajo tiene su propio vocabulario para esto —un enum de desplazamiento con sus variantes— y
+/// dejarlo asomar sería exactamente la fuga que este fichero existe para impedir. Se recorren **todas**
+/// las variantes con un `match` exhaustivo, que es lo que hace que compilar sea la comprobación: si
+/// `Desplazamiento` fuera el tipo ajeno, sus variantes no se llamarían así.
+#[test]
+fn el_historial_se_pide_y_se_lee_con_tipos_propios() {
+    fn describir(cuanto: Desplazamiento) -> &'static str {
+        match cuanto {
+            Desplazamiento::Lineas(_) => "unas líneas",
+            Desplazamiento::Paginas(_) => "unas pantallas",
+            Desplazamiento::AlPrincipio => "hasta lo más viejo que se guarda",
+            Desplazamiento::AlFinal => "de vuelta a donde el programa escribe",
+        }
+    }
+
+    let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+    for n in 0..40 {
+        pantalla.advance(format!("linea {n}\r\n").as_bytes());
+    }
+
+    for cuanto in [
+        Desplazamiento::AlPrincipio,
+        Desplazamiento::Lineas(-1),
+        Desplazamiento::Paginas(-1),
+        Desplazamiento::AlFinal,
+    ] {
+        assert!(!describir(cuanto).is_empty());
+        pantalla.desplazar(cuanto);
+    }
+
+    // Y lo que se lee de vuelta es un número nuestro, no la posición interna del motor.
+    let cuanto: usize = pantalla.view().desplazamiento();
+    assert_eq!(cuanto, 0, "se acabó pidiendo volver al final");
 }

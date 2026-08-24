@@ -578,6 +578,43 @@ pub struct EnPuntos {
     pub alto: f32,
 }
 
+/// Lo que ha costado **recolocar el texto** de las consolas a lo largo de la sesión.
+///
+/// **Es la fuga que el historial abre, y por eso se declara desde el mismo hito que lo enciende.**
+/// Recolocar corre en la mitad lógica del fotograma —al aplicar el tamaño que midió el pase anterior—
+/// y hasta ahora **no lo cronometraba nadie**: con el historial apagado costaba 7 µs y se perdía en el
+/// ruido, así que la fuga era invisible. Con historial recorre **todas** las líneas guardadas: 984 µs
+/// por consola medidos con contenido que envuelve (**D21**), y una frontera mueve **dos**.
+///
+/// Sin esto, ese trabajo se publicaría como coste del framework — la cifra con la que **D3** juzga a
+/// egui.
+#[derive(Clone, Copy, Default)]
+pub struct Reflujo {
+    /// En cuántos fotogramas **se llegó a recolocar de verdad**.
+    ///
+    /// **Casi todos los fotogramas no recolocan nada**: solo los que cruzan un borde de celda mientras
+    /// se arrastra una frontera, o los que siguen a un cambio de tamaño de la ventana. Sin este número,
+    /// una media repartida entre miles de fotogramas quietos publica «recolocar no cuesta nada», que es
+    /// exactamente el disfraz que el resto del informe evita.
+    pub fotogramas: usize,
+    /// Lo que costaron todos ellos juntos.
+    pub total: Duration,
+}
+
+impl Reflujo {
+    /// Anota lo que costó recolocar en un fotograma. **Solo se llama cuando hubo recolocación**: un
+    /// cero apuntado como muestra hunde la media y hace decir a este tramo lo contrario de lo que vale.
+    pub fn anotar(&mut self, cuanto: Duration) {
+        self.fotogramas += 1;
+        self.total += cuanto;
+    }
+
+    /// Lo que costó de media cada recolocación, o nada si no hubo ninguna.
+    fn por_vez(&self) -> Option<Duration> {
+        self.total.checked_div(self.fotogramas as u32)
+    }
+}
+
 /// Lo que ha costado pintar la barra de pestañas a lo largo de la sesión.
 ///
 /// **Se declara porque el fotograma se reparte por resta**: lo que nadie nombra se publica como coste
@@ -710,15 +747,37 @@ pub struct Arrastres {
 /// **Una lista por pestaña y no un array de dos**: el número de divisiones deja de estar fijado por el
 /// tipo en cuanto llega el árbol, y una firma que siga prometiendo dos obligaría a recortar o rellenar
 /// justo aquí, que es donde el informe se convierte en el dato que alguien va a creerse.
+/// Lo que la sesión entera tiene que contar de sí misma, además de sus tramos por consola.
+///
+/// **Es un struct con nombres y no cuatro parámetros seguidos**, por lo mismo que [`Tramos`]: cuando
+/// esto eran argumentos posicionales, intercambiar dos compilaba sin una queja y publicaba un informe
+/// mentiroso. Y son cuatro cosas que crecen —cada hito que declara un tramo nuevo añade el suyo—, así
+/// que la firma tenía los días contados.
+#[derive(Clone, Copy, Default)]
+pub struct DeLaSesion {
+    /// Los gestos que una tanda se inyectó, si es que se inyectó alguno.
+    pub arrastres: Option<Arrastres>,
+    /// De dónde salieron las consolas, si salieron de un fichero.
+    pub restauracion: Option<Restauracion>,
+    /// Lo que costó pintar la barra de pestañas.
+    pub barra: Barra,
+    /// Lo que costó recolocar el texto al cambiar el ancho de una consola.
+    pub reflujo: Reflujo,
+}
+
 pub fn cabecera(
     a: &mut dyn std::io::Write,
     ventana: EnPuntos,
     rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
     visible: usize,
-    arrastres: Option<Arrastres>,
-    restauracion: Option<Restauracion>,
-    barra: Barra,
+    sesion: DeLaSesion,
 ) -> std::io::Result<()> {
+    let DeLaSesion {
+        arrastres,
+        restauracion,
+        barra,
+        reflujo,
+    } = sesion;
     let perfil = if cfg!(debug_assertions) {
         "depuración — el número que vale es el de --release"
     } else {
@@ -807,6 +866,16 @@ pub fn cabecera(
              marcadas a la vez como mucho (acumular los reclamos y pintar las fichas; se resta de su \
              fotograma)",
             barra.fotogramas, barra.total, barra.fichas_marcadas
+        )?;
+    }
+    // **Solo cuando hubo.** En una tanda que no redimensiona nada no se recoloca ni una vez, y
+    // publicar «0 veces» invita a leer que no cuesta.
+    if let Some(cada) = reflujo.por_vez() {
+        writeln!(
+            a,
+            "recolocar:    {} veces · {:?} en total · {cada:?} cada vez (el texto, al cambiar el ancho \
+             de una consola; corre en la mitad lógica y se resta de su fotograma)",
+            reflujo.fotogramas, reflujo.total
         )?;
     }
     writeln!(a, "renderizador: glow")?;
@@ -943,9 +1012,12 @@ mod tests {
             ventana,
             rejillas,
             visible,
-            arrastres,
-            restauracion,
-            barra,
+            DeLaSesion {
+                arrastres,
+                restauracion,
+                barra,
+                reflujo: Reflujo::default(),
+            },
         )
         .expect("escribir a memoria no falla");
         String::from_utf8(salida).expect("la cabecera es texto")
@@ -1565,6 +1637,85 @@ mod tests {
         assert!(
             !sin.contains("barra:"),
             "sin barra que pintar, la cabecera publicó un tramo que nadie midió:\n{sin}"
+        );
+    }
+
+    fn con_reflujo(reflujo: Reflujo) -> String {
+        let mut salida = Vec::new();
+        cabecera(
+            &mut salida,
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            0,
+            DeLaSesion {
+                reflujo,
+                ..Default::default()
+            },
+        )
+        .expect("escribir a memoria no falla");
+        String::from_utf8(salida).expect("la cabecera es texto")
+    }
+
+    /// **La línea que dice lo que cuesta recolocar el texto, y que solo sale cuando se recolocó.**
+    /// Recolocar corre en la mitad lógica del fotograma, donde no hay pintado que lo envuelva: lo que
+    /// no se nombre aquí se publica como coste del framework, que es la cifra con la que **D3** juzga a
+    /// egui. Con el historial encendido son casi mil microsegundos **por consola** y una frontera mueve
+    /// dos.
+    ///
+    /// **Y la forma de la línea es un contrato con `scripts/medir-fotograma.sh`**, que la lee para
+    /// invalidar una corrida de la tanda M. Su guarda saca el número con
+    /// `s/^recolocar: *\([0-9]*\) veces .*$/\1/p` y compara contra los gestos inyectados: si la línea
+    /// cambia de forma, el guion no ve **ninguna** recolocación e invalida corridas buenas — y si la
+    /// línea desaparece del todo, la guarda que dice cazar «la frontera se movió sin cruzar bordes de
+    /// celda» deja de cazar nada.
+    #[test]
+    fn la_cabecera_dice_lo_que_costo_recolocar_solo_cuando_se_recoloco() {
+        // Los números de una corrida publicada: 320 recolocaciones a los ~984 µs que cuesta recorrer el
+        // historial de una consola.
+        let con = con_reflujo(Reflujo {
+            fotogramas: 320,
+            total: Duration::from_micros(320 * 984),
+        });
+
+        assert!(
+            con.contains("314.88ms en total") && con.contains("984µs cada vez"),
+            "la cabecera no declaró lo que costó recolocar ni lo que cuesta cada vez:\n{con}"
+        );
+
+        // **La forma exacta que el guion sabe leer.** El `.*` que sigue a «veces» exige que detrás haya
+        // algo, igual que en la línea de restauradas: una línea recortada no casaría y el guion
+        // invalidaría una corrida buena.
+        let linea = con
+            .lines()
+            .find(|linea| linea.starts_with("recolocar:"))
+            .expect("no hay línea de recolocar que el guion pueda leer");
+        let (etiqueta, resto) = linea
+            .split_once(" veces ")
+            .expect("la línea de recolocar perdió las palabras que el guion busca");
+        assert!(
+            etiqueta
+                .strip_prefix("recolocar:")
+                .expect("la línea empieza por su etiqueta")
+                .trim_start()
+                .parse::<usize>()
+                == Ok(320),
+            "el guion no sacaría 320 recolocaciones de esta línea: «{linea}»"
+        );
+        assert!(
+            !resto.is_empty(),
+            "detrás de «veces» no queda nada y el guion exige que quede algo: «{linea}»"
+        );
+
+        // **Y en una tanda que no redimensiona nada, la línea no sale.** Publicar «0 veces» se lee como
+        // «recolocar no cuesta nada» en vez de como «no se recolocó», y además le daría a la guarda del
+        // guion un número que pasaría sus dos comprobaciones sin que nada se hubiera recolocado.
+        let sin = con_reflujo(Reflujo::default());
+        assert!(
+            !sin.contains("recolocar:"),
+            "sin recolocar nada, la cabecera publicó un tramo que nadie midió:\n{sin}"
         );
     }
 }

@@ -56,6 +56,19 @@
 #                    entre las dos es lo que cuesta restaurar, y el informe de L lo declara aparte
 #                    —`restauradas:`— porque ocurre **antes del primer fotograma** y no se resta de
 #                    ninguno.
+#              Con UNA pestaña y DOS divisiones, y la FRONTERA DEL ÁRBOL arrastrándose, la que F2.6 añade
+#              — también en el régimen de la C:
+#                M = como la C, y además la ventana agarra la frontera que reparte las dos consolas y la
+#                    lleva a un lado y al otro sin parar, alternando para que el reparto vuelva. Es la
+#                    ÚNICA tanda que le cambia el ancho a **dos** consolas a la vez, y por eso es la que
+#                    mide el peor caso de recolocar el texto — el tramo que el historial encareció de
+#                    7 µs a casi un milisegundo **por consola**. Ni la K ni la J lo ejercitan: la K
+#                    estrecha el panel de UNA, y la J reordena el árbol sin cruzar bordes de celda.
+#                    Su control es **C**, que abre las mismas dos sin tocarlas.
+#
+#                    **Dos corridas de M no se promedian**, por lo mismo que las de K: la rejilla que el
+#                    informe publica es la del último fotograma y aquí las dos consolas están oscilando,
+#                    así que dos corridas acaban con distinto número de columnas. Se leen por separado.
 #     [mib]    tamaño de la carga por consola, 44 por defecto
 #
 #   El modo `comparar` no mide: lee dos informes de la misma tanda y dice si se pueden promediar.
@@ -234,7 +247,7 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
 fi
 
 # ── Modo tanda ──────────────────────────────────────────────────────────────────
-TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J, K o L}
+TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J, K, L o M}
 MIB=${2:-44}
 SALIDA="$RAIZ/target/medidas"
 mkdir -p "$SALIDA"
@@ -269,7 +282,8 @@ case "$TANDA" in
     J)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=consola ;;   # dos, y arrastrándose: el gesto de F2.3
     K)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=panel ;;     # dos, y estrechando el panel sin parar: el gesto de F2.4
     L)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=consola; RESTAURA=1 ;;  # cuatro en fila, pero salidas del fichero: el arranque de F2.5
-    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K o L" >&2; exit 2 ;;
+    M)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=frontera ;;       # dos, y moviendo la frontera del árbol: el peor caso de recolocar
+    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K, L o M" >&2; exit 2 ;;
 esac
 # **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
 # que caben, porque lo que hace falta es que el gesto dure **de principio a fin**. Una tanda que se queda sin
@@ -480,7 +494,7 @@ sembrar() {
 case "$TANDA" in
     A) : ;;                       # sin panel: nadie publica nada
     B) sembrar quieto & ;;
-    C|D|F|G|H|I|J|K|L) sembrar hablador & ;;
+    C|D|F|G|H|I|J|K|L|M) sembrar hablador & ;;
 esac
 
 echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIRECTORIOS consolas volcando $MIB MiB · ventana $TAMANO · no toques la máquina hasta que cierre" >&2
@@ -604,24 +618,61 @@ demasiado estrecha para que la operación se acepte, así que esta tanda no mide
     echo "gestos durante la tanda: $INYECTADOS inyectados, $CON_EFECTO efectos ($QUE_GESTO)" >&2
 fi
 
-# **Que el guardado de la disposición llegara a ocurrir, en las tandas que lo ejercitan.** Es el mismo
-# engaño que el testigo evita con los paneles y con los gestos: si nadie escribió, el informe declara el
-# coste de escribir en **cero** y la tanda se lee como «guardar no cuesta nada» en vez de como «no se
-# guardó». Pasa si el plazo no vence antes de cerrar la ventana, si la disposición vuelve a la de partida
-# —el ciclo del gesto lo hace con dos consolas— o si el directorio de la corrida no se puede escribir.
+# **Y que se recolocara el texto, en la tanda que existe para medir eso.** Mover la frontera del árbol le
+# cambia el ancho a **dos** consolas, y recolocar el texto de cada una es el tramo que el historial
+# encareció de 7 µs a casi un milisegundo. Una corrida donde la frontera se moviera sin llegar a cruzar
+# un borde de celda —un recorrido demasiado corto, una rejilla más gruesa— publicaría el tramo en cero y
+# se leería como «recolocar no cuesta nada» en vez de como «no se recolocó»: el mismo disfraz que el
+# testigo evita con los paneles y la cuenta de efectos con los gestos.
+#
+# **Solo donde el gesto cambia el ancho de una consola.** El de mover consolas reordena el árbol sin
+# tocar el reparto, y exigirle la línea invalidaría corridas correctas.
+if [ "$GESTO" = frontera ]; then
+    RECOLOCACIONES=$(sed -n 's/^recolocar: *\([0-9]*\) veces .*$/\1/p' "$INFORME" | head -1)
+    if [ -z "$RECOLOCACIONES" ]; then
+        invalidar "esta tanda mueve la frontera del árbol y el informe no declara ninguna recolocación: \
+el trabajo que el historial encareció se publicaría como coste del framework"
+    fi
+    # **Y que sean MÁS que los gestos, no simplemente más de cero.** Que la línea exista no basta: el
+    # arranque ya recoloca dos o tres veces por su cuenta —el compositor entrega el tamaño de la ventana
+    # cuando las consolas ya están vivas—, así que una corrida cuya frontera no llegara a cruzar ni un
+    # borde de celda publicaría «recolocar: 2 veces» y **pasaría**, que es justo el caso que esta guarda
+    # dice cazar. Cada gesto entero mueve la frontera varias celdas, así que tiene que dejar al menos una
+    # recolocación suya: las dos corridas publicadas dan 320 para 159 gestos y 1 397 para 697.
+    if [ "$RECOLOCACIONES" -le "$INYECTADOS" ]; then
+        invalidar "se inyectaron $INYECTADOS gestos y solo hubo $RECOLOCACIONES recolocaciones: no llegan \
+ni a una por gesto, así que la frontera se movió sin cruzar bordes de celda y esta tanda no mide el peor \
+caso que promete"
+    fi
+    echo "recolocaciones durante la tanda: $RECOLOCACIONES para $INYECTADOS gestos" >&2
+fi
+
+# **Que el guardado de la disposición llegara a INTENTARSE, en las tandas que lo ejercitan.** Es el mismo
+# engaño que el testigo evita con los paneles y con los gestos: si nadie intentó guardar, el informe
+# declara el coste de ese camino en **cero** y la tanda se lee como «guardar no cuesta nada» en vez de
+# como «no se guardó». Pasa si el plazo no vence antes de cerrar la ventana, si la disposición vuelve a la
+# de partida —el ciclo del gesto lo hace con dos consolas— o si el árbol no se llega a mover.
+#
+# **Se cuentan los INTENTOS y no las escrituras, y eso no es rebajar el listón: es que una tanda no
+# escribe nunca.** La aplicación veta el guardado en cuanto ve una variable de la puerta de medida —para
+# no machacarle la disposición a quien mide—, así que el número de escrituras de una corrida es **cero por
+# construcción** y exigirlo invalidaba todas las tandas con gestos. El trabajo que hay que declarar sí
+# ocurre y sí se cronometra: copiar la disposición, validarla y llegar hasta la puerta. Lo que la guarda
+# vigila es que ese camino se recorra.
 #
 # **Solo se exige donde la tanda mueve la disposición**, que son las que inyectan gestos: en una tanda
 # quieta no hay nada que guardar y exigirlo invalidaría corridas correctas.
 if [ "$ARRASTRES" != 0 ]; then
-    ESCRITURAS=$(sed -n 's/^escribir la disposición en disco *(\([0-9]*\) escrituras de [0-9]* intentos)$/\1/p' "$INFORME" | head -1)
-    if [ -z "$ESCRITURAS" ]; then
-        invalidar "se pidieron arrastres y el informe no declara ninguna escritura de la disposición"
+    INTENTOS=$(sed -n 's/^escribir la disposición en disco *([0-9]* escrituras de \([0-9]*\) intentos)$/\1/p' "$INFORME" | head -1)
+    if [ -z "$INTENTOS" ]; then
+        invalidar "se pidieron arrastres y el informe no declara ningún intento de guardar la disposición"
     fi
-    if [ "$ESCRITURAS" = 0 ]; then
-        invalidar "se movió la disposición y no se guardó ni una vez: el coste de escribir se publicaría \
-como cero, que se lee como «guardar no cuesta nada»"
+    if [ "$INTENTOS" = 0 ]; then
+        invalidar "se movió la disposición y no se intentó guardarla ni una vez: el coste de ese camino se \
+publicaría como cero, que se lee como «guardar no cuesta nada»"
     fi
-    echo "escrituras de la disposición durante la tanda: $ESCRITURAS" >&2
+    echo "intentos de guardar la disposición durante la tanda: $INTENTOS (ninguno escribe: una tanda tiene \
+el guardado vetado)" >&2
 fi
 
 # **Que la disposición saliera del FICHERO, en la tanda que dice medir eso.** Es la guarda que hace

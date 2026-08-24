@@ -15,7 +15,7 @@ use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 mod screen;
 mod view;
 
-pub use screen::Screen;
+pub use screen::{Desplazamiento, HISTORIAL, Screen};
 pub use view::{CellWidth, Cursor, CursorShape, TermColor, Underline, View, ViewCell};
 
 /// Error de cualquier operación sobre el pseudoterminal.

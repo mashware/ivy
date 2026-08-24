@@ -173,16 +173,36 @@ pub struct View {
     /// nada fallaría — la comprobación del constructor solo corre en depuración.
     size: Size,
     cells: Vec<ViewCell>,
-    cursor: Cursor,
+    /// Dónde está el cursor, **si es que se ve**.
+    ///
+    /// **Es opcional desde que hay historial, y no es prudencia**: subiendo por el historial el
+    /// cursor sigue estando donde estaba —en el área activa— y eso queda **fuera de la pantalla**.
+    /// Recortarlo a la última fila lo dibujaría en un sitio donde no está, que es peor que no
+    /// dibujarlo: quien mira creería que el programa escribe ahí.
+    cursor: Option<Cursor>,
+    /// Cuántas líneas se ha subido por el historial: **cero es «se está mirando lo último»**.
+    ///
+    /// **Hoy no lo pinta nadie, y decirlo importa**: es lo que separa una pantalla quieta de una que se
+    /// ha quedado atrás mientras el programa sigue escribiendo, y enseñarlo —una marca, una barra— es de
+    /// su propio hito. Lo que sostiene mientras tanto es que se pueda **comprobar el efecto** de subir
+    /// desde fuera de este módulo, que es la única forma de que una prueba del historial afirme sobre lo
+    /// que se ve y no sobre el campo donde se apunta.
+    desplazamiento: usize,
 }
 
 impl View {
-    pub(crate) fn new(size: Size, cells: Vec<ViewCell>, cursor: Cursor) -> Self {
+    pub(crate) fn new(
+        size: Size,
+        cells: Vec<ViewCell>,
+        cursor: Option<Cursor>,
+        desplazamiento: usize,
+    ) -> Self {
         debug_assert_eq!(cells.len(), size.rows as usize * size.cols as usize);
         Self {
             size,
             cells,
             cursor,
+            desplazamiento,
         }
     }
 
@@ -191,9 +211,17 @@ impl View {
         self.size
     }
 
-    /// Dónde está el cursor y qué forma tiene.
-    pub fn cursor(&self) -> Cursor {
+    /// Dónde está el cursor y qué forma tiene, **o nada si no se ve**.
+    ///
+    /// No se ve cuando se ha subido por el historial lo bastante como para dejarlo fuera de la
+    /// pantalla. Ver el campo.
+    pub fn cursor(&self) -> Option<Cursor> {
         self.cursor
+    }
+
+    /// Cuántas líneas se ha subido por el historial. **Cero es «se está mirando lo último»**.
+    pub fn desplazamiento(&self) -> usize {
+        self.desplazamiento
     }
 
     /// Una celda por fila y columna, o `None` si cae fuera.

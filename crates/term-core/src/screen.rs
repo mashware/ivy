@@ -2,7 +2,7 @@
 
 use alacritty_terminal::Term;
 use alacritty_terminal::event::VoidListener;
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::term::TermMode;
@@ -56,13 +56,64 @@ pub struct Screen {
     parser: Processor,
 }
 
+/// Cuánto se sube o se baja por el historial de una consola.
+///
+/// **Vocabulario propio, no el del motor**, por lo mismo que el resto de esta caja: quien la use no
+/// tiene que conocer los tipos de sus dependencias ni migrar con ellos.
+///
+/// Los números son **líneas**, positivos hacia lo viejo — la dirección en la que se sube.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Desplazamiento {
+    /// Tantas líneas hacia lo viejo; en negativo, hacia lo nuevo.
+    Lineas(i32),
+    /// Tantas pantallas hacia lo viejo; en negativo, hacia lo nuevo. **La pantalla la decide la
+    /// rejilla**, no un número fijo: una consola estrecha y alta no tiene la misma página que una
+    /// ancha y baja.
+    Paginas(i32),
+    /// Del todo hacia lo viejo.
+    AlPrincipio,
+    /// Del todo hacia lo nuevo, que es donde el programa escribe.
+    AlFinal,
+}
+
+impl Desplazamiento {
+    /// Lo traduce a lo que el motor entiende. **Privado a la caja**: el tipo del motor no sale de
+    /// aquí.
+    fn al_motor(self, filas: u16) -> Scroll {
+        match self {
+            Self::Lineas(cuantas) => Scroll::Delta(cuantas),
+            // Una página es la pantalla entera menos una línea, que es lo que hace cualquier
+            // paginador: deja una de contexto para no perder el hilo entre pantalla y pantalla.
+            Self::Paginas(cuantas) => Scroll::Delta(cuantas * (filas.saturating_sub(1)) as i32),
+            Self::AlPrincipio => Scroll::Top,
+            Self::AlFinal => Scroll::Bottom,
+        }
+    }
+}
+
+/// Cuántas líneas recuerda cada consola de lo que salió por arriba.
+///
+/// **El número lo pone este proyecto y no se hereda del motor**, que trae 10 000. Se eligió midiendo
+/// —el banco está en `examples/historial.rs`— y la decisión entera, con la tabla y lo descartado, es
+/// **D21** de `docs/02-decisiones.md`. Lo que hay que saber para tocarlo:
+///
+/// - **Es el defecto de WezTerm**, que es el listón contra el que este proyecto se mide.
+/// - **Recolocar el texto al cambiar el ancho recorre el historial entero.** Con estas líneas y
+///   contenido que envuelve son ~984 µs por consola; con las 10 000 del motor, 4,07 ms — y una
+///   frontera mueve **dos** consolas, así que serían más de ocho milisegundos por fotograma
+///   **mientras se arrastra**.
+/// - **Guardar historial encarece interpretar un volcado un 85 %**, de 182 a 98 MiB/s. Ese precio
+///   está declarado y aceptado en D21; no es un descuido que alguien pueda «arreglar» bajando esto
+///   sin leer la decisión.
+/// - **Hasta 14,4 MiB por consola** con el historial lleno a 180 columnas, y no hay techo de
+///   divisiones (**D14**).
+pub const HISTORIAL: usize = 3_500;
+
 impl Screen {
     /// Crea una pantalla vacía del tamaño dado.
     pub fn new(size: Size) -> Self {
         let config = Config {
-            // Sin historial: el scrollback es Fase 2 y `to_text` solo vuelca lo visible. El valor
-            // por defecto son 10 000 líneas por división, memoria que aquí nadie va a leer.
-            scrolling_history: 0,
+            scrolling_history: HISTORIAL,
             ..Config::default()
         };
 
@@ -106,6 +157,18 @@ impl Screen {
         }
     }
 
+    /// Sube o baja por lo que salió por arriba.
+    ///
+    /// **No le llega nada al programa de dentro**: mirar el historial es cosa del terminal, y el
+    /// programa ni se entera ni tiene por qué. Es lo que separa esto de mandarle las flechas.
+    ///
+    /// **Y el desplazamiento se queda donde está aunque siga entrando salida.** Lo sostiene el propio
+    /// motor: mientras hay desplazamiento, lo que llega se acumula por debajo sin mover lo que se
+    /// mira. Es lo que uno espera al parar a leer algo mientras un programa sigue escribiendo.
+    pub fn desplazar(&mut self, cuanto: Desplazamiento) {
+        self.term.scroll_display(cuanto.al_motor(self.size().rows));
+    }
+
     /// Si el programa de dentro ha pedido que lo pegado le llegue **marcado como pegado**.
     ///
     /// Un shell que lo pide no ejecuta lo que reciba así aunque traiga saltos de línea: lo deja
@@ -136,9 +199,9 @@ impl Screen {
         let contenido = self.term.renderable_content();
         // Las coordenadas del iterador y las del cursor van en el mismo sistema, que cuenta desde
         // el principio del historial. Sumar el desplazamiento las lleva a coordenadas visibles, que
-        // son con las que quien pinta puede indexar. Hoy vale siempre 0 —esta caja se crea sin
-        // historial— y para las **celdas** esta cuenta seguirá valiendo cuando lo haya. Para el
-        // **cursor** no: ver más abajo.
+        // son con las que quien pinta puede indexar. Para las **celdas** la cuenta basta —el
+        // iterador solo recorre lo visible—; para el **cursor** no, porque puede quedarse fuera:
+        // ver más abajo.
         let desplazamiento = contenido.display_offset as i32;
 
         for indexada in contenido.display_iter {
@@ -158,31 +221,33 @@ impl Screen {
             celdas[fila as usize * columnas + columna] = view::celda_desde(indexada.cell);
         }
 
-        // Hoy el cursor siempre cae dentro de lo visible, porque esta caja se crea sin historial.
-        // El recorte es red de seguridad para que la vista no pueda salir con un índice fuera de
-        // rango, pero **no es una solución**: cuando la Fase 2 traiga scrollback y se pueda subir
-        // por el historial, el cursor caerá de verdad fuera de la pantalla y recortarlo lo dibujaría
-        // en la última fila, que es un sitio donde no está. La aserción es lo que hará que eso salte
-        // en un test en vez de aparecer como un cursor fantasma.
+        // **El cursor puede no verse, y ahora se dice en vez de recortarse.** Subiendo por el
+        // historial el cursor sigue en el área activa, que queda por debajo de lo que se mira:
+        // recortarlo a la última fila lo dibujaría en un sitio donde no está, y quien mirase creería
+        // que el programa escribe ahí. Esto es exactamente lo que el comentario de este sitio
+        // anunciaba desde F1.2, cuando el historial no existía.
         let fila_cursor = contenido.cursor.point.line.0 + desplazamiento;
-        debug_assert!(
-            (0..size.rows as i32).contains(&fila_cursor),
-            "el cursor cayó fuera de lo visible ({fila_cursor}): con historial hay que decir que no se ve, no recortarlo"
-        );
-        let cursor = Cursor {
-            row: fila_cursor.clamp(0, size.rows.saturating_sub(1) as i32) as u16,
-            col: (contenido.cursor.point.column.0 as u16).min(size.cols.saturating_sub(1)),
-            shape: view::forma_desde(contenido.cursor.shape),
-        };
+        let cursor = (0..size.rows as i32)
+            .contains(&fila_cursor)
+            .then(|| Cursor {
+                row: fila_cursor as u16,
+                col: (contenido.cursor.point.column.0 as u16).min(size.cols.saturating_sub(1)),
+                shape: view::forma_desde(contenido.cursor.shape),
+            });
 
-        View::new(size, celdas, cursor)
+        View::new(size, celdas, cursor, contenido.display_offset)
     }
 
-    /// Vuelca la pantalla visible a texto.
+    /// Vuelca **el área activa** a texto — donde el programa escribe, no necesariamente lo que se
+    /// está mirando.
+    ///
+    /// **La diferencia importa desde que hay historial, y por eso está dicha así.** Subiendo por lo
+    /// que salió por arriba, lo que se ve **no** es el área activa; esto sigue devolviendo el área
+    /// activa, que es lo que quiere quien comprueba qué escribió un programa. Quien necesite lo que
+    /// se ve tiene [`view`](Screen::view), que sí lleva el desplazamiento aplicado.
     ///
     /// Recorta los espacios finales de cada línea, descarta las líneas vacías del final y une con
     /// saltos de línea, sin salto al final. Una pantalla sin contenido devuelve la cadena vacía.
-    /// No incluye historial.
     ///
     /// Se descartan las líneas vacías finales porque una pantalla casi siempre tiene la mitad de
     /// abajo en blanco, y arrastrar esos saltos convierte cualquier comparación en una cuenta de
@@ -449,7 +514,10 @@ mod tests {
         let mut pantalla = Screen::new(Size::default());
         pantalla.advance(b"hola");
 
-        let cursor = pantalla.view().cursor();
+        let cursor = pantalla
+            .view()
+            .cursor()
+            .expect("con la pantalla al día el cursor se ve");
 
         assert_eq!((cursor.row, cursor.col), (0, 4));
         assert_eq!(cursor.shape, CursorShape::Block);
@@ -460,7 +528,14 @@ mod tests {
         let mut pantalla = Screen::new(Size::default());
         pantalla.advance(b"\x1b[?25l");
 
-        assert_eq!(pantalla.view().cursor().shape, CursorShape::Hidden);
+        assert_eq!(
+            pantalla
+                .view()
+                .cursor()
+                .expect("escondido no es lo mismo que fuera de pantalla")
+                .shape,
+            CursorShape::Hidden
+        );
     }
 
     #[test]
@@ -493,5 +568,194 @@ mod tests {
 
         assert_eq!(partida.to_text(), entera.to_text());
         assert!(partida.to_text().starts_with("rojo"));
+    }
+
+    /// **Lo que sale por arriba se recuerda, y esa es la mitad que no existía.** Con el historial
+    /// apagado —como estaba— subir no llevaba a ninguna parte: la primera línea de un volcado se
+    /// perdía en cuanto la pantalla se llenaba.
+    #[test]
+    fn lo_que_sale_por_arriba_se_puede_volver_a_ver() {
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..20 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        // Sin subir, lo primero ya no está: la pantalla son cuatro filas.
+        assert!(!texto_de(&pantalla.view()).contains("linea 0"));
+
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+
+        assert!(
+            texto_de(&pantalla.view()).contains("linea 0"),
+            "subiendo del todo tenía que aparecer la primera línea del volcado"
+        );
+    }
+
+    /// **Y el techo es el techo**: pasadas las líneas que se recuerdan, lo más viejo se cae. Sin esta
+    /// prueba, un techo mal puesto —o el del motor, que es tres veces mayor— no lo notaría nadie
+    /// hasta ver la memoria.
+    #[test]
+    fn del_historial_no_se_recuerda_mas_de_lo_que_dice_el_techo() {
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        // Bastante más de lo que cabe, para que el principio tenga que haberse caído.
+        for n in 0..(HISTORIAL + 500) {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+
+        // **Subir del todo deja el desplazamiento en lo que se recuerda**, así que este número *es*
+        // el techo. Afirmar sobre él —y no sobre qué línea quedó la primera— es lo que hace que la
+        // prueba caiga si alguien cambia la constante o hereda la del motor, sin depender de cómo
+        // cuente el motor las filas de la pantalla.
+        assert_eq!(
+            pantalla.view().desplazamiento(),
+            HISTORIAL,
+            "el historial guardó otra cosa de lo que dice su techo"
+        );
+        let arriba = texto_de(&pantalla.view());
+        assert!(
+            !arriba.starts_with("linea 0"),
+            "se escribió más de lo que cabe, así que lo más viejo tenía que haberse caído: {}",
+            arriba.lines().next().unwrap_or("")
+        );
+    }
+
+    /// **Subiendo por el historial, el cursor deja de verse — y la foto lo dice en vez de recortarlo.**
+    /// Recortarlo lo dibujaba en la última fila, o sea en un sitio donde no está: quien mirase creería
+    /// que el programa escribe ahí. Es el caso que el comentario de `view` anunciaba desde F1.2.
+    #[test]
+    fn subiendo_por_el_historial_el_cursor_deja_de_verse() {
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..20 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+        assert!(
+            pantalla.view().cursor().is_some(),
+            "sin subir, el cursor tiene que verse"
+        );
+
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+
+        assert_eq!(
+            pantalla.view().cursor(),
+            None,
+            "arriba del todo el cursor está fuera de la pantalla, y decirlo es la única forma honesta"
+        );
+    }
+
+    /// **La foto dice cuánto se ha subido**, que es lo que separa una pantalla quieta de una que se
+    /// quedó atrás mientras el programa seguía escribiendo.
+    #[test]
+    fn la_foto_dice_cuanto_se_ha_subido() {
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..20 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+        assert_eq!(pantalla.view().desplazamiento(), 0);
+
+        pantalla.desplazar(Desplazamiento::Lineas(3));
+
+        assert_eq!(pantalla.view().desplazamiento(), 3);
+    }
+
+    /// **Lo que sigue llegando no te devuelve al final.** Es lo que uno espera al parar a leer algo
+    /// mientras un programa sigue escribiendo: lo nuevo se acumula por debajo y lo que se mira no se
+    /// mueve. Sin esto, subir mientras algo vuelca sería inútil — que es exactamente el caso en el que
+    /// hace falta.
+    #[test]
+    fn lo_que_sigue_llegando_no_devuelve_la_vista_al_final() {
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..20 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+        let mirando = texto_de(&pantalla.view());
+
+        for n in 20..40 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        assert_eq!(
+            texto_de(&pantalla.view()),
+            mirando,
+            "siguió entrando salida y la vista se movió: leer algo mientras un programa escribe sería \
+             imposible"
+        );
+    }
+
+    /// Y **bajando del todo se vuelve a lo último**, que es donde el programa escribe.
+    #[test]
+    fn bajando_del_todo_se_vuelve_a_donde_el_programa_escribe() {
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..20 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+        let al_dia = texto_de(&pantalla.view());
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+
+        pantalla.desplazar(Desplazamiento::AlFinal);
+
+        assert_eq!(texto_de(&pantalla.view()), al_dia);
+        assert!(
+            pantalla.view().cursor().is_some(),
+            "y el cursor vuelve a verse"
+        );
+    }
+
+    /// **Una página es la pantalla menos una línea**, como en cualquier paginador: deja una de
+    /// contexto para no perder el hilo entre pantalla y pantalla. Con la pantalla entera, la línea de
+    /// unión se pierde en cada salto y nadie sabe por dónde iba.
+    #[test]
+    fn una_pagina_deja_una_linea_de_contexto() {
+        let mut pantalla = Screen::new(Size { rows: 10, cols: 20 });
+        for n in 0..50 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        pantalla.desplazar(Desplazamiento::Paginas(1));
+
+        assert_eq!(
+            pantalla.view().desplazamiento(),
+            9,
+            "una página de diez filas tiene que subir nueve líneas, no diez"
+        );
+    }
+
+    /// El volcado a texto sigue dando **el área activa** aunque se esté mirando el historial, y su
+    /// documentación lo dice así. Es lo que quiere quien comprueba qué escribió un programa; quien
+    /// quiera lo que se ve tiene la foto.
+    #[test]
+    fn el_volcado_a_texto_da_el_area_activa_aunque_se_mire_el_historial() {
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..20 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+        let activa = pantalla.to_text();
+
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+
+        assert_eq!(pantalla.to_text(), activa);
+        assert!(
+            !texto_de(&pantalla.view()).contains("linea 19"),
+            "la prueba no está mirando el historial, así que no compara nada"
+        );
+    }
+
+    /// Lo que la foto enseña, en texto: es lo que se **ve**, no lo que el programa tiene escrito.
+    fn texto_de(vista: &View) -> String {
+        (0..vista.size().rows)
+            .map(|fila| {
+                vista
+                    .row(fila)
+                    .expect("la fila está dentro")
+                    .iter()
+                    .map(|celda| celda.c)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

@@ -1200,6 +1200,12 @@ una fuga posible, y ninguna se ve leyendo el informe, porque el número sale pla
 
 ### Medido — el fotograma con pestañas (16 de agosto de 2026)
 
+> **Estas cifras son de antes del historial.** Desde que cada consola guarda 3 500 líneas, interpretar
+> cuesta el doble y la vuelta completa con ello (**D21**). Las mismas tandas vueltas a tomar con el
+> historial encendido están en el anexo «las cuatro tandas de los anexos, vueltas a tomar con historial»
+> de **D21**; lo que sigue se conserva porque es lo que se midió aquel día y es lo que sostiene las
+> conclusiones de esta decisión.
+
 Tres tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
 `scripts/medir-fotograma.sh C|F|G`. Las tres con los cuatro paneles publicándose a ritmo de una vez
 por segundo, para que se puedan comparar entre sí. Carga de 44 MiB por consola que vuelca.
@@ -1343,6 +1349,12 @@ panel—, y mirar solo el primero declaraba **cero** justo en el fotograma del a
 una fuga posible, y ninguna se ve leyendo el informe: el número sale plausible.
 
 ### Medido — el fotograma con cuatro divisiones (17 de agosto de 2026)
+
+> **Estas cifras son de antes del historial.** Desde que cada consola guarda 3 500 líneas, interpretar
+> cuesta el doble y la vuelta completa con ello (**D21**). Las mismas tandas vueltas a tomar con el
+> historial encendido están en el anexo «las cuatro tandas de los anexos, vueltas a tomar con historial»
+> de **D21**; lo que sigue se conserva porque es lo que se midió aquel día y es lo que sostiene las
+> conclusiones de esta decisión.
 
 Tres tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
 `scripts/medir-fotograma.sh C|H|I`. Las tres con **todos** los paneles publicándose a ritmo de una vez
@@ -2250,9 +2262,10 @@ apretado. Y hasta 165 MiB con cuatro consolas, sin que nada acote cuántas hay (
 - **Arrastrar una frontera cuesta ~2 ms por fotograma** con dos consolas de contenido que envuelve — un
   **12 %** del presupuesto. Solo se paga **mientras se arrastra**, y solo en los fotogramas que cruzan
   un borde de celda: el reparto sale temprano cuando la rejilla no cambia.
-- **Leer un volcado se encarece un 85 %**: de 182 a 98 MiB/s. Con el presupuesto de bombeo de 128 KiB
-  por fotograma son alrededor de **medio milisegundo más por consola que vuelque**, sobre los 5,78 ms
-  que hoy cuesta un fotograma con dos volcando.
+- **Leer un volcado se encarece un 85 %** en el banco: de 182 a 98 MiB/s. **Dentro de la ventana eso se
+  traduce en un 39 % más de interpretar y un 1,2 % de vuelta completa** — el banco lee a lo ancho de una
+  rejilla de 180 columnas y la ventana traga 128 KiB por fotograma, así que no son el mismo régimen. Ver
+  abajo el anexo con las cuatro corridas.
 - **Hasta 14,4 MiB por consola** de historial lleno, 58 con cuatro.
 
 Es el precio de que un terminal recuerde lo que salió, y se declara en vez de esconderse.
@@ -2275,3 +2288,157 @@ etiqueta de otro es exactamente el número mal etiquetado que este proyecto no p
 **Cuándo dejaría de valer.** Si cambia la versión del motor —los números son suyos—, si llega la
 configuración de F2.10, o si alguien mide que recolocar dejó de crecer con el historial. El banco está
 en el repositorio para volver a tomarlos en un minuto.
+
+### Medido — 25 agosto 2026: lo que el historial le hace a la ventana de verdad
+
+**El banco medía el motor; esto mide la aplicación.** Cuatro corridas de la tanda `C` —dos consolas
+volcando, con panel—, **las cuatro con el mismo binario y seguidas**: dos compilando con el techo a cero
+y dos con las 3 500 líneas puestas. Las dos de cada par **se pueden promediar** según el comparador del
+guion, y la tabla publica la media con las dos corridas detrás.
+
+| | sin historial | con 3 500 líneas | |
+|---|---|---|---|
+| **byte disponible → fotograma pagado** | **74,6 ms** (74,19 · 74,94) | **75,5 ms** (75,62 · 75,40) | **+1,2 %** |
+| de eso, esperando en la cola | 71,7 ms (71,65 · 71,80) | 72,0 ms (71,99 · 71,95) | +0,4 % |
+| **interpretando** | **1,05 ms** (0,95 · 1,16) | **1,46 ms** (1,51 · 1,41) | **+39 %** |
+| encolando el pintado | 249 µs (229 · 269) | 234 µs (237 · 230) | dentro del ruido |
+| **el resto del fotograma** (el framework) | 279 µs (257 · 300) | 262 µs (262 · 263) | dentro del ruido |
+
+**Lo que hay que leer aquí: el historial encarece interpretar un 39 %, y la vuelta completa un 1,2 %.**
+Cada fotograma traga un presupuesto fijo de 128 KiB por división; interpretarlo cuesta ahora la mitad más,
+y eso se paga **dentro** del fotograma, no en la cola. El framework no se mueve, que es lo que **D3**
+vigila, y el tramo `recolocar` va declarado aparte desde este hito para que no se le cuele.
+
+**Una versión anterior de este anexo publicó «la vuelta se dobla, 37,1 → 75,4 ms» y era falso. Se retira,
+y conviene que quede escrito por qué**, porque el fallo es exactamente el que la regla dura del proyecto
+describe:
+
+1. **La columna «sin historial» no era del mismo binario ni del mismo día.** Salía de una corrida del **18
+   de agosto**, aunque el texto afirmaba «el mismo binario del día y a media hora de distancia». Nadie
+   podía verlo leyendo el anexo.
+2. **Y la conclusión no la sostenían los datos.** Hay corridas de la tanda `C` del **19 de agosto**, con el
+   historial **apagado**, que ya daban **73,7 y 74,0 ms** de vuelta y 71,5 ms de cola. O sea que el salto
+   de 37 a 74 ms ya había ocurrido **antes** de encender el historial: atribuírselo era colgarle un coste
+   ajeno.
+
+**Y eso deja una pregunta abierta que no es de este hito:** entre el 18 y el 19 de agosto la vuelta
+completa de la misma tanda, con la misma ventana y la misma rejilla, pasó de **37 a 74 ms** con el
+historial apagado — **y no es coste de CPU**: interpretar se movió de 763 a 851 µs y el residuo del
+framework de 220 a 240. Los fotogramas son parecidos en número y en coste, así que lo que se duplicó es
+**lo que cada byte espera**, no lo que cuesta atenderlo. Apunta a cuándo se pide repintado, no a cuánto
+cuesta pintar. Queda como issue propio.
+
+**Cuándo se nota el 39 %, y cuándo no.** Solo con un volcado sostenido —un `cat` de un fichero grande, que
+es lo que esta tanda hace a propósito—, y ahí se traduce en menos de un 2 % de retraso. Un comando normal
+no llena la cola y no espera nada. **El precio caro del historial no está aquí**: está en recolocar el
+texto al cambiar de ancho, que es lo que mide el anexo siguiente.
+
+### Medido — 24 agosto 2026: el peor caso de recolocar, con la frontera moviéndose sin parar
+
+**Por qué hace falta una tanda nueva y no valían las que había.** Recolocar el texto se paga **por
+consola**, y ninguna de las dos tandas con gestos le cambia el ancho a más de una: la `K` estrecha el
+panel de la consola izquierda, y la `J` reordena el árbol al soltar sin cruzar bordes de celda mientras
+vuela. La frontera que reparte dos consolas es la única que se las cambia **a las dos a la vez**, así que
+es la única que ejercita el techo de 3 500 líneas por su lado caro. Es la tanda **`M`**.
+
+| | tanda `C` (control, quieta) | tanda `M`, corrida 1 | tanda `M`, corrida 2 |
+|---|---|---|---|
+| fotogramas de la corrida | 429 · 470 | 799 | **3 488** |
+| fotogramas con salida | 358 | 357 | 357 |
+| gestos inyectados · efectos | — | 159 · 480 | 697 · 2 093 |
+| **recolocaciones** | 3 · 3 (las del arranque) | **320** | **1 397** |
+| lo que costó cada una | 671 · 524 µs | **654 µs** | 197 µs |
+| **el resto del fotograma** (el framework) | 262 · 263 µs | **257 µs** | 163 µs |
+
+**Lo primero, que es lo que la tanda venía a comprobar: el gesto no se le cuela al framework.** Con la
+frontera moviéndose sin parar y recolocando dos consolas trescientas veintitantas veces, el residuo se
+queda en **257 µs**, dentro de los 262–263 del control quieto. El tramo `recolocar` está declarado y se
+resta de su fotograma, así que los 209 ms que costó recolocar en esa corrida **no se publican como coste
+de egui** — que es exactamente lo que la regla dura del proyecto persigue.
+
+**Lo segundo: recolocar cuesta lo que el banco dijo, y las dos corridas no dicen lo mismo.** Los 654 µs
+por vez de la primera están en el mismo orden que los 984 µs del banco y los 524–671 del control quieto.
+La segunda da **197 µs**, tres veces menos, y **por qué difieren no está aislado**. Se publican las dos y
+se dice lo que se sabe:
+
+- **No se promedian.** Las dos tienen los mismos 357 fotogramas con salida pero una vivió 3 488 fotogramas
+  y la otra 799 —inyectar gestos mantiene la ventana despierta, igual que un ratón humano—. Es el mismo
+  aviso que el anexo de **D15** lleva para la tanda `J`, y aquí muerde más porque la diferencia es de
+  cuatro veces.
+- **La explicación que los datos DESCARTAN** es que la corrida barata midiera el historial a medio llenar:
+  recolocar crece con las líneas guardadas, y en la corrida larga el volcado terminó pronto, así que la
+  mayoría de sus recolocaciones ocurrieron con **más** historial detrás, no con menos. Predice lo
+  contrario de lo que salió.
+- **La que queda en pie** es con quién compite cada recolocación: la corta pasó el 45 % de sus fotogramas
+  volcando y la larga el 10 %. Es consistente con los números **y no está medida** — aislarla pide que el
+  informe publique cuánto historial había detrás de cada recolocación, que es instrumentación que este
+  hito no añade. Queda dicho como hipótesis, no como resultado.
+
+**Lo que esta tanda NO mide, y conviene saberlo antes de fiarse: redimensionar la ventana.** Cambiar el
+tamaño de la ventana le cambia el ancho a **todas** las consolas de **todas** las pestañas a la vez —las
+de fondo se remiden en cada fotograma contra el área nueva—, así que un solo fotograma de ese arrastre
+recoloca ocho consolas donde el gesto de la frontera recoloca dos. Con el historial lleno son del orden de
+**8 ms por fotograma**, más que el fotograma entero. **Ninguna tanda lo cubre**, y no por olvido: todas
+piden un tamaño fijo y el guion invalida la corrida que no lo tuvo, que es justo lo que hace comparables
+las medidas del proyecto. El trabajo **sí está declarado** —el tramo suma todas las consolas del fotograma
+y se resta de él—, así que no es un número mal etiquetado: es un **camino sin número**. Medirlo pide una
+tanda que redimensione, y esa tanda tiene que decidir antes qué hacer con la guarda del tamaño.
+
+**Lo tercero, y es el número que se lleva alguien que arrastre una frontera con una consola volcando:**
+dos recolocaciones por gesto, de medio milisegundo largo cada una, dentro de un fotograma que ya paga 76
+ms de espera en la cola. El gesto se ve fluido porque lo que cuesta no está en el pintado; lo que se
+retrasa es **lo que la consola tenía pendiente de enseñar**.
+
+**Lo que la tanda destapó de camino, y no era de rendimiento.** El gesto inyectado apretaba sobre la línea
+del divisor **en el mismo fotograma** en que llevaba el puntero hasta ella, y así perdía el empate contra
+la consola de al lado: egui admite como candidatos a los tres —la línea mide dos puntos y las dos consolas
+la tocan— y el empate lo gana el último registrado. El resultado era que la tanda **arrastraba una
+consola** y publicaba el gesto de **D15** bajo esta etiqueta. Se arregla acercando el puntero en un
+fotograma y apretando en el siguiente, que es lo que hace una mano: comprobado que un arrastre humano gana
+siempre. **A quien usa la aplicación no le pasa**, y eso está medido y no razonado.
+
+### Medido — 24 agosto 2026: las cuatro tandas de los anexos, vueltas a tomar con historial
+
+**Por qué se vuelven a tomar.** Guardar historial encarece **interpretar**, y las tablas publicadas en los
+anexos de **D13** (pestañas) y **D14** (cuatro divisiones) se midieron con el historial apagado: dejarlas
+sin más las convertiría en cifras que ya no describen a esta aplicación. Ocho corridas, dos por tanda, el
+mismo día y con el mismo binario, y **el comparador del guion dice que las dos de cada par se pueden
+promediar**.
+
+| | **F** — 2 pestañas, la de fondo quieta | **G** — 2 pestañas, las cuatro volcando | **H** — 4 en fila | **I** — 4 en cuadro |
+|---|---|---|---|---|
+| Rejilla de cada consola | 47×39 | 47×39 | **49×20** | **24×39** |
+| Consolas volcando | 2 de 4 | **4** | **4** | **4** |
+| Vuelta completa | 75,3 ms · 74,8 | 77,7 · 78,8 | 77,1 · 80,0 | 79,2 · 80,0 |
+| — esperando en la cola | 71,9 · 71,4 | 72,0 · 72,5 | 71,7 · 73,5 | 73,1 · 73,5 |
+| — interpretando | 1,41 ms · 1,42 | 1,31 · 1,44 | 1,21 · 1,45 | 1,51 · 1,48 |
+| — encolando el pintado | 203 µs · 215 | 203 · 246 | 146 · 171 | 128 · 135 |
+| — el panel de estado | 5,4 µs · 5,1 | 5,1 · 6,6 | 10,9 · 12,4 | 5,3 · 5,5 |
+| — la barra de pestañas | 2,78 µs · 2,08 | 2,41 · 2,90 | (no hay) | (no hay) |
+| **el resto del fotograma** | **236 µs · 243** | **263 · 298** | **319 · 355** | **274 · 291** |
+
+**Estas cifras NO se comparan con las de los anexos de D13 y D14, y decirlo importa más que la tabla.**
+Aquéllas son del 16 y el 17 de agosto, con otro binario y otro día de máquina: la misma tanda `C` daba
+allí 52 ms de vuelta completa, el 18 de agosto daba 37 y el 19 —todavía **sin historial**— ya daba 74.
+Lo que estas ocho corridas sirven es (a) dejar publicado lo que la aplicación hace **hoy**, y (b)
+responder entre ellas, que es la comparación válida porque son del mismo día y el mismo binario.
+
+**Lo que responden entre ellas:**
+
+1. **El residuo del framework sigue sin crecer con nada.** Entre **236 y 355 µs** en las ocho corridas, con
+   la variación entre las dos de una misma tanda (319 → 355 en `H`) del mismo orden que la variación entre
+   tandas. Es la misma conclusión de los anexos de **D13** y **D14**, ahora con el historial encendido y
+   con el tramo `recolocar` declarado aparte para que no se cuele aquí.
+2. **Cuántas consolas vuelcan casi no mueve la vuelta completa.** De dos volcando (`F`, 75,0 ms de
+   media) a cuatro (`H`, 78,6) hay **menos de un 5 %**, y la espera en la cola se queda clavada entre 71,4
+   y 73,5 ms en las **ocho** corridas. En el anexo de D14, en agosto, esa misma diferencia era del
+   **doble** (52 → 100 ms) — pero eso es de otro binario y no se cruza con esto: lo que aquí se afirma es
+   lo de hoy, y hoy no se mueve.
+3. **Interpretar se mueve poco y encolar el pintado baja con las celdas**, igual que antes: 146 µs con las
+   980 celdas de `H`, 128 con las 936 de `I`, 203 con las 1 833 de `F`… al revés de lo que la cuenta de
+   celdas haría esperar entre las dos primeras y la tercera, y por eso se publica sin conclusión: son
+   microsegundos dentro de una vuelta de 75 ms.
+4. **Recolocar apenas aparece en estas cuatro**, y es lo correcto: ninguna arrastra nada, así que las
+   entre dos y cinco recolocaciones de cada corrida son las del arranque, cuando el compositor entrega el
+   tamaño. Lo que cuesta cada una —de 43 µs en cuadro a 976 µs en fila— depende de cuánto texto hay que
+   recolocar, y el caso caro tiene su propia tanda: la **`M`** de aquí arriba.
