@@ -138,6 +138,14 @@ pub enum Attention {
 }
 
 impl Attention {
+    /// Las tres, para quien tenga que recorrerlas — una tabla de color, una de símbolos, una prueba.
+    ///
+    /// **Vive aquí, pegada a `prioridad`, y no en cada sitio que las recorre.** Una lista literal
+    /// repetida por ahí admite una cuarta variante **en silencio**, que es justo lo que el `match` de
+    /// abajo impide para las tablas de producción: quien añada una no compilará hasta tocar
+    /// `prioridad`, y entonces tiene esta lista tres líneas más arriba.
+    pub const TODAS: [Self; 3] = [Self::Wait, Self::Block, Self::Done];
+
     /// Cuánto reclama, para poder comparar dos. Números sin más significado que su orden.
     fn prioridad(self) -> u8 {
         match self {

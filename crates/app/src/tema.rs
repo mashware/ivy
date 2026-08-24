@@ -6,7 +6,7 @@
 //! secuencias de escape, y una aplicación que resuelva por ahí sale en negro.
 
 use eframe::egui::Color32;
-use panel_contract::{Mark, Style};
+use panel_contract::{Attention, Mark, Style};
 use term_core::TermColor;
 
 /// Cuánto se acerca al fondo un color atenuado.
@@ -161,6 +161,25 @@ impl Tema {
             Mark::Block => self.paleta[1],
             Mark::Info => self.primer_plano,
         }
+    }
+
+    /// El color con el que se pinta un reclamo de una división.
+    ///
+    /// **Tabla propia, y no la de las marcas del cuerpo, aunque las dos vengan de la misma paleta.** La
+    /// de las marcas apaga `done` porque lo terminado es donde no queda nada que hacer; aquí `done`
+    /// dice lo contrario —terminó y **nadie lo ha mirado**—, así que reutilizarla apagaría justo lo que
+    /// reclama. Es la copia peligrosa de este hito y por eso está dicha.
+    ///
+    /// **Sin sostener es lo mismo atenuado**: el reclamo sigue ahí —la aplicación no esconde lo que su
+    /// productor dijo— pero nadie lo está sosteniendo, y eso se ve antes de leer nada. El detalle
+    /// —desde cuándo, o qué falló— lo dice la línea del aviso, que va justo debajo.
+    pub fn color_del_reclamo(&self, clase: Attention, sostenido: bool) -> Color32 {
+        let color = match clase {
+            Attention::Wait => self.paleta[3],
+            Attention::Block => self.paleta[1],
+            Attention::Done => self.paleta[2],
+        };
+        if sostenido { color } else { self.apagar(color) }
     }
 }
 
@@ -638,6 +657,83 @@ mod tests {
         // vez de devolver un color cualquiera.
         for n in 0..8u8 {
             let _ = t.color(TermColor::Dim(n));
+        }
+    }
+
+    /// Los tres con color propio. Devolviendo el mismo para todos, la fila del reclamo diría «reclama»
+    /// y callaría **cuál**, que es lo único que decide si hay que ir corriendo o no.
+    #[test]
+    fn los_tres_reclamos_no_se_pintan_todos_igual() {
+        let t = tema();
+        let colores = Attention::TODAS.map(|clase| t.color_del_reclamo(clase, true));
+
+        for (i, uno) in colores.iter().enumerate() {
+            for otro in &colores[i + 1..] {
+                assert_ne!(uno, otro, "dos reclamos comparten color: {colores:?}");
+            }
+        }
+    }
+
+    /// **La copia peligrosa de este hito, atada donde se nota.** La tabla de las marcas del cuerpo
+    /// apaga `done` porque lo terminado es donde ya no queda nada que hacer; aquí `done` dice lo
+    /// contrario —terminó y **nadie lo ha mirado**—, así que reutilizarla apagaría justo lo que
+    /// reclama. Con `por_marca` de por medio esta prueba cae, y sin ella la suite seguiría verde con el
+    /// reclamo más silencioso de los tres pintado de gris.
+    #[test]
+    fn el_reclamo_terminado_no_se_pinta_apagado_como_su_marca_del_cuerpo() {
+        let t = tema();
+
+        assert_ne!(
+            t.color_del_reclamo(Attention::Done, true),
+            t.color_del_panel(Some(Mark::Done), None),
+            "el reclamo terminado se está pintando con la tabla del cuerpo, que lo apaga"
+        );
+        assert_eq!(
+            t.color_del_reclamo(Attention::Done, true),
+            t.paleta[2],
+            "sostenido se pinta con el color entero, sin atenuar"
+        );
+    }
+
+    /// **Cada clase clavada a su color, y no solo «los tres son distintos».** Las pruebas del pintado
+    /// comparan contra esta misma función, así que cruzar el ámbar de `wait` con el rojo de `block` —o
+    /// pintar `wait` con el gris del texto normal, que es dejar de alarmar— pasaba entera la suite. Es
+    /// el disfraz de siempre: afirmar sobre el sitio donde se apunta el valor en vez de sobre el valor.
+    #[test]
+    fn cada_reclamo_lleva_el_color_que_la_decision_le_asigno() {
+        let t = tema();
+
+        assert_eq!(t.color_del_reclamo(Attention::Wait, true), t.paleta[3]);
+        assert_eq!(t.color_del_reclamo(Attention::Block, true), t.paleta[1]);
+        assert_eq!(t.color_del_reclamo(Attention::Done, true), t.paleta[2]);
+    }
+
+    /// Y sin sostener es **ese mismo color atenuado**, no otro: el atenuado dice «nadie lo sostiene»,
+    /// no «es otra cosa». Con un color propio para el rancio, la clase dejaría de leerse.
+    #[test]
+    fn un_reclamo_sin_sostener_es_su_propio_color_atenuado() {
+        let t = tema();
+
+        for clase in Attention::TODAS {
+            assert_eq!(
+                t.color_del_reclamo(clase, false),
+                t.apagar(t.color_del_reclamo(clase, true)),
+                "{clase:?} sin sostener no es su color apagado"
+            );
+        }
+    }
+
+    /// Sostenido y sin sostener no pueden verse igual: el atenuado **es** lo que dice que no hay nadie
+    /// detrás, y con los dos colores iguales la ficha mentiría sobre lo fresco que es el reclamo.
+    #[test]
+    fn un_reclamo_sin_sostener_se_ve_distinto_del_mismo_sostenido() {
+        let t = tema();
+        for clase in Attention::TODAS {
+            assert_ne!(
+                t.color_del_reclamo(clase, true),
+                t.color_del_reclamo(clase, false),
+                "{clase:?} se ve igual lo sostenga alguien o no"
+            );
         }
     }
 }

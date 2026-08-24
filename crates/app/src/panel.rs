@@ -12,7 +12,7 @@
 use std::time::{Duration, SystemTime};
 
 use eframe::egui::{Align2, Color32, Painter, Pos2, Rect};
-use panel_contract::{Line, Mark, Panel, Problem, Style};
+use panel_contract::{Attention, Line, Mark, Panel, Problem, Style};
 
 use crate::pintor::Metrica;
 use crate::tema::Tema;
@@ -122,6 +122,28 @@ pub fn apartar(division: Rect, ancho_de_celda: f32, celdas_del_panel: Option<usi
     }
 }
 
+/// Lo que una división reclama ahora mismo.
+///
+/// **Dos cosas y no una**: *qué* reclama —que lo dice su productor y la aplicación no deduce— y si hay
+/// alguien **sosteniéndolo**, es decir si lo que se enseña es de fiar o es lo último que llegó de un
+/// productor que ya no contesta. Las dos caben en un solo símbolo, que es lo que hace falta donde no
+/// hay sitio para una frase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reclamo {
+    /// Cuál de los tres del contrato.
+    pub clase: Attention,
+    /// Si hay alguien detrás de lo que este panel dice.
+    ///
+    /// Sale del mismo sitio que el aviso que se pinta debajo, y no de un segundo criterio de «esto ya
+    /// no vale»: con dos, el día que discrepen el panel diría que el reclamo es de fiar mientras su
+    /// propia línea confiesa que no. Cubre las dos formas de quedarse sin nadie detrás —el silencio
+    /// largo y el fichero que dejó de leerse—, que en pantalla significan lo mismo.
+    ///
+    /// **Con una excepción, y está en el registro de decisiones**: lo *terminado* no se queda sin nadie
+    /// detrás por callar, porque callar es lo que hace quien terminó.
+    pub sostenido: bool,
+}
+
 /// Lo que una división sabe del panel de su productor.
 ///
 /// **Guarda el último panel bueno a propósito.** El productor machaca el fichero entero en cada
@@ -208,6 +230,37 @@ impl Estado {
         self.ultimo_bueno.is_some() || self.aviso(ahora).is_some()
     }
 
+    /// Qué reclama esta división **ahora**, si reclama algo.
+    ///
+    /// **Sale del campo que el productor declaró y de nada más.** Ni del cuerpo del resumen, ni de la
+    /// fase, ni de si la consola escribe: deducirlo es exactamente lo que el contrato prohíbe, y una
+    /// línea con `mark: block` de la semana pasada dejaría la pestaña marcada para siempre.
+    ///
+    /// **Sin panel bueno no hay reclamo**, aunque la aplicación tenga algo que confesar: lo que se
+    /// confiesa entonces es que no hay panel, y un panel que no se ha podido leer nunca no dijo nada
+    /// que reclamar.
+    pub fn reclamo(&self, ahora: SystemTime) -> Option<Reclamo> {
+        self.reclamo_con(self.aviso(ahora).is_none())
+    }
+
+    /// Lo mismo, para quien ya tiene el aviso en la mano.
+    ///
+    /// **Existe para que el aviso se calcule una vez por división y fotograma** y no dos: el camino de
+    /// pintado ya lo necesita entero, y volver a pedirlo aquí solo para preguntarle si es `None` cuesta
+    /// un formateo de cadena en cada fotograma de una ventana que puede estar repintándose a sesenta.
+    fn reclamo_con(&self, nada_que_confesar: bool) -> Option<Reclamo> {
+        let clase = self.ultimo_bueno.as_ref()?.attention?;
+        // **Lo terminado no necesita a nadie detrás.** Quien acabó deja de publicar *por definición*,
+        // así que el silencio no desmiente su «terminó y nadie lo ha mirado»: es su estado normal. Sin
+        // esta excepción, media hora después de acabar todo lo terminado se apagaría — y encontrar por
+        // la mañana lo que acabó de noche es justo para lo que sirve.
+        // Lo que sí lo desmiente es **no poder leer su fichero**, y eso es lo único que aquí se mira:
+        // `problema` es lo mismo que separa las dos clases de aviso en [`Estado::aviso`], de donde sale
+        // `nada_que_confesar`.
+        let sostenido = nada_que_confesar || (clase == Attention::Done && self.problema.is_none());
+        Some(Reclamo { clase, sostenido })
+    }
+
     /// Lo que la aplicación tiene que decir de su cuenta sobre este panel, si tiene algo que decir.
     ///
     /// **Es la línea de la app, no una línea del productor**, y por eso no depende de `header`: esa
@@ -257,18 +310,23 @@ impl Estado {
         }
     }
 
-    /// La maqueta para este ancho y este aviso, calculándola solo si no vale la que hay.
+    /// La maqueta para este ancho, este aviso y este reclamo, calculándola solo si no vale la que hay.
     fn maquetar_si_hace_falta(
         &mut self,
         id: &str,
         ancho: usize,
         tema: &Tema,
         aviso: Option<String>,
+        reclamo: Option<Reclamo>,
     ) -> Option<&[Fila]> {
         if self.ultimo_bueno.is_none() && aviso.is_none() {
             return None;
         }
 
+        // **El reclamo no está en la clave, y es a propósito**: se atenúa exactamente cuando aparece
+        // el aviso —que sí está— y su clase solo cambia al releer el fichero, que tira la maqueta
+        // entera. Meterlo sería un término que ninguna prueba puede tumbar. Quien cambie el criterio de
+        // «sostenido» y lo despegue del aviso tiene que añadirlo aquí.
         let vigente =
             matches!(&self.maqueta, Some(hecha) if hecha.ancho == ancho && hecha.aviso == aviso);
         if !vigente {
@@ -279,6 +337,7 @@ impl Estado {
                     ancho,
                     tema,
                     aviso.as_deref(),
+                    reclamo,
                 ),
                 ancho,
                 aviso,
@@ -397,6 +456,40 @@ fn simbolo(marca: Mark) -> char {
     }
 }
 
+/// El símbolo con el que se pinta cada clase de reclamo.
+///
+/// **Los tres son propios y ninguno se repite con los del cuerpo**, a propósito: el mismo signo en dos
+/// sitios invita a leer que la aplicación dedujo el uno del otro, que es justo lo que el contrato
+/// prohíbe — un `mark: block` de una línea del resumen **no** es un reclamo de la división.
+///
+/// **Elegidos midiéndolos contra el ancho de una `M`**, con el mismo criterio y por la misma razón que
+/// los de arriba. La prueba que lo comprueba contra la fuente cuenta el porqué entero.
+///
+/// `?` porque te preguntan a ti, `⊘` porque algo la tiene parada, y `∎` porque ahí ya no queda nada
+/// por hacer más que mirarlo.
+fn simbolo_del_reclamo(clase: Attention) -> char {
+    match clase {
+        Attention::Wait => '?',
+        Attention::Block => '⊘',
+        Attention::Done => '∎',
+    }
+}
+
+/// Lo que dice la fila del reclamo, en palabras.
+///
+/// **El símbolo no viaja solo**: en el panel hay sitio, y un signo suelto obliga a recordar una tabla.
+///
+/// Las tres frases son **las del contrato, palabra por palabra**, incluido el «a ti» de la primera —
+/// que es justo lo que la separa de la segunda, «por algo que **no** eres tú». Acortarlas por caber es
+/// perder la oposición que las distingue; lo que no cabe se envuelve, como todo lo demás del panel.
+fn texto_del_reclamo(clase: Attention) -> &'static str {
+    match clase {
+        Attention::Wait => "te espera a ti",
+        Attention::Block => "atascada por algo que no eres tú",
+        Attention::Done => "terminó y nadie lo ha mirado",
+    }
+}
+
 /// Lo menos que se le deja al texto cuando la sangría y la columna se lo comen todo, en celdas.
 ///
 /// **Sin un suelo, la envoltura no progresa**: con el hueco a cero o negativo, cada vuelta del bucle
@@ -424,6 +517,7 @@ fn maquetar(
     ancho: usize,
     tema: &Tema,
     aviso: Option<&str>,
+    reclamo: Option<Reclamo>,
 ) -> Vec<Fila> {
     let mut filas = Vec::new();
 
@@ -438,6 +532,24 @@ fn maquetar(
             0,
             &sanear(&identidad),
             tema.color_del_panel(None, None),
+            ancho,
+        );
+    }
+
+    // **El reclamo va en la fila de la aplicación y no en la de identidad**, y esa frontera es la
+    // razón de ser de este hito: `header: false` esconde la identidad de la división, y la respuesta a
+    // «¿tengo que ir ahí?» no puede apagarla el productor con una bandera suya. Es la misma frontera
+    // que ya cumple el aviso de abajo.
+    if let Some(reclamo) = reclamo {
+        envolver(
+            &mut filas,
+            0,
+            &format!(
+                "{} {}",
+                simbolo_del_reclamo(reclamo.clase),
+                texto_del_reclamo(reclamo.clase)
+            ),
+            tema.color_del_reclamo(reclamo.clase, reclamo.sostenido),
             ancho,
         );
     }
@@ -666,7 +778,8 @@ pub fn pintar(
     // quedaría pegado a la consola de al lado.
     let ancho = ((rect.width() / metrica.ancho()) as usize).saturating_sub(2 * MARGEN as usize);
     let aviso = estado.aviso(ahora);
-    let Some(filas) = estado.maquetar_si_hace_falta(id, ancho, tema, aviso) else {
+    let reclamo = estado.reclamo_con(aviso.is_none());
+    let Some(filas) = estado.maquetar_si_hace_falta(id, ancho, tema, aviso, reclamo) else {
         return;
     };
 
@@ -1290,7 +1403,13 @@ mod tests {
     /// leer el estilo, pintarlo todo del mismo color o **no pintar nada**, y las pruebas de
     /// `Tema::color_del_panel` siguen verdes porque afirman sobre el ayudante, no sobre el camino.
     fn lo_que_se_pinta(fichero: &str) -> Vec<(String, Color32)> {
-        lo_que_se_encola(fichero, SITIO)
+        textos_y_colores(lo_que_se_encola(fichero, SITIO))
+    }
+
+    /// Lo mismo, para cuando la prueba necesita pintar en un momento concreto y no puede pasar por el
+    /// fichero.
+    fn textos_y_colores(formas: Vec<eframe::egui::Shape>) -> Vec<(String, Color32)> {
+        formas
             .into_iter()
             .filter_map(|forma| match forma {
                 eframe::egui::Shape::Text(texto) => {
@@ -1777,17 +1896,17 @@ mod tests {
         let tema = Tema::default();
 
         let primera = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None, None)
             .expect("hay panel")
             .to_vec();
         let repetida = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None, None)
             .expect("hay panel")
             .to_vec();
         assert_eq!(primera, repetida, "el mismo ancho da la misma maqueta");
 
         let estrecha = estado
-            .maquetar_si_hace_falta("a1b2", 12, &tema, None)
+            .maquetar_si_hace_falta("a1b2", 12, &tema, None, None)
             .expect("hay panel")
             .to_vec();
         assert_ne!(
@@ -1804,14 +1923,14 @@ mod tests {
         let mut estado = Estado::default();
         estado.refrescar(dir.path());
         let tema = Tema::default();
-        estado.maquetar_si_hace_falta("a1b2", 40, &tema, None);
+        estado.maquetar_si_hace_falta("a1b2", 40, &tema, None, None);
 
         publicar(&dir, r#"{"header":false,"lines":["lo nuevo"]}"#);
         envejecer(&dir, 1);
         estado.refrescar(dir.path());
 
         let filas = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None, None)
             .expect("hay panel");
         assert!(
             filas.iter().any(|fila| fila.texto.contains("lo nuevo")),
@@ -1884,6 +2003,7 @@ mod tests {
             ancho,
             &Tema::default(),
             None,
+            None,
         );
 
         for fila in &filas {
@@ -1909,6 +2029,7 @@ mod tests {
             "a1b2",
             ancho,
             &Tema::default(),
+            None,
             None,
         );
 
@@ -1939,6 +2060,7 @@ mod tests {
             36,
             &Tema::default(),
             None,
+            None,
         );
 
         assert_eq!(
@@ -1963,6 +2085,7 @@ mod tests {
             "a1b2",
             ancho,
             &Tema::default(),
+            None,
             None,
         );
 
@@ -1990,6 +2113,7 @@ mod tests {
             36,
             &Tema::default(),
             None,
+            None,
         );
 
         let pegada = filas[0].texto.find("pegada").expect("está");
@@ -2013,6 +2137,7 @@ mod tests {
             "a1b2",
             16,
             &Tema::default(),
+            None,
             None,
         );
 
@@ -2039,11 +2164,11 @@ mod tests {
         let tema = Tema::default();
 
         let primera = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None, None)
             .expect("hay panel")
             .as_ptr();
         let segunda = estado
-            .maquetar_si_hace_falta("a1b2", 40, &tema, None)
+            .maquetar_si_hace_falta("a1b2", 40, &tema, None, None)
             .expect("hay panel")
             .as_ptr();
 
@@ -2098,6 +2223,7 @@ mod tests {
             "a1b2",
             36,
             &Tema::default(),
+            None,
             None,
         );
 
@@ -2280,13 +2406,461 @@ mod tests {
 
         for ancho in [0usize, 1, 2, 3] {
             let filas = estado
-                .maquetar_si_hace_falta("sonda", ancho, &tema, None)
+                .maquetar_si_hace_falta("sonda", ancho, &tema, None, None)
                 .expect("hay panel que maquetar");
             assert!(
                 !filas.is_empty(),
                 "con un panel de {ancho} celdas no se maquetó ninguna fila"
             );
             recortar(filas, 1);
+        }
+    }
+
+    /// **Los tres símbolos del reclamo, preguntándoselos a la fuente y no a la memoria**, con el mismo
+    /// criterio que los del cuerpo: lo que mide una `M`. Un glifo que la cara monoespaciada no tiene
+    /// mide cero y sale como un cuadro; uno que viene de las fuentes de emoji mide casi el doble y
+    /// **descuadra la columna**, que se lee peor todavía porque no parece un fallo de fuente sino un
+    /// panel mal alineado. Los candidatos obvios de este vocabulario ya cayeron por ahí.
+    #[test]
+    fn los_tres_simbolos_del_reclamo_miden_una_celda() {
+        let ctx = eframe::egui::Context::default();
+        let mut anchos = Vec::new();
+        let mut celda = 0.0;
+        ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let fuente = eframe::egui::FontId::monospace(crate::CUERPO);
+            ui.ctx().fonts_mut(|fuentes| {
+                celda = fuentes.glyph_width(&fuente, 'M');
+                anchos = Attention::TODAS
+                    .iter()
+                    .map(|clase| {
+                        let simbolo = simbolo_del_reclamo(*clase);
+                        (simbolo, fuentes.glyph_width(&fuente, simbolo))
+                    })
+                    .collect();
+            });
+        })
+        .drop_without_applying_deltas();
+
+        for (simbolo, ancho) in anchos {
+            assert!(
+                (ancho - celda).abs() < 0.01,
+                "«{simbolo}» mide {ancho} y una celda mide {celda}: {}",
+                if ancho == 0.0 {
+                    "no está en la fuente"
+                } else {
+                    "viene de la de emoji y descuadraría la columna"
+                }
+            );
+        }
+    }
+
+    /// **Ninguno de los tres es el de una marca del cuerpo**, y no es cosmética: el mismo signo en los
+    /// dos sitios invita a leer que la aplicación dedujo el uno del otro, que es exactamente lo que el
+    /// contrato le prohíbe. Con el juego repetido, un panel con `mark: block` en una línea y sin
+    /// reclamo se vería igual que uno que reclama.
+    #[test]
+    fn cada_reclamo_lleva_su_simbolo_y_ninguno_se_repite_con_los_del_cuerpo() {
+        assert_eq!(
+            [
+                simbolo_del_reclamo(Attention::Wait),
+                simbolo_del_reclamo(Attention::Block),
+                simbolo_del_reclamo(Attention::Done),
+            ],
+            ['?', '⊘', '∎']
+        );
+
+        let del_cuerpo = [
+            Mark::Done,
+            Mark::Current,
+            Mark::Pending,
+            Mark::Wait,
+            Mark::Block,
+            Mark::Info,
+        ]
+        .map(simbolo);
+        for clase in Attention::TODAS {
+            let suyo = simbolo_del_reclamo(clase);
+            assert!(
+                !del_cuerpo.contains(&suyo),
+                "«{suyo}» ya lo usa una marca del cuerpo: el panel diría dos cosas con un solo signo"
+            );
+        }
+    }
+
+    /// **La bandera del productor no esconde el reclamo.** `header: false` quita la línea de identidad
+    /// —la que es suya— y el reclamo sigue, porque la respuesta a «¿tengo que ir ahí?» es de la
+    /// aplicación. Pintándolo en la línea de identidad, un productor la apagaría y la división
+    /// desaparecería del radar sin que nadie lo notara.
+    #[test]
+    fn el_reclamo_se_pinta_aunque_el_productor_apague_su_cabecera() {
+        let tema = Tema::default();
+
+        let filas =
+            lo_que_se_pinta(r#"{"header":false,"attention":"wait","lines":["lo que sea"]}"#);
+
+        assert_eq!(
+            filas,
+            vec![
+                (
+                    "? te espera a ti".to_owned(),
+                    tema.color_del_reclamo(Attention::Wait, true)
+                ),
+                ("  lo que sea".to_owned(), tema.color_del_panel(None, None)),
+            ]
+        );
+    }
+
+    /// Y con la cabecera puesta, el reclamo va **debajo de la identidad y encima del cuerpo**: arriba,
+    /// que es donde el recorte no llega.
+    #[test]
+    fn el_reclamo_va_arriba_del_todo_con_la_identidad_puesta() {
+        let filas =
+            lo_que_se_pinta(r#"{"phase":"build","attention":"done","lines":["el cuerpo"]}"#);
+
+        let textos: Vec<&str> = filas.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(
+            textos,
+            [
+                "a1b2 · build",
+                "∎ terminó y nadie lo ha mirado",
+                "  el cuerpo"
+            ]
+        );
+    }
+
+    /// **Una marca del cuerpo no es un reclamo de la división**, y esta prueba entra por el pintado
+    /// para decirlo donde se ve: un `mark: block` es contenido del resumen —«esperé aprobación el
+    /// martes»— y deducir de él que la división reclama la dejaría marcada para siempre.
+    #[test]
+    fn una_marca_del_cuerpo_no_pinta_reclamo_en_la_fila_de_la_aplicacion() {
+        let filas = lo_que_se_pinta(
+            r#"{"header":false,"lines":[{"text":"esperé aprobación el martes","mark":"block"}]}"#,
+        );
+
+        let textos: Vec<&str> = filas.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(textos, ["× esperé aprobación el martes"]);
+    }
+
+    /// **Un reclamo que nadie sostiene se atenúa, y no se apaga.** El idioma de este panel es confesar
+    /// y no esconder —por eso un productor rancio sigue teniendo panel—, así que su reclamo sigue
+    /// pintándose: lo que cambia es el color, que dice «reclama, y no hay nadie detrás». El detalle
+    /// —desde cuándo— lo sigue diciendo el aviso, en su propia línea.
+    #[test]
+    fn un_reclamo_que_nadie_sostiene_se_atenua_y_el_panel_lo_confiesa_aparte() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        let tema = Tema::default();
+
+        let filas = textos_y_colores(pintando(
+            &mut estado,
+            SITIO,
+            SystemTime::now() + Duration::from_secs(60 * 60),
+        ));
+
+        assert_eq!(
+            filas[0],
+            (
+                "⊘ atascada por algo que no eres tú".to_owned(),
+                tema.color_del_reclamo(Attention::Block, false)
+            )
+        );
+        assert_ne!(
+            filas[0].1,
+            tema.color_del_reclamo(Attention::Block, true),
+            "sin nadie que lo sostenga tiene que verse distinto, o el atenuado no dice nada"
+        );
+        assert!(
+            filas[1].0.contains("sin noticias"),
+            "el reclamo no sustituye a la confesión, van los dos: {filas:?}"
+        );
+    }
+
+    /// Y mientras el productor lo sostiene, el mismo panel se pinta con el color entero: sin esta
+    /// mitad, atenuarlo siempre pasaría por bueno.
+    #[test]
+    fn el_mismo_reclamo_se_pinta_entero_mientras_su_productor_lo_sostiene() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        let tema = Tema::default();
+
+        let filas = textos_y_colores(pintando(&mut estado, SITIO, SystemTime::now()));
+
+        assert_eq!(
+            filas[0].1,
+            tema.color_del_reclamo(Attention::Block, true),
+            "recién publicado, nadie tiene nada que confesar: {filas:?}"
+        );
+    }
+
+    /// **Sin panel bueno no hay reclamo**, aunque la aplicación tenga mucho que confesar: lo que
+    /// confiesa entonces es que no hay panel. Un documento que nunca se pudo leer no dijo nada que
+    /// reclamar, y marcar la división por él sería inventarse la señal.
+    #[test]
+    fn un_panel_que_nunca_se_pudo_leer_no_reclama_nada() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(&dir, "esto no es json");
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        let ahora = SystemTime::now();
+
+        assert!(
+            estado.aviso(ahora).is_some(),
+            "la aplicación tenía que tener algo que confesar aquí"
+        );
+        assert_eq!(estado.reclamo(ahora), None);
+    }
+
+    /// El reclamo se va cuando su productor lo quita, y no se queda pegado a la maqueta de antes.
+    #[test]
+    fn el_reclamo_desaparece_cuando_el_productor_deja_de_reclamar() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r#"{"header":false,"attention":"wait","lines":["lo que sea"]}"#,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        pintando(&mut estado, SITIO, SystemTime::now());
+
+        publicar(&dir, r#"{"header":false,"lines":["lo que sea"]}"#);
+        envejecer(&dir, 1);
+        estado.refrescar(dir.path());
+        let filas = textos_y_colores(pintando(&mut estado, SITIO, SystemTime::now()));
+
+        let textos: Vec<&str> = filas.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(textos, ["  lo que sea"]);
+    }
+
+    /// **La fila del reclamo se envuelve como cualquier otra.** Sus frases son las del contrato, y la
+    /// del bloqueo mide treinta y tres celdas: en un panel estrecho —que es un ancho que el usuario
+    /// elige arrastrando— tiene que partirse, no salirse. Sin esta prueba, pasarle a su envoltura un
+    /// ancho equivocado dejaba la suite entera en verde, porque el sitio de las demás pruebas es ancho.
+    #[test]
+    fn la_fila_del_reclamo_no_se_sale_de_un_panel_estrecho() {
+        let ancho = 12;
+
+        let filas = maquetar(
+            Some(&panel_con(r#"{"header":false,"lines":["lo que sea"]}"#)),
+            "a1b2",
+            ancho,
+            &Tema::default(),
+            None,
+            Some(Reclamo {
+                clase: Attention::Block,
+                sostenido: true,
+            }),
+        );
+
+        assert!(
+            filas.len() > 2,
+            "con este ancho la frase tenía que partirse en varias filas: {filas:?}"
+        );
+        for fila in &filas {
+            assert!(
+                fila.columna + fila.texto.chars().count() <= ancho,
+                "«{}» empieza en {} y mide {}: se sale de un panel de {ancho}",
+                fila.texto,
+                fila.columna,
+                fila.texto.chars().count()
+            );
+        }
+    }
+
+    /// **Cuando solo cabe una fila, la que sobrevive es la del reclamo.** De las dos que pone la
+    /// aplicación, la del reclamo es la que contesta «¿tengo que ir ahí?» y el aviso es el que matiza
+    /// «y no es fresco», así que el orden es ése y no el contrario. Queda atado aquí porque el recorte
+    /// es silencioso: se lleva las últimas filas sin que nada falle.
+    #[test]
+    fn en_un_panel_de_un_solo_renglon_lo_que_queda_es_el_reclamo() {
+        let (_, alto) = celda();
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+
+        let filas = textos_y_colores(pintando(
+            &mut estado,
+            Rect::from_min_size(Pos2::new(0.0, 0.0), eframe::egui::vec2(400.0, 2.0 * alto)),
+            SystemTime::now() + Duration::from_secs(60 * 60),
+        ));
+
+        let textos: Vec<&str> = filas.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(
+            textos,
+            ["? te espera a ti", "… 3 más"],
+            "el reclamo tiene que ser lo primero que se pinta, y lo que falta tiene que decirse"
+        );
+    }
+
+    /// **Lo terminado no se apaga por callar.** Quien acabó deja de publicar por definición, así que el
+    /// silencio no desmiente su «terminó y nadie lo ha mirado»: es su estado normal. Sin esta
+    /// excepción, media hora después de acabar —el plazo de serie— todo lo terminado se pintaría
+    /// apagado, y encontrar por la mañana lo que acabó de noche es justo para lo que sirve.
+    ///
+    /// **Y la aplicación sigue confesando el silencio en su línea**: lo que la excepción cambia es el
+    /// color del reclamo, no lo que el panel cuenta.
+    #[test]
+    fn lo_terminado_se_sigue_viendo_entero_por_mucho_que_calle() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r#"{"header":false,"attention":"done","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        let tema = Tema::default();
+
+        let filas = textos_y_colores(pintando(
+            &mut estado,
+            SITIO,
+            SystemTime::now() + Duration::from_secs(60 * 60),
+        ));
+
+        assert_eq!(
+            filas[0].1,
+            tema.color_del_reclamo(Attention::Done, true),
+            "una hora callado, y lo terminado sigue entero: {filas:?}"
+        );
+        assert!(
+            filas[1].0.contains("sin noticias"),
+            "el silencio se sigue confesando, que es otra cosa: {filas:?}"
+        );
+    }
+
+    /// **Pero sí se apaga cuando su fichero deja de leerse**, que es lo único que de verdad desmiente
+    /// lo que se está enseñando: sin poder leerlo, lo que hay en pantalla es lo último que llegó y nada
+    /// dice que siga siendo verdad. Sin esta mitad, la excepción de arriba sería «lo terminado no se
+    /// apaga nunca», que es esconder.
+    #[test]
+    fn lo_terminado_si_se_apaga_cuando_su_fichero_deja_de_leerse() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r#"{"header":false,"attention":"done","lines":["lo que sea"]}"#,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        let tema = Tema::default();
+
+        publicar(&dir, "esto ya no es json");
+        envejecer(&dir, 1);
+        estado.refrescar(dir.path());
+        let filas = textos_y_colores(pintando(&mut estado, SITIO, SystemTime::now()));
+
+        assert_eq!(
+            filas[0].1,
+            tema.color_del_reclamo(Attention::Done, false),
+            "sin poder leer su fichero, nadie sostiene lo que se ve: {filas:?}"
+        );
+    }
+
+    /// Y la excepción es **solo de lo terminado**: lo que te espera y lo que está atascado siguen
+    /// apagándose al quedarse sin nadie detrás, porque ahí el silencio sí desmiente lo que dicen.
+    #[test]
+    fn la_excepcion_de_lo_terminado_no_alcanza_a_las_otras_dos_clases() {
+        let tema = Tema::default();
+
+        for (clase, valor) in [(Attention::Wait, "wait"), (Attention::Block, "block")] {
+            let dir = PanelDir::create().expect("crear el directorio");
+            publicar(
+                &dir,
+                &format!(
+                    r#"{{"header":false,"attention":"{valor}","stale_after_minutes":1,"lines":["x"]}}"#
+                ),
+            );
+            let mut estado = Estado::default();
+            estado.refrescar(dir.path());
+
+            let filas = textos_y_colores(pintando(
+                &mut estado,
+                SITIO,
+                SystemTime::now() + Duration::from_secs(60 * 60),
+            ));
+
+            assert_eq!(
+                filas[0].1,
+                tema.color_del_reclamo(clase, false),
+                "{clase:?} tenía que apagarse tras una hora callada: {filas:?}"
+            );
+        }
+    }
+
+    /// **Una palabra que no existe no marca nada, y no se lleva por delante el resto del panel.** El
+    /// campo lo escribe un tercero a mano, así que `waiting` por `wait` es cuestión de tiempo: la
+    /// aplicación no puede adivinar cuál de los tres quiso decir —adivinarlo sería deducir— ni
+    /// castigar al resto del documento por una palabra suelta.
+    ///
+    /// **Entra por el pintado porque es ahí donde se ve.** La caja del contrato ya afirma que ese campo
+    /// se lee vacío, pero no que la identidad y el cuerpo sigan pintándose: son dos cosas distintas y
+    /// esta es la de este hito.
+    #[test]
+    fn un_reclamo_que_no_existe_no_marca_y_el_resto_del_panel_se_pinta_entero() {
+        let filas =
+            lo_que_se_pinta(r#"{"attention":"waiting","phase":"validate","lines":["el cuerpo"]}"#);
+
+        let textos: Vec<&str> = filas.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(textos, ["a1b2 · validate", "  el cuerpo"]);
+    }
+
+    /// **Lo que [`Estado::reclamo`] contesta desde fuera es lo mismo que el panel pinta.** Son dos
+    /// caminos: el pintado ya tiene el aviso en la mano y pregunta por dentro; el de fuera —la puerta
+    /// por la que preguntará quien acumule los reclamos de una pestaña— tiene que calcularlo él.
+    ///
+    /// **Sin esta prueba el de fuera no lo mira nadie**: comprobado invirtiendo ahí la pregunta del
+    /// aviso —dar por sostenido justo lo que no lo está y al revés— con la suite entera en verde. Lo
+    /// que se afirma es el valor, no que las dos puertas coincidan, porque coincidir en lo falso
+    /// también coincide.
+    #[test]
+    fn lo_que_reclamo_contesta_desde_fuera_es_lo_que_el_panel_pinta() {
+        let dir = PanelDir::create().expect("crear el directorio");
+        publicar(
+            &dir,
+            r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+        );
+        let mut estado = Estado::default();
+        estado.refrescar(dir.path());
+        let tema = Tema::default();
+        let recien = SystemTime::now();
+        let callado = recien + Duration::from_secs(60 * 60);
+
+        assert_eq!(
+            estado.reclamo(recien),
+            Some(Reclamo {
+                clase: Attention::Wait,
+                sostenido: true
+            }),
+            "recién publicado no hay nada que confesar de este panel"
+        );
+        assert_eq!(
+            estado.reclamo(callado),
+            Some(Reclamo {
+                clase: Attention::Wait,
+                sostenido: false
+            }),
+            "tras una hora callado ya no hay nadie detrás de lo que se enseña"
+        );
+
+        for cuando in [recien, callado] {
+            let dicho = estado.reclamo(cuando).expect("reclama");
+            let filas = textos_y_colores(pintando(&mut estado, SITIO, cuando));
+            assert_eq!(
+                filas[0].1,
+                tema.color_del_reclamo(dicho.clase, dicho.sostenido),
+                "lo que se pinta no es lo que se contesta desde fuera: {filas:?}"
+            );
         }
     }
 }

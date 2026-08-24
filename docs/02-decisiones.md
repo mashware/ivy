@@ -892,6 +892,36 @@ cuadros—. La comprobación está atada por una prueba que pregunta a la fuente
 deja de medir una celda, así que el día que cambie se enterará quien corra la suite y no quien mire la
 pantalla.
 
+### Lo que F2.8 añadió: los tres del reclamo, medidos igual
+
+**Decisión.** El reclamo de una división —el campo `attention` de **D18**— se pinta con `?` (`wait`),
+`⊘` (`block`) y `∎` (`done`), y **ninguno de los tres es uno de los seis del cuerpo**. Medidos con el
+mismo criterio y en la misma fuente: los tres miden **8,43 puntos**, que es lo que mide una celda.
+
+| Símbolo | Ancho | Veredicto |
+|---|---|---|
+| `?` U+003F, `⊘` U+2298, `∎` U+220E | 8,43 | están, y monoespaciados |
+| `✓` U+2713, `☑` U+2611, `⏳` U+23F3, `⚠` U+26A0, `⛔` U+26D4, `★` U+2605 | 0,00 o de emoji | fuera, por lo mismo de siempre |
+
+**Y por qué no se repiten los del cuerpo, que también miden bien.** Porque el mismo signo en dos sitios
+del mismo panel invita a leer que la aplicación **dedujo el uno del otro** — que es exactamente lo que
+D18 prohíbe: un `mark: block` en una línea del resumen no es un reclamo de la división. Con el juego
+repetido, un panel que solo cuenta que algo se atascó el martes se vería igual que uno que te reclama
+ahora.
+
+**La tabla de color es propia, y no la de las marcas.** La de las marcas **apaga** `done` porque lo
+terminado es donde ya no queda nada que hacer; aquí `done` dice lo contrario —terminó y **nadie lo ha
+mirado**—, así que reutilizarla apagaría justo lo que reclama. *Descartado:* reutilizarla «porque son
+los mismos nombres». Los nombres coinciden y el significado no.
+
+**Un reclamo que nadie sostiene se atenúa; no se apaga.** Si la aplicación tiene algo que confesar sobre
+ese panel —lleva callado más de lo suyo, o su fichero dejó de leerse—, el reclamo se sigue pintando con
+su color atenuado: reclama, y no hay nadie detrás. **Con una excepción, que está en D18**: lo terminado
+no se atenúa por callar, porque callar es lo que hace quien terminó. *Descartado:* esconderlo, que contradice el idioma de
+este panel —confesar y no esconder, que es la razón de que un productor rancio siga teniendo panel—; y
+pintarlo igual, que haría a la ficha de la pestaña mentir sobre lo fresco que es. El detalle —desde
+cuándo, o qué falló— lo sigue diciendo el aviso, en su propia línea y con su propio color.
+
 ---
 
 ## D10 — El ancho del panel: en celdas, de cada división, y plegable con el mismo gesto
@@ -1983,6 +2013,25 @@ su barra lateral contesta esa pregunta mejor que la nuestra ([07-panorama.md](07
   más que un indicador falso. El indicador entra ahora; el aviso, cuando se sepa que el campo se
   publica bien.
 
+### Lo que F2.8 añadió: quién sostiene un reclamo, y la excepción de lo terminado
+
+**Un reclamo se ve atenuado cuando la aplicación tiene algo que confesar sobre ese panel** — lleva
+callado más de lo suyo, o su fichero dejó de leerse. Dice las dos cosas a la vez: *reclama*, y *no hay
+nadie detrás*. La razón de atenuarlo en vez de esconderlo, con lo descartado, está en **D9** → «lo que
+F2.8 añadió».
+
+**Excepción, y es de producto: `done` no se atenúa por silencio.** Quien terminó **deja de publicar por
+definición**, así que su silencio no desmiente nada: es su estado normal. Sin la excepción, media hora
+después de acabar —el plazo de serie— *todo* lo terminado se pintaría apagado, y **encontrar por la
+mañana lo que acabó de noche es justo para lo que sirve el campo**. Lo que sí lo atenúa es **no poder
+leer su fichero**: ahí lo que se enseña es lo último que llegó, y nada dice que siga siendo verdad.
+
+*Descartado:* tratar las tres clases igual, que es más simple de explicar y apaga el caso central del
+producto. *Descartado también:* que `done` no se atenúe **nunca** — eso sería esconder un panel roto
+detrás de un resumen plausible, que es lo que este panel existe para no hacer.
+
+**Lo encontró la revisión, no el diseño.** El diseño escribió «el rancio se atenúa» para las tres sin
+mirar qué significa el silencio en cada una.
 ---
 
 ## D19 — Nos posicionamos contra emuladores de terminal, no contra orquestadores de agentes
