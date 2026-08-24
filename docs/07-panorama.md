@@ -5,7 +5,7 @@ Los detalles de *cómo está construido* cada terminal están en [06-referencias
 esto es el mapa del territorio.
 
 **Si solo vienes a por una cosa, ve a [«En qué nos diferenciamos»](#en-qué-nos-diferenciamos--agosto-2026):**
-el resumen de los seis análisis de este mes, con lo que ya no nos diferencia y las tres cosas que
+el resumen de los ocho análisis de este mes, con lo que ya no nos diferencia y las tres cosas que
 quedan.
 
 ---
@@ -230,26 +230,37 @@ soportarlos da compatibilidad gratis con todo lo que hoy notifica, sin pedirle a
 `panel.json`. El contrato para quien quiera un panel; los OSC para que el resto funcione sin cambiar
 nada.
 
-### Los cinco recién analizados, en fila
+### Los siete analizados, en fila
 
-| | Xirp (E3) | Superset (E4) | Conductor | **Warp (E5)** | **cmux (E6)** |
-|---|---|---|---|---|---|
-| El terminal es | de primera clase | dentro del navegador | un panel secundario | **de primera clase** | **de primera clase** |
-| Plataformas | macOS | macOS + AppImage | macOS | **las tres** | macOS |
-| Abierto | no | ELv2 | no | **AGPL + UI en MIT** | **GPL-3.0+** |
-| Agentes que acepta | 3, con adaptador | 10, con adaptador | 3, con adaptador | 5, `enum` compilado | **cualquiera, sin adaptador** |
-| Quién decide qué se ve | la app (3 constantes) | la app (4 eventos) | la app (sus métricas) | la app (5 estados) | **el productor (texto libre)** |
-| Vía para que publique un tercero | hooks del harness | hooks + `superset-notify` | **ninguna** | **ninguna** | **OSC 777/99, `cmux notify`** |
-| Canal para pilotar la app | MCP | MCP | **no** | sin verificar | socket API |
-| Lo publicado es | un estado | un evento | métricas | un estado | **una notificación de una línea** |
-| Persiste cuando vuelves | como estado | no | sí | como estado | **no: se borra al leerla** |
-| **Estado estructurado que elige quien trabaja** | **no** | **no** | **no** | **no** | **no** |
+| | Xirp (E3) | Superset (E4) | Conductor | **Warp (E5)** | **cmux (E6)** | **Orca (E7)** | **Herdr (E8)** |
+|---|---|---|---|---|---|---|---|
+| El terminal es | de primera clase | dentro del navegador | un panel secundario | **de primera clase** | **de primera clase** | de primera clase, en Electron | **el sustrato: es el multiplexor** |
+| Plataformas | macOS | macOS + AppImage | macOS | **las tres** | macOS | **las tres + móvil** | **las tres, un binario** |
+| Abierto | no | ELv2 | no | **AGPL + UI en MIT** | **GPL-3.0+** | **MIT** | **Apache-2.0** |
+| Agentes que acepta | 3, con adaptador | 10, con adaptador | 3, con adaptador | 5, `enum` compilado | **cualquiera, sin adaptador** | **cualquiera, sin adaptador** | **cualquiera**; 17 con integración |
+| Quién decide qué se ve | la app (3 constantes) | la app (4 eventos) | la app (sus métricas) | la app (5 estados) | **el productor (texto libre)** | la app (6 indicadores) | la app (4 estados) **+ tokens del productor** |
+| Vía para que publique un tercero | hooks del harness | hooks + `superset-notify` | **ninguna** | **ninguna** | **OSC 777/99, `cmux notify`** | **el título OSC, de facto** | **`report-agent --source custom:*`** |
+| Canal para pilotar la app | MCP | MCP | **no** | sin verificar | socket API | CLI + MCP | **socket NDJSON, 70+ métodos** |
+| Lo publicado es | un estado | un evento | métricas | un estado | **una notificación de una línea** | un estado | **un estado + pares clave-valor** |
+| Persiste cuando vuelves | como estado | no | sí | como estado | **no: se borra al leerla** | como estado | **sí, y sobrevive al reinicio** |
+| **Estado estructurado que elige quien trabaja** | **no** | **no** | **no** | **no** | **no** | **no** | **casi: sin listas, sin marcas, sin fase libre** |
 
-La última fila es el proyecto, y las dos de encima explican por qué. Los cuatro primeros tienen estado
+La última fila es el proyecto, y las dos de encima explican por qué. Seis de los siete tienen estado
 pero con vocabulario que elige la app; **cmux tiene el canal abierto de verdad y por eso enseña dónde
 está el límite**: lo que cabe por ahí es un aviso de una línea que se borra al leerlo. Nadie tiene lo
 de en medio — un cuerpo estructurado, persistente y escrito en el vocabulario del productor
 (**D6**).
+
+**La última columna es la que obliga a afinar todo lo demás.** Herdr sí tiene canal documentado,
+identidad por división y un productor que puede ser cualquiera; lo que no tiene es **cuerpo**: cuatro
+estados suyos y pares clave-valor «solo para mostrar». La casilla vacía se ha estrechado desde
+«nadie abre el canal» hasta **«nadie deja que por el canal viaje algo con forma»**.
+
+**Y Orca obliga a matizar la fila del tercero.** Su canal no lo diseñaron para esto: leen el título
+del terminal, y resulta que un título lo puede escribir cualquiera. Así que un CI **sí** puede
+teñirle un punto de color sin adaptador ninguno, igual que en cmux — pero solo puede decir una de las
+palabras que Orca ya conocía. **Un canal abierto con un vocabulario cerrado sigue siendo un semáforo**,
+y eso es exactamente el límite que este proyecto existe para pasar.
 
 ### Cline merece párrafo aparte
 
@@ -391,6 +402,188 @@ tiene el terminal nativo; Superset, por lo lejos que ha llegado en producto. Per
 la puerta a volverse estándar como fue Backstage, y su emulador vive en el navegador — la misma
 decisión estructural que ya señalamos en Cline, y que no se cambia sin rehacer el producto.
 
+### E7 — Orca: el que ya ganó la adopción, y donde se queda corto
+
+App de escritorio **Electron + TypeScript**, licencia **MIT**, de Stably AI (YC W22). Repositorio
+creado el **17 de marzo de 2026**; a 24 de agosto lleva **52.261 estrellas y 3.612 forks**, con
+empujes diarios. En adopción no hay color con nadie más de esta lista, y eso pesa más que cualquier
+ficha técnica: **es el que está definiendo lo que la gente espera de la categoría.**
+
+**El producto.** Un worktree por tarea; **25-30 agentes** preconfigurados y «cualquiera que corra en
+un terminal» apuntando a su binario; terminales «clase Ghostty» con WebGL, divisiones infinitas y
+scrollback que sobrevive al reinicio; *Design Mode*, que abre una ventana Chromium real por worktree
+para señalar un elemento de la interfaz y mandárselo al agente; diff con anotaciones, GitHub y
+Linear; worktrees por SSH con reconexión; app móvil de acompañamiento; y una CLI para guionizar la
+app desde cualquier shell.
+
+**Lo que enseña de cada división, que es lo que aquí importa:**
+
+| Lo que ves | Qué significa |
+|---|---|
+| girando | trabajando |
+| interrogación ámbar | **te espera**: permiso o respuesta |
+| punto esmeralda | terminado, o activo y callado |
+| punto rojo | bloqueado, interrumpido o fallido |
+| punto gris | inactivo |
+| nada | shell sin agente reconocido |
+
+Seis indicadores, los mismos en la pestaña del agente y en la ficha de su worktree, con marca de
+tiempo. Es un semáforo mejor pintado que el de Superset, y con más estados; sigue contestando **«a
+qué división voy»** y no **«por dónde va»**.
+
+**De dónde sale ese estado, y aquí está la parte que hay que leer con cuidado:** *«del OSC title del
+terminal y de los hooks del agente»*. Tiene dos consecuencias opuestas y las dos importan.
+
+- **A su favor, y hay que reconocerlo: el canal está abierto de facto.** El título de un terminal lo
+  emite **cualquier** proceso — un CI, un despliegue, un `printf` en un script. No hace falta ser un
+  agente soportado ni instalar un adaptador. Eso coloca a Orca **al lado de cmux, no al lado de
+  Conductor**: es el segundo de la lista por el que un tercero puede decir algo. Pero lo que cabe por
+  esa puerta es **una palabra del vocabulario que eligió Orca** (`working`, `idle`), y ni siquiera
+  está documentada como contrato: es una consecuencia de mirar el título.
+- **En su contra: para el agente que de verdad les importa no se fían de eso.** A Claude Code le
+  instalan un **hook de status line** que emite los OSC, y además **leen `~/.claude`** para pintar el
+  consumo y la cercanía al límite de tasa. Ir a buscar el estado al **disco privado del harness** es
+  D6 al revés: no lo declara quien trabaja, lo va a espiar la app. Funciona hoy, es un adaptador por
+  agente, y se rompe el día que Anthropic cambie ese formato — que no le debe nada a nadie.
+
+**Su CLI va en la dirección contraria a la nuestra.** `orca worktree create`, `terminal send`, `wait`,
+`split`, `goto`, `click`, `fill`, `artifacts share`: sirve para que un script **mande** en Orca, no
+para que un proceso de dentro **cuente** lo suyo. No hay comando para publicar estado. Sí tienen
+registro de skills y **MCP**, así que el canal agente → app de **D5** existe.
+
+**Tres cosas que dejan de diferenciarnos por su culpa, y están anotadas arriba:** multiplataforma de
+verdad (las tres, más móvil), hospedar cualquier agente CLI sin adaptador, y **enseñar coste y
+cercanía al límite** — que hasta ahora solo le atribuíamos a Conductor y sin verificar. Orca lo hace
+y se puede comprobar.
+
+**Lo que sigue en pie contra él, y son las mismas tres de siempre:** el cuerpo del panel es un
+semáforo de seis y lo elige la app, no hay forma de que el productor escriba una lista de pasos con
+sus marcas, y lo que publica un tercero es una palabra sin persistencia propia. Un CI que quiera
+decir «bloqueado esperando aprobación desde hace 40 minutos» solo puede poner `working`.
+
+**El suelo es el que ya medimos y descartamos.** Electron + `xterm.js` con WebGL, con medida propia
+en el anexo «Medido — 8 agosto» de [02-decisiones.md](02-decisiones.md) → D3: **escalado negativo**,
+7,1 MiB/s agregados con cuatro divisiones frente a 8,6 con una. A eso se le suma, según reseñas de
+terceros, **400-800 MiB de RAM en reposo** con unos pocos agentes, ~250 MB de instalador, y Linux
+**solo en AppImage**. Su producto esquiva ese techo porque abanica agentes que piensan; el nuestro no
+puede, y por eso D3 sigue decidida.
+
+**El riesgo, y es el mayor de toda la lista.** Es el único que junta **adopción masiva + MIT + un
+canal por el que ya entra cualquier proceso**. Lo que le falta para llevarse las patas 1 y 2 no es
+tecnología: es **decidir que el cuerpo del panel lo escriba el productor**. Eso cabe en un *pull
+request* de cualquiera, y con 3.612 forks la probabilidad de que a alguien se le ocurra no es baja.
+Lo que no pueden copiar barato es el suelo nativo: Electron es una decisión estructural suya, igual
+que el navegador lo es en Cline y en Superset.
+
+**Nota de nombres, para quien busque después:** hay otro proyecto llamado `orca` en GitHub
+(`orca-cli/orca`, un binario Go con cola de revisión unificada). No es este. El de aquí es
+[stablyai/orca](https://github.com/stablyai/orca), `onorca.dev`.
+
+### E8 — Herdr: el más cercano de toda la lista, y hay que decirlo sin adornos
+
+**No es un orquestador con tablero: es el sustrato.** Multiplexor escrito en **Rust**, TUI dentro de
+tu propio terminal, **Apache-2.0**, arquitectura **cliente-servidor** —el servidor es dueño de todo
+el estado y sobrevive a que te desconectes, así que los agentes siguen corriendo—, sesiones con
+nombre, adjuntar en remoto por SSH y worktrees envolviendo `git worktree`. Su lema es literal: *«the
+runtime your coding agents live on»*. Es tmux con conciencia de agentes, y por eso está aquí y no en
+la categoría D.
+
+Repositorio creado el **27 de marzo de 2026** — diez días después que Orca — y a 24 de agosto lleva
+**31.888 estrellas y 2.281 forks**, con empujes diarios. **Un solo binario para las tres
+plataformas**, Windows incluido con su propio ConPTY empaquetado.
+
+**Sus estados, y de dónde salen.** `idle`, `working`, `blocked` —más un `done` que aparece en el API
+y en la barra lateral y su propia documentación marca como raro—, con **acumulación hacia arriba**:
+agente → panel → pestaña → workspace, con prioridad `blocked > working > idle > done`. Un agente
+bloqueado en un workspace de diez pinta el workspace entero de bloqueado. La detección va en capas:
+
+1. **Procesos**: reconoce el binario en primer plano (`claude`, `codex`, `pi`…) y marca que ahí vive
+   un agente.
+2. **Heurísticas de pantalla**: sin integración instalada, contrasta **el recorte vivo del buffer de
+   abajo** contra reglas en TOML, mirando además el título del terminal y las secuencias OSC.
+3. **Integraciones**: hooks instalados en la configuración del agente que reportan estado semántico
+   por el socket, y **mandan sobre** lo que dijeron las heurísticas.
+
+**La capa 2 es exactamente lo que D6 prohíbe, y ellos mismos publican el precio.** Su documentación
+advierte que *«unusual new agent prompts may initially show as idle instead of blocked»* y que la
+detección de bloqueo es «deliberadamente estricta» para los agentes que solo se leen por pantalla. Es
+**la segunda evidencia ajena de D6**, después del bug de los 63 avisos de Superset, y esta vez
+escrita por el propio fabricante en su manual. Y tiene coste medible: la detección pollea cada panel
+**cada 300-500 ms** en su propia tarea, y las reseñas reportan CPU alta con muchos paneles
+desplazándose rápido, con «instala las integraciones» como remedio recomendado.
+
+**Y ahora la parte incómoda: su canal es el más parecido al nuestro que existe.** Esto no es un
+matiz, es el hallazgo de la ficha.
+
+```
+herdr pane report-agent "$HERDR_PANE_ID" \
+  --source custom:my-agent \
+  --agent my-agent \
+  --state working \
+  [--seq N] [--message "por qué está bloqueado"] \
+  [--agent-session-id …] [--agent-session-path …]
+```
+
+- **Inyectan identidad por división en el entorno** — `HERDR_PANE_ID`, `HERDR_BIN_PATH`. Es **D7**,
+  con otro nombre y el mismo propósito, y es el tercero de la lista que lo hace (Superset, Conductor,
+  Herdr).
+- **`--source custom:*` está documentado y abierto a cualquier proceso**, no solo a un agente
+  soportado. Un CI, un despliegue o un script propio entran por la puerta principal, sin adaptador y
+  sin pedirle permiso a nadie. **Esto es la pata 2 del proyecto, hecha por otro y publicada.**
+- **Resuelven dos problemas que nosotros todavía no tenemos resueltos:** `--source` da **autoridad
+  por fuente** —cada integración manda sobre lo suyo y la suelta al salir, así que dos productores
+  sobre la misma división no se pisan— y `--seq` es un número estrictamente creciente con el que
+  **descartan reportes que llegan tarde**. Nuestro `panel.json` es hoy un fichero por división donde
+  gana el último que escribe, sin autoridad ni orden. Ver «Cosas concretas para robar».
+- Su socket es **NDJSON con más de 70 métodos**, versión de protocolo negociada y esquema publicado
+  (`herdr api schema --json`), con eventos de suscripción como `pane.agent_status_changed`. El canal
+  agente → app de **D5** existe, y es el más completo de toda la lista.
+
+**Dónde para, que es donde seguimos solos. Tres cosas, y solo tres:**
+
+1. **El vocabulario del estado sigue siendo suyo.** El productor **declara** —eso lo cumplen— pero
+   solo puede decir una de cuatro palabras que eligió Herdr. Nuestra `phase` en texto libre y la
+   lista con seis marcas (`done`, `current`, `pending`, `wait`, `block`, `info`) no caben en ese
+   `--state`. El `--message` es una frase, y solo para explicar un bloqueo.
+2. **El cuerpo son pares clave-valor y son «solo para mostrar».** `report-metadata` añade *tokens* al
+   panel, declaradamente sin autoridad sobre el estado; el documentado es `summary`, que se pinta
+   como `$summary` en la fila de la barra lateral. **Escalares y mapas: no hay listas de pasos, ni
+   referencias, ni enlaces, ni coste, ni contexto restante como campos.** *(Un límite de 32 claves de
+   80 caracteres aparece en una guía de terceros y no en su documentación oficial: sin verificar.)*
+3. **No hay panel, hay una fila.** La barra lateral agrega todos los agentes de todos los workspaces
+   con un punto de color y una línea. Es la mejor respuesta de la lista a **«a qué división voy»** —
+   mejor que la nuestra, porque suma entre workspaces— y no intenta contestar **«por dónde va»**. Y
+   no puede: vive dentro de un TUI, donde el espacio disponible es una fila de texto, no la mitad
+   derecha de la consola.
+
+**Lo que además nos deja de diferenciar:** multiplataforma de verdad (un binario, Windows incluido),
+open source, hospedar cualquier agente sin adaptador, y **que el productor declare en vez de que la
+app deduzca**. Esa última llevaba en el discurso desde el principio y hoy tiene dueño.
+
+**Y lo que sigue siendo nuestro frente a él, con precisión:** su canal es **un socket local**
+(`/tmp/herdr-<sesión>.sock`). Un fichero en un directorio no lo es: un contenedor con el directorio
+montado, un CI en otra máquina escribiendo por un volumen compartido o un `scp` publican en
+`panel.json` sin poder hablar con ningún proceso nuestro. Ahí está la diferencia real entre «fuera de
+banda» y «fuera del proceso».
+
+**Un riesgo de seguridad que conviene anotar, y refuerza D7.** Su documentación **no describe
+autenticación ni control de acceso** sobre el socket: el acceso parece implícito para cualquier
+proceso local que lo alcance, y el `pane_id` viaja como parámetro. Si es así, cualquier proceso de la
+máquina puede reportar sobre **cualquier** panel, que es el mismo agujero que Superset documentó en
+su `HOOKS_INVESTIGATION.md`. *(No verificado ejecutándolo, y con Windows usan tuberías con nombre,
+que tienen otro modelo de permisos.)*
+
+**El riesgo de producto, y es el más alto de toda la lista junto con el de Orca.** La distancia entre
+`report-metadata` y nuestro contrato **es un campo, no una arquitectura**. Ya tienen identidad por
+división, socket con esquema, autoridad por fuente y número de secuencia; les falta aceptar un cuerpo
+estructurado en vez de pares de cadenas. Eso cabe en una release. Lo que no pueden hacer barato es el
+panel al lado de la consola: viven dentro de un terminal ajeno, y esa es una decisión estructural
+suya igual que Electron lo es en Orca y el navegador en Superset y en Cline.
+
+**Nota de nombres:** el repositorio se movió de `ogulcancelik/herdr` a
+[herdrdev/herdr](https://github.com/herdrdev/herdr) (el primero redirige); la documentación está en
+`herdr.dev`. No confundir con `wmux`, otro multiplexor de agentes.
+
 ---
 
 ## Lo que este panorama dice del proyecto
@@ -464,7 +657,7 @@ puede llegar en un *pull request* de cualquiera. El reloj corre más rápido de 
 
 ## En qué nos diferenciamos — agosto 2026
 
-El resumen de los seis análisis de este mes. Se escribe aquí porque la respuesta cambió: hace un mes
+El resumen de los ocho análisis de este mes. Se escribe aquí porque la respuesta cambió: hace un mes
 eran tres patas y hoy es una, y quien vuelva a esta pregunta dentro de tres meses necesita la versión
 de hoy, no la de la primera semana.
 
@@ -474,22 +667,27 @@ Esto es lo importante de asumir, porque estaba en el discurso y hoy tiene dueño
 
 | | Quién lo tiene ya |
 |---|---|
-| Terminal nativo, no navegador | Warp, cmux, Xirp |
-| Multiplataforma real | **Warp** |
-| Open source | Warp, cmux, Superset |
+| Terminal nativo, no navegador | Warp, cmux, Xirp, **Herdr** (es el propio multiplexor) |
+| Multiplataforma real | **Warp**, **Orca** (también móvil), **Herdr** (un binario, con Windows) |
+| Open source | Warp, cmux, Superset, **Orca** (MIT), **Herdr** (Apache-2.0) |
 | Un worktree por agente | **todos** |
-| Hospedar cualquier agente CLI | **cmux** (sin adaptadores), Warp (cinco) |
+| Hospedar cualquier agente CLI | **cmux**, **Orca** y **Herdr** (sin adaptadores), Warp (cinco) |
 | Avisar cuando un agente espera | **todos** |
-| Coste, tokens, contexto restante | Conductor |
-| Canal para pilotar la app desde el agente | Superset y Xirp (MCP), cmux (socket) |
-| Que cualquier proceso pueda publicar algo | **cmux** (OSC 777/99) |
+| Coste, tokens, contexto restante | Conductor (sin verificar), **Orca** (verificado: lee `~/.claude`) |
+| Canal para pilotar la app desde el agente | Superset y Xirp (MCP), cmux (socket), Orca (CLI + MCP), **Herdr** (socket, 70+ métodos) |
+| Que cualquier proceso pueda publicar algo | **cmux** (OSC 777/99), Orca (título OSC, de facto), **Herdr** (`--source custom:*`, documentado) |
+| **Que lo declare quien trabaja en vez de deducirlo la app** | **Herdr** (su capa de hooks manda sobre las heurísticas) |
 
-Nueve cosas. Ninguna sirve ya para explicar el proyecto en treinta segundos.
+Diez cosas. Ninguna sirve ya para explicar el proyecto en treinta segundos, y la última —que llevaba
+en el discurso desde el principio— cayó en agosto. **De las diez, Orca tiene seis y Herdr siete.**
+Ninguno de los dos tiene la que falta: **qué cabe por ese canal.**
 
 ### Lo que sí queda, y son tres
 
-**1. El cuerpo del panel lo decide quien trabaja, y es estructurado.** Los cuatro primeros tienen
-estado rico con vocabulario que elige la app. cmux abre el canal pero solo transporta una línea.
+**1. El cuerpo del panel lo decide quien trabaja, y es estructurado.** Los demás tienen estado rico
+con vocabulario que elige la app. cmux abre el canal pero solo transporta una línea, Orca lo abre sin
+querer para transportar una palabra suya, y **Herdr, que es el que más lejos llega, transporta cuatro
+estados suyos más pares clave-valor «solo para mostrar»**.
 Nadie tiene lo de en medio: **una lista con marcas** (`done`, `current`, `pending`, `wait`, `block`,
 `info`), referencias, enlaces y una `phase` en texto libre, escrita por el productor en su propio
 vocabulario, sin que nadie haya tenido que diseñar antes ese campo.
@@ -499,8 +697,15 @@ vocabulario, sin que nadie haya tenido que diseñar antes ese campo.
 viva dentro de ese PTY» (cmux, por OSC). Un fichero que escribe quien sea desde donde sea: un agente,
 un CI en otra máquina, un despliegue, un cron, un script propio.
 
+> **Media pata, desde agosto de 2026.** Herdr documenta `--source custom:*` y admite explícitamente a
+> un productor que no sea un agente. Lo que queda nuestro de este punto es **el medio**: su canal es
+> un socket local, y un fichero no lo es. Un contenedor con el directorio montado, un CI en otra
+> máquina escribiendo por un volumen compartido o un `scp` publican sin poder hablar con ningún
+> proceso de la nuestra.
+
 **3. Es estado persistente, no un evento.** Sigue ahí cuando vuelves, y **sabe caducar**
-(`updated_at` + `stale_after_minutes`). La diferencia práctica: los seis te dicen *a qué división ir
+(`updated_at` + `stale_after_minutes`). Herdr persiste y sobrevive al reinicio, pero **nadie declara
+cuándo su estado deja de valer**. La diferencia práctica: los otros siete te dicen *a qué división ir
 ahora*; este te dice *por dónde va cada una* cuando llegas.
 
 ### Dicho en una frase
@@ -510,16 +715,22 @@ ahora*; este te dice *por dónde va cada una* cuando llegas.
 
 ### La posición real en el mapa
 
-Los dos rivales serios tienen mitades distintas de esta casilla, y ninguno las dos:
+Los rivales serios tienen mitades distintas de esta casilla, y ninguno las dos:
 
 | | Tiene | Le falta |
 |---|---|---|
 | **Warp** (E5) | nativo + multiplataforma + abierto | **el contrato** |
 | **cmux** (E6) | nativo + abierto + canal abierto de una línea | **multiplataforma** y el contrato estructurado |
+| **Orca** (E7) | multiplataforma + MIT + canal abierto de facto + **la adopción** | **el suelo nativo** y el contrato estructurado |
+| **Herdr** (E8) | nativo + multiplataforma + abierto + **canal documentado con identidad por división** | **el cuerpo del contrato** y el sitio donde pintarlo |
 
 La combinación completa —nativo, multiplataforma, abierto **y** contrato estructurado— sigue vacía.
-Pero es un hueco **de una decisión de diseño de ancho, no de tecnología**, y los dos que lo rodean son
-open source, así que la idea puede llegarles en un *pull request* de cualquiera.
+Pero es un hueco **de una decisión de diseño de ancho, no de tecnología**, y los cuatro que lo rodean
+son open source, así que la idea puede llegarles en un *pull request* de cualquiera. **Con Orca y
+Herdr eso deja de ser hipotético:** casi 6.000 forks entre los dos y empujes diarios es mucha gente
+mirando el mismo problema, uno con el canal abierto por accidente y el otro con el canal abierto a
+propósito, con identidad por división y esquema publicado. **A Herdr le falta un campo; a nosotros nos
+falta el producto.** Esa es la carrera, dicha en una línea.
 
 **Consecuencia para priorizar, y es la razón de que este resumen esté escrito:** el contrato no es la
 última pata que implementar cuando el terminal esté pulido. Es **la única que sostiene el proyecto**,
@@ -544,4 +755,6 @@ y todo lo que se haga antes que ella se hace sabiendo que no diferencia.
 | **Conductor** | **Reservar un rango de puertos por división** (`CONDUCTOR_PORT` a `+9`) en vez de detectar en qué puerto ha levantado algo. Encaja con `PANEL_ID`/`PANEL_DIR` de D7 y le quita a la app un trabajo de deducción, que es justo lo que D6 prohíbe |
 | **Cline Kanban** | Cadenas de dependencias entre tareas: al terminar una arranca sola la siguiente, sin escribir un script (ver «Ideas sin fase» en [05-roadmap.md](05-roadmap.md)) |
 | **Xirp** | **Notificar** al pasar a «esperando entrada», no solo pintarlo: resuelve «a qué división voy ahora» sin tener las cuatro a la vista (ver «Pendiente» en [04-contrato-panel.md](04-contrato-panel.md)) |
+| **Orca** | Un **hook de status line** como forma de que un agente que no sabe nada de ti emita estado sin tocar su código: se lo instalas en su configuración y él pinta el título. Vale para cualquier harness que tenga línea de estado configurable, y no obliga a mantener un wrapper por agente |
+| **Herdr** | **Autoridad por fuente y número de secuencia.** `--source custom:<nombre>` identifica a cada productor, le da mando sobre lo suyo y lo suelta al salir; `--seq` es un contador estrictamente creciente con el que **descartan reportes que llegan tarde**. Nuestro `panel.json` es un fichero por división donde gana el último que escribe: con dos productores sobre la misma división —un agente y el CI que lanzó— o con escrituras desordenadas, no hay forma de saber cuál vale. **Es el hueco más concreto que este panorama le encuentra al contrato.** Y la segunda: **acumular el estado hacia arriba** (agente → panel → pestaña → workspace, con `blocked` ganando a todo), que es lo que hace que su barra lateral conteste «a qué división voy» mejor que la nuestra |
 | **Superset** | Navegador integrado con **detección de puertos por división** — y el productor ya sabe en qué puerto levantó su servidor, así que puede publicarlo. Agentes lanzados en cron: un `panel.json` con productor programado no pide nada nuevo al contrato. Y **distinguir dos esperas**: un permiso que se concede en un segundo (`PermissionRequest`) no es una pregunta que exige pensar (`PendingQuestion`); nuestro contrato tiene un solo `wait` |

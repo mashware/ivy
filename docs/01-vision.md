@@ -13,7 +13,9 @@ Ventana
 ```
 
 El panel no lo escribe la app. Lo escribe **quien esté haciendo el trabajo**, mediante un
-fichero con formato definido. La app solo lo pinta.
+contrato abierto. La app solo lo pinta. Hoy ese contrato llega por un fichero, pero **el transporte
+no es el contrato** ([02-decisiones.md](02-decisiones.md) → D17): el documento es lo que se versiona,
+y puede llegar también por MCP o por el propio terminal.
 
 ## Para quién
 
@@ -27,18 +29,21 @@ Gente que trabaja con varios agentes de terminal en paralelo y necesita saber, d
 
 ## Qué lo diferencia
 
-Contrastado contra seis competidores en agosto de 2026
+Contrastado contra ocho competidores en agosto de 2026
 ([07-panorama.md](07-panorama.md) → «En qué nos diferenciamos»). Queda **una** cosa, no varias:
 
 **El cuerpo del panel lo decide quien trabaja, y es estado estructurado y persistente.** Los
-orquestadores completos —Xirp, Superset, Conductor, Warp— tienen estado rico, pero con un vocabulario
-que elige la app: tres constantes, cuatro eventos, cinco estados, unas métricas. cmux sí abre el canal
-—cualquier proceso le emite OSC 777/99— pero por ahí solo caben un título y un cuerpo que **se borran
-al leerse**. Nadie tiene lo de en medio: una lista con marcas, referencias y enlaces, escrita en el
-vocabulario del productor, que sigue ahí cuando vuelves y que sabe caducar. Eso es lo que permite
-cuatro divisiones con cuatro productores distintos y una vista global que los resume.
+orquestadores completos —Xirp, Superset, Conductor, Warp, Orca— tienen estado rico, pero con un
+vocabulario que elige la app: tres constantes, cuatro eventos, cinco estados, seis indicadores, unas
+métricas. cmux sí abre el canal —cualquier proceso le emite OSC 777/99— pero por ahí solo caben un
+título y un cuerpo que **se borran al leerse**. **Y Herdr, que es el que más lejos llega, deja
+publicar a cualquiera —`--source custom:*`, documentado— pero lo que cabe son cuatro estados suyos y
+pares clave-valor «solo para mostrar».** Nadie tiene lo de en medio: una lista con marcas,
+referencias y enlaces, escrita en el vocabulario del productor, que sigue ahí cuando vuelves y que
+sabe caducar. Eso es lo que permite cuatro divisiones con cuatro productores distintos y una vista
+global que los resume.
 
-**Lo que ya NO diferencia, y estaba escrito aquí: preservar las suscripciones.** Lo hacen los seis
+**Lo que ya NO diferencia, y estaba escrito aquí: preservar las suscripciones.** Lo hacen los ocho
 —todos lanzan el binario oficial del agente y ninguno cobra API aparte—. Sigue siendo la decisión
 correcta ([02-decisiones.md](02-decisiones.md) → D4) y una condición para que esto se adopte, pero no
 es un argumento que distinga nada.
@@ -64,24 +69,24 @@ es un argumento que distinga nada.
 
 ## ¿Merece la pena? — valoración de agosto de 2026
 
-Escrita después de analizar seis competidores. Se guarda porque la pregunta va a volver, y porque
+Escrita después de analizar ocho competidores. Se guarda porque la pregunta va a volver, y porque
 tiene dos mitades con respuestas distintas que conviene no confundir.
 
 ### Cuánto tardarían en copiarlo: días
 
 Leer un JSON de un directorio conocido y pintar una lista con marcas no tiene dificultad técnica
-ninguna. Cualquiera de los seis lo tiene funcionando en una tarde y pulido en una semana. **No hay
+ninguna. Cualquiera de los ocho lo tiene funcionando en una tarde y pulido en una semana. **No hay
 foso técnico, y creerse lo contrario sería el peor error de este proyecto.**
 
 ### Por qué ninguno lo ha hecho ya
 
-Los seis han tenido la oportunidad. Warp lleva años y su lista de agentes está **compilada en el
-binario** como un `enum`. Conductor no tiene ni una vía de vuelta. cmux, que es el que más cerca
-está, abrió el canal y lo dejó en título, subtítulo y cuerpo. No es incapacidad: es que su producto
-empuja al contrario.
+Los ocho han tenido la oportunidad. Warp lleva años y su lista de agentes está **compilada en el
+binario** como un `enum`. Conductor no tiene ni una vía de vuelta. Orca lee el título del terminal, y
+por ahí ya le entra cualquiera, pero solo para decir una palabra suya. No es incapacidad: es que su
+producto empuja al contrario.
 
-1. **Un contrato abierto degrada su propuesta.** Los seis venden lo mismo: *«nosotros entendemos a tu
-   agente»*. Un formato donde cualquiera publica lo que quiera los convierte en **un visor de ficheros
+1. **Un contrato abierto degrada su propuesta.** Los que venden producto —Warp, Xirp, Superset,
+   Conductor, Orca— venden lo mismo: *«nosotros entendemos a tu agente»*. Un formato donde cualquiera publica lo que quiera los convierte en **un visor de ficheros
    ajenos**. Lo primero se vende; lo segundo es infraestructura, y la infraestructura la regala quien
    no tiene que monetizarla.
 2. **Un contrato es un compromiso, no una feature.** Hay que versionarlo y no romperlo nunca. Un
@@ -94,11 +99,19 @@ empuja al contrario.
 **La ventaja no es que no puedan: es que no quieren.** Eso aguanta más que una ventaja técnica, y
 mucho menos que una patente.
 
+> **Y hay un contraejemplo que hay que mirar de frente: Herdr.** No vende «entendemos a tu agente»,
+> vende ser el sustrato donde corren; regala la infraestructura porque es su tesis, no su coste; y
+> **ya abrió el canal a productores que no son agentes, documentado**. Los tres frenos de arriba no
+> le aplican a él. Lo que le frena es otra cosa, y es estructural: **vive dentro de un TUI, donde el
+> sitio donde pintar un cuerpo es una fila de texto**. Por eso su barra lateral contesta «a qué
+> división voy» mejor que la nuestra y no intenta contestar «por dónde va». Mover eso le cuesta el
+> producto entero, igual que a Orca le costaría salir de Electron.
+
 ### El riesgo real, y no es el copiado
 
 Que la necesidad **se resuelva por otro camino**: que los harnesses publiquen progreso estructurado
 de forma nativa. Si Claude Code, Codex y compañía empiezan a emitir paso actual, plan y bloqueo por
-sus propios hooks, los seis tendrán el 80 % del contenido gratis por el stream, y este contrato queda
+sus propios hooks, los demás tendrán el 80 % del contenido gratis por el stream, y este contrato queda
 para el 20 % restante — el CI, el despliegue, el script propio.
 
 Ese escenario es **más probable** que «Warp lee `panel.json`». Y la defensa no es técnica: es tener
@@ -106,13 +119,16 @@ productores escribiendo antes de que ocurra.
 
 ### Las dos preguntas
 
-**Para uso propio: sí, con margen.** Los seis productos completos no hacen esto —verificado producto
-a producto, no intuido— y tres de ellos ni corren en Linux. F1.0 a F1.3 están cerrados, el terminal se
+**Para uso propio: sí, con margen.** Los ocho productos completos no hacen esto —verificado producto
+a producto, no intuido—. El argumento de que «tres ni corren en Linux» **ya no vale**: Orca y Herdr
+corren en las tres plataformas, son gratis y están muy pulidos. Lo que queda es el cuerpo del panel,
+no la disponibilidad. F1.0 a F1.3 están cerrados, el terminal se
 usa y el prototipo del panel funciona: queda menos por delante de lo que ya se lleva hecho.
 
 **Como producto: frágil, y hay que decirlo.** Competir con Warp —multiplataforma, open source, 64k
-estrellas— apoyándose en una decisión de diseño copiable en una tarde no es imposible, pero no es un
-plan de negocio. Que la diferenciación tenga que ser evidente en treinta segundos ya estaba escrito en
+estrellas—, con Orca —MIT, 52k, empujes diarios— y con Herdr —Apache-2.0, 32k en cinco meses—
+apoyándose en una decisión de diseño copiable en una tarde no es imposible, pero no es un plan de
+negocio. Que la diferenciación tenga que ser evidente en treinta segundos ya estaba escrito en
 el panorama antes de esta ronda de análisis; sigue valiendo, y ahora con menos margen.
 
 ### Lo único que puede convertirse en foso
@@ -126,7 +142,7 @@ mano; esto tiene uno que publica por su voluntad. Es poco, pero es de otra natur
 
 ### La prueba que queda pendiente, y es la que decide
 
-No más análisis de competencia — con seis está contestado. **Usar el panel con contenido real una
+No más análisis de competencia — con ocho está contestado. **Usar el panel con contenido real una
 semana de trabajo y ver si cambia el día.** No una demostración: uso propio, con `flow` publicando.
 
 - Si lo cambia, la prioridad pasa a que escriban más productores, no a pulir el terminal.
@@ -135,5 +151,6 @@ semana de trabajo y ver si cambia el día.** No una demostración: uso propio, c
 
 Lo que **no** vale es seguir puliendo el terminal esperando que el diferenciador se aclare solo. No se
 va a aclarar más de lo que está hoy, y cada mes que pasa es un mes en que la idea puede aparecérsele a
-otro — que es exactamente lo que ha ocurrido seis veces en agosto de 2026 con otras piezas de esta
-propuesta.
+otro — que es exactamente lo que ha ocurrido **diez** veces en agosto de 2026 con otras piezas de esta
+propuesta, la última de ellas —que el estado lo declare quien trabaja en vez de deducirlo la app— con
+Herdr.

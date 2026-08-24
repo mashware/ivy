@@ -37,6 +37,8 @@ divisiones que quieras, colocadas como quieras.
 paralelo como quepan. **Arrastrar una división y soltarla en otro sitio** cuando el trabajo
 cambia de forma — lo que no da ningún terminal actual y lo que originó este proyecto. Copiar,
 pegar, buscar, subir por el historial. Plegar el panel, o darle el ancho que quieras. Cerrar y encontrártelo como lo dejaste.
+**Y cuando algo te reclama en una pestaña que no estás mirando, la ficha de esa pestaña te lo dice** —
+si te espera a ti, si está atascada, o si terminó y nadie lo ha visto.
 
 **Lo que falta:** el panel sigue siendo de solo lectura. Cuenta cosas, no puedes hacer nada
 desde él.
@@ -63,8 +65,14 @@ sitio donde trabajar. Y el trabajo deja de ser solo el de los agentes: **cualqui
 que espera una decisión tuya; debajo lo bloqueado; al final lo que avanza solo.
 
 **Lo que puedes hacer:** empezar el día ahí. Con ocho tareas repartidas en cuatro pestañas el
-problema deja de ser hacerlas y pasa a ser saber a cuál ir. **Ninguna herramienta del panorama
-tiene esto**: todas enseñan las tareas, ninguna las ordena por lo que te reclama.
+problema deja de ser hacerlas y pasa a ser saber a cuál ir.
+
+> **Corregido en agosto de 2026.** Aquí decía «ninguna herramienta del panorama tiene esto: todas
+> enseñan las tareas, ninguna las ordena por lo que te reclama», y **dejó de ser cierto**: la barra
+> lateral de Herdr acumula el estado de agente a panel, a pestaña y a workspace, y ordena por quién
+> necesita atención ([07-panorama.md](07-panorama.md) → E8). Lo que sigue sin tener nadie no es el
+> **orden**, es el **cuerpo**: por qué está atascada, en qué paso va y cuánto le queda. La lista de
+> esta fase se ordena con `attention` (D18) y se lee con lo que publique el productor.
 
 **Por qué está aparcada:** solo funciona si el estado que llega es fiable, y eso se sabe después
 de usar la Fase 3 un tiempo. Antes es maquetar una lista bonita con datos en los que no confías.
@@ -224,6 +232,14 @@ Lo que convierte el prototipo en algo que se usa a diario.
 | **F2.5** | Guardar y restaurar la disposición al abrir |
 | **F2.6** | Scrollback, selección y **copiar** — pegar se adelantó fuera de fase ([#46](https://github.com/mashware/agent-terminal/issues/46)), porque no necesita nada de lo demás y su ausencia hacía que la aplicación se sintiera rota. Ver D11 |
 | **F2.7** | Primera compilación y prueba real en **macOS y Windows** |
+| **F2.8** | **El panel dice cuándo te reclama, y la pestaña lo acumula** — el campo `attention` del contrato (**D18**), el indicador en la ficha de la pestaña, y nada más: el aviso del sistema se queda fuera hasta que el campo tenga productores |
+
+**F2.8 se hace antes que F2.6 y F2.7, y el número no se recicla.** Los identificadores de hito viven
+en commits, decisiones y en el almacén de conocimiento, así que renumerar sale más caro que aceptar
+que la tabla no esté en orden. La razón de adelantarlo: es lo único de la Fase 2 que toca **la pata
+que diferencia**, y el panorama de agosto dejó a dos competidores a un solo campo de distancia
+([07-panorama.md](07-panorama.md) → E7 y E8). Scrollback y portabilidad son terminal, y el terminal
+ya no es lo que hay que defender.
 
 F2.3 es la razón de ser de la fase: es la carencia que llevó a plantearse esto, y es la que
 justifica no haber cogido un multiplexor ya hecho.

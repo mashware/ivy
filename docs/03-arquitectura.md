@@ -22,16 +22,24 @@
 
 ## Los tres canales
 
-### 1. Estado — `panel.json` (productor → app)
+### 1. Estado — el documento de panel (productor → app)
 
-Un fichero por división, en `$PANEL_DIR/panel.json`. Lo escribe quien hace el trabajo,
-machacándolo entero. La app lo observa y repinta al cambiar.
+Lo publica quien hace el trabajo. **La fuente de verdad es el estado que la app tiene por división**,
+y los transportes lo alimentan ([02-decisiones.md](02-decisiones.md) → D17):
+
+| Transporte | Estado | Para quién |
+|---|---|---|
+| **Fichero** — `$PANEL_DIR/panel.json`, machacado entero, observado por la app | funcionando | todo el mundo: el listón de entrada es cero |
+| **MCP** — `panel_set` entrega el documento sin escribir el fichero | Fase 3 | el agente que además pilota la app |
+| **OSC por el PTY** | candidato, tras F2.7 | el que está tras un `ssh` o en un contenedor sin volumen |
 
 Especificación completa: [04-contrato-panel.md](04-contrato-panel.md).
 
-**Por qué fichero y no socket:** aislamiento de fallos (si el productor muere, el panel sigue
-mostrando el último estado bueno), inspeccionable con `cat`, y funciona a través de SSH sin
-protocolo propio.
+**Por qué el fichero es el de serie:** es el único donde el productor más tonto posible publica sin
+escribir código —`cat >` desde un script— y el único donde el estado sobrevive a que el productor
+muera sin que nadie programe nada. Además se lee con `cat` y cruza un volumen montado sin protocolo
+propio. **Lo que no da:** no sabe quién escribe, y no le dice a quien publica que su documento estaba
+roto.
 
 ### 2. Control — MCP (agente → app)
 
@@ -79,7 +87,7 @@ Se rompe en cada versión del agente. Para eso está el canal 1.
 |---|---|
 | `actions` del panel ejecutan comandos en el shell | El comando debe verse antes de ejecutarse; `send` es texto plano sin interpolación ni plantillas |
 | Un `panel.json` de origen no confiable (repo clonado, contenedor) | Tratar el fichero como no confiable; nunca ejecutar nada sin confirmación visible |
-| Un agente escribiendo en la división de otro | El servidor MCP acota por `PANEL_ID` |
+| Un agente escribiendo en la división de otro | El servidor MCP acota por `PANEL_ID`. **Por el fichero no hay acotado**: quien pueda escribir en el directorio es el productor (D17) |
 | Leer el buffer y mandarlo a un modelo | Exfiltra lo que haya en pantalla: tokens, claves, respuestas de API. La selección de qué se envía debe ser explícita, nunca automática |
 | Definir `ANTHROPIC_API_KEY` al lanzar un panel | Prohibido: cambiaría la facturación del usuario (ver D4) |
 | Secretos en el panel | El panel es texto persistido; no es sitio para credenciales |

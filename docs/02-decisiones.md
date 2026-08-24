@@ -607,7 +607,7 @@ sesión de la suscripción, pero hay issues abiertos reportando facturación de 
 | Dirección | Canal | Para qué |
 |---|---|---|
 | Agente → app | **MCP** | Crear divisiones, publicar estado, leer salida |
-| Productor → app | **`panel.json`** | Estado que publica cualquiera, agente o no |
+| Productor → app | **el documento de panel** | Estado que publica cualquiera, agente o no. Hoy llega por fichero; el transporte no es el contrato (**D17**) |
 | App → agente | **PTY** | Botones, y todo lo que no hable MCP |
 
 **Por qué MCP:** lo hablan Claude Code, opencode, Gemini CLI y Codex — se escribe el servidor
@@ -1741,3 +1741,153 @@ diga otra cosa.
   nueva por consola restaurada, son tantos directorios vacíos como consolas por arranque. No se mitiga
   aquí porque en la rama normal no hay nada que mitigar, y una limpieza propia sería un mecanismo sin
   escenario en el 99 % de los casos.
+
+---
+
+## D17 — El contrato es el documento, no el fichero: la fuente de verdad es el estado de la app
+
+**Qué se decidió.** `panel.json` deja de ser **la** definición del contrato y pasa a ser **un
+transporte** de un documento que también puede llegar por otros. Tres partes:
+
+1. **El contrato es el documento de panel** — `phase`, `lines`, marcas, estilos, caducidad. Eso es lo
+   que se versiona y lo que nadie puede romper. Dónde vive y cómo viaja es aparte.
+2. **La fuente de verdad es el estado que la app tiene por división**, no el fichero. El fichero
+   alimenta ese estado; no lo es.
+3. **Cada entrega trae una fuente y un orden.** Quién publica (`fichero`, `mcp`, y lo que venga) y un
+   número creciente por fuente. Dos productores sobre la misma división dejan de pisarse por azar.
+
+**Por qué, y la razón no es teórica.** El plan ya tenía **dos escritores** del mismo sitio: el
+productor por fichero y el agente por `panel_set` de MCP en la Fase 3 (**D5**). Sin fuente ni orden,
+quien manda es quien escribió el último, que es la peor forma posible de decidirlo — depende de la
+planificación del sistema operativo. El síntoma no aparece hoy porque solo hay un productor real, y
+por eso conviene decidirlo ahora y no cuando muerda.
+
+**Y una razón de origen, que conviene admitir.** El primer productor fue un agente que escribe
+ficheros, y para eso el fichero es imbatible. Las tres razones que justificaban elegirlo —aislamiento
+de fallos, se lee con `cat`, cruza SSH sin protocolo propio— siguen siendo buenas, pero **ninguna
+dice por qué tiene que ser el único**. La decisión del medio se tomó con un solo tipo de productor a
+la vista.
+
+**Los candidatos, medidos por lo único que decide: qué tiene que hacer el productor para publicar.**
+
+| | Fichero | MCP | Socket | OSC por el PTY | API HTTP |
+|---|---|---|---|---|---|
+| Publicar desde un script | `cat >` | no | necesita cliente | `printf` | `curl` + puerto |
+| Publicar desde un agente | ya lo hace | sí, si habla MCP | no | sí | sí |
+| Cruza contenedor / SSH | solo con volumen montado | no | no | **gratis, sin configurar nada** | con red y puerto |
+| Sobrevive al productor | **gratis** | si la app lo guarda | si la app lo guarda | si la app lo guarda | si la app lo guarda |
+| Sabe quién escribe | **no, nadie** | sí, por sesión | sí, credenciales del proceso | **sí, por construcción: es su PTY** | solo si lo autenticas |
+| Avisa al productor de que su documento está roto | **no** | sí | sí | no | sí |
+| Superficie de ataque | quien escriba en el directorio | acotado por `PANEL_ID` | quien alcance el socket | **un `cat` de un fichero con secuencias publica lo que quiera** | cualquiera en la red |
+
+**Lo que se decide con esa tabla:**
+
+- **El fichero se queda de serie**, y no por inercia: es el único donde el productor más tonto
+  posible publica sin escribir código, y el único donde el estado sobrevive a que el productor muera
+  sin que nadie programe nada. Para un contrato cuyo valor depende de que alguien publique, el listón
+  de entrada es la propiedad más importante que tiene.
+- **MCP entra en la Fase 3 entregando el mismo documento al estado de la app, sin escribir el
+  fichero.** Escribirlo sería que la app se detecte a sí misma por el vigilante, un rodeo con un
+  fotograma de retraso y sin ninguna ventaja.
+- **OSC por el PTY queda como candidato a evaluar después de F2.7**, y es el que tapa el agujero que
+  hoy no tapa nadie: un CI dentro de un `ssh` dentro de la división, sin volumen montado ni puerto.
+  Es además **el único transporte donde el acotado por división no se puede falsear**, porque llega
+  por el PTY de esa división y no por un identificador que el emisor elige. Su límite lo enseña cmux:
+  por ahí caben avisos, no cuerpos grandes ([07-panorama.md](07-panorama.md) → E6).
+
+**Lo que se descartó, y por qué:**
+
+- **La API HTTP.** Todo lo que aporta lo cubre otro transporte, y añade puerto, autenticación,
+  descubrimiento y una superficie de red que la tabla de seguridad de
+  [03-arquitectura.md](03-arquitectura.md) hoy no tiene. Es la única de las cinco que convierte «quien
+  escriba en tu directorio» en «cualquiera que alcance tu máquina».
+- **El socket local como transporte principal.** Es lo que hace Herdr, y su ventaja real —saber qué
+  proceso escribe— no compensa perder al productor que no puede hablarlo: un contenedor, un CI en otra
+  máquina, un `scp`. Ahí está la diferencia entre «fuera de banda» y «fuera del proceso»
+  ([07-panorama.md](07-panorama.md) → E8).
+- **Sustituir el fichero en vez de acompañarlo.** Cualquier transporte que exija un cliente sube el
+  listón de entrada, y el listón de entrada es lo que hace que el formato pueda tener productores —
+  que es la única cosa que puede convertirse en foso ([01-vision.md](01-vision.md)).
+- **Dejar la fuente de verdad en el fichero y que MCP escriba ahí.** Mantiene una sola fuente y se
+  sigue leyendo con `cat`, pero le da al agente permiso de escritura sobre el fichero de su división
+  por un camino que no pasa por el acotado de `PANEL_ID`, y hace que el estado de la app dependa de
+  que el sistema de ficheros avise a tiempo. La inspeccionabilidad se conserva de otra forma: el
+  fichero sigue siendo el transporte de serie y sigue estando ahí.
+
+**Lo que esto NO cambia, y conviene decirlo para que nadie lo reabra por error:**
+
+- **D6 sigue intacta.** Esto es sobre **por dónde llega** el estado, no sobre quién lo decide. Lo
+  sigue declarando quien trabaja, en su vocabulario.
+- **El documento no cambia de forma.** Un `panel.json` escrito hoy vale igual mañana.
+- **El vigilante no era el problema.** Se comprobó antes de escribir esto: la app usa **un solo
+  vigilante** para todos los directorios, no uno por división, y los límites del sistema en la máquina
+  de desarrollo son 1.024 instancias y 524.288 rutas. Vigilar ficheros no escala mal aquí, y ese
+  argumento no debe usarse contra el fichero.
+
+**Consecuencias, y una es trabajo pendiente:** [04-contrato-panel.md](04-contrato-panel.md) se parte
+en dos —el documento y los transportes—, la tabla de canales de **D5** deja de nombrar `panel.json`
+como si fuera el canal, y **queda por decidir cómo se expresan la fuente y el orden en el propio
+documento**: Herdr lo resuelve con `--source` y un `--seq` estrictamente creciente, y aquí no hay
+todavía ni uno ni otro. No se decide en esta entrada porque con un solo transporte vivo sería
+inventar la forma antes de tener el segundo caso delante.
+
+---
+
+## D18 — El productor declara si su división reclama, y la app no lo deduce del cuerpo
+
+**Qué se decidió.** El documento de panel gana un campo opcional, `attention`, con tres valores:
+`wait`, `block`, `done`. Ausente significa que esa división no reclama nada. Lo escribe el productor.
+
+| Valor | Qué dice | Ejemplo |
+|---|---|---|
+| `wait` | **te espera a ti**: una pregunta, un permiso, una decisión | «¿apruebo el diseño?» |
+| `block` | atascada por algo que no eres tú | «esperando que el contrato de otro servicio exista» |
+| `done` | terminó y nadie lo ha mirado | el ciclo acabó y el diff sigue sin revisar |
+
+**Y la app lo acumula hacia arriba:** división → pestaña, con `wait` ganando a `block` y `block` a
+`done`. `wait` va primero porque **es lo único que se desatasca contigo delante ahora mismo**; una
+división bloqueada por un tercero puede seguir esperando cinco minutos más.
+
+**Por qué hace falta un campo y no vale el cuerpo que ya existe.** El contrato sabe expresar
+«esperando» y «bloqueado» desde el principio — `mark: wait`, `mark: block` — pero eso son **líneas del
+cuerpo**, y el cuerpo es libre por diseño. Para pintar el indicador de una pestaña o disparar un aviso
+a partir de ahí, la app tendría que **leer el cuerpo y decidir qué significa**: que una línea con
+`block` en el medio de un resumen quiere decir que la división entera reclama. Eso es la app
+decidiendo qué significa el trabajo de otro, o sea **D6 rota por dentro**, que es la peor forma de
+romperla: sin que ningún documento diga que se rompió.
+
+**Por qué esto no contradice la regla del cuerpo libre.** El campo no nombra una métrica ni un
+vocabulario de dominio: nombra **la única pregunta que la app necesita responder para navegar** —
+¿tengo que ir ahí?—. Sigue sin haber campos de coste, de contexto ni de progreso, y `phase` sigue
+siendo texto libre que se pinta literal. La app entiende de navegación; la semántica sigue siendo
+del productor.
+
+**Y sin el campo la app no inventa nada.** Un productor que no publique `attention` tiene el mismo
+panel que hoy y su pestaña no se marca. No hay valor por defecto deducido del cuerpo, ni de la
+`phase`, ni de la actividad de la consola. **Callar es callar**, no «esto no reclama porque no lo
+parece».
+
+**Por qué ahora y no en la Fase 4.** Porque desbloquea tres cosas que están escritas como pendientes
+en tres documentos distintos y todas esperaban a esta decisión: el aviso al pasar a «esperando»
+([04-contrato-panel.md](04-contrato-panel.md) → Pendiente), el indicador de una pestaña que no miras
+—hoy lo que corre en una pestaña de fondo no se anuncia de ninguna forma—, y la vista resumen de la
+Fase 4, que ordena por esto mismo. Y porque la afirmación de que **nadie más ordena por lo que te
+reclama dejó de ser cierta en agosto de 2026**: Herdr acumula agente → panel → pestaña → workspace y
+su barra lateral contesta esa pregunta mejor que la nuestra ([07-panorama.md](07-panorama.md) → E8).
+
+**Lo que se descartó, y por qué:**
+
+- **Un enum de estado de trabajo tipo `idle` / `working` / `blocked`** — lo que tienen Herdr, Xirp,
+  Superset y Warp. Describe **qué hace el programa**, y eso o lo deduce la app (D6) o lo declara un
+  harness que no conoce la pregunta (**D6**, «el nivel 2 reinterpretado falla igual que adivinar»).
+  `attention` no pregunta qué hace: pregunta si te reclama, que es lo que la app necesita para
+  navegar y lo único que el productor puede contestar sin equivocarse.
+- **Deducirlo de la presencia de un `mark: wait` en el cuerpo.** Es lo barato y es lo que rompe D6 por
+  dentro. Además sería frágil de la forma más tonta: una línea histórica —«esperé aprobación el
+  martes», con `mark: wait`— marcaría la pestaña para siempre.
+- **Un campo de urgencia numérica.** Tres valores contestan la pregunta; un número obliga a cada
+  productor a calibrar contra los demás, y nadie puede hacer eso porque nadie ve los otros paneles.
+- **Que el aviso del sistema lo dispare la app por su cuenta al aparecer un `wait`.** Se deja para
+  cuando el campo tenga productores: notificar es interrumpir, y una interrupción falsa cuesta mucho
+  más que un indicador falso. El indicador entra ahora; el aviso, cuando se sepa que el campo se
+  publica bien.
