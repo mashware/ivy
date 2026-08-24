@@ -578,6 +578,39 @@ pub struct EnPuntos {
     pub alto: f32,
 }
 
+/// Lo que costó abrir la ventana con la disposición que había guardada.
+///
+/// **Se publica fuera de la tabla de tramos y no se resta de ningún fotograma**, y eso es lo que hay que
+/// entender antes de leer sus números: restaurar ocurre **entero antes del primer fotograma** —el fichero
+/// se lee en `arrancar` y las consolas se abren en el constructor—, así que no contamina el reparto por
+/// resta con el que este proyecto juzga a su framework. Es coste de **arranque**, que es otro camino y
+/// hasta este hito no lo declaraba nadie.
+#[derive(Clone, Copy)]
+pub struct Restauracion {
+    /// Cuántas consolas salieron del fichero. **Es el número que hace comparable la tanda**: sin él, una
+    /// corrida en la que el fichero no llegó a mandar publica la ventana de fábrica bajo etiqueta de
+    /// restaurada, que es el mismo disfraz que el informe ya evita con los paneles y con los gestos.
+    pub consolas: usize,
+    /// Leer el fichero del disco, interpretarlo y validarlo.
+    ///
+    /// **Es opcional, y eso impide publicar un número que nadie tomó.** Con un `Duration` a secas, una
+    /// ventana construida con una persistencia que nunca leyó el disco publicaría `0ns en leer y
+    /// validar` — indistinguible de una lectura instantánea de verdad, y exactamente la clase de cifra
+    /// que este proyecto prohíbe. Sin medida, el informe lo dice con esas palabras.
+    pub leer: Option<Duration>,
+    /// Abrir la ventana con lo que el fichero pedía: un `fork` y un `exec` por hoja, **y todo lo que
+    /// viene detrás por cada consola** — armar el vigilante de su directorio y describir el árbol
+    /// entero para el primer espejo.
+    ///
+    /// **Va hasta que la ventana está construida, no hasta que los procesos existen**, y esa raya la
+    /// movió una revisión: parándola antes, dos trabajos que **crecen con N** quedaban fuera de un
+    /// número que dice medir justo eso, y se habrían publicado como coste del framework.
+    ///
+    /// **Es el que crece con N** y por eso va aparte del de arriba: leer un documento de cuatro hojas y
+    /// uno de doscientas cuesta casi lo mismo, y abrirlas no.
+    pub abrirlas: Duration,
+}
+
 /// Los gestos de arrastre que una tanda de medida se inyectó a sí misma, tal como se declaran.
 #[derive(Clone, Copy)]
 pub struct Arrastres {
@@ -629,6 +662,7 @@ pub fn cabecera(
     rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
     visible: usize,
     arrastres: Option<Arrastres>,
+    restauracion: Option<Restauracion>,
 ) -> std::io::Result<()> {
     let perfil = if cfg!(debug_assertions) {
         "depuración — el número que vale es el de --release"
@@ -687,6 +721,26 @@ pub fn cabecera(
             a,
             "arrastres:    {} inyectados · {} efectos ({})",
             arrastres.inyectados, arrastres.con_efecto, arrastres.gesto
+        )?;
+    }
+    // **De dónde salieron las consolas, y solo cuando salieron del fichero.** Sin esta línea, una tanda
+    // que dice medir el arranque restaurado y otra que abrió de fábrica producen informes **idénticos**:
+    // la cabecera publica cuántas consolas hay, no quién las pidió. Y con la misma cuenta de consolas
+    // ninguna de las guardas del guion salta — que es exactamente el disfraz que este proyecto ya se comió
+    // una vez con los paneles y otra con los gestos.
+    //
+    // **Los dos tiempos van separados a propósito**: leer no crece con el número de consolas y abrirlas sí,
+    // así que sumarlos daría un número que no se puede extrapolar a una disposición más grande.
+    if let Some(restauracion) = restauracion {
+        let leer = match restauracion.leer {
+            Some(cuanto) => format!("{cuanto:?}"),
+            None => "sin medir".to_string(),
+        };
+        writeln!(
+            a,
+            "restauradas:  {} consolas · {leer} en leer y validar · {:?} en abrirlas (antes del primer \
+             fotograma, no se resta de ninguno)",
+            restauracion.consolas, restauracion.abrirlas
         )?;
     }
     writeln!(a, "renderizador: glow")?;
@@ -789,10 +843,125 @@ mod tests {
         visible: usize,
         arrastres: Option<Arrastres>,
     ) -> String {
+        cabecera_completa(ventana, rejillas, visible, arrastres, None)
+    }
+
+    fn cabecera_completa(
+        ventana: EnPuntos,
+        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+        visible: usize,
+        arrastres: Option<Arrastres>,
+        restauracion: Option<Restauracion>,
+    ) -> String {
         let mut salida = Vec::new();
-        cabecera(&mut salida, ventana, rejillas, visible, arrastres)
-            .expect("escribir a memoria no falla");
+        cabecera(
+            &mut salida,
+            ventana,
+            rejillas,
+            visible,
+            arrastres,
+            restauracion,
+        )
+        .expect("escribir a memoria no falla");
         String::from_utf8(salida).expect("la cabecera es texto")
+    }
+
+    #[test]
+    fn la_cabecera_declara_de_donde_salieron_las_consolas_solo_cuando_salieron_del_fichero() {
+        // **Es la línea que distingue la tanda que restaura de la que pide.** Sin ella, una corrida que
+        // abrió de fábrica con cuatro consolas y otra que las sacó del fichero publican **el mismo
+        // informe**: la cabecera dice cuántas hay, no quién las pidió. Y el guion invalida la corrida
+        // leyendo justo esta línea, así que si deja de salir, la tanda L pasa a medir el arranque de
+        // siempre sin que nada lo diga.
+        let restaurada = cabecera_completa(
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            0,
+            None,
+            Some(Restauracion {
+                consolas: 4,
+                leer: Some(Duration::from_micros(310)),
+                abrirlas: Duration::from_millis(12),
+            }),
+        );
+        assert!(
+            restaurada.contains("restauradas:  4 consolas"),
+            "la cabecera no declaró las consolas que salieron del fichero:\n{restaurada}"
+        );
+        // **Los dos tiempos, y por separado.** Publicar solo la suma daría un número que no se puede
+        // extrapolar: leer no crece con el número de consolas y abrirlas sí.
+        assert!(
+            restaurada.contains("310µs") && restaurada.contains("12ms"),
+            "la cabecera no declaró lo que costó leer y lo que costó abrirlas:\n{restaurada}"
+        );
+
+        let de_fabrica = cabecera_completa(
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            0,
+            None,
+            None,
+        );
+        assert!(
+            !de_fabrica.contains("restauradas"),
+            "una ventana abierta de fábrica dice haber restaurado, que es el disfraz que esta línea \
+             existe para quitar:\n{de_fabrica}"
+        );
+    }
+
+    #[test]
+    fn una_lectura_que_nadie_tomo_se_publica_con_esas_palabras_y_no_como_un_cero() {
+        // **La rama que hace honesto al `Option`, y no la ejercía ninguna prueba.** El campo se volvió
+        // opcional justamente para que una ventana levantada sin tocar el disco no publicara `0ns en leer
+        // y validar` —indistinguible de una lectura instantánea de verdad—, y sin embargo el único caso
+        // que se pasaba por aquí traía número: cambiar el texto de la rama vacía por un cero, o por la
+        // suma de los dos tiempos, dejaba el fichero entero en verde.
+        //
+        // **Lo que se afirma es lo que se lee, no que haya un `Option` dentro.** La cabecera es lo único
+        // que llega a quien interpreta la tanda, y ahí la diferencia entre «sin medir» y «0ns» es la
+        // diferencia entre saber que nadie midió y creerse un número.
+        let sin_medir = cabecera_completa(
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            0,
+            None,
+            Some(Restauracion {
+                consolas: 2,
+                leer: None,
+                abrirlas: Duration::from_millis(7),
+            }),
+        );
+
+        assert!(
+            sin_medir.contains("sin medir en leer y validar"),
+            "una lectura que nadie tomó no se declara como tal:\n{sin_medir}"
+        );
+        assert!(
+            sin_medir.contains("7ms en abrirlas"),
+            "la línea perdió lo que sí se midió:\n{sin_medir}"
+        );
+        // **Y con la forma que el guion sabe leer, incluso sin número de lectura.** La guarda de la tanda
+        // L saca la cuenta de consolas con `s/^restauradas: *\([0-9]*\) consolas .*$/\1/p`, y ese `.*`
+        // detrás de «consolas» **exige que siga habiendo algo**: una línea que se quedara en
+        // `restauradas:  2 consolas` no casaría, el guion no vería ninguna consola restaurada e
+        // invalidaría una corrida buena diciendo que la ventana abrió de fábrica.
+        let linea = sin_medir
+            .lines()
+            .find(|linea| linea.starts_with("restauradas:"))
+            .expect("no hay línea de restauradas que el guion pueda leer");
+        assert!(
+            linea.starts_with("restauradas:  2 consolas ·"),
+            "la línea de restauradas ya no tiene la forma que el guion de medida sabe leer: «{linea}»"
+        );
     }
 
     #[test]

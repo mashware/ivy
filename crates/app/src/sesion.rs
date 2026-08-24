@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Cuántas hojas se aceptan en un documento entero.
 ///
@@ -653,6 +654,14 @@ pub struct Persistencia {
     /// hay está prohibido con razón. Contando los intentos, un temporal plantado estorba **un intento**
     /// y no una sesión.
     intentos: usize,
+    /// Lo que tardó [`Self::cargar`] la última vez que se la llamó, si se la llamó.
+    ///
+    /// **Vive aquí y no lo devuelve `cargar`, y es lo que evita tocar seis firmas para publicar un
+    /// número.** Quien lo publica es el informe de medida, que ya recibe esta misma `Persistencia` por
+    /// otro motivo —el veto de versión se queda con la ventana—, así que el dato viaja con quien ya
+    /// viajaba. Devolverlo en el `Option` habría obligado a cambiar el tipo con el que abre la ventana y
+    /// las seis pruebas que lo construyen a mano.
+    tardo_en_cargar: Option<Duration>,
 }
 
 impl Persistencia {
@@ -669,6 +678,7 @@ impl Persistencia {
             no_pisar: None,
             avisados: HashSet::new(),
             intentos: 0,
+            tardo_en_cargar: None,
         }
     }
 
@@ -689,6 +699,25 @@ impl Persistencia {
     /// formato: adivinar media disposición es peor que no restaurarla. Se avisa de todo salvo de que no
     /// haya fichero.
     pub fn cargar(&mut self) -> Option<Valido> {
+        let antes = std::time::Instant::now();
+        let cargada = self.cargando();
+        self.tardo_en_cargar = Some(antes.elapsed());
+        cargada
+    }
+
+    /// Lo que tardó la última carga, para que el informe de medida lo declare. **Nada si nadie la
+    /// llamó.**
+    ///
+    /// **Y esa distinción es la que impide publicar un número inventado**, que era el hueco que dejó la
+    /// primera versión: devolviendo un `Duration` a secas, una ventana construida con una persistencia
+    /// que nunca tocó el disco —lo que hacen las pruebas, y lo que podría hacer un camino nuevo—
+    /// publicaba `0ns en leer y validar`, indistinguible de una lectura instantánea de verdad. Con
+    /// `None` el informe dice «sin medir», que es lo que pasó.
+    pub fn tardo_en_cargar(&self) -> Option<Duration> {
+        self.tardo_en_cargar
+    }
+
+    fn cargando(&mut self) -> Option<Valido> {
         let Some(ruta) = self.ruta.clone() else {
             // **Con su propio verbo, y sin tocar la lista de motivos ya avisados, y las dos cosas las
             // pidió una revisión.** Decir «no se guardó» antes de haber intentado guardar nada es un
@@ -1271,6 +1300,35 @@ mod tests_de_los_techos {
         assert!(interpretar(&justo).is_ok());
     }
 
+    /// **Lo que la tanda de medida siembra tiene que seguir entendiéndose, y nadie lo afirmaba.**
+    ///
+    /// `scripts/medir-fotograma.sh` escribe este documento **desde `sh`**, con las etiquetas del formato
+    /// puestas a mano en un `printf`. Así que el día en que este enum renombre `hoja`, `rama`, `peso` o
+    /// `orientacion`, el guion seguiría escribiendo el nombre viejo y **la aplicación abriría de fábrica**:
+    /// la tanda que dice medir el arranque restaurado mediría el de siempre. La corrida lo cazaría —el
+    /// informe no declararía consolas restauradas y el guion la invalida— pero eso son quince minutos de
+    /// medida tirados, y esta prueba lo caza en la suite.
+    #[test]
+    fn el_documento_que_siembra_la_tanda_de_medida_se_sigue_entendiendo() {
+        let sembrado = r#"{"v":1,"pestañas":[{"raiz":{"rama":{"orientacion":"columnas","hijos":[{"peso":1.0,"nodo":{"hoja":{"ancho_del_panel":36,"plegado":false}}},{"peso":1.0,"nodo":{"hoja":{"ancho_del_panel":36,"plegado":false}}},{"peso":1.0,"nodo":{"hoja":{"ancho_del_panel":36,"plegado":false}}},{"peso":1.0,"nodo":{"hoja":{"ancho_del_panel":36,"plegado":false}}}]}}}]}"#;
+
+        let valido =
+            interpretar(sembrado).expect("la tanda siembra un documento que ya no se entiende");
+
+        assert_eq!(valido.hojas(), 4, "las cuatro consolas de la tanda L");
+
+        // **Y dónde lo deja, que es la otra mitad y se escapaba.** El guion escribe en
+        // `<config>/agent-terminal/disposicion.json` con esos dos nombres puestos a mano; renombrar
+        // cualquiera de las dos constantes dejaría la suite en verde mientras **cada corrida de la tanda
+        // abriría de fábrica**, porque la aplicación buscaría su fichero en otro sitio y no encontraría
+        // nada.
+        assert_eq!(
+            DIRECTORIO, "agent-terminal",
+            "el guion siembra en este directorio"
+        );
+        assert_eq!(FICHERO, "disposicion.json", "y con este nombre de fichero");
+    }
+
     #[test]
     fn la_cuenta_de_hojas_que_se_publica_es_la_que_se_comparo_con_el_techo() {
         // Si `hojas()` recalculara en vez de leer lo guardado, podrían dejar de ser el mismo número.
@@ -1386,6 +1444,44 @@ mod tests_del_fichero {
                 },
             }],
         }
+    }
+
+    /// **Lo que se publica como tiempo de lectura tiene que salir de una lectura**, y nada lo afirmaba.
+    ///
+    /// El informe de medida imprime este número. Sin prueba, cambiar el cronómetro por un cero dejaba la
+    /// suite entera en verde mientras el informe publicaba un tiempo que nadie tomó — el disfraz que
+    /// este proyecto nombra: elegir un cero con el que el defecto y el arreglo dan lo mismo.
+    #[test]
+    fn el_tiempo_de_carga_solo_existe_cuando_hubo_carga() {
+        let casa = Directorio::nueva("tiempo-de-carga");
+        let fichero = casa.fichero();
+        std::fs::create_dir_all(fichero.parent().expect("el fichero tiene directorio"))
+            .expect("crear el directorio de configuración");
+        std::fs::write(
+            &fichero,
+            r#"{"v":1,"pestañas":[{"raiz":{"hoja":{"ancho_del_panel":36,"plegado":false}}}]}"#,
+        )
+        .expect("sembrar la disposición");
+
+        let mut persistencia = Persistencia::en(Some(fichero));
+        assert!(
+            persistencia.tardo_en_cargar().is_none(),
+            "dice haber medido una carga que todavía no ha ocurrido"
+        );
+
+        persistencia.cargar().expect("el documento se entiende");
+
+        // **Mayor que cero, y no solo «hay número».** Afirmando `is_some()` a secas, cambiar el
+        // cronómetro por un cero deja la prueba en verde: `Some(0)` también es algo. Y un cero es
+        // exactamente lo que este proyecto tiene fichado como el número con el que el defecto y el
+        // arreglo dan el mismo resultado. Leer un fichero del disco no tarda cero.
+        let tardo = persistencia
+            .tardo_en_cargar()
+            .expect("leyó el fichero y no dejó dicho lo que tardó: el informe diría «sin medir»");
+        assert!(
+            tardo > Duration::ZERO,
+            "publica un cero como tiempo de lectura, que es un número que nadie tomó"
+        );
     }
 
     #[test]

@@ -1779,6 +1779,60 @@ diga otra cosa.
   aquí porque en la rama normal no hay nada que mitigar, y una limpieza propia sería un mecanismo sin
   escenario en el 99 % de los casos.
 
+### Medido — 24 agosto 2026: lo que cuesta abrir con las consolas que dejaste
+
+**La tanda `L`**, que es la que este hito añade y la única que recorre el arranque restaurado: siembra un
+fichero de disposición conocido —una pestaña con **cuatro consolas en fila**— y lanza **sin pedir
+pestañas ni divisiones**, para que mande el fichero. **Su control es `H`**, que abre esas mismas cuatro
+pidiéndolas, y se tomó **el mismo día y con el mismo binario**: las cifras de `H` del anexo de D14 son de
+agosto y de otro binario, así que compararse con ellas mezclaría el coste de restaurar con todo lo que ha
+cambiado desde entonces. Las cuatro corridas publican la **misma rejilla** —49×20 por consola— que es lo
+que las hace comparables.
+
+| | **L** — restaurada | **L** (2.ª) | **H** — pedida | **H** (2.ª) |
+|---|---|---|---|---|
+| Consolas restauradas del fichero | **4** | **4** | — | — |
+| — leer el fichero, interpretarlo y validarlo | **35,1 µs** | **35,2 µs** | — | — |
+| — abrir la ventana con ellas | **5,261 ms** | **5,506 ms** | — | — |
+| Vuelta completa (división 0) | 49,4 ms | 47,2 | 57,6 | 45,7 |
+| **el resto del fotograma** | **401 µs · 393 fot.** | **379 · 410** | **461 · 403** | **370 · 410** |
+| mirar si la disposición cambió | 652 ns | 688 | 920 | 659 |
+
+**Las tres cosas que esto prueba:**
+
+1. **Restaurar cuesta 5,42 ms una sola vez, y ocurre entero antes del primer fotograma.** De ahí,
+   **35 µs** son leer el fichero —el **0,65 %**— y el resto es abrir la ventana con esas consolas:
+   **1,35 ms por consola**. Ese segundo tramo **no es solo el `fork` y el `exec`**: incluye armar el
+   vigilante del directorio de cada consola y describir el árbol entero para el primer espejo, que son
+   los otros dos trabajos que crecen con el número de consolas.
+2. **No deja ningún rastro en el fotograma, y ésa era la pregunta.** El «resto del fotograma» —la cifra
+   con la que D3 juzga a egui— sale **401 y 379 µs** restaurando y **461 y 370 µs** pidiendo: los mismos
+   números, con los dos rangos solapados. El tramo del espejo tampoco se mueve (652-920 ns en las
+   cuatro). Es lo que el diseño afirmaba sin medirlo, y ahora lo sostiene una corrida.
+3. **El informe declara de dónde salieron las consolas**, y el guion **invalida la corrida** si no lo
+   dice. Sin esa línea, una tanda en la que el fichero no llegara a mandar publicaría la ventana de
+   fábrica bajo etiqueta de restaurada: mismo número de consolas, misma rejilla, y ninguna guarda
+   saltando. Es el mismo disfraz que el testigo evita con los paneles y la cuenta de efectos con los
+   gestos. **Y el comparador también la mira**, porque `L` y `H` son idénticas en geometría por
+   construcción: sin ese dato daba luz verde a promediar una con otra.
+
+**Y tres avisos para quien vuelva a estas cifras:**
+
+- **La primera versión de este anexo publicó 4,45 ms, y estaba mal etiquetada.** El cronómetro se
+  paraba cuando los procesos existían, no cuando la ventana estaba construida, así que dejaba fuera el
+  vigilante de cada consola y el recorrido del árbol — **dos trabajos que crecen con N**, dentro de un
+  número que dice medir justo eso. Lo cazó una revisión, y la diferencia es del **15 %**. Queda escrito
+  porque es la regla dura del proyecto vista en directo: lo que no se declara se publica como coste de
+  otro.
+- **La vuelta completa dispersa mucho entre corridas de la misma tanda** —49,4 contra 47,2 en `L`, 57,6
+  contra 45,7 en `H`— y **la dispersión es de la máquina, no del hito**: aparece igual en las dos tandas.
+  Lo que sí se puede leer es la **comparación entre tandas de la misma pareja**, que es para lo que están.
+- **Una corrida de `H` se descartó por contaminada**, y conviene saber cómo se cazó: publicaba **5,7 s**
+  de media en la cola con un percentil 95 de 76 ms —una sola muestra dispara la media— y su informe
+  traía una sección de **latencia de teclado** que las otras no tienen. Alguien pulsó una tecla mientras
+  corría. Es el aviso de «no toques la máquina» convertido en algo que se puede comprobar después: **si
+  el informe habla de teclado, la corrida no vale**.
+
 ---
 
 ## D17 — El contrato es el documento, no el fichero: la fuente de verdad es el estado de la app

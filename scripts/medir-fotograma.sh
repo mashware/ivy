@@ -45,6 +45,17 @@
 #              el informe publica es la del último fotograma, y en esta tanda el ancho de la consola
 #              izquierda está oscilando, así que dos corridas acaban con distinto número de columnas. Se
 #              leen por separado.
+#              Con la disposición SALIDA DEL FICHERO, la que F2.5 añade:
+#                L = **no pide ni pestañas ni divisiones**: siembra un fichero de disposición conocido
+#                    —una pestaña con CUATRO consolas en fila— y deja que mande él. Es la única tanda
+#                    que recorre el arranque restaurado, que es el camino más caro que F2.5 añade y el
+#                    que hasta ella estaba **excluido de la medida por construcción**: el guion borra el
+#                    directorio de configuración al empezar cada corrida, y lo que la tanda pide manda
+#                    sobre el fichero.
+#                    Su control es **H**, que abre las mismas cuatro en fila pidiéndolas: la diferencia
+#                    entre las dos es lo que cuesta restaurar, y el informe de L lo declara aparte
+#                    —`restauradas:`— porque ocurre **antes del primer fotograma** y no se resta de
+#                    ninguno.
 #     [mib]    tamaño de la carga por consola, 44 por defecto
 #
 #   El modo `comparar` no mide: lee dos informes de la misma tanda y dice si se pueden promediar.
@@ -165,8 +176,18 @@ if [ "${MEDIR_COMO_CONSOLA:-}" != "1" ] && [ "${1:-}" = comparar ]; then
     # último gesto llegó a completarse — y con el nombre dentro, dos corridas idénticas en ventana, pestañas
     # y rejillas salían «no comparables» por un dato que no cambia nada de lo que se mide. Medido: dos J del
     # 18 de agosto de 2026, las dos 1280×800 con las dos consolas a 49×39, rechazadas solo por eso.
+    #
+    # **Y de dónde salieron las consolas, que no es geometría pero decide si dos corridas son la misma
+    # cosa.** Una corrida restaurada y otra pedida son **idénticas en ventana, pestañas y rejillas por
+    # construcción** —ésa es la razón de ser de la tanda que restaura y de su control—, así que sin esta
+    # línea el comparador daba luz verde a promediar una con otra: exactamente el disfraz que la línea
+    # `restauradas:` del informe existe para quitar. Se compara su presencia **y** su número.
     geometria() {
-        sed -n -e 's/^pestañas: */pestañas /p' -e 's/^  división [0-9]*: */división /p' "$1"
+        sed -n \
+            -e 's/^pestañas: */pestañas /p' \
+            -e 's/^  división [0-9]*: */división /p' \
+            -e 's/^restauradas: *\([0-9]*\) consolas .*$/restauradas \1/p' \
+            "$1"
     }
     primera=$(geometria "$2")
     segunda=$(geometria "$3")
@@ -213,7 +234,7 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
 fi
 
 # ── Modo tanda ──────────────────────────────────────────────────────────────────
-TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J o K}
+TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J, K o L}
 MIB=${2:-44}
 SALIDA="$RAIZ/target/medidas"
 mkdir -p "$SALIDA"
@@ -233,6 +254,12 @@ rm -f "$TESTIGO"
 # revisión lo tiró: con dos, añadir una tanda pide dos ediciones y la que se olvide cae en el `*)` del
 # segundo con cero gestos — o sea que una tanda nueva pensada para arrastrar se quedaría quieta y el guion la
 # invalidaría por no declarar arrastres, en vez de simplemente funcionar.
+# **Y una tanda puede pedir que mande el FICHERO en vez de la petición.** Por defecto no: `RESTAURA=0`
+# está aquí arriba y no repetido en cada letra para que añadir una tanda siga siendo editar **una línea**,
+# que es la regla que este `case` ya tenía. Lo que cambia con `RESTAURA=1` es de dónde salen las consolas,
+# no cuántas: `PESTANAS` y `DIVISIONES` siguen describiendo la disposición de la tanda, y son las que se
+# siembran en el fichero y contra las que se comprueba el informe.
+RESTAURA=0
 case "$TANDA" in
     A|B|C|D) PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola ;;
     F)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola ;;   # la de fondo, quieta: no vuelca ninguna
@@ -241,7 +268,8 @@ case "$TANDA" in
     I)       PESTANAS=1; DIVISIONES=2x2; VUELCAN=4; ARRASTRES=0; GESTO=consola ;;   # cuatro en cuadro
     J)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=consola ;;   # dos, y arrastrándose: el gesto de F2.3
     K)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=panel ;;     # dos, y estrechando el panel sin parar: el gesto de F2.4
-    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J o K" >&2; exit 2 ;;
+    L)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=consola; RESTAURA=1 ;;  # cuatro en fila, pero salidas del fichero: el arranque de F2.5
+    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K o L" >&2; exit 2 ;;
 esac
 # **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
 # que caben, porque lo que hace falta es que el gesto dure **de principio a fin**. Una tanda que se queda sin
@@ -306,6 +334,73 @@ rm -rf /run/user/"$(id -u)"/agent-terminal-* 2>/dev/null || true
 CONFIG="$SALIDA/.config"
 rm -rf "$CONFIG"
 mkdir -p "$CONFIG"
+
+# **La disposición sembrada, y solo en las tandas que restauran.** Se escribe **antes** de abrir la
+# ventana y en el directorio aislado de la corrida, así que lo que la aplicación encuentra al arrancar es
+# exactamente esto y no lo que dejara nadie. La forma es la del contrato de D16: un documento con su
+# versión, una lista de pestañas, y cada pestaña con su árbol de ramas y hojas.
+#
+# **Los pesos son todos 1 a propósito.** El reparto normaliza por la suma de su rama, así que cuatro unos
+# dan cuatro cuartos: la misma rejilla que la tanda H obtiene pidiendo cuatro divisiones, que es lo que
+# hace que H sirva de control. Con pesos distintos, la diferencia entre las dos tandas incluiría el
+# reparto y ya no sería solo lo que cuesta restaurar.
+#
+# **El ancho del panel es el de fábrica**, por lo mismo: una tanda que sembrara otro ancho mediría
+# consolas más estrechas que las de H y publicaría esa diferencia como coste del arranque.
+sembrar_disposicion() {
+    columnas=${DIVISIONES%x*}
+    filas=${DIVISIONES#*x}
+    hoja='{"hoja":{"ancho_del_panel":36,"plegado":false}}'
+
+    if [ "$filas" = 1 ]; then
+        rama_de_columna="$hoja"
+    else
+        hijos=""
+        n=0
+        while [ "$n" -lt "$filas" ]; do
+            [ -z "$hijos" ] || hijos="$hijos,"
+            hijos="$hijos{\"peso\":1.0,\"nodo\":$hoja}"
+            n=$((n + 1))
+        done
+        rama_de_columna="{\"rama\":{\"orientacion\":\"filas\",\"hijos\":[$hijos]}}"
+    fi
+
+    # **Con una sola columna, la raíz ES esa columna: no se envuelve.** Una rama de un solo hijo es un
+    # documento que el validador **rechaza** —`RamaDeUnHijo`—, así que `1x2` sembraría un fichero que no se
+    # entiende, la ventana abriría de fábrica y la tanda mediría otra cosa. Lo caza la guarda del final,
+    # pero quince minutos después. Comprobado generando el documento y pasándolo por el intérprete.
+    if [ "$columnas" = 1 ]; then
+        raiz="$rama_de_columna"
+    else
+        hijos=""
+        n=0
+        while [ "$n" -lt "$columnas" ]; do
+            [ -z "$hijos" ] || hijos="$hijos,"
+            hijos="$hijos{\"peso\":1.0,\"nodo\":$rama_de_columna}"
+            n=$((n + 1))
+        done
+        raiz="{\"rama\":{\"orientacion\":\"columnas\",\"hijos\":[$hijos]}}"
+    fi
+
+    # **Sin eñe en el nombre de la variable, y no es cosmética.** `sh` solo admite letras ASCII, dígitos y
+    # subrayado en un identificador: con `pestañas=` el intérprete no ve una asignación sino una orden que
+    # no existe, sigue adelante y **escribe un documento con la palabra «ñas» dentro**. Es la razón por la
+    # que el resto del guion escribe `PESTANAS`.
+    lista=""
+    n=0
+    while [ "$n" -lt "$PESTANAS" ]; do
+        [ -z "$lista" ] || lista="$lista,"
+        lista="$lista{\"raiz\":$raiz}"
+        n=$((n + 1))
+    done
+
+    mkdir -p "$CONFIG/agent-terminal"
+    printf '{"v":1,"pestañas":[%s]}\n' "$lista" > "$CONFIG/agent-terminal/disposicion.json"
+}
+
+if [ "$RESTAURA" = 1 ]; then
+    sembrar_disposicion
+fi
 
 publicar() {  # publicar <directorio> <n>
     # **Dónde cae el temporal NO importa, y la tanda D existe para haberlo comprobado.** La sospecha
@@ -378,7 +473,7 @@ sembrar() {
 case "$TANDA" in
     A) : ;;                       # sin panel: nadie publica nada
     B) sembrar quieto & ;;
-    C|D|F|G|H|I|J|K) sembrar hablador & ;;
+    C|D|F|G|H|I|J|K|L) sembrar hablador & ;;
 esac
 
 echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIRECTORIOS consolas volcando $MIB MiB · ventana $TAMANO · no toques la máquina hasta que cierre" >&2
@@ -391,13 +486,28 @@ INFORME="$SALIDA/tanda-$TANDA-$(date +%H%M%S).txt"
 # abajo ni la invalidación llegaban a correr, y el pánico —que antes se leía en el terminal— se quedaba en
 # un fichero que nadie nombraba.
 ESTADO=0
-MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
+export MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
     MEDIR_TURNOS="$TURNOS" MEDIR_VUELCAN="$VUELCAN" \
-    MEDIR_PESTANAS="$PESTANAS" MEDIR_DIVISIONES="$DIVISIONES" \
     MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" MEDIR_GESTO="$GESTO" \
     XDG_CONFIG_HOME="$CONFIG" \
-    SHELL="$RAIZ/scripts/medir-fotograma.sh" \
-    "$APP" > "$INFORME" 2> "$INFORME.err" || ESTADO=$?
+    SHELL="$RAIZ/scripts/medir-fotograma.sh"
+# **Las dos que piden disposición no se exportan cuando la tanda restaura, y en eso consiste la tanda L.**
+# La aplicación abre de fábrica **en cuanto una de las dos está** —a propósito, para que una tanda no
+# dependa de lo que hubiera guardado—, así que sembrar el fichero **y** pedir cuatro divisiones daría el
+# mismo informe con el fichero sin leer siquiera: cuatro consolas, la misma rejilla, y ninguna guarda
+# saltando. La línea `restauradas:` del informe es lo que distingue las dos cosas, y por eso se comprueba
+# abajo.
+if [ "$RESTAURA" = 0 ]; then
+    export MEDIR_PESTANAS="$PESTANAS" MEDIR_DIVISIONES="$DIVISIONES"
+else
+    # **Y se quitan del entorno, no basta con no ponerlas.** Antes iban delante de la orden, así que
+    # fijaban su valor para el hijo **viniera lo que viniera** de fuera; con `export` condicional, una que
+    # el usuario tuviera exportada de antes —que es como la documentación dice abrir una disposición
+    # concreta a mano— llegaría a la aplicación y la haría abrir de fábrica, con el fichero sembrado sin
+    # leer siquiera.
+    unset MEDIR_PESTANAS MEDIR_DIVISIONES
+fi
+"$APP" > "$INFORME" 2> "$INFORME.err" || ESTADO=$?
 
 wait 2>/dev/null || true
 
@@ -505,6 +615,25 @@ if [ "$ARRASTRES" != 0 ]; then
 como cero, que se lee como «guardar no cuesta nada»"
     fi
     echo "escrituras de la disposición durante la tanda: $ESCRITURAS" >&2
+fi
+
+# **Que la disposición saliera del FICHERO, en la tanda que dice medir eso.** Es la guarda que hace
+# distinguible la tanda L de la H, y sin ella la L no mide nada de lo que promete: si la siembra falla —el
+# directorio no se puede escribir, el formato cambia y el documento deja de entenderse, la variable de
+# configuración no llega— la aplicación abre de fábrica **una pestaña con dos consolas**, y aunque eso lo
+# cazaría la guarda de las consolas de abajo por pura aritmética, el día en que una tanda restaurada pida
+# justo dos ya no lo cazaría nadie. Lo que se comprueba es lo que el informe declara, no lo que se dedujo
+# de una cuenta.
+if [ "$RESTAURA" = 1 ]; then
+    RESTAURADAS=$(sed -n 's/^restauradas: *\([0-9]*\) consolas .*$/\1/p' "$INFORME" | head -1)
+    if [ -z "$RESTAURADAS" ]; then
+        invalidar "esta tanda siembra una disposición y el informe no declara ninguna consola restaurada: \
+la ventana abrió de fábrica, así que esto es una tanda H con otro nombre"
+    fi
+    if [ "$RESTAURADAS" != "$DIRECTORIOS" ]; then
+        invalidar "el informe dice que restauró $RESTAURADAS consolas y se sembraron $DIRECTORIOS"
+    fi
+    echo "consolas restauradas del fichero: $RESTAURADAS" >&2
 fi
 
 # **Que las consolas fueran las que se pidieron.** Con la variable de la disposición sin llegar, la

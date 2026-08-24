@@ -1403,7 +1403,23 @@ pub fn arrancar() -> eframe::Result {
     // mano con esas variables —que es como la documentación dice abrir una disposición concreta— no.
     let pestañas = std::env::var(VARIABLE_DE_LAS_PESTAÑAS).ok();
     let divisiones = std::env::var(VARIABLE_DE_LAS_DIVISIONES).ok();
-    if pestañas.is_some() || divisiones.is_some() {
+    // **Cualquiera de las variables de la puerta de medida veta la escritura, no solo las dos que piden
+    // consolas.** Con la comprobación puesta solo en esas dos, **la tanda que restaura era la única
+    // sesión de medida con el guardado vivo** —no las pone a propósito, para que mande el fichero—, así
+    // que podía escribir en disco durante la corrida mientras su tanda de control tenía la escritura
+    // vetada: dos regímenes distintos comparándose fila por fila en el anexo. Y el guion solo exige que
+    // se declaren las escrituras en las tandas que arrastran, así que las de aquélla no las habría
+    // cazado nadie.
+    let de_medida = [
+        pestañas.as_deref(),
+        divisiones.as_deref(),
+        std::env::var(VARIABLE_DEL_TAMAÑO).ok().as_deref(),
+        std::env::var(VARIABLE_DE_LOS_ARRASTRES).ok().as_deref(),
+        std::env::var(VARIABLE_DEL_GESTO).ok().as_deref(),
+    ]
+    .iter()
+    .any(Option::is_some);
+    if de_medida {
         persistencia.no_pisar_porque("esta sesión la pidió una tanda de medida");
     }
     let con_que = con_que_abrir(pestañas.as_deref(), divisiones.as_deref(), guardada);
@@ -2990,6 +3006,12 @@ struct Ventana {
     /// de un binario más nuevo. Lo dice el doc del tipo, y era la deuda con nombre que dejó el PR que
     /// aprendió a restaurar.
     persistencia: sesion::Persistencia,
+    /// De dónde salieron las consolas, cuando salieron del fichero: cuántas eran y lo que costó abrirlas.
+    ///
+    /// **Solo lo rellena la rama que restaura**, así que `None` significa «esta ventana la abrió una
+    /// petición, no un fichero» — que es justo lo que el informe necesita distinguir y la cuenta de
+    /// consolas no distingue.
+    restauracion: Option<medida::Restauracion>,
     /// El espejo del fotograma anterior. **Contra él se arma el plazo**, así que el plazo se rearma
     /// **cuando algo cambia** y no cuando algo está sin escribir: sin esto, un directorio no escribible
     /// dejaría la diferencia puesta y **la ventana no se dormiría nunca**.
@@ -3151,8 +3173,31 @@ impl Ventana {
             } => Self::con_pestañas(ctx, pestañas, disposicion, tamaño),
             ConQueAbrir::Restaurada(guardada) => {
                 let cuantas = guardada.hojas();
+                // **Se cronometra abrirlas, y no leer el fichero, y la diferencia importa.** Lo que crece
+                // con el tamaño de la disposición son los `fork` y los `exec` de aquí: leer un documento de
+                // cuatro hojas y uno de doscientas cuesta casi lo mismo. Lo que costó leer viaja con la
+                // persistencia, que ya sabe cuánto tardó su propia carga.
+                let antes = Instant::now();
                 match Self::materializar(ctx, &guardada, programa) {
-                    Ok(pestañas) => Self::con_estas_pestañas(ctx, pestañas, tamaño),
+                    Ok(pestañas) => {
+                        Self::con_estas_pestañas(ctx, pestañas, tamaño).map(|mut ventana| {
+                            // **Solo cuando se abrieron de verdad.** Si materializar falla se abre de fábrica,
+                            // y una ventana de fábrica que declarase «restauradas» sería el disfraz que esta
+                            // línea existe para quitar.
+                            //
+                            // **Y el cronómetro se cierra AQUÍ, con la ventana ya construida, no cuando los
+                            // procesos existen.** Detrás de `materializar` quedan dos trabajos que **crecen
+                            // con el número de consolas** —armar el vigilante de cada directorio y describir
+                            // el árbol entero para el primer espejo—, y pararlo antes los dejaba fuera de un
+                            // número que dice medir justo eso.
+                            ventana.restauracion = Some(medida::Restauracion {
+                                consolas: cuantas,
+                                leer: persistencia.tardo_en_cargar(),
+                                abrirlas: antes.elapsed(),
+                            });
+                            ventana
+                        })
+                    }
                     Err(fallo) => {
                         eprintln!(
                             "no se pudo abrir la disposición guardada de {cuantas} consolas ({fallo}); \
@@ -3221,6 +3266,7 @@ impl Ventana {
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
             persistencia: sesion::Persistencia::en(None),
+            restauracion: None,
             ultimo_visto: None,
             ultimo_escrito: None,
             pendiente_de_guardar: None,
@@ -3459,6 +3505,7 @@ impl Ventana {
                 con_efecto: arrastres.con_efecto,
                 gesto: arrastres.que.como_se_publica(),
             }),
+            self.restauracion,
         )?;
 
         // Dónde quedó el divisor, y no «mitad y mitad»: desde que se arrastra, los tramos de abajo
@@ -5592,6 +5639,7 @@ mod tests {
             ultimo_fotograma_cerrado: 0,
             cronometrado_aparte: std::time::Duration::ZERO,
             persistencia: sesion::Persistencia::en(None),
+            restauracion: None,
             ultimo_visto: None,
             ultimo_escrito: None,
             pendiente_de_guardar: None,
@@ -17206,6 +17254,129 @@ mod tests {
         assert_eq!(segunda, vec![(36, false)]);
         // Y las proporciones del árbol de la primera, que es lo que decide los anchos de las consolas.
         assert_eq!(pesos_de_la_raiz(&ventana), vec![3.0, 1.0]);
+    }
+
+    #[test]
+    fn solo_la_ventana_restaurada_declara_de_donde_salieron_sus_consolas() {
+        // **Sin esto, la línea del informe la cubre solo quien la llama a mano.** El informe publica
+        // `restauradas:` a partir de este campo, y el guion de medida **invalida la corrida** si no lo ve:
+        // una ventana restaurada que no lo rellenara tiraría la tanda entera, y una de fábrica que lo
+        // rellenara publicaría un arranque restaurado que no ocurrió. Las dos ramas, en la misma prueba.
+        let ctx = egui::Context::default();
+
+        let restaurada = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::Restaurada(guardado_de_dos_pestañas()),
+            "cat",
+            None,
+            sesion::Persistencia::en(None),
+        )
+        .expect("la disposición guardada se abre");
+        let declarada = restaurada
+            .restauracion
+            .expect("una ventana restaurada no dijo de dónde salieron sus consolas");
+        assert_eq!(
+            declarada.consolas, 3,
+            "la cuenta que se publica no es la del documento que se abrió"
+        );
+        // **Y el tiempo, que es la mitad que se escapaba.** Sin esto, cablear el cronómetro a cero o
+        // arrancarlo después de abrir las consolas deja la prueba en verde mientras el informe publica
+        // `0ns en abrirlas` de una sesión que bifurcó tres procesos. Esta rama lanza `cat` de verdad.
+        assert!(
+            declarada.abrirlas > std::time::Duration::ZERO,
+            "abrió tres consolas y dice haber tardado cero en hacerlo"
+        );
+        // **Y lo que no se midió no se publica.** Esta persistencia nunca leyó el disco —la prueba la
+        // construye vacía—, así que el informe tiene que decir «sin medir» en vez de un cero que se lee
+        // como una lectura instantánea.
+        assert!(
+            declarada.leer.is_none(),
+            "publica un tiempo de lectura de un fichero que nadie llegó a leer"
+        );
+
+        let de_fabrica = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::DeFabrica {
+                pestañas: 1,
+                disposicion: Disposicion::DE_SIEMPRE,
+            },
+            "cat",
+            None,
+            sesion::Persistencia::en(None),
+        )
+        .expect("la ventana de siempre abre");
+        assert!(
+            de_fabrica.restauracion.is_none(),
+            "una ventana de fábrica dice haber restaurado consolas"
+        );
+    }
+
+    #[test]
+    fn la_ventana_que_salio_de_un_fichero_de_verdad_publica_lo_que_costo_leerlo() {
+        // **La otra mitad del número, y la que ninguna prueba tocaba.** La de al lado abre con una
+        // persistencia que **nunca leyó el disco**, así que solo puede afirmar que el informe dice «sin
+        // medir»: con `leer` cableado a `None` en el constructor, esa prueba pasa igual y **toda corrida
+        // de la tanda L publicaría «sin medir» sobre una lectura que sí ocurrió**. Aquí el fichero se
+        // escribe, se carga y se restaura, que es el camino entero del arranque de verdad.
+        //
+        // **Y se compara con lo que la carga apuntó, no con «algo mayor que cero».** Un mayor-que-cero
+        // pelado también lo cumple el cronómetro de abrir las consolas: sin esta igualdad, cruzar los dos
+        // campos publica el coste de bifurcar tres procesos bajo la etiqueta de leer un fichero, que es
+        // el número mal etiquetado que este proyecto ya ha pagado.
+        let ctx = egui::Context::default();
+        let base = std::env::temp_dir().join(format!(
+            "agent-terminal-restaurada-de-fichero-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
+        let ruta = sesion::ruta_de(Some(base.join("config").as_os_str()), None)
+            .expect("la ruta de la prueba es absoluta");
+
+        let mut persistencia = sesion::Persistencia::en(Some(ruta));
+        assert!(
+            persistencia.guardar(&guardado_de_dos_pestañas()),
+            "no se guardó lo que la prueba iba a restaurar"
+        );
+        let guardada = persistencia
+            .cargar()
+            .expect("no se leyó lo que se acababa de guardar");
+        let costo_leer = persistencia.tardo_en_cargar();
+
+        let ventana = Ventana::abriendo(
+            &ctx,
+            ConQueAbrir::Restaurada(guardada),
+            "cat",
+            None,
+            persistencia,
+        )
+        .expect("la disposición guardada se abre");
+
+        let declarada = ventana
+            .restauracion
+            .expect("una ventana restaurada no dijo de dónde salieron sus consolas");
+        assert_eq!(
+            declarada.leer, costo_leer,
+            "el informe no publica el tiempo que la carga apuntó"
+        );
+        assert!(
+            declarada.leer.is_some_and(|cuanto| cuanto > Duration::ZERO),
+            "leyó un fichero del disco y lo publica como «sin medir» o como instantáneo: {:?}",
+            declarada.leer
+        );
+        // **Las consolas que se declaran son las que la ventana abrió**, y no un número copiado del
+        // documento: el guion compara esta cifra con las que sembró para decidir si la tanda vale.
+        let abiertas: usize = ventana
+            .pestañas
+            .iter()
+            .map(|pestaña| pestaña.divisiones().len())
+            .sum();
+        assert_eq!(
+            declarada.consolas, abiertas,
+            "declara un número de consolas que no es el de la ventana que abrió"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
