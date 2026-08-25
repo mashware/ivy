@@ -159,7 +159,7 @@ pub fn pintar(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica, o
 /// que lo está. Aplicar la intensidad siempre al primer plano parece lo natural y es el error:
 /// atenúa un color que ya no se ve y deja el otro a plena intensidad.
 fn colores_de(celda: &ViewCell, tema: &Tema) -> (Color32, Color32) {
-    if celda.inverse {
+    let (letra, fondo) = if celda.inverse {
         (
             tema.color(celda.fg),
             tema.con_atributos(celda.bg, celda.bold, celda.dim),
@@ -169,6 +169,21 @@ fn colores_de(celda: &ViewCell, tema: &Tema) -> (Color32, Color32) {
             tema.con_atributos(celda.fg, celda.bold, celda.dim),
             tema.color(celda.bg),
         )
+    };
+
+    // **Lo seleccionado se realza intercambiando sus dos colores, y no con un color nuevo del tema.**
+    // Es lo que hace cualquier terminal, y la razón es que **se lee siempre**: los dos colores de una
+    // celda ya eran legibles el uno sobre el otro, así que intercambiarlos no puede dejar texto
+    // ilegible. Un color de realce propio sí puede — y lo haría justo donde el programa ha elegido
+    // colores raros, que es donde nadie lo probaría.
+    //
+    // **Va después del vídeo inverso y no antes**, así que sobre una celda ya invertida el realce la
+    // devuelve a sus colores de origen. Es lo correcto y lo que se espera: seleccionar por encima del
+    // cursor de `vim` lo enseña como el resto del texto en vez de dejarlo indistinguible.
+    if celda.selected {
+        (fondo, letra)
+    } else {
+        (letra, fondo)
     }
 }
 
@@ -274,6 +289,71 @@ mod tests {
             alto,
             fuente: FontId::monospace(14.0),
         }
+    }
+
+    #[test]
+    fn lo_seleccionado_se_pinta_con_los_dos_colores_intercambiados() {
+        // **El realce se lee siempre porque no inventa un color**: intercambia los dos que la celda ya
+        // tenía, que por fuerza eran legibles el uno sobre el otro. Se afirma sobre los **colores que
+        // salen**, no sobre el campo de la celda: pintar el realce con el mismo fondo de siempre dejaría
+        // la selección invisible y el campo puesto igual.
+        let tema = Tema::default();
+        let mut celda = ViewCell {
+            fg: TermColor::Indexed(1),
+            bg: TermColor::Indexed(4),
+            ..ViewCell::default()
+        };
+
+        let (letra, fondo) = colores_de(&celda, &tema);
+        celda.selected = true;
+        let (letra_realzada, fondo_realzado) = colores_de(&celda, &tema);
+
+        assert_eq!(
+            (letra_realzada, fondo_realzado),
+            (fondo, letra),
+            "lo seleccionado no salió con sus dos colores intercambiados"
+        );
+        assert_ne!(
+            fondo_realzado, fondo,
+            "el fondo de la celda realzada es el mismo de antes: la selección no se vería"
+        );
+    }
+
+    #[test]
+    fn el_realce_intercambia_los_colores_ya_atenuados_y_no_al_reves() {
+        // **La intensidad se aplica primero y el realce se intercambia después**, y el orden se nota
+        // justo donde el programa pidió atenuado: es el color que él declaró como primer plano el que va
+        // apagado, y con vídeo inverso ese color viaja en el fondo. Intercambiando antes de aplicar la
+        // intensidad, lo apagado sería el color equivocado — el mismo defecto que una revisión ya
+        // encontró en este pintor sin la selección de por medio.
+        let tema = Tema::default();
+        let celda = ViewCell {
+            fg: TermColor::Indexed(1),
+            bg: TermColor::Indexed(4),
+            inverse: true,
+            dim: true,
+            ..ViewCell::default()
+        };
+
+        let (_, fondo_apagado) = colores_de(&celda, &tema);
+        let (letra_realzada, _) = colores_de(
+            &ViewCell {
+                selected: true,
+                ..celda
+            },
+            &tema,
+        );
+
+        assert_eq!(
+            letra_realzada, fondo_apagado,
+            "la letra de la celda realzada no es el color que iba atenuado: el realce se intercambió \
+             antes de aplicar la intensidad"
+        );
+        assert_ne!(
+            letra_realzada,
+            tema.color(TermColor::Indexed(4)),
+            "la letra salió a plena intensidad: el atenuado que el programa pidió se perdió"
+        );
     }
 
     #[test]

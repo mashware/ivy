@@ -21,6 +21,7 @@ pub mod medida;
 pub mod panel;
 pub mod pintor;
 pub mod puente;
+pub mod raton;
 pub mod sesion;
 pub mod teclado;
 
@@ -32,9 +33,9 @@ use medida::{Medida, RestoDelFotograma};
 use panel_contract::PanelDir;
 use pintor::Metrica;
 use puente::Puente;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tema::Tema;
-use term_core::{Desplazamiento, Pty, Screen, Size};
+use term_core::{Celda, Desplazamiento, Mitad, Pty, Screen, Size};
 use vigilante::{Bandera, Vigilante};
 
 /// El nombre con el que la ventana se presenta al escritorio.
@@ -232,6 +233,10 @@ struct ArrastresInyectados {
     /// reconstruye igual —quitar, insertar y rehacer el reparto— y ese es el trabajo que la tanda mide. Lo
     /// que no cuenta es el que **no ocurre**.
     con_efecto: usize,
+    /// En cuántos **fotogramas** el gesto dejó texto marcado. Ver [`medida::Arrastres::marcados`].
+    marcados: usize,
+    /// Cuántos informes de ratón salieron hacia el programa. Ver [`medida::Arrastres::informados`].
+    informados: usize,
     /// Qué gesto se inyecta. Ver [`Gesto`].
     que: Gesto,
     /// Lo que mide una celda de la fuente, para el gesto del panel: su recorrido se cuenta en celdas.
@@ -271,12 +276,24 @@ impl ArrastresInyectados {
             paso: 0,
             hechos: 0,
             con_efecto: 0,
+            marcados: 0,
+            informados: 0,
             que,
             celda: None,
             origen: None,
             por_la_derecha: true,
             ultimo_fotograma: None,
         })
+    }
+
+    /// Apunta que el gesto dejó texto marcado. Ver [`Self::marcados`].
+    fn uno_marcado_mas(&mut self) {
+        self.marcados += 1;
+    }
+
+    /// Apunta que salió un informe de ratón hacia el programa. Ver [`Self::informados`].
+    fn uno_informado_mas(&mut self) {
+        self.informados += 1;
     }
 
     /// Apunta que un gesto surtió efecto de verdad. Ver [`Self::con_efecto`].
@@ -313,7 +330,77 @@ impl ArrastresInyectados {
             Gesto::MoverLaConsola => self.mover_una_consola(pintado, fotograma),
             Gesto::EstrecharElPanel => self.estrechar_un_panel(pintado, fotograma),
             Gesto::MoverLaFronteraDelArbol => self.mover_una_frontera(pintado, fotograma),
+            Gesto::Marcar | Gesto::RatonAlPrograma => self.marcar_un_trozo(pintado, fotograma),
         }
+    }
+
+    /// El gesto de marcar texto: agarrar dentro de la consola y arrastrar sin parar.
+    ///
+    /// **Solo sobre la PRIMERA consola, y la segunda es el control dentro de la misma corrida** — igual
+    /// que la tanda de la frontera del panel. Las dos vuelcan lo mismo y solo una recibe el gesto, así que
+    /// la diferencia entre sus tramos es lo que cuesta marcar, medida contra un control que compartió
+    /// máquina, fotograma y minuto.
+    ///
+    /// **Sin acorde a propósito**: el botón primario a secas dentro de una consola es lo que **D20**
+    /// define como marcar. Un acorde de más y esta tanda mediría el gesto de mover la división.
+    ///
+    /// **Alterna cuánto abarca** para que el trozo marcado crezca y mengüe en vez de quedarse quieto: una
+    /// selección que no cambia no vuelve a recorrer nada, y la tanda estaría midiendo el gesto **sin su
+    /// trabajo**.
+    fn marcar_un_trozo(
+        &mut self,
+        pintado: &[(egui::Rect, Option<f32>)],
+        fotograma: u64,
+    ) -> Vec<egui::Event> {
+        let Some((consola, _)) = pintado.first().copied() else {
+            return Vec::new();
+        };
+        // Sin celda todavía no hay recorrido que calcular: es el primer fotograma, antes de que la métrica
+        // exista. Se devuelve vacío **sin avanzar el gesto**, para no contar uno que no ocurrió.
+        let Some(celda) = self.celda else {
+            return Vec::new();
+        };
+        self.ultimo_fotograma = Some(fotograma);
+
+        // **Se agarra dentro de la consola y lejos de sus bordes.** El de la derecha lo ocupa el asidero
+        // del panel y el de más allá el divisor del árbol: apretar cerca de cualquiera de los dos mediría
+        // otro gesto bajo esta etiqueta.
+        let alto = consola.center().y;
+        let empieza = egui::pos2(consola.left() + celda, alto);
+        let recorrido = CELDAS_QUE_MARCA_EL_GESTO * celda;
+        let hasta = if self.por_la_derecha {
+            empieza.x + recorrido
+        } else {
+            empieza.x + recorrido / 2.0
+        };
+
+        let paso = self.paso;
+        self.paso += 1;
+        // El acercamiento va aparte del apretón por lo mismo que en el de la frontera: el empate.
+        if paso == 0 {
+            return vec![egui::Event::PointerMoved(empieza)];
+        }
+        if paso == 1 {
+            return vec![egui::Event::PointerButton {
+                pos: empieza,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }];
+        }
+        if paso <= FOTOGRAMAS_ARRASTRANDO + 1 {
+            return vec![egui::Event::PointerMoved(egui::pos2(hasta, alto))];
+        }
+
+        self.paso = 0;
+        self.hechos += 1;
+        self.por_la_derecha = !self.por_la_derecha;
+        vec![egui::Event::PointerButton {
+            pos: egui::pos2(hasta, alto),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
     }
 
     /// El gesto de la frontera que reparte dos consolas: agarrarla y llevarla a un lado y al otro.
@@ -555,7 +642,11 @@ impl ArrastresInyectados {
                     pos: origen.center(),
                     button: egui::PointerButton::Primary,
                     pressed: true,
-                    modifiers: egui::Modifiers::NONE,
+                    // **Con el acorde de mover, y sin él esta tanda mediría otra cosa.** Desde **D20**
+                    // el botón primario a secas dentro de una consola **marca texto**: un gesto inyectado
+                    // sin acorde recorrería el camino de la selección y publicaría su coste bajo la
+                    // etiqueta «moviendo consolas», con el informe declarando gestos igual.
+                    modifiers: ACORDE_DE_MOVER,
                 },
             ];
         }
@@ -605,7 +696,7 @@ impl ArrastresInyectados {
 /// girando rápido se perdía hasta una línea por fotograma siempre en contra del movimiento. Quien lo mira
 /// no tiene forma de notarlo salvo probando a girar muy fuerte.
 ///
-/// Sale de aquí en crudo para que lo sume [`Division::desplazar_con_la_rueda`], que es quien guarda el
+/// Sale de aquí en crudo para que lo sume [`Division::atender_la_rueda`], que es quien guarda el
 /// resto de un fotograma para el siguiente.
 ///
 /// **Dos campos con nombre y no una pareja de números**, por lo mismo que el resto de este fichero: dos
@@ -615,6 +706,82 @@ impl ArrastresInyectados {
 struct DeLaRueda {
     lineas: f32,
     paginas: f32,
+}
+
+/// Qué significa el arrastre que está en curso ahora mismo.
+///
+/// **Se decide al apretar y no se relee**, que es lo que **D20** llama el latch. Los dos gestos entran
+/// por el mismo botón y lo único que los separa es el acorde; releerlo en cada fotograma haría que
+/// soltar `Ctrl+Mayúsculas` a mitad de un arrastre cambiara lo que el gesto significa **con el botón
+/// todavía apretado**.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueHaceElArrastre {
+    /// Marcar texto: el botón izquierdo a secas dentro de una consola.
+    Selecciona,
+    /// Llevarse la división a otro sitio: el gesto de **D15**, ahora con `Ctrl+Mayúsculas`.
+    MueveLaDivision,
+    /// Contárselo al programa de dentro, que lo ha pedido.
+    VaAlPrograma,
+}
+
+impl QueHaceElArrastre {
+    /// Lo que significa apretar con ese acorde sobre una consola cuyo programa quiere —o no— el ratón.
+    ///
+    /// **El acorde llega del propio evento de pulsación**, no del estado del fotograma: ése describe el
+    /// **final del lote** y no el instante del clic. Es la misma fuente de la que ya bebe el pegado, y la
+    /// misma trampa que allí costó un caso.
+    ///
+    /// **El orden de las tres ramas es el contrato, no una comodidad de escritura.** Mover la división
+    /// gana siempre: es de la ventana y ningún programa puede quitárselo. Después, **`Mayúsculas` fuerza
+    /// la selección** aunque el programa reclame el ratón — sin esa salida, dentro de `vim` o `htop` no
+    /// habría **ninguna** forma de sacar una línea de la pantalla, y es lo que hace todo terminal. Solo
+    /// entonces se mira si el programa lo pidió.
+    fn con(acorde: egui::Modifiers, lo_quiere_el_programa: bool) -> Self {
+        if acorde.ctrl && acorde.shift {
+            Self::MueveLaDivision
+        } else if lo_quiere_el_programa && !acorde.shift {
+            Self::VaAlPrograma
+        } else {
+            Self::Selecciona
+        }
+    }
+}
+
+/// Un botón que se apretó o se soltó en este fotograma, con dónde y con qué acorde.
+///
+/// **Se recogen de la cola en vez de leerse de la respuesta de cada consola**, y no es una preferencia:
+/// la respuesta de egui dice `clicked()` **al soltar**, así que un programa que espera saber cuándo se
+/// apretó lo sabría tarde y nunca sabría con qué botón se soltó. La cola trae los dos instantes por
+/// separado, que es exactamente lo que el informe tiene que contar.
+#[derive(Debug, Clone, Copy)]
+struct DelBoton {
+    donde: egui::Pos2,
+    boton: egui::PointerButton,
+    apretado: bool,
+    acorde: egui::Modifiers,
+}
+
+/// Lo que la consola se lleva de haberle mandado el giro al programa.
+///
+/// **Los dos valen y por eso viajan juntos**: el coste se anota en la serie del ratón, y si el giro fue un
+/// informe de verdad decide si cuenta en el número que las tandas leen.
+struct DeLaRuedaAlPrograma {
+    costo: Duration,
+    /// Si lo que salió fue un informe de ratón y no las teclas de flecha.
+    fue_un_informe: bool,
+}
+
+/// Quién se queda el giro de la rueda sobre una consola.
+///
+/// El orden lo fija **D23** y se decide entero antes de mover nada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuienSeQuedaLaRueda {
+    /// Subir y bajar por lo que salió por arriba. El programa no se entera.
+    ElHistorial,
+    /// El informe de ratón, con sus dos números propios.
+    ElPrograma,
+    /// Las flechas, que es lo que hace que `less` se desplace sin pedir el ratón.
+    LasFlechas,
 }
 
 /// Lo que la ventana se lleva de haber pintado la barra de pestañas.
@@ -737,6 +904,14 @@ enum Gesto {
     /// Agarrar la frontera que reparte dos consolas y llevarla a un lado y al otro: el de F2.2, y el
     /// único que le cambia el ancho a las dos a la vez.
     MoverLaFronteraDelArbol,
+    /// Marcar texto dentro de una consola: el botón izquierdo a secas, que es lo que **D20** decide.
+    Marcar,
+    /// **El mismo recorrido que marcar, sobre una consola cuyo programa pidió el ratón.** Lo que cambia
+    /// no es el gesto sino a dónde va: en vez de extender una selección, sale un informe por cada celda
+    /// que cruza. Por eso reutiliza el inyector de [`Self::Marcar`] en vez de tener uno propio — un
+    /// recorrido distinto haría que las dos tandas no se pudieran comparar, que es justo lo que la
+    /// pareja gesto/control existe para permitir.
+    RatonAlPrograma,
 }
 
 impl Gesto {
@@ -751,6 +926,8 @@ impl Gesto {
             Self::MoverLaConsola => "moviendo consolas",
             Self::EstrecharElPanel => "estrechando el panel",
             Self::MoverLaFronteraDelArbol => "moviendo la frontera del árbol",
+            Self::Marcar => "marcando texto",
+            Self::RatonAlPrograma => "mandando el ratón al programa",
         }
     }
 }
@@ -777,6 +954,20 @@ const VARIABLE_DEL_GESTO: &str = "MEDIR_GESTO";
 /// Ocho: bastante para cruzar varias en cada gesto, y poco para que el panel no llegue a su mínimo ni al
 /// techo con el ancho de fábrica — llegar a un extremo convertiría la mitad de los gestos en un no-op y
 /// la tanda mediría dos regímenes.
+/// El acorde con el que se agarra una consola para llevársela de sitio, desde **D20**.
+///
+/// **Vive aquí y no repetido en cada sitio** porque lo comparten tres caminos que tienen que decir lo
+/// mismo: el que reparte el gesto de verdad, el gesto que la tanda de medida se inyecta, y las pruebas.
+/// Con la constante suelta, cambiar el acorde en uno de ellos deja los otros midiendo o probando el gesto
+/// que ya no es.
+const ACORDE_DE_MOVER: egui::Modifiers = egui::Modifiers {
+    alt: false,
+    ctrl: true,
+    shift: true,
+    mac_cmd: false,
+    command: false,
+};
+
 const CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL: f32 = 8.0;
 
 /// Cuántas celdas empuja la frontera del árbol **cada fotograma de arrastre** del gesto inyectado.
@@ -796,6 +987,15 @@ const CELDAS_QUE_CRUZA_EL_GESTO_DEL_PANEL: f32 = 8.0;
 /// y el ancho de fábrica del panel. Atado por
 /// `el_vaiven_del_gesto_de_la_frontera_no_deja_ninguna_consola_en_su_suelo`.
 const CELDAS_QUE_CRUZA_EL_GESTO_DE_LA_FRONTERA: f32 = 8.0;
+
+/// Cuántas celdas abarca el trozo que marca el gesto inyectado, en su tirada larga.
+///
+/// **Veinte, y el número NO sale de que marcar más cueste más** — eso decía este comentario y la medida lo
+/// desmintió. Mientras hay una selección viva, componer la foto pregunta **por cada celda de la rejilla**
+/// si va realzada, marcadas dos o dos mil: el coste crece con la rejilla, no con el trozo (**D22**). Lo
+/// que veinte compran es que el trozo sea **el de un gesto de verdad** —una ruta, una orden— y que quepa
+/// de sobra en la consola más estrecha que una tanda abre, que son 47 columnas.
+const CELDAS_QUE_MARCA_EL_GESTO: f32 = 20.0;
 
 /// Cuántos fotogramas dura el tramo de arrastre de un gesto inyectado, entre apretar y soltar.
 ///
@@ -1508,6 +1708,8 @@ fn gesto_de(valor: Option<&str>) -> Gesto {
     match valor.map(str::trim) {
         Some("panel") => Gesto::EstrecharElPanel,
         Some("frontera") => Gesto::MoverLaFronteraDelArbol,
+        Some("marcar") => Gesto::Marcar,
+        Some("raton") => Gesto::RatonAlPrograma,
         _ => Gesto::MoverLaConsola,
     }
 }
@@ -1863,6 +2065,87 @@ impl Division {
         })
     }
 
+    /// En qué celda de esta consola cae ese punto, **acotado a lo que la consola ocupa de verdad**.
+    ///
+    /// **El acotado no es una comodidad: es lo que impide seleccionar sobre el panel.** El rectángulo que
+    /// llega aquí es el de la división entera —consola, asidero y panel—, y las columnas que sobran de
+    /// la rejilla son justamente las que ocupa el panel. Quien empieza un arrastre ahí no está señalando
+    /// texto.
+    ///
+    /// Devuelve **nada cuando el punto cae fuera de la rejilla de la consola**, que es lo que quien
+    /// empieza una selección tiene que respetar; quien la extiende acota, porque arrastrar más allá del
+    /// borde es el gesto normal de seleccionar hasta el final.
+    fn celda_bajo(
+        &self,
+        division: egui::Rect,
+        punto: egui::Pos2,
+        metrica: &Metrica,
+    ) -> Option<Celda> {
+        let dentro = punto - division.min;
+        let columna = dentro.x / metrica.ancho();
+        let fila = dentro.y / metrica.alto();
+        (columna >= 0.0
+            && fila >= 0.0
+            && columna < f32::from(self.medido.cols)
+            && fila < f32::from(self.medido.rows))
+        .then(|| Celda {
+            fila: fila as u16,
+            columna: columna as u16,
+            mitad: Mitad::de_la_fraccion(columna.fract()),
+        })
+    }
+
+    /// La misma cuenta, pero **sin rechazar nada**: es la que usa quien ya está arrastrando.
+    ///
+    /// **Arrastrar fuera de la consola y seguir marcando es el gesto de siempre**, así que aquí un punto
+    /// de fuera no es un error: es alguien queriendo llegar al final de la línea.
+    ///
+    /// **Y no se acota, porque acotar aquí no cambiaría nada.** El motor lleva el punto a su rejilla por su
+    /// cuenta al convertirlo a rango —leído en su fuente, no supuesto— y el paso a `u16` satura en vez de
+    /// dar la vuelta. Un acotado propio sería un mecanismo sin escenario: comprobado quitándolo, ninguna
+    /// prueba cambia de resultado.
+    ///
+    /// **Lo que sí decide esta función es de qué MITAD de la celda se habla, y ahí hay un caso que costó un
+    /// defecto.** Pasado el borde derecho la mitad tiene que ser la **derecha**: el motor **excluye** la
+    /// última celda cuando la selección termina por su izquierda, así que dándole «izquierda» se perdía
+    /// **el último carácter de la línea** — justo en el gesto que existe para cogerla entera.
+    fn celda_para_extender(
+        &self,
+        division: egui::Rect,
+        punto: egui::Pos2,
+        metrica: &Metrica,
+    ) -> Celda {
+        let dentro = punto - division.min;
+        let ultima_columna = f32::from(self.medido.cols.saturating_sub(1));
+        let columna = dentro.x / metrica.ancho();
+        let fila = dentro.y / metrica.alto();
+        let mitad = if columna >= ultima_columna {
+            Mitad::Derecha
+        } else {
+            Mitad::de_la_fraccion(columna.fract())
+        };
+        Celda {
+            fila: fila as u16,
+            columna: columna as u16,
+            mitad,
+        }
+    }
+
+    /// La celda de debajo del punto, **llevada a la rejilla** si el punto se salió de ella.
+    ///
+    /// **Acotar aquí y no dejarlo pasar, al revés que al extender una selección.** Allí el punto se le da
+    /// al motor, que lo lleva a su rejilla por su cuenta; aquí lo que se hace con la celda es **contársela
+    /// al programa**, y una columna que su rejilla no tiene es una celda inventada. Ocurre en cuanto un
+    /// arrastre termina fuera de la consola donde empezó, que es el final normal de un gesto.
+    fn celda_acotada(&self, division: egui::Rect, punto: egui::Pos2, metrica: &Metrica) -> Celda {
+        let suelta = self.celda_para_extender(division, punto, metrica);
+        Celda {
+            fila: suelta.fila.min(self.medido.rows.saturating_sub(1)),
+            columna: suelta.columna.min(self.medido.cols.saturating_sub(1)),
+            mitad: suelta.mitad,
+        }
+    }
+
     /// Mueve el historial con lo que la rueda ha pedido, **guardando lo que no llega a una línea**.
     ///
     /// **El resto se acumula de un fotograma para otro, y ahí estaba el defecto.** Un panel táctil manda
@@ -1874,7 +2157,12 @@ impl Division {
     /// **Se trunca hacia cero y el resto conserva su signo**, así que cambiar de sentido a mitad no
     /// arrastra deuda del sentido anterior: la fracción que quedaba se gasta contra el movimiento nuevo,
     /// que es lo que hace la mano.
-    fn desplazar_con_la_rueda(&mut self, pedido: DeLaRueda) {
+    fn atender_la_rueda(
+        &mut self,
+        pedido: DeLaRueda,
+        acorde: egui::Modifiers,
+        donde: Celda,
+    ) -> Option<DeLaRuedaAlPrograma> {
         self.rueda_pendiente.lineas += pedido.lineas;
         self.rueda_pendiente.paginas += pedido.paginas;
 
@@ -1883,16 +2171,141 @@ impl Division {
         self.rueda_pendiente.lineas -= lineas;
         self.rueda_pendiente.paginas -= paginas;
 
-        // **Solo lo que mueve algo.** Un `Lineas(0)` no es inocuo de balde: es una orden al motor que no
-        // hace nada, y publicarla haría creer a quien lea el código que el fotograma desplazó.
-        if lineas != 0.0 {
-            self.pantalla
-                .desplazar(Desplazamiento::Lineas(lineas as i32));
+        match self.quien_se_queda_la_rueda(acorde) {
+            QuienSeQuedaLaRueda::ElHistorial => {
+                // **Solo lo que mueve algo.** Un `Lineas(0)` no es inocuo de balde: es una orden al motor
+                // que no hace nada, y publicarla haría creer a quien lea el código que el fotograma
+                // desplazó.
+                if lineas != 0.0 {
+                    self.pantalla
+                        .desplazar(Desplazamiento::Lineas(lineas as i32));
+                }
+                if paginas != 0.0 {
+                    self.pantalla
+                        .desplazar(Desplazamiento::Paginas(paginas as i32));
+                }
+                None
+            }
+            quien => {
+                // **Las páginas se convierten a líneas antes de salir, y no se mandan aparte.** Un
+                // programa no entiende «una página»: lo que espera es tantos giros como líneas, y la
+                // página la mide la rejilla que él mismo tiene delante. Sin esta cuenta, un panel táctil
+                // que manda páginas dejaría `less` quieto.
+                let filas = f32::from(self.pantalla.size().rows);
+                let cuantas = (lineas + paginas * filas) as i32;
+                (cuantas != 0)
+                    .then(|| self.mandar_la_rueda(quien, cuantas, donde))
+                    .flatten()
+            }
         }
-        if paginas != 0.0 {
-            self.pantalla
-                .desplazar(Desplazamiento::Paginas(paginas as i32));
+    }
+
+    /// Quién se queda el giro, en el orden que fija **D23**.
+    ///
+    /// **`Mayúsculas` primero y siempre.** Es la salida que garantiza que subir por el historial se puede
+    /// hacer en cualquier consola, mire lo que mire el programa de dentro; sin ella, dentro de un
+    /// paginador no habría forma de ver lo que salió por arriba **de la consola**, que es otra cosa que lo
+    /// que el paginador enseña.
+    fn quien_se_queda_la_rueda(&self, acorde: egui::Modifiers) -> QuienSeQuedaLaRueda {
+        if acorde.shift {
+            QuienSeQuedaLaRueda::ElHistorial
+        } else if self.pantalla.raton_reclamado().lo_quiere() {
+            QuienSeQuedaLaRueda::ElPrograma
+        } else if self.pantalla.la_rueda_va_como_flechas() {
+            QuienSeQuedaLaRueda::LasFlechas
+        } else {
+            QuienSeQuedaLaRueda::ElHistorial
         }
+    }
+
+    /// Manda al programa tantos giros como líneas, y devuelve lo que costó llegar al pseudoterminal.
+    ///
+    /// **Un envío y no uno por línea.** Los bytes se juntan y salen de una vez: el pseudoterminal es una
+    /// llamada al sistema por escritura, y con un panel táctil un solo gesto trae decenas de líneas.
+    fn mandar_la_rueda(
+        &mut self,
+        quien: QuienSeQuedaLaRueda,
+        cuantas: i32,
+        donde: Celda,
+    ) -> Option<DeLaRuedaAlPrograma> {
+        let empezo = Instant::now();
+        let arriba = cuantas > 0;
+        let mut bytes = Vec::new();
+        for _ in 0..cuantas.unsigned_abs() {
+            match quien {
+                QuienSeQuedaLaRueda::LasFlechas => {
+                    // **La misma tabla que las teclas, y hereda su corte declarado**: el modo de
+                    // aplicación —en el que las flechas cambian de forma— queda fuera del hito, y está
+                    // escrito en el módulo del teclado. Escribirla aquí de otra forma dejaría dos tablas
+                    // que se contradicen.
+                    bytes.extend_from_slice(if arriba { b"\x1b[A" } else { b"\x1b[B" });
+                }
+                _ => {
+                    let gesto = if arriba {
+                        raton::Gesto::RuedaArriba
+                    } else {
+                        raton::Gesto::RuedaAbajo
+                    };
+                    // **El giro se informa sobre la celda de debajo del puntero, no sobre la esquina.**
+                    // Un programa con dos zonas que se desplazan —`tmux` con dos paneles, `vim` con dos
+                    // ventanas— decide **cuál** mueve por la celda que el informe trae: con la 1;1 fija,
+                    // la rueda movía siempre la de arriba a la izquierda, mirase el puntero donde mirase.
+                    if let Some(informe) = raton::informe(
+                        gesto,
+                        raton::Donde::desde_cero(donde.fila, donde.columna),
+                        self.pantalla.raton_reclamado(),
+                        egui::Modifiers::NONE,
+                    ) {
+                        bytes.extend_from_slice(&informe);
+                    }
+                }
+            }
+        }
+        if bytes.is_empty() {
+            return None;
+        }
+        if let Err(fallo) = self.pty.write(&bytes) {
+            eprintln!("no se pudo enviar el giro de la rueda al programa: {fallo}");
+            // **Un envío que falló no es una ida rápida**, igual que en el camino del teclado y en el del
+            // clic: anotarlo mediría el fallo y lo publicaría como el coste normal del gesto.
+            return None;
+        }
+        Some(DeLaRuedaAlPrograma {
+            costo: empezo.elapsed(),
+            // **Las flechas no son un informe de ratón, y contarlas como tal invalidaba tandas buenas.**
+            // Lo que sale por ese camino son las mismas teclas que manda el teclado; publicarlas bajo «N
+            // informes de ratón» metía muestras ajenas en esa serie y hacía saltar la guarda que exige
+            // cero informes en toda tanda que no sea la del ratón — con un `less` desplazándose, una
+            // corrida correcta se marcaba inválida.
+            fue_un_informe: quien == QuienSeQuedaLaRueda::ElPrograma,
+        })
+    }
+
+    /// Manda al programa lo que el ratón acaba de hacer sobre esta consola.
+    ///
+    /// Devuelve lo que costó llegar al pseudoterminal, o nada si no había nada que mandar — que es el
+    /// caso normal: el programa solo recibe lo que ha pedido.
+    fn mandar_al_programa_el_raton(
+        &mut self,
+        gesto: raton::Gesto,
+        celda: Celda,
+        acorde: egui::Modifiers,
+    ) -> Option<Duration> {
+        let empezo = Instant::now();
+        let bytes = raton::informe(
+            gesto,
+            raton::Donde::desde_cero(celda.fila, celda.columna),
+            self.pantalla.raton_reclamado(),
+            acorde,
+        )?;
+        if let Err(fallo) = self.pty.write(&bytes) {
+            // Un gesto que se pierde en silencio dentro de un editor se lee como que la ventana está
+            // colgada, igual que una tecla perdida.
+            eprintln!("no se pudo enviar el ratón al programa: {fallo}");
+            // Un envío que falló no es una ida rápida: no se anota, o el número mediría el fallo.
+            return None;
+        }
+        Some(empezo.elapsed())
     }
 
     /// Aplica el tamaño que midió el último pase de interfaz.
@@ -2267,6 +2680,7 @@ impl Division {
         let mut pegado = false;
         let mut ordenes = Vec::new();
         let mut historial: Vec<Desplazamiento> = Vec::new();
+        let mut al_portapapeles: Option<String> = None;
 
         // Los eventos que van al programa **se consumen**, no se leen y se dejan. Un fotograma
         // puede correr más de un pase sobre la misma entrada —egui lo hace cuando algo pide
@@ -2285,6 +2699,7 @@ impl Division {
             let mut pedidas = Vec::new();
             let mut abiertas = pestañas_abiertas;
             let mut subidas = Vec::new();
+            let mut copiar = None;
 
             estado.events.retain(|evento| {
                 if let egui::Event::ModifiersChanged(nuevos) = evento {
@@ -2358,6 +2773,7 @@ impl Division {
                         | egui::Key::W
                         | egui::Key::D
                         | egui::Key::B
+                        | egui::Key::C
                         | egui::Key::X => true,
                         _ => false,
                     };
@@ -2405,6 +2821,19 @@ impl Division {
                             // tiene la del foco, y bajarla siempre dejaría de consumir la flecha con dos
                             // pestañas abiertas, que es el caso normal.
                             egui::Key::X if !repeat => pedidas.push(Orden::CerrarDivision),
+                            // **Copiar, y el evento se traga HAYA O NO algo marcado.** Devolverlo a la
+                            // cola sin selección lo dejaría caer en la tabla del teclado, que traduce
+                            // `Ctrl+C` a `\x03` — o sea que pedir copiar **interrumpiría el programa**.
+                            // `Ctrl+C` a secas sigue siendo suyo: esta rama solo se alcanza con el acorde
+                            // de la ventana.
+                            //
+                            // **La repetición se traga sin copiar, y no por la razón de las otras.** En
+                            // crear, cerrar y partir la guarda existe porque repetir **destruye**; aquí
+                            // repetir no destruye nada, pero **recorre y reserva la selección entera en
+                            // cada fotograma** mientras el acorde siga apretado — un segundo son sesenta
+                            // copias idénticas del mismo texto, y con una selección grande sesenta cadenas
+                            // que nacen y mueren. Copiar dos veces lo mismo no le sirve a nadie.
+                            egui::Key::C if !repeat => copiar = self.pantalla.texto_seleccionado(),
                             // La repetición de crear, cerrar o partir se traga sin hacer nada, que es el
                             // objeto de la guarda.
                             _ => {}
@@ -2454,6 +2883,7 @@ impl Division {
             pegado = pego;
             ordenes = pedidas;
             historial = subidas;
+            al_portapapeles = copiar;
         });
 
         // **Se aplican fuera del cierre de la entrada**, no dentro: ahí dentro el préstamo de la
@@ -2461,6 +2891,12 @@ impl Division {
         // préstamos separados.
         for cuanto in historial {
             self.pantalla.desplazar(cuanto);
+        }
+
+        // **Y el portapapeles, también fuera**, pero por otra razón: escribir en él es pedirle algo al
+        // contexto, y dentro del cierre el contexto tiene su entrada prestada.
+        if let Some(texto) = al_portapapeles {
+            ctx.copy_text(texto);
         }
 
         // Una orden sale igual aunque no se haya tecleado nada para el programa, que es el caso normal:
@@ -3366,6 +3802,59 @@ struct Ventana {
     /// trabajo ocurrió después de que terminara. El resto de aquel saldría corto y el de éste, inflado.
     /// Se aparca aquí y se declara al fotograma que empieza, que es el que lo pagó.
     gastado_inyectando: std::time::Duration,
+    /// Con qué acorde se apretó el botón primario la última vez.
+    ///
+    /// **Existe porque el apretón y el arrastre no caen en el mismo fotograma**, y eso costó descubrirlo:
+    /// egui da un arrastre por empezado cuando el puntero se ha movido **desde** donde se apretó, o sea
+    /// como pronto en el fotograma siguiente. Mirar la cola en el fotograma del `drag_started()` no
+    /// encuentra ninguna pulsación —ya pasó— y el gesto se resolvería siempre como si nadie hubiera
+    /// tocado ninguna tecla.
+    ///
+    /// Se apunta al ver la pulsación y se lee al empezar el arrastre. **No se limpia entre medias**: entre
+    /// los dos fotogramas no hay nada que la invalide, y limpiarla en el primero que no traiga pulsación
+    /// la borraría justo antes de usarla.
+    acorde_del_ultimo_apreton: egui::Modifiers,
+    /// El último fotograma en el que se repartieron apretones y soltados, y **nada** hasta el primero.
+    ///
+    /// Ver la razón donde se usa: los eventos de botón no se pueden consumir, así que una pasada repetida
+    /// mandaría el mismo clic dos veces.
+    ultimo_fotograma_con_botones: Option<u64>,
+    /// La última celda que se le contó al programa mientras se arrastra, y de qué consola.
+    ///
+    /// **Sirve para no repetir el mismo informe.** Un arrastre lento pasa decenas de fotogramas sobre
+    /// la misma celda, y contárselo en todos no le dice nada nuevo al programa: le llegan sesenta
+    /// mensajes por segundo diciendo lo que ya sabía.
+    ultima_celda_informada: Option<(usize, u16, u16)>,
+    /// Si el último apretón **del botón primario** cayó sobre una consola cuyo programa había pedido el
+    /// ratón.
+    ///
+    /// **Se guarda con el acorde y por la misma razón**: el apretón y el arrastre no caen en el mismo
+    /// fotograma, así que cuando egui da el gesto por empezado ya no queda forma de saber sobre qué
+    /// consola bajó el botón. Sin esto, arrastrar dentro de `htop` empezaría a marcar texto en cuanto el
+    /// puntero se moviera, encima de lo que el programa está pintando.
+    ///
+    /// **Es solo del primario porque solo el primario arrastra.** Qué hacer con el soltado de los demás
+    /// lo dice [`Self::apretones_del_programa`], que lleva la cuenta botón a botón.
+    el_apreton_fue_del_programa: bool,
+    /// Qué botones bajaron sobre qué consola con destino al programa, y siguen sin soltarse.
+    ///
+    /// **Un gesto es uno y sus dos extremos van al mismo sitio, o el programa se queda esperando.** Sin
+    /// esta lista, el soltado se resolvía por su cuenta y salían tres formas de mentirle al programa de
+    /// dentro: un soltado que cae **sobre otra consola** se lo llevaba ella —y la que recibió el apretón
+    /// se quedaba creyendo el botón apretado para siempre, con `htop` estirando su columna y `vim`
+    /// extendiendo su selección—; un soltado **fuera de toda rejilla** se perdía; y un botón que no es el
+    /// primario recibía su apretón y nunca su soltado, porque el único latch que había era el del
+    /// primario.
+    ///
+    /// **Es una lista y no un solo hueco** porque dos botones pueden estar bajados a la vez: arrastrar con
+    /// el izquierdo y pulsar el derecho es un gesto que existe.
+    apretones_del_programa: Vec<(usize, egui::PointerButton)>,
+    /// Qué significa el arrastre en curso, y **nada mientras no haya ninguno**. Ver [`QueHaceElArrastre`].
+    ///
+    /// **Estado propio, y aquí sí hace falta.** Lo que egui sostiene entre fotogramas es *qué* control se
+    /// arrastra, no *qué quiso decir* quien lo agarró: eso solo está en el acorde del evento de pulsación,
+    /// que pasa por la cola una vez y no vuelve.
+    arrastre_en_curso: Option<QueHaceElArrastre>,
     /// Con qué se pintó el último fotograma: el rectángulo de cada división y **dónde quedó la frontera de
     /// su panel**, o nada si esa división no tenía panel a la vista.
     ///
@@ -3602,6 +4091,12 @@ impl Ventana {
             // `None` pelados en más de treinta llamadas — dos huecos que no dicen cuál es cuál.
             arrastres: None,
             gastado_inyectando: std::time::Duration::ZERO,
+            acorde_del_ultimo_apreton: egui::Modifiers::NONE,
+            el_apreton_fue_del_programa: false,
+            apretones_del_programa: Vec::new(),
+            ultima_celda_informada: None,
+            ultimo_fotograma_con_botones: None,
+            arrastre_en_curso: None,
             ultimo_pintado: Vec::new(),
             // **Del largo de la lista y no del parámetro `cuantas`, aunque aquí valgan lo mismo.** Son
             // dos fuentes para el mismo dato, y con dos se puede coger la que no toca: poner un cero o
@@ -3828,6 +4323,8 @@ impl Ventana {
                 arrastres: self.arrastres.as_ref().map(|arrastres| medida::Arrastres {
                     inyectados: arrastres.hechos,
                     con_efecto: arrastres.con_efecto,
+                    marcados: arrastres.marcados,
+                    informados: arrastres.informados,
                     gesto: arrastres.que.como_se_publica(),
                 }),
                 restauracion: self.restauracion,
@@ -4309,6 +4806,32 @@ impl Ventana {
         // el teclado: un fotograma puede correr dos pasadas sobre la misma entrada.
         let rueda = Self::recoger_la_rueda(ui, metrica);
 
+        // **Con qué acorde se ha apretado, del propio evento y no del estado.** Ver
+        // [`QueHaceElArrastre::con`] y [`Self::acorde_del_ultimo_apreton`]. Se mira antes del bucle
+        // porque la respuesta es de la ventana, no de cada consola: solo una de ellas recibe la pulsación.
+        if let Some(acorde) = Self::acorde_del_apreton(ui) {
+            self.acorde_del_ultimo_apreton = acorde;
+        }
+
+        // **Apretar y soltar se reparten aquí, antes del bucle**, y no dentro con la respuesta de cada
+        // consola: egui da `clicked()` **al soltar**, así que el programa se enteraría tarde del apretón
+        // y nunca de qué botón se soltó. Ver [`DelBoton`].
+        //
+        // **Y una sola vez por fotograma, no por pasada.** egui puede correr la pasada de interfaz dos
+        // veces sobre la misma entrada, y estos eventos **no se pueden consumir** —la pulsación es lo que
+        // egui necesita para empezar el arrastre—, así que sin esta cuenta el programa de dentro recibía
+        // **dos apretones donde el usuario dio uno**: un doble clic que nadie hizo. El teclado se defiende
+        // consumiendo; aquí hay que llevar la cuenta. `cumulative_frame_nr` sube una vez por fotograma;
+        // `cumulative_pass_nr` sube por pasada y no filtraría nada.
+        let fotograma = ui.ctx().cumulative_frame_nr();
+        if self.ultimo_fotograma_con_botones != Some(fotograma) {
+            self.ultimo_fotograma_con_botones = Some(fotograma);
+            self.repartir_los_botones(ui, rectangulos, &nombres, metrica);
+        }
+        // **Dónde bajó el botón, que es donde empieza una selección.** egui lo conserva mientras el botón
+        // siga apretado, así que se lee en el fotograma que haga falta.
+        let origen_del_apreton = ui.ctx().input(|estado| estado.pointer.press_origin());
+
         // **Los rectángulos y los nombres se recorren emparejados, no indexando uno con el otro.** Son
         // dos listas que salen del mismo árbol y siempre miden lo mismo; emparejarlas hace imposible el
         // desajuste en vez de defenderse de él con una guarda que en la aplicación no puede saltar nunca.
@@ -4341,11 +4864,54 @@ impl Ventana {
                 self.activa_mut().foco = nombre;
             }
 
+            // **Un clic seco tira la selección, y va aquí arriba a propósito.** Más abajo hay una guarda
+            // que se salta la consola cuando no la están arrastrando —está para que ningún botón que no
+            // sea el primario mueva nada—, y un clic **no es un arrastre**: puesto detrás, no se ejecuta
+            // nunca. Sin esto no hay forma de dejar de tener algo marcado salvo esperar a que el programa
+            // limpie la pantalla.
+            if respuesta.clicked()
+                && let Some(division) = self.division_llamada(nombre)
+            {
+                division.pantalla.quitar_la_seleccion();
+            }
+
             // **Solo el botón primario mueve consolas.** `dragged()` y `drag_stopped()` no miran qué botón
             // es —egui apunta como candidato a arrastrarse cualquier pulsación—, y en un terminal eso no es
             // teórico: el botón central es el pegado de X11 y el derecho es la selección en casi todos. Un
             // arrastre con cualquiera de los dos cambiaría dos consolas de sitio sin que nadie lo pidiera.
             if !respuesta.dragged_by(egui::PointerButton::Primary) && !respuesta.drag_stopped() {
+                continue;
+            }
+
+            // **El significado del gesto se fija aquí, al empezar, y no se vuelve a mirar.** Ver
+            // [`QueHaceElArrastre`]. Sin acorde en la cola —que es lo que pasa cuando egui da el arrastre
+            // por empezado un fotograma después del apretón— se toma el de un botón pelado, que es
+            // seleccionar.
+            if respuesta.drag_started() {
+                self.arrastre_en_curso = Some(QueHaceElArrastre::con(
+                    self.acorde_del_ultimo_apreton,
+                    self.el_apreton_fue_del_programa,
+                ));
+            }
+
+            if self.arrastre_en_curso == Some(QueHaceElArrastre::Selecciona) {
+                self.marcar_arrastrando(&respuesta, nombre, *rect, metrica, origen_del_apreton);
+                if respuesta.drag_stopped() {
+                    self.arrastre_en_curso = None;
+                }
+                continue;
+            }
+
+            if self.arrastre_en_curso == Some(QueHaceElArrastre::VaAlPrograma) {
+                // **En el fotograma en que se suelta no se informa movimiento, y ése era un defecto.** El
+                // soltado se reparte antes que este bucle, así que el programa recibía primero el
+                // `soltar` y **después** un `arrastrar` de la misma celda: un movimiento con el botón ya
+                // subido, que para quien lleva estado del ratón es una contradicción.
+                if respuesta.drag_stopped() {
+                    self.arrastre_en_curso = None;
+                } else {
+                    self.arrastrar_para_el_programa(&respuesta, nombre, *rect, metrica);
+                }
                 continue;
             }
 
@@ -4380,24 +4946,359 @@ impl Ventana {
             } else if !respuesta.drag_stopped() {
                 destino = encima;
             }
+
+            if respuesta.drag_stopped() {
+                self.arrastre_en_curso = None;
+            }
         }
 
         // **Después del bucle, y no dentro**: dentro, `self` está prestado por el recorrido del árbol.
-        if let Some((puntero, pedido)) = rueda
+        if let Some((puntero, pedido, acorde)) = rueda
             && let Some(donde) = rectangulos.iter().position(|rect| rect.contains(puntero))
             && let Some(&nombre) = nombres.get(donde)
+            && let Some(rect) = rectangulos.get(donde).copied()
             && let Some(division) = self
                 .activa_mut()
                 .divisiones_mut()
                 .into_iter()
                 .find(|division| division.nombre == nombre)
+            // **La celda de debajo del puntero, acotada y no rechazada.** El giro puede caer sobre la
+            // franja del panel, y ahí lo que el programa espera saber es que la rueda giró: perderlo
+            // dejaría la rueda muerta en las columnas de la derecha de la consola.
+            && let Some(al_programa) = {
+                let celda = division.celda_para_extender(rect, puntero, &metrica.clone());
+                division.atender_la_rueda(pedido, acorde, celda)
+            }
         {
-            division.desplazar_con_la_rueda(pedido);
+            // **La ida del ratón se anota en la medida de SU consola**, no en la de la ventana: el
+            // informe se publica por división y una serie común no diría en cuál ocurrió el gesto.
+            division.medida.anotar_ida_del_raton(al_programa.costo);
+            if al_programa.fue_un_informe {
+                self.uno_informado_mas(true);
+            }
         }
 
         DelRaton {
             destino,
             cambio_el_arbol,
+        }
+    }
+
+    /// Reparte los apretones y soltados de este fotograma entre las consolas que los recibieron.
+    ///
+    /// **También apunta si el apretón fue de un programa que pidió el ratón**, que es lo que el latch
+    /// del arrastre necesita un fotograma después. Ver [`Self::el_apreton_fue_del_programa`].
+    fn repartir_los_botones(
+        &mut self,
+        ui: &egui::Ui,
+        rectangulos: &[egui::Rect],
+        nombres: &[usize],
+        metrica: &Metrica,
+    ) {
+        for boton in Self::recoger_los_botones(ui) {
+            // **Un soltado va a la consola que se quedó SU apretón, no a la que hay debajo del puntero.**
+            // Soltar sobre otra consola, sobre la franja del panel o fuera de la ventana es lo normal al
+            // final de un arrastre; resolviéndolo por el puntero, la consola que recibió el apretón se
+            // queda creyendo el botón apretado **para siempre** —`htop` sigue estirando su columna— y la
+            // de al lado recibe un soltar de un apretar que nunca vio.
+            let de_un_apreton_vivo = (!boton.apretado)
+                .then(|| {
+                    self.apretones_del_programa
+                        .iter()
+                        .position(|&(_, cual)| cual == boton.boton)
+                })
+                .flatten();
+            if let Some(cual) = de_un_apreton_vivo {
+                let (nombre, _) = self.apretones_del_programa.remove(cual);
+                self.soltar_para_el_programa(nombre, boton, rectangulos, nombres, metrica);
+                continue;
+            }
+
+            let Some(donde) = rectangulos
+                .iter()
+                .position(|rect| rect.contains(boton.donde))
+            else {
+                continue;
+            };
+            let (Some(&nombre), Some(rect)) = (nombres.get(donde), rectangulos.get(donde)) else {
+                continue;
+            };
+
+            // Un soltado que llega hasta aquí no tenía apretón vivo: su gesto no era del programa, o ya
+            // se cerró. No se informa, que es lo que evita el soltar huérfano.
+            if !boton.apretado {
+                continue;
+            }
+
+            // **El acorde de mover la división gana antes de mirar nada más**: es de la ventana, y
+            // dejar que un programa se lo quedara haría imposible recolocar consolas dentro de `vim`.
+            let para_el_programa =
+                QueHaceElArrastre::con(boton.acorde, self.quiere_el_raton(nombre))
+                    == QueHaceElArrastre::VaAlPrograma;
+
+            // **La celda se resuelve antes de apuntar nada, y ése era un defecto.** Las columnas del
+            // panel de estado están dentro del rectángulo de la división pero no son de la consola: un
+            // apretón ahí no tiene celda que contar. Apuntándolo igual, el arrastre que empezaba sobre el
+            // panel de una consola cuyo programa pide el ratón le mandaba a ese programa un gesto que
+            // **empezó fuera de él** en cuanto el puntero entraba.
+            let sobre_la_rejilla = self
+                .division_llamada(nombre)
+                .and_then(|division| division.celda_bajo(*rect, boton.donde, metrica));
+            let del_programa = para_el_programa && sobre_la_rejilla.is_some();
+
+            if boton.boton == egui::PointerButton::Primary {
+                self.el_apreton_fue_del_programa = del_programa;
+            }
+            let Some(celda) = sobre_la_rejilla.filter(|_| del_programa) else {
+                continue;
+            };
+
+            self.apretones_del_programa.push((nombre, boton.boton));
+            // **El primer informe del arrastre se siembra aquí.** Sin esto, el fotograma siguiente vuelve
+            // a contar la celda que el apretón acaba de contar: una escritura al pseudoterminal de más
+            // por gesto, que es justo lo que ese campo existe para evitar.
+            self.ultima_celda_informada = Some((nombre, celda.fila, celda.columna));
+            self.informar(
+                nombre,
+                raton::Gesto::Apretar(boton.boton),
+                celda,
+                boton.acorde,
+            );
+        }
+    }
+
+    /// Le cuenta al programa que se soltó el botón que él vio bajar.
+    ///
+    /// **La celda se acota a la rejilla en vez de rechazarse**, al revés que en el apretón y por la misma
+    /// razón que lo hace la selección: soltar pasado el borde es el final normal de un arrastre, y lo que
+    /// el programa necesita saber es que el botón subió — no perderlo porque el puntero se fue.
+    fn soltar_para_el_programa(
+        &mut self,
+        nombre: usize,
+        boton: DelBoton,
+        rectangulos: &[egui::Rect],
+        nombres: &[usize],
+        metrica: &Metrica,
+    ) {
+        let Some(suyo) = nombres.iter().position(|&cual| cual == nombre) else {
+            // La consola del apretón ya no está —cerrada a mitad del gesto—: no hay a quién contárselo.
+            return;
+        };
+        let Some(rect) = rectangulos.get(suyo).copied() else {
+            return;
+        };
+        let Some(celda) = self
+            .division_llamada(nombre)
+            .map(|division| division.celda_acotada(rect, boton.donde, metrica))
+        else {
+            return;
+        };
+        self.ultima_celda_informada = None;
+        self.informar(
+            nombre,
+            raton::Gesto::Soltar(boton.boton),
+            celda,
+            boton.acorde,
+        );
+    }
+
+    /// Manda el informe y lo apunta en la medida de esa consola y en el de la tanda.
+    fn informar(
+        &mut self,
+        nombre: usize,
+        gesto: raton::Gesto,
+        celda: Celda,
+        acorde: egui::Modifiers,
+    ) {
+        if let Some(division) = self.division_llamada(nombre)
+            && let Some(costo) = division.mandar_al_programa_el_raton(gesto, celda, acorde)
+        {
+            division.medida.anotar_ida_del_raton(costo);
+            self.uno_informado_mas(matches!(gesto, raton::Gesto::Apretar(_)));
+        }
+    }
+
+    /// Apunta en el informe de la tanda que salió un informe hacia el programa.
+    ///
+    /// **El efecto se cuenta UNA VEZ POR GESTO, no por informe**, y esa distinción se cobró una lectura
+    /// mala. El contador de efectos responde «cuántos de los gestos inyectados cambiaron algo», y en todas
+    /// las demás tandas sale menor o igual que el de gestos; contando cada informe —un gesto de ratón son
+    /// el apretón, sus movimientos y el soltado— la tanda del ratón publicaba **el triple de efectos que
+    /// de gestos** y su columna dejaba de ser comparable con las demás. Cuenta el apretón, que es el que
+    /// abre el gesto, y el giro de rueda, que **es** un gesto entero por sí mismo.
+    fn uno_informado_mas(&mut self, cuenta_como_efecto: bool) {
+        if let Some(arrastres) = self.arrastres.as_mut() {
+            arrastres.uno_informado_mas();
+            if cuenta_como_efecto {
+                arrastres.uno_con_efecto_mas();
+            }
+        }
+    }
+
+    /// Si el programa de esa consola ha pedido el ratón.
+    fn quiere_el_raton(&mut self, nombre: usize) -> bool {
+        self.division_llamada(nombre)
+            .is_some_and(|division| division.pantalla.raton_reclamado().lo_quiere())
+    }
+
+    /// Los apretones y soltados de la cola de este fotograma.
+    ///
+    /// **No los consume**, igual que [`Self::acorde_del_apreton`]: la pulsación es lo que egui necesita
+    /// para decidir quién se arrastra, y quitársela dejaría el gesto sin empezar nunca.
+    fn recoger_los_botones(ui: &egui::Ui) -> Vec<DelBoton> {
+        ui.ctx().input(|estado| {
+            estado
+                .events
+                .iter()
+                .filter_map(|evento| match evento {
+                    egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers,
+                    } => Some(DelBoton {
+                        donde: *pos,
+                        boton: *button,
+                        apretado: *pressed,
+                        acorde: *modifiers,
+                    }),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    /// Le cuenta al programa que el puntero recorre celdas con el botón apretado.
+    ///
+    /// **Solo cuando la celda cambia.** Un arrastre lento manda decenas de fotogramas sobre la misma
+    /// celda, y el informe repetido no le dice nada nuevo al programa: lo que espera es enterarse de que
+    /// se ha pasado a otra.
+    fn arrastrar_para_el_programa(
+        &mut self,
+        respuesta: &egui::Response,
+        nombre: usize,
+        division: egui::Rect,
+        metrica: &Metrica,
+    ) {
+        let Some(puntero) = respuesta.interact_pointer_pos() else {
+            return;
+        };
+        let boton = egui::PointerButton::Primary;
+        // **Se acota a la rejilla en vez de rechazarse, igual que hace la selección.** Arrastrar pasado el
+        // borde y seguir es el gesto de siempre: con la variante estricta, sacar el puntero de la consola
+        // dejaba el arrastre del programa **congelado** en la última celda que sí entró —una barra de
+        // `htop` que deja de seguir la mano— hasta volver a entrar. `xterm` acota.
+        let Some(celda) = self
+            .division_llamada(nombre)
+            .map(|consola| consola.celda_acotada(division, puntero, metrica))
+        else {
+            return;
+        };
+        if self.ultima_celda_informada == Some((nombre, celda.fila, celda.columna)) {
+            return;
+        }
+        self.ultima_celda_informada = Some((nombre, celda.fila, celda.columna));
+        // **El acorde es el del apretón, no «ninguno».** Con `Modifiers::NONE` fijo, una tecla mantenida
+        // durante el arrastre viajaba en el apretón y en el soltado pero **en ninguno de los informes de
+        // en medio**: para un programa que distingue el arrastre con acorde —selección por bloques en un
+        // editor— la tecla se soltaba y se volvía a pulsar sola a mitad del gesto.
+        let acorde = self.acorde_del_ultimo_apreton;
+        self.informar(nombre, raton::Gesto::Arrastrar(boton), celda, acorde);
+    }
+
+    /// Con qué acorde se ha apretado el botón primario en este fotograma, si es que se ha apretado.
+    ///
+    /// **Del propio evento y no del estado del fotograma.** El estado describe el **final del lote**: si
+    /// en el mismo lote llega el apretón y después el aviso de que se soltó `Ctrl`, leerlo daría «sin
+    /// acorde» sobre una pulsación que sí lo llevaba. Es la misma fuente de la que ya bebe el pegado, y la
+    /// misma trampa que allí costó un caso.
+    ///
+    /// **No consume el evento**, al revés que la rueda y el teclado: la pulsación es lo que egui necesita
+    /// para empezar el arrastre, y quitársela dejaría el gesto sin empezar nunca. Aquí solo se mira.
+    fn acorde_del_apreton(ui: &egui::Ui) -> Option<egui::Modifiers> {
+        ui.ctx().input(|estado| {
+            estado.events.iter().find_map(|evento| match evento {
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => Some(*modifiers),
+                _ => None,
+            })
+        })
+    }
+
+    /// La consola de la pestaña activa que se llama así, si sigue estando.
+    fn division_llamada(&mut self, nombre: usize) -> Option<&mut Division> {
+        self.activa_mut()
+            .divisiones_mut()
+            .into_iter()
+            .find(|division| division.nombre == nombre)
+    }
+
+    /// Lleva la selección de esa consola a donde está el puntero.
+    ///
+    /// **Empezar y extender se separan por `drag_started()` y no por si ya había selección.** Con lo
+    /// segundo, arrastrar sobre una consola que ya tenía algo marcado extendería aquella selección vieja
+    /// en vez de empezar una nueva desde donde se apretó.
+    fn marcar_arrastrando(
+        &mut self,
+        respuesta: &egui::Response,
+        nombre: usize,
+        division: egui::Rect,
+        metrica: &Metrica,
+        origen_del_apreton: Option<egui::Pos2>,
+    ) {
+        let empieza = respuesta.drag_started();
+        // **Al empezar vale DONDE SE APRETÓ, no dónde está el puntero.** egui da el arrastre por empezado
+        // en el fotograma en que el puntero **ya se ha movido**, así que preguntar por él ahí devuelve el
+        // final del primer tramo: empezar la selección con ese punto la abre y la cierra en la misma
+        // celda, y no se marca nada. Comprobado por las malas — la prueba de marcar salía sin nada.
+        let punto = if empieza {
+            origen_del_apreton
+        } else {
+            respuesta.interact_pointer_pos()
+        };
+        let Some(puntero) = punto else {
+            return;
+        };
+        let Some(consola) = self.division_llamada(nombre) else {
+            return;
+        };
+
+        if empieza {
+            // **Empezar sobre el panel no empieza nada, y con ello el gesto entero se cancela.** Las
+            // columnas que sobran de la rejilla son las suyas y las de su asidero, y quien aprieta ahí no
+            // está señalando texto.
+            //
+            // **Cancelar el gesto —y no solo saltarse este fotograma— es lo que arregla el defecto que la
+            // revisión encontró.** Sin ello, los fotogramas siguientes seguían extendiendo: el ancla de
+            // una selección **anterior** sobrevivía y su extremo saltaba al puntero, así que apretar en el
+            // panel y arrastrar cambiaba solo lo que había marcado y `Ctrl+Mayúsculas+C` copiaba un texto
+            // que nadie señaló.
+            match consola.celda_bajo(division, puntero, metrica) {
+                Some(celda) => consola.pantalla.empezar_seleccion(celda),
+                None => self.arrastre_en_curso = None,
+            }
+            return;
+        }
+
+        // Extender **no** rechaza: arrastrar más allá del borde y seguir marcando es el gesto de siempre.
+        let celda = consola.celda_para_extender(division, puntero, metrica);
+        consola.pantalla.extender_seleccion(celda);
+        let marco = consola.pantalla.hay_seleccion();
+
+        // **Y se apunta si de verdad quedó algo marcado, para el informe de una tanda.** Ver
+        // [`medida::Arrastres::marcados`]: es lo que distingue «se inyectó el gesto» de «el gesto marcó»,
+        // y lo que permite a una tanda de OTRO gesto invalidarse si el suyo acabó seleccionando.
+        if marco && let Some(arrastres) = self.arrastres.as_mut() {
+            arrastres.uno_marcado_mas();
+            // **Y cuenta también como efecto, porque para el gesto de marcar ESTE es su efecto.** El
+            // contador de efectos dice «el gesto cambió algo de verdad», y lo que cambia al marcar es lo
+            // que hay marcado. Sin esto la tanda de marcar publicaría **cero efectos** —la lectura de que
+            // el gesto no hizo nada— y el guion la invalidaría teniendo razón por el motivo equivocado.
+            arrastres.uno_con_efecto_mas();
         }
     }
 
@@ -4417,16 +5318,37 @@ impl Ventana {
     ///
     /// **No es método de la ventana**: no lee nada de ella, y un receptor promete una dependencia que no
     /// existe.
-    fn recoger_la_rueda(ui: &egui::Ui, metrica: &Metrica) -> Option<(egui::Pos2, DeLaRueda)> {
+    fn recoger_la_rueda(
+        ui: &egui::Ui,
+        metrica: &Metrica,
+    ) -> Option<(egui::Pos2, DeLaRueda, egui::Modifiers)> {
         ui.ctx().input_mut(|estado| {
             let puntero = estado.pointer.hover_pos()?;
             let mut pedido = DeLaRueda::default();
             let mut hubo = false;
+            // **El acorde sale del propio evento del giro**, por lo mismo que el del apretón: el estado
+            // del fotograma describe el final del lote, y aquí decide quién se queda la rueda.
+            let mut acorde = egui::Modifiers::NONE;
 
             estado.events.retain(|evento| {
-                let egui::Event::MouseWheel { unit, delta, .. } = evento else {
+                let egui::Event::MouseWheel {
+                    unit,
+                    delta,
+                    modifiers,
+                    ..
+                } = evento
+                else {
                     return true;
                 };
+                // **El acorde es el del PRIMER giro del lote, no el del último.** El lote suma todo lo
+                // que la rueda pidió en el fotograma, así que quedarse con el último dejaba que soltar
+                // `Mayúsculas` a mitad de un golpe de rueda le entregara al programa **también la parte
+                // que se giró con la tecla puesta** — y esa tecla es justo la salida que garantiza que el
+                // historial siempre se puede mirar. Es el mismo criterio que el apretón: el gesto se fija
+                // al empezar.
+                if !hubo {
+                    acorde = *modifiers;
+                }
                 hubo = true;
                 match unit {
                     egui::MouseWheelUnit::Line => pedido.lineas += delta.y,
@@ -4438,7 +5360,7 @@ impl Ventana {
                 false
             });
 
-            hubo.then_some((puntero, pedido))
+            hubo.then_some((puntero, pedido, acorde))
         })
     }
 
@@ -5833,12 +6755,12 @@ mod tests {
         });
     }
 
+    /// El acorde de la ventana: `Ctrl+Mayúsculas`.
+    ///
+    /// **Es la misma constante que usa producción**, y eso no es ahorro de líneas: con una copia, cambiar
+    /// el acorde dejaría las pruebas verdes probando el gesto que ya no existe.
     fn con_mayusculas() -> egui::Modifiers {
-        egui::Modifiers {
-            shift: true,
-            ctrl: true,
-            ..Default::default()
-        }
+        ACORDE_DE_MOVER
     }
 
     #[test]
@@ -6167,6 +7089,12 @@ mod tests {
             // pruebas, que es la única forma de comprobar el gesto sin abrir ventana.
             arrastres: None,
             gastado_inyectando: std::time::Duration::ZERO,
+            acorde_del_ultimo_apreton: egui::Modifiers::NONE,
+            el_apreton_fue_del_programa: false,
+            apretones_del_programa: Vec::new(),
+            ultima_celda_informada: None,
+            ultimo_fotograma_con_botones: None,
+            arrastre_en_curso: None,
             ultimo_pintado: Vec::new(),
             siguiente_nombre,
             siguiente_nombre_de_division,
@@ -10005,6 +10933,757 @@ mod tests {
         );
     }
 
+    /// Pulsa el acorde de copiar en esa consola y devuelve lo que quedó en el portapapeles.
+    ///
+    /// **Se lee de la salida del contexto**, que es por donde egui entrega el portapapeles al escritorio:
+    /// afirmar sobre una copia nuestra probaría que la guardamos, no que se copió.
+    fn copiar_en(division: &mut Division, ctx: &egui::Context) -> Option<String> {
+        let mut modificadores = egui::Modifiers::NONE;
+        encolar(
+            ctx,
+            vec![
+                egui::Event::ModifiersChanged(ACORDE_DE_MOVER),
+                tecla(egui::Key::C, ACORDE_DE_MOVER),
+            ],
+        );
+        // **Teclear va FUERA de la pasada, y no es un detalle de estilo.** `run_ui` sustituye la entrada
+        // por la que se le pasa, así que dentro de ella la cola que acaba de sembrarse ya no está: el
+        // acorde no llegaría nunca. La pasada de después solo sirve para recoger lo que la aplicación
+        // dejó dicho al escritorio.
+        division.teclear(ctx, Instant::now(), &mut modificadores, 1);
+        let salida = ctx.run_ui(egui::RawInput::default(), |_| {});
+        let copiado = salida
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|orden| match orden {
+                egui::OutputCommand::CopyText(texto) => Some(texto.clone()),
+                _ => None,
+            });
+        salida.drop_without_applying_deltas();
+        copiado
+    }
+
+    #[test]
+    fn copiar_deja_en_el_portapapeles_lo_que_dicen_los_contratos() {
+        // **AC5.** Se comprueba contra el texto **literal**, con las tres reglas dentro de la misma
+        // cadena: una línea que envuelve unida sin salto, sin el relleno del final, y el carácter ancho
+        // sin duplicar. Afirmar solo «hay algo en el portapapeles» dejaría pasar cualquiera de las tres.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        division.pantalla.resize(Size { rows: 4, cols: 10 });
+        division.pantalla.advance("0123456日本".as_bytes());
+
+        division.pantalla.empezar_seleccion(Celda {
+            fila: 0,
+            columna: 0,
+            mitad: Mitad::Izquierda,
+        });
+        division.pantalla.extender_seleccion(Celda {
+            fila: 1,
+            columna: 9,
+            mitad: Mitad::Derecha,
+        });
+
+        assert_eq!(
+            copiar_en(&mut division, &ctx).as_deref(),
+            Some("0123456日本"),
+            "lo copiado no es lo que los contratos dicen que es «el texto»"
+        );
+    }
+
+    #[test]
+    fn mantener_el_acorde_de_copiar_no_vuelve_a_copiar_en_cada_fotograma() {
+        // **Repetir no destruye nada, pero recorre y reserva la selección ENTERA cada vez.** Un segundo con
+        // el acorde apretado son sesenta copias idénticas del mismo texto y sesenta cadenas que nacen y
+        // mueren; con una selección grande eso es basura por fotograma para no darle nada a nadie. Y la
+        // repetición **se sigue tragando**: devolverla a la cola la dejaría caer en la tabla del teclado,
+        // que traduce `Ctrl+C` a `\x03`.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+        division.pantalla.advance(b"hola mundo");
+        division.pantalla.empezar_seleccion(Celda {
+            fila: 0,
+            columna: 0,
+            mitad: Mitad::Izquierda,
+        });
+        division.pantalla.extender_seleccion(Celda {
+            fila: 0,
+            columna: 3,
+            mitad: Mitad::Derecha,
+        });
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(ACORDE_DE_MOVER),
+                egui::Event::Key {
+                    key: egui::Key::C,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: true,
+                    modifiers: ACORDE_DE_MOVER,
+                },
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 1);
+        let salida = ctx.run_ui(egui::RawInput::default(), |_| {});
+        let copio = salida
+            .platform_output
+            .commands
+            .iter()
+            .any(|orden| matches!(orden, egui::OutputCommand::CopyText(_)));
+        salida.drop_without_applying_deltas();
+
+        assert!(
+            !copio,
+            "una repetición del acorde volvió a copiar: mantenerlo apretado reserva la selección entera \
+             en cada fotograma"
+        );
+        assert!(
+            division.pulsaciones.is_empty(),
+            "la repetición se devolvió a la cola y al programa le llegó {:?}",
+            String::from_utf8_lossy(&division.pulsaciones)
+        );
+    }
+
+    #[test]
+    fn copiar_sin_nada_marcado_no_interrumpe_el_programa() {
+        // **AC6, y es el que más duele si falla.** Sin selección, devolver el evento a la cola lo deja
+        // caer en la tabla del teclado, que traduce `Ctrl+C` a `\x03` — o sea que pedir copiar **mataría
+        // lo que esté corriendo**. Se afirma sobre lo que sale hacia el programa, no sobre el
+        // portapapeles: un `\x03` de más no cambia lo copiado.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        division.pantalla.advance(b"hola");
+
+        assert_eq!(
+            copiar_en(&mut division, &ctx),
+            None,
+            "sin nada marcado se copió algo"
+        );
+        assert!(
+            division.pulsaciones.is_empty(),
+            "al programa le llegó {:?} por pedir copiar sin nada marcado",
+            String::from_utf8_lossy(&division.pulsaciones)
+        );
+    }
+
+    #[test]
+    fn ctrl_c_a_secas_sigue_siendo_del_programa() {
+        // **La otra mitad de AC6, y sin ella «no mandar nada» pasaría tragándose también el acorde del
+        // programa.** `Ctrl+C` es cómo se interrumpe lo que esté corriendo desde que existen los
+        // terminales: quitárselo sería romper el terminal para arreglar el copiar.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+        let solo_ctrl = egui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(solo_ctrl),
+                tecla(egui::Key::C, solo_ctrl),
+            ],
+        );
+        division.teclear(&ctx, Instant::now(), &mut modificadores, 1);
+
+        assert_eq!(
+            division.pulsaciones.as_slice(),
+            b"\x03",
+            "Ctrl+C a secas dejó de interrumpir el programa"
+        );
+    }
+
+    /// Un arrastre entero **para marcar texto**: el botón izquierdo a secas, que es lo que **D20** decide.
+    ///
+    /// Mismas cuatro pasadas y por las mismas razones que [`arrastrar_una_consola`] — egui resuelve la
+    /// interacción contra lo registrado en la pasada anterior, y el movimiento tiene que llegar en un
+    /// fotograma distinto del apretón. Lo único que cambia es el acorde, que es justo lo que se prueba.
+    fn arrastrar_para_marcar(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        rectangulos: &[egui::Rect],
+        desde: egui::Pos2,
+        hasta: egui::Pos2,
+    ) {
+        arrastrar_con_acorde(
+            ventana,
+            ctx,
+            rectangulos,
+            desde,
+            hasta,
+            egui::Modifiers::NONE,
+        );
+    }
+
+    /// Dos consolas con texto dentro y la rejilla ya anunciada, listas para marcar sobre ellas.
+    ///
+    /// **La rejilla hay que anunciarla**, porque de ella salen las columnas que la consola ocupa de verdad
+    /// —lo que sobra es el panel— y sin eso la cuenta de dónde cae el puntero no tiene contra qué acotar.
+    fn dos_consolas_con_texto(rectangulos: &[egui::Rect], metrica: &Metrica) -> Ventana {
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        for (division, rect) in ventana
+            .activa_mut()
+            .divisiones_mut()
+            .into_iter()
+            .zip(rectangulos)
+        {
+            division.medido = metrica.celdas_en(rect.size());
+            division.pantalla.resize(division.medido);
+            division.pantalla.advance(b"hola mundo");
+        }
+        ventana
+    }
+
+    /// Lo que esa consola tiene marcado ahora mismo.
+    fn marcado_en(ventana: &Ventana, cual: usize) -> Option<String> {
+        ventana.activa().divisiones()[cual]
+            .pantalla
+            .texto_seleccionado()
+    }
+
+    #[test]
+    fn el_boton_izquierdo_dentro_de_una_consola_marca_texto_y_no_la_mueve_de_sitio() {
+        // **AC3, y es el cambio de conducta de D20 visto desde el usuario.** Hasta este hito el mismo
+        // gesto se llevaba la consola a otro sitio; ahora marca texto, que es lo que hace cualquier
+        // terminal. Se afirma sobre las **dos** cosas: que marca **y** que no mueve. Con solo la primera,
+        // un gesto que marcara y además reordenara el árbol pasaría.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+        let orden = ventana
+            .activa()
+            .divisiones()
+            .iter()
+            .map(|division| division.nombre)
+            .collect::<Vec<_>>();
+
+        // De la primera letra a la cuarta, dentro de la consola de la izquierda.
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+        );
+
+        assert_eq!(
+            marcado_en(&ventana, 0).as_deref(),
+            Some("hola"),
+            "el arrastre no marcó el texto por el que pasó"
+        );
+        assert_eq!(
+            ventana
+                .activa()
+                .divisiones()
+                .iter()
+                .map(|division| division.nombre)
+                .collect::<Vec<_>>(),
+            orden,
+            "el arrastre además movió la consola de sitio: el gesto se está resolviendo como el de D15"
+        );
+    }
+
+    #[test]
+    fn con_el_acorde_el_mismo_arrastre_mueve_la_division_y_no_marca_nada() {
+        // **AC4, la otra mitad de D20.** Sin esta prueba, «marcar» podría estar implementado tragándose
+        // el gesto entero y el de mover no existiría ya. Y se afirma también que **no queda nada
+        // marcado**: un gesto que hiciera las dos cosas dejaría al usuario con la consola movida y un
+        // trozo realzado que él no pidió.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+        let primera = ventana.activa().divisiones()[0].nombre;
+
+        arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].center(),
+            rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+        );
+
+        assert_eq!(
+            ventana.activa().divisiones()[1].nombre,
+            primera,
+            "con el acorde la consola no se movió de sitio"
+        );
+        assert!(
+            ventana
+                .activa()
+                .divisiones()
+                .iter()
+                .all(|division| division.pantalla.texto_seleccionado().is_none()),
+            "el gesto de mover dejó texto marcado por el camino"
+        );
+    }
+
+    /// El mismo arrastre de marcar, pero apretando con el acorde que se le pase.
+    fn arrastrar_con_acorde(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        rectangulos: &[egui::Rect],
+        desde: egui::Pos2,
+        hasta: egui::Pos2,
+        acorde: egui::Modifiers,
+    ) {
+        let mut pasada = |entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        };
+
+        pasada(egui::RawInput::default());
+        pasada(egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(desde),
+                egui::Event::PointerButton {
+                    pos: desde,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: acorde,
+                },
+            ],
+            ..Default::default()
+        });
+        pasada(egui::RawInput {
+            events: vec![egui::Event::PointerMoved(hasta)],
+            ..Default::default()
+        });
+        pasada(egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: hasta,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: acorde,
+            }],
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn mover_la_division_exige_las_dos_teclas_del_acorde_y_no_una() {
+        // **Lo que separa el gesto nuevo del de siempre es una CONJUNCIÓN, y eso no lo ataba nadie.**
+        // Comprobado mutando: con `ctrl` solo, o con `shift` solo, la suite entera seguía verde — porque
+        // las dos pruebas de D20 aprietan con los dos modificadores o con ninguno, y nadie con uno. Un
+        // defecto que relaje la conjunción convierte `Ctrl` a secas —o `Mayúsculas` a secas, que es lo que
+        // uno tiene puesto al escribir una mayúscula— en «llévate la consola de sitio».
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+
+        for (nombre, acorde) in [
+            (
+                "solo Ctrl",
+                egui::Modifiers {
+                    ctrl: true,
+                    ..Default::default()
+                },
+            ),
+            (
+                "solo Mayúsculas",
+                egui::Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+            let orden: Vec<_> = ventana
+                .activa()
+                .divisiones()
+                .iter()
+                .map(|division| division.nombre)
+                .collect();
+
+            arrastrar_con_acorde(
+                &mut ventana,
+                &ctx,
+                &rectangulos,
+                rectangulos[0].min + egui::vec2(1.0, 1.0),
+                rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+                acorde,
+            );
+
+            assert_eq!(
+                marcado_en(&ventana, 0).as_deref(),
+                Some("hola"),
+                "con {nombre} el arrastre no marcó: media tecla del acorde ya cuenta como el acorde entero"
+            );
+            assert_eq!(
+                ventana
+                    .activa()
+                    .divisiones()
+                    .iter()
+                    .map(|division| division.nombre)
+                    .collect::<Vec<_>>(),
+                orden,
+                "con {nombre} la consola se movió de sitio"
+            );
+        }
+    }
+
+    #[test]
+    fn apretar_sobre_el_panel_no_empieza_ni_cambia_ninguna_seleccion() {
+        // **Dos defectos en uno, y los dos los encontró la revisión.** El primero: las columnas que sobran
+        // de la rejilla son del panel y de su asidero, y quien aprieta ahí no está señalando texto. El
+        // segundo, peor: cancelar solo ese fotograma dejaba los siguientes **extendiendo** — el ancla de
+        // una selección anterior sobrevivía y su extremo saltaba al puntero, así que apretar en el panel y
+        // arrastrar **cambiaba solo lo que había marcado** y copiar devolvía un texto que nadie señaló.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+
+        // Se le deja a la consola menos rejilla que ancho tiene la división: lo que sobra por la derecha es
+        // lo que en la ventana de verdad ocupan el panel y su asidero.
+        let media = Size {
+            rows: metrica.celdas_en(rectangulos[0].size()).rows,
+            cols: metrica.celdas_en(rectangulos[0].size()).cols / 2,
+        };
+        ventana.activa_mut().divisiones_mut()[0].medido = media;
+
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+        );
+        let antes = marcado_en(&ventana, 0);
+        assert_eq!(antes.as_deref(), Some("hola"), "no se llegó a marcar nada");
+
+        // Y ahora un arrastre que EMPIEZA sobre las columnas del panel.
+        let sobre_el_panel =
+            rectangulos[0].min + egui::vec2(metrica.ancho() * (f32::from(media.cols) + 2.0), 4.0);
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            sobre_el_panel,
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 8.5, metrica.alto() * 0.5),
+        );
+
+        assert_eq!(
+            marcado_en(&ventana, 0),
+            antes,
+            "apretar sobre el panel cambió lo que había marcado: se copiaría un texto que nadie señaló"
+        );
+    }
+
+    #[test]
+    fn arrastrar_pasado_el_borde_marca_hasta_el_final_de_la_linea() {
+        // **El acotado, y el último carácter.** Sacar el ratón por el borde y seguir marcando es el gesto
+        // de siempre; sin acotar, la selección se quedaría congelada donde estuviera. Y hay un segundo
+        // defecto debajo que la revisión encontró: acotando **antes** de mirar de qué mitad de la celda se
+        // habla, la última columna salía siempre «por la izquierda» — y el motor **excluye** la celda que
+        // queda a la izquierda del final. Se perdía el último carácter de la línea justo en el gesto que
+        // existe para cogerla entera.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        let rejilla = Size {
+            rows: metrica.celdas_en(rectangulos[0].size()).rows,
+            cols: 6,
+        };
+        {
+            let division = &mut ventana.activa_mut().divisiones_mut()[0];
+            division.medido = rejilla;
+            division.pantalla.resize(rejilla);
+            division.pantalla.advance(b"abcdef");
+        }
+
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            // Muy pasado el borde derecho de la rejilla.
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 40.0, metrica.alto() * 0.5),
+        );
+
+        assert_eq!(
+            marcado_en(&ventana, 0).as_deref(),
+            Some("abcdef"),
+            "arrastrar pasado el borde no llegó al final de la línea"
+        );
+    }
+
+    #[test]
+    fn el_gesto_de_marcar_de_una_tanda_declara_lo_que_marco() {
+        // **El número que el informe publica al lado de los gestos, atado por el efecto.** Comprobado
+        // mutando: anulando los dos contadores de esa rama la suite seguía verde, y con ellos a cero la
+        // tanda que mide marcar publicaría «cero efectos, cero marcados» —la lectura de que el gesto no
+        // hizo nada— y, peor, la salvaguarda de que las **otras** tandas exigen cero dejaría de significar
+        // nada.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+        ventana.arrastres = ArrastresInyectados::nuevos(1, Gesto::Marcar);
+
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+        );
+
+        let arrastres = ventana.arrastres.as_ref().expect("la tanda pidió gestos");
+        assert!(
+            arrastres.marcados > 0,
+            "se marcó texto y el informe lo publicaría como que no se marcó nada"
+        );
+        assert_eq!(
+            arrastres.marcados, arrastres.con_efecto,
+            "en la tanda que marca, marcar ES el efecto: publicar cero efectos se lee como que el gesto \
+             no hizo nada"
+        );
+    }
+
+    #[test]
+    fn un_clic_seco_tira_lo_que_hubiera_marcado() {
+        // **Sin esto no hay forma de dejar de tener algo marcado**: el realce se quedaría puesto hasta que
+        // el programa limpiara la pantalla por su cuenta. Es lo que hace cualquier terminal.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+        );
+        assert!(
+            marcado_en(&ventana, 0).is_some(),
+            "no se llegó a marcar nada"
+        );
+
+        // Un clic seco: apretar y soltar en el mismo sitio, sin mover.
+        let donde = rectangulos[0].min + egui::vec2(metrica.ancho() * 6.5, metrica.alto() * 0.5);
+        arrastrar_para_marcar(&mut ventana, &ctx, &rectangulos, donde, donde);
+
+        assert_eq!(
+            marcado_en(&ventana, 0),
+            None,
+            "un clic seco dejó puesto lo que había marcado"
+        );
+    }
+
+    /// Un arrastre entero **con el botón que se le diga** y con el acorde **cambiando a mitad**.
+    ///
+    /// **Los dos acordes viajan por separado, y es lo único que sabe montar el caso del latch**: apretar
+    /// con uno y que el otro esté puesto con el botón todavía abajo. Ninguno de los otros ayudantes de
+    /// aquí puede escribirlo, porque todos mandan el mismo acorde en el apretón y en el soltado.
+    ///
+    /// **El acorde se manda como `ModifiersChanged` además de dentro del evento del botón** porque son
+    /// **dos fuentes distintas** —el instante del clic y el estado del fotograma— y todo el mecanismo que
+    /// se prueba aquí consiste en que mande la primera. Sin el `ModifiersChanged`, el estado del fotograma
+    /// no cambiaría nunca y el caso quedaría sin escribir.
+    ///
+    /// Cuatro pasadas y por las mismas razones que [`arrastrar_una_consola`]: egui resuelve la interacción
+    /// contra lo registrado en la pasada anterior y el movimiento tiene que llegar en un fotograma
+    /// distinto del apretón.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "cada parámetro es un eje del gesto"
+    )]
+    fn arrastrar_con(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        rectangulos: &[egui::Rect],
+        boton: egui::PointerButton,
+        desde: egui::Pos2,
+        hasta: egui::Pos2,
+        al_apretar: egui::Modifiers,
+        a_mitad: egui::Modifiers,
+    ) {
+        let mut pasada = |entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        };
+
+        pasada(egui::RawInput::default());
+        pasada(egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(al_apretar),
+                egui::Event::PointerMoved(desde),
+                egui::Event::PointerButton {
+                    pos: desde,
+                    button: boton,
+                    pressed: true,
+                    modifiers: al_apretar,
+                },
+            ],
+            ..Default::default()
+        });
+        pasada(egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(a_mitad),
+                egui::Event::PointerMoved(hasta),
+            ],
+            ..Default::default()
+        });
+        pasada(egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: hasta,
+                button: boton,
+                pressed: false,
+                modifiers: a_mitad,
+            }],
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn soltar_el_acorde_a_mitad_del_arrastre_no_convierte_el_gesto_en_marcar() {
+        // **El latch de D20, y hasta ahora no lo ataba nadie.** Las pruebas del acorde mandan el mismo
+        // acorde en el apretón y en el soltado, así que caen las mutaciones de **de dónde** se lee el
+        // acorde, pero no las de **cuándo**. Un defecto que lo relea en cada fotograma deja el gesto a
+        // merced de un dedo: soltar `Mayúsculas` a mitad de llevarse una consola —que es lo que uno hace
+        // en cuanto deja de necesitarla— convertiría el arrastre en marcar texto **con el botón todavía
+        // apretado**, y la consola se quedaría a medio camino sin que nada explicara por qué.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+        let primera = ventana.activa().divisiones()[0].nombre;
+
+        arrastrar_con(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            egui::PointerButton::Primary,
+            rectangulos[0].center(),
+            rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+            ACORDE_DE_MOVER,
+            // Y a mitad del gesto se sueltan las dos teclas.
+            egui::Modifiers::NONE,
+        );
+
+        assert_eq!(
+            ventana.activa().divisiones()[1].nombre,
+            primera,
+            "soltar el acorde a mitad del arrastre dejó la consola sin moverse: el gesto se releyó en \
+             vuelo en vez de quedarse con lo que significaba al apretar"
+        );
+        assert!(
+            ventana
+                .activa()
+                .divisiones()
+                .iter()
+                .all(|division| division.pantalla.texto_seleccionado().is_none()),
+            "soltar el acorde a mitad del arrastre puso a marcar texto un gesto que era de mover"
+        );
+    }
+
+    #[test]
+    fn apretar_el_acorde_a_mitad_del_arrastre_no_convierte_el_gesto_en_mover() {
+        // **La otra mitad del latch, y sin ella «quedarse con lo del apretón» se cumple quedándose
+        // siempre con «mover».** Este es el camino que de verdad muerde: marcar texto y estirar la
+        // selección con `Mayúsculas` es un gesto de terminal de toda la vida, así que la tecla se aprieta
+        // a mitad **a propósito**. Si eso cambiara el significado, el usuario acabaría con la consola
+        // cambiada de sitio por intentar ampliar lo que estaba marcando.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+        let orden = nombres_en_orden(&ventana);
+
+        arrastrar_con(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            egui::PointerButton::Primary,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+            egui::Modifiers::NONE,
+            // Y a mitad del gesto se aprietan las dos teclas del acorde de mover.
+            ACORDE_DE_MOVER,
+        );
+
+        assert_eq!(
+            marcado_en(&ventana, 0).as_deref(),
+            Some("hola"),
+            "apretar el acorde a mitad del arrastre dejó de marcar: el gesto se releyó en vuelo"
+        );
+        assert_eq!(
+            nombres_en_orden(&ventana),
+            orden,
+            "apretar el acorde a mitad de marcar se llevó la consola de sitio"
+        );
+    }
+
+    #[test]
+    fn arrastrar_con_un_boton_que_no_es_el_primario_no_marca_nada() {
+        // **El hueco que dejó abierto la guarda de «solo el primario mueve consolas»: nadie comprobaba
+        // que tampoco MARCAN.** Y en un terminal los dos botones tienen dueño — el central es el pegado
+        // de X11 y el derecho es la selección en casi todos—, así que los dos se aprietan **encima de una
+        // consola** a diario. `dragged()` y `drag_stopped()` no miran qué botón es: sin cualificarlos, un
+        // pegado con el central que se desplace un poco dejaría medio buffer realzado, y el
+        // `Ctrl+Mayúsculas+C` siguiente copiaría eso.
+        //
+        // La otra mitad —que tampoco cambian las consolas de sitio— la ata
+        // `arrastrar_con_un_boton_que_no_es_el_primario_no_cambia_las_consolas_de_sitio`; aquí se afirma
+        // también, porque el mismo defecto puede salir por cualquiera de los dos lados.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+
+        for (nombre, boton) in [
+            ("el central", egui::PointerButton::Middle),
+            ("el derecho", egui::PointerButton::Secondary),
+        ] {
+            let mut ventana = dos_consolas_con_texto(&rectangulos, &metrica);
+            let orden = nombres_en_orden(&ventana);
+
+            arrastrar_con(
+                &mut ventana,
+                &ctx,
+                &rectangulos,
+                boton,
+                rectangulos[0].min + egui::vec2(1.0, 1.0),
+                rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+                egui::Modifiers::NONE,
+                egui::Modifiers::NONE,
+            );
+
+            assert_eq!(
+                marcado_en(&ventana, 0),
+                None,
+                "arrastrando con {nombre} se marcó texto que nadie señaló"
+            );
+            assert_eq!(
+                nombres_en_orden(&ventana),
+                orden,
+                "arrastrando con {nombre} las consolas cambiaron de sitio"
+            );
+        }
+    }
+
     /// Dos consolas lado a lado **con sitio de sobra** para recibir a otra por cualquier lado.
     ///
     /// **Cuatrocientos puntos de ancho y no doscientos**: soltar por un lado exige que las dos quepan con
@@ -10031,6 +11710,10 @@ mod tests {
     ///
     /// Devuelve sobre qué consola decía la aplicación que se soltaría, tomado **en vuelo**, que es cuando
     /// esa respuesta significa algo.
+    ///
+    /// **El apretón lleva `Ctrl+Mayúsculas`, y desde D20 eso es lo que hace que el gesto MUEVA.** Sin el
+    /// acorde el mismo arrastre marca texto: son dos gestos por el mismo botón, y lo único que los separa
+    /// es con qué se apretó. Quien quiera probar el de seleccionar tiene [`arrastrar_para_marcar`].
     fn arrastrar_una_consola(
         ventana: &mut Ventana,
         ctx: &egui::Context,
@@ -10062,7 +11745,7 @@ mod tests {
                     pos: desde,
                     button: egui::PointerButton::Primary,
                     pressed: true,
-                    modifiers: egui::Modifiers::default(),
+                    modifiers: con_mayusculas(),
                 },
             ],
             ..Default::default()
@@ -11616,6 +13299,15 @@ mod tests {
         }
         arrastres.uno_con_efecto_mas();
         arrastres.uno_con_efecto_mas();
+        // Y **uno** marcado, distinto de los otros dos números por lo mismo: tres cifras iguales no
+        // distinguirían publicar una de publicar otra.
+        arrastres.uno_marcado_mas();
+        // Y **cuatro** informes de ratón, distintos de los tres anteriores por la misma razón: cuatro
+        // cifras iguales no distinguirían publicar una de publicar otra. Se apuntan sobre el contador y no
+        // por el enganche porque éste ya tiene su prueba, la del clic que llega al programa.
+        for _ in 0..4 {
+            arrastres.uno_informado_mas();
+        }
         // Sin nada medido el informe no se publica, y entonces esto pasaría por no encontrar una línea en
         // un texto vacío.
         ventana.pestañas[0].divisiones_mut()[0]
@@ -11629,8 +13321,12 @@ mod tests {
         let informe = String::from_utf8(salida).expect("el informe es texto");
 
         assert!(
-            informe.contains("arrastres:    3 inyectados · 2 efectos (moviendo consolas)"),
-            "el informe no declara los arrastres inyectados y los que reordenaron:\n{informe}"
+            informe.contains(
+                "arrastres:    3 inyectados · 2 efectos · 1 fotogramas con texto marcado · \
+                 4 informes al programa (moviendo consolas)"
+            ),
+            "el informe no declara los arrastres inyectados, los que reordenaron, los que marcaron \
+             texto y los que se le contaron al programa:\n{informe}"
         );
         assert!(
             !informe.contains("pedidos"),
@@ -12098,14 +13794,17 @@ mod tests {
         }
     }
 
-    /// La entrada de un botón que baja, sin soltarse.
+    /// La entrada de un botón que baja **con el acorde de mover**, sin soltarse.
+    ///
+    /// Lleva `Ctrl+Mayúsculas` porque desde **D20** es lo que distingue mover la división de marcar
+    /// texto: los dos gestos entran por el mismo botón.
     fn pulsar(en: egui::Pos2) -> egui::RawInput {
         egui::RawInput {
             events: vec![egui::Event::PointerButton {
                 pos: en,
                 button: egui::PointerButton::Primary,
                 pressed: true,
-                modifiers: egui::Modifiers::default(),
+                modifiers: con_mayusculas(),
             }],
             ..Default::default()
         }
@@ -17281,6 +18980,7 @@ mod tests {
         assert_eq!(VARIABLE_DEL_GESTO, "MEDIR_GESTO");
         assert_eq!(gesto_de(Some("panel")), Gesto::EstrecharElPanel);
         assert_eq!(gesto_de(Some("frontera")), Gesto::MoverLaFronteraDelArbol);
+        assert_eq!(gesto_de(Some("marcar")), Gesto::Marcar);
         // Con espacios alrededor, que es lo que deja un guion de shell al componer la variable.
         assert_eq!(gesto_de(Some("  panel  ")), Gesto::EstrecharElPanel);
         assert_eq!(
@@ -17303,6 +19003,7 @@ mod tests {
             Gesto::MoverLaFronteraDelArbol.como_se_publica(),
             "moviendo la frontera del árbol"
         );
+        assert_eq!(Gesto::Marcar.como_se_publica(), "marcando texto");
     }
 
     /// La disposición de esta ventana, escrita y vuelta a leer **pasando por el texto**.
@@ -19048,6 +20749,850 @@ mod tests {
         );
     }
 
+    /// Una ventana de dos consolas donde la de la izquierda **pide el ratón** y enseña lo que recibe.
+    ///
+    /// **El programa de dentro es de verdad y devuelve lo que le llega**, con los caracteres de control
+    /// en notación visible. Es lo que permite afirmar sobre lo que **el programa recibió** en vez de
+    /// sobre el contador donde se apunta que se le mandó algo: comprobado mutando, una prueba que mirara
+    /// la serie de la medida sigue verde con los bytes yendo a la consola equivocada.
+    fn consola_que_pide_el_raton(
+        rectangulos: &[egui::Rect],
+        metrica: &Metrica,
+        prueba: &str,
+    ) -> Ventana {
+        let mut ventana = ventana_con(
+            "stty -echo -icanon; printf '\\033[?1000h\\033[?1002h\\033[?1006h'; echo listo; cat -v",
+            "sleep 30",
+        );
+        for (division, rect) in ventana
+            .activa_mut()
+            .divisiones_mut()
+            .into_iter()
+            .zip(rectangulos)
+        {
+            // **El panel se hace visible PUBLICANDO uno de verdad, y la rejilla se DERIVA del reparto.**
+            // Las dos cosas van juntas: un panel que nadie publicó no ocupa columnas, así que sin
+            // publicarlo la consola se queda con la división entera y **la franja del panel no existe**
+            // para la prueba — todo apretón caería «dentro de la rejilla» y el escenario no ocurriría.
+            // Fijar la rejilla a mano, que es lo que hacen los ayudantes de las pruebas de selección,
+            // tiene el mismo problema al revés: inventa una franja que el reparto no puso ahí. Es el
+            // hueco que la entrega anterior dejó declarado, y esto es lo que lo cierra.
+            // **El directorio lleva el nombre de la prueba, y no solo el del proceso.** La suite corre
+            // en paralelo dentro del mismo proceso: sin ese discriminante, el `remove_dir_all` de una
+            // prueba cae entre el `write` y el `refrescar` de otra, el panel de aquélla no llega a verse
+            // y su franja —lo que la prueba existe para ejercitar— desaparece.
+            let dir = std::env::temp_dir().join(format!(
+                "agent-terminal-raton-{}-{prueba}-{}",
+                std::process::id(),
+                division.nombre
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("crear el directorio del panel de la prueba");
+            std::fs::write(
+                dir.join("panel.json"),
+                br#"{"v":1,"lines":[{"text":"panel de la prueba"}]}"#,
+            )
+            .expect("publicar el panel de la prueba");
+            division.estado_del_panel.refrescar(&dir);
+            assert!(
+                division.estado_del_panel.se_ve(SystemTime::now()),
+                "el panel de la prueba no llegó a verse, así que su franja no existe"
+            );
+
+            let hueco = division.repartir_con_su_panel(*rect, metrica.ancho(), SystemTime::now());
+            division.medido = metrica.celdas_en(hueco.consola.size());
+            division.pantalla.resize(division.medido);
+        }
+        let izquierda = &mut ventana.activa_mut().divisiones_mut()[0];
+        esperar_a_que_la_pantalla_diga(izquierda, "listo");
+        assert!(
+            izquierda.pantalla.raton_reclamado().lo_quiere(),
+            "el programa de la prueba no llegó a pedir el ratón"
+        );
+        ventana
+    }
+
+    /// Bombea la consola hasta que enseñe eso, o se rinde diciendo lo que hay.
+    fn esperar_a_que_la_consola_diga(ventana: &mut Ventana, cual: usize, texto: &str) {
+        let division = &mut ventana.activa_mut().divisiones_mut()[cual];
+        let limite = Instant::now() + Duration::from_secs(5);
+        while !division.pantalla.to_text().contains(texto) {
+            assert!(
+                Instant::now() < limite,
+                "el programa no recibió «{texto}»; en pantalla hay: {:?}",
+                division.pantalla.to_text()
+            );
+            division.bombear();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Gira la rueda sobre esa consola, con el acorde que se le diga.
+    ///
+    /// **El puntero se mueve primero**: la rueda va a la consola bajo el puntero, y sin ese movimiento
+    /// egui no tiene ninguna posición que dar.
+    fn girar_la_rueda(
+        ventana: &mut Ventana,
+        ctx: &egui::Context,
+        rectangulos: &[egui::Rect],
+        donde: egui::Pos2,
+        lineas: f32,
+        acorde: egui::Modifiers,
+    ) {
+        let mut pasada = |entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        };
+
+        pasada(egui::RawInput {
+            events: vec![egui::Event::PointerMoved(donde)],
+            ..Default::default()
+        });
+        pasada(egui::RawInput {
+            events: vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, lineas),
+                modifiers: acorde,
+                phase: egui::TouchPhase::Move,
+            }],
+            ..Default::default()
+        });
+    }
+
+    #[test]
+    fn la_rueda_le_llega_al_programa_que_la_pidio_y_no_mueve_el_historial() {
+        // **La primera rama de D23 después de `Mayúsculas`.** Es lo que hace que la lista de `htop` suba
+        // y baje con la rueda; y el historial **no** se mueve, porque las dos cosas a la vez dejarían la
+        // pantalla desplazándose mientras el programa cree que su lista es lo que se ve.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "la_rueda_le_llega_al_programa_que_la_pidio_y_no_mueve_el_historial",
+        );
+        // **Con historial detrás, y no es un adorno.** Sin nada por arriba, desplazar no mueve nada, así
+        // que la afirmación del cero se cumple igual con el defecto puesto: comprobado mutando —mandando
+        // el giro al programa Y desplazando— la prueba seguía verde.
+        for n in 0..80 {
+            ventana.activa_mut().divisiones_mut()[0]
+                .pantalla
+                .advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        // **Se gira sobre una celda concreta y se afirma ESA celda.** Un programa con dos zonas que se
+        // desplazan —`tmux` con dos paneles— decide cuál mueve por la celda del informe: con la esquina
+        // fija, la rueda movería siempre la de arriba a la izquierda mirase el puntero donde mirase.
+        girar_la_rueda(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 2.5),
+            3.0,
+            egui::Modifiers::NONE,
+        );
+
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<64;4;3M");
+        assert_eq!(
+            ventana.activa().divisiones()[0]
+                .pantalla
+                .view()
+                .desplazamiento(),
+            0,
+            "el giro se le contó al programa y ADEMÁS movió el historial"
+        );
+    }
+
+    #[test]
+    fn una_pagina_de_rueda_le_llega_al_programa_como_tantos_giros_como_filas() {
+        // **Un programa no entiende «una página»**: lo que espera son giros, y la página la mide la
+        // rejilla que él mismo tiene delante. Sin esta cuenta, un panel táctil que manda páginas —o
+        // cualquier ratón cuyo escritorio las emita— dejaría `htop` quieto mientras el gesto ocurre.
+        // Comprobado mutando: ignorando las páginas, ninguna prueba caía.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "una_pagina_de_rueda_le_llega_al_programa_como_tantos_giros_como_filas",
+        );
+        let filas = usize::from(ventana.activa().divisiones()[0].pantalla.size().rows);
+
+        let pasada = |ventana: &mut Ventana, entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        };
+        let sobre = rectangulos[0].min + egui::vec2(metrica.ancho() * 0.5, metrica.alto() * 0.5);
+        pasada(
+            &mut ventana,
+            egui::RawInput {
+                events: vec![egui::Event::PointerMoved(sobre)],
+                ..Default::default()
+            },
+        );
+        pasada(
+            &mut ventana,
+            egui::RawInput {
+                events: vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Page,
+                    delta: egui::vec2(0.0, 1.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                }],
+                ..Default::default()
+            },
+        );
+
+        // **Los saltos de línea se quitan antes de contar**: la pantalla envuelve, así que un informe
+        // partido entre dos filas no casaría y el recuento saldría corto sin que nada esté mal.
+        let limite = Instant::now() + Duration::from_secs(5);
+        loop {
+            let division = &mut ventana.activa_mut().divisiones_mut()[0];
+            let seguido = division.pantalla.to_text().replace('\n', "");
+            let cuantos = seguido.matches("^[[<64;1;1M").count();
+            if cuantos >= filas {
+                assert_eq!(
+                    cuantos, filas,
+                    "una página mandó más giros que filas tiene la consola"
+                );
+                return;
+            }
+            assert!(
+                Instant::now() < limite,
+                "una página tenía que valer {filas} giros y llegaron {cuantos}"
+            );
+            division.bombear();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn con_mayusculas_la_rueda_es_del_historial_aunque_el_programa_la_pida() {
+        // **La salida que garantiza que el historial de la consola siempre es alcanzable.** Lo que un
+        // paginador enseña no es lo que salió por arriba de la consola, así que sin esta rama hay
+        // sesiones enteras —un agente dentro de una interfaz de pantalla completa— donde no habría forma
+        // de ver lo anterior.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "con_mayusculas_la_rueda_es_del_historial_aunque_el_programa_la_pida",
+        );
+        for n in 0..80 {
+            ventana.activa_mut().divisiones_mut()[0]
+                .pantalla
+                .advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        girar_la_rueda(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].center(),
+            3.0,
+            egui::Modifiers::SHIFT,
+        );
+
+        assert_eq!(
+            ventana.activa().divisiones()[0]
+                .pantalla
+                .view()
+                .desplazamiento(),
+            3,
+            "con Mayúsculas el giro se fue al programa en vez de subir por el historial"
+        );
+    }
+
+    #[test]
+    fn en_pantalla_alterna_sin_raton_la_rueda_llega_como_flechas() {
+        // **La rama que hace que `less` y `man` se desplacen con la rueda sin pedir el ratón.** Es la
+        // única de las cuatro donde lo que sale no es un informe sino teclas, y por eso hay que verlo:
+        // mandar el informe a un programa que no lo pidió le mete basura en la pantalla.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = ventana_con(
+            "stty -echo -icanon; printf '\\033[?1049h'; echo listo; cat -v",
+            "sleep 30",
+        );
+        // Sin gesto pedido no hay contador que mirar, y la afirmación de abajo pasaría por vacía.
+        ventana.arrastres = ArrastresInyectados::nuevos(1, Gesto::RatonAlPrograma);
+        for (division, rect) in ventana
+            .activa_mut()
+            .divisiones_mut()
+            .into_iter()
+            .zip(&rectangulos)
+        {
+            division.medido = metrica.celdas_en(rect.size());
+            division.pantalla.resize(division.medido);
+        }
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "listo");
+        assert!(
+            ventana.activa().divisiones()[0]
+                .pantalla
+                .la_rueda_va_como_flechas(),
+            "el programa de la prueba no llegó a la pantalla alterna"
+        );
+
+        girar_la_rueda(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].center(),
+            -2.0,
+            egui::Modifiers::NONE,
+        );
+
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[B^[[B");
+        // **Y no cuentan como informe de ratón**, que es lo que la tanda lee. Lo que sale por este camino
+        // son las mismas teclas que manda el teclado; publicarlas bajo «N informes de ratón» metía
+        // muestras ajenas en esa serie **y hacía saltar la guarda** que exige cero informes en toda tanda
+        // que no sea la del ratón: una corrida correcta con un `less` desplazándose se marcaba inválida.
+        assert_eq!(
+            ventana
+                .arrastres
+                .as_ref()
+                .map(|arrastres| arrastres.informados),
+            Some(0),
+            "las flechas de la rueda se contaron como informes de ratón"
+        );
+    }
+
+    #[test]
+    fn un_clic_le_llega_al_programa_que_lo_pidio_y_con_su_celda() {
+        // **AC7.** Es lo que hace que pinchar dentro de `vim` coloque el cursor donde se pinchó, y la
+        // celda importa tanto como el clic: una columna de más abre la entrada de al lado de un menú.
+        // Se pincha en la **cuarta columna de la tercera fila**, que en el informe son la 4 y la 3
+        // porque allí se cuenta desde uno.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "un_clic_le_llega_al_programa_que_lo_pidio_y_con_su_celda",
+        );
+
+        let donde = rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 2.5);
+        arrastrar_para_marcar(&mut ventana, &ctx, &rectangulos, donde, donde);
+
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<0;4;3M");
+    }
+
+    #[test]
+    fn arrastrar_dentro_de_un_programa_que_pide_el_raton_no_marca_texto() {
+        // **Los dos gestos entran por el mismo botón y solo uno puede ganar.** Marcar además de informar
+        // dejaría al programa pintando su propia selección con la nuestra realzada encima, dos capas
+        // diciendo cosas distintas sobre las mismas celdas.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "arrastrar_dentro_de_un_programa_que_pide_el_raton_no_marca_texto",
+        );
+
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+        );
+
+        assert_eq!(
+            marcado_en(&ventana, 0),
+            None,
+            "el arrastre marcó texto en una consola cuyo programa había pedido el ratón"
+        );
+    }
+
+    #[test]
+    fn una_pasada_repetida_no_le_manda_el_clic_dos_veces_al_programa() {
+        // **egui puede correr la pasada de interfaz dos veces sobre la misma entrada**, y estos eventos
+        // no se pueden consumir: la pulsación es lo que egui necesita para empezar el arrastre. Sin
+        // llevar la cuenta del fotograma, el programa de dentro recibía **dos apretones donde el usuario
+        // dio uno** — un doble clic que nadie hizo, que dentro de un editor selecciona una palabra o abre
+        // lo que haya bajo el puntero.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "una_pasada_repetida_no_le_manda_el_clic_dos_veces_al_programa",
+        );
+        let celda = |columna: f32| {
+            rectangulos[0].min + egui::vec2(metrica.ancho() * columna, metrica.alto() * 0.5)
+        };
+
+        // **La misma entrada, dos veces, dentro del MISMO fotograma**: es lo que egui hace cuando algo
+        // pide recomponerse. Y después un clic en otra celda que hace de centinela, para que contar
+        // ocurra cuando lo del primero ya llegó.
+        let entrada = |donde: egui::Pos2| egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(donde),
+                egui::Event::PointerButton {
+                    pos: donde,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        for donde in [celda(0.5), celda(0.5), celda(2.5)] {
+            ctx.run_ui(entrada(donde), |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+                // La segunda pasada del mismo fotograma, que es lo que esta prueba persigue.
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        }
+
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<0;3;1M");
+        let en_pantalla = ventana.activa().divisiones()[0]
+            .pantalla
+            .to_text()
+            .replace('\n', "");
+        assert_eq!(
+            en_pantalla.matches("^[[<0;1;1M").count(),
+            2,
+            "el apretón se le contó al programa más veces que apretones hubo; en pantalla hay: {en_pantalla:?}"
+        );
+    }
+
+    #[test]
+    fn apretar_sobre_el_panel_no_le_entrega_el_arrastre_al_programa() {
+        // **Las columnas del panel de estado están dentro del rectángulo de la división pero no son de la
+        // consola.** Apuntando ese apretón como «del programa», arrastrar desde el panel hacia dentro le
+        // mandaba a `vim` o a `htop` un gesto que **empezó fuera de él**. Es la versión de ratón del mismo
+        // defecto que la selección ya pagó una entrega antes.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "apretar_sobre_el_panel_no_le_entrega_el_arrastre_al_programa",
+        );
+        // **Bien dentro del panel y lejos de su asidero.** Justo pasada la última columna de la consola
+        // está la frontera arrastrable, y un apretón ahí se lo queda ella: el gesto no llegaría nunca al
+        // camino que esta prueba persigue, y la prueba pasaría por no ejercitarlo.
+        let en_el_panel = egui::pos2(
+            rectangulos[0].right() - metrica.ancho() * 5.0,
+            rectangulos[0].min.y + metrica.alto() * 0.5,
+        );
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            en_el_panel,
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 2.5, metrica.alto() * 0.5),
+        );
+
+        // El centinela: un clic limpio DENTRO de la consola, que sí tiene que llegar. Con él en pantalla,
+        // lo que hubiera mandado el gesto anterior ya habría llegado también.
+        let dentro = rectangulos[0].min + egui::vec2(metrica.ancho() * 5.5, metrica.alto() * 0.5);
+        arrastrar_para_marcar(&mut ventana, &ctx, &rectangulos, dentro, dentro);
+
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<0;6;1M");
+        let en_pantalla = ventana.activa().divisiones()[0]
+            .pantalla
+            .to_text()
+            .replace('\n', "");
+        assert_eq!(
+            en_pantalla.matches("^[[<32;").count(),
+            0,
+            "el arrastre que empezó sobre el panel le llegó al programa; en pantalla hay: {en_pantalla:?}"
+        );
+        // **Y tampoco su apretón ni su soltado.** Sin la primera afirmación, un apretón sobre el panel
+        // informado con una celda inventada pasaría; sin la segunda, el programa recibiría **un soltar
+        // sin su apretar**, que para quien lleva estado del ratón es peor que no recibir nada. Los dos que
+        // quedan son el centinela: su apretar y su soltar.
+        assert_eq!(
+            en_pantalla.matches("^[[<0;").count(),
+            2,
+            "el gesto que empezó sobre el panel le mandó al programa algún extremo; en pantalla hay: {en_pantalla:?}"
+        );
+    }
+
+    #[test]
+    fn un_boton_que_no_es_el_primario_recibe_su_apreton_y_tambien_su_soltado() {
+        // **El latch del arrastre es solo del primario, porque solo el primario arrastra**; el del
+        // soltado tiene que ser de cada botón. Con uno solo para todos, el clic derecho dentro de un
+        // programa que pide el ratón —el que abre un menú contextual en `htop` o en un editor— recibía su
+        // apretón y **nunca su soltado**: el programa se queda con el menú abierto creyendo el botón
+        // bajado.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(&rectangulos, &metrica, "boton_no_primario");
+        let donde = rectangulos[0].min + egui::vec2(metrica.ancho() * 0.5, metrica.alto() * 0.5);
+
+        let pasada = |ventana: &mut Ventana, entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        };
+        pasada(&mut ventana, egui::RawInput::default());
+        for apretado in [true, false] {
+            pasada(
+                &mut ventana,
+                egui::RawInput {
+                    events: vec![egui::Event::PointerButton {
+                        pos: donde,
+                        button: egui::PointerButton::Secondary,
+                        pressed: apretado,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+            );
+        }
+
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<2;1;1M^[[<2;1;1m");
+    }
+
+    #[test]
+    fn el_acorde_no_desaparece_a_mitad_del_arrastre() {
+        // **Una tecla mantenida durante el gesto tiene que viajar en TODOS los informes.** Con el acorde
+        // fijo a «ninguno» en los de movimiento, la tecla iba en el apretón y en el soltado pero en
+        // ninguno de en medio: para un programa que distingue el arrastre con acorde —selección por
+        // bloques en un editor— se soltaba y se volvía a pulsar sola a mitad del gesto.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana =
+            consola_que_pide_el_raton(&rectangulos, &metrica, "el_acorde_no_desaparece");
+
+        arrastrar_con_acorde(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 0.5, metrica.alto() * 0.5),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 2.5, metrica.alto() * 0.5),
+            egui::Modifiers::CTRL,
+        );
+
+        // 32 del movimiento más 16 de `Ctrl`. Sin el acorde saldría un 32 pelado.
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<48;");
+    }
+
+    #[test]
+    fn soltar_sobre_otra_consola_se_lo_cuenta_a_la_que_recibio_el_apreton() {
+        // **El defecto que esto persigue deja al programa creyendo el botón apretado PARA SIEMPRE.**
+        // Terminar un arrastre fuera de la consola donde empezó es lo normal; resolviendo el soltado por
+        // dónde cae el puntero, la consola del apretón no se entera nunca —`htop` sigue estirando su
+        // columna, `vim` extendiendo su selección— y la vecina recibe un soltar de un apretar que no vio.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(&rectangulos, &metrica, "soltar_sobre_otra");
+
+        arrastrar_para_marcar(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 0.5, metrica.alto() * 0.5),
+            rectangulos[1].center(),
+        );
+
+        // La `m` final es el soltado, y tiene que llegarle a la consola de la IZQUIERDA aunque el puntero
+        // estuviera sobre la derecha.
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "m");
+        let en_pantalla = ventana.activa().divisiones()[0]
+            .pantalla
+            .to_text()
+            .replace('\n', "");
+        // **La celda del soltado va acotada a SU rejilla.** El puntero estaba sobre la consola de al
+        // lado, que empieza mucho más a la derecha: sin acotar, al programa se le contaba un soltado en
+        // una columna que su pantalla no tiene.
+        let ultima = ventana.activa().divisiones()[0].medido;
+        assert_eq!(
+            en_pantalla
+                .matches(&format!("^[[<0;{};", ultima.cols))
+                .count(),
+            1,
+            "el soltado no llegó acotado a la última columna de su consola; en pantalla hay: {en_pantalla:?}"
+        );
+        // Y lo mismo para los informes de movimiento, que salen por otro camino y tenían el mismo hueco.
+        assert_eq!(
+            en_pantalla.matches("^[[<32;").count(),
+            en_pantalla
+                .matches(&format!("^[[<32;{};", ultima.cols))
+                .count(),
+            "algún informe de arrastre salió con una columna que la consola no tiene; en pantalla hay: {en_pantalla:?}"
+        );
+    }
+
+    #[test]
+    fn un_gesto_de_raton_son_tres_informes_y_un_solo_efecto() {
+        // **Tres cosas que se cuentan mal por separado y esta prueba ata juntas**, porque las tres viven
+        // en el mismo gesto:
+        //
+        // 1. **El apretón siembra la celda ya contada**: sin eso, el primer fotograma del arrastre repite
+        //    la celda que el apretón acaba de contar — una escritura al pseudoterminal de más por gesto.
+        // 2. **El soltado la limpia**: sin eso, un gesto nuevo que empiece donde acabó el anterior se
+        //    traga su primer informe.
+        // 3. **Los efectos se cuentan por GESTO, no por informe.** El contador responde «cuántos de los
+        //    gestos inyectados cambiaron algo» y en las demás tandas nunca pasa de los gestos; contando
+        //    cada informe, la tanda del ratón publicaba el triple y su columna dejaba de comparar.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana =
+            consola_que_pide_el_raton(&rectangulos, &metrica, "un_gesto_tres_informes");
+        ventana.arrastres = ArrastresInyectados::nuevos(2, Gesto::RatonAlPrograma);
+        let celda = |columna: f32| {
+            rectangulos[0].min + egui::vec2(metrica.ancho() * columna, metrica.alto() * 0.5)
+        };
+
+        let pasada = |ventana: &mut Ventana, entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        };
+        let gesto = |ventana: &mut Ventana, desde: egui::Pos2, hasta: egui::Pos2| {
+            pasada(ventana, egui::RawInput::default());
+            pasada(
+                ventana,
+                egui::RawInput {
+                    events: vec![
+                        egui::Event::PointerMoved(desde),
+                        egui::Event::PointerButton {
+                            pos: desde,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+            );
+            // Un fotograma moviéndose **dentro de la celda del apretón**, que es el que sobra sin la
+            // siembra, y otro que sí cambia de celda. **El desplazamiento tiene que superar el umbral con
+            // el que egui decide que un gesto es un arrastre** —unos seis puntos— o ese fotograma no
+            // llega al camino que se quiere ejercitar y la prueba pasa sin probarlo: comprobado, con un
+            // punto de movimiento la mutación de la siembra no la tumbaba.
+            let dentro_de_la_misma =
+                desde + egui::vec2(metrica.ancho() * 0.3, metrica.alto() * 0.4);
+            for donde in [dentro_de_la_misma, hasta] {
+                pasada(
+                    ventana,
+                    egui::RawInput {
+                        events: vec![egui::Event::PointerMoved(donde)],
+                        ..Default::default()
+                    },
+                );
+            }
+            pasada(
+                ventana,
+                egui::RawInput {
+                    events: vec![egui::Event::PointerButton {
+                        pos: hasta,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+            );
+        };
+
+        gesto(&mut ventana, celda(0.5), celda(2.5));
+        // El segundo empieza **donde acabó el primero**, que es lo que destapa que el soltado no limpió.
+        gesto(&mut ventana, celda(2.5), celda(4.5));
+
+        let arrastres = ventana.arrastres.as_ref().expect("los acabo de poner");
+        assert_eq!(
+            (arrastres.informados, arrastres.con_efecto),
+            (6, 2),
+            "un gesto son tres informes —apretar, arrastrar, soltar— y UN efecto; salieron {} informes y {} efectos",
+            arrastres.informados,
+            arrastres.con_efecto
+        );
+    }
+
+    #[test]
+    fn el_arrastre_no_repite_el_informe_de_la_celda_en_la_que_ya_esta() {
+        // **Un arrastre lento pasa decenas de fotogramas sobre la misma celda**, y contárselos todos le
+        // manda al programa sesenta mensajes por segundo diciendo lo que ya sabía — con su ida al
+        // pseudoterminal cada uno. Lo que el programa espera es enterarse de que se pasó a **otra**.
+        //
+        // **Se cuenta después de un centinela**, no en el momento: afirmar «no llegó un segundo» justo
+        // después del primero pasaría igual con el defecto puesto, porque el segundo estaría aún de
+        // camino. Con el informe de la tercera celda en pantalla, lo de las dos anteriores ya llegó.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "el_arrastre_no_repite_el_informe_de_la_celda_en_la_que_ya_esta",
+        );
+        let celda = |columna: f32| {
+            rectangulos[0].min + egui::vec2(metrica.ancho() * columna, metrica.alto() * 0.5)
+        };
+
+        let pasada = |ventana: &mut Ventana, entrada: egui::RawInput| {
+            ctx.run_ui(entrada, |ui| {
+                ventana.atender_el_raton(
+                    ui,
+                    &rectangulos,
+                    &Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO)),
+                );
+            })
+            .drop_without_applying_deltas();
+        };
+        pasada(&mut ventana, egui::RawInput::default());
+        pasada(
+            &mut ventana,
+            egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(celda(0.5)),
+                    egui::Event::PointerButton {
+                        pos: celda(0.5),
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+        // Dos fotogramas dentro de la MISMA celda, y uno más en la siguiente que hace de centinela.
+        for donde in [celda(1.3), celda(1.7), celda(2.5)] {
+            pasada(
+                &mut ventana,
+                egui::RawInput {
+                    events: vec![egui::Event::PointerMoved(donde)],
+                    ..Default::default()
+                },
+            );
+        }
+
+        esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<32;3;1M");
+        // **Los saltos de línea se quitan antes de contar**: con el panel a la derecha la consola es
+        // estrecha y la pantalla envuelve, así que un informe partido entre dos filas no casaría y el
+        // recuento saldría corto sin que nada esté mal.
+        let en_pantalla = ventana.activa().divisiones()[0]
+            .pantalla
+            .to_text()
+            .replace('\n', "");
+        assert_eq!(
+            en_pantalla.matches("^[[<32;2;1M").count(),
+            1,
+            "el arrastre repitió el informe de una celda en la que ya estaba; en pantalla hay: {en_pantalla:?}"
+        );
+    }
+
+    #[test]
+    fn con_mayusculas_se_marca_texto_aunque_el_programa_pida_el_raton() {
+        // **AC7, la otra mitad, y es la que garantiza que siempre se puede sacar una línea de la
+        // pantalla.** Sin esta salida, dentro de `htop` o de `vim` no habría NINGUNA forma de copiar lo
+        // que se está viendo — y es lo que hace cualquier terminal con esa misma tecla.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "con_mayusculas_se_marca_texto_aunque_el_programa_pida_el_raton",
+        );
+        ventana.activa_mut().divisiones_mut()[0]
+            .pantalla
+            .advance(b"\x1b[Hhola mundo");
+
+        arrastrar_con_acorde(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            rectangulos[0].min + egui::vec2(metrica.ancho() * 3.5, metrica.alto() * 0.5),
+            egui::Modifiers::SHIFT,
+        );
+
+        assert_eq!(
+            marcado_en(&ventana, 0).as_deref(),
+            Some("hola"),
+            "con Mayúsculas apretada el gesto se fue al programa en vez de marcar"
+        );
+    }
+
+    #[test]
+    fn mover_la_division_gana_al_programa_que_pide_el_raton() {
+        // **El acorde de la ventana no se lo puede quedar un programa.** Si pudiera, abrir `vim` en una
+        // consola dejaría esa consola clavada donde está: no habría forma de recolocarla sin cerrarlo.
+        let ctx = egui::Context::default();
+        let rectangulos = dos_consolas_anchas();
+        let metrica = con_metrica(|metrica| metrica.clone());
+        let mut ventana = consola_que_pide_el_raton(
+            &rectangulos,
+            &metrica,
+            "mover_la_division_gana_al_programa_que_pide_el_raton",
+        );
+        let primera = ventana.activa().divisiones()[0].nombre;
+
+        arrastrar_una_consola(
+            &mut ventana,
+            &ctx,
+            &rectangulos,
+            rectangulos[0].center(),
+            rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+        );
+
+        assert_eq!(
+            ventana.activa().divisiones()[1].nombre,
+            primera,
+            "el programa se quedó el acorde de mover y la consola no se movió de sitio"
+        );
+    }
+
+    /// La celda de arriba a la izquierda: la que da el puntero cuando la prueba no se ocupa de él.
+    fn arriba_a_la_izquierda() -> Celda {
+        Celda {
+            fila: 0,
+            columna: 0,
+            mitad: Mitad::Izquierda,
+        }
+    }
+
     /// Una consola con ochenta líneas de historial detrás.
     fn division_con_historial() -> Division {
         let mut division = division_con("sleep 30", 0);
@@ -19140,8 +21685,8 @@ mod tests {
             paginas: 0.0,
         };
 
-        izquierda.desplazar_con_la_rueda(medio);
-        derecha.desplazar_con_la_rueda(medio);
+        izquierda.atender_la_rueda(medio, egui::Modifiers::NONE, arriba_a_la_izquierda());
+        derecha.atender_la_rueda(medio, egui::Modifiers::NONE, arriba_a_la_izquierda());
 
         assert_eq!(
             (
@@ -19152,7 +21697,7 @@ mod tests {
             "media línea movió algo: se está redondeando en vez de guardar el resto"
         );
 
-        izquierda.desplazar_con_la_rueda(medio);
+        izquierda.atender_la_rueda(medio, egui::Modifiers::NONE, arriba_a_la_izquierda());
 
         assert_eq!(
             (

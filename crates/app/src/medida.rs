@@ -214,6 +214,19 @@ impl Tramos {
 #[derive(Default)]
 pub struct Medida {
     ida: Serie,
+    /// **Codificar** un gesto de ratón y escribirlo en el programa.
+    ///
+    /// **La etiqueta dice exactamente lo que el reloj abarca, y eso costó una corrección.** La primera
+    /// versión lo publicaba como «del fotograma que ve el gesto al byte», que es lo que mide la serie de
+    /// la tecla; este reloj empieza **mucho después** —el recorrido del árbol, el reparto del puntero y
+    /// resolver la celda quedan fuera, dentro del reloj que ya cronometra atender el ratón entero— así
+    /// que bajo aquella etiqueta publicaba un tramo estrictamente más corto que el que nombraba. **No es
+    /// comparable con la ida de la tecla**, y por eso no comparten nombre.
+    ///
+    /// **Serie propia y no la de la tecla** también por lo que mide: un arrastre mete **decenas de
+    /// muestras por gesto** —una por celda recorrida— contra la única que mete una tecla, así que
+    /// promediarlas juntas dejaría la cifra que D3 publica describiendo sobre todo al ratón.
+    raton: Serie,
     esperar: Serie,
     interpretar: Serie,
     encolar: Serie,
@@ -229,6 +242,11 @@ impl Medida {
     /// Anota lo que ha tardado la ida: de empezar la pasada de interfaz a escribir en el programa.
     pub fn anotar_ida(&mut self, cuanto: Duration) {
         self.ida.anotar(cuanto);
+    }
+
+    /// Anota lo que ha tardado codificar un gesto de ratón y escribirlo en el programa.
+    pub fn anotar_ida_del_raton(&mut self, cuanto: Duration) {
+        self.raton.anotar(cuanto);
     }
 
     /// Anota los tramos de este fotograma. Quedan pendientes hasta que se sepa lo que costó entero.
@@ -318,8 +336,12 @@ impl Medida {
     }
 
     /// Si esta división llegó a medir algo, para no publicar el informe de una consola en blanco.
+    ///
+    /// **El ratón cuenta.** Una tanda que solo inyecta gestos y no teclea ni recibe salida tiene sus
+    /// muestras aquí y en ningún otro sitio; sin esta condición su informe saldría en blanco y la
+    /// corrida se leería como que el gesto no costó nada.
     pub fn hay_algo(&self) -> bool {
-        self.ida.hay() || self.vuelta.hay()
+        self.ida.hay() || self.raton.hay() || self.vuelta.hay()
     }
 
     /// Publica los números **de esta división** al destino que se le dé.
@@ -350,6 +372,28 @@ impl Medida {
                 a,
                 "  no incluye el trecho de la pulsación al fotograma: no es medible desde aquí"
             )?;
+        }
+
+        if self.raton.hay() {
+            writeln!(
+                a,
+                "\ncodificar el gesto de ratón → byte en el programa   ({} informes de ratón)",
+                self.raton.total
+            )?;
+            writeln!(a, "  {}", self.raton)?;
+            writeln!(
+                a,
+                "  un arrastre mete una muestra por celda recorrida, no una por gesto"
+            )?;
+            writeln!(
+                a,
+                "  NO abarca la pasada entera como el tramo de la tecla: repartir el puntero y"
+            )?;
+            writeln!(
+                a,
+                "  resolver la celda quedan fuera, dentro del reloj de atender el ratón; los dos"
+            )?;
+            writeln!(a, "  números no se comparan")?;
         }
 
         if self.vuelta.hay() {
@@ -717,7 +761,33 @@ pub struct Arrastres {
     /// segunda cuánto trabajo provocaron. La primera versión las imprimía como «N de M» y publicó
     /// «423 de 211», que es un número imposible de leer bien.
     pub con_efecto: usize,
-    /// Qué gesto se inyectó, tal como se publica. **Va en el informe** porque los dos gestos no cuestan lo
+    /// En cuántos **fotogramas** el gesto dejó texto marcado en alguna consola.
+    ///
+    /// **Fotogramas y no gestos, y decirlo importa**: un gesto extiende la selección una vez por cada
+    /// fotograma de arrastre, así que este número sale **mayor** que el de gestos inyectados. Publicarlo
+    /// bajo la palabra «gestos» daba una fila con el tercer número por encima del primero, que es
+    /// imposible de leer bien — lo mismo que ya pasó una vez publicando «423 de 211».
+    ///
+    /// **Las tandas lo leen en los DOS sentidos.** La que mide marcar exige que haya **más de uno por
+    /// gesto**: si el gesto entrara por otro sitio —el asidero del panel, el divisor— la corrida se
+    /// inyectaría entera y publicaría el coste de otra cosa bajo su etiqueta. Y las que miden **otro**
+    /// gesto exigen que sea **cero**: desde **D20** el botón primario a secas dentro de una consola marca
+    /// texto, así que un gesto que perdiera su asidero se convertiría en una selección sin que nada más lo
+    /// delatara.
+    ///
+    /// **En la tanda que marca coincide con los efectos, y es correcto**: el efecto de marcar **es** dejar
+    /// algo marcado. Los dos se publican igual porque en las demás tandas no coinciden — allí los efectos
+    /// son repartos y maquetados, y éste tiene que salir cero.
+    pub marcados: usize,
+    /// Cuántos **informes de ratón** salieron hacia el programa de dentro durante la corrida.
+    ///
+    /// **Se lee en los dos sentidos, igual que los marcados.** La tanda que mide el ratón exige que sea
+    /// **mayor que cero**: sin ese número, una corrida en la que el programa nunca llegara a pedir el
+    /// ratón publicaría los tramos de un gesto que se resolvió como selección, bajo la etiqueta del
+    /// ratón. Y las demás exigen que sea **cero**: un informe que se escapara metería una ida al
+    /// pseudoterminal dentro de la media de otra tanda.
+    pub informados: usize,
+    /// Qué gesto se inyectó, tal como se publica. **Va en el informe** porque los tres gestos no cuestan lo
     /// mismo y una tanda no se compara con otra de la otra clase.
     pub gesto: &'static str,
 }
@@ -833,8 +903,12 @@ pub fn cabecera(
     if let Some(arrastres) = arrastres {
         writeln!(
             a,
-            "arrastres:    {} inyectados · {} efectos ({})",
-            arrastres.inyectados, arrastres.con_efecto, arrastres.gesto
+            "arrastres:    {} inyectados · {} efectos · {} fotogramas con texto marcado · {} informes al programa ({})",
+            arrastres.inyectados,
+            arrastres.con_efecto,
+            arrastres.marcados,
+            arrastres.informados,
+            arrastres.gesto
         )?;
     }
     // **De dónde salieron las consolas, y solo cuando salieron del fichero.** Sin esta línea, una tanda
@@ -1139,11 +1213,16 @@ mod tests {
             Some(Arrastres {
                 inyectados: 1720,
                 con_efecto: 1719,
+                marcados: 3,
+                informados: 7,
                 gesto: "moviendo consolas",
             }),
         );
         assert!(
-            con_gesto.contains("arrastres:    1720 inyectados · 1719 efectos (moviendo consolas)"),
+            con_gesto.contains(
+                "arrastres:    1720 inyectados · 1719 efectos · 3 fotogramas con texto marcado · \
+                 7 informes al programa (moviendo consolas)"
+            ),
             "la cabecera no declaró los arrastres de la tanda:\n{con_gesto}"
         );
 

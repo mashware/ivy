@@ -2442,3 +2442,273 @@ responder entre ellas, que es la comparación válida porque son del mismo día 
    entre dos y cinco recolocaciones de cada corrida son las del arranque, cuando el compositor entrega el
    tamaño. Lo que cuesta cada una —de 43 µs en cuadro a 976 µs en fila— depende de cuánto texto hay que
    recolocar, y el caso caro tiene su propia tanda: la **`M`** de aquí arriba.
+
+## D22 — Qué es «el texto» que se copia, y las cuatro reglas que la selección hereda del motor
+
+**Qué se decidió.** Copiar devuelve lo que el motor de terminal llama «el texto de la selección», y
+**esas reglas se escriben aquí** aunque el código sea de la dependencia. Heredar el código es correcto;
+heredar la decisión sin decirla, no — en este proyecto ninguna decisión vive solo en el código, y menos
+si vive en el de otro.
+
+**Las cuatro reglas de qué es «el texto»:**
+
+1. **Una línea que envuelve se copia SIN el salto.** Una línea más larga que la rejilla la parte el
+   terminal, no el programa. Copiarla con un salto dentro devuelve algo que **nadie escribió**, y pegarlo
+   en un shell ejecuta dos órdenes en vez de una. Dos líneas de verdad **sí** conservan el suyo: lo que
+   las distingue es quién puso el final.
+2. **El relleno del final de cada línea no se copia.** Una rejilla está llena de celdas vacías a la
+   derecha de lo escrito; arrastrarlas convierte cualquier pegado en una línea con cola de espacios.
+3. **El acompañante de un carácter ancho no se duplica.** Un carácter CJK o un emoji ocupan dos celdas y
+   son **uno**; copiar las dos lo devolvería repetido.
+4. **El hueco de una tabulación se salta.**
+
+**Las tres formas de perder una selección, y también son suyas:**
+
+- **Cambiar el número de columnas la borra.** El texto se recoloca: lo que estaba marcado deja de estar
+  donde estaba, y conservar el rango dejaría realzado un trozo que nadie eligió. **Con las mismas
+  columnas no**: redimensionar solo el alto la conserva, porque no se recoloca nada.
+- **Saltar a pantalla alterna la borra.** Un programa de pantalla completa —`vim`, `less`, `htop`— cambia
+  a la alterna al arrancar, y lo que se marcó no está en la pantalla nueva.
+- **Limpiar una región que la cruza la borra.** El programa borró lo que estaba marcado; sobrevivir sería
+  realzar celdas vacías, o lo que él escriba ahí después.
+
+> **Cuando `htop` te borre la selección, la razón está aquí.** Ese era el objeto de escribirlas: sin esta
+> sección, la explicación vive en el fuente de una dependencia y quien la busque no sabe ni que existe.
+
+**Y una regla que este proyecto añade, porque el motor no puede saberla.** El acompañante de un carácter
+ancho **se realza con su cabeza**. El motor hace solo el camino contrario —marca la cabeza cuando el
+acompañante cae dentro, para que su texto no salga cortado— y le basta porque **su** pintor dibuja el
+fondo de un carácter ancho de dos celdas de ancho. El nuestro pinta el fondo de **cada celda por
+separado** (**D3**), así que sin añadirla un carácter ancho en el borde de la selección sale con media
+letra realzada y media no, justo donde hay CJK o emoji.
+
+**Cómo se ve lo seleccionado: intercambiando sus dos colores.** No hay color de realce en el tema, y no
+es por ahorrar: los dos colores de una celda **ya eran legibles el uno sobre el otro**, así que
+intercambiarlos no puede dejar texto ilegible. Un color propio sí puede, y lo haría justo donde el
+programa ha elegido colores raros — que es donde nadie lo probaría. El intercambio va **después** del
+vídeo inverso, así que seleccionar por encima del cursor de `vim` lo enseña como el resto del texto en
+vez de dejarlo indistinguible.
+
+**Copiar no filtra caracteres de control, al revés que pegar.** Lo que sale ya es texto de celdas y el
+motor no guarda escapes. Pegar filtra porque protege **al programa de dentro** de lo que entra (**D11**);
+aquí la dirección es la contraria y no hay a quién proteger.
+
+**Lo que se descartó, y por qué.**
+
+- **Escribir nuestras propias reglas de «el texto».** Son diez reglas finas —envolturas, acompañantes,
+  tabulaciones, relleno— que el motor ya sostiene y que hay que mantener al día con él. Reescribirlas es
+  garantizar que un día discrepen del realce, que sí sale de sus coordenadas.
+- **Sacar el rango de la selección por la API de `term-core`.** Es un tipo del motor y sería la fuga que
+  el criterio fundacional de esa caja impide. Lo que quien pinta necesita es **un `bool` por celda**, y
+  con eso las dos reglas finas del realce las sigue decidiendo el motor.
+- **Filtrar los controles al copiar**, por simetría con el pegado. Ninguno sale: lo que hay son celdas.
+  Sería copiar la guarda del pegado sin su razón.
+- **Un color de realce en el tema.** Ver arriba: puede dejar texto ilegible, y el intercambio no.
+
+**Cuándo dejaría de valer.** Si el motor cambia sus reglas de conversión a texto —los números y el
+comportamiento son suyos—, o si algún día el pintor dibujara el fondo de un carácter ancho de una vez, en
+cuyo caso la regla que este proyecto añade sobraría.
+
+### Medido — 25 agosto 2026: lo que cuesta tener texto marcado
+
+**Con su control dentro de la misma corrida.** La tanda **`N`** abre dos consolas volcando lo mismo y
+marca texto **solo en la izquierda**: la derecha no se toca. Es la misma forma que la tanda `K` usa para
+el gesto del panel.
+
+| encolando el pintado | consola marcada | consola sin tocar | diferencia |
+|---|---|---|---|
+| tanda `N`, corrida 1 | 277,4 µs | 191,9 µs | **+85,5** |
+| tanda `N`, corrida 2 | 297,5 µs | 187,3 µs | **+110,2** |
+| tanda `C` (quieta), corrida 1 | 236,7 µs | 204,8 µs | **+31,9** |
+| tanda `C` (quieta), corrida 2 | 230,4 µs | 189,6 µs | **+40,8** |
+
+**Y aquí está lo que la primera versión de este anexo publicó mal.** Decía «marcar cuesta ~100 µs» tomando
+la diferencia entre las dos consolas de la corrida. Pero **esa diferencia existe sin selección ninguna**:
+la tanda quieta ya da 32 y 41 µs entre izquierda y derecha. La consola de al lado **no es un control
+limpio** — hay una asimetría de sitio que no es de este gesto.
+
+**Lo que queda, con las dos cuentas que se pueden hacer y su desacuerdo dicho:**
+
+- **Diferencia de diferencias** (98 − 36): **~62 µs por fotograma**.
+- **La misma posición entre corridas** (287 de media contra 234, izquierda con y sin marcar): **~53 µs**.
+
+**Las dos no coinciden del todo, y con estos datos no se cierra la diferencia.** La corrida de la tanda
+`N` vivió **1 066 y 2 640 fotogramas** contra los **429 y 470** de la quieta: inyectar gestos mantiene la
+ventana despierta, así que las dos no comparten régimen — el mismo aviso que el anexo de **D15** lleva para
+la tanda `J`. Señal de ello: el control de `N` sale **más barato** que el mismo puesto en la tanda quieta,
+que es al revés de lo que cualquier explicación de «marcar cuesta» predice. Lo que se publica es la
+horquilla, **50–60 µs por fotograma**, y que **no está aislada**. Aislarla pide una tanda que marque y
+desmarque alternando dentro de la misma corrida, contra la misma consola.
+
+**Lo que sí está claro, y es más importante que la cifra: el coste NO crece con lo que hay marcado.**
+Mientras haya una selección viva, componer la foto pregunta **por cada celda de la rejilla** si va
+realzada — las 1 911 de una consola de 49×39, marcadas dos o dos mil. O sea que:
+
+- marcar una palabra cuesta lo mismo que marcar la pantalla entera;
+- el coste **crece con la rejilla y con el número de consolas**, no con el gesto;
+- y se paga en **todos** los fotogramas mientras la selección siga viva, no solo mientras se arrastra.
+
+La primera versión de este anexo lo explicaba como «veinte rectángulos de más al pintar», y la aritmética
+se contradecía sola: sesenta microsegundos entre veinte rectángulos serían tres cada uno, cuando encolar
+las 1 911 celdas enteras cuesta 190. Los rectángulos de más existen —una celda realzada tiene un fondo
+distinto del de la ventana, y el pintor se salta las que llevan ese fondo—, pero no son el grueso.
+
+**Hasta dónde llega lo medido, dicho antes de que alguien se fíe de más.** La tanda marca **veinte
+celdas de una fila**, que es un gesto de los que se hacen —una ruta, una orden—. Lo que **no** se ha
+corrido es el otro extremo: marcar la pantalla entera, que es el gesto de «copiar toda la salida». Ahí, al
+barrido por celda se le suma **un rectángulo de fondo por cada celda marcada** —el pintor se salta las que
+llevan el fondo de la ventana, y una realzada no lo lleva—, y eso son 1 911 rectángulos por fotograma
+contra los veinte de la tanda. Que ese sumando no sea el grueso está **razonado, no corrido**.
+
+**Y dura más de lo que parece: una selección sigue viva —y cobrando— hasta que alguien la tira.** No la
+tiran teclear, ni perder el foco, ni cambiar de pestaña, ni mover la división: solo un clic seco o las tres
+reglas del motor de aquí arriba. El camino cotidiano que lo paga es marcar una línea, copiarla y seguir
+trabajando: el `cargo build` siguiente barre la rejilla en cada fotograma **con la marca ya fuera de
+pantalla**. Y **cada consola sostiene la suya**, así que con cuatro divisiones se paga cuatro veces.
+
+**Queda una pregunta abierta, y no es de este hito:** preguntar por celda con la selección viva se puede
+acotar mirando primero si la fila entra en el rango. No se hace ahora porque sería optimizar contra una
+cifra que este anexo acaba de declarar **no aislada**, y este proyecto no optimiza contra números que no
+sostiene.
+
+**Y el gesto se declara con TRES números en la cabecera, no con dos.** A los gestos inyectados y los que
+surtieron efecto se les suma **en cuántos fotogramas quedó texto marcado** —fotogramas y no gestos: cada
+gesto extiende la selección una vez por fotograma de arrastre, así que sale mayor—. Ese tercero lo leen las
+tandas en los dos sentidos: la que mide marcar exige **más de uno por gesto**, y **todas las demás exigen
+cero**. La razón es **D20**: desde que el botón primario a secas marca texto, cualquier gesto que pierda su
+asidero se convierte en una selección **sin que nada más lo delate**, porque se inyecta entero y declara
+efectos igual. Comprobado quitándole el acorde al gesto de mover consolas: la tanda `J` se invalida
+diciendo que dejó texto marcado en 183 fotogramas. Y en el otro sentido, la que marca exige **más de uno
+por gesto** y no simplemente más de cero: cada gesto extiende la selección una vez por fotograma de
+arrastre, así que pedir «al menos uno en toda la corrida» dejaría pasar una tanda en la que solo el primero
+marcara.
+
+---
+
+## D23 — El ratón al programa de dentro: quién se queda cada gesto, y en qué se lo cuenta
+
+**Decisión.** Una consola cuyo programa **ha pedido** el ratón recibe los gestos que ocurren sobre ella, en
+un informe que **escribe este proyecto** porque la librería del motor no lo trae. El reparto tiene un orden
+fijo, se decide **al apretar** y no se relee, y `Mayúsculas` es la salida que devuelve el gesto al terminal
+pase lo que pase.
+
+### El orden, y por qué es ése
+
+| Quién se lo queda | Cuándo | Por qué va ahí |
+|---|---|---|
+| **Mover la división** | `Ctrl+Mayúsculas` apretado | Es de la ventana. Si un programa pudiera quitárselo, abrir `vim` en una consola la dejaría clavada donde está |
+| **La selección** | `Mayúsculas` apretado | Sin esta salida, dentro de `htop` o de `vim` no habría **ninguna** forma de sacar una línea de la pantalla. Es lo que hace todo terminal con esa misma tecla |
+| **El programa** | Lo ha pedido | Lo normal en cuanto hay una interfaz de pantalla completa dentro |
+| **La selección** | Nadie más lo reclamó | El caso de todos los días: un shell no pide el ratón |
+
+**Para la rueda el orden es el mismo con una rama más**, y ésa es la que hace que `less` y `man` se
+desplacen sin pedir el ratón: `Mayúsculas` → siempre el historial; el programa lo pide → sus dos números
+propios; **pantalla alterna** → flechas; si no → el historial.
+
+**Y el significado se fija al apretar**, exactamente como en **D20**: los gestos entran todos por el mismo
+botón, y releer el acorde en cada fotograma haría que soltar una tecla a mitad de un arrastre cambiara lo
+que el gesto significa **con el botón todavía apretado**.
+
+### La codificación es nuestra, y dónde se corta
+
+La caja del motor sabe decir **si** el programa quiere el ratón —son sus banderas— pero armar el informe lo
+hacía el binario de Alacritty, no su librería. Así que la tabla es de este proyecto:
+
+```
+extendida:   \x1b[<{botón};{columna};{fila}M   al apretar
+             \x1b[<{botón};{columna};{fila}m   al soltar
+antigua:     \x1b[M{32+botón}{32+columna}{32+fila}
+rueda:       botón 64 (arriba) y 65 (abajo);  arrastrar suma 32;  Ctrl 16 y Alt 8
+```
+
+Columnas y filas **empiezan en uno** y son las de la rejilla visible.
+
+**Lo que queda fuera: la codificación de coordenadas en UTF-8.** La antigua mete cada número en un byte con
+32 sumado, así que **satura en la columna 223** — y lo que hace `xterm` sin ese modo es exactamente eso:
+dejar de informar. Pasado ese punto **no se manda nada**, nunca un número aproximado: unas coordenadas
+equivocadas el programa las entiende como un clic en otro sitio, y eso es peor que no recibir nada. Es el
+mismo corte que este proyecto ya declaró para las teclas de función, y por la misma razón: escribir una
+tabla sin poder verla funcionando es adivinar.
+
+**Y `Mayúsculas` no viaja en el informe**, aunque la codificación tenga sitio para ella: en esta ventana esa
+tecla fuerza la selección, así que un gesto con ella apretada no llega nunca a codificarse. Ponerla sería
+una rama muerta que además sugiere lo contrario de lo que la ventana hace.
+
+### Lo que se leyó en el motor y no se supuso
+
+**El desplazamiento alternativo viene ENCENDIDO de fábrica.** Está en el modo por defecto del motor —leído
+en su fuente, igual que hace `xterm`—, así que en la práctica lo que decide que la rueda salga como flechas
+es **la pantalla alterna**. La bandera se sigue preguntando porque un programa **puede apagarla**: `vim` lo
+hace en cuanto quiere el ratón para sí, y darle flechas entonces movería su punto de inserción sin que nadie
+tocara una tecla. La primera prueba de esto se escribió suponiendo lo contrario y **falló**: es un caso más
+de que la API ajena se lee.
+
+### La medida: serie propia, y una etiqueta que dice exactamente lo que abarca
+
+Lo que cuesta el ratón se anota en **su propia serie**, no en la de la tecla. Es la misma razón por la que
+aquélla excluye el pegado: son dos poblaciones distintas bajo una etiqueta que solo describe a una. Un
+arrastre mete **decenas de muestras por gesto** —una por celda cruzada— contra la única que mete una tecla,
+así que promediarlas juntas dejaría la cifra que **D3** publica describiendo sobre todo al ratón.
+
+**La etiqueta es «codificar el gesto de ratón → byte en el programa», y no la de la tecla.** La primera
+versión de este anexo lo publicaba como «del fotograma que ve el gesto al byte», que es lo que mide la serie
+de la tecla — y **es falso**: este reloj empieza mucho después, con el recorrido del árbol, el reparto del
+puntero y resolver la celda **fuera**, dentro del reloj que ya cronometra atender el ratón entero. Bajo
+aquella etiqueta publicaba un tramo estrictamente más corto que el que nombraba, que es el error que este
+proyecto castiga por encima de los demás. Corregido en el código, en el informe y aquí. **Los dos números no
+se comparan.**
+
+**Anexo — medido.** Tanda `O`, dos corridas del mismo binario, promediables según el comparador. Hace **el
+mismo recorrido** que la tanda que marca texto y solo se distingue en que el programa de la consola
+izquierda ha pedido el ratón; la derecha es el control dentro de la misma corrida.
+
+| Corrida | Gestos | Informes | Codificar y escribir, media | El 95 % |
+|---|---|---|---|---|
+| 1 | 1 001 | 3 004 | 5,126 µs | 10,480 µs |
+| 2 | 1 387 | 4 164 | 5,286 µs | 10,200 µs |
+
+**Lo que cuesta codificar un gesto y escribírselo al programa: 5,1–5,3 µs de media y unos 10 µs el 95 %.**
+
+**Y los informes salen exactamente a tres por gesto** —apretar, un movimiento, soltar—, que es lo que
+confirma que ningún camino informa de más: la primera versión mandaba **cuatro**, con un movimiento
+publicado **después** del soltado.
+
+**Y esta cifra sí está aislada, al revés que la de D22.** No sale de restar una consola de la otra: es su
+propia serie, cronometrada entre dos puntos del mismo camino, y sus muestras se cuentan **por informe** y no
+por fotograma. Lo que **no** se puede hacer con esta tanda es restarle la consola de control para sacar «lo
+que cuesta el ratón por fotograma»: la asimetría entre izquierda y derecha existe sin gesto ninguno, y esa
+resta ya publicó dos números falsos en este mismo documento.
+
+**Un aviso más, del mismo tipo que el de D15:** las dos corridas **no comparten régimen** —1 001 y 1 387
+gestos inyectados—, así que sus medias **por fotograma** no se promedian. Las de esta serie sí, porque su
+unidad es el informe.
+
+**Y los efectos se cuentan por GESTO, no por informe.** Un gesto de ratón son el apretón, sus movimientos y
+el soltado; contando cada uno, la tanda publicaba **el triple de efectos que de gestos** y su columna dejaba
+de ser comparable con las de las demás tandas, donde los efectos nunca pasan de los gestos. Cuenta el
+apretón, que abre el gesto, y el giro de rueda, que **es** un gesto entero por sí mismo. Con el código
+final la tanda declara **1 001 gestos y 1 002 efectos**.
+
+### Las guardas nuevas, y en los dos sentidos
+
+La cabecera del informe declara ahora **cuatro** números del gesto, no tres: a los inyectados, los que
+surtieron efecto y los fotogramas con texto marcado se les suma **cuántos informes de ratón salieron**. Ese
+cuarto se lee igual que el tercero:
+
+- **Y las flechas no cuentan.** Lo que sale cuando la rueda se traduce son las mismas teclas que manda el
+  teclado; publicarlas bajo «N informes de ratón» metía muestras ajenas en esa serie **y hacía saltar la
+  guarda** que exige cero informes en toda tanda que no sea la del ratón — una corrida correcta con un
+  `less` desplazándose se marcaba inválida.
+- **La tanda del ratón exige más de uno por gesto.** Sin ese número, una corrida en la que el programa nunca
+  llegara a pedir el ratón —la secuencia que no sale, un binario viejo— publicaría los tramos de una
+  **selección** bajo la etiqueta del ratón, y las dos tandas serían **indistinguibles leyendo el informe**:
+  hacen el mismo recorrido.
+- **Y exige además que no marcara nada**, porque los dos caminos corriendo a la vez mezclarían sus tramos.
+- **Todas las demás exigen cero.** Un informe que se escapara metería una ida al pseudoterminal dentro de la
+  media de otra tanda.
+
+**Probadas fallando, que es la única forma de saber que sirven.** Quitándole a la tanda la línea que hace
+que su programa pida el ratón, la corrida se invalida diciendo que **dejó texto marcado en 1 990
+fotogramas** — el gesto entero se resolvió como una selección, exactamente el escenario contra el que la
+guarda existe. Sin ella, ese informe se habría publicado como bueno y sus tramos serían los de la tanda que
+marca texto con la etiqueta del ratón encima.

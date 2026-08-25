@@ -118,6 +118,18 @@ pub struct ViewCell {
     pub strikeout: bool,
     /// El programa pidió no mostrar el contenido. El carácter sigue estando: quien pinta decide.
     pub hidden: bool,
+    /// Esta celda está dentro de lo que hay seleccionado ahora mismo.
+    ///
+    /// **Un booleano por celda y no el rango de la selección**, que es el criterio fundacional de esta
+    /// caja: el rango es un tipo del motor y sacarlo por aquí lo filtraría. Y quien pinta no necesita el
+    /// rango —ya recorre la rejilla celda a celda—, necesita saber de cada una si va realzada.
+    ///
+    /// **Lo decide el motor y no una comparación de coordenadas aquí**, y la diferencia no es cosmética:
+    /// el acompañante de un carácter ancho cuenta como seleccionado cuando lo está su cabeza, y el
+    /// cursor de bloque **no** se realza en los extremos de la selección. Rehacer esas dos reglas aquí
+    /// sería reescribir lo que la dependencia ya sostiene, y con ellas mal la selección se ve rota
+    /// exactamente donde hay emoji.
+    pub selected: bool,
 }
 
 impl Default for ViewCell {
@@ -134,6 +146,7 @@ impl Default for ViewCell {
             underline: Underline::None,
             strikeout: false,
             hidden: false,
+            selected: false,
         }
     }
 }
@@ -344,7 +357,13 @@ fn subrayado_desde(banderas: Flags) -> Underline {
     }
 }
 
-pub(crate) fn celda_desde(celda: &Cell) -> ViewCell {
+/// Traduce una celda del motor a la nuestra, diciendo aparte si va dentro de la selección.
+///
+/// **La selección llega como parámetro y no se lee de la celda**, porque no es suya: el motor la guarda
+/// como un rango de la rejilla, no como una bandera por celda. Quien recorre la rejilla ya sabe de cada
+/// celda si el rango la incluye, y preguntárselo aquí obligaría a pasarle el rango entero —o sea a
+/// filtrar un tipo del motor hasta este módulo.
+pub(crate) fn celda_desde(celda: &Cell, seleccionada: bool) -> ViewCell {
     {
         let banderas = celda.flags;
 
@@ -383,6 +402,7 @@ pub(crate) fn celda_desde(celda: &Cell) -> ViewCell {
             underline: subrayado_desde(banderas),
             strikeout: banderas.contains(Flags::STRIKEOUT),
             hidden: banderas.contains(Flags::HIDDEN),
+            selected: seleccionada,
         }
     }
 }

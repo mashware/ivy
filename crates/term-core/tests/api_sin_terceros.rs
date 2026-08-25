@@ -27,7 +27,8 @@
 //! que hace la fuga **imposible** en vez de dejarla en manos de acordarse de mirar.
 
 use term_core::{
-    CellWidth, CursorShape, Desplazamiento, Screen, Size, TermColor, Underline, ViewCell,
+    Celda, CellWidth, CursorShape, Desplazamiento, Mitad, RatonReclamado, Screen, Size, TermColor,
+    Underline, ViewCell,
 };
 
 /// Recorre todas las variantes de color sin nombrar el enum de la librería de debajo.
@@ -95,13 +96,14 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
             underline,
             strikeout,
             hidden,
+            selected,
         } = *celda;
 
         assert!(!describir(fg).is_empty());
         assert!(!describir(bg).is_empty());
         assert!(!describir_ancho(width).is_empty());
         assert!(!describir_subrayado(underline).is_empty());
-        let _ = (c, inverse, bold, dim, italic, strikeout, hidden);
+        let _ = (c, inverse, bold, dim, italic, strikeout, hidden, selected);
     }
 
     assert!(
@@ -160,4 +162,80 @@ fn el_historial_se_pide_y_se_lee_con_tipos_propios() {
     // Y lo que se lee de vuelta es un número nuestro, no la posición interna del motor.
     let cuanto: usize = pantalla.view().desplazamiento();
     assert_eq!(cuanto, 0, "se acabó pidiendo volver al final");
+}
+
+/// Que **la selección** también se pide y se lee con tipos propios.
+///
+/// Es superficie nueva y de la clase que este fichero vigila: el motor guarda la selección como un rango
+/// suyo, con su punto y su mitad, y dejar asomar cualquiera de los tres sería la fuga. Lo que sale de aquí
+/// son una celda nuestra, una mitad nuestra, un `bool` por celda y una cadena.
+#[test]
+fn la_seleccion_se_pide_y_se_lee_con_tipos_propios() {
+    fn describir(mitad: Mitad) -> &'static str {
+        match mitad {
+            Mitad::Izquierda => "por la mitad de la izquierda",
+            Mitad::Derecha => "por la mitad de la derecha",
+        }
+    }
+
+    let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+    pantalla.advance(b"hola mundo");
+
+    let desde = Celda {
+        fila: 0,
+        columna: 0,
+        mitad: Mitad::Izquierda,
+    };
+    let hasta = Celda {
+        fila: 0,
+        columna: 3,
+        mitad: Mitad::Derecha,
+    };
+    assert!(!describir(desde.mitad).is_empty());
+    assert!(!describir(hasta.mitad).is_empty());
+
+    pantalla.empezar_seleccion(desde);
+    pantalla.extender_seleccion(hasta);
+
+    let hay: bool = pantalla.hay_seleccion();
+    let texto: Option<String> = pantalla.texto_seleccionado();
+    assert!(hay);
+    assert_eq!(texto.as_deref(), Some("hola"));
+
+    // Y el realce llega a la foto como un booleano por celda, no como el rango.
+    let vista = pantalla.view();
+    let realzadas = vista.cells().iter().filter(|celda| celda.selected).count();
+    assert_eq!(realzadas, 4, "el realce no llegó celda a celda");
+
+    pantalla.quitar_la_seleccion();
+    assert!(!pantalla.hay_seleccion());
+}
+
+/// Que preguntar por el ratón también se hace con tipos propios.
+///
+/// **Va aparte de las de arriba porque es superficie nueva y ninguna la custodiaba.** Lo que
+/// `raton_reclamado` lee son las banderas del motor, así que devolverlas tal cual es el refactor
+/// natural — y con él, toda la caja seguiría compilando y este fichero seguiría pasando. La prueba
+/// nombra el tipo propio y **desestructura sus cuatro campos**, que es lo que hace imposible que el
+/// tipo del motor pase por aquí: sus banderas no tienen estos nombres.
+#[test]
+fn el_raton_se_pregunta_y_se_lee_con_tipos_propios() {
+    let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+    pantalla.advance(b"\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+
+    let RatonReclamado {
+        botones,
+        arrastre,
+        movimiento,
+        extendido,
+    } = pantalla.raton_reclamado();
+
+    // **Los tres modos se SUSTITUYEN, no se acumulan** —leído en el motor, no supuesto—: pedir el
+    // arrastre apaga el de solo clics. Por eso aquí queda encendido el arrastre y no los botones. La
+    // codificación sí es aparte y convive con cualquiera de los tres.
+    assert!(arrastre && extendido);
+    assert!(!botones && !movimiento);
+    assert!(pantalla.raton_reclamado().lo_quiere());
+    // Y la otra pregunta de la superficie nueva, que devuelve un `bool` y no el modo del motor.
+    let _: bool = pantalla.la_rueda_va_como_flechas();
 }

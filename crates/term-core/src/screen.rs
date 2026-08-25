@@ -3,14 +3,15 @@
 use alacritty_terminal::Term;
 use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::Processor;
 
 use crate::Size;
-use crate::view::{self, Cursor, View, ViewCell};
+use crate::view::{self, CellWidth, Cursor, View, ViewCell};
 
 /// Dimensiones en el vocabulario de `alacritty_terminal`.
 ///
@@ -54,6 +55,87 @@ impl From<Size> for Dims {
 pub struct Screen {
     term: Term<VoidListener>,
     parser: Processor,
+}
+
+/// Una celda de la rejilla **visible**, y de qué mitad de ella se habla.
+///
+/// **Vocabulario propio**, por lo mismo que [`Desplazamiento`]: quien use esta caja no tiene que conocer
+/// los tipos del motor.
+///
+/// **Las coordenadas son las de lo que se ve**, con el desplazamiento del historial ya aplicado — o sea
+/// las mismas con las que se indexa [`View`]. Quien pinta cuenta filas y columnas desde arriba a la
+/// izquierda de lo que tiene delante, y obligarle a restar el desplazamiento sería pedirle que sepa que
+/// existe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Celda {
+    pub fila: u16,
+    pub columna: u16,
+    /// De qué mitad de la celda se habla.
+    ///
+    /// **No es un detalle de precisión: sin esto no se puede seleccionar un solo carácter.** Empezar y
+    /// terminar en la misma celda da una selección vacía o de un carácter según por qué lado se entró y
+    /// por cuál se sale, que es exactamente lo que hace el ratón en cualquier terminal.
+    pub mitad: Mitad,
+}
+
+/// De qué mitad de una celda se habla, para empezar o terminar una selección.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mitad {
+    Izquierda,
+    Derecha,
+}
+
+impl Mitad {
+    /// Cuál de las dos mitades cae en esa fracción del ancho de la celda.
+    ///
+    /// **Vive aquí y no en quien pinta** para que la regla —la mitad exacta— esté escrita una vez. Quien
+    /// pinta sabe puntos y celdas; dónde cae la frontera entre las dos mitades es de esta caja.
+    pub fn de_la_fraccion(dentro: f32) -> Self {
+        if dentro < 0.5 {
+            Self::Izquierda
+        } else {
+            Self::Derecha
+        }
+    }
+}
+
+/// Traduce la mitad de la celda al vocabulario del motor.
+fn mitad_del_motor(mitad: Mitad) -> Side {
+    match mitad {
+        Mitad::Izquierda => Side::Left,
+        Mitad::Derecha => Side::Right,
+    }
+}
+
+/// Qué le ha pedido al terminal el programa de dentro sobre el ratón.
+///
+/// **Vocabulario propio y no las banderas del motor**, por lo mismo que [`Desplazamiento`] y
+/// [`Celda`]: quien use esta caja no tiene que conocer sus tipos ni migrar con ellos.
+///
+/// **Lo que hay aquí es lo que el programa PIDE, no lo que la ventana decide hacer.** El orden de
+/// prioridades —cuándo gana el historial, cuándo el programa— es de quien reparte los gestos, no de
+/// esta caja: aquí solo se contesta la pregunta.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RatonReclamado {
+    /// Quiere que se le avise de apretar y de soltar los botones.
+    pub botones: bool,
+    /// Quiere que se le avise también mientras se arrastra con un botón apretado.
+    pub arrastre: bool,
+    /// Quiere que se le avise del movimiento **aunque no haya ningún botón apretado**.
+    pub movimiento: bool,
+    /// Quiere el informe en la codificación extendida, la que no tiene techo de columna.
+    pub extendido: bool,
+}
+
+impl RatonReclamado {
+    /// Si el programa quiere el ratón para algo.
+    ///
+    /// **`extendido` no cuenta**: dice *cómo* quiere el informe, no *si* lo quiere. Un programa que
+    /// solo encendiera esa bandera no ha pedido nada, y mandarle informes sería hablarle sin que
+    /// preguntara.
+    pub fn lo_quiere(&self) -> bool {
+        self.botones || self.arrastre || self.movimiento
+    }
 }
 
 /// Cuánto se sube o se baja por el historial de una consola.
@@ -182,6 +264,37 @@ impl Screen {
         self.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 
+    /// Qué le ha pedido el programa de dentro al terminal sobre el ratón.
+    ///
+    /// **Devuelve un tipo propio y no las banderas del motor**, por la misma razón que
+    /// [`pegado_marcado`](Screen::pegado_marcado): esta caja existe para sobrevivir a que la interfaz
+    /// se reescriba, y lo consigue no dejando asomar los tipos de sus dependencias por su API.
+    pub fn raton_reclamado(&self) -> RatonReclamado {
+        let modo = self.term.mode();
+        RatonReclamado {
+            botones: modo.contains(TermMode::MOUSE_REPORT_CLICK),
+            arrastre: modo.contains(TermMode::MOUSE_DRAG),
+            movimiento: modo.contains(TermMode::MOUSE_MOTION),
+            extendido: modo.contains(TermMode::SGR_MOUSE),
+        }
+    }
+
+    /// Si girar la rueda tiene que llegarle al programa **como flechas**.
+    ///
+    /// Es lo que hace que `less` y `man` se desplacen con la rueda sin pedir el ratón: piden la
+    /// pantalla alterna y encienden el desplazamiento alternativo, y el terminal les traduce el giro a
+    /// las teclas que ya saben atender.
+    ///
+    /// **El desplazamiento alternativo viene encendido de fábrica** —está en el modo por defecto del
+    /// motor, leído y no supuesto, igual que hace `xterm`—, así que en la práctica lo que decide es la
+    /// pantalla alterna. La bandera sigue preguntándose porque un programa **puede apagarla**: `vim` lo
+    /// hace en cuanto quiere el ratón para sí, y darle flechas entonces movería su punto de inserción
+    /// sin que nadie tocara una tecla.
+    pub fn la_rueda_va_como_flechas(&self) -> bool {
+        let modo = self.term.mode();
+        modo.contains(TermMode::ALT_SCREEN) && modo.contains(TermMode::ALTERNATE_SCROLL)
+    }
+
     /// Una foto de la rejilla visible: todas las celdas y el cursor.
     ///
     /// Es el lector que usa quien pinta, y **no toca la pantalla**: a diferencia de consultar los
@@ -197,6 +310,11 @@ impl Screen {
         let mut celdas = vec![ViewCell::default(); size.rows as usize * columnas];
 
         let contenido = self.term.renderable_content();
+        // **El rango de la selección se saca UNA vez y se pregunta por celda**, y quien contesta es el
+        // motor: sus dos reglas finas —el acompañante de un carácter ancho va con su cabeza, y el cursor
+        // de bloque no se realza en los extremos— no se rehacen aquí.
+        let seleccion = contenido.selection;
+        let forma_del_cursor = contenido.cursor.shape;
         // Las coordenadas del iterador y las del cursor van en el mismo sistema, que cuenta desde
         // el principio del historial. Sumar el desplazamiento las lleva a coordenadas visibles, que
         // son con las que quien pinta puede indexar. Para las **celdas** la cuenta basta —el
@@ -204,6 +322,9 @@ impl Screen {
         // ver más abajo.
         let desplazamiento = contenido.display_offset as i32;
 
+        // **Si la celda anterior era la cabeza de un carácter ancho Y estaba realzada.** Ver abajo por
+        // qué hace falta llevar la cuenta.
+        let mut venia_cabeza_ancha_realzada = false;
         for indexada in contenido.display_iter {
             let fila = indexada.point.line.0 + desplazamiento;
             let columna = indexada.point.column.0;
@@ -218,7 +339,25 @@ impl Screen {
             if fila < 0 || fila >= size.rows as i32 || columna >= columnas {
                 continue;
             }
-            celdas[fila as usize * columnas + columna] = view::celda_desde(indexada.cell);
+            let seleccionada = seleccion.is_some_and(|rango| {
+                rango.contains_cell(&indexada, contenido.cursor.point, forma_del_cursor)
+            });
+            let mut celda = view::celda_desde(indexada.cell, seleccionada);
+            // **El acompañante de un carácter ancho se realza con su cabeza, y esto lo pone ESTA caja.**
+            // El motor hace solo el camino contrario —marca la cabeza cuando el acompañante cae dentro,
+            // para que su texto no salga cortado— y le basta porque su pintor dibuja el fondo de un
+            // carácter ancho de dos celdas de ancho. El nuestro pinta **el fondo de cada celda por
+            // separado**, así que sin esto un carácter ancho en el borde de la selección sale con media
+            // letra realzada y media no, justo donde hay CJK o emoji.
+            //
+            // Se lleva con una bandera y no con una segunda pasada porque el recorrido es por filas y el
+            // acompañante viene **justo detrás** de su cabeza: una pasada más sobre la rejilla entera se
+            // paga en todos los fotogramas para arreglar dos celdas.
+            if celda.width == CellWidth::WideTail && venia_cabeza_ancha_realzada {
+                celda.selected = true;
+            }
+            venia_cabeza_ancha_realzada = celda.selected && celda.width == CellWidth::WideHead;
+            celdas[fila as usize * columnas + columna] = celda;
         }
 
         // **El cursor puede no verse, y ahora se dice en vez de recortarse.** Subiendo por el
@@ -236,6 +375,77 @@ impl Screen {
             });
 
         View::new(size, celdas, cursor, contenido.display_offset)
+    }
+
+    /// Empieza una selección en esa celda, **tirando la que hubiera**.
+    ///
+    /// **El punto es de la rejilla visible** y aquí se convierte al sistema del motor, que cuenta desde
+    /// el principio del historial: restar el desplazamiento es lo que hace que seleccionar algo que se
+    /// fue por arriba marque **eso** y no lo que hoy ocupa su sitio en pantalla.
+    ///
+    /// **No se comprueba que la celda exista.** El motor acota el punto por su cuenta al convertirlo a
+    /// rango, y una celda fuera de la rejilla no es un error de quien llama: es el ratón saliéndose de la
+    /// consola mientras se arrastra, que es el caso normal.
+    pub fn empezar_seleccion(&mut self, donde: Celda) {
+        self.term.selection = Some(Selection::new(
+            SelectionType::Simple,
+            self.punto_del_motor(donde),
+            mitad_del_motor(donde.mitad),
+        ));
+    }
+
+    /// Lleva hasta esa celda la selección empezada, si hay alguna.
+    ///
+    /// **Sin selección empezada no hace nada, y eso no es una guarda por si acaso**: el arrastre se
+    /// atiende en cada fotograma mientras el botón está apretado, y el primero de todos es el que la
+    /// empieza. Los demás llegan aquí sin que nadie haya soltado nada.
+    pub fn extender_seleccion(&mut self, hasta: Celda) {
+        let punto = self.punto_del_motor(hasta);
+        let mitad = mitad_del_motor(hasta.mitad);
+        if let Some(seleccion) = self.term.selection.as_mut() {
+            seleccion.update(punto, mitad);
+        }
+    }
+
+    /// Tira la selección que hubiera. Sin selección, no hace nada.
+    pub fn quitar_la_seleccion(&mut self) {
+        self.term.selection = None;
+    }
+
+    /// Si hay algo seleccionado ahora mismo.
+    ///
+    /// **No es lo mismo que «se ha empezado una selección»**: arrastrar y volver al punto de partida deja
+    /// una selección empezada y **vacía**, y de ahí no se copia nada. Quien pregunte para decidir si
+    /// copiar tiene que preguntar esto.
+    pub fn hay_seleccion(&self) -> bool {
+        self.term
+            .selection
+            .as_ref()
+            .is_some_and(|seleccion| !seleccion.is_empty())
+    }
+
+    /// El texto de lo seleccionado, o nada si no hay selección.
+    ///
+    /// **Las reglas de qué es «el texto» son del motor y están escritas en D22 del registro de decisiones**:
+    /// las líneas que envuelven
+    /// se unen **sin salto**, el relleno del final de cada línea se **recorta**, el acompañante de un
+    /// carácter ancho **no se duplica** y el hueco de una tabulación se salta. Heredar el código es
+    /// correcto; heredar la decisión sin decirla, no.
+    ///
+    /// **No filtra caracteres de control**, al revés que pegar: lo que sale de aquí son caracteres de
+    /// celdas y el motor no guarda escapes. Pegar filtra porque protege al programa de dentro de lo que
+    /// entra; aquí la dirección es la contraria.
+    pub fn texto_seleccionado(&self) -> Option<String> {
+        self.term.selection_to_string()
+    }
+
+    /// Lleva una celda de lo visible al sistema de coordenadas del motor.
+    fn punto_del_motor(&self, celda: Celda) -> Point {
+        let desplazamiento = self.term.grid().display_offset() as i32;
+        Point::new(
+            Line(i32::from(celda.fila) - desplazamiento),
+            Column(usize::from(celda.columna)),
+        )
     }
 
     /// Vuelca **el área activa** a texto — donde el programa escribe, no necesariamente lo que se
@@ -284,6 +494,256 @@ impl Screen {
 mod tests {
     use super::*;
     use crate::{CellWidth, CursorShape, TermColor, Underline};
+
+    /// Una celda por la que empezar o terminar una selección.
+    fn celda(fila: u16, columna: u16, mitad: Mitad) -> Celda {
+        Celda {
+            fila,
+            columna,
+            mitad,
+        }
+    }
+
+    /// Selecciona de la primera celda a la última **incluida**, que es lo que hace un arrastre.
+    fn seleccionar(pantalla: &mut Screen, desde: (u16, u16), hasta: (u16, u16)) {
+        pantalla.empezar_seleccion(celda(desde.0, desde.1, Mitad::Izquierda));
+        pantalla.extender_seleccion(celda(hasta.0, hasta.1, Mitad::Derecha));
+    }
+
+    #[test]
+    fn una_linea_que_envuelve_se_copia_sin_el_salto_que_no_escribio_nadie() {
+        // **La primera de las reglas de qué es «el texto», y es la que más se nota.** Una línea más
+        // larga que la rejilla la parte el terminal, no el programa: copiarla con un salto dentro
+        // devuelve algo que **nadie escribió**, y pegarlo en un shell ejecuta dos órdenes en vez de una.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 10 });
+        pantalla.advance(b"0123456789abcde");
+
+        seleccionar(&mut pantalla, (0, 0), (1, 4));
+
+        assert_eq!(
+            pantalla.texto_seleccionado().as_deref(),
+            Some("0123456789abcde"),
+            "la línea envuelta se copió partida"
+        );
+    }
+
+    #[test]
+    fn dos_lineas_de_verdad_se_copian_con_su_salto() {
+        // **El otro lado de la regla, y sin esta prueba la de arriba se cumple quitando todos los
+        // saltos.** Lo que distingue una línea envuelta de dos líneas es quién puso el final: el
+        // terminal o el programa.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 10 });
+        pantalla.advance(b"uno\r\ndos");
+
+        seleccionar(&mut pantalla, (0, 0), (1, 2));
+
+        assert_eq!(
+            pantalla.texto_seleccionado().as_deref(),
+            Some("uno\ndos"),
+            "dos líneas escritas por el programa se pegaron en una"
+        );
+    }
+
+    #[test]
+    fn el_relleno_del_final_de_la_linea_no_se_copia() {
+        // **Seleccionar hasta el borde derecho no arrastra los espacios que nadie escribió.** Una
+        // rejilla está llena de celdas vacías a la derecha de lo escrito; copiarlas convierte cualquier
+        // pegado en una línea con cola de espacios.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"hola");
+
+        seleccionar(&mut pantalla, (0, 0), (0, 19));
+
+        assert_eq!(
+            pantalla.texto_seleccionado().as_deref(),
+            Some("hola"),
+            "se copió el relleno del final de la línea"
+        );
+    }
+
+    #[test]
+    fn el_hueco_de_una_tabulacion_no_se_copia_como_espacios() {
+        // **La cuarta regla de qué es «el texto».** Una tabulación deja celdas vacías hasta la siguiente
+        // parada; copiarlas como espacios convierte una tabla alineada en una fila de espacios sueltos, y
+        // pegarla en cualquier sitio que vuelva a tabular la descoloca.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"a\tb");
+
+        seleccionar(&mut pantalla, (0, 0), (0, 8));
+
+        assert_eq!(
+            pantalla.texto_seleccionado().as_deref(),
+            Some("a\tb"),
+            "el hueco de la tabulación se copió como espacios"
+        );
+    }
+
+    #[test]
+    fn el_acompanante_de_un_caracter_ancho_no_se_duplica_al_copiar() {
+        // **Un carácter ancho ocupa dos celdas y es UNO.** La segunda es su acompañante: copiar las dos
+        // devolvería el carácter repetido, que es lo que se ve al pegar CJK o un emoji.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance("日本".as_bytes());
+
+        seleccionar(&mut pantalla, (0, 0), (0, 3));
+
+        assert_eq!(
+            pantalla.texto_seleccionado().as_deref(),
+            Some("日本"),
+            "el acompañante del carácter ancho se copió como carácter"
+        );
+    }
+
+    #[test]
+    fn el_realce_de_un_caracter_ancho_cubre_sus_dos_celdas() {
+        // **Un carácter ancho ocupa dos celdas y se ve como una cosa**, así que realzar solo la primera
+        // lo parte por la mitad: media letra sobre el fondo de la selección y media sobre el de la
+        // consola. Quien decide esto es el motor —el acompañante va con su cabeza—, y esta prueba es lo
+        // que impide rehacer la regla aquí con una comparación de coordenadas que no la conoce.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance("日x".as_bytes());
+
+        // Solo la CABEZA del carácter ancho: la columna 1 es su acompañante y no se toca.
+        pantalla.empezar_seleccion(celda(0, 0, Mitad::Izquierda));
+        pantalla.extender_seleccion(celda(0, 0, Mitad::Derecha));
+
+        let vista = pantalla.view();
+        let realzadas: Vec<usize> = (0..3)
+            .filter(|columna| {
+                vista
+                    .cell(0, *columna as u16)
+                    .expect("la celda está en la rejilla")
+                    .selected
+            })
+            .collect();
+
+        assert_eq!(
+            realzadas,
+            vec![0, 1],
+            "el realce no cubrió las dos celdas del carácter ancho: se ve partido por la mitad"
+        );
+    }
+
+    #[test]
+    fn marcar_el_acompanante_de_un_caracter_ancho_realza_tambien_su_cabeza() {
+        // **El camino contrario del de arriba, y lo pone el motor.** Arrastrando desde la derecha se
+        // entra por el acompañante antes que por la cabeza: sin esta regla, el primer fotograma del
+        // gesto realzaría la mitad vacía del carácter y no la que lleva la letra. Rehacer el realce aquí
+        // con una comparación de coordenadas se lleva esta regla por delante sin que nada se queje.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance("日x".as_bytes());
+
+        // Solo el ACOMPAÑANTE: la columna 1.
+        pantalla.empezar_seleccion(celda(0, 1, Mitad::Izquierda));
+        pantalla.extender_seleccion(celda(0, 1, Mitad::Derecha));
+
+        let vista = pantalla.view();
+        assert!(
+            vista
+                .cell(0, 0)
+                .expect("la celda está en la rejilla")
+                .selected,
+            "se marcó el acompañante y su cabeza —la que lleva la letra— se quedó sin realzar"
+        );
+    }
+
+    #[test]
+    fn arrastrar_y_volver_al_punto_de_partida_no_deja_nada_que_copiar() {
+        // **«Hay selección empezada» y «hay algo seleccionado» no son lo mismo**, y quien decide si
+        // copiar tiene que preguntar lo segundo: un clic seco deja lo primero puesto, y copiar entonces
+        // devolvería la celda de debajo del puntero sin que nadie la haya seleccionado.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"hola mundo");
+
+        pantalla.empezar_seleccion(celda(0, 2, Mitad::Izquierda));
+        pantalla.extender_seleccion(celda(0, 2, Mitad::Izquierda));
+
+        assert!(
+            !pantalla.hay_seleccion(),
+            "un clic sin arrastrar dejó algo seleccionado"
+        );
+    }
+
+    #[test]
+    fn cambiar_de_columnas_borra_la_seleccion_y_conservarlas_la_conserva() {
+        // **Las dos mitades de la misma regla heredada del motor, y hacen falta las dos.** Al cambiar el
+        // número de columnas el texto se recoloca: lo que estaba marcado deja de estar donde estaba, y
+        // conservar el rango dejaría realzado un trozo que nadie eligió. Con las mismas columnas no se
+        // recoloca nada, así que la selección **sobrevive** — y sin esta segunda mitad, «borrar siempre»
+        // pasaría la prueba.
+        let mut pantalla = Screen::new(Size { rows: 6, cols: 20 });
+        pantalla.advance(b"hola mundo");
+        seleccionar(&mut pantalla, (0, 0), (0, 3));
+        assert!(pantalla.hay_seleccion(), "no se llegó a seleccionar nada");
+
+        pantalla.resize(Size { rows: 3, cols: 20 });
+        assert!(
+            pantalla.hay_seleccion(),
+            "cambiar solo las filas borró la selección: no se recoloca nada, así que no hay motivo"
+        );
+
+        pantalla.resize(Size { rows: 3, cols: 10 });
+        assert!(
+            !pantalla.hay_seleccion(),
+            "cambiar de columnas dejó la selección puesta, realzando un trozo que nadie eligió"
+        );
+    }
+
+    #[test]
+    fn saltar_a_pantalla_alterna_borra_la_seleccion() {
+        // **Lo que se marcó no está en la pantalla nueva.** Un programa de pantalla completa —`vim`,
+        // `less`, `htop`— cambia a la alterna al arrancar, y una selección que sobreviviera quedaría
+        // realzando celdas de un contenido que ya no existe.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"hola mundo");
+        seleccionar(&mut pantalla, (0, 0), (0, 3));
+        assert!(pantalla.hay_seleccion(), "no se llegó a seleccionar nada");
+
+        pantalla.advance(b"\x1b[?1049h");
+
+        assert!(
+            !pantalla.hay_seleccion(),
+            "la selección sobrevivió al salto a pantalla alterna"
+        );
+    }
+
+    #[test]
+    fn limpiar_una_region_que_cruza_la_seleccion_la_borra() {
+        // **El programa borró lo que estaba marcado.** Si la selección sobreviviera, seguiría realzando
+        // celdas vacías y copiarlas devolvería nada — o peor, lo que el programa escriba después ahí.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"hola mundo");
+        seleccionar(&mut pantalla, (0, 0), (0, 3));
+        assert!(pantalla.hay_seleccion(), "no se llegó a seleccionar nada");
+
+        // Limpiar la pantalla entera, que es lo que hace `clear`.
+        pantalla.advance(b"\x1b[2J");
+
+        assert!(
+            !pantalla.hay_seleccion(),
+            "se limpió lo que estaba marcado y la selección se quedó ahí"
+        );
+    }
+
+    #[test]
+    fn se_selecciona_lo_que_se_ve_tambien_subido_por_el_historial() {
+        // **Las coordenadas de la selección son las de lo que se MIRA**, no las del área activa. Subido
+        // por el historial, marcar la primera fila tiene que dar la línea vieja que se está mirando; con
+        // las coordenadas sin trasladar daría la que hoy ocupa ese sitio en el área activa.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..40 {
+            pantalla.advance(format!("linea {n}\r\n").as_bytes());
+        }
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+
+        seleccionar(&mut pantalla, (0, 0), (0, 7));
+
+        assert_eq!(
+            pantalla.texto_seleccionado().as_deref(),
+            Some("linea 0"),
+            "se seleccionó por coordenadas del área activa en vez de por lo que se ve"
+        );
+    }
 
     #[test]
     fn el_programa_puede_pedir_y_retirar_que_lo_pegado_le_llegue_marcado() {
@@ -739,6 +1199,131 @@ mod tests {
         assert!(
             !texto_de(&pantalla.view()).contains("linea 19"),
             "la prueba no está mirando el historial, así que no compara nada"
+        );
+    }
+
+    #[test]
+    fn una_consola_recien_abierta_no_reclama_el_raton() {
+        // El caso de todos los días: un shell no pide el ratón, así que el terminal se lo queda entero
+        // para seleccionar. Si esto fuera al revés, arrastrar en un `bash` dejaría de marcar texto.
+        let pantalla = Screen::new(Size { rows: 4, cols: 20 });
+
+        assert!(
+            !pantalla.raton_reclamado().lo_quiere(),
+            "un shell sin pedir nada se llevó el ratón"
+        );
+    }
+
+    #[test]
+    fn cada_bandera_del_raton_se_lee_por_separado() {
+        // **Las tres se piden con secuencias distintas y significan cosas distintas**: un programa que
+        // solo quiere clics no quiere que se le informe de cada píxel que recorre el puntero. Leerlas
+        // en bloque mandaría informes de movimiento a `vim`, que pide `1002` y no `1003`.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"\x1b[?1000h");
+        assert_eq!(
+            pantalla.raton_reclamado(),
+            RatonReclamado {
+                botones: true,
+                ..RatonReclamado::default()
+            },
+            "pedir los clics encendió algo más"
+        );
+
+        pantalla.advance(b"\x1b[?1002h");
+        assert!(
+            pantalla.raton_reclamado().arrastre,
+            "pedir el arrastre no se leyó"
+        );
+        assert!(
+            !pantalla.raton_reclamado().movimiento,
+            "pedir el arrastre encendió también el movimiento"
+        );
+        // **Y los tres se SUSTITUYEN, no se acumulan** —leído en el motor, no supuesto—: pedir el
+        // arrastre apaga el de solo clics. Importa porque quien lee estas banderas decide con
+        // `lo_quiere()`, que las mira todas: si se acumularan, apagar el arrastre dejaría los clics
+        // encendidos y la consola no recuperaría la selección.
+        assert!(
+            !pantalla.raton_reclamado().botones,
+            "pedir el arrastre dejó encendido el modo de solo clics: los tres se sustituyen"
+        );
+
+        pantalla.advance(b"\x1b[?1003h");
+        assert!(
+            pantalla.raton_reclamado().movimiento,
+            "pedir el movimiento no se leyó"
+        );
+    }
+
+    #[test]
+    fn pedir_solo_la_codificacion_extendida_no_es_pedir_el_raton() {
+        // **`extendido` dice CÓMO se quiere el informe, no SI se quiere.** Contarlo como querer el
+        // ratón haría que un programa que enciende la codificación por delante —y muchos la encienden
+        // junto con otras cosas al arrancar— se llevara el botón izquierdo sin haberlo pedido, y con
+        // él la selección.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"\x1b[?1006h");
+
+        assert!(
+            pantalla.raton_reclamado().extendido,
+            "la codificación extendida no se leyó"
+        );
+        assert!(
+            !pantalla.raton_reclamado().lo_quiere(),
+            "encender solo la codificación se llevó el ratón"
+        );
+    }
+
+    #[test]
+    fn apagar_el_raton_lo_devuelve() {
+        // Un programa que termina apaga lo que encendió. Sin esto, salir de `htop` dejaría la consola
+        // sin poder seleccionar hasta cerrarla.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"\x1b[?1000h");
+        assert!(pantalla.raton_reclamado().lo_quiere());
+
+        pantalla.advance(b"\x1b[?1000l");
+
+        assert!(
+            !pantalla.raton_reclamado().lo_quiere(),
+            "el programa apagó el ratón y el terminal siguió creyendo que lo quería"
+        );
+    }
+
+    #[test]
+    fn la_rueda_va_como_flechas_solo_en_pantalla_alterna() {
+        // **El desplazamiento alternativo viene ENCENDIDO de fábrica** —leído en el motor, no supuesto:
+        // su modo por defecto ya lo trae, igual que `xterm`—. Así que lo único que hace falta para que
+        // el giro se traduzca es la pantalla alterna, y quien no la pide no recibe flechas: mandárselas
+        // a un shell le cambiaría la orden que tiene escrita en cada giro.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        assert!(
+            !pantalla.la_rueda_va_como_flechas(),
+            "un shell sin pantalla alterna recibió flechas al girar la rueda"
+        );
+
+        pantalla.advance(b"\x1b[?1049h");
+        assert!(
+            pantalla.la_rueda_va_como_flechas(),
+            "en pantalla alterna el giro no se tradujo, y `less` no se desplazaría"
+        );
+    }
+
+    #[test]
+    fn un_programa_puede_apagar_el_desplazamiento_alternativo() {
+        // La otra mitad de la regla, y la que hace falta porque la bandera viene encendida: un programa
+        // de pantalla alterna que la apaga —`vim` lo hace en cuanto quiere el ratón para sí— deja de
+        // recibir flechas al girar. Sin esta mitad, girar la rueda dentro de un editor movería el punto
+        // de inserción sin que nadie tocara una tecla.
+        let mut pantalla = Screen::new(Size { rows: 4, cols: 20 });
+        pantalla.advance(b"\x1b[?1049h");
+        assert!(pantalla.la_rueda_va_como_flechas());
+
+        pantalla.advance(b"\x1b[?1007l");
+
+        assert!(
+            !pantalla.la_rueda_va_como_flechas(),
+            "el programa apagó el desplazamiento alternativo y siguió recibiendo flechas"
         );
     }
 

@@ -56,6 +56,24 @@
 #                    entre las dos es lo que cuesta restaurar, y el informe de L lo declara aparte
 #                    —`restauradas:`— porque ocurre **antes del primer fotograma** y no se resta de
 #                    ninguno.
+#              Con UNA pestaña y DOS divisiones, y TEXTO MARCÁNDOSE, la otra que F2.6 añade — también en
+#              el régimen de la C:
+#                N = como la C, y además la ventana agarra dentro de la consola IZQUIERDA y arrastra para
+#                    marcar texto, una y otra vez, alternando cuánto abarca para que el trozo crezca y
+#                    mengüe. La consola DERECHA no se toca: es la tanda de control **dentro de la misma
+#                    corrida**, igual que en la K, así que la diferencia entre los tramos de las dos es lo
+#                    que cuesta marcar, medido contra un control que compartió máquina, fotograma y minuto.
+#                    **Invalida la corrida si el informe no declara gestos con texto marcado**: desde D20
+#                    el botón primario a secas marca, pero si el gesto perdiera su sitio —el asidero del
+#                    panel, el divisor— la corrida se inyectaría entera y publicaría el coste de otra cosa.
+#                O = EL MISMO recorrido que la N, con una sola diferencia: el programa de la consola
+#                    IZQUIERDA **ha pedido el ratón**, así que el gesto no marca nada — sale un informe
+#                    por cada celda que cruza. La DERECHA sigue siendo el control dentro de la misma
+#                    corrida. Que el recorrido sea idéntico es lo que hace comparables las dos tandas:
+#                    la diferencia entre ellas es lo que cuesta mandar el ratón en vez de marcar.
+#                    **Invalida la corrida si no salió al menos un informe por gesto** —el programa no
+#                    llegó a pedirlo y lo publicado sería una selección con otra etiqueta— **y también si
+#                    dejó texto marcado**, que significaría que los dos caminos corrieron a la vez.
 #              Con UNA pestaña y DOS divisiones, y la FRONTERA DEL ÁRBOL arrastrándose, la que F2.6 añade
 #              — también en el régimen de la C:
 #                M = como la C, y además la ventana agarra la frontera que reparte las dos consolas y la
@@ -243,11 +261,19 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
         exit 0
     fi
 
+    # **En la tanda del ratón, la PRIMERA consola lo pide y las demás no.** Es lo que convierte el mismo
+    # recorrido en informes al programa en vez de en una selección, y lo que deja a la segunda de control
+    # dentro de la misma corrida — igual que la K con el panel y la N con el texto marcado. Se pide antes
+    # de arrancar la carga para que la ventana lo haya leído cuando empiecen a llegar los gestos.
+    if [ "${MEDIR_GESTO:-}" = raton ] && [ "$turno" = 1 ]; then
+        printf '\033[?1000h\033[?1002h\033[?1006h'
+    fi
+
     exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}"
 fi
 
 # ── Modo tanda ──────────────────────────────────────────────────────────────────
-TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J, K, L o M}
+TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J, K, L, M, N u O}
 MIB=${2:-44}
 SALIDA="$RAIZ/target/medidas"
 mkdir -p "$SALIDA"
@@ -283,7 +309,9 @@ case "$TANDA" in
     K)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=panel ;;     # dos, y estrechando el panel sin parar: el gesto de F2.4
     L)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=consola; RESTAURA=1 ;;  # cuatro en fila, pero salidas del fichero: el arranque de F2.5
     M)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=frontera ;;       # dos, y moviendo la frontera del árbol: el peor caso de recolocar
-    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K, L o M" >&2; exit 2 ;;
+    N)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=marcar ;;         # dos, y marcando texto en la izquierda: la derecha es el control
+    O)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=raton ;;           # dos, y el MISMO recorrido, pero el programa de la izquierda pidió el ratón
+    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K, L, M, N u O" >&2; exit 2 ;;
 esac
 # **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
 # que caben, porque lo que hace falta es que el gesto dure **de principio a fin**. Una tanda que se queda sin
@@ -494,7 +522,7 @@ sembrar() {
 case "$TANDA" in
     A) : ;;                       # sin panel: nadie publica nada
     B) sembrar quieto & ;;
-    C|D|F|G|H|I|J|K|L|M) sembrar hablador & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O) sembrar hablador & ;;
 esac
 
 echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIRECTORIOS consolas volcando $MIB MiB · ventana $TAMANO · no toques la máquina hasta que cierre" >&2
@@ -597,9 +625,11 @@ fi
 # —un cambio de nombre, un binario viejo—, si la disposición tiene una sola consola, o si la ventana se
 # cierra antes de completar el primero.
 if [ "$ARRASTRES" != 0 ]; then
-    INYECTADOS=$(sed -n 's/^arrastres: *\([0-9]*\) inyectados · [0-9]* efectos .*$/\1/p' "$INFORME" | head -1)
-    CON_EFECTO=$(sed -n 's/^arrastres: *[0-9]* inyectados · \([0-9]*\) efectos .*$/\1/p' "$INFORME" | head -1)
-    QUE_GESTO=$(sed -n 's/^arrastres: *[0-9]* inyectados · [0-9]* efectos (\(.*\))$/\1/p' "$INFORME" | head -1)
+    INYECTADOS=$(sed -n 's/^arrastres: *\([0-9]*\) inyectados · .*$/\1/p' "$INFORME" | head -1)
+    CON_EFECTO=$(sed -n 's/^arrastres: *[0-9]* inyectados · \([0-9]*\) efectos · .*$/\1/p' "$INFORME" | head -1)
+    MARCADOS=$(sed -n 's/^arrastres: *[0-9]* inyectados · [0-9]* efectos · \([0-9]*\) fotogramas con texto marcado .*$/\1/p' "$INFORME" | head -1)
+    INFORMADOS=$(sed -n 's/^arrastres: .* texto marcado · \([0-9]*\) informes al programa .*$/\1/p' "$INFORME" | head -1)
+    QUE_GESTO=$(sed -n 's/^arrastres: .* informes al programa (\(.*\))$/\1/p' "$INFORME" | head -1)
     if [ -z "$INYECTADOS" ]; then
         invalidar "se pidieron arrastres y el informe no declara ninguna línea de arrastres"
     fi
@@ -615,7 +645,52 @@ if [ "$ARRASTRES" != 0 ]; then
         invalidar "se inyectaron $INYECTADOS gestos ($QUE_GESTO) y ninguno cambió nada: la ventana es \
 demasiado estrecha para que la operación se acepte, así que esta tanda no mide el gesto"
     fi
-    echo "gestos durante la tanda: $INYECTADOS inyectados, $CON_EFECTO efectos ($QUE_GESTO)" >&2
+    # **Y la guarda del texto marcado, que se lee en los DOS sentidos.** Desde **D20** el botón primario a
+    # secas dentro de una consola marca texto, así que cualquier gesto que pierda su asidero —el del panel,
+    # el del divisor, el de agarrar la consola— se convierte en una selección **sin que nada más lo
+    # delate**: se inyecta entero, declara efectos, y publica el coste de marcar bajo la etiqueta de otra
+    # cosa. Por eso la tanda que mide marcar exige que haya, y las demás exigen que no.
+    if [ -z "$MARCADOS" ]; then
+        invalidar "se pidieron arrastres y el informe no declara cuántos dejaron texto marcado"
+    fi
+    # **Y se exige MÁS DE UNO POR GESTO, no simplemente más de cero.** Cada gesto extiende la selección una
+    # vez por fotograma de arrastre, así que un gesto sano deja del orden de dos: pedir «al menos uno en
+    # toda la corrida» dejaría pasar una tanda en la que solo el primero marcara y los demás cayeran en
+    # otro camino. Es la misma cuenta que la guarda de recolocaciones de la tanda de la frontera.
+    if [ "$GESTO" = marcar ] && [ "$MARCADOS" -le "$INYECTADOS" ]; then
+        invalidar "se inyectaron $INYECTADOS gestos de marcar y solo $MARCADOS fotogramas dejaron texto \
+marcado: no llegan ni a uno por gesto, así que la mayoría entró por otro sitio y la corrida publica el \
+coste de otra cosa bajo su etiqueta"
+    fi
+    if [ "$GESTO" != marcar ] && [ "$MARCADOS" != 0 ]; then
+        invalidar "esta tanda mide «$QUE_GESTO» y sin embargo dejó texto marcado en $MARCADOS fotogramas: \
+su gesto está cayendo en el camino de la selección, así que mide otra cosa"
+    fi
+    # **Y la guarda de los informes al programa, que se lee en los mismos dos sentidos.** La tanda O hace
+    # EL MISMO recorrido que la N y solo se distinguen en si el programa de la consola izquierda pidió el
+    # ratón: sin este número, una corrida en la que ese programa nunca llegara a pedirlo —la secuencia que
+    # no sale, un binario viejo, la carga que arranca antes— publicaría los tramos de una **selección**
+    # bajo la etiqueta del ratón, y las dos tandas serían indistinguibles leyendo el informe. Y al revés:
+    # un informe que se escapara en cualquier otra tanda metería una ida al pseudoterminal dentro de su
+    # media sin que nada lo delatara.
+    if [ -z "$INFORMADOS" ]; then
+        invalidar "se pidieron arrastres y el informe no declara cuántos informes de ratón salieron"
+    fi
+    if [ "$GESTO" = raton ] && [ "$INFORMADOS" -le "$INYECTADOS" ]; then
+        invalidar "se inyectaron $INYECTADOS gestos de ratón y solo salieron $INFORMADOS informes: no \
+llegan ni a uno por gesto, así que el programa no llegó a pedir el ratón y la corrida publica el coste de \
+una selección bajo la etiqueta del ratón"
+    fi
+    if [ "$GESTO" = raton ] && [ "$MARCADOS" != 0 ]; then
+        invalidar "esta tanda manda el ratón al programa y además dejó texto marcado en $MARCADOS \
+fotogramas: los dos caminos se están recorriendo a la vez, así que sus tramos mezclan las dos cosas"
+    fi
+    if [ "$GESTO" != raton ] && [ "$INFORMADOS" != 0 ]; then
+        invalidar "esta tanda mide «$QUE_GESTO» y sin embargo mandó $INFORMADOS informes de ratón al \
+programa: su gesto está cayendo en el camino del ratón, así que mide otra cosa"
+    fi
+    echo "gestos durante la tanda: $INYECTADOS inyectados, $CON_EFECTO efectos, $MARCADOS fotogramas con \
+texto marcado, $INFORMADOS informes al programa ($QUE_GESTO)" >&2
 fi
 
 # **Y que se recolocara el texto, en la tanda que existe para medir eso.** Mover la frontera del árbol le
@@ -660,9 +735,13 @@ fi
 # ocurre y sí se cronometra: copiar la disposición, validarla y llegar hasta la puerta. Lo que la guarda
 # vigila es que ese camino se recorra.
 #
-# **Solo se exige donde la tanda mueve la disposición**, que son las que inyectan gestos: en una tanda
-# quieta no hay nada que guardar y exigirlo invalidaría corridas correctas.
-if [ "$ARRASTRES" != 0 ]; then
+# **Solo se exige donde la tanda mueve la disposición.** En una tanda quieta no hay nada que guardar, y
+# **tampoco en la que marca texto ni en la que manda el ratón al programa**: ninguno de los dos toca el
+# árbol ni el reparto, así que sus corridas no intentan guardar ni una vez y exigirlo las invalidaría
+# teniendo razón por el motivo equivocado. Que la lista de gestos exentos crezca no es un descuido: es que
+# «inyecta gestos» y «mueve la disposición» dejaron de ser lo mismo en cuanto hubo un gesto que no la
+# mueve, y desde entonces cada gesto nuevo que no la mueva entra aquí.
+if [ "$ARRASTRES" != 0 ] && [ "$GESTO" != marcar ] && [ "$GESTO" != raton ]; then
     INTENTOS=$(sed -n 's/^escribir la disposición en disco *([0-9]* escrituras de \([0-9]*\) intentos)$/\1/p' "$INFORME" | head -1)
     if [ -z "$INTENTOS" ]; then
         invalidar "se pidieron arrastres y el informe no declara ningún intento de guardar la disposición"
