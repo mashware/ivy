@@ -581,6 +581,14 @@ mod tests {
     /// monocromo es un **texto**. Afirmar sobre lo que decidió la regla —o sobre si la caché tiene una
     /// entrada— pasaría igual con el pintor devolviendo `false` siempre.
     fn formas_de(pantalla: &Screen) -> (usize, usize) {
+        formas_de_con(pantalla, &mut crate::fuentes::Descubridor::default())
+    }
+
+    /// Lo mismo, pero con un descubridor que la prueba ha dejado en el estado que quiere mirar.
+    fn formas_de_con(
+        pantalla: &Screen,
+        descubridor: &mut crate::fuentes::Descubridor,
+    ) -> (usize, usize) {
         let ctx = Context::default();
         // **Una pasada en vacío antes**, porque el motor de texto no existe hasta que la hay: sin esto
         // la primera maquetación ocurre a mitad de la pasada que se está midiendo.
@@ -598,7 +606,7 @@ mod tests {
                 &Tema::default(),
                 &metrica(10.0, 20.0),
                 Pos2::ZERO,
-                &mut crate::fuentes::Descubridor::default(),
+                descubridor,
             );
         });
         let (mut imagenes, mut textos) = (0, 0);
@@ -880,6 +888,119 @@ mod tests {
             0,
             "se pintó un cursor con la foto diciendo que no se ve: es un cursor fantasma en la última \
              fila, y quien mire creerá que el programa escribe ahí"
+        );
+    }
+
+    /// En qué orden encoló el pintor sus glifos: `"texto"` o `"imagen"`, uno por forma.
+    fn orden_de(pantalla: &Screen) -> Vec<&'static str> {
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let vista = pantalla.view();
+        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("el orden"),
+            ));
+            pintar(
+                &painter,
+                &vista,
+                &Tema::default(),
+                &metrica(10.0, 20.0),
+                Pos2::ZERO,
+                &mut crate::fuentes::Descubridor::default(),
+            );
+        });
+        let mut orden = Vec::new();
+        for forma in &salida.shapes {
+            anotar(&forma.shape, &mut orden);
+        }
+        salida.drop_without_applying_deltas();
+        orden
+    }
+
+    fn anotar(forma: &eframe::egui::Shape, orden: &mut Vec<&'static str>) {
+        match forma {
+            eframe::egui::Shape::Mesh(malla)
+                if malla.texture_id != eframe::egui::TextureId::default() =>
+            {
+                orden.push("imagen");
+            }
+            eframe::egui::Shape::Text(_) => orden.push("texto"),
+            eframe::egui::Shape::Vec(muchas) => {
+                for una in muchas {
+                    anotar(una, orden);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn los_emojis_se_encolan_todos_juntos_y_no_entre_las_letras() {
+        // **Es la razón de ser del atlas, y hasta aquí no la ataba nadie.** El motor solo junta en el
+        // mismo lote de dibujo formas que compartan textura: los emojis viven en su atlas y las letras en
+        // el de fuentes, así que encolarlos en el orden de la rejilla parte el lote **en cada emoji**.
+        // Medido en **D25** con las dos consolas volcando emojis: el resto del fotograma pasaba de 275 a
+        // 743 µs, o sea casi el triple de la cifra con la que **D3** juzga al framework, y por trabajo que
+        // no es suyo.
+        //
+        // **Se afirma sobre el orden de lo encolado, que es lo único que decide el reparto en lotes.**
+        // Contar cuántas imágenes salen —que es lo que hacen las demás pruebas de aquí— pasa igual con las
+        // dos pasadas fundidas en una: se comprobó fundiéndolas, y las 647 seguían en verde.
+        if !hay_color_en_la_maquina() {
+            return;
+        }
+        let orden = orden_de(&con("a\u{1F600}b\u{1F600}c"));
+
+        assert_eq!(
+            orden.iter().filter(|que| **que == "imagen").count(),
+            2,
+            "no salieron los dos emojis como imagen ({orden:?}): la prueba no está mirando lo que dice"
+        );
+        assert!(
+            orden.iter().filter(|que| **que == "texto").count() >= 3,
+            "no salieron las tres letras ({orden:?}): la prueba no está mirando lo que dice"
+        );
+        let primera_imagen = orden.iter().position(|que| *que == "imagen");
+        let ultimo_texto = orden.iter().rposition(|que| *que == "texto");
+        assert!(
+            primera_imagen > ultimo_texto,
+            "los emojis se encolaron entre las letras ({orden:?}): el motor parte el lote de dibujo en \
+             cada uno, que es exactamente lo que el atlas existe para evitar"
+        );
+    }
+
+    #[test]
+    fn con_el_atlas_lleno_el_emoji_se_sigue_viendo_aunque_sea_en_monocromo() {
+        // **El Contrato 5 por el camino que esta máquina no recorre nunca.** Cuando el atlas se llena,
+        // pedir el glifo de color devuelve nada y quien pinta **tiene que caer al camino de texto**: el
+        // emoji sale en monocromo, que es como salía antes del hito, en vez de desaparecer de la pantalla.
+        //
+        // **En una máquina con fuente de emoji esa caída no la ejercita ninguna otra prueba**, porque
+        // aquí el color siempre está: se comprobó mutando la caída para que no pintara nada, y las 647
+        // seguían en verde. La otra mitad —que con el atlas lleno no se devuelva una textura cualquiera—
+        // se ata en `fuentes`.
+        if !hay_color_en_la_maquina() {
+            return;
+        }
+        let mut descubridor = crate::fuentes::Descubridor::default();
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        // La celda de esta prueba mide 20 puntos de alto, y los píxeles físicos aquí van uno a uno.
+        descubridor.llena_el_atlas(&ctx, 20);
+
+        let (imagenes, textos) = formas_de_con(&con("\u{1F600}"), &mut descubridor);
+
+        assert_eq!(
+            imagenes, 0,
+            "con el atlas lleno se pintó una imagen igualmente: sale el dibujo de otro glifo"
+        );
+        assert_eq!(
+            textos, 1,
+            "con el atlas lleno el emoji no se pintó de ninguna manera: desaparece de la pantalla en vez \
+             de salir en monocromo, y quien lo escribió no sabrá que estaba"
         );
     }
 }

@@ -13738,6 +13738,14 @@ mod tests {
         //      no medirlo.
         //
         // **Se afirma sobre el informe publicado y no sobre un contador**, que es donde el número se lee.
+        //
+        // **Y esta prueba NO cubre el eslabón de la ventana, aunque lo parezca**: arma la llamada a pintar
+        // una división y anota el coste **ella misma**, así que borrar la anotación de la aplicación —el
+        // único sitio donde ocurre cuando el terminal corre— la deja en verde. Lo destapó una mutación,
+        // después de entregar. Lo que ata es la mitad de abajo: que quien pinta una división **lea** el
+        // coste, sin lo cual se acumularía. El eslabón entero lo recorre
+        // `la_ventana_de_verdad_declara_los_emojis_que_pinto_en_su_pasada`, que hace una pasada de
+        // interfaz de verdad y no toca nada por dentro.
         let mut ventana = ventana_con("sleep 30", "sleep 30");
         ventana.activa_mut().divisiones_mut()[0]
             .pantalla
@@ -13798,6 +13806,50 @@ mod tests {
             !informe.contains("0 glifos rasterizados · 0 sin fuente"),
             "el tramo salió con los dos contadores a cero, así que no se anotó nada de lo que se pagó: \
              {informe}"
+        );
+    }
+
+    #[test]
+    fn la_ventana_de_verdad_declara_los_emojis_que_pinto_en_su_pasada() {
+        // **La prueba de arriba no cubre este eslabón, y lo destapó una mutación.** Aquella arma la
+        // llamada a pintar una división y anota el coste **ella misma**, así que borrar la anotación de la
+        // ventana —el único sitio donde ocurre cuando la aplicación corre— dejaba las 647 en verde. Lo que
+        // aquí se recorre es el camino de quien usa el terminal: una pasada de interfaz entera, con la
+        // prueba sin tocar nada por dentro.
+        //
+        // Si nadie anota, el tramo desaparece del informe y sus microsegundos se publican como coste del
+        // framework — la cifra con la que **D3** juzga a egui.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.activa_mut().divisiones_mut()[0]
+            .pantalla
+            .advance("\u{1F600}\u{1F44D}".as_bytes());
+
+        pasada_de_interfaz(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            egui::RawInput::default(),
+        );
+
+        let mut informe = Vec::new();
+        ventana
+            .color
+            .publicar(&mut informe)
+            .expect("no se pudo publicar el tramo");
+        let informe = String::from_utf8(informe).expect("el informe no es texto");
+        // **Los dos escenarios, y por eso no se salta sola.** Donde la máquina tiene fuente de emoji el
+        // tramo sale con sus glifos rasterizados; donde no la tiene sale con los intentos fallidos, que
+        // también se pagaron.
+        assert!(
+            informe.contains("rasterizar un glifo de color"),
+            "la ventana pintó dos emojis en su pasada y su informe no declara el tramo: lo que costaron \
+             se publica como coste del framework"
+        );
+        assert!(
+            !informe.contains("0 glifos rasterizados · 0 sin fuente"),
+            "el tramo salió con los dos contadores a cero, así que la ventana no anotó nada de lo que su \
+             pasada pagó: {informe}"
         );
     }
 

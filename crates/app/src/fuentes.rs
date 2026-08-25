@@ -346,6 +346,26 @@ impl Descubridor {
         self.glifos.cuantos()
     }
 
+    /// Llena el atlas de glifos de color hasta que no cabe uno más, a esa altura de celda.
+    ///
+    /// **Existe para que el pintor pueda probar qué se ve cuando el atlas se llena**, que es lo que el
+    /// Contrato 5 promete: se cae al camino de texto y el emoji sale igual, en monocromo. El atlas y su
+    /// altura son de este módulo, así que desde el pintor no hay forma de dejarlo en ese estado — y
+    /// llenarlo con emojis de verdad exige que la máquina tenga ochocientos distintos instalados.
+    #[cfg(test)]
+    pub fn llena_el_atlas(&mut self, ctx: &egui::Context, alto: u32) {
+        self.glifos.alto = alto;
+        let lado = LADO_DEL_ATLAS / 4;
+        while self
+            .glifos
+            .pegar(
+                ctx,
+                egui::ColorImage::filled([lado, lado], egui::Color32::RED),
+            )
+            .is_some()
+        {}
+    }
+
     /// Apunta un carácter que quien pinta se ha encontrado.
     ///
     /// **Es lo único que corre por celda, y por eso es lo único que tiene que ser barato**: un carácter ya
@@ -964,6 +984,50 @@ fn glifo_de_color(
     None
 }
 
+/// Los píxeles de un mapa de bits, en RGBA y con **el alfa ya premultiplicado**. `None` si lo que trae
+/// no es un dibujo a color.
+///
+/// **Está aparte de `rasteriza` para poder afirmar sobre ella, y no es un rodeo.** Cuál de los tres
+/// caminos recorre un emoji **no lo decide este proyecto: lo decide la fuente que la máquina tenga
+/// instalada**. En ésta manda `Noto Color Emoji`, que trae PNG, así que los otros dos se entregarían sin
+/// que ninguna prueba los hubiera ejecutado nunca — y son los dos que llegan por delante en **F2.7**.
+/// Comprobado mutándolos con el cuerpo dentro de `rasteriza`: quitar la vuelta de BGRA a RGBA, que pinta
+/// de azul lo que el emoji tiene de rojo, dejaba las 647 pruebas en verde.
+fn pixeles_de(
+    mapa: &skrifa::bitmap::BitmapData<'_>,
+    ancho: u32,
+    alto: u32,
+) -> Option<image::RgbaImage> {
+    match mapa {
+        skrifa::bitmap::BitmapData::Png(bytes) => {
+            let mut pixeles = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+                .ok()?
+                .into_rgba8();
+            // **Se premultiplica ANTES de reescalar, y ésa es toda la diferencia entre un emoji limpio y
+            // uno con halo.** Promediar píxeles transparentes con opacos sin premultiplicar mezcla el
+            // color de los transparentes en el borde del dibujo. Es el defecto clásico del reescalado con
+            // alfa, y aquí ocurriría en todos: un emoji es un dibujo redondo dentro de un cuadro vacío.
+            for pixel in pixeles.pixels_mut() {
+                let alfa = u32::from(pixel.0[3]);
+                for canal in &mut pixel.0[..3] {
+                    *canal = u8::try_from(u32::from(*canal) * alfa / 255).unwrap_or(*canal);
+                }
+            }
+            Some(pixeles)
+        }
+        skrifa::bitmap::BitmapData::Bgra(bytes) => {
+            let mut crudo = bytes.to_vec();
+            // De BGRA a RGBA. Ya viene con el alfa premultiplicado, que es lo que hace falta arriba.
+            for pixel in crudo.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+            image::RgbaImage::from_raw(ancho, alto, crudo)
+        }
+        // Una máscara de alfa es un dibujo **monocromo**: no es un glifo de color y no se pinta por aquí.
+        skrifa::bitmap::BitmapData::Mask(_) => None,
+    }
+}
+
 /// El mapa de bits de color de un glifo, reescalado para que quepa en el hueco que se le da.
 ///
 /// Devuelve `None` cuando esa cara **no** trae el glifo a color: o no tiene tabla de mapas de bits, o la
@@ -983,37 +1047,9 @@ fn rasteriza(
 ) -> Option<egui::ColorImage> {
     let mapa = skrifa::bitmap::BitmapStrikes::new(fuente)
         .glyph_for_size(skrifa::instance::Size::new(CUERPO_PARA_RASTERIZAR), glifo)?;
-    let mut pixeles = match &mapa.data {
-        skrifa::bitmap::BitmapData::Png(bytes) => {
-            image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
-                .ok()?
-                .into_rgba8()
-        }
-        skrifa::bitmap::BitmapData::Bgra(bytes) => {
-            let mut crudo = bytes.to_vec();
-            // De BGRA a RGBA. Ya viene con el alfa premultiplicado, que es lo que hace falta más abajo.
-            for pixel in crudo.chunks_exact_mut(4) {
-                pixel.swap(0, 2);
-            }
-            image::RgbaImage::from_raw(mapa.width, mapa.height, crudo)?
-        }
-        // Una máscara de alfa es un dibujo **monocromo**: no es un glifo de color y no se pinta por aquí.
-        skrifa::bitmap::BitmapData::Mask(_) => return None,
-    };
+    let pixeles = pixeles_de(&mapa.data, mapa.width, mapa.height)?;
     if pixeles.width() == 0 || pixeles.height() == 0 {
         return None;
-    }
-    // **Se premultiplica ANTES de reescalar, y ésa es toda la diferencia entre un emoji limpio y uno con
-    // halo.** Promediar píxeles transparentes con opacos sin premultiplicar mezcla el color de los
-    // transparentes —que suele ser negro— en el borde del dibujo. Es el defecto clásico del reescalado
-    // con alfa, y aquí ocurriría en todos: un emoji es un dibujo redondo dentro de un cuadro vacío.
-    if matches!(mapa.data, skrifa::bitmap::BitmapData::Png(_)) {
-        for pixel in pixeles.pixels_mut() {
-            let alfa = u32::from(pixel.0[3]);
-            for canal in &mut pixel.0[..3] {
-                *canal = u8::try_from(u32::from(*canal) * alfa / 255).unwrap_or(*canal);
-            }
-        }
     }
     // **El factor es el MENOR de los dos y no el de la altura, aunque el contrato hable de la altura.**
     // Los dos a la vez —«a la altura de la celda» y «sin invadir la de al lado»— solo se cumplen así: el
@@ -1908,6 +1944,145 @@ mod tests {
         assert!(
             descubridor.dijo_el_techo,
             "se llegó al techo y no se dijo por la salida de error: un techo callado se lee como un fallo"
+        );
+    }
+
+    #[test]
+    fn un_mapa_de_bits_que_es_una_mascara_monocroma_no_sale_por_el_camino_del_color() {
+        // **Una máscara de alfa es un dibujo en blanco y negro, y por el camino del color saldría teñido
+        // de lo que hubiera en el canal.** Es el mismo hallazgo que la entrega ya tiene escrito —una
+        // fuente puede *cubrir* un emoji sin traerlo a color— pero por el otro camino: aquí la fuente sí
+        // es de emoji y sí trae mapa de bits para ese glifo, solo que monocromo. Quien lo pida tiene que
+        // caer al camino de texto, que es el Contrato 5.
+        //
+        // **Se construye la máscara a mano y se dice por qué**: en esta máquina manda `Noto Color Emoji`,
+        // que trae PNG, así que ninguna fuente instalada recorre esta rama. Se comprobó mutándola:
+        // convertir la máscara en imagen dejaba las 647 pruebas en verde.
+        let mascara = skrifa::bitmap::BitmapData::Mask(skrifa::bitmap::MaskData {
+            bpp: 8,
+            is_packed: false,
+            data: &[0xFF, 0x80, 0x40, 0x00],
+        });
+
+        assert!(
+            pixeles_de(&mascara, 2, 2).is_none(),
+            "un dibujo monocromo salió por el camino del color: se pinta como imagen y sale teñido de lo \
+             que traiga el canal, en vez de con el color que el programa pidió para esa celda"
+        );
+    }
+
+    #[test]
+    fn un_mapa_de_bits_en_bgra_conserva_los_colores_que_el_emoji_tiene() {
+        // **La fuente entrega los canales al revés y hay que darles la vuelta.** Sin eso un emoji rojo
+        // sale azul y uno azul sale rojo — un defecto que **no se ve en esta máquina**, porque aquí gana
+        // una fuente que trae PNG, y que sí se vería con las que entregan el mapa de bits sin comprimir.
+        // Se comprobó mutándolo: quitar el intercambio no rompía ninguna prueba.
+        //
+        // Un píxel rojo opaco, escrito como lo escribe la fuente: azul, verde, rojo, alfa.
+        let bgra = skrifa::bitmap::BitmapData::Bgra(&[0, 0, 255, 255]);
+
+        let pixeles = pixeles_de(&bgra, 1, 1).expect("un píxel en BGRA no dio imagen");
+
+        assert_eq!(
+            pixeles.get_pixel(0, 0).0,
+            [255, 0, 0, 255],
+            "el emoji salió con el rojo y el azul cambiados"
+        );
+    }
+
+    #[test]
+    fn un_pixel_transparente_no_se_lleva_su_color_al_borde_del_emoji() {
+        // **Es el halo, y es el defecto clásico de reducir un dibujo con alfa.** Un emoji es una figura
+        // dentro de un cuadro vacío, y el vacío de un PNG lleva color aunque no se vea: promediado sin
+        // premultiplicar, ese color invisible se mezcla en el borde de la figura y le deja una orla. Se
+        // vería en **todos** los emojis, no en un caso raro, porque todos se reducen de 128 píxeles a
+        // diecisiete.
+        //
+        // **Se afirma sobre el píxel transparente y no sobre el borde ya reducido**, porque es donde el
+        // defecto se ve sin depender de qué dibujo traiga la fuente instalada: premultiplicado, lo que no
+        // se ve no tiene color que aportar. Se comprobó mutándolo: sin premultiplicar, la suite pasaba
+        // entera.
+        let mut origen = image::RgbaImage::new(2, 1);
+        origen.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+        // Blanco del todo transparente: no se ve, pero su color está escrito en el fichero.
+        origen.put_pixel(1, 0, image::Rgba([255, 255, 255, 0]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(origen)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("no se pudo escribir el PNG de la prueba");
+
+        let pixeles = pixeles_de(&skrifa::bitmap::BitmapData::Png(&png), 2, 1)
+            .expect("el PNG de la prueba no dio imagen");
+
+        assert_eq!(
+            pixeles.get_pixel(1, 0).0,
+            [0, 0, 0, 0],
+            "un píxel invisible conservó su color: al reducir el emoji ese color se promedia con el del \
+             dibujo y le deja un halo alrededor"
+        );
+        assert_eq!(
+            pixeles.get_pixel(0, 0).0,
+            [255, 0, 0, 255],
+            "el píxel opaco perdió color al premultiplicar: el emoji entero saldría apagado"
+        );
+    }
+
+    #[test]
+    fn una_celda_sin_alto_o_sin_ancho_no_tumba_la_ventana() {
+        // **Es un pánico, no un dibujo raro.** El reescalado acota el tamaño final entre uno y lo que la
+        // celda da, y con una celda de cero ese acotado pide un mínimo mayor que su máximo — la
+        // biblioteca estándar entra en pánico ahí, así que se cae la ventana entera. Y la celda llega a
+        // valer cero: el alto y el ancho salen de multiplicar su rectángulo por los píxeles físicos y
+        // redondear, y el de una consola aplastada contra el borde mide una fracción de punto.
+        //
+        // Se comprobó mutándola: sin la guarda, esta prueba no falla — revienta.
+        let ctx = contexto();
+        let mut descubridor = Descubridor::default();
+
+        assert!(
+            descubridor
+                .glifo_a_color(&ctx, '\u{1F600}', 0, 20)
+                .is_none(),
+            "una celda sin alto dio glifo"
+        );
+        assert!(
+            descubridor
+                .glifo_a_color(&ctx, '\u{1F600}', 20, 0)
+                .is_none(),
+            "una celda sin ancho dio glifo"
+        );
+    }
+
+    #[test]
+    fn con_el_atlas_lleno_no_se_inventa_ninguna_textura() {
+        // **AC8 por el lado de quien pide, que es el que decide lo que se ve.** Que el atlas deje de
+        // aceptar ya está probado arriba; lo que aquí se ata es que un emoji pedido con el atlas lleno
+        // **no devuelve nada** en vez de un trozo cualquiera de la textura. Sin esto, la forma natural de
+        // «arreglar» el techo —devolver el último sitio, o un rectángulo por defecto— pinta en cada emoji
+        // nuevo el dibujo de otro, y quien mire verá la cara equivocada.
+        //
+        // **Se llena con imágenes sintéticas y se le fija antes la altura**, porque una altura distinta de
+        // la que el atlas tiene dentro lo vacía entero: sin fijarla, la petición de abajo encontraría
+        // sitio de sobra y esto no probaría nada.
+        let ctx = contexto();
+        let mut descubridor = Descubridor::default();
+        descubridor.glifos.alto = 20;
+        let lado = LADO_DEL_ATLAS / 4;
+        while descubridor
+            .glifos
+            .pegar(
+                &ctx,
+                egui::ColorImage::filled([lado, lado], egui::Color32::RED),
+            )
+            .is_some()
+        {}
+
+        assert!(
+            descubridor
+                .glifo_a_color(&ctx, '\u{1F600}', 20, 20)
+                .is_none(),
+            "con el atlas lleno se devolvió una textura igualmente: es el trozo que ocupa otro glifo, así \
+             que el emoji sale con el dibujo de otro"
         );
     }
 }
