@@ -74,6 +74,19 @@ fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
 # ocurre dentro de su pasada, donde no hay nada que pueda recogerlo.
 skrifa = "0.44"
 
+# **Para decodificar el mapa de bits de un emoji y reducirlo al tamaño de una celda.** Los glifos de color
+# de `Noto Color Emoji` vienen dentro de la fuente como **PNG indexado por paleta** de 136×128 —comprobado
+# ejecutándolo—, así que hay que expandirlos a RGBA y reescalarlos; `skrifa` entrega los bytes tal cual y
+# no hace ni lo uno ni lo otro.
+#
+# **No añade ni un paquete ni una feature al árbol, y conviene decirlo porque la intuición dice lo
+# contrario.** `image` con la feature `png` **ya se compila aquí** por rebote del portapapeles —comprobado
+# con `cargo tree -e features -i image`, que da `image/png → arboard → egui-winit → eframe → app`—. Es el
+# mismo argumento con el que `serde` con `derive` está justificado más arriba: la política del manifiesto
+# de la raíz razona sobre **lo que entra al árbol**, no sobre cuántas líneas tiene el manifiesto.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+
 # **Solo para el banco de fuentes, y a propósito.** Esta entrega mide qué cuesta descubrir las fuentes
 # del sistema y rasterizar un glifo a color; hasta que esos números decidan cómo se hace, nada de esto
 # entra en producción. Es el mismo criterio con el que el banco del historial midió el motor por debajo

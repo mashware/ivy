@@ -2857,3 +2857,117 @@ de desarrollo participan en la resolución de versiones: añadir `fontique` movi
 0.60 para `arboard` —el portapapeles, que **sí** va en el binario— y metió la pila de `windows 0.62`. En
 Linux no cambia nada; **en Windows, que es la plataforma de F2.7, ya cambia lo que se compila**. Lo
 encontró la revisión leyendo el fichero de bloqueo.
+
+---
+
+## D25 — El emoji a color se pinta como imagen, y todos los glifos viven en un atlas propio
+
+**Decisión.** Un carácter cuya presentación pide color **no se le pide al motor de texto**: se rasteriza
+aparte y se pinta como **imagen**. Y todos los glifos rasterizados se pegan en **una sola textura** de
+512×512 píxeles, no en una textura cada uno.
+
+Las dos mitades salen de razones distintas, y las dos están medidas.
+
+### Por qué como imagen y no por el motor de texto
+
+**epaint 0.36.1 no sabe rasterizar un glifo a color.** Su rasterizador coge **solo** el contorno
+(`outline_glyphs`) y lo pinta con `set_paint(WHITE)`; en todo su módulo de texto no hay una mención a las
+tablas de color de una fuente. Comprobado leyendo su fuente en `text/font.rs:241`.
+
+Así que registrar `Noto Color Emoji` en la cadena de reserva —que es lo que **D24** hace para el CJK y los
+iconos— **no daría emojis a color**. Daría la silueta. Y en esta máquina no daría ni eso: `Noto Color
+Emoji` es un **mapa de bits de 136×128 sin contornos**, así que el motor no tendría nada que dibujar.
+
+**Lo que sí hay en el árbol es la pieza que hace falta**: `skrifa` —que epaint ya usa por debajo— sabe
+sacar el mapa de bits de un glifo, y el pintor de este proyecto **pinta celda a celda**, así que el emoji
+como imagen es una rama más en un `if` que ya existía, no un cambio de arquitectura.
+
+### Por qué un atlas, y el número que lo decidió
+
+**La primera versión daba una textura por glifo, y la medida la tumbó.** El teselador de epaint no puede
+juntar en la misma malla dos formas con identificadores de textura distintos —lo dice él mismo: «Mixing
+different `texture_id` in the same…»— así que **cada emoji de la pantalla partía el lote de dibujo**.
+
+**Casi el triple de lo que cuesta dibujar, y por trabajo que no es del framework.** Con atlas, todos los
+emojis de la pantalla se dibujan juntos. Es lo que hacen los terminales que son el listón de este
+proyecto, y por esta razón.
+
+**Pero el atlas solo no bastaba, y el segundo número lo dice.** El motor junta formas **consecutivas** que
+compartan textura, y el pintor recorre la rejilla celda a celda: una letra, otra letra, un emoji, otra
+letra… así que el lote se partía igual, ahora entre el atlas de fuentes y el de emojis. La solución es
+pintar **en dos pasadas** —todos los textos y después todos los emojis—, que es la misma disciplina con la
+que este pintor ya separaba los fondos de los glifos, y por la misma razón.
+
+### La resta entera, con el control corrido con el mismo binario
+
+| El resto del fotograma — la cifra con la que **D3** juzga a egui | Dos consolas volcando emojis |
+|---|---|
+| Una textura por glifo | **743,4 µs** |
+| Atlas, pintado entremezclado | 565,9 µs |
+| Atlas y dos pasadas | 370,8 µs |
+| **Atlas, dos pasadas y el atajo del ASCII** | **356,3 µs** |
+| *Control: las mismas dos consolas en ASCII* | *268,8 µs* |
+
+**Lo que hay que mirar del control no es la diferencia con la tanda, sino que no se ha movido.** 268,8 µs
+con este binario contra los 274,3 que publicó el hito anterior: **una pantalla sin emojis no paga nada**
+por que el terminal sepa pintarlos, ni siquiera la pasada de más. Eso es lo que hace aceptable el resto de
+la tabla.
+
+Con emojis, dibujar cuesta un 33 % más y encolar un 26 % (289,8 → 366,1 µs). Es el precio de **117 emojis
+por consola** en pantalla, que es una carga deliberadamente peor que cualquier uso real.
+
+### El atajo del ASCII, y el defecto que casi entra con él
+
+La pasada del color recorre la rejilla entera para pintar unos pocos emojis, así que descarta el ASCII
+**sin consultar las tablas de Unicode**. Duplicar ahí una regla que vive en otro sitio solo es aceptable
+si algo avisa cuando las dos dejan de decir lo mismo, y ese algo es una prueba que recorre los 128
+caracteres con los dos selectores detrás.
+
+**Lo que el atajo ahorra no se distingue del ruido, y se dice así.** 366,1 µs contra 377,5 en el tramo del
+pintado: la diferencia entre dos corridas de la misma tanda es del mismo orden. Los 92 µs que cuesta la
+pasada de más los paga **recorrer la rejilla otra vez**, y eso el atajo no lo evita. Una versión anterior
+de este anexo se los atribuía a él — un número con la etiqueta cambiada, que es justo lo que este proyecto
+dice que es peor que no tener número.
+
+**La escribió y la tumbó a la primera.** El atajo descartaba **todo** el ASCII, y Unicode le da `Emoji=Yes`
+a la **almohadilla, al asterisco y a los diez dígitos**: `#` seguido del selector es `#️⃣`. Once teclas que
+habrían salido en monocromo, en el hito cuyo objeto es que salgan a color. El atajo ahora descarta solo el
+ASCII **sin nada pegado**.
+
+### El techo dejó de ser un contador y es mejor así
+
+El diseño pedía «la memoria de los glifos rasterizados tiene techo declarado». Con atlas, el techo es
+**una textura de tamaño fijo**: la memoria que la tarjeta gráfica dedica a los emojis es **1 MiB y no
+cambia**, aparezcan uno o mil. A la altura de celda de esta máquina caben unos ochocientos glifos —17
+píxeles de alto, 18 de ancho—, muchos más de los que una persona ve en una sesión. Cuando se llena **se
+dice por la salida de error** y los emojis que no estén ya dentro salen en monocromo.
+
+Un contador habría dado el mismo límite con memoria que crece hasta él. La textura fija lo da desde el
+primer emoji.
+
+### Qué queda fuera, dicho con su razón
+
+**Los contornos de color —`COLR`— no se pintan.** Hacerlo exige rasterizar contornos a mano, que es el
+rasterizador propio que este hito descartó **a propósito** por invalidar el histórico de medida entero.
+En Linux no se nota, porque las fuentes de emoji del sistema son de mapa de bits; **en Windows sí**,
+porque `Segoe UI Emoji` es `COLR`. Queda declarado como lo que le falta a **F2.7**, no como algo que aquí
+funcione.
+
+**Los modificadores de tono de piel tampoco.** Son caracteres **anchos**, así que el motor de terminal les
+da celda propia en vez de pegarlos a la del emoji base, y la regla de presentación no puede mirar la celda
+siguiente: no lo tiene en su firma. La base sale a color y el modificador sale por su cuenta.
+
+**Y el panel de estado no pinta color.** Descubre fuentes —eso lo arregló la entrega anterior— pero su
+texto lo maqueta el motor de una vez, no celda a celda, así que un emoji en un resumen sale monocromo. El
+hito trata de la consola; esto queda dicho para que nadie lo lea como un fallo.
+
+### Lo que se descartó
+
+- **Registrar la fuente de emoji en la cadena de reserva**, como se hace con el CJK. No da color: da la
+  silueta, o nada. Es la primera cosa que se probó y la que reordenó el hito entero.
+- **Una textura por glifo.** Medido arriba: casi triplica la cifra de **D3**.
+- **Reescalar en la tarjeta gráfica** en vez de en la CPU, subiendo el mapa de bits a su tamaño original.
+  Serían 68 KiB por emoji en memoria de vídeo en vez de 1,2 KiB, sesenta veces más, y a cambio de un
+  filtrado que a esta escala no se distingue.
+- **Un rasterizador propio para todo**, que es la opción C del abanico de este hito. Sigue escrita como
+  **destino** para cuando este proyecto cambie de framework (**D3**), no como descarte.

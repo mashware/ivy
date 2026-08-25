@@ -118,6 +118,7 @@ dependencies = [
  "eframe",
  "fontique",
  "host-load",
+ "image",
  "notify",
  "panel-contract",
  "serde",

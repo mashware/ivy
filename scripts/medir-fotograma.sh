@@ -280,11 +280,16 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
     if [ "${MEDIR_CJK:-}" = 1 ]; then
         exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}" --cjk
     fi
+    # **Y la carga con emojis solo la pide la tanda Q**, por lo mismo: es la única que recorre el camino
+    # de rasterizar un glifo de color.
+    if [ "${MEDIR_EMOJI:-}" = 1 ]; then
+        exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}" --emoji
+    fi
     exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}"
 fi
 
 # ── Modo tanda ──────────────────────────────────────────────────────────────────
-TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J, K, L, M, N u O}
+TANDA=${1:?falta la tanda: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P o Q}
 MIB=${2:-44}
 SALIDA="$RAIZ/target/medidas"
 mkdir -p "$SALIDA"
@@ -323,7 +328,8 @@ case "$TANDA" in
     N)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=marcar ;;         # dos, y marcando texto en la izquierda: la derecha es el control
     O)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=raton ;;           # dos, y el MISMO recorrido, pero el programa de la izquierda pidió el ratón
     P)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola; CJK=1 ;;       # dos, y las dos volcando en JAPONÉS: la única que descubre fuentes
-    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K, L, M, N u O" >&2; exit 2 ;;
+    Q)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola; EMOJI=1 ;;     # dos, y las dos volcando EMOJIS: la única que rasteriza glifos de color
+    *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K, L, M, N, O, P o Q" >&2; exit 2 ;;
 esac
 # **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
 # que caben, porque lo que hace falta es que el gesto dure **de principio a fin**. Una tanda que se queda sin
@@ -534,7 +540,7 @@ sembrar() {
 case "$TANDA" in
     A) : ;;                       # sin panel: nadie publica nada
     B) sembrar quieto & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P) sembrar hablador & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q) sembrar hablador & ;;
 esac
 
 echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIRECTORIOS consolas volcando $MIB MiB · ventana $TAMANO · no toques la máquina hasta que cierre" >&2
@@ -550,6 +556,7 @@ ESTADO=0
 export MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
     MEDIR_TURNOS="$TURNOS" MEDIR_VUELCAN="$VUELCAN" \
     MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" MEDIR_GESTO="$GESTO" MEDIR_CJK="${CJK:-}" \
+    MEDIR_EMOJI="${EMOJI:-}" \
     XDG_CONFIG_HOME="$CONFIG" \
     SHELL="$RAIZ/scripts/medir-fotograma.sh"
 # **Las dos que piden disposición no se exportan cuando la tanda restaura, y en eso consiste la tanda L.**
@@ -634,6 +641,28 @@ algo distinto de la carga está disparando el descubrimiento, así que sus tramo
 le corresponde a lo que dice medir"
 fi
 
+
+# **La guarda del glifo de color, y se lee en los dos sentidos como todas las de arriba.** La tanda Q es
+# la única que vuelca emojis, y por tanto la única que recorre el camino de rasterizar. Sin este número,
+# una corrida en la que la carga no llegara a salir —o en la que la máquina no tuviera ninguna fuente de
+# emoji a color— publicaría la sección del color **vacía** y se leería como «pintar un emoji a color no
+# cuesta nada», que es exactamente el engaño que el testigo evita con los paneles.
+#
+# Y al revés: si una tanda que NO es la Q rasteriza glifos de color, es que algo distinto de la carga lo
+# está disparando, y sus tramos mezclan un trabajo que no le corresponde a lo que dice medir. La de siempre
+# es ASCII puro: ahí no hay ni un emoji.
+RASTERIZADOS=$(grep -oE "[0-9]+ glifos rasterizados" "$INFORME" | grep -oE "^[0-9]+" | head -1)
+RASTERIZADOS=${RASTERIZADOS:-0}
+if [ "${EMOJI:-}" = 1 ] && [ "$RASTERIZADOS" = 0 ]; then
+    invalidar "esta tanda vuelca emojis para medir lo que cuesta rasterizar un glifo de color y no \
+rasterizó ninguno: o la carga no llegó a salir, o la máquina no tiene ninguna fuente de emoji a color, y \
+en los dos casos la sección del color se publicaría vacía y se leería como que no cuesta nada"
+fi
+if [ "${EMOJI:-}" != 1 ] && [ "$RASTERIZADOS" != 0 ]; then
+    invalidar "esta tanda no vuelca emojis y sin embargo rasterizó $RASTERIZADOS glifos de color: algo \
+distinto de la carga lo está disparando, así que sus tramos mezclan un trabajo que no le corresponde a lo \
+que dice medir"
+fi
 
 
 # La aplicación publica el informe al salir, así que si terminó mal el informe está a medias — y a simple

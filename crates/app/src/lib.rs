@@ -813,6 +813,12 @@ struct DeLaDivision {
     /// el soltado de una consola, que cuenta las reordenaciones que el árbol acepta y no los soltados que se
     /// mandan.
     cambio_el_ancho: bool,
+    /// Lo que costó rasterizar glifos de color **mientras se pintaba esta división**.
+    ///
+    /// **Viaja por aquí y no por un acumulador de la ventana porque hay que restarlo del tramo de ESTA
+    /// consola.** El descubridor es de la ventana, así que su contador es común; leerlo al cerrar el
+    /// fotograma diría cuánto se gastó pero no a quién quitárselo.
+    color: fuentes::CosteDelColor,
 }
 
 /// Con qué reparto abre la ventana: las dos consolas iguales.
@@ -3723,6 +3729,8 @@ struct Ventana {
     /// Lo que cuesta buscar esas fuentes, para que el informe lo declare y no acabe publicado como coste
     /// del framework.
     descubrimiento: medida::Descubrimiento,
+    /// Lo que cuesta rasterizar los glifos de color, para que no acabe dentro del tramo del pintado.
+    color: medida::Rasterizado,
     tema: Tema,
     /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
     resto_del_fotograma: RestoDelFotograma,
@@ -4082,6 +4090,7 @@ impl Ventana {
             modificadores: egui::Modifiers::NONE,
             descubridor: fuentes::Descubridor::default(),
             descubrimiento: medida::Descubrimiento::default(),
+            color: medida::Rasterizado::default(),
             tema: Tema::default(),
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
@@ -4447,7 +4456,10 @@ impl Ventana {
         // **Y el descubrimiento igual: su fila va después del resto porque también está descontado de
         // él.** Es el tramo más caro que este proyecto añade fuera de una consola, así que sin declararlo
         // el número de D3 se lo comería entero.
-        self.descubrimiento.publicar(a)
+        self.descubrimiento.publicar(a)?;
+        // **Y el del color va el último, con la misma razón que los tres de arriba**: está restado del
+        // tramo del pintado, así que sin esta fila el número existiría y nadie podría auditarlo.
+        self.color.publicar(a)
     }
 
     /// Le da a las consolas de las pestañas que no se ven la rejilla que tendrían si se vieran.
@@ -6121,7 +6133,12 @@ impl Ventana {
             hueco.consola.left_top(),
             descubridor,
         );
-        let encolado = antes.elapsed();
+        // **Rasterizar un glifo de color corre DENTRO del pintado, así que se le resta al pintado.** Es la
+        // única cosa cara que este proyecto hace ahí: buscar y registrar una cara se hacen fuera porque
+        // rehacen el atlas, pero subir una textura no invalida nada. Sin esta resta, «encolando el
+        // pintado» mediría además lo que cuesta decodificar un PNG y reducirlo.
+        let color = descubridor.coste_del_color();
+        let encolado = antes.elapsed().saturating_sub(color.gastado);
 
         let antes_de_pintarlo = Instant::now();
         if let (Some(sitio), Some(dir)) = (hueco.panel, division.panel.as_ref()) {
@@ -6164,6 +6181,7 @@ impl Ventana {
         DeLaDivision {
             frontera_del_panel,
             cambio_el_ancho,
+            color,
         }
     }
 }
@@ -6467,6 +6485,16 @@ impl eframe::App for Ventana {
                 &metrica,
                 &mut self.descubridor,
             );
+            // **Se anota por división y no una vez por fotograma**, porque es de la división de la que se
+            // restó: dos consolas que rasterizan en el mismo fotograma pagan cada una lo suyo.
+            if suyo.color.rasterizados + suyo.color.fallidos > 0 {
+                self.cronometrado_aparte += suyo.color.gastado;
+                self.color.anotar(
+                    suyo.color.gastado,
+                    suyo.color.rasterizados,
+                    suyo.color.fallidos,
+                );
+            }
             if hay_gesto {
                 pintado.push((rect, suyo.frontera_del_panel));
                 if suyo.cambio_el_ancho {
@@ -7100,6 +7128,7 @@ mod tests {
         let mut ventana = Ventana {
             descubridor: fuentes::Descubridor::default(),
             descubrimiento: medida::Descubrimiento::default(),
+            color: medida::Rasterizado::default(),
             // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
             // arma igual —sobre una lista vacía— para que la ventana de las pruebas no se declare
             // ciega y active el respaldo, que es un camino con su propia prueba.
@@ -13693,6 +13722,83 @@ mod tests {
                 area.width()
             );
         }
+    }
+
+    #[test]
+    fn lo_que_cuesta_pintar_un_emoji_a_color_sale_del_tramo_del_pintado_y_se_declara() {
+        // **La regla dura de este proyecto: un número mal etiquetado es peor que ningún número.** El coste
+        // del fotograma se reparte **por resta**, así que un trabajo que no se declara se publica como
+        // coste del framework — la cifra con la que **D3** juzga a egui.
+        //
+        // Rasterizar un emoji corre **dentro** del pintado, al revés que buscar una fuente. Así que hacen
+        // falta las dos mitades, y esta prueba ata las dos:
+        //   1. que alguien **lea** el coste al pintar cada división — si no, se acumularía y el fotograma
+        //      siguiente se restaría un trabajo que no pagó;
+        //   2. que ese coste **acabe en el informe** — leerlo y tirarlo lo escondería igual de bien que
+        //      no medirlo.
+        //
+        // **Se afirma sobre el informe publicado y no sobre un contador**, que es donde el número se lee.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.activa_mut().divisiones_mut()[0]
+            .pantalla
+            .advance("\u{1F600}\u{1F44D}".as_bytes());
+
+        let ctx = egui::Context::default();
+        // Una pasada en vacío antes: el motor de texto no existe hasta que la hay.
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let Ventana {
+            pestañas,
+            descubridor,
+            color,
+            ..
+        } = &mut ventana;
+        let salida = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+            let suyo = Ventana::pintar_division(
+                ui,
+                pestañas[0].divisiones_mut()[0],
+                area_de(802.0),
+                &Tema::default(),
+                &metrica,
+                descubridor,
+            );
+            if suyo.color.rasterizados + suyo.color.fallidos > 0 {
+                color.anotar(
+                    suyo.color.gastado,
+                    suyo.color.rasterizados,
+                    suyo.color.fallidos,
+                );
+            }
+        });
+        salida.drop_without_applying_deltas();
+
+        assert_eq!(
+            ventana.descubridor.coste_del_color(),
+            fuentes::CosteDelColor::default(),
+            "el coste del color quedó sin leer después de pintar: se acumula, y el fotograma siguiente se \
+             restaría de su pintado un trabajo que no ha hecho"
+        );
+
+        let mut informe = Vec::new();
+        ventana
+            .color
+            .publicar(&mut informe)
+            .expect("no se pudo publicar el tramo");
+        let informe = String::from_utf8(informe).expect("el informe no es texto");
+        // **Los dos escenarios, y por eso no se salta sola.** Donde la máquina tiene fuente de emoji, el
+        // tramo tiene que aparecer con su número; donde no la tiene, el intento fallido tiene que
+        // aparecer igual — porque también se pagó.
+        assert!(
+            informe.contains("rasterizar un glifo de color"),
+            "se pintaron dos emojis y el informe no declara el tramo: sus microsegundos se publicarían \
+             como coste del framework"
+        );
+        assert!(
+            !informe.contains("0 glifos rasterizados · 0 sin fuente"),
+            "el tramo salió con los dos contadores a cero, así que no se anotó nada de lo que se pagó: \
+             {informe}"
+        );
     }
 
     #[test]

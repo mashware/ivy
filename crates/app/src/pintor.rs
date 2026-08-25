@@ -8,6 +8,7 @@
 //! **La medida de la celda se pregunta, no se inventa.** El ancho sale del glifo de referencia de
 //! la fuente y el alto de su altura de línea. Calcularlo a ojo es lo que descuadra las filas.
 
+use crate::fuentes::Presentacion;
 use crate::tema::Tema;
 use eframe::egui::{
     Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, vec2,
@@ -148,15 +149,93 @@ pub fn pintar(
         }
     }
 
-    for (fila, celdas) in vista.cells().chunks_exact(ancho).enumerate() {
-        let fila = fila as u16;
-        for (columna, celda) in celdas.iter().enumerate() {
-            let hueco = metrica.celda(origen, fila, columna as u16);
-            // **Apuntar es lo único que corre por celda, y por eso tiene que ser barato**: un carácter
-            // ASCII o ya resuelto se descarta sin tocar nada. Buscar la fuente y registrarla ocurren
-            // fuera de esta pasada — ver `Descubridor::resolver`.
-            descubridor.apunta(celda.c);
-            pintar_glifo(painter, celda, tema, metrica, hueco, descubridor);
+    // **Los glifos se pintan en DOS pasadas —primero los de texto, después los de color— y eso no es
+    // organización: es lo que decide cuánto cuesta dibujar el fotograma.** El motor solo puede juntar en
+    // el mismo lote de dibujo formas que compartan textura; los emojis viven en su atlas y las letras en
+    // el de fuentes, así que pintarlos entremezclados en el orden de la rejilla parte el lote **en cada
+    // emoji**. Ver **D25**, que trae la medida.
+    //
+    // **El coste de la pasada de más es recorrer la rejilla otra vez**, unos microsegundos: la del color
+    // descarta con una comparación todo lo que no va a color, que es casi todo.
+    // **Los glifos se pintan en DOS pasadas —primero los de texto, después los de color— y eso no es
+    // organización: es lo que decide cuánto cuesta dibujar el fotograma.** El motor solo puede juntar en
+    // el mismo lote de dibujo formas que compartan textura; los emojis viven en su atlas y las letras en
+    // el de fuentes, así que pintarlos entremezclados en el orden de la rejilla parte el lote **en cada
+    // emoji**. Ver **D25**, que trae la medida.
+    //
+    // **El coste de la pasada de más es recorrer la rejilla otra vez**, unos microsegundos: la del color
+    // descarta con una comparación todo lo que no va a color, que es casi todo.
+    // **Y la segunda pasada solo ocurre si la primera vio algún emoji.** Una pantalla sin ninguno —que es
+    // la inmensa mayoría— recorrería la rejilla entera para no pintar nada. Con ASCII el atajo de abajo la
+    // dejaría en casi nada de todos modos, pero con japonés en pantalla no hay atajo que valga: cada celda
+    // consultaría las tablas de Unicode por segunda vez.
+    //
+    // **Lo que ahorra está por debajo de lo que el banco puede distinguir, y se dice así**: dos corridas de
+    // la misma tanda con japonés dan 280 y 301 µs en el tramo del pintado, así que cualquier diferencia
+    // menor que esos 21 µs no se puede afirmar. Se hace por la forma —no recorrer la rejilla para no pintar
+    // nada— y no porque haya un número detrás.
+    let mut hubo_color = false;
+    for pasada in [Presentacion::Texto, Presentacion::Color] {
+        if pasada == Presentacion::Color && !hubo_color {
+            break;
+        }
+        for (fila, celdas) in vista.cells().chunks_exact(ancho).enumerate() {
+            let fila = fila as u16;
+            for (columna, celda) in celdas.iter().enumerate() {
+                // **Apuntar es lo único que corre por celda, y por eso tiene que ser barato**: un
+                // carácter ASCII o ya resuelto se descarta sin tocar nada. Buscar la fuente y registrarla
+                // ocurren fuera de esta pasada — ver `Descubridor::resolver`. Va solo en la primera de
+                // las dos: apuntar dos veces lo mismo no cambia nada, pero se pagaría dos veces.
+                if pasada == Presentacion::Texto {
+                    descubridor.apunta(celda.c);
+                }
+                // El acompañante de un carácter ancho **no pinta nada**. El glifo entero lo dibuja su
+                // primera columna y se sale sobre esta; volver a pintarlo aquí lo duplicaría, medio
+                // encima del otro. Y el hueco que deja un ancho que no cabía al final de la fila tampoco
+                // es un espacio: es un sitio donde no hay carácter.
+                if matches!(celda.width, CellWidth::WideTail | CellWidth::WrapFiller) {
+                    continue;
+                }
+                // Un espacio no tiene nada que dibujar, y son la mayor parte de una pantalla.
+                if celda.c == ' ' || celda.hidden {
+                    continue;
+                }
+                let pegados = vista.adjuntos_de(celda);
+                // **Un ASCII SIN NADA PEGADO se descarta de la pasada del color sin consultar las tablas
+                // de Unicode.** Es la inmensa mayoría de lo que pasa por una pantalla de terminal.
+                //
+                // **Lo que este atajo ahorra NO se distingue del ruido entre corridas** —366 µs contra
+                // 377 en el tramo del pintado— y queda dicho así en vez de atribuirle un número que no
+                // le corresponde: los 92 µs que cuesta la pasada de más los paga **recorrer la rejilla
+                // otra vez**, y eso el atajo no lo evita. Lo que sí evita es consultar las tablas de
+                // Unicode en casi todas las celdas, que es un argumento de forma y no una medida.
+                //
+                // **Lo de «sin nada pegado» no es prudencia, es obligatorio**: `#`, `*` y los dígitos
+                // tienen `Emoji=Yes`, así que `#` seguido del selector es `#️⃣` y va a color. La primera
+                // versión de este atajo descartaba todo el ASCII y se los comía; lo destapó la prueba que
+                // recorre los 128 con los dos selectores detrás, escrita justamente porque duplicar aquí
+                // una regla que vive en `fuentes` solo es aceptable si algo avisa cuando dejan de decir
+                // lo mismo.
+                if pasada == Presentacion::Color && celda.c.is_ascii() && pegados.is_empty() {
+                    continue;
+                }
+                // Cada celda se pinta en la pasada que le toca por su presentación, y en la otra no.
+                if crate::fuentes::presentacion_de(celda.c, pegados) != pasada {
+                    // Si en la pasada del texto una celda pide color, la del color tiene trabajo.
+                    hubo_color |= pasada == Presentacion::Texto;
+                    continue;
+                }
+                pintar_caracter(
+                    painter,
+                    celda.c,
+                    pegados,
+                    metrica.celda(origen, fila, columna as u16),
+                    celda.width == CellWidth::WideHead,
+                    colores_de(celda, tema).0,
+                    metrica,
+                    descubridor,
+                );
+            }
         }
     }
 
@@ -198,36 +277,79 @@ fn colores_de(celda: &ViewCell, tema: &Tema) -> (Color32, Color32) {
     }
 }
 
-fn pintar_glifo(
+/// Pinta un carácter en su hueco: a color si le toca color, y por el camino de texto si no.
+///
+/// **Existe como función aparte porque el cursor de bloque repinta el carácter que tapa**, y sin esto
+/// ese repintado no sabría de emojis: un emoji bajo el cursor saldría en monocromo o no saldría.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "    Son los datos que hacen falta para pintar un carácter, y ninguno se deduce de otro: el carácter, lo \
+    que lleva pegado —que decide la presentación—, dónde va, si ocupa dos columnas, de qué color si es \
+    texto, con qué tamaño, quién sabe de fuentes y dónde se recuerdan los glifos de color. Agruparlos en \
+    un tipo sería una caja que no significa nada fuera de esta llamada."
+)]
+fn pintar_caracter(
     painter: &Painter,
-    celda: &ViewCell,
-    tema: &Tema,
-    metrica: &Metrica,
+    que: char,
+    pegados: &[char],
     hueco: Rect,
-    descubridor: &crate::fuentes::Descubridor,
+    ancho: bool,
+    color: Color32,
+    metrica: &Metrica,
+    descubridor: &mut crate::fuentes::Descubridor,
 ) {
-    // El acompañante de un carácter ancho **no pinta nada**. El glifo entero lo dibuja su primera
-    // columna y se sale sobre esta; volver a pintarlo aquí lo duplicaría, medio encima del otro.
-    // Y el hueco que deja un ancho que no cabía al final de la fila tampoco es un espacio: es un
-    // sitio donde no hay carácter.
-    if matches!(celda.width, CellWidth::WideTail | CellWidth::WrapFiller) {
+    // **Un emoji ancho ocupa las DOS columnas que el motor le reservó**, no una. El hueco que llega es
+    // el de su primera columna; el dibujo se centra en el de las dos, que es lo que su anchura declara.
+    let suyo = if ancho {
+        Rect::from_min_max(hueco.min, hueco.max + vec2(metrica.ancho, 0.0))
+    } else {
+        hueco
+    };
+    if crate::fuentes::presentacion_de(que, pegados) == crate::fuentes::Presentacion::Color
+        && pintar_a_color(painter, que, suyo, descubridor)
+    {
         return;
     }
-    // Un espacio no tiene nada que dibujar, y son la mayor parte de una pantalla de terminal.
-    if celda.c == ' ' || celda.hidden {
-        return;
-    }
-
-    let (color, _) = colores_de(celda, tema);
+    // **No se recorta el glifo a su celda.** Si la fuente pinta más ancho de lo que el parser
+    // reservó, tiene que verse: es el dato que decide si hay que embarcar una fuente propia.
+    // Recortarlo escondería el desajuste y lo convertiría en una sorpresa mucho más cara.
+    //
     // **La familia se elige por carácter, y ahí está el único sitio donde se puede elegir.** egui ordena
     // su cadena de reserva por familia entera, no por rango: para que la fuente de iconos que el usuario
     // instaló gane en las zonas de uso privado **sin** quitarle las letras a la del terminal, tiene que
     // vivir en su propia familia y pedirse solo donde toca. Quien recorre celda a celda es esto.
-    let fuente = eframe::egui::FontId::new(metrica.fuente.size, descubridor.familia_de(celda.c));
-    // **No se recorta el glifo a su celda.** Si la fuente pinta más ancho de lo que el parser
-    // reservó, tiene que verse: es el dato que decide si hay que embarcar una fuente propia.
-    // Recortarlo escondería el desajuste y lo convertiría en una sorpresa mucho más cara.
-    painter.text(hueco.left_top(), Align2::LEFT_TOP, celda.c, fuente, color);
+    let fuente = eframe::egui::FontId::new(metrica.fuente.size, descubridor.familia_de(que));
+    painter.text(hueco.left_top(), Align2::LEFT_TOP, que, fuente, color);
+}
+
+/// Pinta el glifo de color de ese carácter, centrado en su hueco. Dice si llegó a pintar algo.
+///
+/// **Devolver `false` no es un fallo: es el Contrato 5 del diseño.** Un carácter cuya presentación pide
+/// color pero que ninguna fuente de la máquina pinta a color se dibuja con lo que dé el motor —su
+/// silueta monocroma, o su cuadro— y no se intenta nada más. El terminal no dibuja glifos que la máquina
+/// no tiene.
+fn pintar_a_color(
+    painter: &Painter,
+    que: char,
+    hueco: Rect,
+    descubridor: &mut crate::fuentes::Descubridor,
+) -> bool {
+    // **En píxeles FÍSICOS, no en puntos.** La textura se sube al tamaño con el que se va a ver: pedirla
+    // en puntos la dejaría a la mitad de resolución en una pantalla al 200 % y el emoji saldría borroso
+    // justo donde más se nota.
+    let por_punto = painter.ctx().pixels_per_point();
+    let alto = (hueco.height() * por_punto).round() as u32;
+    let ancho = (hueco.width() * por_punto).round() as u32;
+    let Some((atlas, uv, medidas)) = descubridor.glifo_a_color(painter.ctx(), que, alto, ancho)
+    else {
+        return false;
+    };
+    // **Centrado en su hueco, y por eso hace falta el tamaño real de la textura**: el reescalado conserva
+    // la proporción del dibujo, así que casi nunca llena el hueco exacto — sobra en un eje. Estirarlo
+    // para que llene deformaría el emoji.
+    let dibujo = Rect::from_center_size(hueco.center(), medidas / por_punto);
+    painter.image(atlas, dibujo, uv, Color32::WHITE);
+    true
 }
 
 fn pintar_cursor(
@@ -236,7 +358,7 @@ fn pintar_cursor(
     tema: &Tema,
     metrica: &Metrica,
     origen: Pos2,
-    descubridor: &crate::fuentes::Descubridor,
+    descubridor: &mut crate::fuentes::Descubridor,
 ) {
     // **Sin cursor no se pinta cursor**, y desde que hay historial ese caso ocurre de verdad: subiendo
     // lo bastante, el cursor se queda en el área activa, por debajo de lo que se mira. La foto lo dice
@@ -271,19 +393,24 @@ fn pintar_cursor(
             // debajo. Se repinta encima, en el color del fondo: es lo que hace un terminal, y sin
             // esto el cursor **borra** la letra sobre la que está en vez de resaltarla.
             if debajo.c != ' ' && !debajo.hidden {
-                // **Con la familia que le toca a ESE carácter, igual que en el pintado normal.** Sin
-                // esto, un icono bajo el cursor se redibuja con la fuente de fábrica y **cambia de
-                // símbolo**: mover el cursor sobre un separador de Powerline le cambiaba el dibujo. Lo
-                // encontró una revisión.
-                painter.text(
-                    hueco.left_top(),
-                    Align2::LEFT_TOP,
+                // **Por el mismo camino que el pintado normal, y no con un `painter.text` propio.** Sin
+                // esto, el repintado no sabría ni de la familia de iconos —un separador de Powerline
+                // cambiaba de símbolo al pasarle el cursor por encima, lo encontró una revisión— ni de
+                // los emojis a color, que saldrían en monocromo solo bajo el cursor.
+                //
+                // **Y el emoji se repinta a color tal cual, no teñido del color del fondo.** Un dibujo a
+                // color no se puede recolorear a un solo tono sin dejarlo en una mancha plana: lo que se
+                // ve encima del bloque es el emoji, que es lo que hacen los demás terminales y lo único
+                // que se lee.
+                pintar_caracter(
+                    painter,
                     debajo.c,
-                    eframe::egui::FontId::new(
-                        metrica.fuente.size,
-                        descubridor.familia_de(debajo.c),
-                    ),
+                    vista.adjuntos_de(debajo),
+                    metrica.celda(origen, cursor.row, cursor.col),
+                    debajo.width == CellWidth::WideHead,
                     colores_de(debajo, tema).1,
+                    metrica,
+                    descubridor,
                 );
             }
         }
@@ -447,6 +574,259 @@ mod tests {
     /// del criterio; la otra —la que se comprueba aquí— es que este pintor no dibuje nada con ese
     /// `None`. Se pinta sobre una capa propia y vacía, así que lo que salga es exactamente lo de este
     /// pintor y nada más.
+    /// Cuántas imágenes y cuántos textos encola el pintor para esa pantalla.
+    ///
+    /// **Es el único oráculo que dice si un emoji salió a color**, y por eso las pruebas de aquí cuentan
+    /// formas en vez de mirar campos. Un emoji a color es una **imagen** en la lista de formas; uno
+    /// monocromo es un **texto**. Afirmar sobre lo que decidió la regla —o sobre si la caché tiene una
+    /// entrada— pasaría igual con el pintor devolviendo `false` siempre.
+    fn formas_de(pantalla: &Screen) -> (usize, usize) {
+        let ctx = Context::default();
+        // **Una pasada en vacío antes**, porque el motor de texto no existe hasta que la hay: sin esto
+        // la primera maquetación ocurre a mitad de la pasada que se está midiendo.
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let vista = pantalla.view();
+        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("la rejilla"),
+            ));
+            pintar(
+                &painter,
+                &vista,
+                &Tema::default(),
+                &metrica(10.0, 20.0),
+                Pos2::ZERO,
+                &mut crate::fuentes::Descubridor::default(),
+            );
+        });
+        let (mut imagenes, mut textos) = (0, 0);
+        for forma in &salida.shapes {
+            contar(&forma.shape, &mut imagenes, &mut textos);
+        }
+        salida.drop_without_applying_deltas();
+        (imagenes, textos)
+    }
+
+    /// **Una imagen encolada es una malla con una textura que NO es el atlas de fuentes.** `Painter::image`
+    /// no produce una variante propia: arma una malla de dos triángulos con la textura pedida —leído en
+    /// `epaint/shapes/shape.rs:373`—. Distinguirla por su textura es lo que impide contar como imagen
+    /// cualquier malla que el marco pinte por su cuenta.
+    fn contar(forma: &eframe::egui::Shape, imagenes: &mut usize, textos: &mut usize) {
+        match forma {
+            eframe::egui::Shape::Mesh(malla)
+                if malla.texture_id != eframe::egui::TextureId::default() =>
+            {
+                *imagenes += 1;
+            }
+            eframe::egui::Shape::Text(_) => *textos += 1,
+            eframe::egui::Shape::Vec(muchas) => {
+                for una in muchas {
+                    contar(una, imagenes, textos);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Una pantalla de una sola línea con ese texto dentro.
+    fn con(texto: &str) -> Screen {
+        let mut pantalla = Screen::new(Size { rows: 1, cols: 20 });
+        pantalla.advance(texto.as_bytes());
+        pantalla
+    }
+
+    /// Si esta máquina tiene con qué pintar emojis a color. Sin eso, medio hito no es comprobable aquí.
+    fn hay_color_en_la_maquina() -> bool {
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        crate::fuentes::Descubridor::default()
+            .glifo_a_color(&ctx, '\u{1F600}', 20, 20)
+            .is_some()
+    }
+
+    #[test]
+    fn un_emoji_de_los_de_toda_la_vida_sale_a_color_sin_que_nadie_lo_pida() {
+        // **AC3, y es la mitad visible del hito.** `😀` tiene `Emoji_Presentation=Yes`, así que va a
+        // color sin selector ninguno.
+        //
+        // **Se afirma en los DOS escenarios**: donde la máquina tiene fuente de color, el emoji tiene que
+        // salir como imagen; donde no la tiene, tiene que seguir saliendo por el camino de texto y la
+        // ventana quedar en pie. Saltar la prueba en una máquina pelada dejaría sin cubrir justo el
+        // camino donde se cae una implementación.
+        let (imagenes, textos) = formas_de(&con("\u{1F600}"));
+        if hay_color_en_la_maquina() {
+            assert_eq!(
+                imagenes, 1,
+                "el emoji no se pintó como imagen: salió por el camino de texto, o sea en monocromo"
+            );
+        } else {
+            assert_eq!(
+                imagenes, 0,
+                "no hay fuente de color en la máquina y aun así se pintó una imagen"
+            );
+            assert_eq!(
+                textos, 1,
+                "sin fuente de color el emoji tiene que salir igualmente, en monocromo"
+            );
+        }
+    }
+
+    #[test]
+    fn el_simbolo_de_texto_se_queda_en_texto_y_con_su_selector_se_va_a_color() {
+        // **AC4, y las dos mitades en la misma prueba a propósito.** `☁` y `☁️` son **el mismo carácter**
+        // con presentación distinta: comprobar solo una de las dos pasaría con un pintor que mandara todo
+        // a color, o todo a texto.
+        let (sin_selector, textos_sin) = formas_de(&con("\u{2601}"));
+        assert_eq!(
+            sin_selector, 0,
+            "una nube sin selector se pintó a color: es un símbolo de texto y así se pierde"
+        );
+        assert_eq!(textos_sin, 1, "la nube no se pintó de ninguna manera");
+
+        let (con_selector, _) = formas_de(&con("\u{2601}\u{FE0F}"));
+        if hay_color_en_la_maquina() {
+            assert_eq!(
+                con_selector, 1,
+                "la nube con selector de emoji no salió a color: el selector no está llegando a la regla"
+            );
+        }
+    }
+
+    #[test]
+    fn una_tecla_hecha_con_una_almohadilla_sale_a_color() {
+        // **El caso que el atajo del ASCII se comió, y por eso está aquí y no solo en la regla.** La
+        // pasada del color descarta el ASCII sin consultar las tablas de Unicode, porque es casi todo lo
+        // que pasa por una pantalla; pero `#`, `*` y los dígitos tienen `Emoji=Yes`, así que con el
+        // selector detrás son teclas y van a color.
+        //
+        // La prueba de la regla, en `fuentes`, no cubre esto: el atajo vive **aquí**, y mutarlo para que
+        // se comiera todo el ASCII dejaba aquella en verde. Se comprobó mutándolo.
+        if !hay_color_en_la_maquina() {
+            return;
+        }
+        let (imagenes, _) = formas_de(&con("#\u{FE0F}\u{20E3}"));
+        assert_eq!(
+            imagenes, 1,
+            "la tecla «#️⃣» salió por el camino de texto: quien pinta está descartando el ASCII sin \
+             mirar lo que lleva pegado, y se come las once teclas que Unicode hace con ASCII"
+        );
+    }
+
+    #[test]
+    fn el_selector_de_texto_devuelve_a_monocromo_un_emoji_que_iria_a_color() {
+        // La otra mitad de **AC4**, la que nadie escribe: el selector que **quita** el color. Sin ella, un
+        // pintor que ignorase `U+FE0E` pasaría las dos pruebas de arriba.
+        let (imagenes, textos) = formas_de(&con("\u{1F600}\u{FE0E}"));
+        assert_eq!(
+            imagenes, 0,
+            "el emoji salió a color llevando detrás el selector de TEXTO, que es justo lo que lo prohíbe"
+        );
+        assert_eq!(
+            textos, 1,
+            "con el selector de texto el emoji tiene que salir igual, en monocromo"
+        );
+    }
+
+    #[test]
+    fn el_emoji_no_invade_la_celda_de_al_lado() {
+        // **AC5.** El mapa de bits de `Noto Color Emoji` es **más ancho que alto** —136×128, comprobado
+        // ejecutándolo— así que escalarlo por la altura de la celda lo deja más ancho que las dos columnas
+        // que el motor le reservó, y se come el borde de su vecina.
+        //
+        // **Se afirma sobre el rectángulo que se encoló**, que es lo que se ve, y no sobre el tamaño de la
+        // textura: una textura del tamaño correcto pintada en un rectángulo estirado sale igual de mal.
+        if !hay_color_en_la_maquina() {
+            return;
+        }
+        let pantalla = con("\u{1F600}");
+        let vista = pantalla.view();
+        let metrica = metrica(10.0, 20.0);
+        assert_eq!(
+            vista.cell(0, 0).map(|celda| celda.width),
+            Some(CellWidth::WideHead),
+            "el motor no le dio dos columnas al emoji: la prueba no está midiendo lo que dice"
+        );
+
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("un emoji"),
+            ));
+            pintar(
+                &painter,
+                &vista,
+                &Tema::default(),
+                &metrica,
+                Pos2::ZERO,
+                &mut crate::fuentes::Descubridor::default(),
+            );
+        });
+        let mut dibujo = None;
+        for forma in &salida.shapes {
+            if let eframe::egui::Shape::Mesh(malla) = &forma.shape
+                && malla.texture_id != eframe::egui::TextureId::default()
+            {
+                dibujo = Some(malla.calc_bounds());
+            }
+        }
+        salida.drop_without_applying_deltas();
+        let dibujo = dibujo.expect("el emoji no se pintó como imagen");
+
+        // Las dos columnas que su anchura declara, y ni un punto más.
+        let suyo = Rect::from_min_size(Pos2::ZERO, vec2(metrica.ancho * 2.0, metrica.alto));
+        assert!(
+            suyo.contains_rect(dibujo),
+            "el emoji ocupa {dibujo:?} y sus dos columnas son {suyo:?}: se sale sobre la celda vecina"
+        );
+        // **Y que no se haya deformado para llenarlas.** El margen es ceñido a propósito: con uno de una
+        // décima, estirar el emoji al hueco entero —proporción 1,000 contra la suya, 1,062— pasaba esta
+        // prueba. Se comprobó mutándolo, y es el disfraz que este proyecto tiene fichado: un margen
+        // elegido con el que el defecto y el arreglo dan el mismo resultado.
+        let proporcion = dibujo.width() / dibujo.height();
+        assert!(
+            (proporcion - 136.0 / 128.0).abs() < 0.03,
+            "el emoji se pintó con proporción {proporcion:.3} en vez de la suya (1,062): está estirado"
+        );
+        // **Y la otra cara de lo mismo, que es la que se ve**: conservar la proporción dentro de un hueco
+        // que no la tiene obliga a que sobre sitio en uno de los dos ejes. Un dibujo que llena el hueco
+        // exacto está estirado por definición.
+        assert!(
+            dibujo.width() < suyo.width() || dibujo.height() < suyo.height(),
+            "el emoji llena su hueco exacto ({dibujo:?} contra {suyo:?}): está estirado para llenarlo"
+        );
+    }
+
+    #[test]
+    fn bajo_el_cursor_el_emoji_se_sigue_viendo_a_color() {
+        // **El cursor de bloque tapa el carácter y lo repinta encima.** Ese repintado tenía su propia
+        // llamada al motor de texto, así que un emoji bajo el cursor salía en monocromo —solo ahí, y solo
+        // mientras el cursor estuviera encima—. Es el mismo defecto que una revisión encontró con los
+        // iconos de Powerline, en el mismo sitio.
+        if !hay_color_en_la_maquina() {
+            return;
+        }
+        let mut pantalla = Screen::new(Size { rows: 1, cols: 20 });
+        pantalla.advance("\u{1F600}".as_bytes());
+        pantalla.advance(b"\x1b[1;1H");
+        assert_eq!(
+            pantalla.view().cursor().map(|c| (c.row, c.col)),
+            Some((0, 0)),
+            "el cursor no quedó sobre el emoji: la prueba no está midiendo lo que dice"
+        );
+        let (imagenes, _) = formas_de(&pantalla);
+        assert_eq!(
+            imagenes, 2,
+            "con el cursor encima tiene que haber dos imágenes —la del pintado y la del repintado del \
+             cursor—: si hay una, el cursor está tapando el emoji y repintándolo en monocromo"
+        );
+    }
+
     fn formas_del_cursor(vista: &View) -> usize {
         let ctx = Context::default();
         let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
@@ -460,7 +840,7 @@ mod tests {
                 &Tema::default(),
                 &metrica(10.0, 20.0),
                 Pos2::ZERO,
-                &crate::fuentes::Descubridor::default(),
+                &mut crate::fuentes::Descubridor::default(),
             );
         });
         let formas = salida.shapes.len();

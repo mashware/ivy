@@ -13,7 +13,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use host_load::{
-    CHUNK, Excluded, Run, aggregate, build_load, build_load_cjk, pace_delay, start_instant,
+    CHUNK, Excluded, Run, aggregate, build_load, build_load_cjk, build_load_color, pace_delay,
+    start_instant,
 };
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -30,7 +31,7 @@ host-load — mide cuánto tarda un terminal en vaciar una carga fija
 
   --mib N       tamaño de la carga en MiB (por defecto 22)
   --cjk         escribe en japonés, chino y coreano en vez de en ASCII
-  --cjk         escribe en japonés, chino y coreano en vez de en ASCII
+  --emoji       salpica la carga de emojis, con y sin selector de presentación
   --at S        arrancar en el siguiente múltiplo de S segundos (por defecto 30; 0 = ya)
   --rate M      caudal sostenido objetivo en MiB/s (por defecto, tan rápido como admita)
   --tag T       etiqueta de la tanda; report agrupa por ella
@@ -69,6 +70,7 @@ struct Opciones {
     mib: usize,
     /// Si la carga se escribe en CJK. Solo la pide la tanda del descubrimiento de fuentes.
     cjk: bool,
+    emoji: bool,
     at: u64,
     rate: Option<f64>,
     tag: String,
@@ -80,6 +82,7 @@ fn parsear(args: &[String]) -> Result<Opciones, Error> {
     let mut o = Opciones {
         mib: MIB_POR_DEFECTO,
         cjk: false,
+        emoji: false,
         at: AT_POR_DEFECTO,
         rate: None,
         tag: "sin-etiqueta".to_string(),
@@ -106,6 +109,7 @@ fn parsear(args: &[String]) -> Result<Opciones, Error> {
         match args[i].as_str() {
             "--mib" => o.mib = valor(i)?.parse()?,
             "--cjk" => o.cjk = true,
+            "--emoji" => o.emoji = true,
             "--at" => o.at = valor(i)?.parse()?,
             "--rate" => o.rate = Some(valor(i)?.parse()?),
             "--tag" => o.tag = valor(i)?.clone(),
@@ -134,12 +138,18 @@ fn run(args: &[String]) -> Result<(), Error> {
         .mib
         .checked_mul(UN_MIB)
         .ok_or_else(|| format!("--mib {} es demasiado grande", o.mib))?;
-    // **La carga en CJK solo la pide la tanda que mide el descubrimiento de fuentes.** La de siempre no
-    // se toca, para que las tandas nuevas sigan siendo comparables con los anexos publicados.
-    let carga = if o.cjk {
-        build_load_cjk(bytes)
-    } else {
-        build_load(bytes)
+    // **Las cargas en CJK y con emojis solo las piden las tandas de las fuentes.** La de siempre no se
+    // toca, para que las tandas nuevas sigan siendo comparables con los anexos publicados.
+    //
+    // **Y las dos banderas juntas no significan nada**, así que se rechaza en vez de elegir una en
+    // silencio: una tanda lanzada con las dos publicaría el coste de un idioma creyendo medir el otro.
+    let carga = match (o.cjk, o.emoji) {
+        (true, true) => {
+            return Err("--cjk y --emoji miden cosas distintas: hay que elegir una".into());
+        }
+        (true, false) => build_load_cjk(bytes),
+        (false, true) => build_load_color(bytes),
+        (false, false) => build_load(bytes),
     };
 
     if let Some(ruta) = o.dump {

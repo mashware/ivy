@@ -678,6 +678,65 @@ impl Descubrimiento {
     }
 }
 
+/// Lo que cuesta **rasterizar un glifo de color**, que es lo único de este proyecto que hace trabajo caro
+/// dentro del pintado.
+///
+/// **Se llama por lo que mide y no por su tema**: en este proyecto `Color` es un color —lo son `Color32`,
+/// `TermColor` y la tabla del tema—, y un tipo con ese nombre que en realidad mide microsegundos se lee
+/// mal en cada sitio donde aparece.
+///
+/// **Va aparte de la búsqueda de fuentes porque ocurre en otro sitio del fotograma, y eso cambia quién lo
+/// paga.** Registrar una cara rehace el atlas del motor, así que se hace **fuera** del pintado y su tramo
+/// se resta del resto; rasterizar un emoji no invalida nada, así que se hace donde hace falta — dentro de
+/// «encolando el pintado». Sin restarlo de ahí, ese tramo dejaría de significar lo que su nombre dice, y
+/// este proyecto ya tiene escrito que un número mal etiquetado es peor que ningún número.
+#[derive(Default)]
+pub struct Rasterizado {
+    rasterizado: Serie,
+    /// Cuántos glifos de color se han rasterizado de verdad.
+    ///
+    /// **Lo publica el informe y no lo puede saber el guion**, igual que los caracteres buscados: una
+    /// tanda que diga medir el color y no rasterice ninguno estaría publicando el coste de un camino que
+    /// no se recorrió.
+    rasterizados: usize,
+    /// Cuántas veces se pidió un glifo de color que la máquina no pinta así.
+    ///
+    /// **Va aparte y no es redundante**: un carácter cuya presentación pide color pero que ninguna fuente
+    /// instalada trae a color **se paga entero** y no devuelve nada. Con un solo número, una máquina con
+    /// fuente de emoji y otra sin ella publicarían informes indistinguibles.
+    fallidos: usize,
+}
+
+impl Rasterizado {
+    /// Anota lo que costó el camino del color **en el pintado de una división**.
+    pub fn anotar(&mut self, cuanto: Duration, rasterizados: usize, fallidos: usize) {
+        self.rasterizado.anotar(cuanto);
+        self.rasterizados += rasterizados;
+        self.fallidos += fallidos;
+    }
+
+    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if !self.rasterizado.hay() {
+            return Ok(());
+        }
+        writeln!(
+            a,
+            "\nrasterizar un glifo de color — de la ventana   ({} fotogramas con trabajo · {} glifos rasterizados · {} sin fuente que los pinte a color)",
+            self.rasterizado.total, self.rasterizados, self.fallidos
+        )?;
+        writeln!(a, "  {}", self.rasterizado)?;
+        writeln!(
+            a,
+            "  NO ocurre en cada fotograma: solo la primera vez que un emoji aparece a una altura de celda\n                   dada, así que la media de aquí no describe un fotograma corriente. Abarca buscar en las\n                   familias de emoji del sistema la que lo trae a color, decodificar su mapa de bits —que en\n                   Noto Color Emoji es un PNG indexado de 136x128— reducirlo al tamaño de la celda y subir la\n                   textura. Un carácter que NINGUNA fuente pinta a color se paga igual y no devuelve nada:\n                   por eso los dos contadores van separados"
+        )?;
+        writeln!(
+            a,
+            "  ESTÁ RESTADO de «encolando el pintado» de la consola que lo pagó, no sumado encima: corre\n                   DENTRO de ese tramo, al revés que buscar una fuente. Sin la resta, el tramo que dice medir\n                   lo que cuesta encolar mediría además esto"
+        )?;
+        Ok(())
+    }
+}
+
 /// Lo grande que es la ventana, en la unidad en la que se le pide que abra.
 ///
 /// **Dos campos con nombre y no una pareja de números**, por lo mismo que los tramos de la tabla llevan

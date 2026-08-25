@@ -164,6 +164,58 @@ pub fn build_load_cjk(bytes_objetivo: usize) -> Vec<u8> {
     carga
 }
 
+/// Los emojis con los que escribe la carga a color, y por qué éstos.
+///
+/// **Los tres casos que la regla de presentación distingue, y ni uno más:** uno que va a color por
+/// defecto, uno de texto **con** su selector —que tiene que salir a color— y uno de texto **sin** él —que
+/// no—. Sin los tres, una tanda pintaría todo por el mismo camino y mediría la mitad del trabajo.
+///
+/// **Y son muchos distintos a propósito.** Quien pinta recuerda por carácter, así que repetir uno solo
+/// recorrería el camino rápido y publicaría el coste de rasterizar **un** glifo como si fuera el de una
+/// pantalla de verdad.
+const EMOJIS: &[&str] = &[
+    "\u{1F600}",
+    "\u{1F44D}",
+    "\u{1F680}",
+    "\u{2601}\u{FE0F}",
+    "\u{1F389}",
+    "\u{2764}\u{FE0F}",
+    "\u{1F4E6}",
+    "\u{2601}",
+    "\u{1F525}",
+    "\u{2B50}",
+    "\u{1F41B}",
+    "\u{2714}\u{FE0F}",
+];
+
+/// La misma carga, pero salpicada de emojis.
+///
+/// **Existe aparte y `build_load` no se toca**, por lo mismo que la de CJK: cambiar la carga de siempre
+/// dejaría las tandas nuevas sin poder compararse con ningún anexo publicado. Ésta solo la pide la tanda
+/// que mide lo que cuesta rasterizar un glifo de color.
+///
+/// **Determinista igual que las otras**: el contenido de la línea `i` depende solo de `i`.
+pub fn build_load_color(bytes_objetivo: usize) -> Vec<u8> {
+    let mut carga = Vec::with_capacity(bytes_objetivo + 256);
+    let mut i: usize = 1;
+    while carga.len() < bytes_objetivo {
+        let color = 31 + i % 7;
+        let cara: String = (0..3).map(|n| EMOJIS[(i + n) % EMOJIS.len()]).collect();
+        let ms = 3 + i % 40;
+        carga.extend_from_slice(
+            format!(
+                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {cara} compilando el módulo {i} … \x1b[32mhecho\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
+            )
+            .as_bytes(),
+        );
+        if i.is_multiple_of(LINEAS_POR_REPINTADO) {
+            carga.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
+        }
+        i += 1;
+    }
+    carga
+}
+
 /// Primer instante alineado en el que arrancar, contado desde la época.
 ///
 /// **Trabaja en fracciones de segundo, y eso es lo único que hace que sirva.** La primera versión
@@ -647,6 +699,40 @@ mod tests {
         assert!(a.mib_s.is_none());
         assert!(a.included.is_empty());
         assert!(a.excluded.is_empty());
+    }
+
+    #[test]
+    fn la_carga_con_emojis_trae_los_tres_casos_de_presentacion() {
+        // **Sin los tres, la tanda mide la mitad del trabajo y nadie se entera.** Quien pinta decide por
+        // la regla de presentación de Unicode: un emoji que va a color **por defecto**, uno de texto **con**
+        // el selector —que tiene que salir a color— y uno de texto **sin** él —que no—. Una carga que solo
+        // trajera del primer tipo recorrería un camino y publicaría su coste como si fueran los tres.
+        let carga = String::from_utf8(build_load_color(64 * 1024)).expect("la carga no es texto");
+        assert!(
+            carga.contains('\u{1F600}'),
+            "no hay ningún emoji de los que van a color por defecto"
+        );
+        assert!(
+            carga.contains("\u{2601}\u{FE0F}"),
+            "no hay ningún símbolo de texto CON selector de emoji: falta el caso que la regla convierte"
+        );
+        assert!(
+            carga.contains('\u{2601}')
+                && carga.matches('\u{2601}').count() > carga.matches("\u{2601}\u{FE0F}").count(),
+            "no hay ningún símbolo de texto SIN selector: falta el caso que tiene que quedarse en gris"
+        );
+    }
+
+    #[test]
+    fn la_carga_con_emojis_es_la_misma_en_dos_corridas() {
+        // **Es lo que hace comparables dos corridas de la misma tanda**, que es de lo que vive el banco de
+        // medida entero: si el contenido cambiara entre corridas, promediar las dos sería promediar dos
+        // cargas distintas. Lo prometen las tres funciones de carga; solo la nueva lo comprueba.
+        assert_eq!(
+            build_load_color(32 * 1024),
+            build_load_color(32 * 1024),
+            "dos corridas de la misma carga dieron bytes distintos: las tandas dejan de ser comparables"
+        );
     }
 
     #[test]

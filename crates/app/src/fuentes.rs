@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use eframe::egui;
 use fontique::{Collection, CollectionOptions, GenericFamily, SourceCache};
+use skrifa::MetadataProvider as _;
 use unicode_properties::emoji::{
     EmojiStatus, UnicodeEmoji, is_emoji_presentation_selector, is_text_presentation_selector,
 };
@@ -225,6 +226,32 @@ pub struct Descubridor {
     /// que todavía no existe, y eso **es un pánico**, no un aviso: «is not bound to any fonts».
     /// Comprobado ejecutándolo. Lo encontró una revisión sondeando ese camino exacto.
     familia_de_iconos_lista: bool,
+    /// Los glifos de color ya rasterizados.
+    ///
+    /// **Va aquí y no en un tipo aparte porque viaja siempre con el descubridor**: quien pinta un
+    /// carácter necesita las dos cosas a la vez —qué familia le toca y, si va a color, qué textura— y
+    /// separarlas obligaría a pasar dos referencias mutables por todas las firmas del pintor. El estado
+    /// nuevo sí queda en su propia caja: [`Glifos`] se prueba y se vacía sola.
+    glifos: Glifos,
+    /// Lo que se ha gastado rasterizando glifos de color, y cuántos van.
+    ///
+    /// **Se cronometra porque corre DENTRO del pintado, al revés que el descubrimiento de caras.**
+    /// Registrar una cara rehace el atlas y por eso se hace fuera; rasterizar un emoji no invalida nada,
+    /// así que se hace donde hace falta. Pero entonces su coste caería dentro del tramo «encolando el
+    /// pintado» —que dejaría de significar lo que su nombre dice— y de ahí, por resta, en la cifra con la
+    /// que **D3** juzga a egui. Un número mal etiquetado es peor que ningún número.
+    color: CosteDelColor,
+}
+
+/// Lo que ha costado el camino del color, para que el informe lo declare.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CosteDelColor {
+    /// Cuánto tiempo se ha gastado en total.
+    pub gastado: std::time::Duration,
+    /// Cuántos glifos se han rasterizado de verdad —los que ya estaban recordados no cuentan.
+    pub rasterizados: usize,
+    /// Cuántas veces se pidió un glifo de color que la máquina no pinta así.
+    pub fallidos: usize,
 }
 
 /// Lo que costó una vuelta del descubrimiento, para que el informe lo pueda declarar.
@@ -259,6 +286,64 @@ impl Descubridor {
         } else {
             egui::FontFamily::Monospace
         }
+    }
+
+    /// La textura del glifo de color de ese carácter, rasterizándolo si hace falta.
+    ///
+    /// Devuelve `None` cuando la máquina no tiene ninguna fuente que lo pinte a color: quien llama
+    /// **tiene que caer al camino de texto**, que es el Contrato 5 del diseño —lo que no está, no se
+    /// inventa—.
+    pub fn glifo_a_color(
+        &mut self,
+        ctx: &egui::Context,
+        que: char,
+        alto: u32,
+        ancho_maximo: u32,
+    ) -> Option<(egui::TextureId, egui::Rect, egui::Vec2)> {
+        // **Se asegura la colección ANTES de partir `self`**, porque construirla toca dos campos más y
+        // no se puede hacer con la mitad prestada.
+        if !self.asegura_la_coleccion() {
+            return None;
+        }
+        // **Y aquí se parte en préstamos disjuntos**: la caché de glifos, la colección y el caché de
+        // ficheros son campos distintos, así que el compilador deja tener los tres a la vez. Es lo que
+        // permite que `glifo_de_color` sea una función libre en vez de un método que pediría el todo.
+        let Self {
+            glifos,
+            coleccion,
+            fuentes,
+            color,
+            ..
+        } = self;
+        let coleccion = coleccion.as_mut()?;
+        // **Solo se cronometra el camino que hace trabajo.** Un glifo ya recordado se devuelve con una
+        // consulta a un mapa, y meter esa consulta en el tramo lo diluiría hasta que el número dejara de
+        // describir lo que cuesta rasterizar — que es lo que el informe tiene que declarar.
+        let ya_estaba = glifos.recuerda(que, alto);
+        let empezo = (!ya_estaba).then(std::time::Instant::now);
+        let medidas = glifos.textura(ctx, coleccion, fuentes, que, alto, ancho_maximo);
+        if let Some(empezo) = empezo {
+            color.gastado += empezo.elapsed();
+            if medidas.is_some() {
+                color.rasterizados += 1;
+            } else {
+                color.fallidos += 1;
+            }
+        }
+        medidas
+    }
+
+    /// Lo que ha costado el camino del color desde la última vez que se preguntó, y se pone a cero.
+    ///
+    /// **Se vacía al leerlo porque el informe cuenta por fotograma**, igual que el resto de sus tramos:
+    /// devolver el acumulado de la sesión daría una media que crece sola y no describe ningún fotograma.
+    pub fn coste_del_color(&mut self) -> CosteDelColor {
+        std::mem::take(&mut self.color)
+    }
+
+    /// Cuántos glifos de color hay recordados. Para que el informe de medida lo pueda declarar.
+    pub fn glifos_recordados(&self) -> usize {
+        self.glifos.cuantos()
     }
 
     /// Apunta un carácter que quien pinta se ha encontrado.
@@ -418,28 +503,8 @@ impl Descubridor {
         // **Se comprueba aquí ADEMÁS de en `apunta`, y no es redundante:** los caracteres que ya estaban
         // en la cola cuando enumerar falló llegan igual hasta aquí, y sin esta línea cada uno volvería a
         // construir la colección entera para volver a encontrarla vacía.
-        if self.sin_fuentes {
+        if !self.asegura_la_coleccion() {
             return None;
-        }
-        // **Se construye aquí y no en el arranque: eso es lo que hace perezoso el descubrimiento.**
-        // Mientras solo aparezcan caracteres que las fuentes de fábrica cubren, esta línea no corre nunca.
-        if self.coleccion.is_none() {
-            let mut coleccion = Collection::new(CollectionOptions {
-                system_fonts: true,
-                ..Default::default()
-            });
-            // **Una máquina sin fontconfig devuelve una colección vacía en vez de caerse**, y ése es el
-            // caso que **AC9** obliga a aguantar. Se dice por la salida de error y se deja de intentar:
-            // sin esto se volvería a enumerar en cada vuelta, gastando el coste entero para nada.
-            if coleccion.family_names().next().is_none() {
-                eprintln!(
-                    "agent-terminal: no se encontró ninguna fuente del sistema. Los caracteres que las \
-                     fuentes de fábrica no cubran seguirán saliendo como cuadros."
-                );
-                self.sin_fuentes = true;
-                return None;
-            }
-            self.coleccion = Some(coleccion);
         }
         let coleccion = self.coleccion.as_mut()?;
         // **Los dos campos se prestan por separado a propósito**: pedirlos a través de un método que
@@ -468,6 +533,39 @@ impl Descubridor {
             }
         }
         None
+    }
+
+    /// Construye la colección del sistema si todavía no existe. Devuelve si hay con qué buscar.
+    ///
+    /// **Sale de `busca` para que las dos búsquedas —la de cobertura y la de color— compartan una sola
+    /// colección.** Enumerar cuesta entre 15,9 y 31,0 ms (**D24**): hacerlo dos veces por tener dos
+    /// funciones sería pagar el tramo más caro del módulo por duplicado.
+    fn asegura_la_coleccion(&mut self) -> bool {
+        if self.sin_fuentes {
+            return false;
+        }
+        if self.coleccion.is_some() {
+            return true;
+        }
+        // **Se construye aquí y no en el arranque: eso es lo que hace perezoso el descubrimiento.**
+        // Mientras solo aparezcan caracteres que las fuentes de fábrica cubren, esta línea no corre nunca.
+        let mut coleccion = Collection::new(CollectionOptions {
+            system_fonts: true,
+            ..Default::default()
+        });
+        // **Una máquina sin fontconfig devuelve una colección vacía en vez de caerse**, y ése es el caso
+        // que **AC9** obliga a aguantar. Se dice por la salida de error y se deja de intentar: sin esto se
+        // volvería a enumerar en cada vuelta, gastando el coste entero para nada.
+        if coleccion.family_names().next().is_none() {
+            eprintln!(
+                "agent-terminal: no se encontró ninguna fuente del sistema. Los caracteres que las \
+                 fuentes de fábrica no cubran seguirán saliendo como cuadros."
+            );
+            self.sin_fuentes = true;
+            return false;
+        }
+        self.coleccion = Some(coleccion);
+        true
     }
 
     /// Le da al motor de texto **todas** las caras descubiertas hasta ahora.
@@ -625,6 +723,320 @@ fn primera_que_cubre(
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------------------------
+// El glifo de color
+// ---------------------------------------------------------------------------------------------
+
+/// Lo que mide de lado el atlas de glifos de color, en píxeles.
+///
+/// **El techo de este hito es una textura de tamaño FIJO, no un contador**, y eso es mejor de lo que el
+/// diseño pedía: la memoria que la tarjeta gráfica dedica a los emojis es **1 MiB y no cambia**, aparezcan
+/// uno o mil. A la altura de celda de esta máquina caben unos ochocientos glifos —17 px de alto, 18 de
+/// ancho—, muchos más de los que una persona ve en una sesión; cuando se llena se sigue pintando, pero en
+/// monocromo por el camino de texto de siempre.
+///
+/// Es el mismo criterio con el que **D8** acotó la cola de salida y **D21** el historial: una entrada que
+/// llega de fuera y no la controla nadie de dentro lleva techo, y el techo se dice.
+const LADO_DEL_ATLAS: usize = 512;
+
+/// El cuerpo con el que se le pide el mapa de bits a la fuente.
+///
+/// **No es la altura de la celda a propósito.** `Noto Color Emoji` trae **una sola tirada** de 136×128
+/// píxeles —comprobado ejecutándolo, no leyendo la especificación— así que pedirle un tamaño u otro
+/// devuelve exactamente la misma imagen. Pedir el mayor de los razonables es lo único que cambia algo en
+/// una fuente que sí traiga varias: se coge la más grande y se reduce, que pierde menos que ampliar una
+/// pequeña.
+const CUERPO_PARA_RASTERIZAR: f32 = 128.0;
+
+/// Dónde está un glifo dentro del atlas y cuánto mide.
+#[derive(Debug, Clone, Copy)]
+struct EnElAtlas {
+    /// El trozo del atlas que ocupa, en coordenadas de 0 a 1 — que es como se pide al pintar.
+    uv: egui::Rect,
+    /// Lo que mide de verdad, en píxeles. Quien pinta lo necesita para centrarlo sin deformarlo.
+    medidas: egui::Vec2,
+}
+
+/// Los glifos de color ya rasterizados, **todos dentro de una sola textura**.
+///
+/// **Una textura y no una por glifo, y la diferencia se mide.** Con una textura por emoji, el motor no
+/// puede juntar dos en el mismo lote de dibujo —lo dice su teselador: mezclar identificadores de textura
+/// en la misma malla es un error— así que cada emoji de la pantalla parte el lote. Medido con las dos
+/// consolas volcando emojis contra su control en ASCII: **el resto del fotograma pasaba de 275 µs a
+/// 743 µs**, es decir la cifra con
+/// la que **D3** juzga al framework casi triplicada, y por trabajo que no es del framework. Con atlas,
+/// todos los emojis de la pantalla se dibujan juntos. Es lo que hacen los terminales que son el listón.
+///
+/// **La altura es un campo y no parte de la clave, y eso es una decisión con consecuencia.** Toda la
+/// ventana comparte una sola métrica —se mide una vez por pasada, con el mismo cuerpo para todas las
+/// divisiones—, así que dos alturas distintas no coexisten nunca: solo se suceden, cuando cambia el zoom
+/// del escritorio. Guardar la altura en la clave dejaría las entradas viejas ocupando sitio para siempre;
+/// tenerla aquí permite **vaciar entero** el atlas en cuanto cambia, que es lo que el contrato del diseño
+/// exige y lo que impide pintar un emoji del tamaño anterior en una celda del nuevo.
+#[derive(Default)]
+struct Glifos {
+    /// La textura donde viven todos. **No existe hasta que hace falta el primero**: una sesión sin
+    /// emojis no le pide ni un byte a la tarjeta gráfica.
+    atlas: Option<egui::TextureHandle>,
+    /// Lo recordado, incluidos los fallos: un `None` es «éste no lo pinta a color nadie de esta máquina».
+    ///
+    /// **Recordar el fallo no es un detalle.** Sin él, un carácter que ninguna fuente de color cubre
+    /// recorrería las familias de emoji **en cada fotograma** — y es justo el carácter que un programa
+    /// roto escupe en bucle. Es la misma razón por la que [`Descubridor`] recuerda los suyos.
+    guardados: std::collections::HashMap<char, Option<EnElAtlas>>,
+    /// Dónde empieza el hueco libre de la fila que se está llenando.
+    siguiente: [usize; 2],
+    /// Lo que mide de alto la fila que se está llenando. Al saltar de fila se avanza esto.
+    alto_de_la_fila: usize,
+    /// La altura de celda a la que están rasterizados los de arriba, en píxeles físicos.
+    alto: u32,
+    /// Si ya se dijo que el atlas se llenó.
+    dijo_el_techo: bool,
+}
+
+impl Glifos {
+    /// Dónde está el glifo de color de ese carácter dentro del atlas, rasterizándolo si hace falta.
+    ///
+    /// Devuelve `None` cuando la máquina no tiene ninguna fuente que lo pinte a color, o cuando el atlas
+    /// se llenó: quien llama **tiene que caer al camino de texto**, que es el Contrato 5 del diseño —lo
+    /// que no está, no se inventa—.
+    fn textura(
+        &mut self,
+        ctx: &egui::Context,
+        coleccion: &mut Collection,
+        fuentes: &mut SourceCache,
+        que: char,
+        alto: u32,
+        ancho_maximo: u32,
+    ) -> Option<(egui::TextureId, egui::Rect, egui::Vec2)> {
+        if alto == 0 || ancho_maximo == 0 {
+            return None;
+        }
+        // **Cambió la altura de la celda: lo recordado ya no vale.** Sin esto, subir el zoom del
+        // escritorio dejaría los emojis del tamaño anterior pintados en celdas del nuevo — y como el
+        // atlas nunca se vacía, para el resto de la vida del proceso.
+        if self.alto != alto {
+            self.guardados.clear();
+            self.siguiente = [0, 0];
+            self.alto_de_la_fila = 0;
+            self.alto = alto;
+            self.dijo_el_techo = false;
+        }
+        let sitio = if let Some(guardado) = self.guardados.get(&que) {
+            *guardado
+        } else {
+            let sitio = glifo_de_color(coleccion, fuentes, que, alto, ancho_maximo)
+                .and_then(|imagen| self.pegar(ctx, imagen));
+            self.guardados.insert(que, sitio);
+            sitio
+        };
+        // **El atlas existe siempre que haya un sitio guardado**: se crea al pegar el primer glifo, y lo
+        // que se guarda es justamente el resultado de haberlo pegado.
+        let sitio = sitio?;
+        Some((self.atlas.as_ref()?.id(), sitio.uv, sitio.medidas))
+    }
+
+    /// Mete una imagen en el primer hueco libre del atlas. `None` si ya no cabe.
+    fn pegar(&mut self, ctx: &egui::Context, imagen: egui::ColorImage) -> Option<EnElAtlas> {
+        let [ancho, alto] = [imagen.width(), imagen.height()];
+        if ancho > LADO_DEL_ATLAS || alto > LADO_DEL_ATLAS {
+            return None;
+        }
+        // Colocación por filas: se llena la fila de izquierda a derecha y se salta a la siguiente cuando
+        // no cabe. **Deja huecos y da igual**: los glifos de una sesión miden todos casi lo mismo —los
+        // rasteriza la misma altura de celda— así que las filas salen parejas.
+        if self.siguiente[0] + ancho > LADO_DEL_ATLAS {
+            self.siguiente = [0, self.siguiente[1] + self.alto_de_la_fila];
+            self.alto_de_la_fila = 0;
+        }
+        if self.siguiente[1] + alto > LADO_DEL_ATLAS {
+            // **Se dice, y una sola vez.** Un techo callado es indistinguible de un fallo: quien vea sus
+            // emojis en monocromo de golpe no tendría forma de saber que el terminal sabe pintarlos y se
+            // ha quedado sin sitio donde guardarlos.
+            if !self.dijo_el_techo {
+                eprintln!(
+                    "agent-terminal: el atlas de glifos de color ({LADO_DEL_ATLAS}x{LADO_DEL_ATLAS} \
+                     píxeles) se ha llenado. Los emojis que no estén ya en él seguirán saliendo en \
+                     monocromo."
+                );
+                self.dijo_el_techo = true;
+            }
+            return None;
+        }
+        let sitio = self.siguiente;
+        let atlas = self.atlas.get_or_insert_with(|| {
+            ctx.load_texture(
+                "glifos-de-color",
+                egui::ColorImage::filled(
+                    [LADO_DEL_ATLAS, LADO_DEL_ATLAS],
+                    egui::Color32::TRANSPARENT,
+                ),
+                // **Lineal y no `NEAREST`**: el mapa de bits viene a 136×128 y la celda mide una fracción
+                // de eso, así que la reducción la hace el remuestreo de la CPU; lo que la tarjeta hace
+                // aquí es solo el ajuste final a píxeles físicos. Con `NEAREST` ese ajuste se ve como
+                // dientes de sierra en el borde del dibujo.
+                egui::TextureOptions::LINEAR,
+            )
+        });
+        // **Solo el rectángulo del glifo nuevo, no el atlas entero.** Re-subir el megabyte completo por
+        // cada emoji descubierto sería medio giga de tráfico a la tarjeta en una sesión que llegue al
+        // techo, para cambiar unos cientos de bytes.
+        atlas.set_partial(sitio, imagen, egui::TextureOptions::LINEAR);
+        self.siguiente[0] = sitio[0] + ancho;
+        self.alto_de_la_fila = self.alto_de_la_fila.max(alto);
+        let lado = LADO_DEL_ATLAS as f32;
+        Some(EnElAtlas {
+            uv: egui::Rect::from_min_max(
+                egui::pos2(sitio[0] as f32 / lado, sitio[1] as f32 / lado),
+                egui::pos2(
+                    (sitio[0] + ancho) as f32 / lado,
+                    (sitio[1] + alto) as f32 / lado,
+                ),
+            ),
+            medidas: egui::vec2(ancho as f32, alto as f32),
+        })
+    }
+
+    /// Si ese carácter ya está recordado —incluido el recuerdo de que no se pinta a color.
+    ///
+    /// **Mira también la altura**, porque un cambio de altura vacía el atlas entero: sin eso, el primer
+    /// glifo tras un cambio de zoom se rasterizaría **sin** que su coste entrara en el tramo.
+    fn recuerda(&self, que: char, alto: u32) -> bool {
+        self.alto == alto && self.guardados.contains_key(&que)
+    }
+
+    /// Cuántos glifos hay recordados.
+    fn cuantos(&self) -> usize {
+        self.guardados.len()
+    }
+}
+
+/// La imagen a color de ese carácter, ya reescalada, si alguna fuente de la máquina lo pinta así.
+///
+/// **Es una función libre y no un método, y eso resuelve un problema real.** Necesita la colección del
+/// sistema y el caché de ficheros, que son **dos campos** del descubridor; como método pediría prestado el
+/// descubridor entero, y quien la llama —la caché de glifos, que vive **dentro** de él— ya tiene prestada
+/// su parte. La primera versión lo salvaba sacando la caché con `mem::take` y devolviéndola después, lo
+/// que dejaba una trampa: una segunda entrada por ese camino habría visto una caché vacía y la primera le
+/// habría sobrescrito al volver lo que la segunda guardara. Nadie reentra hoy, y nada lo impedía.
+///
+/// **Devuelve la imagen y no la cara**: quien llama guarda texturas, no fuentes. Prestarle la cara abierta
+/// le obligaría a cargar con los veinte megas del fichero mientras la usa, y a hablar el modelo de fuente
+/// de una caja de terceros para nada.
+fn glifo_de_color(
+    coleccion: &mut Collection,
+    fuentes: &mut SourceCache,
+    que: char,
+    alto: u32,
+    ancho_maximo: u32,
+) -> Option<egui::ColorImage> {
+    // **Solo las familias que el sistema declara de emoji, y ahí acaba la búsqueda.** No se cae a
+    // recorrerlas todas como hace `busca`: una familia que no es de emoji y aun así cubre un emoji lo
+    // pinta **en monocromo** —en esta máquina `DejaVu Sans` se lleva el 😀 teniendo `Noto Color Emoji`
+    // instalada—, así que la red de debajo daría exactamente lo que esta función existe para evitar.
+    let genericas: Vec<_> = coleccion.generic_families(GenericFamily::Emoji).collect();
+    for id in genericas {
+        let Some(caras) = coleccion.family(id).map(|familia| familia.fonts().to_vec()) else {
+            continue;
+        };
+        for cara in caras {
+            let Some(blob) = fuentes.get(cara.source()) else {
+                continue;
+            };
+            let Ok(fuente) = skrifa::FontRef::from_index(blob.data(), cara.index()) else {
+                continue;
+            };
+            let Some(glifo) = fuente.charmap().map(que) else {
+                continue;
+            };
+            // **Que la cubra no basta: tiene que traerla a color.** Las familias que el sistema
+            // declara de emoji en esta máquina son decenas —casi todas las `Noto` de símbolos— y la
+            // mayoría son monocromas. Sin esta comprobación ganaría la primera que enumere el
+            // sistema, que es el defecto que este proyecto tiene documentado desde **D24** y el que
+            // Alacritty arrastra.
+            if let Some(imagen) = rasteriza(&fuente, glifo, alto, ancho_maximo) {
+                return Some(imagen);
+            }
+        }
+    }
+    None
+}
+
+/// El mapa de bits de color de un glifo, reescalado para que quepa en el hueco que se le da.
+///
+/// Devuelve `None` cuando esa cara **no** trae el glifo a color: o no tiene tabla de mapas de bits, o la
+/// tiene y para ese glifo guarda una **máscara de alfa**, que es un dibujo monocromo y por tanto no es
+/// esto. Quien llame cae al camino de texto.
+///
+/// **Los contornos de color —`COLR`— quedan fuera, y no por olvido.** Pintarlos exige rasterizar
+/// contornos a mano, que es el rasterizador propio que este hito descartó a propósito por invalidar el
+/// histórico de medida entero. En Linux no se nota —las fuentes de emoji del sistema son de mapa de
+/// bits— pero en Windows sí, porque `Segoe UI Emoji` es `COLR`: queda declarado como lo que le falta a
+/// **F2.7**, no como algo que aquí funcione.
+fn rasteriza(
+    fuente: &skrifa::FontRef<'_>,
+    glifo: skrifa::GlyphId,
+    alto: u32,
+    ancho_maximo: u32,
+) -> Option<egui::ColorImage> {
+    let mapa = skrifa::bitmap::BitmapStrikes::new(fuente)
+        .glyph_for_size(skrifa::instance::Size::new(CUERPO_PARA_RASTERIZAR), glifo)?;
+    let mut pixeles = match &mapa.data {
+        skrifa::bitmap::BitmapData::Png(bytes) => {
+            image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+                .ok()?
+                .into_rgba8()
+        }
+        skrifa::bitmap::BitmapData::Bgra(bytes) => {
+            let mut crudo = bytes.to_vec();
+            // De BGRA a RGBA. Ya viene con el alfa premultiplicado, que es lo que hace falta más abajo.
+            for pixel in crudo.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+            image::RgbaImage::from_raw(mapa.width, mapa.height, crudo)?
+        }
+        // Una máscara de alfa es un dibujo **monocromo**: no es un glifo de color y no se pinta por aquí.
+        skrifa::bitmap::BitmapData::Mask(_) => return None,
+    };
+    if pixeles.width() == 0 || pixeles.height() == 0 {
+        return None;
+    }
+    // **Se premultiplica ANTES de reescalar, y ésa es toda la diferencia entre un emoji limpio y uno con
+    // halo.** Promediar píxeles transparentes con opacos sin premultiplicar mezcla el color de los
+    // transparentes —que suele ser negro— en el borde del dibujo. Es el defecto clásico del reescalado
+    // con alfa, y aquí ocurriría en todos: un emoji es un dibujo redondo dentro de un cuadro vacío.
+    if matches!(mapa.data, skrifa::bitmap::BitmapData::Png(_)) {
+        for pixel in pixeles.pixels_mut() {
+            let alfa = u32::from(pixel.0[3]);
+            for canal in &mut pixel.0[..3] {
+                *canal = u8::try_from(u32::from(*canal) * alfa / 255).unwrap_or(*canal);
+            }
+        }
+    }
+    // **El factor es el MENOR de los dos y no el de la altura, aunque el contrato hable de la altura.**
+    // Los dos a la vez —«a la altura de la celda» y «sin invadir la de al lado»— solo se cumplen así: el
+    // mapa de bits de `Noto Color Emoji` es más ancho que alto (136×128), así que escalarlo por la altura
+    // lo deja **más ancho que las dos columnas** que el motor le reservó, y el emoji se comería el borde
+    // de su vecina. Medido: 18 px de ancho para una celda de 17 px de alto.
+    let factor =
+        (alto as f32 / pixeles.height() as f32).min(ancho_maximo as f32 / pixeles.width() as f32);
+    let ancho_final = ((pixeles.width() as f32 * factor).round() as u32).clamp(1, ancho_maximo);
+    let alto_final = ((pixeles.height() as f32 * factor).round() as u32).clamp(1, alto);
+    let pequeno = image::imageops::resize(
+        &pixeles,
+        ancho_final,
+        alto_final,
+        // **Triangular y no Lanczos.** Se reduce de 136 px a diecisiete: a esa escala los dos dan un
+        // resultado que no se distingue mirándolo, y el triangular cuesta la mitad. El coste se paga una
+        // vez por carácter, pero se paga **dentro de un fotograma**.
+        image::imageops::FilterType::Triangle,
+    );
+    Some(egui::ColorImage::from_rgba_premultiplied(
+        [ancho_final as usize, alto_final as usize],
+        pequeno.as_raw(),
+    ))
 }
 
 #[cfg(test)]
@@ -1147,6 +1559,316 @@ mod tests {
         );
         let _ = ctx;
     }
+    /// Si esta máquina tiene con qué pintar emojis a color.
+    fn hay_color(ctx: &egui::Context) -> bool {
+        Descubridor::default()
+            .glifo_a_color(ctx, '\u{1F600}', 20, 20)
+            .is_some()
+    }
+
+    #[test]
+    fn un_ascii_sin_nada_pegado_no_va_nunca_a_color() {
+        // **Ata un atajo que vive en el pintor**: la pasada del color descarta el ASCII suelto con dos
+        // comparaciones, sin consultar estas tablas, porque es la inmensa mayoría de lo que pasa por una
+        // pantalla de terminal. Ese atajo duplica una regla
+        // que vive aquí, y duplicar una regla solo es aceptable si algo avisa cuando las dos dejan de
+        // decir lo mismo. Esto es ese algo.
+        for n in 0..=127u8 {
+            assert_eq!(
+                presentacion_de(char::from(n), &[]),
+                Presentacion::Texto,
+                "el carácter ASCII U+{n:04X} suelto pide color, y quien pinta lo descarta sin \
+                 preguntar: no saldría"
+            );
+        }
+    }
+
+    #[test]
+    fn una_tecla_de_ascii_con_su_selector_si_va_a_color() {
+        // **La otra mitad, y la que destapó un defecto de verdad.** La primera versión del atajo del
+        // pintor descartaba **todo** el ASCII de la pasada del color, y se comía `#️⃣` `*️⃣` y `0️⃣`–`9️⃣`:
+        // Unicode le da `Emoji=Yes` a la almohadilla, al asterisco y a los diez dígitos, así que con el
+        // selector detrás son emojis de pleno derecho. Lo encontró la prueba de arriba al correrla.
+        for c in "#*0123456789".chars() {
+            assert_eq!(
+                presentacion_de(c, &['\u{FE0F}']),
+                Presentacion::Color,
+                "«{c}» con el selector de emoji detrás se quedó en texto: es la base de una tecla y \
+                 tiene que salir a color"
+            );
+        }
+    }
+
+    #[test]
+    fn el_glifo_de_color_se_rasteriza_una_vez_y_luego_se_recuerda() {
+        // **La caché no es una optimización opcional: sin ella se rasteriza en CADA fotograma.** Son 45 a
+        // 80 µs por emoji y por fotograma —medido—, o sea que una pantalla con veinte emojis se comería
+        // más de un milisegundo en repetir un trabajo idéntico sesenta veces por segundo.
+        //
+        // **Se afirma sobre el CONTADOR de rasterizados y no sobre el tamaño del mapa**, porque el mapa
+        // guarda también los fallos: una implementación que buscara siempre y no guardara nada dejaría el
+        // mapa igual de grande.
+        let ctx = contexto();
+        let mut descubridor = Descubridor::default();
+
+        descubridor.glifo_a_color(&ctx, '\u{1F600}', 20, 20);
+        let primera = descubridor.coste_del_color();
+        assert_eq!(
+            primera.rasterizados + primera.fallidos,
+            1,
+            "la primera vez no llegó a intentar rasterizar nada"
+        );
+
+        for _ in 0..10 {
+            descubridor.glifo_a_color(&ctx, '\u{1F600}', 20, 20);
+        }
+        let despues = descubridor.coste_del_color();
+        assert_eq!(
+            (despues.rasterizados, despues.fallidos),
+            (0, 0),
+            "diez peticiones más del mismo emoji volvieron a hacer trabajo: no se está recordando nada"
+        );
+        assert_eq!(
+            despues.gastado,
+            std::time::Duration::ZERO,
+            "se contó tiempo por consultar algo ya recordado: el tramo del informe dejaría de describir \
+             lo que cuesta rasterizar"
+        );
+    }
+
+    #[test]
+    fn cambiar_la_altura_de_la_celda_tira_lo_recordado() {
+        // **Sin esto, subir el zoom del escritorio deja los emojis del tamaño anterior pintados en celdas
+        // del nuevo** — y como la caché no se vacía nunca, para el resto de la vida del proceso.
+        //
+        // **Se afirma sobre el TAMAÑO de la textura devuelta, no sobre que se haya vaciado el mapa.** Una
+        // caché que se vacíe y vuelva a rasterizar al tamaño viejo cumpliría lo segundo y seguiría
+        // pintando mal, que es el defecto que esto existe para impedir.
+        let ctx = contexto();
+        if !hay_color(&ctx) {
+            return;
+        }
+        let mut descubridor = Descubridor::default();
+        let (_, _, pequeno) = descubridor
+            .glifo_a_color(&ctx, '\u{1F600}', 20, 20)
+            .expect("la máquina tiene fuente de color y no dio glifo");
+        let (_, _, grande) = descubridor
+            .glifo_a_color(&ctx, '\u{1F600}', 40, 40)
+            .expect("no dio glifo a la altura nueva");
+
+        assert!(
+            grande.y > pequeno.y,
+            "con la celda al doble de alto el emoji salió de {pequeno:?}, el tamaño de la celda \
+             anterior: la caché está devolviendo lo viejo"
+        );
+        assert_eq!(
+            descubridor.glifos_recordados(),
+            1,
+            "quedaron guardadas las dos alturas: la caché no se vació y la memoria crece con cada zoom"
+        );
+    }
+
+    #[test]
+    fn al_llenarse_el_atlas_se_deja_de_recordar_y_se_dice() {
+        // **AC8.** El techo de este hito es una textura de tamaño fijo: la memoria que la tarjeta gráfica
+        // dedica a los emojis es 1 MiB y no cambia, aparezcan uno o mil. Quién decide cuántos caracteres
+        // distintos aparecen es el programa de dentro —un `cat` de un fichero de emojis los recorrería
+        // todos—, así que sin techo la textura tendría que crecer sin límite.
+        //
+        // **Se atan las DOS mitades**: que deje de aceptar al llenarse, y que lo diga. Un techo callado es
+        // indistinguible de un fallo — quien vea sus emojis en monocromo de golpe no tendría forma de
+        // saber que el terminal sabe pintarlos y se ha quedado sin sitio.
+        //
+        // **Se llena con imágenes sintéticas y no con emojis de verdad**, y se dice: llenarlo de verdad
+        // exige que la máquina tenga ochocientos emojis distintos instalados, que es una condición de la
+        // máquina y no del código.
+        let ctx = contexto();
+        let mut glifos = Glifos::default();
+        let lado = LADO_DEL_ATLAS / 8;
+        let cuadrado =
+            || egui::ColorImage::filled([lado, lado], egui::Color32::from_rgb(10, 20, 30));
+
+        let mut pegados = 0;
+        while glifos.pegar(&ctx, cuadrado()).is_some() {
+            pegados += 1;
+            assert!(pegados <= 8 * 8, "el atlas aceptó más de lo que cabe en él");
+        }
+        assert_eq!(
+            pegados,
+            8 * 8,
+            "el atlas no aprovechó su superficie: caben {} cuadrados de {lado} píxeles y entraron {pegados}",
+            8 * 8
+        );
+        assert!(
+            glifos.dijo_el_techo,
+            "el atlas se llenó y no se dijo por la salida de error: un techo callado se lee como un fallo"
+        );
+    }
+
+    #[test]
+    fn dos_glifos_distintos_no_se_pisan_dentro_del_atlas() {
+        // **Es el modo de fallo propio de meterlos todos en una textura**, y no lo cubre ninguna prueba de
+        // arriba: colocar mal uno lo pinta encima de otro, y entonces dos emojis distintos salen iguales.
+        // Con una textura por glifo esto no podía pasar; con atlas, sí.
+        //
+        // **Se comprueban todos los pares de una tanda larga y no solo los dos primeros**, porque el sitio
+        // donde se pisan es el **salto de fila**: dos glifos seguidos caen bien casi con cualquier cuenta,
+        // y el que estrena fila es el que se coloca encima del de arriba.
+        let ctx = contexto();
+        let mut glifos = Glifos::default();
+        // Anchos distintos a propósito: con todos iguales, una cuenta que ignorase el ancho real y
+        // avanzara un paso fijo colocaría bien igualmente.
+        let sitios: Vec<_> = (0..80)
+            .filter_map(|n| {
+                let ancho = 15 + n % 7;
+                glifos.pegar(
+                    &ctx,
+                    egui::ColorImage::filled([ancho, 17], egui::Color32::RED),
+                )
+            })
+            .collect();
+        assert!(
+            sitios.len() > 60,
+            "solo cupieron {} glifos de 17 píxeles de alto en un atlas de {LADO_DEL_ATLAS}: la prueba no \
+             llega a saltar de fila varias veces",
+            sitios.len()
+        );
+
+        let lado = LADO_DEL_ATLAS as f32;
+        for (n, uno) in sitios.iter().enumerate() {
+            for otro in &sitios[n + 1..] {
+                let comun = uno.uv.intersect(otro.uv);
+                // **Menos de medio píxel de solape, no cero exacto**: dos glifos pegados comparten su
+                // borde, y en coma flotante ese borde no da una anchura de cero limpia.
+                assert!(
+                    comun.width() * lado < 0.5 || comun.height() * lado < 0.5,
+                    "dos glifos se solapan dentro del atlas ({:?} y {:?}): uno se pinta encima del otro \
+                     y los dos emojis salen iguales",
+                    uno.uv,
+                    otro.uv
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn un_dibujo_monocromo_no_se_pinta_por_el_camino_del_color() {
+        // **Es el hallazgo de la primera entrega, y aquí es donde se resuelve.** Una fuente puede *cubrir*
+        // un emoji y pintarlo en blanco y negro —en esta máquina `DejaVu Sans` se lleva el 😀 teniendo
+        // `Noto Color Emoji` instalada—, así que «la primera que lo cubra» es la regla equivocada.
+        //
+        // Lo que ata esta prueba es la mitad comprobable sin depender de qué fuentes haya: **una máscara
+        // de alfa nunca sale por aquí**, y una máscara de alfa es exactamente un dibujo monocromo.
+        let ctx = contexto();
+        let mut descubridor = Descubridor::default();
+        // La 'a' no es emoji y ninguna fuente de emoji la trae a color: tiene que salir sin glifo.
+        assert!(
+            descubridor.glifo_a_color(&ctx, 'a', 20, 20).is_none(),
+            "una letra corriente salió por el camino del color"
+        );
+        let coste = descubridor.coste_del_color();
+        assert_eq!(
+            coste.rasterizados, 0,
+            "se rasterizó una letra corriente como si fuera un emoji"
+        );
+        assert_eq!(
+            coste.fallidos, 1,
+            "el intento fallido no se contó, así que el informe no lo declara"
+        );
+    }
+
+    #[test]
+    fn un_caracter_sin_glifo_de_color_no_se_vuelve_a_buscar() {
+        // **Recordar el fallo no es un detalle.** Sin él, un carácter que ninguna fuente de color cubre
+        // recorrería las familias de emoji **en cada fotograma** — y es justo el carácter que un programa
+        // roto escupe en bucle.
+        let ctx = contexto();
+        let mut descubridor = Descubridor::default();
+        // **Un carácter que NINGUNA fuente pinta a color, y por eso es el sin asignar de Unicode.** La
+        // primera versión de esta prueba usaba un muñeco de nieve y no probaba nada: `Noto Color Emoji`
+        // lo trae, así que se recordaba por el camino del éxito y quitar el recuerdo del **fallo** la
+        // dejaba pasando igual. Lo destapó mutarla.
+        assert!(
+            descubridor
+                .glifo_a_color(&ctx, CUADRO_DE_REEMPLAZO, 20, 20)
+                .is_none(),
+            "el carácter sin asignar salió a color: la prueba no está midiendo el camino del fallo"
+        );
+        let primera = descubridor.coste_del_color();
+        assert_eq!(primera.fallidos, 1, "el intento fallido no se contó");
+
+        for _ in 0..5 {
+            descubridor.glifo_a_color(&ctx, CUADRO_DE_REEMPLAZO, 20, 20);
+        }
+        let despues = descubridor.coste_del_color();
+        assert_eq!(
+            despues.rasterizados + despues.fallidos,
+            0,
+            "se volvió a buscar un carácter que ya se había buscado: se paga el recorrido entero por \
+             fotograma mientras esté en pantalla"
+        );
+    }
+
+    #[test]
+    fn un_emoji_de_una_sola_columna_se_queda_dentro_de_ella() {
+        // **El caso que el criterio obliga y que se ve raro, así que conviene que esté escrito.** El motor
+        // de terminal le da **una sola celda** a `☁️`, `❤️` y `✔️` —comprobado ejecutándolo: llegan como
+        // `Single` con el selector pegado, mientras que `😀` llega como cabeza de un carácter ancho—, y el
+        // criterio dice que un emoji no invade a su vecina más allá de lo que su anchura declara.
+        //
+        // **Consecuencia, dicha con su número**: en una celda de 13×20 puntos, que es la de esta máquina
+        // con dos divisiones, ese emoji sale de 13×12 — un 60 % del alto de la línea, centrado. Se ve
+        // pequeño y **es lo correcto**: pintarlo a la altura de la línea taparía lo que el programa
+        // escribió en la celda de al lado, y quién decide la anchura de un carácter es el motor, no este
+        // proyecto.
+        let ctx = contexto();
+        if !hay_color(&ctx) {
+            return;
+        }
+        let mut descubridor = Descubridor::default();
+        let (_, _, medidas) = descubridor
+            .glifo_a_color(&ctx, '\u{2601}', 20, 13)
+            .expect("la máquina tiene fuente de color y no dio glifo");
+        assert!(
+            medidas.x <= 13.0,
+            "el emoji de una columna salió de {medidas:?} en una celda de 13 de ancho: se come la vecina \
+             y tapa lo que el programa escribió ahí"
+        );
+        assert!(
+            medidas.x as u32 == 13,
+            "el emoji de una columna salió de {medidas:?} sin llenar los 13 de ancho que tiene: se ve \
+             más pequeño de lo que le cabe"
+        );
+    }
+
+    #[test]
+    fn el_emoji_se_reescala_para_caber_en_el_hueco_que_se_le_da() {
+        // **AC5, por el lado de quien rasteriza.** El pintor comprueba el rectángulo que sale a pantalla;
+        // aquí se comprueba que la imagen que se le entrega ya viene acotada, que es lo que hace que ese
+        // rectángulo quepa.
+        let ctx = contexto();
+        if !hay_color(&ctx) {
+            return;
+        }
+        let mut descubridor = Descubridor::default();
+        for (alto, ancho) in [(20u32, 40u32), (40, 20), (17, 17)] {
+            let (_, _, medidas) = descubridor
+                .glifo_a_color(&ctx, '\u{1F600}', alto, ancho)
+                .expect("la máquina tiene fuente de color y no dio glifo");
+            assert!(
+                medidas.y <= alto as f32 && medidas.x <= ancho as f32,
+                "para un hueco de {ancho}x{alto} el emoji salió de {medidas:?}: se sale de su sitio"
+            );
+            // Y que quepa no basta: tiene que **llenar** uno de los dos ejes, o estaría desperdiciando
+            // sitio y saldría más pequeño de lo que la celda da.
+            assert!(
+                medidas.y as u32 == alto || medidas.x as u32 == ancho,
+                "para un hueco de {ancho}x{alto} el emoji salió de {medidas:?}: no llena ningún eje, \
+                 así que se ve más pequeño de lo que cabe"
+            );
+        }
+    }
+
     #[test]
     fn al_llegar_al_techo_de_familias_se_deja_de_registrar_y_se_dice() {
         // **Un techo que se traga lo que descarta es indistinguible de un fallo.** Quien vea un cuadro
