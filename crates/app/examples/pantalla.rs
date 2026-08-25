@@ -97,7 +97,17 @@ impl eframe::App for Prueba {
 
         let vista = self.pantalla.view();
         let origen = ui.max_rect().left_top();
-        pintar(ui.painter(), &vista, &self.tema, &metrica, origen);
+        // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
+        // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
+        // `resolver`, uno persistente solo acumularía apuntes que nadie mira.
+        pintar(
+            ui.painter(),
+            &vista,
+            &self.tema,
+            &metrica,
+            origen,
+            &mut Default::default(),
+        );
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {

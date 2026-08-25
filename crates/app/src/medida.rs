@@ -612,6 +612,72 @@ impl Guardado {
     }
 }
 
+/// Lo que **la ventana** paga por buscar en la máquina las fuentes que le faltan.
+///
+/// **Vive aquí y no en la división por la misma razón que el guardado**: las caras se le registran al
+/// motor de texto, que es de la ventana entera, no de una consola.
+///
+/// **Y hace falta la resta, no solo la serie.** El resto del fotograma se calcula restándole al coste todo
+/// lo que se cronometró: una serie sola imprimiría su fila **y a la vez** dejaría el número dentro de la
+/// cifra con la que **D3** juzga al framework. Es el hallazgo que costó una revisión entera en el tramo
+/// del guardado, y aquí muerde igual — este trabajo son **milisegundos**, no microsegundos.
+#[derive(Default)]
+pub struct Descubrimiento {
+    busqueda: Serie,
+    /// Cuántos caracteres se han buscado en la máquina, en total.
+    ///
+    /// **Lo publica el informe y no lo puede saber el guion**, igual que las escrituras de la disposición:
+    /// este número vive dentro del proceso. Una tanda que diga medir el descubrimiento y no busque nada
+    /// publicaría el coste de un camino que no se recorrió.
+    buscados: usize,
+    /// Cuántas caras del sistema se le han dado al motor de texto.
+    ///
+    /// **Va aparte de los buscados y no es redundante**: un carácter que ninguna fuente cubre se busca —y
+    /// se paga entero— **sin registrar nada**. Con un solo número, una máquina sin fuentes y una con todo
+    /// instalado publicarían informes indistinguibles.
+    registradas: usize,
+}
+
+impl Descubrimiento {
+    /// Anota lo que costó **una vuelta** de descubrimiento: buscar las caras de lo apuntado y
+    /// registrarlas.
+    pub fn anotar(&mut self, cuanto: Duration, buscados: usize, registradas: usize) {
+        self.busqueda.anotar(cuanto);
+        self.buscados += buscados;
+        self.registradas += registradas;
+    }
+
+    /// Si se llegó a buscar algo, **para que una prueba pueda afirmar que el camino real lo anota** y no
+    /// solo que la anotación funciona cuando se la llama a mano.
+    ///
+    /// Los dos contadores los lee el informe directamente; esto es lo único que hacía falta de fuera.
+    #[cfg(test)]
+    pub fn hay_algo(&self) -> bool {
+        self.busqueda.hay()
+    }
+
+    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if !self.busqueda.hay() {
+            return Ok(());
+        }
+        writeln!(
+            a,
+            "\nbuscar en la máquina una fuente que falta — de la ventana   ({} vueltas · {} caracteres buscados · {} caras registradas)",
+            self.busqueda.total, self.buscados, self.registradas
+        )?;
+        writeln!(a, "  {}", self.busqueda)?;
+        writeln!(
+            a,
+            "  NO ocurre en cada fotograma: solo cuando aparece un carácter que ni las caras registradas ni\n                   las de fábrica cubren, y por eso la media de aquí no describe un fotograma corriente.\n                   Abarca preguntarle al motor si el carácter ya se ve —maquetarlo y comparar su dibujo con\n                   el del cuadro—, enumerar las fuentes del sistema la primera vez, abrir las candidatas\n                   hasta dar con la que lo trae, y decirle al motor que se quede con ella. Un carácter que\n                   NADIE cubre se paga igual y no registra nada: por eso los dos contadores van separados"
+        )?;
+        writeln!(
+            a,
+            "  LO QUE ESTE TRAMO NO MIDE, dicho aquí porque callarlo sería peor: rehacer el ATLAS de glifos.\n                   Entregarle la configuración al motor solo la guarda; el atlas se reconstruye al empezar\n                   la pasada SIGUIENTE, antes de que ninguna línea de este proyecto tome control, así que no\n                   hay dónde poner el cronómetro. Medido aparte: unos 4,5 ms por registro con una cara CJK\n                   de 20 MB, y caen en «el resto del fotograma». Ocurre tantas veces como diga la columna\n                   de caras registradas, no una por fotograma"
+        )?;
+        Ok(())
+    }
+}
+
 /// Lo grande que es la ventana, en la unidad en la que se le pide que abra.
 ///
 /// **Dos campos con nombre y no una pareja de números**, por lo mismo que los tramos de la tabla llevan

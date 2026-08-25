@@ -369,7 +369,17 @@ impl eframe::App for Barrido {
 
             let origen = hueco.left_top() + paso * indice as f32;
             let antes = Instant::now();
-            pintar(ui.painter(), &vista, &self.tema, &metrica, origen);
+            // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
+            // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
+            // `resolver`, uno persistente solo acumularía apuntes que nadie mira.
+            pintar(
+                ui.painter(),
+                &vista,
+                &self.tema,
+                &metrica,
+                origen,
+                &mut Default::default(),
+            );
 
             lectura += leido;
             encolado += antes.elapsed();

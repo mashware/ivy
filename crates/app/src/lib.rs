@@ -3714,6 +3714,15 @@ struct Ventana {
     /// Quien avisa de que un productor ha publicado. Vive con la ventana porque sus rutas son las de
     /// las consolas que la ventana tiene abiertas, y es la ventana quien sabe a quién despertar.
     vigilante: Vigilante,
+    /// Quién busca en la máquina las fuentes que hacen falta, **cuando hacen falta**.
+    ///
+    /// **Uno por ventana y no uno por consola**, porque las caras se le registran al motor de texto, que
+    /// es de la ventana: dos descubridores buscarían dos veces lo mismo y el segundo le borraría al
+    /// primero lo que hubiera registrado.
+    descubridor: fuentes::Descubridor,
+    /// Lo que cuesta buscar esas fuentes, para que el informe lo declare y no acabe publicado como coste
+    /// del framework.
+    descubrimiento: medida::Descubrimiento,
     tema: Tema,
     /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
     resto_del_fotograma: RestoDelFotograma,
@@ -4071,6 +4080,8 @@ impl Ventana {
             pestañas,
             activa: 0,
             modificadores: egui::Modifiers::NONE,
+            descubridor: fuentes::Descubridor::default(),
+            descubrimiento: medida::Descubrimiento::default(),
             tema: Tema::default(),
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
@@ -4432,7 +4443,11 @@ impl Ventana {
         // **Los dos tramos de guardar van después del resto, y con su propia fila cada uno.** Están
         // descontados de ese resto —entran en el acumulador de la ventana—, así que sin estas filas el
         // número existiría y **nadie podría auditarlo**.
-        self.guardado.publicar(a)
+        self.guardado.publicar(a)?;
+        // **Y el descubrimiento igual: su fila va después del resto porque también está descontado de
+        // él.** Es el tramo más caro que este proyecto añade fuera de una consola, así que sin declararlo
+        // el número de D3 se lo comería entero.
+        self.descubrimiento.publicar(a)
     }
 
     /// Le da a las consolas de las pestañas que no se ven la rejilla que tendrían si se vieran.
@@ -6050,6 +6065,7 @@ impl Ventana {
         rect: egui::Rect,
         tema: &Tema,
         metrica: &Metrica,
+        descubridor: &mut fuentes::Descubridor,
     ) -> DeLaDivision {
         // **El panel se cronometra aparte del encolado de la consola, con dos relojes que se suman:
         // uno alrededor de leer y repartir, y otro alrededor de pintarlo.** Son dos y no uno porque el
@@ -6103,6 +6119,7 @@ impl Ventana {
             tema,
             metrica,
             hueco.consola.left_top(),
+            descubridor,
         );
         let encolado = antes.elapsed();
 
@@ -6115,6 +6132,7 @@ impl Ventana {
                 tema,
                 metrica,
                 ahora,
+                descubridor,
             );
         }
         let coste_del_panel = coste_de_leer + antes_de_pintarlo.elapsed();
@@ -6325,6 +6343,23 @@ impl eframe::App for Ventana {
         // Va a `cronometrado_aparte`, que ya existe para exactamente esto —el trabajo de la ventana que
         // no es de ninguna consola— y que ya se resta. Un tramo nuevo en el informe para unos
         // microsegundos habría que explicarlo entero y diría muy poco.
+        // **Las fuentes que faltan se buscan aquí, ANTES de pintar y no durante.** Registrar una cara le
+        // rehace al motor de texto el atlas de glifos entero —milisegundos, no microsegundos— y hacerlo a
+        // mitad de una pasada dejaría a medias las medidas de esa misma pasada. El precio, declarado: lo
+        // que el pintado apunta se resuelve en el fotograma **siguiente**, así que un carácter recién
+        // llegado sale como cuadro **un fotograma** —16 ms— antes de verse bien.
+        //
+        // Va a `cronometrado_aparte` **y** a su propio tramo del informe: sin la resta, estos milisegundos
+        // se publicarían como coste del framework, que es la cifra con la que **D3** lo juzga.
+        let buscando = Instant::now();
+        let vuelta = self.descubridor.resolver(ui.ctx());
+        if vuelta.hubo_trabajo() {
+            let cuanto = buscando.elapsed();
+            self.cronometrado_aparte += cuanto;
+            self.descubrimiento
+                .anotar(cuanto, vuelta.buscados, vuelta.registradas);
+        }
+
         let recorrido = Instant::now();
         let reparto_de = |ventana: &Self| ventana.activa().raiz.colocar(area, metrica.ancho());
         let mut reparto = reparto_de(self);
@@ -6424,7 +6459,14 @@ impl eframe::App for Ventana {
             .into_iter()
             .zip(rectangulos.iter().copied())
         {
-            let suyo = Self::pintar_division(ui, division, rect, &self.tema, &metrica);
+            let suyo = Self::pintar_division(
+                ui,
+                division,
+                rect,
+                &self.tema,
+                &metrica,
+                &mut self.descubridor,
+            );
             if hay_gesto {
                 pintado.push((rect, suyo.frontera_del_panel));
                 if suyo.cambio_el_ancho {
@@ -7056,6 +7098,8 @@ mod tests {
             .sum();
 
         let mut ventana = Ventana {
+            descubridor: fuentes::Descubridor::default(),
+            descubrimiento: medida::Descubrimiento::default(),
             // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
             // arma igual —sobre una lista vacía— para que la ventana de las pruebas no se declare
             // ciega y active el respaldo, que es un camino con su propia prueba.
@@ -13680,7 +13724,14 @@ mod tests {
                 .zip(rectangulos)
                 .enumerate()
             {
-                Ventana::pintar_division(ui, division, rect, &Tema::default(), &metrica);
+                Ventana::pintar_division(
+                    ui,
+                    division,
+                    rect,
+                    &Tema::default(),
+                    &metrica,
+                    &mut fuentes::Descubridor::default(),
+                );
                 esperado[cual] = metrica.celdas_en(rect.size());
             }
         })
@@ -13924,7 +13975,14 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
-            Ventana::pintar_division(ui, division, area_de(800.0), &Tema::default(), &metrica);
+            Ventana::pintar_division(
+                ui,
+                division,
+                area_de(800.0),
+                &Tema::default(),
+                &metrica,
+                &mut fuentes::Descubridor::default(),
+            );
         })
         .drop_without_applying_deltas();
     }
@@ -14260,6 +14318,7 @@ mod tests {
                 area_de(800.0),
                 &Tema::default(),
                 &metrica,
+                &mut fuentes::Descubridor::default(),
             );
         })
         .drop_without_applying_deltas();
@@ -14300,7 +14359,14 @@ mod tests {
         let (mut con_panel, mut sin_descontar) = (REJILLA_INICIAL, REJILLA_INICIAL);
         ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
-            Ventana::pintar_division(ui, &mut division, entera, &Tema::default(), &metrica);
+            Ventana::pintar_division(
+                ui,
+                &mut division,
+                entera,
+                &Tema::default(),
+                &metrica,
+                &mut fuentes::Descubridor::default(),
+            );
             con_panel = division.medido;
             sin_descontar = metrica.celdas_en(entera.size());
         })
@@ -14330,7 +14396,14 @@ mod tests {
         let mut corte = 0.0;
         let mut salida = ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
-            Ventana::pintar_division(ui, &mut division, entera, &Tema::default(), &metrica);
+            Ventana::pintar_division(
+                ui,
+                &mut division,
+                entera,
+                &Tema::default(),
+                &metrica,
+                &mut fuentes::Descubridor::default(),
+            );
             corte = division
                 .repartir_con_su_panel(entera, metrica.ancho(), SystemTime::now())
                 .consola

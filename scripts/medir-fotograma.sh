@@ -27,6 +27,12 @@
 #                J = como la C, y además la ventana **se arrastra a sí misma**: agarra una consola, la
 #                    lleva sobre la otra y la suelta, una y otra vez, alternando el lado. La diferencia
 #                    entre J y C es lo que cuesta el gesto
+#                P = las dos consolas volcando en JAPONÉS. Es la ÚNICA tanda que recorre el camino de
+#                    buscar fuentes en la máquina, porque es la única cuya carga trae caracteres que las
+#                    fuentes de fábrica no cubren. Su control es la C: mismas consolas, misma carga en
+#                    tamaño, y la única diferencia es el idioma. Invalida la corrida si no llegó a buscar
+#                    ninguna fuente — una sección de descubrimiento vacía se lee como «no cuesta nada»— y
+#                    también al revés, si una tanda que no es ésta buscó alguna.
 #
 #              NO hay tanda con arrastres de CUATRO divisiones, y no es un olvido: el ciclo del gesto solo
 #              devuelve la disposición a la de partida **con dos**. Con más, insertar parte el peso del
@@ -269,6 +275,11 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
         printf '\033[?1000h\033[?1002h\033[?1006h'
     fi
 
+    # **La carga en CJK solo la pide la tanda P.** La de siempre es bit a bit la misma que en todos los
+    # anexos publicados: cambiarla haría que una tanda nueva no se pudiera comparar con ninguno de ellos.
+    if [ "${MEDIR_CJK:-}" = 1 ]; then
+        exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}" --cjk
+    fi
     exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}"
 fi
 
@@ -311,6 +322,7 @@ case "$TANDA" in
     M)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=frontera ;;       # dos, y moviendo la frontera del árbol: el peor caso de recolocar
     N)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=marcar ;;         # dos, y marcando texto en la izquierda: la derecha es el control
     O)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=raton ;;           # dos, y el MISMO recorrido, pero el programa de la izquierda pidió el ratón
+    P)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola; CJK=1 ;;       # dos, y las dos volcando en JAPONÉS: la única que descubre fuentes
     *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K, L, M, N u O" >&2; exit 2 ;;
 esac
 # **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
@@ -522,7 +534,7 @@ sembrar() {
 case "$TANDA" in
     A) : ;;                       # sin panel: nadie publica nada
     B) sembrar quieto & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O) sembrar hablador & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P) sembrar hablador & ;;
 esac
 
 echo "tanda $TANDA · $PESTANAS pestaña(s) de $DIVISIONES · $VUELCAN de $DIRECTORIOS consolas volcando $MIB MiB · ventana $TAMANO · no toques la máquina hasta que cierre" >&2
@@ -537,7 +549,7 @@ INFORME="$SALIDA/tanda-$TANDA-$(date +%H%M%S).txt"
 ESTADO=0
 export MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
     MEDIR_TURNOS="$TURNOS" MEDIR_VUELCAN="$VUELCAN" \
-    MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" MEDIR_GESTO="$GESTO" \
+    MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" MEDIR_GESTO="$GESTO" MEDIR_CJK="${CJK:-}" \
     XDG_CONFIG_HOME="$CONFIG" \
     SHELL="$RAIZ/scripts/medir-fotograma.sh"
 # **Las dos que piden disposición no se exportan cuando la tanda restaura, y en eso consiste la tanda L.**
@@ -600,6 +612,29 @@ invalidar() {
     echo "Informe marcado como $INFORME.INVALIDA" >&2
     exit 1
 }
+
+# **La guarda del descubrimiento de fuentes, y se lee en los dos sentidos como las de arriba.** La
+# tanda P es la única que vuelca en japonés, y por tanto la única que recorre el camino de buscar
+# fuentes en la máquina. Sin este número, una corrida en la que la carga no llegara a salir —o en la
+# que la máquina no tuviera fuentes CJK— publicaría la sección del descubrimiento **vacía** y se leería
+# como «buscar fuentes no cuesta nada», que es el mismo engaño que el testigo evita con los paneles.
+#
+# Y al revés: si una tanda que NO es la P busca fuentes, es que algo distinto de la carga las está
+# disparando, y sus tramos mezclan un trabajo que no le corresponde a lo que dice medir.
+BUSCADOS=$(grep -oE "[0-9]+ caracteres buscados" "$INFORME" | grep -oE "^[0-9]+" | head -1)
+BUSCADOS=${BUSCADOS:-0}
+if [ "${CJK:-}" = 1 ] && [ "$BUSCADOS" = 0 ]; then
+    invalidar "esta tanda vuelca en japonés para medir lo que cuesta buscar fuentes en la máquina y \
+no buscó ninguna: o la carga no llegó a salir, o la máquina no tiene con qué, y en los dos casos la \
+sección del descubrimiento se publicaría vacía y se leería como que no cuesta nada"
+fi
+if [ "${CJK:-}" != 1 ] && [ "$BUSCADOS" != 0 ]; then
+    invalidar "esta tanda no vuelca en japonés y sin embargo buscó $BUSCADOS fuentes en la máquina: \
+algo distinto de la carga está disparando el descubrimiento, así que sus tramos mezclan un trabajo que no \
+le corresponde a lo que dice medir"
+fi
+
+
 
 # La aplicación publica el informe al salir, así que si terminó mal el informe está a medias — y a simple
 # vista un informe truncado se parece bastante a uno bueno.

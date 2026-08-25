@@ -119,7 +119,14 @@ impl Metrica {
 /// el cursor al final**. Pintar cada celda entera de una vez dejaría el fondo de una celda encima
 /// del glifo de la anterior en cuanto un glifo se saliera de su hueco — que es precisamente lo que
 /// aquí no se recorta, para poder verlo.
-pub fn pintar(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica, origen: Pos2) {
+pub fn pintar(
+    painter: &Painter,
+    vista: &View,
+    tema: &Tema,
+    metrica: &Metrica,
+    origen: Pos2,
+    descubridor: &mut crate::fuentes::Descubridor,
+) {
     let tamano = vista.size();
     // El fondo por defecto es el mismo para toda la pantalla: preguntarlo una vez por celda serían
     // casi dos mil consultas por pasada para obtener siempre lo mismo.
@@ -145,11 +152,15 @@ pub fn pintar(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica, o
         let fila = fila as u16;
         for (columna, celda) in celdas.iter().enumerate() {
             let hueco = metrica.celda(origen, fila, columna as u16);
-            pintar_glifo(painter, celda, tema, metrica, hueco);
+            // **Apuntar es lo único que corre por celda, y por eso tiene que ser barato**: un carácter
+            // ASCII o ya resuelto se descarta sin tocar nada. Buscar la fuente y registrarla ocurren
+            // fuera de esta pasada — ver `Descubridor::resolver`.
+            descubridor.apunta(celda.c);
+            pintar_glifo(painter, celda, tema, metrica, hueco, descubridor);
         }
     }
 
-    pintar_cursor(painter, vista, tema, metrica, origen);
+    pintar_cursor(painter, vista, tema, metrica, origen, descubridor);
 }
 
 /// Los dos colores de una celda, ya con la intensidad aplicada donde corresponde.
@@ -187,7 +198,14 @@ fn colores_de(celda: &ViewCell, tema: &Tema) -> (Color32, Color32) {
     }
 }
 
-fn pintar_glifo(painter: &Painter, celda: &ViewCell, tema: &Tema, metrica: &Metrica, hueco: Rect) {
+fn pintar_glifo(
+    painter: &Painter,
+    celda: &ViewCell,
+    tema: &Tema,
+    metrica: &Metrica,
+    hueco: Rect,
+    descubridor: &crate::fuentes::Descubridor,
+) {
     // El acompañante de un carácter ancho **no pinta nada**. El glifo entero lo dibuja su primera
     // columna y se sale sobre esta; volver a pintarlo aquí lo duplicaría, medio encima del otro.
     // Y el hueco que deja un ancho que no cabía al final de la fila tampoco es un espacio: es un
@@ -201,19 +219,25 @@ fn pintar_glifo(painter: &Painter, celda: &ViewCell, tema: &Tema, metrica: &Metr
     }
 
     let (color, _) = colores_de(celda, tema);
+    // **La familia se elige por carácter, y ahí está el único sitio donde se puede elegir.** egui ordena
+    // su cadena de reserva por familia entera, no por rango: para que la fuente de iconos que el usuario
+    // instaló gane en las zonas de uso privado **sin** quitarle las letras a la del terminal, tiene que
+    // vivir en su propia familia y pedirse solo donde toca. Quien recorre celda a celda es esto.
+    let fuente = eframe::egui::FontId::new(metrica.fuente.size, descubridor.familia_de(celda.c));
     // **No se recorta el glifo a su celda.** Si la fuente pinta más ancho de lo que el parser
     // reservó, tiene que verse: es el dato que decide si hay que embarcar una fuente propia.
     // Recortarlo escondería el desajuste y lo convertiría en una sorpresa mucho más cara.
-    painter.text(
-        hueco.left_top(),
-        Align2::LEFT_TOP,
-        celda.c,
-        metrica.fuente.clone(),
-        color,
-    );
+    painter.text(hueco.left_top(), Align2::LEFT_TOP, celda.c, fuente, color);
 }
 
-fn pintar_cursor(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica, origen: Pos2) {
+fn pintar_cursor(
+    painter: &Painter,
+    vista: &View,
+    tema: &Tema,
+    metrica: &Metrica,
+    origen: Pos2,
+    descubridor: &crate::fuentes::Descubridor,
+) {
     // **Sin cursor no se pinta cursor**, y desde que hay historial ese caso ocurre de verdad: subiendo
     // lo bastante, el cursor se queda en el área activa, por debajo de lo que se mira. La foto lo dice
     // en vez de recortarlo, que es lo que este sitio anunciaba desde F1.3.
@@ -247,11 +271,18 @@ fn pintar_cursor(painter: &Painter, vista: &View, tema: &Tema, metrica: &Metrica
             // debajo. Se repinta encima, en el color del fondo: es lo que hace un terminal, y sin
             // esto el cursor **borra** la letra sobre la que está en vez de resaltarla.
             if debajo.c != ' ' && !debajo.hidden {
+                // **Con la familia que le toca a ESE carácter, igual que en el pintado normal.** Sin
+                // esto, un icono bajo el cursor se redibuja con la fuente de fábrica y **cambia de
+                // símbolo**: mover el cursor sobre un separador de Powerline le cambiaba el dibujo. Lo
+                // encontró una revisión.
                 painter.text(
                     hueco.left_top(),
                     Align2::LEFT_TOP,
                     debajo.c,
-                    metrica.fuente.clone(),
+                    eframe::egui::FontId::new(
+                        metrica.fuente.size,
+                        descubridor.familia_de(debajo.c),
+                    ),
                     colores_de(debajo, tema).1,
                 );
             }
@@ -429,6 +460,7 @@ mod tests {
                 &Tema::default(),
                 &metrica(10.0, 20.0),
                 Pos2::ZERO,
+                &crate::fuentes::Descubridor::default(),
             );
         });
         let formas = salida.shapes.len();

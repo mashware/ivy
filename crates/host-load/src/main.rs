@@ -12,7 +12,9 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use host_load::{CHUNK, Excluded, Run, aggregate, build_load, pace_delay, start_instant};
+use host_load::{
+    CHUNK, Excluded, Run, aggregate, build_load, build_load_cjk, pace_delay, start_instant,
+};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -27,6 +29,8 @@ host-load — mide cuánto tarda un terminal en vaciar una carga fija
   host-load report [--tag T] [--results RUTA]
 
   --mib N       tamaño de la carga en MiB (por defecto 22)
+  --cjk         escribe en japonés, chino y coreano en vez de en ASCII
+  --cjk         escribe en japonés, chino y coreano en vez de en ASCII
   --at S        arrancar en el siguiente múltiplo de S segundos (por defecto 30; 0 = ya)
   --rate M      caudal sostenido objetivo en MiB/s (por defecto, tan rápido como admita)
   --tag T       etiqueta de la tanda; report agrupa por ella
@@ -63,6 +67,8 @@ fn ejecutar() -> Result<(), Error> {
 /// dependencia, lo que la hace compilable en cualquier sitio donde haya que medir.
 struct Opciones {
     mib: usize,
+    /// Si la carga se escribe en CJK. Solo la pide la tanda del descubrimiento de fuentes.
+    cjk: bool,
     at: u64,
     rate: Option<f64>,
     tag: String,
@@ -73,6 +79,7 @@ struct Opciones {
 fn parsear(args: &[String]) -> Result<Opciones, Error> {
     let mut o = Opciones {
         mib: MIB_POR_DEFECTO,
+        cjk: false,
         at: AT_POR_DEFECTO,
         rate: None,
         tag: "sin-etiqueta".to_string(),
@@ -98,6 +105,7 @@ fn parsear(args: &[String]) -> Result<Opciones, Error> {
         };
         match args[i].as_str() {
             "--mib" => o.mib = valor(i)?.parse()?,
+            "--cjk" => o.cjk = true,
             "--at" => o.at = valor(i)?.parse()?,
             "--rate" => o.rate = Some(valor(i)?.parse()?),
             "--tag" => o.tag = valor(i)?.clone(),
@@ -126,7 +134,13 @@ fn run(args: &[String]) -> Result<(), Error> {
         .mib
         .checked_mul(UN_MIB)
         .ok_or_else(|| format!("--mib {} es demasiado grande", o.mib))?;
-    let carga = build_load(bytes);
+    // **La carga en CJK solo la pide la tanda que mide el descubrimiento de fuentes.** La de siempre no
+    // se toca, para que las tandas nuevas sigan siendo comparables con los anexos publicados.
+    let carga = if o.cjk {
+        build_load_cjk(bytes)
+    } else {
+        build_load(bytes)
+    };
 
     if let Some(ruta) = o.dump {
         std::fs::write(&ruta, &carga)?;

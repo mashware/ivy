@@ -122,6 +122,48 @@ pub fn build_load(bytes_objetivo: usize) -> Vec<u8> {
     carga
 }
 
+/// Los caracteres con los que la carga en CJK escribe, y por qué éstos.
+///
+/// **Cubren los tres bloques que el hito de las fuentes persigue** —kanji, hiragana y hangul— más un
+/// icono del Área de Uso Privado, que es el otro caso. Ninguno lo cubren las fuentes de fábrica de egui,
+/// así que cada uno **dispara de verdad** el camino de descubrimiento en vez de rozarlo.
+const LETRAS_CJK: &[char] = &[
+    '日', '本', '語', '漢', '字', '中', '文', 'あ', 'い', 'う', 'え', 'お', '한', '국', '어',
+    '\u{f015}',
+];
+
+/// La misma carga, pero escribiendo en CJK.
+///
+/// **Existe aparte y `build_load` no se toca, y eso es deliberado**: cambiar la carga de siempre haría
+/// que las tandas nuevas no fueran comparables con ninguno de los anexos publicados. Ésta solo la pide la
+/// tanda que mide el descubrimiento de fuentes.
+///
+/// **Determinista igual que la otra**: el contenido de la línea `i` depende solo de `i`.
+pub fn build_load_cjk(bytes_objetivo: usize) -> Vec<u8> {
+    let mut carga = Vec::with_capacity(bytes_objetivo + 256);
+    let mut i: usize = 1;
+    while carga.len() < bytes_objetivo {
+        let color = 31 + i % 7;
+        // **Una palabra distinta por línea, rotando**, para que no sea siempre el mismo carácter: quien
+        // pinta cachea por carácter, así que repetir uno solo recorrería el camino rápido y mediría el
+        // descubrimiento de **una** fuente en vez del de una pantalla de verdad.
+        let palabra: String = (0..4)
+            .map(|n| LETRAS_CJK[(i + n) % LETRAS_CJK.len()])
+            .collect();
+        carga.extend_from_slice(
+            format!(
+                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {palabra} — compilando el módulo {i} … \x1b[32m完了\x1b[0m\n"
+            )
+            .as_bytes(),
+        );
+        if i.is_multiple_of(LINEAS_POR_REPINTADO) {
+            carga.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
+        }
+        i += 1;
+    }
+    carga
+}
+
 /// Primer instante alineado en el que arrancar, contado desde la época.
 ///
 /// **Trabaja en fracciones de segundo, y eso es lo único que hace que sirva.** La primera versión

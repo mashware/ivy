@@ -50,6 +50,30 @@ winit = { version = "0.30", default-features = false, features = ["wayland-csd-a
 # **como sale hoy** — y está escrito en `fuentes.rs`, que es donde se decide.
 unicode-properties = { version = "0.1.4", features = ["emoji"] }
 
+# **Quién sabe qué fuentes tiene la máquina, y cuál de ellas cubre un carácter.** Entró como dependencia
+# de desarrollo cuando solo la usaba el banco de medida; desde que el terminal descubre fuentes de verdad
+# es de producción.
+#
+# Es de los mismos autores que `skrifa` —que ya está en el árbol porque el motor de texto de egui la usa
+# por debajo— así que las dos hablan el mismo modelo de fuente en vez de convivir dos. Y usa las APIs
+# nativas de cada plataforma: fontconfig en Linux, DirectWrite en Windows, CoreText en macOS, que es lo
+# que hace falta para no dejarle deuda a **F2.7**.
+#
+# **`fontconfig` se carga en EJECUCIÓN, no se enlaza al compilar.** Sin esa feature, compilar este repo en
+# Linux pasa a exigir `pkg-config` y las cabeceras de fontconfig — comprobado: la máquina donde se escribió
+# esto no las tiene y la compilación falla en el guion de construcción, no en el código. Es la misma
+# técnica, y la misma razón, que el `dlopen` con el que `libwayland` llega de rebote. El precio es que la
+# ausencia de fontconfig se descubre **al arrancar** y no al compilar — que es justo el caso que **AC9**
+# obliga a aguantar.
+fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
+
+# **Para comprobar que el motor de texto va a poder abrir una fuente ANTES de dársela.** Es la misma caja
+# que epaint usa por debajo, así que lo que aquí se abra, allí se abre. Sin esta comprobación, un fichero
+# de fuente corrupto —una actualización de paquete a medias, unos desplazamientos viejos de fontconfig—
+# mata el proceso: el único modo de fallo que epaint tiene para bytes que no entiende es un pánico, y
+# ocurre dentro de su pasada, donde no hay nada que pueda recogerlo.
+skrifa = "0.44"
+
 # **Solo para el banco de fuentes, y a propósito.** Esta entrega mide qué cuesta descubrir las fuentes
 # del sistema y rasterizar un glifo a color; hasta que esos números decidan cómo se hace, nada de esto
 # entra en producción. Es el mismo criterio con el que el banco del historial midió el motor por debajo
@@ -73,8 +97,7 @@ unicode-properties = { version = "0.1.4", features = ["emoji"] }
 # cambia nada; **en Windows, que es la plataforma de F2.7, ya cambia lo que se compila**. Queda dicho aquí
 # porque el comentario de arriba, tal como estaba, prometía lo contrario.
 [dev-dependencies]
-fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
-skrifa = "0.44"
+host-load = { path = "../host-load" }
 
 # **Para que las pruebas del banco corran con `cargo test`, y no solo si alguien se acuerda de pedir
 # `--examples`.** Un `example` de cargo no es un objetivo de prueba de serie: el módulo `tests` de

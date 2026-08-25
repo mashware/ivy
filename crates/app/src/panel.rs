@@ -796,6 +796,7 @@ pub fn pintar(
     tema: &Tema,
     metrica: &Metrica,
     ahora: SystemTime,
+    descubridor: &mut crate::fuentes::Descubridor,
 ) {
     let rect = painter.clip_rect();
     painter.rect_filled(rect, 0.0, tema.fondo_del_panel());
@@ -826,6 +827,10 @@ pub fn pintar(
         if fila.texto.is_empty() {
             continue;
         }
+        // **El panel también descubre fuentes.** Lo que enseña es lo que publica su productor —texto
+        // libre, en cualquier idioma—, y sin apuntarlo un resumen en japonés se quedaba en cuadros para
+        // siempre porque nada disparaba la búsqueda.
+        descubridor.apunta_texto(&fila.texto);
         painter.text(
             Pos2::new(x, y),
             Align2::LEFT_TOP,
@@ -1016,6 +1021,7 @@ mod tests {
                 &Tema::default(),
                 &metrica,
                 ahora,
+                &mut crate::fuentes::Descubridor::default(),
             );
         });
 
