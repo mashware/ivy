@@ -946,6 +946,31 @@ impl Gesto {
 /// median: una tanda vieja que de pronto arrastrara paneles publicaría sus números bajo la misma letra.
 const VARIABLE_DEL_GESTO: &str = "MEDIR_GESTO";
 
+/// Las cinco variables que dicen que esta sesión la pidió una tanda de medida.
+///
+/// **Una lista con nombre, y no cinco lecturas sueltas, porque de ella cuelgan dos vetos**: que la tanda no
+/// le pise la disposición a quien mide, y que no le lea la configuración. Escritas a mano en el sitio donde
+/// se leen, **añadir una sexta y olvidarse de meterla ahí no lo cazaba nadie** —ni la suite, ni el guion, ni
+/// una revisión, porque la variable nueva viviría en otro fichero—. Lo cazó una revisión mutando la
+/// expresión entera a `false` con la suite en verde.
+/// Si alguna de las variables de la puerta de medida está puesta.
+///
+/// **Recibe quién mira el entorno en vez de mirarlo, y eso es lo único que la hace comprobable.** Fijar
+/// variables desde una prueba es comportamiento indefinido en un proceso con hilos, y esta suite corre en
+/// paralelo lanzando procesos; sin este corte, **la expresión entera se podía cambiar por `false`** —
+/// apagando los dos vetos que cuelgan de ella— con la suite en verde. Lo cazó una revisión.
+fn alguna_variable_de_medida(hay: impl Fn(&str) -> bool) -> bool {
+    VARIABLES_DE_MEDIDA.iter().any(|cual| hay(cual))
+}
+
+const VARIABLES_DE_MEDIDA: [&str; 5] = [
+    VARIABLE_DE_LAS_PESTAÑAS,
+    VARIABLE_DE_LAS_DIVISIONES,
+    VARIABLE_DEL_TAMAÑO,
+    VARIABLE_DE_LOS_ARRASTRES,
+    VARIABLE_DEL_GESTO,
+];
+
 /// Cuántas celdas empuja la frontera del panel **cada fotograma de arrastre** del gesto inyectado.
 ///
 /// **Por fotograma y no por gesto, y eso se supo sondeando.** El punto al que el gesto lleva el puntero se
@@ -1613,15 +1638,51 @@ enum ConQueAbrir {
     Restaurada(sesion::Valido),
 }
 
-/// Lee los ajustes del usuario, avisando de lo que no se entienda.
+/// Por qué puerta entra esta sesión.
 ///
-/// **Un fichero que no está es el caso normal y no se dice.** Lo demás sí: quien escribió un fichero que
-/// no se aplica tiene que enterarse, o creerá que el terminal ignora lo que le pide.
-fn leer_los_ajustes() -> ajustes::Ajustes {
-    let Some(ruta) = ajustes::ruta() else {
-        return ajustes::Ajustes::default();
+/// **Un enumerado y no un booleano**, porque en la llamada un `false` suelto no dice qué es lo que no es.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Puerta {
+    /// La normal: quien abre el terminal para usarlo.
+    Normal,
+    /// Una tanda del banco de medida.
+    DeMedida,
+}
+
+/// Los ajustes que hay que usar: los del fichero, **o ninguno si esto es una tanda de medida**.
+///
+/// **El veto sostiene más de lo que parece.** El guion de medida ya lanza con el directorio de
+/// configuración aislado, pero **quien lanza el binario a mano con las variables de medida** —que es como
+/// la documentación dice abrir una disposición concreta— leería el suyo. Su tamaño de letra cambiaría la
+/// rejilla, y de la rejilla dependen **todas** las cifras publicadas de este proyecto.
+///
+/// Y hay una segunda consecuencia: el guion **invalida una corrida** si una tanda que no vuelca en japonés
+/// busca fuentes. Con una fuente configurada leída bajo medida, toda tanda enumeraría y **toda corrida
+/// saldría inválida**.
+///
+/// **Se veta el fichero entero, no «los ajustes que afectan a la medida».** Esa lista sería una lista que
+/// se olvida de crecer; ésta se lee de un vistazo.
+fn ajustes_a_usar(
+    puerta: Puerta,
+    ruta: Option<&std::path::Path>,
+) -> (ajustes::Ajustes, medida::LecturaDeAjustes) {
+    if puerta == Puerta::DeMedida {
+        return (
+            ajustes::Ajustes::default(),
+            medida::LecturaDeAjustes::Vetada,
+        );
+    }
+    let Some(ruta) = ruta else {
+        // **Sin sitio de fiar tampoco se lee, y se dice.** Quien tenga el entorno sin una ruta absoluta
+        // escribiría un fichero que no se aplica nunca; el módulo hermano ya tiene ese mismo verbo.
+        eprintln!(
+            "agent-terminal: no hay dónde buscar la configuración (ni $XDG_CONFIG_HOME ni $HOME dan una \
+             ruta absoluta). Se abre con lo de fábrica."
+        );
+        return (ajustes::Ajustes::default(), medida::LecturaDeAjustes::Sin);
     };
-    match ajustes::leer(&ruta) {
+    let empezo = Instant::now();
+    match ajustes::leer(ruta) {
         Ok((ajustes, avisos)) => {
             // **Se dicen todas las que se guardaron, y cuántas quedaron fuera.** Callar las de más sin
             // decir cuántas eran haría creer que a partir del techo el fichero está bien.
@@ -1634,7 +1695,13 @@ fn leer_los_ajustes() -> ajustes::Ajustes {
                     avisos.sin_listar()
                 );
             }
-            ajustes
+            (
+                ajustes,
+                medida::LecturaDeAjustes::Con {
+                    cuanto: empezo.elapsed(),
+                    avisos: avisos.cuantos(),
+                },
+            )
         }
         Err(problema) => {
             // **Que no haya fichero es el caso normal y no se dice**; lo decide el propio tipo, para que
@@ -1645,7 +1712,10 @@ fn leer_los_ajustes() -> ajustes::Ajustes {
                     ruta.display()
                 );
             }
-            ajustes::Ajustes::default()
+            // **Se declara que SÍ se miró, aunque no se aplicara nada.** «De fábrica porque el fichero
+            // estaba roto» y «de fábrica porque una tanda lo vetó» son dos cosas distintas, y el informe
+            // solo distingue tandas si esta línea no las confunde.
+            (ajustes::Ajustes::default(), medida::LecturaDeAjustes::Sin)
         }
     }
 }
@@ -1842,15 +1912,7 @@ pub fn arrancar() -> eframe::Result {
     // vetada: dos regímenes distintos comparándose fila por fila en el anexo. Y el guion solo exige que
     // se declaren las escrituras en las tandas que arrastran, así que las de aquélla no las habría
     // cazado nadie.
-    let de_medida = [
-        pestañas.as_deref(),
-        divisiones.as_deref(),
-        std::env::var(VARIABLE_DEL_TAMAÑO).ok().as_deref(),
-        std::env::var(VARIABLE_DE_LOS_ARRASTRES).ok().as_deref(),
-        std::env::var(VARIABLE_DEL_GESTO).ok().as_deref(),
-    ]
-    .iter()
-    .any(Option::is_some);
+    let de_medida = alguna_variable_de_medida(|cual| std::env::var_os(cual).is_some());
     if de_medida {
         persistencia.no_pisar_porque("esta sesión la pidió una tanda de medida");
     }
@@ -1861,11 +1923,12 @@ pub fn arrancar() -> eframe::Result {
     // leería el suyo — y su tamaño de letra cambiaría la rejilla, que es de lo que dependen todas las
     // cifras publicadas del proyecto. Los colores no la cambian; se veta el fichero entero igualmente,
     // porque la regla se lee de un vistazo y «solo estos ajustes» sería una lista que se olvida de crecer.
-    let ajustes = if de_medida {
-        ajustes::Ajustes::default()
+    let puerta = if de_medida {
+        Puerta::DeMedida
     } else {
-        leer_los_ajustes()
+        Puerta::Normal
     };
+    let (ajustes, lo_que_costo) = ajustes_a_usar(puerta, ajustes::ruta().as_deref());
 
     let mut opciones = eframe::NativeOptions::default();
     // **Se pide el tamaño solo si alguien lo pidió**, y por eso no hay un tamaño por defecto aquí: sin
@@ -1896,7 +1959,8 @@ pub fn arrancar() -> eframe::Result {
             // **El tema se pone aquí y no en el constructor**, igual que los arrastres de arriba y que el
             // tramo de restaurar: llevarlo hasta dentro obligaría a pasarlo por tres constructores con
             // treinta y tres llamadas entre pruebas, y ninguna de ellas configura nada.
-            ventana.tema = Tema::con(&ajustes.colores);
+            ventana.aplicar_los_ajustes(&ajustes);
+            ventana.configuracion = lo_que_costo;
             Ok(Box::new(ventana))
         }),
     )
@@ -3785,6 +3849,13 @@ struct Ventana {
     /// Lo que cuesta rasterizar los glifos de color, para que no acabe dentro del tramo del pintado.
     color: medida::Rasterizado,
     tema: Tema,
+    /// El cuerpo de la letra con el que se mide la celda, en puntos.
+    ///
+    /// **Va pegado al tema porque los dos salen de lo mismo**: son lo que quien usa el terminal configuró,
+    /// y los escribe la misma función. Y **no es una constante desde que se puede configurar**: cambiarlo
+    /// cambia la rejilla —cuántas filas y columnas caben— y por tanto lo que cuesta interpretar y pintar.
+    /// No es un ajuste estético: es el parámetro del que depende el histórico de medida entero.
+    cuerpo: f32,
     /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
     resto_del_fotograma: RestoDelFotograma,
     /// Cuándo empezó el fotograma en curso, que es donde arranca el cronómetro de la ida.
@@ -3840,6 +3911,8 @@ struct Ventana {
     /// petición, no un fichero» — que es justo lo que el informe necesita distinguir y la cuenta de
     /// consolas no distingue.
     restauracion: Option<medida::Restauracion>,
+    /// Lo que costó leer la configuración de quien usa el terminal, y si se llegó a leer.
+    configuracion: medida::LecturaDeAjustes,
     /// El espejo del fotograma anterior. **Contra él se arma el plazo**, así que el plazo se rearma
     /// **cuando algo cambia** y no cuando algo está sin escribir: sin esto, un directorio no escribible
     /// dejaría la diferencia puesta y **la ventana no se dormiría nunca**.
@@ -4114,6 +4187,20 @@ impl Ventana {
     ///
     /// **Existe para que abrir de fábrica y restaurar compartan todo lo que no es la lista de pestañas.**
     /// Los contadores, el vigilante y los cronómetros salen **de la lista construida** y no de lo que nadie
+    /// Le pone a la ventana lo que el usuario configuró.
+    ///
+    /// **Va aquí y no en el constructor**, igual que los arrastres inyectados y el tramo de restaurar:
+    /// llevarlo dentro obligaría a pasarlo por tres constructores con decenas de llamadas, y ninguna de
+    /// ellas configura nada.
+    fn aplicar_los_ajustes(&mut self, ajustes: &ajustes::Ajustes) {
+        self.tema = Tema::con(&ajustes.colores);
+        // **Lo que el fichero no pida se queda como está**, que es lo que permite configurar solo un color
+        // sin heredar de paso un cuerpo de letra que nadie escribió.
+        if let Some(cuerpo) = ajustes.cuerpo {
+            self.cuerpo = cuerpo;
+        }
+    }
+
     /// pidiera: con dos caminos armando este estado por su cuenta, el segundo se olvidaría de uno.
     fn con_estas_pestañas(
         ctx: &egui::Context,
@@ -4145,6 +4232,7 @@ impl Ventana {
             descubrimiento: medida::Descubrimiento::default(),
             color: medida::Rasterizado::default(),
             tema: Tema::default(),
+            cuerpo: CUERPO,
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
@@ -4154,6 +4242,7 @@ impl Ventana {
             recolocar: medida::Reflujo::default(),
             persistencia: sesion::Persistencia::en(None),
             restauracion: None,
+            configuracion: medida::LecturaDeAjustes::default(),
             ultimo_visto: None,
             ultimo_escrito: None,
             pendiente_de_guardar: None,
@@ -4402,6 +4491,7 @@ impl Ventana {
                     gesto: arrastres.que.como_se_publica(),
                 }),
                 restauracion: self.restauracion,
+                configuracion: self.configuracion,
                 barra: self.coste_de_la_barra,
                 reflujo: self.recolocar,
             },
@@ -6379,7 +6469,7 @@ impl eframe::App for Ventana {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+        let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(self.cuerpo));
 
         // El teclado va antes de todo lo demás **y ese orden importa para el número, no para el
         // comportamiento**: el cronómetro de la ida se cierra dentro de `teclear`, así que cualquier
@@ -7198,6 +7288,7 @@ mod tests {
             activa: 0,
             modificadores: egui::Modifiers::NONE,
             tema: Tema::default(),
+            cuerpo: CUERPO,
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
             ultimo_fotograma_cerrado: 0,
@@ -7207,6 +7298,7 @@ mod tests {
             recolocar: medida::Reflujo::default(),
             persistencia: sesion::Persistencia::en(None),
             restauracion: None,
+            configuracion: medida::LecturaDeAjustes::default(),
             ultimo_visto: None,
             ultimo_escrito: None,
             pendiente_de_guardar: None,
@@ -13903,6 +13995,173 @@ mod tests {
             !informe.contains("0 glifos rasterizados · 0 sin fuente"),
             "el tramo salió con los dos contadores a cero, así que la ventana no anotó nada de lo que su \
              pasada pagó: {informe}"
+        );
+    }
+
+    #[test]
+    fn cualquiera_de_las_cinco_variables_cierra_la_puerta_de_medida() {
+        // **De aquí cuelgan los dos vetos de una tanda**: no pisar la disposición de quien mide, y no leer
+        // su configuración. La expresión entera se podía cambiar por `false` —apagándolos los dos— con la
+        // suite en verde, porque ninguna prueba la ejercía. Lo cazó una revisión.
+        assert!(
+            !alguna_variable_de_medida(|_| false),
+            "sin ninguna variable puesta, la puerta de medida se cerró igualmente"
+        );
+        for cual in VARIABLES_DE_MEDIDA {
+            assert!(
+                alguna_variable_de_medida(|puesta| puesta == cual),
+                "«{cual}» sola no cierra la puerta de medida, así que una tanda que solo la ponga leería \
+                 la configuración de quien mide"
+            );
+        }
+    }
+
+    #[test]
+    fn las_cinco_variables_de_medida_son_las_que_el_guion_exporta() {
+        // **De esta lista cuelgan dos vetos**: que una tanda no le pise la disposición a quien mide, y que
+        // no le lea la configuración. Escritas a mano en el sitio donde se leen, **añadir una sexta y
+        // olvidarse de meterla ahí no lo cazaba nadie** — ni la suite, ni el guion, ni una revisión,
+        // porque la variable nueva viviría en otro fichero. Lo cazó una revisión mutando la expresión
+        // entera a `false` con la suite en verde.
+        //
+        // **Se afirma contra los nombres literales**, que son los que el guion exporta. Compararlos con
+        // las constantes de al lado mediría que el código es consistente consigo mismo.
+        assert_eq!(
+            VARIABLES_DE_MEDIDA,
+            [
+                "MEDIR_PESTANAS",
+                "MEDIR_DIVISIONES",
+                "MEDIR_TAMANO",
+                "MEDIR_ARRASTRES",
+                "MEDIR_GESTO"
+            ],
+            "la lista de la que cuelgan los vetos de una tanda de medida ya no es la que el guion exporta"
+        );
+    }
+
+    #[test]
+    fn un_fichero_que_no_esta_no_se_declara_como_vetado() {
+        // **Es el camino que el banco recorre de verdad, y el único que delata un veto roto.** El guion
+        // vacía el directorio de configuración antes de cada tanda, así que bajo medida **no existe
+        // ningún fichero**: si el veto se rompiera, lo que se leería es «no hay fichero», no «lo apliqué».
+        //
+        // Con este caso declarándose como vetado, un veto roto pasaría por una corrida buena. Lo cazó una
+        // revisión mutando la rama del error con la suite en verde.
+        let dir =
+            std::env::temp_dir().join(format!("agent-terminal-sin-fichero-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("crear el directorio de la prueba");
+
+        let (_, costo) = ajustes_a_usar(Puerta::Normal, Some(&dir.join("config")));
+        assert_eq!(
+            costo,
+            medida::LecturaDeAjustes::Sin,
+            "una lectura sin fichero se declara como vetada, así que un veto roto en el banco —donde nunca \
+             hay fichero— pasaría por una corrida buena"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn una_tanda_de_medida_no_lee_la_configuracion_de_quien_mide() {
+        // **Sin esto, todas las cifras publicadas del proyecto dejan de ser comparables.** El guion de
+        // medida ya lanza con el directorio de configuración aislado, pero quien lanza el binario a mano
+        // con las variables de medida —que es como la documentación dice abrir una disposición concreta—
+        // leería el suyo, y su tamaño de letra cambiaría la rejilla.
+        //
+        // Y hay una segunda consecuencia: el guion invalida una corrida si una tanda que no vuelca en
+        // japonés busca fuentes. Con una fuente configurada leída bajo medida, **toda corrida saldría
+        // inválida**.
+        //
+        // **La entrega anterior dejó el veto puesto en el código y sin nada que lo atara**, y quedó
+        // declarado como el hueco que no podía cerrarse el hito sin tapar. Esto lo tapa.
+        let dir = std::env::temp_dir().join(format!("agent-terminal-veto-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("crear el directorio de la prueba");
+        let fichero = dir.join("config");
+        std::fs::write(&fichero, "tamaño = 42\ncolor.1 = #ff0000\nfondo = #010203")
+            .expect("escribir la configuración de la prueba");
+
+        // Sin medida se lee entero: si esto fallara, la prueba de abajo pasaría por no haber fichero.
+        let (leidos, costo) = ajustes_a_usar(Puerta::Normal, Some(&fichero));
+        assert_eq!(
+            leidos.cuerpo,
+            Some(42.0),
+            "sin medida no se leyó la configuración"
+        );
+        assert!(leidos.colores.fondo.is_some());
+        assert!(
+            matches!(costo, medida::LecturaDeAjustes::Con { .. }),
+            "se aplicó la configuración y el informe no lo declararía: {costo:?}"
+        );
+
+        let (bajo_medida, costo) = ajustes_a_usar(Puerta::DeMedida, Some(&fichero));
+        assert_eq!(
+            costo,
+            medida::LecturaDeAjustes::Vetada,
+            "el informe declararía otra cosa que «vetada», y entonces esta corrida no se distingue de una \
+             que sí leyó la configuración de quien mide"
+        );
+        assert_eq!(
+            bajo_medida,
+            ajustes::Ajustes::default(),
+            "una tanda de medida leyó la configuración de quien mide: su tamaño de letra cambiaría la \
+             rejilla, y de la rejilla dependen todas las cifras publicadas"
+        );
+
+        // **«Se miró y no había» es un TERCER estado, y confundirlo con «del usuario» publica un número
+        // con la etiqueta cambiada**: una máquina sin fichero y otra que aplicó otro cuerpo de letra
+        // tienen rejillas que pueden no tener nada que ver. Lo cazó una revisión.
+        let (_, sin_fichero) = ajustes_a_usar(Puerta::Normal, Some(&dir.join("no-existe")));
+        assert_eq!(
+            sin_fichero,
+            medida::LecturaDeAjustes::Sin,
+            "una máquina sin fichero publica el mismo informe que una que sí configuró algo"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn el_tamano_configurado_le_cambia_la_rejilla_a_la_consola() {
+        // **Es lo que separa «se lee el número» de «el número hace algo».** Una versión anterior de esta
+        // prueba comparaba dos llamadas a la medida de la celda con cuerpos distintos: eso mide a egui, no
+        // a este código, y **quitar la línea que aplica el cuerpo la dejaba en verde**. Se comprobó
+        // mutándolo.
+        //
+        // Lo que hay que mirar es la rejilla, que es de donde sale cuántas filas y columnas ve el programa
+        // de dentro.
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+
+        let rejilla_con = |cuerpo: Option<f32>| {
+            let mut ventana = ventana_con("sleep 30", "sleep 30");
+            ventana.aplicar_los_ajustes(&ajustes::Ajustes {
+                cuerpo,
+                ..Default::default()
+            });
+            pasada_de_interfaz(
+                &mut ventana,
+                &ctx,
+                area_de(1200.0),
+                egui::RawInput::default(),
+            );
+            ventana.activa().divisiones()[0].medido
+        };
+
+        let de_fabrica = rejilla_con(None);
+        let grande = rejilla_con(Some(28.0));
+
+        assert!(
+            de_fabrica.cols > 0 && de_fabrica.rows > 0,
+            "la rejilla de fábrica salió vacía: la prueba no está midiendo nada"
+        );
+        assert!(
+            grande.cols < de_fabrica.cols && grande.rows < de_fabrica.rows,
+            "con el doble de cuerpo la consola tiene la misma rejilla ({grande:?} contra {de_fabrica:?}): \
+             el tamaño configurado no llega hasta la medida de la celda"
         );
     }
 

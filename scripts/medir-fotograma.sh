@@ -664,11 +664,43 @@ distinto de la carga lo está disparando, así que sus tramos mezclan un trabajo
 que dice medir"
 fi
 
-
 # La aplicación publica el informe al salir, así que si terminó mal el informe está a medias — y a simple
 # vista un informe truncado se parece bastante a uno bueno.
 if [ "$ESTADO" != 0 ]; then
     invalidar "la aplicación terminó con estado $ESTADO; lo que dijo queda en el .err de al lado"
+fi
+
+# **La guarda de la configuración, y ésta invalida por partida doble.** Desde que el terminal lee un fichero
+# de configuración, una corrida que leyera el de quien mide tendría **otra rejilla** —el tamaño de letra la
+# decide— y sus tramos no se comparan con los de ningún anexo publicado. La aplicación tiene la lectura
+# vetada bajo estas variables, así que el informe **siempre** debe decir «de fábrica»:
+#
+#   - si no lo dice **de ninguna forma**, el informe es de un binario que no declara esto y la corrida no se
+#     puede juzgar — el mismo engaño que el testigo evita con los paneles;
+#   - y si dice cualquier otra cosa —«del usuario», o «de fábrica» porque miró y no encontró nada—, **el
+#     veto se ha roto** y esa corrida hay que tirarla. Los tres estados se distinguen en el primer
+#     sustantivo a propósito: el guion vacía el directorio de configuración, así que un veto roto en el
+#     banco produce «se miró y no había», y si eso empezara igual que el vetado pasaría por bueno.
+#
+# **El `grep` va DENTRO del `if` y no en una asignación, y esa diferencia es lo único que hace que esta
+# guarda exista.** Con `set -e`, una asignación que toma su valor de un `grep -c` sin coincidencias hereda
+# su estado 1 y **mata el guion ahí mismo**: no se renombra el informe, no se imprime nada, y el guion sale
+# en silencio. La primera versión de esta guarda estaba escrita así y **estaba muerta en los dos casos que
+# existe para cazar** — comprobado ejecutando el guion, no el `grep` suelto, que es como se verificó mal la
+# primera vez. Y estando por encima del control de estado, se llevaba por delante todas las demás guardas.
+#
+# **Y va DEBAJO del control de estado a propósito**: un informe truncado por un pánico tampoco tiene línea
+# de configuración, y diagnosticarlo como «no declara la configuración» taparía el fallo de verdad.
+if ! grep -q "^configuración: vetada" "$INFORME"; then
+    if grep -q "^configuración:" "$INFORME"; then
+        invalidar "esta corrida MIRÓ la configuración del usuario en vez de tener el fichero vetado: bajo \
+la puerta de medida no se puede ni mirar, porque el tamaño de letra decide la rejilla y de ella dependen \
+todas las cifras publicadas. El veto se ha roto"
+    else
+        invalidar "el informe no declara si se leyó la configuración del usuario. Sin ese dato, una corrida \
+que la leyó y otra que corrió de fábrica publican informes indistinguibles con rejillas que pueden no tener \
+nada que ver"
+    fi
 fi
 
 if [ "$TANDA" != A ] && [ ! -f "$TESTIGO" ]; then

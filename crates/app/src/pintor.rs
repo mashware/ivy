@@ -524,6 +524,39 @@ mod tests {
     }
 
     #[test]
+    fn el_cuerpo_de_letra_mas_grande_que_se_admite_no_deja_una_rejilla_imposible() {
+        // **Desde que el cuerpo se configura hay un camino nuevo hasta esta guarda**, y no es el que la
+        // motivó: antes solo se llegaba estrechando la ventana, ahora basta con pedir letra grande. Con el
+        // máximo que se admite —96 puntos— la celda mide 58×112, así que una división de una ventana
+        // pequeña se queda sin sitio para una sola columna.
+        //
+        // Comprobado ejecutándolo: la rejilla sale **1×1** y no 0×1. Una consola de una celda es inútil
+        // pero está viva; una de cero columnas es una división entre cero esperando a ocurrir.
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+
+        let mut rejillas = Vec::new();
+        ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let metrica = Metrica::medir(ui.ctx(), eframe::egui::FontId::monospace(96.0));
+            for hueco in [vec2(320.0, 200.0), vec2(40.0, 30.0), vec2(0.0, 0.0)] {
+                rejillas.push(metrica.celdas_en(hueco));
+            }
+        })
+        .drop_without_applying_deltas();
+
+        for rejilla in rejillas {
+            assert!(
+                rejilla.cols >= 1 && rejilla.rows >= 1,
+                "con el cuerpo máximo la rejilla salió {}x{}: una consola de cero columnas es una \
+                 división entre cero esperando a ocurrir",
+                rejilla.cols,
+                rejilla.rows
+            );
+        }
+    }
+
+    #[test]
     fn una_ventana_mas_estrecha_que_una_celda_sigue_dando_una_columna() {
         let rejilla = metrica(10.0, 20.0).celdas_en(vec2(3.0, 4.0));
 

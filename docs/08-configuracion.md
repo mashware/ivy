@@ -34,8 +34,16 @@ carácter de comentario y el principio de un color, así que un comentario al fi
 | `divisor` | la línea que separa dos consolas |
 | `foco` | con qué se señala la consola que tiene el teclado |
 | `panel` | el fondo del panel de estado |
+| `tamaño` (o `tamano`) | el cuerpo de la letra, en puntos |
 
 Los colores se escriben **`#rrggbb`**, en hexadecimal, y da igual si en mayúsculas o en minúsculas.
+
+**El tamaño va de 4 a 96 puntos**, con decimales si quieres. El de siempre son **14**. Fuera de ese rango
+se te avisa y se usa el de siempre: con dos puntos no se lee nada y con doscientos caben tres columnas. Y **`tamano` sin eñe también
+vale**, para cuando escribes desde un teclado que no es el tuyo.
+
+Cambiar el tamaño **cambia cuántas filas y columnas** te caben en la ventana, así que los programas que
+corren dentro lo notan.
 
 **Lo que no pongas se queda como estaba.** Puedes cambiar un solo color y no escribir los demás.
 
@@ -82,5 +90,5 @@ aplicándose.
 
 ## Lo que todavía no se puede configurar
 
-La fuente, su tamaño y los atajos llegan en las siguientes entregas de este mismo hito. Recargar el fichero
+La fuente y los atajos llegan en las siguientes entregas de este mismo hito. Recargar el fichero
 sin cerrar el terminal queda para después, y está escrito por qué.

@@ -871,6 +871,31 @@ pub struct Restauracion {
     pub abrirlas: Duration,
 }
 
+/// Lo que costó mirar la configuración de quien usa el terminal, **y si se llegó a mirar**.
+///
+/// **Se llama por el acto y no por la cosa**, como sus hermanos: `Restauracion`, `Descubrimiento`,
+/// `Rasterizado` nombran el trabajo. Un tipo llamado `Configuracion` dentro del módulo de medida se lee
+/// como «la configuración de la medida», que es justo lo que no es.
+///
+/// **Un tramo de una sola vez, como el de restaurar**: ocurre entero antes del primer fotograma, así que no
+/// tiene serie ni media. Lo que hace falta es que **esté declarado**, o sus microsegundos caen dentro del
+/// arranque sin nombre.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LecturaDeAjustes {
+    /// No se miró: es una tanda de medida y el fichero está vetado.
+    #[default]
+    Vetada,
+    /// Se miró y no había nada que aplicar — no hay fichero, o no se pudo usar.
+    Sin,
+    /// Se aplicó lo que el fichero pedía.
+    Con {
+        /// Lo que costó leerlo e interpretarlo.
+        cuanto: Duration,
+        /// Cuántas líneas no se pudieron aplicar.
+        avisos: usize,
+    },
+}
+
 /// Los gestos de arrastre que una tanda de medida se inyectó a sí misma, tal como se declaran.
 #[derive(Clone, Copy)]
 pub struct Arrastres {
@@ -954,6 +979,8 @@ pub struct DeLaSesion {
     pub arrastres: Option<Arrastres>,
     /// De dónde salieron las consolas, si salieron de un fichero.
     pub restauracion: Option<Restauracion>,
+    /// Lo que costó leer la configuración, y si se leyó.
+    pub configuracion: LecturaDeAjustes,
     /// Lo que costó pintar la barra de pestañas.
     pub barra: Barra,
     /// Lo que costó recolocar el texto al cambiar el ancho de una consola.
@@ -970,6 +997,7 @@ pub fn cabecera(
     let DeLaSesion {
         arrastres,
         restauracion,
+        configuracion,
         barra,
         reflujo,
     } = sesion;
@@ -1055,6 +1083,36 @@ pub fn cabecera(
              fotograma, no se resta de ninguno)",
             restauracion.consolas, restauracion.abrirlas
         )?;
+    }
+    // **Se declara SIEMPRE, se haya leído o no**, y ésa es la mitad que importa. Una corrida que leyó la
+    // configuración de quien mide y otra que corrió de fábrica publican rejillas que pueden no tener nada
+    // que ver, y sin esta línea sus informes son indistinguibles. Toda tanda de medida tiene el fichero
+    // vetado, así que aquí debe leerse siempre «de fábrica»: si alguna vez dice otra cosa, esa corrida no
+    // se compara con ninguna.
+    match configuracion {
+        // **Los tres estados se distinguen EN EL PRIMER SUSTANTIVO, no en el paréntesis**, y eso es lo
+        // que hace que el guion de medida pueda leerlos. Con «de fábrica» para el vetado y para el que
+        // miró y no encontró nada, un veto roto en una máquina sin fichero —que es **el caso real del
+        // banco**, porque el guion vacía el directorio de configuración— se leería como una corrida buena.
+        // Lo cazó una revisión.
+        LecturaDeAjustes::Vetada => writeln!(
+            a,
+            "configuración: vetada (no se lee bajo la puerta de medida: el tamaño de letra de quien mide \
+             cambiaría la rejilla, y de la rejilla dependen todas las cifras publicadas)"
+        )?,
+        // **«Se miró y no había» NO es «del usuario», y confundirlos publica un número con la etiqueta
+        // cambiada.** Una máquina sin fichero y otra que aplicó un cuerpo de letra distinto tienen rejillas
+        // que pueden no tener nada que ver, y con un solo estado para las dos sus informes salían
+        // idénticos. Lo cazó una revisión.
+        LecturaDeAjustes::Sin => writeln!(
+            a,
+            "configuración: de fábrica (se miró y no había nada que aplicar)"
+        )?,
+        LecturaDeAjustes::Con { cuanto, avisos } => writeln!(
+            a,
+            "configuración: del usuario · {cuanto:?} en leerla · {avisos} línea(s) que no se pudieron \
+             aplicar (antes del primer fotograma, no se resta de ninguno)"
+        )?,
     }
     // **Solo cuando la hubo.** Con una sola pestaña no hay barra que pintar, y publicar «0 fotogramas»
     // invita a leer que no cuesta nada.
@@ -1197,6 +1255,74 @@ mod tests {
         )
     }
 
+    /// La cabecera con un estado de configuración concreto, que es lo que el guion de medida lee.
+    fn con_configuracion(configuracion: LecturaDeAjustes) -> String {
+        let mut salida = Vec::new();
+        cabecera(
+            &mut salida,
+            EnPuntos {
+                ancho: 1280.0,
+                alto: 800.0,
+            },
+            &[(0, vec![(0, rejilla(49, 39))])],
+            0,
+            DeLaSesion {
+                arrastres: None,
+                restauracion: None,
+                configuracion,
+                barra: Barra::default(),
+                reflujo: Reflujo::default(),
+            },
+        )
+        .expect("escribir a memoria no falla");
+        String::from_utf8(salida).expect("el informe es texto")
+    }
+
+    #[test]
+    fn los_tres_estados_de_la_configuracion_se_distinguen_donde_el_guion_mira() {
+        // **El guion invalida una corrida leyendo el PRIMER SUSTANTIVO de esta línea**, así que su forma
+        // es tan contrato como el nombre de un fichero. Cambiar el texto dejaba la suite entera en verde
+        // y **toda tanda de medida saldría inválida** — o, peor, pasaría por buena una que rompió el veto.
+        //
+        // **Y los tres tienen que empezar distinto.** El guion vacía el directorio de configuración, así
+        // que un veto roto en el banco produce «se miró y no había»: si eso empezara igual que el vetado,
+        // el veto roto se leería como una corrida buena. Lo cazó una revisión, después de que otra hubiera
+        // pedido separar los estados sin ver esta consecuencia.
+        let vetada = con_configuracion(LecturaDeAjustes::Vetada);
+        let linea = vetada
+            .lines()
+            .find(|l| l.starts_with("configuración:"))
+            .expect("no hay línea de configuración que el guion pueda leer");
+        assert!(
+            linea.starts_with("configuración: vetada"),
+            "la línea de la configuración vetada ya no tiene la forma que el guion sabe leer: «{linea}»"
+        );
+
+        let sin = con_configuracion(LecturaDeAjustes::Sin);
+        let linea = sin
+            .lines()
+            .find(|l| l.starts_with("configuración:"))
+            .expect("no hay línea de configuración");
+        assert!(
+            !linea.starts_with("configuración: vetada"),
+            "«se miró y no había» empieza igual que «vetada», así que un veto roto en el banco —donde no \
+             hay fichero por construcción— pasaría por una corrida buena: «{linea}»"
+        );
+
+        let con = con_configuracion(LecturaDeAjustes::Con {
+            cuanto: Duration::from_micros(25),
+            avisos: 0,
+        });
+        let linea = con
+            .lines()
+            .find(|l| l.starts_with("configuración:"))
+            .expect("no hay línea de configuración");
+        assert!(
+            linea.starts_with("configuración: del usuario"),
+            "la línea de la configuración aplicada cambió de forma: «{linea}»"
+        );
+    }
+
     fn con_barra(
         ventana: EnPuntos,
         rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
@@ -1214,6 +1340,7 @@ mod tests {
             DeLaSesion {
                 arrastres,
                 restauracion,
+                configuracion: LecturaDeAjustes::default(),
                 barra,
                 reflujo: Reflujo::default(),
             },

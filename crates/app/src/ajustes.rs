@@ -183,10 +183,25 @@ pub struct Colores {
 }
 
 /// Lo que el fichero pide, ya entendido.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Ajustes {
     pub colores: Colores,
+    /// El cuerpo de la letra, en puntos. `None` si el fichero no lo pide.
+    ///
+    /// **Se llama igual que en la ventana y distinto que en el fichero, a propósito.** `tamaño` es la clave
+    /// que la gente teclea y es contrato publicado; `cuerpo` es como el resto del código llama a este
+    /// número. La traducción ocurre **una vez**, donde se interpreta la clave, y no en cada salto.
+    pub cuerpo: Option<f32>,
 }
+
+/// Lo menos y lo más que se admite como cuerpo de letra.
+///
+/// **No es una manía: fuera de este rango la ventana deja de ser un terminal.** Con dos puntos no se lee
+/// nada y con doscientos caben tres columnas, y el reparto de las divisiones tiene mínimos que dejarían de
+/// poder cumplirse. Los extremos son generosos a propósito —hay quien trabaja a 8 y quien presenta a 40—:
+/// lo que se rechaza es lo que solo puede ser una errata.
+const TAMANO_MINIMO: f32 = 4.0;
+const TAMANO_MAXIMO: f32 = 96.0;
 
 /// Las líneas que no se pudieron aplicar: las que se guardan **y cuántas hubo**.
 ///
@@ -364,6 +379,21 @@ pub fn interpretar(texto: &str) -> Result<(Ajustes, Avisos), Problema> {
 
 /// Mete el valor donde le toque, si la clave y el valor valen.
 fn aplicar(ajustes: &mut Ajustes, clave: &str, valor: &str) -> Result<(), Falta> {
+    if clave == "tamaño" || clave == "tamano" {
+        // **Las dos formas de escribirlo valen, y es deliberado.** Quien teclea la configuración de un
+        // terminal no siempre tiene una eñe a mano —un teclado que no es el suyo, una sesión remota— y
+        // rechazar `tamano` sería un fallo que quien lo sufre no puede ni ver.
+        let cuanto = valor
+            .parse::<f32>()
+            .ok()
+            .filter(|c| c.is_finite() && (TAMANO_MINIMO..=TAMANO_MAXIMO).contains(c))
+            .ok_or_else(|| Falta::ValorInvalido {
+                clave: clave.to_owned(),
+                valor: valor.to_owned(),
+            })?;
+        ajustes.cuerpo = Some(cuanto);
+        return Ok(());
+    }
     let colores = &mut ajustes.colores;
     let hueco: &mut Option<Color32> = match clave {
         "fondo" => &mut colores.fondo,
@@ -716,6 +746,49 @@ mod tests {
     }
 
     #[test]
+    fn el_tamano_de_letra_se_lee_y_se_escribe_de_las_dos_formas() {
+        // **Las dos grafías valen a propósito**: quien teclea la configuración de un terminal no siempre
+        // tiene una eñe a mano —un teclado que no es el suyo, una sesión remota— y rechazar `tamano` sería
+        // un fallo que quien lo sufre no puede ni ver en pantalla.
+        for clave in ["tamaño", "tamano"] {
+            let (ajustes, avisos) = de(&format!("{clave} = 18"));
+            assert_eq!(ajustes.cuerpo, Some(18.0), "«{clave}» no se entendió");
+            assert_eq!(avisos.cuantos(), 0, "«{clave}» dio aviso");
+        }
+        let (ajustes, _) = de("tamaño = 12.5");
+        assert_eq!(
+            ajustes.cuerpo,
+            Some(12.5),
+            "un tamaño con decimales no se entendió"
+        );
+    }
+
+    #[test]
+    fn un_tamano_imposible_no_deja_la_ventana_sin_rejilla() {
+        // **Fuera de rango la ventana deja de ser un terminal**: con dos puntos no se lee nada, con
+        // doscientos caben tres columnas, y el reparto de las divisiones tiene mínimos que dejarían de
+        // poder cumplirse. Un cero o un negativo son peores: la celda mediría cero y la rejilla saldría
+        // de dividir por él.
+        for valor in ["0", "-14", "1", "500", "nan", "inf", "grande"] {
+            let (ajustes, avisos) = de(&format!("tamaño = {valor}"));
+            assert_eq!(
+                ajustes.cuerpo, None,
+                "«{valor}» se aceptó como cuerpo de letra"
+            );
+            assert_eq!(avisos.cuantos(), 1, "«{valor}» no dio aviso");
+        }
+        // Y los extremos que sí valen, para que el rango no se cierre de más: hay quien trabaja a 8 y
+        // quien presenta a 40.
+        for valor in ["4", "8", "40", "96"] {
+            let (ajustes, _) = de(&format!("tamaño = {valor}"));
+            assert!(
+                ajustes.cuerpo.is_some(),
+                "«{valor}» se rechazó y es un tamaño de trabajo"
+            );
+        }
+    }
+
+    #[test]
     fn el_indice_de_la_paleta_son_digitos_y_nada_mas() {
         // **La asimetría que había no se podía explicar**: `color.+1` aplicaba un color y `color.-1` se
         // rechazaba, las dos por dejarle la decisión al intérprete de números. Lo cazó una revisión
@@ -981,7 +1054,7 @@ mod tests {
 
     #[test]
     fn el_techo_y_el_tope_de_avisos_son_los_que_dice_el_documento() {
-        // **Las dos constantes están publicadas en `docs/06-configuracion.md`**, y las pruebas que las usan
+        // **Las dos constantes están publicadas en `docs/08-configuracion.md`**, y las pruebas que las usan
         // se parametrizan **con ellas mismas**: mover el número no tumbaba nada mientras el documento
         // seguía prometiendo el viejo. Es el disfraz que este proyecto tiene fichado —elegir un número con
         // el que el defecto y el arreglo dan lo mismo— y hace falta escribirlos literales una vez.
