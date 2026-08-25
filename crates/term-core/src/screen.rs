@@ -308,6 +308,8 @@ impl Screen {
         let size = self.size();
         let columnas = size.cols as usize;
         let mut celdas = vec![ViewCell::default(); size.rows as usize * columnas];
+        // Vacío en el caso corriente: solo crece con las celdas que llevan algo pegado.
+        let mut adjuntos = Vec::new();
 
         let contenido = self.term.renderable_content();
         // **El rango de la selección se saca UNA vez y se pregunta por celda**, y quien contesta es el
@@ -342,7 +344,7 @@ impl Screen {
             let seleccionada = seleccion.is_some_and(|rango| {
                 rango.contains_cell(&indexada, contenido.cursor.point, forma_del_cursor)
             });
-            let mut celda = view::celda_desde(indexada.cell, seleccionada);
+            let mut celda = view::celda_desde(indexada.cell, seleccionada, &mut adjuntos);
             // **El acompañante de un carácter ancho se realza con su cabeza, y esto lo pone ESTA caja.**
             // El motor hace solo el camino contrario —marca la cabeza cuando el acompañante cae dentro,
             // para que su texto no salga cortado— y le basta porque su pintor dibuja el fondo de un
@@ -374,7 +376,7 @@ impl Screen {
                 shape: view::forma_desde(contenido.cursor.shape),
             });
 
-        View::new(size, celdas, cursor, contenido.display_offset)
+        View::new(size, celdas, adjuntos, cursor, contenido.display_offset)
     }
 
     /// Empieza una selección en esa celda, **tirando la que hubiera**.
@@ -478,6 +480,12 @@ impl Screen {
                     continue;
                 }
                 linea.push(celda.c);
+                // **Y lo que va pegado detrás, que también lo escribió el programa.** Sin esto, `☁️`
+                // sale como `☁` —el selector de emoji no ocupa columna pero SÍ es texto—, y devolver
+                // eso es devolver un carácter **distinto** del que se escribió. Es la misma regla que
+                // **D22** fija para copiar: lo que sale de aquí es lo que el programa puso, ni un
+                // carácter más ni uno menos.
+                linea.extend(celda.zerowidth().into_iter().flatten());
             }
             lineas.push(linea.trim_end().to_string());
         }
@@ -1342,5 +1350,196 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    // ── Lo que va pegado a una celda ──────────────────────────────────────────────────────────
+
+    /// Lo pegado a la primera celda de la vista, escrito con las mismas palabras que usa quien pinta.
+    fn pegado_a(pantalla: &Screen, columna: u16) -> Vec<char> {
+        let vista = pantalla.view();
+        let celda = *vista.cell(0, columna).expect("la celda existe");
+        vista.adjuntos_de(&celda).to_vec()
+    }
+
+    #[test]
+    fn el_selector_que_convierte_un_simbolo_en_emoji_llega_a_la_vista() {
+        // **Es la razón de ser de este dato.** `☁` y `☁️` son el mismo carácter con presentación
+        // distinta, y lo que los separa —el selector U+FE0F— no ocupa columna: se quedaba en el motor,
+        // así que las dos formas llegaban a quien pinta **idénticas** y no había forma de distinguirlas.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        pantalla.advance("\u{2601}\u{FE0F}".as_bytes());
+
+        assert_eq!(
+            pegado_a(&pantalla, 0),
+            vec!['\u{FE0F}'],
+            "el selector de emoji no llegó a la vista"
+        );
+    }
+
+    #[test]
+    fn el_mismo_simbolo_sin_selector_no_trae_nada_pegado() {
+        // **La otra mitad, y sin ella la de arriba se cumple devolviendo siempre el selector.** Lo que
+        // se afirma es que la vista distingue los dos casos, no que sepa producir uno.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        pantalla.advance("\u{2601}".as_bytes());
+
+        assert!(
+            pegado_a(&pantalla, 0).is_empty(),
+            "una celda sin nada pegado trajo algo"
+        );
+    }
+
+    #[test]
+    fn cada_celda_se_queda_con_lo_suyo_y_no_con_lo_de_la_vecina() {
+        // **El tramo de cada celda apunta a un vector común**, así que dos celdas con cosas pegadas es
+        // el caso donde un desplazamiento mal calculado le da a una lo de la otra. Los dos selectores
+        // son distintos a propósito: con el mismo, cruzarlos daría el mismo resultado.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        pantalla.advance("\u{2601}\u{FE0F}\u{2601}\u{FE0E}".as_bytes());
+
+        assert_eq!(pegado_a(&pantalla, 0), vec!['\u{FE0F}']);
+        assert_eq!(pegado_a(&pantalla, 1), vec!['\u{FE0E}']);
+    }
+
+    #[test]
+    fn lo_pegado_tiene_techo_y_el_motor_no_lo_tiene() {
+        // **El `Vec<char>` de la dependencia crece sin tope**, así que un programa que escupa marcas
+        // combinantes sobre la misma celda lo hace crecer sin límite: una entrada de fuera sin acotar,
+        // el patrón que D8 castigó con la cola de salida. El techo lo pone esta caja al copiar.
+        //
+        // **La PRIMERA marca es distinta de todas las demás, y ésa es la mitad de la prueba.** Con
+        // doscientas marcas iguales, quedarse con las dieciséis **últimas** en vez de con las primeras da
+        // el mismo resultado y esta prueba pasa igual — el segundo disfraz que las reglas del proyecto
+        // nombran: elegir números con los que el defecto y el arreglo coinciden. Y alternar dos marcas
+        // tampoco basta: 200 − 16 = 184 es par, así que el tramo del final arranca con la misma que el
+        // del principio y **la prueba vuelve a pasar rota**. Hicieron falta las dos correcciones.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        let mut bytes = String::from("a");
+        let alternadas: Vec<char> = (0..200)
+            .map(|i| match i {
+                0 => '\u{0300}',
+                i if i % 2 == 0 => '\u{0301}',
+                _ => '\u{0308}',
+            })
+            .collect();
+        bytes.extend(alternadas.iter());
+        pantalla.advance(bytes.as_bytes());
+
+        let pegados = pegado_a(&pantalla, 0);
+        assert_eq!(
+            pegados.len(),
+            16,
+            "lo pegado a una celda pasó del techo de esta caja"
+        );
+        assert_eq!(
+            pegados,
+            alternadas[..16].to_vec(),
+            "el recorte se quedó con las marcas equivocadas: lo que decide la presentación es lo que va \
+             JUSTO detrás del carácter, así que el techo tiene que cortar por el final"
+        );
+    }
+    #[test]
+    fn la_celda_no_engorda_sin_que_nadie_se_entere() {
+        // **La rejilla se reserva ENTERA cada fotograma** (`vec![ViewCell::default(); filas × columnas]`),
+        // así que cada byte que engorde la celda se paga multiplicado por las celdas y por los fotogramas.
+        // Este número no es sagrado —lo pegado a una celda ya lo subió de 24 a 28— pero subirlo tiene que
+        // ser una decisión que alguien tome mirándola, no un efecto de haber añadido un campo. Y ya ha
+        // hecho su trabajo: la primera versión del tramo iba en dos campos anidados y costaba **32**;
+        // empaquetarlo en un entero devolvió cuatro bytes por celda, que son cuatro por fotograma también.
+        assert_eq!(
+            std::mem::size_of::<ViewCell>(),
+            28,
+            "la celda de la vista cambió de tamaño: mira qué campo lo hizo y si compensa"
+        );
+    }
+    #[test]
+    fn el_volcado_a_texto_no_se_deja_lo_que_va_pegado() {
+        // **Devolver `☁` donde el programa escribió `☁️` es devolver OTRO carácter.** El selector de
+        // emoji no ocupa columna pero es texto igual, y quien lea este volcado —una prueba hoy, un
+        // agente leyendo su consola mañana— se lleva algo que nadie escribió. Es la misma regla que
+        // **D22** fija para copiar con el ratón, que el motor ya cumple por su cuenta.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        pantalla.advance("\u{2601}\u{FE0F}".as_bytes());
+
+        assert_eq!(
+            pantalla.to_text(),
+            "\u{2601}\u{FE0F}",
+            "el volcado a texto se dejó el selector por el camino"
+        );
+    }
+
+    #[test]
+    fn el_volcado_a_texto_de_lo_corriente_no_cambia() {
+        // **La otra mitad, y sin ella la de arriba se cumple metiendo caracteres de más.** Lo que el
+        // programa no escribió no puede aparecer aquí.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        pantalla.advance(b"hola");
+
+        assert_eq!(pantalla.to_text(), "hola");
+    }
+
+    #[test]
+    fn lo_pegado_va_con_la_cabeza_del_caracter_ancho_y_no_con_su_acompanante() {
+        // **Es el caso normal de este hito, no una esquina**: CJK y los emojis son ANCHOS, así que
+        // cualquier cosa que se les pegue llega a una celda de dos columnas. Quien pinta recorre celda a
+        // celda, y si el acompañante trajera una copia de lo pegado, la mitad derecha de un emoji se
+        // pintaría con otra presentación que la izquierda.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        pantalla.advance("\u{1F600}\u{FE0F}".as_bytes());
+
+        let vista = pantalla.view();
+        let cabeza = *vista.cell(0, 0).expect("la cabeza existe");
+        let acompanante = *vista.cell(0, 1).expect("el acompañante existe");
+
+        assert_eq!(cabeza.width, CellWidth::WideHead);
+        assert_eq!(acompanante.width, CellWidth::WideTail);
+        assert_eq!(
+            vista.adjuntos_de(&cabeza),
+            &['\u{FE0F}'],
+            "la cabeza del carácter ancho perdió lo que llevaba pegado"
+        );
+        assert!(
+            vista.adjuntos_de(&acompanante).is_empty(),
+            "el acompañante se quedó con una copia de lo pegado, y no es suyo"
+        );
+    }
+
+    #[test]
+    fn lo_pegado_sigue_ahi_cuando_se_sube_por_el_historial() {
+        // **Subir por el historial reconstruye la vista desde otro sitio de la rejilla**, y ahí es donde
+        // un dato nuevo se cae sin que nadie lo note: lo que se ve arriba ya no viene del área activa.
+        // Si el selector se perdiera al subir, la misma línea se pintaría de una forma mientras se
+        // escribe y de otra al volver a mirarla.
+        //
+        // **Se comprueba primero que la línea NO se ve sin subir**, y eso no es ceremonia: sin ese paso
+        // la prueba pasa igual sin desplazarse ni una línea, y entonces no habla del historial. Lo
+        // destapó mutarla.
+        let mut pantalla = Screen::new(Size { rows: 2, cols: 10 });
+        pantalla.advance("\u{2601}\u{FE0F}\r\n".as_bytes());
+        for _ in 0..5 {
+            pantalla.advance(b"relleno\r\n");
+        }
+
+        let sin_subir = pantalla.view();
+        assert_ne!(
+            sin_subir.cell(0, 0).expect("la fila 0 existe").c,
+            '\u{2601}',
+            "la línea del selector se ve sin subir: esta prueba no estaría mirando el historial"
+        );
+
+        pantalla.desplazar(Desplazamiento::AlPrincipio);
+        let vista = pantalla.view();
+        assert!(
+            vista.desplazamiento() > 0,
+            "no se subió por el historial: el desplazamiento sigue en cero"
+        );
+        let celda = *vista
+            .cell(0, 0)
+            .expect("la primera línea del historial se ve");
+        assert_eq!(celda.c, '\u{2601}');
+        assert_eq!(
+            vista.adjuntos_de(&celda),
+            &['\u{FE0F}'],
+            "lo pegado se perdió al subir por el historial"
+        );
     }
 }

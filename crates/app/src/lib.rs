@@ -17,6 +17,7 @@
 //! `logic` ve es la del último pase mostrado, así que leer el teclado ahí reenviaría la última
 //! tecla pulsada miles de veces por segundo durante un volcado.
 
+pub mod fuentes;
 pub mod medida;
 pub mod panel;
 pub mod pintor;

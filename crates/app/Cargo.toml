@@ -41,6 +41,15 @@ serde_json = "1"
 # winit en el árbol y esta línea deja de surtir efecto en silencio.
 winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
 
+# **Quién sabe qué caracteres son emoji y con qué presentación.** No es una tabla que se pueda escribir a
+# mano ni deducir de un rango: `Emoji_Presentation` es una propiedad de Unicode que cambia con cada
+# versión del estándar, y de ella depende que `☁` salga en texto y `☁️` a color.
+#
+# **Ojo con su enumerado: es `#[non_exhaustive]`.** Una categoría que añadan mañana cae en el caso por
+# defecto y sale monocromo, sin que la compilación diga nada. Se acepta a sabiendas — ese carácter saldría
+# **como sale hoy** — y está escrito en `fuentes.rs`, que es donde se decide.
+unicode-properties = { version = "0.1.4", features = ["emoji"] }
+
 # **Solo para el banco de fuentes, y a propósito.** Esta entrega mide qué cuesta descubrir las fuentes
 # del sistema y rasterizar un glifo a color; hasta que esos números decidan cómo se hace, nada de esto
 # entra en producción. Es el mismo criterio con el que el banco del historial midió el motor por debajo

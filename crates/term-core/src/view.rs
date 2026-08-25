@@ -85,10 +85,99 @@ pub enum Underline {
     Dashed,
 }
 
+/// Cuántos caracteres de anchura cero se conservan pegados a una celda.
+///
+/// **El motor no tiene ninguno**, y ésa es la razón de que este exista: el `Vec<char>` de
+/// `alacritty_terminal 0.26` crece sin tope, así que un programa que escupa marcas combinantes sobre la
+/// misma celda lo hace crecer sin límite. Es una entrada de fuera sin acotar — el mismo patrón que **D8**
+/// castigó con la cola de salida.
+///
+/// **Dieciséis, y la razón es acotar, no preservar una secuencia concreta.** La primera versión de este
+/// comentario decía que hacían falta seis para no partir una familia de emoji unida por juntadores
+/// (`👨‍👩‍👧‍👦`), y **eso es falso con este motor**: se comprobó ejecutándolo contra
+/// `alacritty_terminal 0.26`, que solo adjunta caracteres de **anchura cero**, y los cuatro miembros de
+/// esa familia son **anchos**. Llegan como **cuatro celdas**, cada una con **un** juntador pegado — no
+/// como una celda con seis. Quien de verdad puede apilar muchos es una marca combinante repetida, que no
+/// tiene número canónico ninguno.
+///
+/// Así que este número **no preserva nada concreto**: pone un techo donde el motor no tiene ninguno, y
+/// dieciséis es holgado para todo lo que se ha visto llegar. Si algún día algo real se corta aquí, se
+/// sube — con la secuencia delante, que es lo que faltaba la primera vez.
+const ADJUNTOS_POR_CELDA: usize = 16;
+
+// El tramo se empaqueta en un solo entero de 32 bits (ver `Adjuntos`), así que el techo tiene que caber
+// en los cinco bits bajos. Sin esto, subirlo a 32 haría que `cuantos` diera la vuelta **en silencio** y
+// todas las celdas declararan que no llevan nada.
+const _: () = assert!(ADJUNTOS_POR_CELDA <= CUANTOS_MAXIMO as usize);
+
+/// Los caracteres de anchura cero que van pegados a una celda: **dónde están, no cuáles son**.
+///
+/// Es opaco a propósito. Los caracteres viven en un vector plano de la [`View`], y esto es el tramo que
+/// los señala; se leen con [`View::adjuntos_de`].
+///
+/// **Por qué no van dentro de la celda.** [`ViewCell`] es `Copy` y la rejilla se reconstruye **entera cada
+/// fotograma**, así que un `Vec` por celda sería una reserva de memoria por celda y por fotograma en el
+/// camino más caliente del proyecto — y le quitaría el `Copy` a un tipo que lo tiene por eso mismo.
+/// Preguntar por una celda que no lleva nada cuesta comparar un entero con cero.
+///
+/// **Y lo que ese trato cuesta, dicho aquí para que nadie lo descubra a la mala: comparar dos
+/// [`ViewCell`] solo significa algo dentro de la MISMA vista.** Esto es dónde están guardados los
+/// caracteres, no cuáles son, así que dos celdas que muestran exactamente lo mismo en dos vistas
+/// distintas pueden salir **distintas**, y dentro de una misma vista dos celdas sin nada pegado salen
+/// iguales solo porque su tramo vacío arranca en el mismo sitio. Hoy no las compara nadie; el día que
+/// alguien lo necesite, lo que quiere comparar es el carácter y lo que [`View::adjuntos_de`] devuelva.
+/// **Va en UN entero y no en dos campos, y son cuatro bytes por celda.** Medido: con `desde: u32` y
+/// `cuantos: u8` como campos de un tipo anidado, la celda pasa de 24 a **32** bytes, porque el tipo trae
+/// su propio relleno y el `u8` no puede colarse en el hueco que la celda ya tenía. Empaquetado son **28**.
+/// Cuatro bytes por celda, reservados y puestos a cero **cada fotograma**, en el camino que este mismo
+/// módulo vigila con una prueba.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Adjuntos(u32);
+
+/// Cuántos caben en los cinco bits bajos del tramo.
+const CUANTOS_MAXIMO: u32 = 31;
+/// Y cuántos caracteres puede haber por delante en el vector, en los veintisiete de arriba.
+const DESDE_MAXIMO: u32 = (1 << 27) - 1;
+
+impl Adjuntos {
+    /// El tramo que empieza en `desde` y dura `cuantos`, **o nada si alguno no cabe**.
+    ///
+    /// **Nada, y no un tramo recortado**: un `desde` que no quepa y se sature apuntaría a caracteres
+    /// **reales de otra celda**, que es peor que no tener ninguno. La primera versión saturaba, y una
+    /// revisión lo cazó. Es inalcanzable —el vector está acotado por celdas × dieciséis, y aquí caben
+    /// ciento treinta y cuatro millones— así que esto no defiende de nada: **elige el modo de fallo**.
+    fn nuevo(desde: usize, cuantos: usize) -> Self {
+        let (Ok(desde), Ok(cuantos)) = (u32::try_from(desde), u32::try_from(cuantos)) else {
+            return Self::default();
+        };
+        if desde > DESDE_MAXIMO || cuantos > CUANTOS_MAXIMO {
+            return Self::default();
+        }
+        Self(desde << 5 | cuantos)
+    }
+
+    fn desde(self) -> usize {
+        (self.0 >> 5) as usize
+    }
+
+    fn cuantos(self) -> usize {
+        (self.0 & CUANTOS_MAXIMO) as usize
+    }
+}
+
 /// Una celda de la rejilla, ya resuelta para quien la pinte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewCell {
     pub c: char,
+    /// Lo que va **pegado** a este carácter y no ocupa columna: selectores de presentación, marcas
+    /// combinantes, los juntadores de una secuencia de emoji.
+    ///
+    /// **Sin esto, `☁` y `☁️` son la misma celda.** Son el mismo carácter con presentación distinta —la
+    /// segunda lleva detrás el selector de emoji— y quien pinta no tenía forma de distinguirlos: el
+    /// carácter que los separa no ocupa columna, así que se quedaba en el motor.
+    ///
+    /// Los caracteres se leen con [`View::adjuntos_de`]; esto solo dice dónde están.
+    pub adjuntos: Adjuntos,
     /// Color del carácter. **El vídeo inverso ya está aplicado**: si el programa lo pidió, este es
     /// el fondo declarado. Resolverlo aquí evita que cada capa de pintado repita la misma regla, y
     /// que una de ellas se olvide.
@@ -136,6 +225,7 @@ impl Default for ViewCell {
     fn default() -> Self {
         Self {
             c: ' ',
+            adjuntos: Adjuntos::default(),
             fg: TermColor::Foreground,
             bg: TermColor::Background,
             width: CellWidth::Single,
@@ -186,6 +276,11 @@ pub struct View {
     /// nada fallaría — la comprobación del constructor solo corre en depuración.
     size: Size,
     cells: Vec<ViewCell>,
+    /// Todo lo que va pegado a las celdas, **plano y en un solo sitio**.
+    ///
+    /// Cada celda que lleve algo señala aquí su tramo; las que no llevan nada —casi todas— no ocupan.
+    /// Ver [`Adjuntos`] para por qué no van dentro de la celda.
+    adjuntos: Vec<char>,
     /// Dónde está el cursor, **si es que se ve**.
     ///
     /// **Es opcional desde que hay historial, y no es prudencia**: subiendo por el historial el
@@ -207,6 +302,7 @@ impl View {
     pub(crate) fn new(
         size: Size,
         cells: Vec<ViewCell>,
+        adjuntos: Vec<char>,
         cursor: Option<Cursor>,
         desplazamiento: usize,
     ) -> Self {
@@ -214,9 +310,32 @@ impl View {
         Self {
             size,
             cells,
+            adjuntos,
             cursor,
             desplazamiento,
         }
+    }
+
+    /// Los caracteres de anchura cero pegados a una celda, en el orden en que llegaron.
+    ///
+    /// Vacío es el caso corriente. **La celda se pasa entera y no su tramo**: `vista.adjuntos(celda.adjuntos)`
+    /// decía dos veces la misma palabra, y esa repetición era la señal de que la costura estaba puesta
+    /// donde no se usa.
+    pub fn adjuntos_de(&self, celda: &ViewCell) -> &[char] {
+        let tramo = celda.adjuntos;
+        let (desde, hasta) = (tramo.desde(), tramo.desde() + tramo.cuantos());
+        // **Un tramo que se saliera es una vista mal construida, no un dato del programa**, así que salta
+        // en las pruebas en vez de disfrazarse de «esta celda no llevaba nada». En producción degrada a
+        // vacío, que es lo único seguro que se puede hacer con un índice en el que ya no se confía.
+        //
+        // La primera versión decía esto mismo en un comentario y hacía lo contrario: devolvía vacío **sin
+        // saltar**, o sea exactamente el disfraz que decía evitar. Lo cazó una revisión.
+        debug_assert!(
+            hasta <= self.adjuntos.len(),
+            "un tramo de la vista apunta fuera de su propio vector: {desde}..{hasta} de {}",
+            self.adjuntos.len()
+        );
+        self.adjuntos.get(desde..hasta).unwrap_or_default()
     }
 
     /// El tamaño de la rejilla que retrata esta vista.
@@ -363,9 +482,22 @@ fn subrayado_desde(banderas: Flags) -> Underline {
 /// como un rango de la rejilla, no como una bandera por celda. Quien recorre la rejilla ya sabe de cada
 /// celda si el rango la incluye, y preguntárselo aquí obligaría a pasarle el rango entero —o sea a
 /// filtrar un tipo del motor hasta este módulo.
-pub(crate) fn celda_desde(celda: &Cell, seleccionada: bool) -> ViewCell {
+///
+/// **`adjuntos` es el vector de toda la vista, y esta función escribe en él.** Lo que va pegado a la celda
+/// no cabe dentro de ella —ver [`Adjuntos`]—, así que se copia al final del vector común y la celda se
+/// queda con el tramo.
+pub(crate) fn celda_desde(celda: &Cell, seleccionada: bool, adjuntos: &mut Vec<char>) -> ViewCell {
     {
         let banderas = celda.flags;
+
+        let pegados = celda.zerowidth().unwrap_or_default();
+        let cuantos = pegados.len().min(ADJUNTOS_POR_CELDA);
+        // **El tramo se toma antes de copiar**, que es cuando `desde` vale el final actual del vector.
+        let tramo = Adjuntos::nuevo(adjuntos.len(), cuantos);
+        // **Los PRIMEROS, no los últimos.** Lo que decide la presentación es el carácter que va justo
+        // detrás del de la celda, así que recortar por el otro extremo se llevaría por delante justo el
+        // que importa.
+        adjuntos.extend_from_slice(&pegados[..cuantos]);
 
         // Son tres banderas, no dos: además del carácter ancho y su acompañante, el terminal marca
         // el hueco que deja al final de una fila cuando el carácter no cabe y lo baja entera a la
@@ -392,6 +524,7 @@ pub(crate) fn celda_desde(celda: &Cell, seleccionada: bool) -> ViewCell {
 
         ViewCell {
             c: celda.c,
+            adjuntos: tramo,
             fg,
             bg,
             width,
@@ -404,5 +537,64 @@ pub(crate) fn celda_desde(celda: &Cell, seleccionada: bool) -> ViewCell {
             hidden: banderas.contains(Flags::HIDDEN),
             selected: seleccionada,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Una vista de una sola celda con ese vector de caracteres pegados detrás.
+    fn vista_con(adjuntos: Vec<char>) -> View {
+        View::new(
+            Size { rows: 1, cols: 1 },
+            vec![ViewCell::default()],
+            adjuntos,
+            None,
+            0,
+        )
+    }
+
+    /// Una celda que señala ese tramo.
+    fn celda_que_senala(tramo: Adjuntos) -> ViewCell {
+        ViewCell {
+            adjuntos: tramo,
+            ..ViewCell::default()
+        }
+    }
+
+    #[test]
+    fn un_tramo_que_no_cabe_en_el_entero_deja_la_celda_sin_nada_en_vez_de_recortarse() {
+        // **Recortar al máximo que cabe sería enseñar lo de la celda de al lado como si fuera de
+        // ésta.** Los caracteres de todas las celdas viven en un vector común, así que un `cuantos`
+        // saturado a los treinta y uno que caben en el entero se lleva por delante los de quien venga
+        // detrás — y el que mira no tiene forma de saber que lo que ve no lo escribió ahí nadie.
+        // Rendirse deja la celda sin nada pegado, que es exactamente como se veía antes de esta
+        // entrega.
+        //
+        // Los cuarenta caracteres del vector son los que un `cuantos` saturado devolvería: si se
+        // recortara, esta celda se quedaría con treinta y uno de ellos.
+        let vista = vista_con(vec!['\u{0301}'; 40]);
+        let celda = celda_que_senala(Adjuntos::nuevo(0, 40));
+
+        assert!(
+            vista.adjuntos_de(&celda).is_empty(),
+            "un tramo que no cabe se recortó en vez de rendirse, y lo recortado son caracteres de otra celda"
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "apunta fuera de su propio vector")]
+    fn un_tramo_que_se_sale_del_vector_salta_en_vez_de_pasar_por_una_celda_sin_nada() {
+        // **Devolver vacío sin más convierte una vista mal construida en «esta celda no llevaba
+        // nada».** Son dos cosas distintas y se ven igual, así que el fallo viajaría hasta el pintado
+        // y se manifestaría como un emoji que perdió su selector — a mil líneas de donde se rompió.
+        // En depuración salta aquí; en producción degrada a vacío, que es lo único seguro que se
+        // puede hacer con un índice del que ya no te fías.
+        let vista = vista_con(vec!['\u{FE0F}']);
+        let celda = celda_que_senala(Adjuntos::nuevo(0, 2));
+
+        let _ = vista.adjuntos_de(&celda);
     }
 }

@@ -16,7 +16,7 @@ mod screen;
 mod view;
 
 pub use screen::{Celda, Desplazamiento, HISTORIAL, Mitad, RatonReclamado, Screen};
-pub use view::{CellWidth, Cursor, CursorShape, TermColor, Underline, View, ViewCell};
+pub use view::{Adjuntos, CellWidth, Cursor, CursorShape, TermColor, Underline, View, ViewCell};
 
 /// Error de cualquier operación sobre el pseudoterminal.
 ///

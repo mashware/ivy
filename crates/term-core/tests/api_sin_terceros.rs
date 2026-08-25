@@ -86,6 +86,7 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
     for celda in vista.cells() {
         let ViewCell {
             c,
+            adjuntos,
             fg,
             bg,
             width,
@@ -103,6 +104,15 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
         assert!(!describir(bg).is_empty());
         assert!(!describir_ancho(width).is_empty());
         assert!(!describir_subrayado(underline).is_empty());
+        // **Lo pegado se consume de verdad, no se descarta.** Es el campo que más fácil sería sacar
+        // con un tipo de la dependencia —el motor lo guarda en un `Vec<char>` suyo— y lo que esta
+        // prueba defiende es justo eso: sale como un tramo de `char` del estándar.
+        let pegados: &[char] = vista.adjuntos_de(celda);
+        assert!(
+            pegados.is_empty(),
+            "esta pantalla es ASCII: ninguna celda debería traer nada pegado"
+        );
+        let _ = adjuntos;
         let _ = (c, inverse, bold, dim, italic, strikeout, hidden, selected);
     }
 

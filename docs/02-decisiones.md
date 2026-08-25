@@ -2475,6 +2475,13 @@ si vive en el de otro.
 > **Cuando `htop` te borre la selección, la razón está aquí.** Ese era el objeto de escribirlas: sin esta
 > sección, la explicación vive en el fuente de una dependencia y quien la busque no sabe ni que existe.
 
+**Una quinta regla que faltaba, y que el volcado a texto incumplía: lo que va pegado a un carácter también
+es texto.** Un selector de emoji —`U+FE0F`— o una marca combinante **no ocupan columna**, pero el programa
+los escribió. Copiar con el ratón siempre los ha conservado, porque eso lo hace el motor; **el volcado a
+texto de esta caja los tiraba**, así que un programa que escribiera `☁️` se leía como `☁`. No es un
+carácter recortado: es **otro** carácter. Corregido en agosto de 2026, al añadirle a la vista lo que va
+pegado a cada celda (**F2.9**), que es cuando el defecto se hizo visible por primera vez.
+
 **Y una regla que este proyecto añade, porque el motor no puede saberla.** El acompañante de un carácter
 ancho **se realza con su cabeza**. El motor hace solo el camino contrario —marca la cabeza cuando el
 acompañante cae dentro, para que su texto no salga cortado— y le basta porque **su** pintor dibuja el
