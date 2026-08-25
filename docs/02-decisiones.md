@@ -3096,3 +3096,91 @@ escriben nada. Pero el fichero acepta `shift+e` y el documento lo publica como v
 Se consumen los dos: al consumir la tecla como atajo se descarta el texto que viene detrás. La alternativa
 —rechazar los acordes sin Ctrl sobre teclas imprimibles— era más barata y le quitaba a quien configura
 `shift+F5` y compañía por el mismo precio.
+
+---
+
+## D27 — Todo el repositorio va en inglés: código, documentos, commits y ramas
+
+**El código propio de este proyecto estuvo en español desde el primer commit** —7 de agosto de 2026—:
+tipos, funciones, campos, módulos, los nombres de diez ficheros, los comentarios, el rustdoc, los 853
+nombres de prueba y los mensajes de sus afirmaciones. También lo que ve quien usa el terminal: las claves
+del fichero de configuración y los mensajes por pantalla.
+
+**Y esa decisión no estaba escrita en ningún sitio.** Ésta es la primera vez que aparece en este
+documento, dieciocho días después de tomarse. El proyecto tiene como regla dura que *no hay decisiones
+que vivan solo en el código*, y esta la incumplió desde el día uno — que es exactamente por lo que creció
+sin que nadie la mirara: nunca hubo un párrafo al que volver.
+
+**Lo que había en la práctica era un híbrido sin enunciar.** En inglés, los nombres de las cajas y todo lo
+que toca al ecosistema (`Screen`, `Size`, `Point`, `spawn`, lo que viene de `alacritty_terminal`, `egui` o
+`serde`); en español, el dominio propio (`Ventana`, `Pestaña`, `Celda`, `Desplazamiento`,
+`RatonReclamado`). La frontera era real y funcionaba, pero al no estar dicha producía líneas como
+`pub struct Screen` con un `pub struct Celda` al lado.
+
+### La decisión
+
+**Todo lo que vive en el repositorio pasa a inglés**: el código propio, los nombres de fichero, los
+comentarios, el rustdoc, las pruebas, los documentos, **los mensajes de commit, los nombres de rama y los
+PR**. Y también lo que ve quien usa el terminal: las claves del fichero —`background`, `size`,
+`key.split-right`— y los mensajes por pantalla.
+
+**Sin compatibilidad con las claves en español, y no es un descuido**: nadie tiene este terminal
+instalado todavía, así que no hay ningún fichero de configuración ahí fuera al que respetarle nada. Una
+tabla de alias sería deuda desde el minuto cero, mantenida para un usuario que no existe. Es la única
+ventana en la que este cambio sale gratis, y por eso se hace ahora.
+
+**El español se queda solo en la conversación de trabajo**, que no vive en el repositorio.
+
+### Por qué
+
+- **El listón que este proyecto se puso es el de un usuario de WezTerm, Ghostty o Kitty** (**D19**), y
+  ninguno de los tres se lee en español. Un terminal que no se puede leer no se puede contribuir, ni
+  auditar, ni bifurcar.
+- **Cuanto más tarde, más caro.** Son 43.860 líneas propias hoy, y cada hito las aumenta.
+- **Pide el árbol limpio**: durante la migración cualquier rama abierta da conflicto en todo. Por eso va
+  justo después de mezclarse F2.10 y **por delante de su cuarta entrega**.
+
+### Lo descartado
+
+- **Dejarlo en español y escribir la D que faltaba.** Cierra el incumplimiento por minutos y no cuesta
+  nada. Se descarta porque no resuelve el problema de fondo: el código sigue sin poder leerlo nadie de
+  fuera, y el precio de arreglarlo sube con cada hito.
+- **Inglés solo de aquí en adelante.** Es la peor de las tres: deja dos idiomas mezclados **sin frontera
+  que los explique**, que es peor que cualquiera de los dos puros — y es justamente el estado del que este
+  hito sale.
+- **Traducir los comentarios a máquina.** Este repositorio vale por lo que sus comentarios explican, no
+  por sus líneas de código: llevan el porqué de cada decisión con mucho matiz —«miente», «el disfraz
+  fichado», «el defecto y el arreglo dan el mismo resultado»— y una traducción mecánica los convierte en
+  ruido. Se traducen a mano, y ahí es donde se va el tiempo del hito.
+- **Aceptar las claves en los dos idiomas.** Es lo que haría **D26** si hubiera alguien a quien
+  respetarle un fichero ya escrito — pero no lo hay: el terminal no está instalado en ninguna parte. Una
+  tabla de alias nace como deuda y se mantiene para siempre por un usuario que nunca existió.
+
+### Los commits, las ramas y los PR, desde ya
+
+**No esperan al hito.** Se escriben en inglés desde esta misma decisión — son cosa nueva cada vez, así
+que no hay nada que migrar y aplazarlo solo produciría más material que traducir. Los que ya están
+escritos se quedan como están: reescribir el histórico cuesta más de lo que aclara.
+
+**Los documentos son la excepción, y solo mientras dure el hito.** Una decisión en inglés dentro de un
+`02-decisiones.md` en español se lee peor que las dos cosas puras. Se traducen **enteros**, de una vez,
+en su entrega — no se van mezclando fichero a fichero.
+
+### Lo que este hito tiene que decidir antes de escribir código
+
+Queda abierto a propósito, porque decidirlo aquí sería adelantar trabajo del hito:
+
+1. **Dónde queda la frontera** con el ecosistema, enunciada y no solo practicada.
+2. **Cómo se entrega.** Un solo cambio de 43.860 líneas no lo revisa nadie.
+3. **Qué mecanismo para los mensajes por pantalla**, si es que hace falta alguno más allá de escribirlos
+   en inglés.
+4. **Qué pasa con el conocimiento ya almacenado**, escrito en español.
+
+### El riesgo que no es de traducción
+
+**El histórico de medida se apoya en nombres que aparecen en informes y en guiones.** El banco de medida
+invalida corridas por lo que el informe **dice** —`configuración: vetada`, los recuentos de arrastres, el
+testigo de las fuentes—, y esos textos los buscan guardas de `scripts/medir-fotograma.sh` con `grep`.
+Renombrar sin mirar no rompe una prueba: **rompe una guarda**, y una guarda rota publica como buena una
+corrida mentirosa. Es el mismo modo de fallo que este proyecto ya pagó una vez, cuando la guarda del
+guion estaba muerta y su verificación fue falsa.

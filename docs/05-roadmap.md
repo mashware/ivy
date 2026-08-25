@@ -45,6 +45,9 @@ que se vean tus fuentes —los iconos de un `ls` y el japonés, no cuadros vací
 la fuente, el tamaño, los colores y los atajos, y que el ratón llegue al programa de dentro para
 poder hacer clic en `vim`.
 
+**Y que se pueda leer fuera de aquí**: el terminal habla **inglés** — sus claves de configuración, sus
+mensajes y su código.
+
 **Lo que falta:** el panel sigue siendo de solo lectura. Cuenta cosas, no puedes hacer nada
 desde él.
 
@@ -240,12 +243,19 @@ Lo que convierte el prototipo en algo que se usa a diario.
 | **F2.8** ✅ | **El panel dice cuándo te reclama, y la pestaña lo acumula** — **cerrado el 24 de agosto de 2026**. Tres entregas; el campo `attention` y quién lo declara en [D18](02-decisiones.md), los tres símbolos medidos y la tabla de color propia en el anexo de [D9](02-decisiones.md), y en el anexo de D18 lo que cuesta la barra desde que su ficha acumula: **entre 2,35 y 2,69 µs por fotograma**, medido con dos pestañas y los cuatro productores reclamando. El aviso del sistema se quedó fuera a propósito, hasta que el campo tenga productores |
 | **F2.9** ✅ | **Las fuentes del sistema** — **cerrado el 25 de agosto de 2026**. Cuatro entregas; CJK, los iconos de un `ls` y **los emojis a color** dejan de salir como cuadros. Que se busquen **cuando hacen falta** y no al arrancar lo decidió una medida ([D24](02-decisiones.md): 23,5–31,0 ms al arranque contra 4,0–5,7 perezoso), y el emoji a color va por su cuenta porque **epaint no sabe rasterizar color** ([D25](02-decisiones.md)). Dos hallazgos que reordenaron trabajo: `Fonts::has_glyph` **miente** —devuelve `false` para la `'a'`—, y una fuente de iconos puesta delante le quitaba **tres de cada cinco letras** al terminal. En los anexos: dibujar con emojis en pantalla cuesta **356 µs contra 269 del control**, después de que el atlas y la pasada propia lo bajaran desde 743. `COLR` —lo que usa Windows— y los tonos de piel quedan fuera, con su razón |
 | **F2.10** | **Configuración** — fuente, tamaño, colores y atajos. Es la primera cosa que hace cualquiera al instalar un terminal, y hasta **D19** no aparecía en este roadmap |
+| **F2.12** | **Todo el repositorio en inglés** — el código propio, los comentarios, las pruebas y los documentos están **en español desde el primer commit**, y esa decisión **no está escrita en ninguna parte**, que es lo que la dejó crecer. Pasa todo a inglés, claves de configuración y mensajes incluidos, **sin compatibilidad hacia atrás**: nadie tiene este terminal instalado, así que no hay ningún fichero ahí fuera al que respetarle nada, y es la única ventana en la que sale gratis. Commits, ramas y PR pasan a inglés **desde ya**, sin esperar al hito. **Se ejecuta el primero de la fase que queda** — ver abajo. [#122](https://github.com/mashware/agent-terminal/issues/122), **D27** |
 | **F2.11** | **Una cabecera por división** — al estilo de Tilix: el asidero para arrastrarla, su botón de cerrar, y de un vistazo cuál tiene el foco. Sale de **D20**, donde se descartó **como parte de F2.6** y no como idea: cuesta alto a **todas** las consolas siempre, y eso deja de comparar con nada las tandas de control ya publicadas. Su hito tiene que empezar por decidir qué se hace con esas medidas |
 
 **De dónde sale esta lista, desde D19.** El listón que hay que pasar antes de publicar es el de un
 usuario de WezTerm, Ghostty o Kitty — **no** el de un usuario de Orca. Eso es lo que mete a F2.9 y
 F2.10 en la fase y lo que deja fuera el navegador integrado, la app móvil, el editor y el abanico de
 agentes: la lista entera de lo que queda fuera, con quién lo tiene, está en **D19**.
+
+**F2.12 se hace antes que F2.10, F2.7 y F2.11, y el número tampoco se recicla** — por la misma razón que
+F2.8 más abajo. Va delante porque **cuanto más código haya, más caro sale**: 43.860 líneas propias hoy, y
+cada hito las aumenta. Y porque durante la migración cualquier rama abierta da conflicto en todo, así que
+pide el árbol limpio — que es como quedó al mezclarse F2.10. **F2.10 se queda con tres entregas de
+cuatro**: elegir la fuente por su nombre espera a que esto termine.
 
 **F2.8 se hace antes que F2.6 y F2.7, y el número no se recicla.** Los identificadores de hito viven
 en commits, decisiones y en el almacén de conocimiento, así que renumerar sale más caro que aceptar
