@@ -629,3 +629,610 @@ mod tests {
         assert!(bytes(&Event::WindowFocused(true)).is_none());
     }
 }
+
+// ── Los atajos de la aplicación: qué acorde hace qué ────────────────────────────────────────────
+
+/// Lo que la aplicación hace cuando alguien pulsa un acorde suyo.
+///
+/// **Once, y son las que hoy existen.** No es una lista abierta a propósito: cada una tiene su condición y
+/// su efecto escritos en el sitio donde ocurren, y una acción sin efecto sería un nombre que se puede
+/// configurar y no hace nada.
+///
+/// **Copiar y pegar no están aquí, y no es un olvido.** Sus acordes **no llegan como teclas**: el
+/// escritorio los resuelve antes y llegan como eventos propios, sin acorde que reasignar ni que devolverle
+/// al programa de dentro. Lo de pegar está comprobado desde F2.6; lo de copiar lo destapó una revisión de
+/// este hito, **ejecutándolo**, y de paso encontró que hasta entonces copiar no copiaba: interrumpía el
+/// programa.
+///
+/// Los dos se apagan con `copiar = no` y `pegar = no`, que es lo único que se puede hacer con ellos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Accion {
+    PartirAlLado,
+    PartirDebajo,
+    CerrarDivision,
+    PestanaNueva,
+    CerrarPestana,
+    PestanaAnterior,
+    PestanaSiguiente,
+    SubirUnaPagina,
+    BajarUnaPagina,
+    IrAlPrincipio,
+    IrAlFinal,
+}
+
+impl Accion {
+    /// Cómo se escribe en el fichero de configuración.
+    pub fn como_se_escribe(self) -> &'static str {
+        match self {
+            Self::PartirAlLado => "partir-al-lado",
+            Self::PartirDebajo => "partir-debajo",
+            Self::CerrarDivision => "cerrar-division",
+            Self::PestanaNueva => "pestaña-nueva",
+            Self::CerrarPestana => "cerrar-pestaña",
+            Self::PestanaAnterior => "pestaña-anterior",
+            Self::PestanaSiguiente => "pestaña-siguiente",
+            Self::SubirUnaPagina => "subir-una-pagina",
+            Self::BajarUnaPagina => "bajar-una-pagina",
+            Self::IrAlPrincipio => "ir-al-principio",
+            Self::IrAlFinal => "ir-al-final",
+        }
+    }
+
+    /// La que se escribe así, si alguna.
+    ///
+    /// **Las eñes se admiten también sin eñe**, por lo mismo que el tamaño de letra: quien teclea desde un
+    /// teclado que no es el suyo no debería quedarse sin poder configurar las pestañas.
+    pub fn de_como_se_escribe(texto: &str) -> Option<Self> {
+        TODAS.iter().copied().find(|accion| {
+            accion.como_se_escribe() == texto || accion.como_se_escribe().replace('ñ', "n") == texto
+        })
+    }
+}
+
+/// Las once, para recorrerlas.
+pub const TODAS: [Accion; 11] = [
+    Accion::PartirAlLado,
+    Accion::PartirDebajo,
+    Accion::CerrarDivision,
+    Accion::PestanaNueva,
+    Accion::CerrarPestana,
+    Accion::PestanaAnterior,
+    Accion::PestanaSiguiente,
+    Accion::SubirUnaPagina,
+    Accion::BajarUnaPagina,
+    Accion::IrAlPrincipio,
+    Accion::IrAlFinal,
+];
+
+/// Un acorde: las teclas de mando que hacen falta, y la tecla.
+///
+/// **`Copy` y comparable por valor**, porque es la clave con la que se busca en la tabla una vez por
+/// evento de teclado — el camino más caliente que este proyecto tiene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Acorde {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub tecla: eframe::egui::Key,
+}
+
+impl Acorde {
+    /// El acorde que se escribe así, si se puede.
+    ///
+    /// Las partes van separadas por `+`, en cualquier orden y sin importar mayúsculas: `ctrl+shift+e`,
+    /// `Shift+Prior`, `alt+f4`.
+    pub fn de_como_se_escribe(texto: &str) -> Option<Self> {
+        let mut acorde = Self {
+            ctrl: false,
+            shift: false,
+            alt: false,
+            tecla: eframe::egui::Key::Space,
+        };
+        let mut tecla = None;
+        for parte in texto.split('+') {
+            let parte = parte.trim();
+            match parte.to_ascii_lowercase().as_str() {
+                "ctrl" | "control" => acorde.ctrl = true,
+                "shift" | "mayus" | "mayús" | "mayusculas" | "mayúsculas" => acorde.shift = true,
+                "alt" => acorde.alt = true,
+                _ => {
+                    // **Una sola tecla por acorde.** Dos serían un acorde que no se puede pulsar, y
+                    // aceptarlo dejaría al usuario esperando que funcionara.
+                    if tecla.is_some() {
+                        return None;
+                    }
+                    tecla = Some(tecla_de(parte)?);
+                }
+            }
+        }
+        acorde.tecla = tecla?;
+        // **Los acordes de copiar y de pegar no se pueden reclamar, y aceptarlos sería prometer algo que
+        // no ocurre.** El escritorio los resuelve **antes** de que lleguen: no aparecen como teclas, llegan
+        // ya convertidos en un copiado o un pegado, y **sin decir si había Mayúsculas**. Un
+        // `atajo.partir-al-lado = ctrl+shift+c` se aceptaría, no funcionaría nunca, y quien lo escribió no
+        // tendría forma de saber por qué.
+        if acorde.ctrl && matches!(acorde.tecla, eframe::egui::Key::C | eframe::egui::Key::V) {
+            return None;
+        }
+        // **Un acorde sin ninguna tecla de mando se le queda al programa de dentro.** Admitirlo sería
+        // dejar que quien configura se quite la `a` de escribir sin que nada se lo advierta.
+        (acorde.ctrl || acorde.shift || acorde.alt).then_some(acorde)
+    }
+}
+
+/// La tecla que se escribe así, si existe.
+///
+/// **`Key::from_name` distingue mayúsculas y quien escribe un fichero de configuración no**: `F4` sí y
+/// `f4` no, `PageUp` sí y `pageup` no. Comprobado ejecutándolo. Así que se prueba tal cual, y si no, con
+/// la inicial en mayúscula.
+///
+/// **Y hay alias, en los dos idiomas.** `prior` y `next` son como los llaman los terminales de siempre —y
+/// como los llamaba el documento de este proyecto antes de que nadie comprobara que no existen—; los del
+/// español están porque el fichero se escribe en español y `supr` es lo que pone en el teclado.
+fn tecla_de(nombre: &str) -> Option<eframe::egui::Key> {
+    use eframe::egui::Key;
+    let alias = match nombre.to_ascii_lowercase().as_str() {
+        "prior" | "pgup" | "repag" | "repág" => Some(Key::PageUp),
+        "next" | "pgdn" | "avpag" | "avpág" => Some(Key::PageDown),
+        "supr" | "suprimir" => Some(Key::Delete),
+        "inicio" => Some(Key::Home),
+        "fin" => Some(Key::End),
+        "esc" => Some(Key::Escape),
+        "intro" | "retorno" => Some(Key::Enter),
+        "tabulador" => Some(Key::Tab),
+        "espacio" => Some(Key::Space),
+        // **Las flechas se escriben con la flecha, y así las publica el documento del proyecto.** No
+        // aceptarlas fue un desajuste real entre lo que se prometía y lo que el código entendía, cazado
+        // contrastando el documento contra la fuente.
+        "arriba" | "↑" => Some(Key::ArrowUp),
+        "abajo" | "↓" => Some(Key::ArrowDown),
+        "izquierda" | "←" => Some(Key::ArrowLeft),
+        "derecha" | "→" => Some(Key::ArrowRight),
+        _ => None,
+    };
+    if alias.is_some() {
+        return alias;
+    }
+    // **Se busca entre TODAS ignorando mayúsculas, y no dándole la vuelta al nombre.** Poner la inicial
+    // en mayúscula arregla `f4` pero no `pageup`, que de verdad se llama `PageUp` con dos. Recorrer la
+    // lista es una vez por línea del fichero, no por fotograma.
+    Key::ALL
+        .iter()
+        .copied()
+        .find(|tecla| tecla.name().eq_ignore_ascii_case(nombre))
+}
+
+/// Qué acorde hace cada cosa.
+///
+/// **Es la única fuente de qué acorde pertenece a la aplicación**, y ésa es la razón de que exista. Antes
+/// eran **dos listas paralelas** —una decía si el acorde era nuestro y otra qué hacía— y desalinearlas ya
+/// dejó una flecha «en la cola sin llegar nunca al programa», con su comentario escrito en el sitio. Con
+/// once acordes configurables ese riesgo se multiplica por once.
+///
+/// **Lo que NO unifica es la condición de cada acción**: que crear no valga repetido, o que cambiar de
+/// pestaña solo sea nuestro con más de una abierta, sigue colgando de la acción que lo necesita. Son
+/// reales y tienen que sobrevivir a que el acorde cambie.
+#[derive(Debug, Clone)]
+pub struct Atajos {
+    /// Pares acorde → acción. **Un vector y no un mapa**: son once como mucho, y recorrer once parejas de
+    /// booleanos y un entero es más rápido que resumir el acorde a un número. Se busca una vez por evento
+    /// de teclado, que es el camino más caliente del proyecto.
+    tabla: Vec<(Acorde, Accion)>,
+}
+
+impl Default for Atajos {
+    /// Los de fábrica: los mismos trece de siempre menos pegar, que no llega como tecla.
+    fn default() -> Self {
+        use eframe::egui::Key;
+        let mando = |tecla| Acorde {
+            ctrl: true,
+            shift: true,
+            alt: false,
+            tecla,
+        };
+        // **El historial va con `Mayúsculas` a secas, y no es una excepción caprichosa.** Sin ella,
+        // `RePág` es del programa —un paginador la usa— y quitársela sería romper `less` dentro de esta
+        // ventana.
+        let historial = |tecla| Acorde {
+            ctrl: false,
+            shift: true,
+            alt: false,
+            tecla,
+        };
+        Self {
+            tabla: vec![
+                (mando(Key::D), Accion::PartirAlLado),
+                (mando(Key::B), Accion::PartirDebajo),
+                (mando(Key::X), Accion::CerrarDivision),
+                (mando(Key::T), Accion::PestanaNueva),
+                (mando(Key::W), Accion::CerrarPestana),
+                (mando(Key::ArrowLeft), Accion::PestanaAnterior),
+                (mando(Key::ArrowRight), Accion::PestanaSiguiente),
+                (historial(Key::PageUp), Accion::SubirUnaPagina),
+                (historial(Key::PageDown), Accion::BajarUnaPagina),
+                (historial(Key::Home), Accion::IrAlPrincipio),
+                (historial(Key::End), Accion::IrAlFinal),
+            ],
+        }
+    }
+}
+
+impl Atajos {
+    /// Qué acción hace ese acorde, si alguna.
+    ///
+    /// **Un acorde que no está en la tabla NO es de la aplicación**, y sus bytes bajan al programa de
+    /// dentro. Es la mitad que hace que desatar un atajo sirva de algo.
+    pub fn accion_de(&self, acorde: Acorde) -> Option<Accion> {
+        self.tabla
+            .iter()
+            .find(|(cual, _)| *cual == acorde)
+            .map(|(_, accion)| *accion)
+    }
+
+    /// Le cambia el acorde a una acción. `None` la desata.
+    ///
+    /// Devuelve la acción que se queda **sin** su acorde por el choque, si alguna: dos acciones no pueden
+    /// compartir acorde, porque entonces pulsar no sabría cuál de las dos hacer.
+    pub fn poner(&mut self, accion: Accion, acorde: Option<Acorde>) -> Option<Accion> {
+        self.tabla.retain(|(_, cual)| *cual != accion);
+        let acorde = acorde?;
+        // **Gana la última leída, y se dice cuál perdió.** Es lo que hace que pegar un juego de atajos
+        // encima de otro haga lo que se espera; callarlo dejaría a alguien media hora cambiando una línea
+        // que otra de más abajo está pisando.
+        let pisada = self
+            .tabla
+            .iter()
+            .find(|(cual, _)| *cual == acorde)
+            .map(|(_, accion)| *accion);
+        self.tabla.retain(|(cual, _)| *cual != acorde);
+        self.tabla.push((acorde, accion));
+        pisada
+    }
+}
+
+#[cfg(test)]
+mod pruebas_de_atajos {
+    use super::*;
+    use eframe::egui::Key;
+
+    #[test]
+    fn el_documento_publica_exactamente_los_atajos_que_el_codigo_tiene() {
+        // **Es el revisor que más rinde en este proyecto, escrito como prueba.** Contrastar el documento
+        // publicado contra la fuente encontró nueve desajustes en un solo PR, ninguno visible en el diff.
+        // Aquí ya cazó dos: el documento prometía «shift+prior», que el código rechazaba, y publicaba las
+        // flechas con su símbolo, que tampoco entendía.
+        //
+        // **La tabla de abajo se copia del documento a mano y a propósito.** Generarla del código mediría
+        // que el código es consistente consigo mismo; lo que hay que atar es que lo publicado sea verdad.
+        let publicado = [
+            ("partir-al-lado", "ctrl+shift+d", Accion::PartirAlLado),
+            ("partir-debajo", "ctrl+shift+b", Accion::PartirDebajo),
+            ("cerrar-division", "ctrl+shift+x", Accion::CerrarDivision),
+            ("pestaña-nueva", "ctrl+shift+t", Accion::PestanaNueva),
+            ("cerrar-pestaña", "ctrl+shift+w", Accion::CerrarPestana),
+            ("pestaña-anterior", "ctrl+shift+←", Accion::PestanaAnterior),
+            (
+                "pestaña-siguiente",
+                "ctrl+shift+→",
+                Accion::PestanaSiguiente,
+            ),
+            ("subir-una-pagina", "shift+repág", Accion::SubirUnaPagina),
+            ("bajar-una-pagina", "shift+avpág", Accion::BajarUnaPagina),
+            ("ir-al-principio", "shift+home", Accion::IrAlPrincipio),
+            ("ir-al-final", "shift+end", Accion::IrAlFinal),
+        ];
+        assert_eq!(
+            publicado.len(),
+            TODAS.len(),
+            "el documento publica {} atajos y el código tiene {}",
+            publicado.len(),
+            TODAS.len()
+        );
+
+        let atajos = Atajos::default();
+        for (nombre, escrito, accion) in publicado {
+            assert_eq!(
+                Accion::de_como_se_escribe(nombre),
+                Some(accion),
+                "el documento publica el nombre «{nombre}» y el código no lo entiende"
+            );
+            let acorde = Acorde::de_como_se_escribe(escrito).unwrap_or_else(|| {
+                panic!("el documento publica «{escrito}» y el código no lo entiende")
+            });
+            assert_eq!(
+                atajos.accion_de(acorde),
+                Some(accion),
+                "el documento dice que «{nombre}» es «{escrito}» de fábrica, y no lo es"
+            );
+        }
+    }
+
+    #[test]
+    fn los_once_de_fabrica_son_los_mismos_de_siempre() {
+        // **Es lo que hace que este cambio no rompa a nadie.** Los acordes de fábrica son los que el
+        // terminal tenía antes de que se pudieran configurar, y una tabla que naciera con otros los
+        // cambiaría de golpe a todo el mundo sin que nadie lo pidiera.
+        let atajos = Atajos::default();
+        let mando = |tecla| Acorde {
+            ctrl: true,
+            shift: true,
+            alt: false,
+            tecla,
+        };
+        let historial = |tecla| Acorde {
+            ctrl: false,
+            shift: true,
+            alt: false,
+            tecla,
+        };
+
+        let de_fabrica = [
+            (mando(Key::D), Accion::PartirAlLado),
+            (mando(Key::B), Accion::PartirDebajo),
+            (mando(Key::X), Accion::CerrarDivision),
+            (mando(Key::T), Accion::PestanaNueva),
+            (mando(Key::W), Accion::CerrarPestana),
+            (mando(Key::ArrowLeft), Accion::PestanaAnterior),
+            (mando(Key::ArrowRight), Accion::PestanaSiguiente),
+            (historial(Key::PageUp), Accion::SubirUnaPagina),
+            (historial(Key::PageDown), Accion::BajarUnaPagina),
+            (historial(Key::Home), Accion::IrAlPrincipio),
+            (historial(Key::End), Accion::IrAlFinal),
+        ];
+
+        for (acorde, esperada) in de_fabrica {
+            assert_eq!(
+                atajos.accion_de(acorde),
+                Some(esperada),
+                "el acorde de fábrica de «{}» cambió",
+                esperada.como_se_escribe()
+            );
+        }
+        // **Contra los pares que se acaban de ejercer, no contra un número escrito aparte.** Un literal
+        // aquí se queda viejo en cuanto la lista cambia, y lo que hay que atar es que **ninguna acción se
+        // quede sin acorde de fábrica**: una acción nueva sin par en la lista de arriba no se dispararía
+        // nunca y nada lo diría.
+        assert_eq!(
+            TODAS.len(),
+            de_fabrica.len(),
+            "hay acciones sin acorde de fábrica, o acordes de fábrica de acciones que ya no existen"
+        );
+    }
+
+    #[test]
+    fn un_acorde_que_nadie_reclama_no_es_de_la_aplicacion() {
+        // **Es la mitad que hace que desatar un atajo sirva de algo**: lo que no está en la tabla baja al
+        // programa de dentro. Sin ella, `ninguno` dejaría el acorde en un limbo donde ni hace nada ni
+        // llega a `vim`.
+        let atajos = Atajos::default();
+        assert_eq!(
+            atajos.accion_de(Acorde {
+                ctrl: true,
+                shift: true,
+                alt: false,
+                tecla: Key::Z
+            }),
+            None,
+            "un acorde que nadie configuró salió como de la aplicación"
+        );
+    }
+
+    #[test]
+    fn desatar_una_accion_le_devuelve_el_acorde_al_programa() {
+        let mut atajos = Atajos::default();
+        let suyo = Acorde {
+            ctrl: true,
+            shift: true,
+            alt: false,
+            tecla: Key::D,
+        };
+        assert_eq!(atajos.accion_de(suyo), Some(Accion::PartirAlLado));
+
+        assert_eq!(
+            atajos.poner(Accion::PartirAlLado, None),
+            None,
+            "desatar no pisa a nadie"
+        );
+        assert_eq!(
+            atajos.accion_de(suyo),
+            None,
+            "el acorde desatado sigue siendo de la aplicación, así que no llega al programa"
+        );
+    }
+
+    #[test]
+    fn cambiar_un_acorde_deja_libre_el_viejo() {
+        // **Las dos mitades del criterio**: el nuevo hace lo suyo, y el viejo deja de hacerlo. Sin la
+        // segunda, reasignar sumaría acordes en vez de moverlos.
+        let mut atajos = Atajos::default();
+        let viejo = Acorde {
+            ctrl: true,
+            shift: true,
+            alt: false,
+            tecla: Key::D,
+        };
+        let nuevo = Acorde {
+            ctrl: true,
+            shift: true,
+            alt: false,
+            tecla: Key::E,
+        };
+
+        atajos.poner(Accion::PartirAlLado, Some(nuevo));
+
+        assert_eq!(
+            atajos.accion_de(nuevo),
+            Some(Accion::PartirAlLado),
+            "el acorde nuevo no hace nada"
+        );
+        assert_eq!(
+            atajos.accion_de(viejo),
+            None,
+            "el acorde viejo sigue partiendo: reasignar sumó en vez de mover, y el programa nunca lo recibe"
+        );
+    }
+
+    #[test]
+    fn dos_acciones_no_se_quedan_con_el_mismo_acorde_y_se_dice_cual_pierde() {
+        // **Gana la última, y se dice cuál perdió.** Callarlo dejaría a alguien media hora cambiando una
+        // línea que otra de más abajo está pisando; y dejar las dos con el mismo acorde haría que pulsar
+        // no supiera cuál de las dos hacer.
+        let mut atajos = Atajos::default();
+        let de_cerrar = Acorde {
+            ctrl: true,
+            shift: true,
+            alt: false,
+            tecla: Key::X,
+        };
+
+        let pisada = atajos.poner(Accion::PartirAlLado, Some(de_cerrar));
+
+        assert_eq!(
+            pisada,
+            Some(Accion::CerrarDivision),
+            "no se dijo qué acción se quedaba sin acorde"
+        );
+        assert_eq!(
+            atajos.accion_de(de_cerrar),
+            Some(Accion::PartirAlLado),
+            "no ganó la última"
+        );
+    }
+
+    #[test]
+    fn un_acorde_se_escribe_como_lo_escribe_la_gente() {
+        for texto in [
+            "ctrl+shift+e",
+            "Ctrl+Shift+E",
+            "SHIFT+ctrl+e",
+            "  ctrl + shift + e  ",
+        ] {
+            assert_eq!(
+                Acorde::de_como_se_escribe(texto),
+                Some(Acorde {
+                    ctrl: true,
+                    shift: true,
+                    alt: false,
+                    tecla: Key::E
+                }),
+                "«{texto}» no se entendió"
+            );
+        }
+        // **«Mayúsculas» también vale, con y sin tilde y con y sin eñe**, por lo mismo que el resto del
+        // fichero: quien teclea desde un teclado que no es el suyo no debería quedarse fuera.
+        for texto in ["ctrl+mayusculas+e", "ctrl+mayúsculas+e", "ctrl+mayus+e"] {
+            assert!(
+                Acorde::de_como_se_escribe(texto).is_some_and(|a| a.shift && a.ctrl),
+                "«{texto}» no se entendió"
+            );
+        }
+    }
+
+    #[test]
+    fn las_teclas_se_escriben_como_las_escribe_la_gente() {
+        // **`Key::from_name` distingue mayúsculas y quien teclea un fichero no.** Comprobado ejecutándolo:
+        // `F4` sí y `f4` no, `PageUp` sí y `pageup` no. Sin esto, la mitad de los acordes que alguien
+        // escribiría a mano se rechazarían sin que se entienda por qué.
+        for (texto, esperada) in [
+            ("ctrl+f4", Key::F4),
+            ("ctrl+F4", Key::F4),
+            ("shift+pageup", Key::PageUp),
+            ("shift+home", Key::Home),
+            ("ctrl+space", Key::Space),
+            ("ctrl+delete", Key::Delete),
+        ] {
+            assert_eq!(
+                Acorde::de_como_se_escribe(texto).map(|a| a.tecla),
+                Some(esperada),
+                "«{texto}» no se entendió"
+            );
+        }
+
+        // **Y los alias, en los dos idiomas.** `prior` y `next` son como los llaman los terminales de
+        // siempre — y como los llamaba el documento de este proyecto antes de que nadie comprobara que no
+        // existen. Los del español están porque el fichero se escribe en español.
+        for (texto, esperada) in [
+            ("shift+prior", Key::PageUp),
+            ("shift+next", Key::PageDown),
+            ("shift+repág", Key::PageUp),
+            ("ctrl+supr", Key::Delete),
+            ("shift+inicio", Key::Home),
+            ("shift+fin", Key::End),
+            ("ctrl+izquierda", Key::ArrowLeft),
+        ] {
+            assert_eq!(
+                Acorde::de_como_se_escribe(texto).map(|a| a.tecla),
+                Some(esperada),
+                "«{texto}» no se entendió"
+            );
+        }
+    }
+
+    #[test]
+    fn los_acordes_de_copiar_y_pegar_no_se_pueden_reclamar() {
+        // **Aceptarlos sería prometer algo que no ocurre**: el escritorio los resuelve antes de que
+        // lleguen, así que esos acordes no aparecen nunca como teclas. Quien los escribiera vería un atajo
+        // que no hace nada y no tendría forma de saber por qué.
+        for texto in [
+            "ctrl+shift+v",
+            "ctrl+v",
+            "ctrl+alt+v",
+            "ctrl+shift+c",
+            "ctrl+c",
+            "ctrl+alt+c",
+        ] {
+            assert_eq!(
+                Acorde::de_como_se_escribe(texto),
+                None,
+                "«{texto}» se aceptó, y no llegaría nunca"
+            );
+        }
+        // Pero sin Ctrl son teclas como otra cualquiera.
+        for texto in ["shift+v", "shift+c", "alt+c"] {
+            assert!(
+                Acorde::de_como_se_escribe(texto).is_some(),
+                "«{texto}» se rechazó, y ése sí llega"
+            );
+        }
+    }
+
+    #[test]
+    fn un_acorde_sin_tecla_de_mando_no_se_admite() {
+        // **Admitirlo dejaría que quien configura se quite una letra de escribir** sin que nada se lo
+        // advierta: `atajo.copiar = c` haría que la `c` no llegara nunca al programa.
+        for texto in ["c", "e", "prior"] {
+            assert_eq!(
+                Acorde::de_como_se_escribe(texto),
+                None,
+                "«{texto}» se aceptó como acorde, y se llevaría esa tecla por delante"
+            );
+        }
+        // Y lo que no es ninguna tecla conocida tampoco.
+        for texto in ["ctrl+shift+", "ctrl+shift+noexiste", "ctrl+shift+e+f", ""] {
+            assert_eq!(
+                Acorde::de_como_se_escribe(texto),
+                None,
+                "«{texto}» se aceptó"
+            );
+        }
+    }
+
+    #[test]
+    fn las_acciones_se_escriben_con_y_sin_eñe() {
+        for accion in TODAS {
+            let escrita = accion.como_se_escribe();
+            assert_eq!(Accion::de_como_se_escribe(escrita), Some(accion));
+            assert_eq!(
+                Accion::de_como_se_escribe(&escrita.replace('ñ', "n")),
+                Some(accion),
+                "«{escrita}» sin eñe no se entendió"
+            );
+        }
+        assert_eq!(
+            Accion::de_como_se_escribe("pegar"),
+            None,
+            "pegar no es un atajo reasignable"
+        );
+        assert_eq!(Accion::de_como_se_escribe("inventada"), None);
+    }
+}

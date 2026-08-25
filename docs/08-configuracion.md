@@ -47,6 +47,74 @@ corren dentro lo notan.
 
 **Lo que no pongas se queda como estaba.** Puedes cambiar un solo color y no escribir los demás.
 
+## Los atajos
+
+Los once atajos del terminal se cambian con `atajo.` y el nombre de lo que hacen:
+
+```
+atajo.partir-al-lado = ctrl+shift+e
+atajo.cerrar-division = ninguno
+```
+
+| Nombre | Qué hace | De fábrica |
+|---|---|---|
+| `partir-al-lado` | parte la consola en dos, a lo ancho | `ctrl+shift+d` |
+| `partir-debajo` | la parte a lo alto | `ctrl+shift+b` |
+| `cerrar-division` | cierra la consola con el foco | `ctrl+shift+x` |
+| `pestaña-nueva` | abre una pestaña | `ctrl+shift+t` |
+| `cerrar-pestaña` | cierra la pestaña | `ctrl+shift+w` |
+| `pestaña-anterior` · `pestaña-siguiente` | se mueve entre pestañas | `ctrl+shift+←` · `ctrl+shift+→` |
+| `subir-una-pagina` · `bajar-una-pagina` | sube y baja por el historial | `shift+repág` · `shift+avpág` |
+| `ir-al-principio` · `ir-al-final` | va a los extremos del historial | `shift+home` · `shift+end` |
+
+Las eñes se pueden escribir también sin eñe (`pestana-nueva`).
+
+**Un acorde se escribe con `+`**, en cualquier orden y sin importar mayúsculas: `ctrl+shift+e`,
+`shift+repág`, `alt+f4`. Vale `ctrl`, `shift` (o `mayúsculas`) y `alt`, y **hace falta al menos uno**: si
+no, te estarías quitando una letra de escribir.
+
+Las teclas se escriben como las llamarías: `e`, `f4`, `espacio`, `supr`, `inicio`, `fin`, `repág`,
+`avpág`, `izquierda`. Valen también sus nombres en inglés (`space`, `delete`, `home`, `pageup`, `prior`).
+
+**`Ctrl+C` y `Ctrl+V` no se pueden asignar a nada.** El escritorio se los queda antes de que lleguen
+aquí, así que un atajo con esos acordes no se dispararía nunca y no tendrías forma de saber por qué.
+
+### `ninguno` te devuelve el acorde
+
+```
+atajo.cerrar-division = ninguno
+```
+
+A partir de ahí ese acorde **le llega al programa que corre dentro**. Es lo que te permite recuperar
+`Ctrl+Mayúsculas+X` para `vim` o para `tmux`.
+
+### Si dos atajos se pisan
+
+**Gana el último que escribas**, y se te dice cuál se ha quedado sin acorde:
+
+```
+agent-terminal: «cerrar-division» se queda sin atajo: su acorde se lo lleva «partir-al-lado», que va después
+```
+
+### Copiar y pegar no se reasignan: copiar solo se apaga
+
+`Ctrl+Mayúsculas+C` y `Ctrl+Mayúsculas+V` **no llegan como teclas**: los resuelve el escritorio antes y
+llegan ya convertidos en un copiado y un pegado, **sin decir siquiera si había Mayúsculas**. No hay acorde
+que mover, y por eso no están en la tabla.
+
+Lo que sí puedes es **apagar copiar**, que es lo que devuelve `Ctrl+Mayúsculas+C` a `vim` o a `tmux`:
+
+```
+atajo.copiar = ninguno
+```
+
+Cualquier otro valor se rechaza y se te dice por qué — asignarle otro acorde se aceptaría y no funcionaría
+nunca:
+
+```
+agent-terminal: línea 3: el acorde de «atajo.copiar» lo decide el escritorio y no se puede cambiar; lo único que se puede es apagarlo con «ninguno»
+```
+
 ## Qué pasa si te equivocas
 
 **Una línea mal escrita no te tumba el fichero.** Se ignora, se te dice cuál es y qué le pasa por la salida
@@ -90,5 +158,5 @@ aplicándose.
 
 ## Lo que todavía no se puede configurar
 
-La fuente y los atajos llegan en las siguientes entregas de este mismo hito. Recargar el fichero
+La fuente llega en la siguiente entrega de este mismo hito. Recargar el fichero
 sin cerrar el terminal queda para después, y está escrito por qué.

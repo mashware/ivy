@@ -129,6 +129,8 @@ pub enum Falta {
     ValorInvalido { clave: String, valor: String },
     /// Esa clave ya estaba puesta más arriba; gana ésta.
     Repetida(String),
+    /// El acorde de esa acción lo decide el escritorio: solo se puede apagar.
+    SoloSeApaga(String),
 }
 
 impl std::fmt::Display for Aviso {
@@ -142,6 +144,11 @@ impl std::fmt::Display for Aviso {
                 write!(f, "«{}» no vale para «{clave}»", recortado(valor))
             }
             Falta::Repetida(clave) => write!(f, "«{clave}» ya estaba puesta antes; gana ésta"),
+            Falta::SoloSeApaga(clave) => write!(
+                f,
+                "el acorde de «{clave}» lo decide el escritorio y no se puede cambiar; \
+                 lo único que se puede es apagarlo con «ninguno»"
+            ),
         }
     }
 }
@@ -183,7 +190,9 @@ pub struct Colores {
 }
 
 /// Lo que el fichero pide, ya entendido.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+// **`Copy` se cae aquí**: los atajos son una lista, y una lista no se copia sola. El tipo se pasa por
+// referencia, que es como ya lo pedían sus dos únicos consumidores.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Ajustes {
     pub colores: Colores,
     /// El cuerpo de la letra, en puntos. `None` si el fichero no lo pide.
@@ -192,6 +201,17 @@ pub struct Ajustes {
     /// que la gente teclea y es contrato publicado; `cuerpo` es como el resto del código llama a este
     /// número. La traducción ocurre **una vez**, donde se interpreta la clave, y no en cada salto.
     pub cuerpo: Option<f32>,
+    /// Los atajos que el fichero cambia: la acción y su acorde nuevo, o `None` para desatarla.
+    ///
+    /// **Una lista y no una tabla ya resuelta**, porque el orden importa: «gana la última» solo se puede
+    /// decidir aplicándolas en el orden en que se escribieron.
+    pub atajos: Vec<(crate::teclado::Accion, Option<crate::teclado::Acorde>)>,
+    /// Si el fichero apagó el atajo de copiar.
+    ///
+    /// **Aparte de la lista, porque copiar no tiene acorde que mover.** Su acorde lo resuelve el
+    /// escritorio antes de que llegue aquí —y sin decir si había Mayúsculas—, así que lo único que se
+    /// puede hacer con él es dejar de atenderlo, que es lo que devuelve `Ctrl+Mayúsculas+C` a `vim`.
+    pub copiar: Option<bool>,
 }
 
 /// Lo menos y lo más que se admite como cuerpo de letra.
@@ -379,6 +399,36 @@ pub fn interpretar(texto: &str) -> Result<(Ajustes, Avisos), Problema> {
 
 /// Mete el valor donde le toque, si la clave y el valor valen.
 fn aplicar(ajustes: &mut Ajustes, clave: &str, valor: &str) -> Result<(), Falta> {
+    if let Some(nombre) = clave.strip_prefix("atajo.") {
+        // **Copiar sigue teniendo su clave, y solo acepta `ninguno`.** Es la clave que este terminal ya
+        // publicó, y quien la escribió para devolverle el acorde a `vim` no tiene por qué enterarse de
+        // que por dentro dejó de ser un acorde. Lo que no se puede es reasignarlo, y eso se dice.
+        if nombre.eq_ignore_ascii_case("copiar") {
+            if !valor.eq_ignore_ascii_case("ninguno") {
+                return Err(Falta::SoloSeApaga(clave.to_owned()));
+            }
+            ajustes.copiar = Some(false);
+            return Ok(());
+        }
+        let accion = crate::teclado::Accion::de_como_se_escribe(nombre)
+            .ok_or_else(|| Falta::ClaveDesconocida(clave.to_owned()))?;
+        // **`ninguno` desata la acción, y es la mitad que hace útil todo esto**: es lo que devuelve un
+        // acorde al programa de dentro cuando `vim` o `tmux` lo quieren para ellos.
+        let acorde = if valor.eq_ignore_ascii_case("ninguno") {
+            None
+        } else {
+            Some(
+                crate::teclado::Acorde::de_como_se_escribe(valor).ok_or_else(|| {
+                    Falta::ValorInvalido {
+                        clave: clave.to_owned(),
+                        valor: valor.to_owned(),
+                    }
+                })?,
+            )
+        };
+        ajustes.atajos.push((accion, acorde));
+        return Ok(());
+    }
     if clave == "tamaño" || clave == "tamano" {
         // **Las dos formas de escribirlo valen, y es deliberado.** Quien teclea la configuración de un
         // terminal no siempre tiene una eñe a mano —un teclado que no es el suyo, una sesión remota— y
@@ -930,6 +980,82 @@ mod tests {
             Falta::ClaveDesconocida("fuente".to_owned()),
             "la línea se partió por un igual que no es el primero"
         );
+    }
+
+    #[test]
+    fn los_atajos_se_leen_del_fichero_en_el_orden_en_que_se_escriben() {
+        // **El orden importa y por eso llegan como lista**: «gana la última» solo se puede decidir
+        // aplicándolas en el orden en que están escritas.
+        let (ajustes, avisos) = de(
+            "atajo.partir-al-lado = ctrl+shift+e\n             atajo.cerrar-division = ninguno\n             atajo.pestaña-nueva = ctrl+alt+t",
+        );
+        assert_eq!(
+            avisos.cuantos(),
+            0,
+            "alguna de las tres líneas no se entendió"
+        );
+        assert_eq!(ajustes.atajos.len(), 3, "no llegaron los tres atajos");
+        assert_eq!(
+            ajustes.atajos[0].0,
+            crate::teclado::Accion::PartirAlLado,
+            "el orden de lectura no se conserva, y «gana la última» deja de poder decidirse"
+        );
+        assert_eq!(ajustes.atajos[1].1, None, "«ninguno» no desató la acción");
+    }
+
+    #[test]
+    fn el_atajo_de_copiar_solo_se_puede_apagar() {
+        // **Su acorde lo decide el escritorio**, que se lo queda antes de que llegue aquí y ni siquiera
+        // dice si había Mayúsculas. Aceptar `atajo.copiar = ctrl+shift+e` sería prometer un acorde que
+        // no se dispararía nunca y que quien lo escribió no tendría forma de depurar.
+        let (ajustes, avisos) = de("atajo.copiar = ninguno");
+        assert_eq!(avisos.cuantos(), 0, "«ninguno» no se entendió");
+        assert_eq!(ajustes.copiar, Some(false), "«ninguno» no apagó el copiar");
+        assert!(
+            ajustes.atajos.is_empty(),
+            "copiar se coló en la lista de acordes, donde no tiene ninguno que mover"
+        );
+
+        let (ajustes, avisos) = de("atajo.copiar = ctrl+shift+e");
+        assert_eq!(avisos.cuantos(), 1, "reasignarlo no se avisó");
+        assert_eq!(ajustes.copiar, None, "reasignarlo tocó el interruptor");
+        assert!(
+            format!("{}", avisos.guardados()[0]).contains("apagarlo"),
+            "el aviso no dice lo único que se puede hacer con ese acorde: {}",
+            avisos.guardados()[0]
+        );
+
+        // Y **no se apaga sin pedirlo**: un fichero que no lo nombra lo deja como estaba.
+        let (ajustes, _) = de("fondo = #101010");
+        assert_eq!(
+            ajustes.copiar, None,
+            "un fichero que no habla de copiar lo dejó dicho igualmente"
+        );
+    }
+
+    #[test]
+    fn un_atajo_mal_escrito_avisa_y_no_se_lleva_a_los_demas() {
+        // La misma regla que el resto del fichero, en la superficie que más se teclea a mano.
+        for (linea, que) in [
+            ("atajo.inventada = ctrl+shift+e", "una acción que no existe"),
+            (
+                "atajo.cerrar-division = ctrl+shift+noexiste",
+                "una tecla que no existe",
+            ),
+            ("atajo.cerrar-division = e", "un acorde sin tecla de mando"),
+            ("atajo.cerrar-division = ", "sin valor"),
+        ] {
+            let (ajustes, avisos) = de(&format!("color.1 = #ff0000\n{linea}\ncolor.2 = #00ff00"));
+            assert!(
+                ajustes.atajos.is_empty(),
+                "{que} se aplicó igualmente: «{linea}»"
+            );
+            assert_eq!(avisos.cuantos(), 1, "{que} no dio aviso: «{linea}»");
+            assert!(
+                ajustes.colores.paleta[1].is_some() && ajustes.colores.paleta[2].is_some(),
+                "{que} se llevó por delante las líneas buenas de al lado"
+            );
+        }
     }
 
     #[test]

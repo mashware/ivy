@@ -2794,6 +2794,8 @@ impl Division {
         empezo_el_fotograma: Instant,
         modificadores: &mut egui::Modifiers,
         pestañas_abiertas: usize,
+        atajos: &teclado::Atajos,
+        copiar_encendido: bool,
     ) -> Vec<Orden> {
         self.pulsaciones.clear();
         // Se pregunta una vez y no por evento porque **el modo no puede cambiar a mitad de pase**:
@@ -2824,8 +2826,25 @@ impl Division {
             let mut abiertas = pestañas_abiertas;
             let mut subidas = Vec::new();
             let mut copiar = None;
+            // **Un acorde sin Ctrl llega DOS veces, y consumir solo una lo deja actuar y escribir.**
+            // egui emite el texto de la tecla junto a la tecla siempre que sea imprimible y no haya
+            // mandato, así que un `atajo.partir-al-lado = shift+e` partía la consola **y además** le
+            // escribía una `E` al programa. Los acordes de fábrica se libraban de casualidad —los que no
+            // llevan Ctrl caen sobre teclas que no escriben nada—, pero el fichero acepta `shift+e` y el
+            // documento lo publica como válido.
+            let mut tragar_el_texto = false;
 
             estado.events.retain(|evento| {
+                // Va lo primero porque el texto llega **detrás** de su tecla: cuando se mira ya se sabe
+                // si la tecla de delante se consumió como atajo.
+                if matches!(evento, egui::Event::Text(_)) && tragar_el_texto {
+                    tragar_el_texto = false;
+                    return false;
+                }
+                // Cualquier otro evento por medio rompe la pareja: el texto que se traga es el del gesto
+                // que acaba de actuar, no el primero que pase por aquí después.
+                tragar_el_texto = false;
+
                 if let egui::Event::ModifiersChanged(nuevos) = evento {
                     acorde = *nuevos;
                     // Se queda en la cola: no es nuestro, y quien lo mire después lo necesita.
@@ -2844,6 +2863,26 @@ impl Division {
                     return true;
                 }
 
+                // **Copiar entra por la misma puerta que pegar, y por la misma razón.** El escritorio
+                // se queda `Ctrl+Mayúsculas+C` **antes** de que sea una tecla y emite un evento de copiar
+                // sin decir si había Mayúsculas — su comprobación es «mandato y la letra C», y no la mira.
+                // Así que el acorde de copiar de un terminal **nunca llega como tecla**, y hasta aquí
+                // acababa traducido a `\x03`: pedir copiar **interrumpía el programa**.
+                //
+                // El propio proyecto lo dejó escrito en `teclado::bytes` —«quien traiga el portapapeles
+                // tendrá que decidirlo antes, en el bucle, donde el estado de los modificadores sí está
+                // disponible»— y nadie lo hizo hasta que una revisión lo comprobó ejecutándolo.
+                //
+                // **Con Mayúsculas copia; sin ellas, `Ctrl+C` sigue interrumpiendo**, que es lo que tiene
+                // que hacer. Y **apagado no se toca el evento**: cae hasta la tabla y sale por `\x03`, que
+                // es justo lo que `vim` o `tmux` esperan cuando alguien les devuelve el acorde.
+                if matches!(evento, egui::Event::Copy) && acorde.shift && copiar_encendido {
+                    // Se traga el evento **haya o no algo marcado**: devolverlo lo dejaría caer en la
+                    // tabla, y pedir copiar sin nada marcado interrumpiría el programa.
+                    copiar = self.pantalla.texto_seleccionado();
+                    return false;
+                }
+
                 // **El escritorio manda el mismo evento para Ctrl+V y para Ctrl+Mayúsculas+V**, sin
                 // decir cuál fue, y se traga la tecla. Ésta es la única puerta donde se pueden
                 // separar, y separarlas es lo que hace que Ctrl+V le siga llegando al programa de
@@ -2857,139 +2896,104 @@ impl Division {
                     return false;
                 }
 
-                // **Cambiar de pestaña se corta aquí, antes de traducir a bytes, y no consumirlo sería
-                // el fallo.** Con Ctrl+Mayúsculas puestas, la flecha cae en la tabla de siempre de
-                // [`teclado::tecla`] —Mayúsculas no cambia el código de control y Ctrl con algo que no
-                // es letra se cae a esa tabla— y el programa de dentro recibiría `\x1b[D`: el cursor se
-                // movería en el editor de la pestaña que se acaba de dejar.
+                // **Una sola consulta a la tabla decide si el acorde es de la aplicación**, y eso es
+                // lo que este bloque estrena. Antes eran dos listas paralelas —una decía si el acorde era
+                // nuestro y otra qué hacía— y desalinearlas ya dejó una flecha «en la cola sin llegar
+                // nunca al programa». Con doce acordes configurables, el riesgo se multiplica por doce.
                 //
-                // **Con una sola pestaña la flecha no se corta**, y esa guarda no es cosmética: sin ella
-                // el acorde se tragaría la tecla para no hacer nada —ir de una pestaña a ella misma— y se
-                // la quitaría al programa, que hoy sí la recibe. Crear y cerrar sí valen con una sola.
-                //
-                // **La cuenta se lleva evento a evento y no se mira una vez por fotograma**, porque el
-                // propio lote la cambia: con una pestaña abierta y `[crear, ←]` en el mismo lote, mirarla
-                // al principio dejaría la flecha fuera de la guarda y se le colaría al programa, que es
-                // justo lo que el párrafo de arriba dice que no puede pasar.
-                //
-                // **La repetición de mantener pulsada la tecla vale para las flechas y no para crear ni
-                // cerrar.** egui marca las repeticiones con `repeat`, pero sigue poniendo `pressed`, así
-                // que sin mirarlo un segundo con el acorde de cerrar apretado son unas treinta órdenes de
-                // cierre en un lote: **todas las pestañas cerradas, todos sus programas muertos y la
-                // ventana con ellos, de un solo gesto**. Ciclar entre pestañas sí es barato y reversible.
-                // Aun así el evento **se consume igual** cuando es repetición: devolverlo a la cola
-                // mandaría `0x14` al programa por cada repetición.
+                // **Lo que NO se unifica es la condición de cada acción.** Que crear no valga repetido, o
+                // que cambiar de pestaña solo sea nuestro con más de una abierta, sigue colgando de la
+                // acción que lo necesita: son reales y tienen que sobrevivir a que el acorde cambie.
                 if let egui::Event::Key {
                     key,
                     pressed: true,
                     repeat,
                     ..
                 } = evento
-                    && acorde.ctrl
-                    && acorde.shift
+                    && let Some(accion) = atajos.accion_de(teclado::Acorde {
+                        ctrl: acorde.ctrl,
+                        shift: acorde.shift,
+                        alt: acorde.alt,
+                        tecla: *key,
+                    })
                 {
-                    // **Primero si el acorde es nuestro, y solo después qué hacer con él.** Resolver las
-                    // dos cosas en el mismo `match` deja un camino que no consume el evento **ni lo
-                    // traduce**: la flecha se quedaba en la cola sin llegar nunca al programa.
-                    let es_nuestro = match key {
-                        egui::Key::ArrowLeft | egui::Key::ArrowRight => abiertas > 1,
-                        egui::Key::T
-                        | egui::Key::W
-                        | egui::Key::D
-                        | egui::Key::B
-                        | egui::Key::C
-                        | egui::Key::X => true,
-                        _ => false,
+                    // **Que el acorde esté en la tabla no lo hace nuestro todavía**, y aquí está la
+                    // única condición que decide eso: con una sola pestaña la flecha **no** es de la
+                    // aplicación. La guarda no es cosmética — sin ella el acorde se tragaría la tecla para
+                    // no hacer nada —ir de una pestaña a ella misma— y se la quitaría al programa.
+                    //
+                    // **Y el evento tiene que CAER hasta la traducción a bytes, no devolverse aquí.**
+                    // Devolverlo sin traducir lo conserva en la cola de egui y el programa no lo ve nunca:
+                    // es el defecto que este bloque tiene documentado desde F2.1, y **el refactor de los
+                    // atajos lo reintrodujo**. Lo cazaron sus dos pruebas al primer intento.
+                    //
+                    // **La cuenta se lleva evento a evento y no una vez por fotograma**, porque el propio
+                    // lote la cambia: con una pestaña abierta y `[crear, ←]` en el mismo lote, mirarla al
+                    // principio dejaría la flecha fuera de la guarda.
+                    let nuestra = match accion {
+                        teclado::Accion::PestanaAnterior | teclado::Accion::PestanaSiguiente => {
+                            abiertas > 1
+                        }
+                        _ => true,
                     };
-
-                    if es_nuestro {
-                        match key {
-                            egui::Key::ArrowLeft => pedidas.push(Orden::Ir(-1)),
-                            egui::Key::ArrowRight => pedidas.push(Orden::Ir(1)),
-                            egui::Key::T if !repeat => {
+                    if nuestra {
+                        match accion {
+                            teclado::Accion::PestanaAnterior => pedidas.push(Orden::Ir(-1)),
+                            teclado::Accion::PestanaSiguiente => pedidas.push(Orden::Ir(1)),
+                            // **La repetición se traga sin hacer nada, y la guarda es la razón de que la
+                            // ventana siga viva.** egui marca las repeticiones con `repeat` pero sigue
+                            // poniendo `pressed`, así que un segundo con el acorde de cerrar apretado son
+                            // unas treinta órdenes de cierre en un lote: todas las pestañas cerradas, todos
+                            // sus programas muertos y la ventana con ellos, de un solo gesto. **Y se consume
+                            // igual**: devolverlo mandaría su byte de control al programa por cada
+                            // repetición.
+                            teclado::Accion::PestanaNueva if !repeat => {
                                 abiertas += 1;
                                 pedidas.push(Orden::Crear);
                             }
-                            // Cerrar la última no quita nada de la lista: pide cerrar la ventana. Por eso
-                            // la cuenta no baja de uno.
-                            egui::Key::W if !repeat => {
+                            // Cerrar la última no quita nada de la lista: pide cerrar la ventana. Por eso la
+                            // cuenta no baja de uno.
+                            teclado::Accion::CerrarPestana if !repeat => {
                                 abiertas = (abiertas - 1).max(1);
                                 pedidas.push(Orden::CerrarPestaña);
                             }
-                            // **Partir lleva la misma guarda de repetición que crear, y por lo mismo:**
-                            // cada una lanza un programa, así que un segundo con el acorde apretado serían
-                            // treinta shells y treinta directorios de una sola pulsación.
-                            //
-                            // **`D` de derecha y `B` de bajo**, que es donde aparece la consola nueva en
-                            // cada caso. Las dos teclas están libres del acorde y se leen igual en las dos
-                            // orientaciones; copiar las de otro terminal no ayudaría, porque no coinciden
-                            // entre ellos —lo que en uno parte al lado, en otro parte debajo.
-                            egui::Key::D if !repeat => {
+                            // **Partir lleva la misma guarda y por lo mismo**: cada una lanza un programa, así
+                            // que un segundo apretado serían treinta shells y treinta directorios.
+                            teclado::Accion::PartirAlLado if !repeat => {
                                 pedidas.push(Orden::Partir(Orientacion::Columnas));
                             }
-                            egui::Key::B if !repeat => {
+                            teclado::Accion::PartirDebajo if !repeat => {
                                 pedidas.push(Orden::Partir(Orientacion::Filas));
                             }
-                            // **`X` de tachar esta consola.** Cerrar la pestaña se queda con `W`, que es
-                            // lo que hace en cualquier navegador y en cualquier terminal con pestañas.
-                            // Para la división sí hay un precedente que no se contradice entre terminales
-                            // —la `x` de tmux y de Zellij matan el panel—, al contrario de lo que pasaba
-                            // con los dos cortes; y no toca a `C` ni a `V`, que son del portapapeles.
+                            // **Aquí la guarda es la más necesaria de las cuatro**: un segundo apretado
+                            // cerraría una consola tras otra, luego la pestaña, y luego la ventana con todo
+                            // lo que quedara por leer.
                             //
-                            // **La guarda de repetición es aquí la más necesaria de las cuatro:** un
-                            // segundo con el acorde apretado cerraría una consola tras otra, luego la
-                            // pestaña, y luego la ventana con todo lo que quedara por leer.
-                            //
-                            // **La cuenta de pestañas no baja aquí**, aunque cerrar la única consola de
-                            // una pestaña cierre la pestaña: desde el teclado no se sabe cuántas consolas
-                            // tiene la del foco, y bajarla siempre dejaría de consumir la flecha con dos
-                            // pestañas abiertas, que es el caso normal.
-                            egui::Key::X if !repeat => pedidas.push(Orden::CerrarDivision),
-                            // **Copiar, y el evento se traga HAYA O NO algo marcado.** Devolverlo a la
-                            // cola sin selección lo dejaría caer en la tabla del teclado, que traduce
-                            // `Ctrl+C` a `\x03` — o sea que pedir copiar **interrumpiría el programa**.
-                            // `Ctrl+C` a secas sigue siendo suyo: esta rama solo se alcanza con el acorde
-                            // de la ventana.
-                            //
-                            // **La repetición se traga sin copiar, y no por la razón de las otras.** En
-                            // crear, cerrar y partir la guarda existe porque repetir **destruye**; aquí
-                            // repetir no destruye nada, pero **recorre y reserva la selección entera en
-                            // cada fotograma** mientras el acorde siga apretado — un segundo son sesenta
-                            // copias idénticas del mismo texto, y con una selección grande sesenta cadenas
-                            // que nacen y mueren. Copiar dos veces lo mismo no le sirve a nadie.
-                            egui::Key::C if !repeat => copiar = self.pantalla.texto_seleccionado(),
-                            // La repetición de crear, cerrar o partir se traga sin hacer nada, que es el
-                            // objeto de la guarda.
+                            // **La cuenta de pestañas no baja aquí**, aunque cerrar la única consola de una
+                            // pestaña cierre la pestaña: desde el teclado no se sabe cuántas consolas tiene
+                            // la del foco, y bajarla siempre dejaría de consumir la flecha con dos pestañas
+                            // abiertas, que es el caso normal.
+                            teclado::Accion::CerrarDivision if !repeat => {
+                                pedidas.push(Orden::CerrarDivision);
+                            }
+                            // **Mirar el historial es del terminal, no del programa**, así que estas cuatro se
+                            // consumen aquí y no se traducen a bytes. **Y la repetición vale**: mantener
+                            // pulsado para subir es el gesto normal, al revés que crear o cerrar.
+                            teclado::Accion::SubirUnaPagina => {
+                                subidas.push(Desplazamiento::Paginas(1));
+                            }
+                            teclado::Accion::BajarUnaPagina => {
+                                subidas.push(Desplazamiento::Paginas(-1));
+                            }
+                            teclado::Accion::IrAlPrincipio => {
+                                subidas.push(Desplazamiento::AlPrincipio);
+                            }
+                            teclado::Accion::IrAlFinal => subidas.push(Desplazamiento::AlFinal),
+                            // La repetición de crear, cerrar, partir o copiar cae aquí: se traga sin hacer
+                            // nada, que es el objeto de la guarda.
                             _ => {}
                         }
-
-                        return false;
-                    }
-                }
-
-                // **Mirar el historial es del terminal, no del programa**, así que estas cuatro se
-                // consumen aquí y no se traducen a bytes. Con `Mayúsculas`, que es lo que hacen todos:
-                // sin ella, `RePág` es del programa —un paginador la usa— y quitársela sería romper
-                // `less` dentro de nuestra ventana.
-                //
-                // **Y la repetición vale**: mantener `RePág` para subir es el gesto normal, al revés
-                // que crear o cerrar una pestaña, donde repetir destruye.
-                if let egui::Event::Key {
-                    key, pressed: true, ..
-                } = evento
-                    && acorde.shift
-                    && !acorde.ctrl
-                    && !acorde.alt
-                {
-                    let cuanto = match key {
-                        egui::Key::PageUp => Some(Desplazamiento::Paginas(1)),
-                        egui::Key::PageDown => Some(Desplazamiento::Paginas(-1)),
-                        egui::Key::Home => Some(Desplazamiento::AlPrincipio),
-                        egui::Key::End => Some(Desplazamiento::AlFinal),
-                        _ => None,
-                    };
-                    if let Some(cuanto) = cuanto {
-                        subidas.push(cuanto);
+                        tragar_el_texto = !acorde.ctrl && !acorde.command && !acorde.alt;
                         return false;
                     }
                 }
@@ -3849,6 +3853,15 @@ struct Ventana {
     /// Lo que cuesta rasterizar los glifos de color, para que no acabe dentro del tramo del pintado.
     color: medida::Rasterizado,
     tema: Tema,
+    /// Qué acorde hace cada cosa.
+    ///
+    /// **Va junto al tema porque sale de lo mismo**: es lo que quien usa el terminal configuró.
+    atajos: teclado::Atajos,
+    /// Si el atajo de copiar está encendido.
+    ///
+    /// **Es un interruptor y no un acorde, porque su acorde lo decide el escritorio**: `Ctrl+Mayúsculas+C`
+    /// no llega como tecla, llega ya convertido en una petición de copiar. Lo mismo que pegar.
+    copiar_encendido: bool,
     /// El cuerpo de la letra con el que se mide la celda, en puntos.
     ///
     /// **Va pegado al tema porque los dos salen de lo mismo**: son lo que quien usa el terminal configuró,
@@ -4183,11 +4196,7 @@ impl Ventana {
         })
     }
 
-    /// El resto de la ventana, que es el mismo se haya restaurado o no.
-    ///
-    /// **Existe para que abrir de fábrica y restaurar compartan todo lo que no es la lista de pestañas.**
-    /// Los contadores, el vigilante y los cronómetros salen **de la lista construida** y no de lo que nadie
-    /// Le pone a la ventana lo que el usuario configuró.
+    /// Le pone a la ventana lo que quien la usa configuró.
     ///
     /// **Va aquí y no en el constructor**, igual que los arrastres inyectados y el tramo de restaurar:
     /// llevarlo dentro obligaría a pasarlo por tres constructores con decenas de llamadas, y ninguna de
@@ -4199,8 +4208,30 @@ impl Ventana {
         if let Some(cuerpo) = ajustes.cuerpo {
             self.cuerpo = cuerpo;
         }
+        if let Some(encendido) = ajustes.copiar {
+            self.copiar_encendido = encendido;
+        }
+        // **Se aplican en el orden en que se escribieron, y por eso llegan como lista.** «Gana la última»
+        // solo se puede decidir así, y es lo que hace que pegar un juego de atajos encima de otro haga lo
+        // que se espera.
+        for (accion, acorde) in &ajustes.atajos {
+            if let Some(pisada) = self.atajos.poner(*accion, *acorde) {
+                // **El choque se dice, no se resuelve en silencio.** Sin esto, quien reasigne un acorde
+                // que ya tenía dueño pierde el otro atajo sin enterarse, y lo descubre el día que lo
+                // necesita.
+                eprintln!(
+                    "agent-terminal: «{}» se queda sin atajo: su acorde se lo lleva «{}», que va después",
+                    pisada.como_se_escribe(),
+                    accion.como_se_escribe()
+                );
+            }
+        }
     }
 
+    /// El resto de la ventana, que es el mismo se haya restaurado o no.
+    ///
+    /// **Existe para que abrir de fábrica y restaurar compartan todo lo que no es la lista de pestañas.**
+    /// Los contadores, el vigilante y los cronómetros salen **de la lista construida** y no de lo que nadie
     /// pidiera: con dos caminos armando este estado por su cuenta, el segundo se olvidaría de uno.
     fn con_estas_pestañas(
         ctx: &egui::Context,
@@ -4232,6 +4263,8 @@ impl Ventana {
             descubrimiento: medida::Descubrimiento::default(),
             color: medida::Rasterizado::default(),
             tema: Tema::default(),
+            atajos: teclado::Atajos::default(),
+            copiar_encendido: true,
             cuerpo: CUERPO,
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
@@ -5835,6 +5868,11 @@ impl Ventana {
         // del mismo dueño, y el compilador no deja tener los dos a la vez.
         let mut modificadores = self.modificadores;
         let abiertas = self.pestañas.len();
+        // **La tabla se clona, y es barato: doce parejas de tres booleanos y un entero.** El préstamo es
+        // el mismo problema que los modificadores de arriba —la división y el campo son dos préstamos del
+        // mismo dueño— y aquí se resuelve igual, sin dejar la tabla en un sitio donde nadie la busque.
+        let atajos = self.atajos.clone();
+        let copiar = self.copiar_encendido;
         let pestaña = self.activa_mut();
         // **La del foco se busca por su nombre**, y si no aparece no se teclea a nadie: escribir en
         // «la primera que haya» mandaría las teclas a un programa que el usuario no está mirando, que es
@@ -5842,7 +5880,14 @@ impl Ventana {
         let donde = pestaña.donde_esta_el_foco();
         let ordenes = donde
             .map(|donde| {
-                pestaña.divisiones_mut()[donde].teclear(ctx, empezo, &mut modificadores, abiertas)
+                pestaña.divisiones_mut()[donde].teclear(
+                    ctx,
+                    empezo,
+                    &mut modificadores,
+                    abiertas,
+                    &atajos,
+                    copiar,
+                )
             })
             .unwrap_or_default();
         self.modificadores = modificadores;
@@ -6962,6 +7007,13 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    /// Deja en la cola de la ventana exactamente estos eventos, en este orden.
+    ///
+    /// **Vacía lo que hubiera antes, y esa es la mitad del ayudante.** Los avisos de cambio de
+    /// modificadores se dejan a propósito en la cola cuando se procesan, así que sin vaciar, una
+    /// segunda llamada correría contra los suyos **más los del tramo anterior** — y la prueba estaría
+    /// afirmando sobre una secuencia que no es la que escribió. Un fotograma de verdad rehace la
+    /// lista entera; esto hace lo mismo.
     fn encolar(ctx: &egui::Context, eventos: Vec<egui::Event>) {
         ctx.input_mut(|entrada| {
             entrada.events.clear();
@@ -6995,7 +7047,14 @@ mod tests {
                 egui::Event::Paste("hola".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(division.pulsaciones, b"hola", "con Mayúsculas no se pegó");
 
         encolar(
@@ -7005,7 +7064,14 @@ mod tests {
                 egui::Event::Paste("hola".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(
             division.pulsaciones, b"\x16",
             "sin Mayúsculas tiene que llegar el byte de control, no el texto"
@@ -7030,7 +7096,14 @@ mod tests {
                 egui::Event::Paste("ls\n".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(division.pulsaciones, b"ls\r", "llegó marcado sin pedirlo");
 
         // Y en cuanto lo pide, la marca aparece — sin tocar nada más que la pantalla.
@@ -7042,7 +7115,14 @@ mod tests {
                 egui::Event::Paste("ls\n".to_owned()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(
             division.pulsaciones, b"\x1b[200~ls\n\x1b[201~",
             "el programa pidió el pegado marcado y el bucle no se enteró"
@@ -7073,7 +7153,14 @@ mod tests {
                 egui::Event::ModifiersChanged(egui::Modifiers::NONE),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(
             division.pulsaciones, b"bueno",
             "soltar el acorde después de pegar impidió el pegado: se leyó el final del lote"
@@ -7088,7 +7175,14 @@ mod tests {
                 egui::Event::ModifiersChanged(con_mayusculas()),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(
             division.pulsaciones, b"\x16",
             "pulsar Mayúsculas después del pegado lo convirtió en pegado: se leyó el final del lote"
@@ -7116,13 +7210,27 @@ mod tests {
                 egui::Event::WindowFocused(false),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         encolar(
             &ctx,
             vec![egui::Event::Paste("no deberías verme".to_owned())],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(
             division.pulsaciones, b"\x16",
             "las Mayúsculas se quedaron pegadas al salir de la ventana, y el pegado se coló"
@@ -7140,7 +7248,14 @@ mod tests {
         let mut modificadores = egui::Modifiers::NONE;
 
         encolar(&ctx, vec![egui::Event::ModifiersChanged(con_mayusculas())]);
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         // **Vaciar la cola es lo que convierte esto en dos fotogramas de verdad.** egui rehace la
         // lista de eventos en cada uno, así que el aviso de que se pulsaron las teclas no sigue ahí
@@ -7149,7 +7264,14 @@ mod tests {
         ctx.input_mut(|entrada| entrada.events.clear());
 
         encolar(&ctx, vec![egui::Event::Paste("tarde".to_owned())]);
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(
             division.pulsaciones, b"tarde",
             "el acorde del fotograma anterior se perdió"
@@ -7157,28 +7279,49 @@ mod tests {
     }
 
     #[test]
-    fn interrumpir_sigue_interrumpiendo_con_y_sin_mayusculas() {
-        // Es lo que más fácil se rompe al traer el portapapeles: copiar en un terminal es
-        // Ctrl+Mayúsculas+C, y si esa combinación dejara de interrumpir, un programa colgado se
-        // queda colgado.
+    fn interrumpir_sigue_interrumpiendo_y_cortar_no_corta() {
+        // **`Ctrl+C` es cómo se interrumpe un programa desde que existen los terminales**, y llega por la
+        // misma puerta que la petición de copiar: si esa puerta se tragara los dos, un programa colgado se
+        // quedaría colgado. Con Mayúsculas la petición **sí** es de copiar, y eso lo prueban las de
+        // `copiar_en`.
+        //
+        // Cortar no se separa por modificadores porque **un terminal no corta**: lo que hay en pantalla no
+        // es un editor del que quitar texto. Con Mayúsculas o sin ellas es del programa.
         let ctx = egui::Context::default();
         let mut division = division_con("sleep 30", 0);
         // La ventana guarda esto entre fotogramas; aquí lo hace la variable, que es lo mismo.
         let mut modificadores = egui::Modifiers::NONE;
 
-        for acorde in [egui::Modifiers::CTRL, con_mayusculas()] {
-            encolar(
-                &ctx,
-                vec![egui::Event::ModifiersChanged(acorde), egui::Event::Copy],
-            );
-            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
-            assert_eq!(division.pulsaciones, b"\x03", "dejó de interrumpir");
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                egui::Event::Copy,
+            ],
+        );
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
+        assert_eq!(division.pulsaciones, b"\x03", "dejó de interrumpir");
 
+        for acorde in [egui::Modifiers::CTRL, con_mayusculas()] {
             encolar(
                 &ctx,
                 vec![egui::Event::ModifiersChanged(acorde), egui::Event::Cut],
             );
-            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+            division.teclear(
+                &ctx,
+                Instant::now(),
+                &mut modificadores,
+                2,
+                &teclado::Atajos::default(),
+                true,
+            );
             assert_eq!(division.pulsaciones, b"\x18", "cortar cambió de byte");
         }
     }
@@ -7188,13 +7331,6 @@ mod tests {
     /// Las dos mitades del fotograma que aquí se prueban —bombear y redimensionar— no tocan la
     /// ventana del escritorio, así que no hace falta abrir ninguna: se arma el struct a mano con
     /// las mismas piezas que [`Division::nueva`].
-    /// Deja en la cola de la ventana exactamente estos eventos, en este orden.
-    ///
-    /// **Vacía lo que hubiera antes, y esa es la mitad del ayudante.** Los avisos de cambio de
-    /// modificadores se dejan a propósito en la cola cuando se procesan, así que sin vaciar, una
-    /// segunda llamada correría contra los suyos **más los del tramo anterior** — y la prueba estaría
-    /// afirmando sobre una secuencia que no es la que escribió. Un fotograma de verdad rehace la
-    /// lista entera; esto hace lo mismo.
     fn division_con(programa: &str, nombre: usize) -> Division {
         let (pty, salida) = Pty::spawn("sh", &["-c", programa], REJILLA_INICIAL)
             .expect("no se pudo abrir el pseudoterminal");
@@ -7288,6 +7424,8 @@ mod tests {
             activa: 0,
             modificadores: egui::Modifiers::NONE,
             tema: Tema::default(),
+            atajos: teclado::Atajos::default(),
+            copiar_encendido: true,
             cuerpo: CUERPO,
             resto_del_fotograma: RestoDelFotograma::default(),
             empezo_el_fotograma: Instant::now(),
@@ -7511,10 +7649,24 @@ mod tests {
             entrada.events.push(egui::Event::WindowFocused(true));
         });
 
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert_eq!(division.pulsaciones, b"a", "no se envió lo tecleado");
 
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
         assert!(
             division.pulsaciones.is_empty(),
             "la misma tecla se envió en el segundo pase"
@@ -8165,6 +8317,177 @@ mod tests {
     }
 
     #[test]
+    fn reasignar_un_atajo_lo_mueve_y_le_devuelve_el_acorde_viejo_al_programa() {
+        // **Las dos mitades del criterio, y la segunda es la que se olvida.** Que el acorde nuevo actúe se
+        // ve enseguida; que el viejo **deje de ser de la aplicación y sus bytes le lleguen al programa de
+        // dentro** es lo que hace que reasignar sirva para algo. Sin ella, el acorde viejo se quedaría en
+        // un limbo: ni parte, ni llega a `vim`.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+        let mut atajos = teclado::Atajos::default();
+        atajos.poner(
+            teclado::Accion::PartirAlLado,
+            Some(teclado::Acorde {
+                ctrl: true,
+                shift: true,
+                alt: false,
+                tecla: egui::Key::E,
+            }),
+        );
+
+        encolar(&ctx, acorde_con(egui::Key::E));
+        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 1, &atajos, true);
+        assert_eq!(
+            ordenes,
+            vec![Orden::Partir(Orientacion::Columnas)],
+            "el acorde nuevo no parte"
+        );
+        assert!(
+            division.pulsaciones.is_empty(),
+            "el acorde nuevo actuó y además le mandó {:?} al programa",
+            String::from_utf8_lossy(&division.pulsaciones)
+        );
+
+        encolar(&ctx, acorde_con(egui::Key::D));
+        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 1, &atajos, true);
+        assert!(ordenes.is_empty(), "el acorde viejo siguió partiendo");
+        assert_eq!(
+            division.pulsaciones,
+            teclado::bytes(&egui::Event::Key {
+                key: egui::Key::D,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: con_mayusculas(),
+            })
+            .expect("la tabla del teclado no traduce Ctrl+Mayúsculas+D")
+            .into_owned(),
+            "el acorde viejo no llegó al programa: se quedó en el limbo de no ser de nadie"
+        );
+    }
+
+    #[test]
+    fn un_acorde_sin_ctrl_actua_pero_no_le_escribe_la_letra_al_programa() {
+        // **El mismo gesto llega dos veces y hay que consumir las dos.** Cuando el acorde no lleva
+        // ninguna tecla de mandato, el escritorio manda la tecla **y detrás el texto que esa tecla
+        // escribe**; consumir solo la tecla dejaba el texto en la cola, caía en la tabla y se le mandaba
+        // al programa: `atajo.partir-al-lado = shift+e` partía la consola **y además** escribía una `E`
+        // en el shell.
+        //
+        // Los acordes de fábrica no lo destapaban: los que no llevan Ctrl caen sobre teclas que no
+        // escriben nada. Pero el fichero acepta `shift+e` y el documento lo publica como válido.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+        let solo_mayusculas = egui::Modifiers::SHIFT;
+        let mut atajos = teclado::Atajos::default();
+        atajos.poner(
+            teclado::Accion::PartirAlLado,
+            Some(teclado::Acorde {
+                ctrl: false,
+                shift: true,
+                alt: false,
+                tecla: egui::Key::E,
+            }),
+        );
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(solo_mayusculas),
+                tecla(egui::Key::E, solo_mayusculas),
+                egui::Event::Text("E".to_owned()),
+            ],
+        );
+        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 1, &atajos, true);
+
+        assert_eq!(
+            ordenes,
+            vec![Orden::Partir(Orientacion::Columnas)],
+            "el acorde configurado sin Ctrl no actuó"
+        );
+        assert!(
+            division.pulsaciones.is_empty(),
+            "el atajo actuó Y ADEMÁS le escribió {:?} al programa",
+            String::from_utf8_lossy(&division.pulsaciones)
+        );
+    }
+
+    #[test]
+    fn la_letra_de_una_tecla_que_no_es_atajo_sigue_llegando_al_programa() {
+        // **La mitad que impide arreglar el de arriba tragándose todo el texto.** Escribir es lo que un
+        // terminal hace: si el texto se consumiera sin que su tecla fuera un atajo, no se podría teclear.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+
+        encolar(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+                tecla(egui::Key::E, egui::Modifiers::SHIFT),
+                egui::Event::Text("E".to_owned()),
+            ],
+        );
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            1,
+            &teclado::Atajos::default(),
+            true,
+        );
+
+        assert_eq!(
+            division.pulsaciones, b"E",
+            "la letra dejó de llegarle al programa"
+        );
+    }
+
+    #[test]
+    fn mantener_pulsado_el_acorde_de_crear_no_abre_mas_que_una_pestaña() {
+        // **La otra mitad, y la más cara de las dos.** Cerrar de más mata programas; crear de más los
+        // lanza: un segundo con el acorde apretado son unas treinta pestañas, **cada una con su shell**,
+        // y aquí no hay geometría que lo frene como en las divisiones. La repetición **se consume igual**:
+        // devolverla le mandaría al programa el byte de control de cada una.
+        let ctx = egui::Context::default();
+        let mut division = division_con("sleep 30", 0);
+        let mut modificadores = egui::Modifiers::NONE;
+
+        let mut lote = acorde_con(egui::Key::T);
+        for _ in 0..5 {
+            lote.push(egui::Event::Key {
+                key: egui::Key::T,
+                physical_key: None,
+                pressed: true,
+                repeat: true,
+                modifiers: con_mayusculas(),
+            });
+        }
+        encolar(&ctx, lote);
+
+        let ordenes = division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            1,
+            &teclado::Atajos::default(),
+            true,
+        );
+
+        assert_eq!(
+            ordenes,
+            vec![Orden::Crear],
+            "las repeticiones de la tecla mantenida pidieron abrir más pestañas"
+        );
+        assert!(
+            division.pulsaciones.is_empty(),
+            "las repeticiones se le colaron al programa"
+        );
+    }
+
+    #[test]
     fn mantener_pulsado_el_acorde_de_cerrar_no_cierra_mas_que_una_pestaña() {
         // **De un solo gesto se perdía todo.** egui marca las repeticiones de una tecla mantenida con
         // `repeat`, pero les sigue poniendo `pressed`, así que un segundo con el acorde apretado son unas
@@ -8189,7 +8512,14 @@ mod tests {
         }
         encolar(&ctx, lote);
 
-        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 4);
+        let ordenes = division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            4,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         assert_eq!(
             ordenes,
@@ -8216,7 +8546,14 @@ mod tests {
         lote.extend(acorde_con(egui::Key::ArrowRight));
         encolar(&ctx, lote);
 
-        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 1);
+        let ordenes = division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            1,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         assert_eq!(
             ordenes,
@@ -8243,7 +8580,14 @@ mod tests {
         lote.extend(acorde_con(egui::Key::ArrowRight));
         encolar(&ctx, lote);
 
-        let ordenes = division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        let ordenes = division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         assert_eq!(
             ordenes,
@@ -9233,6 +9577,83 @@ mod tests {
             ventana.activa().divisiones()[0].pulsaciones,
             b"\x1b[D",
             "la flecha se la tragó el acorde en vez de llegar al programa"
+        );
+    }
+
+    #[test]
+    fn un_atajo_desatado_le_devuelve_su_acorde_al_programa() {
+        // **Es la razón de ser de poder desatar**, y el criterio que este cambio cierra: quien necesite
+        // `Ctrl+Mayúsculas+D` dentro de `vim` o de `tmux` lo recupera escribiendo `ninguno`, y entonces sus
+        // bytes bajan al programa en vez de partir una consola.
+        //
+        // **Se afirma sobre los bytes que llegan al programa**, no sobre la tabla: comprobar que el acorde
+        // salió de la tabla pasaría igual con un pintor que se tragara la tecla y no la tradujera — que es
+        // exactamente el defecto que este bloque tiene documentado desde F2.1 y que el refactor de los
+        // atajos reintrodujo una vez.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+
+        // De fábrica, ese acorde parte la consola y el programa no lo ve.
+        encolar(&ctx, acorde_con(egui::Key::D));
+        assert_eq!(
+            ventana.teclear_la_del_foco(&ctx),
+            vec![Orden::Partir(Orientacion::Columnas)],
+            "de fábrica ese acorde tiene que partir"
+        );
+        assert!(
+            ventana.activa().divisiones()[0].pulsaciones.is_empty(),
+            "de fábrica el acorde no debe llegar al programa"
+        );
+
+        ventana.aplicar_los_ajustes(&ajustes::Ajustes {
+            atajos: vec![(teclado::Accion::PartirAlLado, None)],
+            ..Default::default()
+        });
+
+        encolar(&ctx, acorde_con(egui::Key::D));
+        assert_eq!(
+            ventana.teclear_la_del_foco(&ctx),
+            Vec::new(),
+            "el atajo desatado siguió partiendo la consola"
+        );
+        assert!(
+            !ventana.activa().divisiones()[0].pulsaciones.is_empty(),
+            "el acorde desatado se tragó la tecla sin traducirla: el programa no la recibe nunca, que es \
+             el defecto que este bloque tiene documentado"
+        );
+    }
+
+    #[test]
+    fn un_acorde_reasignado_hace_lo_suyo_y_el_viejo_baja_al_programa() {
+        // **Las dos mitades del criterio en el camino real**, no en la tabla: el acorde nuevo parte, y el
+        // que se dejó libre le llega al programa de dentro.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.aplicar_los_ajustes(&ajustes::Ajustes {
+            atajos: vec![(
+                teclado::Accion::PartirAlLado,
+                Some(teclado::Acorde {
+                    ctrl: true,
+                    shift: true,
+                    alt: false,
+                    tecla: egui::Key::E,
+                }),
+            )],
+            ..Default::default()
+        });
+
+        encolar(&ctx, acorde_con(egui::Key::E));
+        assert_eq!(
+            ventana.teclear_la_del_foco(&ctx),
+            vec![Orden::Partir(Orientacion::Columnas)],
+            "el acorde nuevo no parte"
+        );
+
+        encolar(&ctx, acorde_con(egui::Key::D));
+        assert_eq!(
+            ventana.teclear_la_del_foco(&ctx),
+            Vec::new(),
+            "el acorde viejo sigue partiendo: reasignar sumó en vez de mover"
         );
     }
 
@@ -11152,24 +11573,37 @@ mod tests {
         );
     }
 
-    /// Pulsa el acorde de copiar en esa consola y devuelve lo que quedó en el portapapeles.
+    /// Pide copiar en esa consola **como lo pide el escritorio** y devuelve lo que quedó en el
+    /// portapapeles.
     ///
     /// **Se lee de la salida del contexto**, que es por donde egui entrega el portapapeles al escritorio:
     /// afirmar sobre una copia nuestra probaría que la guardamos, no que se copió.
+    ///
+    /// **Y se pide con el evento de copiar, no con la tecla `C`, porque la tecla no llega nunca.** El
+    /// escritorio se queda `Ctrl+Mayúsculas+C` antes y lo entrega ya convertido en una petición de copiar.
+    /// Sembrar aquí la tecla probaba un camino que en la ventana de verdad no se recorre: con él, estas
+    /// mismas pruebas pasaron un hito entero mientras copiar **interrumpía el programa**.
     fn copiar_en(division: &mut Division, ctx: &egui::Context) -> Option<String> {
         let mut modificadores = egui::Modifiers::NONE;
         encolar(
             ctx,
             vec![
                 egui::Event::ModifiersChanged(ACORDE_DE_MOVER),
-                tecla(egui::Key::C, ACORDE_DE_MOVER),
+                egui::Event::Copy,
             ],
         );
         // **Teclear va FUERA de la pasada, y no es un detalle de estilo.** `run_ui` sustituye la entrada
         // por la que se le pasa, así que dentro de ella la cola que acaba de sembrarse ya no está: el
         // acorde no llegaría nunca. La pasada de después solo sirve para recoger lo que la aplicación
         // dejó dicho al escritorio.
-        division.teclear(ctx, Instant::now(), &mut modificadores, 1);
+        division.teclear(
+            ctx,
+            Instant::now(),
+            &mut modificadores,
+            1,
+            &teclado::Atajos::default(),
+            true,
+        );
         let salida = ctx.run_ui(egui::RawInput::default(), |_| {});
         let copiado = salida
             .platform_output
@@ -11212,12 +11646,10 @@ mod tests {
     }
 
     #[test]
-    fn mantener_el_acorde_de_copiar_no_vuelve_a_copiar_en_cada_fotograma() {
-        // **Repetir no destruye nada, pero recorre y reserva la selección ENTERA cada vez.** Un segundo con
-        // el acorde apretado son sesenta copias idénticas del mismo texto y sesenta cadenas que nacen y
-        // mueren; con una selección grande eso es basura por fotograma para no darle nada a nadie. Y la
-        // repetición **se sigue tragando**: devolverla a la cola la dejaría caer en la tabla del teclado,
-        // que traduce `Ctrl+C` a `\x03`.
+    fn con_el_atajo_de_copiar_apagado_el_acorde_es_del_programa() {
+        // **Apagarlo es lo único que se puede hacer con este acorde, y tiene que hacer algo.** Quien
+        // escribe `atajo.copiar = ninguno` lo hace para devolvérselo a `vim` o a `tmux`: si aquí se
+        // siguiera tragando el evento, el fichero mentiría y el programa no recibiría nada.
         let ctx = egui::Context::default();
         let mut division = division_con("sleep 30", 0);
         let mut modificadores = egui::Modifiers::NONE;
@@ -11237,16 +11669,17 @@ mod tests {
             &ctx,
             vec![
                 egui::Event::ModifiersChanged(ACORDE_DE_MOVER),
-                egui::Event::Key {
-                    key: egui::Key::C,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: true,
-                    modifiers: ACORDE_DE_MOVER,
-                },
+                egui::Event::Copy,
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 1);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            1,
+            &teclado::Atajos::default(),
+            false,
+        );
         let salida = ctx.run_ui(egui::RawInput::default(), |_| {});
         let copio = salida
             .platform_output
@@ -11255,15 +11688,10 @@ mod tests {
             .any(|orden| matches!(orden, egui::OutputCommand::CopyText(_)));
         salida.drop_without_applying_deltas();
 
-        assert!(
-            !copio,
-            "una repetición del acorde volvió a copiar: mantenerlo apretado reserva la selección entera \
-             en cada fotograma"
-        );
-        assert!(
-            division.pulsaciones.is_empty(),
-            "la repetición se devolvió a la cola y al programa le llegó {:?}",
-            String::from_utf8_lossy(&division.pulsaciones)
+        assert!(!copio, "con el atajo apagado se copió igual");
+        assert_eq!(
+            division.pulsaciones, b"\x03",
+            "al programa no le llegó el acorde que se le acababa de devolver"
         );
     }
 
@@ -11302,14 +11730,21 @@ mod tests {
             ..Default::default()
         };
 
+        // **También llega como evento de copiar, y ahí está el filo de esta prueba.** El escritorio no
+        // dice si había Mayúsculas: emite lo mismo para `Ctrl+C` y para `Ctrl+Mayúsculas+C`, y quien los
+        // separa es este bucle mirando los modificadores que sí tiene a mano.
         encolar(
             &ctx,
-            vec![
-                egui::Event::ModifiersChanged(solo_ctrl),
-                tecla(egui::Key::C, solo_ctrl),
-            ],
+            vec![egui::Event::ModifiersChanged(solo_ctrl), egui::Event::Copy],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 1);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            1,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         assert_eq!(
             division.pulsaciones.as_slice(),
@@ -14124,6 +14559,87 @@ mod tests {
     }
 
     #[test]
+    fn apagar_copiar_en_el_fichero_le_devuelve_el_acorde_al_programa() {
+        // **El tramo que va del fichero a la ventana, y sin él la mitad de la promesa no está atada.** Que
+        // el interruptor apague cuando se le pasa a mano lo prueba otra; ésta recorre el camino de verdad:
+        // el fichero dice `atajo.copiar = ninguno`, la ventana lo aplica, y el acorde acaba en el programa
+        // de dentro. Comprobado mutando: sin la línea que lo aplica, la suite entera seguía verde.
+        let ctx = egui::Context::default();
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        ventana.aplicar_los_ajustes(&ajustes::Ajustes {
+            copiar: Some(false),
+            ..Default::default()
+        });
+        un_fotograma_en(&mut ventana, &ctx, area_de(1200.0), Vec::new());
+
+        let division = &mut ventana.activa_mut().divisiones_mut()[0];
+        division.pantalla.advance(b"hola mundo");
+        division.pantalla.empezar_seleccion(Celda {
+            fila: 0,
+            columna: 0,
+            mitad: Mitad::Izquierda,
+        });
+        division.pantalla.extender_seleccion(Celda {
+            fila: 0,
+            columna: 3,
+            mitad: Mitad::Derecha,
+        });
+        division.pulsaciones.clear();
+
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            vec![
+                egui::Event::ModifiersChanged(con_mayusculas()),
+                egui::Event::Copy,
+            ],
+        );
+
+        assert_eq!(
+            ventana.activa().divisiones()[0].pulsaciones,
+            b"\x03",
+            "el fichero apagó copiar y el acorde no llegó al programa"
+        );
+
+        // **Y la mitad contraria: sin configurar nada, copiar copia.** Sin ella, arrancar con el
+        // interruptor apagado de fábrica dejaba la suite entera en verde y el terminal sin copiar para
+        // nadie — las pruebas de copiar le pasan el interruptor a mano y no miran de dónde sale.
+        // Comprobado mutando el valor de fábrica.
+        let mut ventana = ventana_con("sleep 30", "sleep 30");
+        un_fotograma_en(&mut ventana, &ctx, area_de(1200.0), Vec::new());
+        let division = &mut ventana.activa_mut().divisiones_mut()[0];
+        division.pantalla.advance(b"hola mundo");
+        division.pantalla.empezar_seleccion(Celda {
+            fila: 0,
+            columna: 0,
+            mitad: Mitad::Izquierda,
+        });
+        division.pantalla.extender_seleccion(Celda {
+            fila: 0,
+            columna: 3,
+            mitad: Mitad::Derecha,
+        });
+        division.pulsaciones.clear();
+
+        un_fotograma_en(
+            &mut ventana,
+            &ctx,
+            area_de(1200.0),
+            vec![
+                egui::Event::ModifiersChanged(con_mayusculas()),
+                egui::Event::Copy,
+            ],
+        );
+
+        assert!(
+            ventana.activa().divisiones()[0].pulsaciones.is_empty(),
+            "sin configurar nada, pedir copiar le mandó {:?} al programa",
+            String::from_utf8_lossy(&ventana.activa().divisiones()[0].pulsaciones)
+        );
+    }
+
+    #[test]
     fn el_tamano_configurado_le_cambia_la_rejilla_a_la_consola() {
         // **Es lo que separa «se lee el número» de «el número hace algo».** Una versión anterior de esta
         // prueba comparaba dos llamadas a la medida de la celda con cuerpos distintos: eso mide a egui, no
@@ -16322,38 +16838,43 @@ mod tests {
         // un detalle del montaje: con la mitad de columnas la prueba se queda verde sin guarda ninguna
         // —lo que frena a la segunda partición es que ya no cabe, no que sea una repetición— y entonces no
         // prueba nada. Comprobado quitando el `repeat`: con ciento sesenta columnas sobrevivía.
+        // **Las dos orientaciones, porque son dos guardas distintas.** Partir al lado y partir debajo
+        // llevan cada una su `repeat` en su brazo, y con una sola probada la otra se puede borrar entera
+        // con la suite en verde.
         let ctx = egui::Context::default();
-        let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
-        let area = area_de_celdas(200.0);
-        let mut mantenido = acorde_con(egui::Key::D);
-        for _ in 0..3 {
-            mantenido.push(egui::Event::Key {
-                key: egui::Key::D,
-                physical_key: None,
-                pressed: true,
-                repeat: true,
-                modifiers: con_mayusculas(),
-            });
+        for tecla in [egui::Key::D, egui::Key::B] {
+            let mut ventana = ventana_de_pestañas([["sleep 30", "sleep 30"]]);
+            let area = area_de_celdas(200.0);
+            let mut mantenido = acorde_con(tecla);
+            for _ in 0..3 {
+                mantenido.push(egui::Event::Key {
+                    key: tecla,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: true,
+                    modifiers: con_mayusculas(),
+                });
+            }
+
+            un_fotograma_en(&mut ventana, &ctx, area, mantenido);
+
+            assert_eq!(
+                ventana.activa().divisiones().len(),
+                3,
+                "las repeticiones de {tecla:?} abrieron consolas de más"
+            );
+
+            // Y que lo que las frenó fue la repetición y no la geometría: el mismo acorde soltado y vuelto
+            // a pulsar sí parte, en la misma ventana y con el mismo foco.
+            un_fotograma_en(&mut ventana, &ctx, area, otra_vez_el_acorde(tecla));
+
+            assert_eq!(
+                ventana.activa().divisiones().len(),
+                4,
+                "en esta ventana no cabía otra partición con {tecla:?}, así que la de arriba no demuestra \
+                 que la guarda de repetición haga nada"
+            );
         }
-
-        un_fotograma_en(&mut ventana, &ctx, area, mantenido);
-
-        assert_eq!(
-            ventana.activa().divisiones().len(),
-            3,
-            "las repeticiones del acorde abrieron consolas de más"
-        );
-
-        // Y que lo que las frenó fue la repetición y no la geometría: el mismo acorde soltado y vuelto a
-        // pulsar sí parte, en la misma ventana y con el mismo foco.
-        un_fotograma_en(&mut ventana, &ctx, area, otra_vez_el_acorde(egui::Key::D));
-
-        assert_eq!(
-            ventana.activa().divisiones().len(),
-            4,
-            "en esta ventana no cabía otra partición, así que la de arriba no demuestra que la guarda \
-             de repetición haga nada"
-        );
     }
 
     #[test]
@@ -21252,7 +21773,14 @@ mod tests {
                 },
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         assert!(
             division.pulsaciones.is_empty(),
@@ -21284,7 +21812,14 @@ mod tests {
         assert!(division.pantalla.view().desplazamiento() > 0);
 
         encolar(&ctx, vec![egui::Event::Text("a".to_owned())]);
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         assert_eq!(
             division.pantalla.view().desplazamiento(),
@@ -22340,13 +22875,27 @@ mod tests {
                     tecla(key, egui::Modifiers::SHIFT),
                 ],
             );
-            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+            division.teclear(
+                &ctx,
+                Instant::now(),
+                &mut modificadores,
+                2,
+                &teclado::Atajos::default(),
+                true,
+            );
             let despues = division.pantalla.view().desplazamiento();
 
             if esperado == usize::MAX {
-                // Las dos de página no van a un sitio fijo: lo que se ata es el SENTIDO, que es lo que
-                // una prueba con las teclas cruzadas dejaría pasar.
+                // Las dos de página no van a un sitio fijo: lo que se ata es el SENTIDO. **Y que se
+                // MOVIÓ**, que es la mitad que faltaba: afirmar solo «no fue hacia arriba» dejaba a
+                // `AvPág` quedarse quieta —sin acorde, sin hacer nada— con el mismo resultado que
+                // bajando. Comprobado quitándole el acorde: era la única de las once que se podía
+                // desatar entera con la suite en verde.
                 let sube = key == egui::Key::PageUp;
+                assert_ne!(
+                    despues, antes,
+                    "{key:?} no movió la vista: se quedó en {antes}"
+                );
                 assert_eq!(
                     despues > antes,
                     sube,
@@ -22379,7 +22928,14 @@ mod tests {
             let antes = division.pantalla.view().desplazamiento();
 
             encolar(&ctx, vec![tecla(key, egui::Modifiers::NONE)]);
-            division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+            division.teclear(
+                &ctx,
+                Instant::now(),
+                &mut modificadores,
+                2,
+                &teclado::Atajos::default(),
+                true,
+            );
 
             assert_eq!(
                 division.pantalla.view().desplazamiento(),
@@ -22407,7 +22963,14 @@ mod tests {
                 tecla(egui::Key::PageUp, egui::Modifiers::SHIFT),
             ],
         );
-        division.teclear(&ctx, Instant::now(), &mut modificadores, 2);
+        division.teclear(
+            &ctx,
+            Instant::now(),
+            &mut modificadores,
+            2,
+            &teclado::Atajos::default(),
+            true,
+        );
 
         let quedan = ctx.input(|entrada| entrada.events.clone());
         assert!(

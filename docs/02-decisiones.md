@@ -3054,3 +3054,45 @@ ajustes» sería una lista que se olvida de crecer.
 - **Elegir el programa que lanza cada consola.** En cuanto el programa o sus argumentos vengan de
   configuración, lanzarlo pasa a ser **superficie sensible** y hay que auditarlo como tal. Merece su propia
   revisión, no un rincón de este hito.
+
+### Copiar no es un acorde reasignable: es un interruptor, y hasta este hito no copiaba
+
+**El escritorio se queda `Ctrl+Mayúsculas+C` antes de que sea una tecla.** Lo entrega ya convertido en una
+petición de copiar, y **sin decir si había Mayúsculas**: su comprobación es «mandato más la letra C». Así
+que el acorde de copiar de un terminal **no llega nunca como tecla**, y la tabla de atajos no puede
+alcanzarlo.
+
+De ahí salen las dos consecuencias de este anexo:
+
+1. **La acción sale de la tabla.** Once acciones reasignables, no doce. Aceptar
+   `atajo.copiar = ctrl+shift+e` habría sido publicar un acorde que no se dispara nunca. La clave sigue
+   existiendo —es la que este terminal ya publicó— y **solo admite `ninguno`**, que es lo que devuelve el
+   acorde a `vim` o a `tmux`. Cualquier otro valor se rechaza diciendo por qué.
+2. **Copiar estaba roto desde F2.8, y nadie lo vio porque su prueba sembraba la tecla.** La petición caía
+   hasta la tabla del teclado, que traduce `Ctrl+C` a `\x03`: **pedir copiar interrumpía el programa**. Las
+   pruebas del hito que lo entregó encolaban un `Event::Key` con la letra `C` —un camino que en la ventana
+   de verdad no se recorre—, así que pasaron un hito entero sobre código muerto. Ahora encolan el evento
+   que manda el escritorio.
+
+**El arreglo es el mismo que el proyecto ya usaba para pegar**, y estaba escrito como pendiente en el
+propio código desde F2.6: *«quien traiga el portapapeles tendrá que decidirlo antes, en el bucle, donde el
+estado de los modificadores sí está disponible»*. Con Mayúsculas copia; sin ellas, `Ctrl+C` sigue
+interrumpiendo. Apagado, el evento cae hasta la tabla y sale por `\x03`, que es justo lo que espera quien
+se lo acaba de devolver a su programa.
+
+**Lo que se pierde, y se dice:** la guarda que impedía que mantener el acorde apretado volviera a copiar en
+cada fotograma. El evento del escritorio **no trae la marca de repetición** —`egui-winit` la descarta a
+propósito—, así que no hay dónde mirar. Costaba una copia idéntica por fotograma mientras la tecla
+estuviera apretada; hasta hoy esa guarda vivía sobre el camino de la tecla, que no se recorre, así que en
+la ventana de verdad **nunca estuvo activa**. No se cambia nada por perderla.
+
+### Un acorde sin Ctrl llega dos veces, y consumir una sola lo deja actuar y escribir
+
+`egui` emite el texto de la tecla **junto a la tecla** siempre que sea imprimible y no haya mandato. Los
+once acordes de fábrica se libraban por casualidad: los que no llevan Ctrl caen sobre teclas que no
+escriben nada. Pero el fichero acepta `shift+e` y el documento lo publica como válido — y así,
+`atajo.partir-al-lado = shift+e` partía la consola **y además escribía una `E` en el shell**.
+
+Se consumen los dos: al consumir la tecla como atajo se descarta el texto que viene detrás. La alternativa
+—rechazar los acordes sin Ctrl sobre teclas imprimibles— era más barata y le quitaba a quien configura
+`shift+F5` y compañía por el mismo precio.
