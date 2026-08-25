@@ -40,3 +40,38 @@ serde_json = "1"
 # La versión tiene que seguir a la que arrastre eframe: si se desincronizan, aparece un segundo
 # winit en el árbol y esta línea deja de surtir efecto en silencio.
 winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
+
+# **Solo para el banco de fuentes, y a propósito.** Esta entrega mide qué cuesta descubrir las fuentes
+# del sistema y rasterizar un glifo a color; hasta que esos números decidan cómo se hace, nada de esto
+# entra en producción. Es el mismo criterio con el que el banco del historial midió el motor por debajo
+# de la fachada de `term-core`: primero el número, y el número decide qué API hace falta.
+#
+# `fontique` es de los mismos autores que `skrifa` —que **ya está en el árbol** porque el motor de texto
+# de egui la usa por debajo— así que las dos hablan el mismo modelo de fuente en vez de convivir dos. Y
+# usa las APIs nativas de cada plataforma: fontconfig en Linux, DirectWrite en Windows, CoreText en
+# macOS, que es lo que hace falta para no dejarle deuda a **F2.7**.
+# **Y `fontconfig` se carga en EJECUCIÓN, no se enlaza al compilar.** Sin esa feature, compilar este
+# repo en Linux pasa a exigir `pkg-config` y las cabeceras de fontconfig — comprobado: la máquina donde
+# se escribió esto no las tiene y la compilación **falla en el guion de construcción**, no en el código.
+# Es la misma técnica, y la misma razón, que el `dlopen` con el que `libwayland` llega de rebote y que
+# está razonada arriba: sin ella el binario dejaría de compilar donde hoy compila. El precio es que la
+# ausencia de fontconfig se descubre **al arrancar** y no al compilar — que es justo el caso que AC9
+# obliga a aguantar.
+#
+# **Y «de desarrollo» no significa «no toca el binario».** Las dependencias de desarrollo participan en la
+# resolución de versiones: añadir `fontique` movió `windows-sys` de 0.59 a 0.60 para `arboard` —el
+# portapapeles, que **sí** va en el binario publicado— y metió la pila de `windows 0.62`. En Linux no
+# cambia nada; **en Windows, que es la plataforma de F2.7, ya cambia lo que se compila**. Queda dicho aquí
+# porque el comentario de arriba, tal como estaba, prometía lo contrario.
+[dev-dependencies]
+fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
+skrifa = "0.44"
+
+# **Para que las pruebas del banco corran con `cargo test`, y no solo si alguien se acuerda de pedir
+# `--examples`.** Un `example` de cargo no es un objetivo de prueba de serie: el módulo `tests` de
+# `examples/fuentes.rs` se compilaría y no se ejecutaría nunca, que es peor que no tenerlo — una prueba
+# que no corre se lee como cobertura y no lo es. Con esto entra en la suite del taller y en la de CI por
+# el mismo camino que las demás.
+[[example]]
+name = "fuentes"
+test = true

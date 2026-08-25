@@ -2712,3 +2712,141 @@ que su programa pida el ratón, la corrida se invalida diciendo que **dejó text
 fotogramas** — el gesto entero se resolvió como una selección, exactamente el escenario contra el que la
 guarda existe. Sin ella, ese informe se habría publicado como bueno y sus tramos serían los de la tanda que
 marca texto con la etiqueta del ratón encima.
+
+---
+
+## D24 — Las fuentes del sistema se buscan cuando hacen falta, no al arrancar
+
+**Decisión.** El terminal **no enumera las fuentes de la máquina al abrir la ventana**. Las busca la
+primera vez que aparece un carácter que ninguna de las caras registradas cubre, y registra entonces la
+que lo cubra. **Elegido con los números delante**, igual que el techo del historial en **D21**.
+
+### Los números, medidos aquí
+
+`cargo run --release --example fuentes -p app`, cinco muestras por punto y **tres corridas del binario con
+la máquina en reposo**. Máquina de desarrollo con **259 familias** instaladas.
+
+**En frío y en caliente van por separado, y ésa es la mitad del anexo.** El banco cachea los ficheros que
+abre, así que la primera muestra paga abrirlos y las demás no. **La vía perezosa paga siempre la fría** —
+una vez por escritura nueva, que es justo lo que ocurre en producción.
+
+**Y por eso la columna fría se publica como rango de corridas y no como un valor.** El frío **ocurre una
+vez por corrida**: dentro de una corrida no hay cinco muestras frías que promediar, hay **una**. Así que
+la única forma de saber cuánto se mueve es **repetir la corrida**, y se movió — hasta un **40 %** en el
+número que sostiene esta decisión. Publicar el valor de una corrida como si fuera *el* valor es
+exactamente lo que la regla dura del proyecto prohíbe, y la primera versión de este anexo lo hacía.
+
+| Qué | En frío (3 corridas) | En caliente |
+|---|---|---|
+| **Enumerar** las fuentes del sistema | **17,3 – 23,2 ms** | 15,1 ms |
+| **Registrar 4 caras** en el motor de texto | **6,2 – 7,8 ms** · 24,5 MiB de fuente en memoria | 1,9 – 2,2 ms |
+| **Registrar 1 cara con la ventana andando** | **3,4 – 4,8 ms** — del **21 % al 29 %** de un fotograma a 60 Hz | 1,2 – 1,5 ms |
+| Encontrar quién cubre 日 **por script** | **570 – 852 µs** | 140 – 210 ns |
+| Encontrar el emoji **a color por familia genérica** | **7,2 – 10,8 µs** | 0,67 – 0,98 µs |
+| Encontrar quién lo cubre **abriendo las 259 en orden** | de 94 µs a **18,2 ms** | 94 – 152 µs |
+
+> **La columna caliente sí es estable, y el contraste es el dato.** Enumerar en caliente dio 15,07, 15,10,
+> 15,17 y 15,12 ms en cuatro corridas seguidas — cuatro cifras dentro del 1 %—, mientras su frío iba de
+> 17,3 a 23,2. Lo que varía es **abrir ficheros**, no recorrer listas. Y sirve de aviso: **la primera
+> versión de este anexo publicaba 13,7 ms de caliente, un número que no se ha vuelto a ver en ninguna de
+> las cuatro corridas.**
+
+### Por qué perezoso, en una resta
+
+**Al arrancar costarían entre 23,5 y 31,0 ms** —enumerar más registrar, sumando los dos extremos de cada
+rango—, y son ms que **hoy no se pagan**.
+
+> **Con qué se compara, dicho con precisión, porque la primera versión de este anexo lo dijo mal.** Decía
+> que «multiplica por 5,3 lo que hoy se tarda en llegar al primer fotograma», tomando los **5,42 ms** de
+> **D16** como si fueran el arranque entero. **No lo son**: ese número es lo que cuesta **restaurar la
+> disposición**, y es **el único tramo del arranque que este proyecto tiene medido**. Abrir la ventana,
+> montar el framework y cargar las fuentes de fábrica **no están medidos**, así que no hay un total con el
+> que dividir. Lo que sí se puede afirmar: son **entre cuatro y seis veces el único tramo medido**, y se
+> pagarían **antes del primer fotograma**.
+
+**Buscar cuando hace falta cuesta entre 4,0 y 5,7 ms** —encontrar la cara más registrarla, sumando otra vez
+los extremos— y ocurre **una vez por escritura nueva**, no por carácter ni por fotograma. Son **del 24 % al
+34 % de un fotograma**: un tirón medible, puntual, y a cambio de no pagar nada al abrir.
+
+**La decisión aguanta el rango entero, y ésa es la razón de publicarlo.** El peor caso de la vía perezosa
+(5,7 ms) contra el **mejor** del arranque (23,5 ms) sigue siendo una distancia de **más de cuatro veces**
+— y el arranque se paga **siempre**, mientras que lo perezoso se paga **solo si el carácter aparece**.
+Ninguna combinación de los extremos medidos le da la vuelta.
+
+> **Ese porcentaje es cuatro veces lo que decía la primera versión de este anexo, y conviene decir por qué.**
+> Publicaba «1,3 ms, un 8 %» por tres errores que la revisión encontró **corriendo el banco**: la mediana
+> de cinco muestras publicaba el caso **caliente** cuando la vía perezosa paga el **frío**; las dos mitades
+> de la suma estaban medidas **con fuentes distintas** —la búsqueda con una de 19,5 MiB y el registro con
+> otra de 3,8—; y los tiempos de búsqueda medían **una copia del fichero de fuente**, no la búsqueda.
+
+> **Y esos 24,5 MiB no son un detalle.** Es el fichero de fuente **entero por cara**, no los glifos que se
+> usan. Con la vía perezosa solo se paga la memoria de lo que de verdad aparece en pantalla.
+
+### Lo que la medida encontró y no se buscaba
+
+**Una fuente que «cubre» un emoji puede pintarlo en blanco y negro, y ganar por orden alfabético.**
+Recorriendo las familias en orden, quien se lleva `😀` en esta máquina es **DejaVu Sans**, y el banco lo
+publica con esas palabras: `DejaVu Sans [monocromo]` — teniendo `Noto Color Emoji` instalada. Es
+exactamente el defecto que Alacritty tiene documentado desde hace años.
+
+**Preguntar por la familia genérica de emoji lo arregla, y además es lo más barato de todo el anexo:
+7,2 – 10,8 µs.** Así que la regla no es «la primera que cubra», es **«la primera que cubra con la
+presentación que toca»** — y el número de arriba ya está medido **con esa regla**, no con la de solo
+cobertura.
+
+**Y `Noto Color Emoji` no tiene contornos de color: es un mapa de bits de 136×128.** Confirma por el lado
+duro lo que la lectura de la fuente de egui ya decía — su rasterizador solo dibuja contornos, así que
+registrar esa fuente **no daría ni la silueta**: no daría nada.
+
+**La dispersión de recorrerlo todo no es «según dónde caiga en el orden», es según lo que pese la
+ganadora.** `Adwaita Sans` está pronto y pesa 0,88 MB: 94 – 134 µs. `Noto Sans CJK HK` está más tarde y
+pesa 19,5 MB: 12,2 – 18,2 ms. Lo que se paga es abrir el fichero, no recorrer la lista — y la primera
+versión de este anexo atribuía el rango a la posición, que es una causa falsa.
+
+### Lo que cuesta guardar los emojis ya dibujados
+
+La celda de este terminal mide **16,3 puntos de alto**, preguntados al motor de texto y no inventados. Un
+glifo reescalado a esa celda ocupa:
+
+| Aumento del escritorio | Por glifo | Mil glifos |
+|---|---|---|
+| 100 % | 1.024 B | **1,0 MiB** |
+| 200 % | 4.096 B | **3,9 MiB** |
+
+**El techo se dimensiona en píxeles y el escritorio decide cuántos hay por punto**, así que la cifra
+depende del aumento — lo mismo que **D10** estableció para el ancho del panel. La primera versión de este
+anexo publicaba una sola cifra con una altura de celda inventada y tratada como píxeles.
+
+**Ojo con el otro número:** los **68 KiB** del mapa de bits son su tamaño **una vez descodificado a RGBA**.
+La fuente lo guarda comprimido — el fichero entero de `Noto Color Emoji`, con todos sus glifos, son
+10,5 MiB.
+
+### Lo que este banco NO dice, y hay que medir aparte
+
+- **Qué cuesta pintar el glifo ya rasterizado.** Eso vive dentro del fotograma y se mide con una tanda del
+  guion, no con un banco. Va en la entrega que traiga el color.
+- **Cuánto cuesta el arranque entero.** Solo hay medido un tramo —restaurar la disposición—, así que hoy
+  no se puede decir qué fracción del arranque sería cualquier cosa que se le añada.
+
+### Lo que la vía perezosa obliga a recordar, y no es obvio
+
+**Hay que recordar también los caracteres que NADIE cubre.** Un carácter cubierto se busca una vez y su
+cara queda registrada, así que el siguiente ya no busca. Pero uno que ninguna fuente de la máquina tenga
+**no deja nada registrado**, así que sin recordar el fallo volvería a recorrer las candidatas cada vez que
+apareciera — y ése es justo el carácter que un programa roto escupe en bucle. Es un requisito de la
+entrega que traiga el descubrimiento, y sale de esta decisión.
+
+### Y dos consecuencias de compilación que se descubrieron aquí
+
+**Descubrir fuentes en Linux se apoya en fontconfig, y enlazarlo exigiría `pkg-config` y sus cabeceras
+para compilar** — comprobado: la máquina donde se escribió esto no las tiene y la compilación falla en el
+guion de construcción, no en el código. Se carga **en ejecución** en su lugar, que es la misma técnica —y
+la misma razón— por la que `libwayland` llega hoy de rebote. El precio está declarado: la ausencia de
+fontconfig se descubre **al arrancar** en vez de al compilar, y es el caso que el criterio de aceptación
+de este hito obliga a aguantar sin caerse.
+
+**Y una dependencia «solo de desarrollo» no es inocua para el binario que se publica.** Las dependencias
+de desarrollo participan en la resolución de versiones: añadir `fontique` movió `windows-sys` de 0.59 a
+0.60 para `arboard` —el portapapeles, que **sí** va en el binario— y metió la pila de `windows 0.62`. En
+Linux no cambia nada; **en Windows, que es la plataforma de F2.7, ya cambia lo que se compila**. Lo
+encontró la revisión leyendo el fichero de bloqueo.
