@@ -17,6 +17,7 @@
 //! `logic` ve es la del último pase mostrado, así que leer el teclado ahí reenviaría la última
 //! tecla pulsada miles de veces por segundo durante un volcado.
 
+pub mod ajustes;
 pub mod fuentes;
 pub mod medida;
 pub mod panel;
@@ -1612,6 +1613,43 @@ enum ConQueAbrir {
     Restaurada(sesion::Valido),
 }
 
+/// Lee los ajustes del usuario, avisando de lo que no se entienda.
+///
+/// **Un fichero que no está es el caso normal y no se dice.** Lo demás sí: quien escribió un fichero que
+/// no se aplica tiene que enterarse, o creerá que el terminal ignora lo que le pide.
+fn leer_los_ajustes() -> ajustes::Ajustes {
+    let Some(ruta) = ajustes::ruta() else {
+        return ajustes::Ajustes::default();
+    };
+    match ajustes::leer(&ruta) {
+        Ok((ajustes, avisos)) => {
+            // **Se dicen todas las que se guardaron, y cuántas quedaron fuera.** Callar las de más sin
+            // decir cuántas eran haría creer que a partir del techo el fichero está bien.
+            for aviso in avisos.guardados() {
+                eprintln!("agent-terminal: {aviso}");
+            }
+            if avisos.sin_listar() > 0 {
+                eprintln!(
+                    "agent-terminal: y {} línea(s) más con problemas, que no se listan",
+                    avisos.sin_listar()
+                );
+            }
+            ajustes
+        }
+        Err(problema) => {
+            // **Que no haya fichero es el caso normal y no se dice**; lo decide el propio tipo, para que
+            // esta rama y cualquier otra que lea el fichero no dejen de coincidir.
+            if problema.merece_aviso() {
+                eprintln!(
+                    "agent-terminal: no se pudo usar {}: {problema}. Se abre con lo de fábrica.",
+                    ruta.display()
+                );
+            }
+            ajustes::Ajustes::default()
+        }
+    }
+}
+
 /// La decisión, con los valores dados: **lo que una tanda de medida pide gana a lo guardado**.
 ///
 /// **La precedencia va escrita porque sin ella una corrida mide una disposición que nadie le pidió.** Las
@@ -1818,6 +1856,17 @@ pub fn arrancar() -> eframe::Result {
     }
     let con_que = con_que_abrir(pestañas.as_deref(), divisiones.as_deref(), guardada);
 
+    // **Los ajustes se leen aquí, y NO se leen bajo medida.** Lo segundo es lo que importa: el guion de
+    // medida aísla el directorio de configuración, pero quien lanza el binario a mano con esas variables
+    // leería el suyo — y su tamaño de letra cambiaría la rejilla, que es de lo que dependen todas las
+    // cifras publicadas del proyecto. Los colores no la cambian; se veta el fichero entero igualmente,
+    // porque la regla se lee de un vistazo y «solo estos ajustes» sería una lista que se olvida de crecer.
+    let ajustes = if de_medida {
+        ajustes::Ajustes::default()
+    } else {
+        leer_los_ajustes()
+    };
+
     let mut opciones = eframe::NativeOptions::default();
     // **Se pide el tamaño solo si alguien lo pidió**, y por eso no hay un tamaño por defecto aquí: sin
     // la variable, `NativeOptions::default()` no lleva `inner_size` y el escritorio decide, que es el
@@ -1844,6 +1893,10 @@ pub fn arrancar() -> eframe::Result {
             // mide ya: el gesto del panel cuenta su recorrido en celdas y su enganche corre antes de la
             // pasada que mide la fuente.
             ventana.arrastres = ArrastresInyectados::nuevos(arrastres, gesto_al_arrancar());
+            // **El tema se pone aquí y no en el constructor**, igual que los arrastres de arriba y que el
+            // tramo de restaurar: llevarlo hasta dentro obligaría a pasarlo por tres constructores con
+            // treinta y tres llamadas entre pruebas, y ninguna de ellas configura nada.
+            ventana.tema = Tema::con(&ajustes.colores);
             Ok(Box::new(ventana))
         }),
     )

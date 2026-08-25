@@ -470,11 +470,20 @@ pub fn ruta() -> Option<PathBuf> {
 /// con un nombre de fichero fijo acaba dentro de cualquier repositorio que alguien clone. Aquí lo dice la
 /// misma comprobación que rechaza lo relativo, porque la cadena vacía tampoco es absoluta.
 pub fn ruta_de(config: Option<&OsStr>, casa: Option<&OsStr>) -> Option<PathBuf> {
+    Some(directorio_de(config, casa)?.join(FICHERO))
+}
+
+/// El directorio propio dentro del de configuración, con los dos valores dados.
+///
+/// **Sale aparte porque este proyecto guarda ahí más de un fichero.** La disposición la escribe la
+/// aplicación; los ajustes los escribe quien usa el terminal. Comparten sitio y la decisión de qué sitio
+/// es, que es justo lo que esta función encierra; no comparten nada más.
+pub fn directorio_de(config: Option<&OsStr>, casa: Option<&OsStr>) -> Option<PathBuf> {
     // El orden es el del estándar del escritorio: la variable propia manda, y donde no hay se usa
     // `.config` de la casa. Que una de las dos no sirva **no descarta la otra**: lo que descarta es que
     // no sirva ninguna.
     let base = absoluta(config).or_else(|| absoluta(casa).map(|casa| casa.join(".config")))?;
-    Some(base.join(DIRECTORIO).join(FICHERO))
+    Some(base.join(DIRECTORIO))
 }
 
 /// La ruta que trae una variable, si es de fiar.
@@ -531,7 +540,7 @@ pub fn leer(ruta: &Path) -> Result<Valido, Problema> {
 /// El byte de más es lo que distingue «ocupa justo el techo» de «se pasa». Y `esperado` es **pista de
 /// reserva y no comprobación**: nadie decide nada con ese número, solo evita que la lectura crezca
 /// duplicando desde treinta y dos bytes. El techo lo sigue poniendo el corte.
-fn leer_acotado(fichero: std::fs::File, esperado: u64) -> std::io::Result<Vec<u8>> {
+pub(crate) fn leer_acotado(fichero: std::fs::File, esperado: u64) -> std::io::Result<Vec<u8>> {
     let techo = BYTES_MAXIMOS as u64;
     let mut bytes = Vec::with_capacity(esperado.min(techo) as usize + 1);
     fichero.take(techo + 1).read_to_end(&mut bytes)?;

@@ -102,6 +102,35 @@ impl Default for Tema {
     }
 }
 
+impl Tema {
+    /// El tema de fábrica con los colores que el fichero de configuración pida encima.
+    ///
+    /// **Lo que el fichero no diga se queda de fábrica**, que es lo que permite cambiar un solo color sin
+    /// escribir los veintidós. Y la paleta se sobrescribe hueco a hueco por lo mismo: pedir el color 1 no
+    /// debe borrar los otros quince.
+    pub fn con(colores: &crate::ajustes::Colores) -> Self {
+        let mut tema = Self::default();
+        for (hueco, pedido) in tema.paleta.iter_mut().zip(colores.paleta.iter()) {
+            if let Some(color) = pedido {
+                *hueco = *color;
+            }
+        }
+        for (hueco, pedido) in [
+            (&mut tema.fondo, colores.fondo),
+            (&mut tema.primer_plano, colores.texto),
+            (&mut tema.cursor, colores.cursor),
+            (&mut tema.divisor, colores.divisor),
+            (&mut tema.foco, colores.foco),
+            (&mut tema.fondo_del_panel, colores.panel),
+        ] {
+            if let Some(color) = pedido {
+                *hueco = color;
+            }
+        }
+        tema
+    }
+}
+
 /// Los colores con los que se pinta el panel de estado.
 ///
 /// **Salen de la paleta del terminal a propósito, no de una segunda familia.** Los dos se ven a la vez

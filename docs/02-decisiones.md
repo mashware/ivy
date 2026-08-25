@@ -2971,3 +2971,86 @@ hito trata de la consola; esto queda dicho para que nadie lo lea como un fallo.
   filtrado que a esta escala no se distingue.
 - **Un rasterizador propio para todo**, que es la opción C del abanico de este hito. Sigue escrita como
   **destino** para cuando este proyecto cambie de framework (**D3**), no como descarte.
+
+---
+
+## D26 — La configuración la escribe una persona, y por eso se tolera por línea y en texto plano
+
+**Decisión.** El fichero que quien usa el terminal escribe para configurarlo es **texto plano
+`clave = valor`**, con comentarios de línea completa, y **se tolera por línea**: la que no se entiende se
+ignora, se dice **con su número**, y el resto del fichero se aplica.
+
+Vive en `$XDG_CONFIG_HOME/agent-terminal/config`, **al lado** de la disposición y no dentro: aquélla la
+escribe la aplicación, ésta la escribe una persona.
+
+### Esto NO reabre D16: es el lado que D16 ya resolvió
+
+**D16 discrimina por autor, con estas palabras**: *«La tolerancia es por documento porque este fichero **lo
+escribe siempre la aplicación**. Es lo contrario de lo que hace el contrato del panel, y a propósito:
+**aquel lo escribe un tercero a mano** y perder el panel entero por un campo que nadie mira sería lo peor
+posible»*.
+
+El fichero de configuración cae de ese segundo lado. Un documento a medias en la disposición solo puede
+venir de un error propio, y adivinar media disposición es peor que no restaurarla; aquí hay un **repuesto
+exacto para cada línea** —el valor de fábrica— y quien escribe se equivoca de tecla.
+
+> **Una versión anterior de este diseño proponía «acotar D16», y estaba equivocada.** Lo destapó el retador
+> del diseño y se comprobó leyendo la decisión. Queda escrito porque el error es instructivo: se iba a
+> cambiar una decisión que ya contemplaba el caso, por no haberla releído entera.
+
+### Por qué texto plano y no JSON, que ya está en el árbol
+
+**La tolerancia por línea es el requisito, y un error de sintaxis global la rompe.** En JSON una coma
+olvidada impide construir el documento entero — y la coma olvidada es el error más común que existe al
+teclear.
+
+Y **la tolerancia por campo no salva de eso**: el contrato del panel es JSON y tolera por campo, pero puede
+permitírselo porque **lo genera un programa**. Aquí no.
+
+En texto plano el peor caso es **una línea**. Y admite comentarios, sin los cuales un fichero de
+configuración no se explica a sí mismo. Es lo que hacen **Ghostty y Kitty**, que usan este mismo formato —
+una confirmación, no la razón.
+
+**Descartado TOML**: resolvería los comentarios pero no el error global, y añade una dependencia al árbol
+que la política del manifiesto de la raíz obliga a justificar.
+
+### El comentario es de línea completa, y no es una simplificación
+
+**La almohadilla es a la vez el carácter de comentario y el prefijo de un color.** Un comentario al final
+del valor parte `color.1 = #ff0000` justo antes del valor, así que la primera versión del intérprete **se
+comía todos los colores**. Lo destapó la suite al primer intento, con siete pruebas en rojo.
+
+### La versión es opcional, al contrario que en la disposición
+
+**Y la razón es la misma que D16 da para exigirla allí.** Aquel fichero **congela la forma de un árbol**,
+así que un lector viejo malinterpretaría un fichero nuevo. Éste es plano: una clave desconocida se ignora y
+se dice, y una que falta toma su valor de fábrica. **No hay forma que congelar**, así que exigir una línea
+ritual no protegería de nada.
+
+Lo que sí se conserva es la mitad que protege: **una versión mayor que la conocida no se aplica**.
+
+### Bajo el banco de medida, el fichero no se lee
+
+**Y esto sostiene más de lo que parece.** El guion de medida ya aísla el directorio de configuración, pero
+**quien lanza el binario a mano con las variables de medida —que es como la documentación dice abrir una
+disposición concreta— leería la suya**. Su tamaño de letra cambiaría la rejilla, y de la rejilla dependen
+**todas** las cifras publicadas de este proyecto.
+
+Hay una segunda consecuencia que lo hace más necesario todavía: el guion **invalida una corrida** si una
+tanda que no vuelca en japonés busca fuentes. Con una fuente configurada leída bajo medida, **toda tanda
+enumeraría y toda corrida saldría inválida**.
+
+El veto es **del fichero entero** desde el primer día, aunque los colores no cambien la rejilla: «solo estos
+ajustes» sería una lista que se olvida de crecer.
+
+### Lo que queda fuera, con su razón
+
+- **Traer un tema desde otro fichero** (`incluir`). Se cortó en el reto al diseño: añadía una ruta, un tope
+  de recursión, una regla de ciclo y un convenio de directorio **para cero criterio de aceptación**.
+- **Un catálogo de temas con nombre**, que es lo que la gente comparte de verdad —Ghostty trae más de 460—.
+  Es **lo primero que entra después** de este hito, no un descarte.
+- **Recargar al guardar.** No lo pide ningún criterio, y el vigilante que existe sigue rutas fijadas al
+  armarlo, una por consola: no vale tal cual.
+- **Elegir el programa que lanza cada consola.** En cuanto el programa o sus argumentos vengan de
+  configuración, lanzarlo pasa a ser **superficie sensible** y hay que auditarlo como tal. Merece su propia
+  revisión, no un rincón de este hito.
