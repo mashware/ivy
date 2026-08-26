@@ -35,19 +35,28 @@ const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
 /// The crates whose identifiers are **all English**, under `crates/`. One entry per delivery.
 const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core"];
 
-/// Single **files** whose identifiers are all English, for a crate that is not finished yet.
+/// Single **files** that carry **no name the glossary retired**, for a crate that is not finished yet.
+///
+/// **It said «identifiers are all English» for one delivery, and that was not true of a single one of
+/// the five.** Their families are renamed and their glossary names are gone, which is what this list
+/// is for; what they still hold is the lowercase Spanish local the glossary never had to decide — the
+/// `resto` of a slice, the `ahora` of a clock, the `fase` of a header — declared out loud as this
+/// file's blind spot at the top and taken by the delivery that finishes `app/src/lib.rs`. There are
+/// **195** of them; the count, the method and why the first attempt at it said 190 are in **D27**.
+///
+/// The claim matters because of what this guard does when it is wrong: it breaks the build. A list
+/// that overstates what it checked is read once, believed, and then relied on by the next delivery to
+/// decide what is already done — which is exactly how the five ended up declared finished.
 ///
 /// **This came in once, was deleted, and is back — and the round trip is the point.** It was built to
 /// point the guard at `app/src/lib.rs`, and pointing it there proved that file could not be declared
-/// finished: it still holds hundreds of Spanish names the glossary never had to decide. With nothing
-/// left to name, a branch of the walk became reachable by nobody, so it went out — this project deletes
-/// a mechanism with no scenario. It returns with the delivery that gives it one: five modules of `app`
-/// that really are finished while their siblings are not.
+/// clean either: it still holds hundreds of Spanish names. With nothing left to name, a branch of the
+/// walk became reachable by nobody, so it went out — this project deletes a mechanism with no
+/// scenario. It returns with the delivery that gives it one.
 ///
-/// A crate whose every file ends up here would be better spelled in [`FINISHED_CRATES`]; nothing
-/// enforces that, and it does not matter much — the two lists cannot disagree about a file, they can
-/// only both be right about it.
-const FINISHED_FILES: &[&str] = &[
+/// A crate whose every file ends up here is **not** thereby ready for [`FINISHED_CRATES`]: that list
+/// is the stronger claim, and this one cannot add up to it.
+const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/mouse.rs",
     "app/src/keyboard.rs",
     "app/src/painter.rs",
@@ -60,8 +69,8 @@ const FINISHED_FILES: &[&str] = &[
 /// **Every file of the crate, and that is what closes the class.** The first version listed only the
 /// file the delivery was renaming, which left the other direction unguarded: nobody checked what a
 /// *sibling* cites **towards** the renamed file. Four citations shipped broken that way — two in
-/// `sesion.rs` sitting two and three lines from citations the same delivery did update, one in
-/// `medida.rs`, and one in an example whose comment exists precisely to say «copied from
+/// `session.rs` sitting two and three lines from citations the same delivery did update, one in
+/// `measure.rs`, and one in an example whose comment exists precisely to say «copied from
 /// `app::PUMP_BUDGET`; if it changes there, this stops measuring the same thing». It changed there.
 ///
 /// The price is thirty entries in [`NOT_OURS`], because a sibling's comments cite font tables, shell
@@ -81,8 +90,25 @@ const FINISHED_FILES: &[&str] = &[
 ///
 /// The second half of each entry is the crate whose names the file may cite: a comment in `lib.rs` is
 /// entitled to name something its sibling modules declare.
+///
+/// **Every file meant every file except two, and neither exception was written down.** The binary was
+/// simply missing and is now here. This file is **not**, and that is the answer rather than an
+/// oversight: putting it on the list reports **sixty-five** citations as this delivery leaves it — and
+/// the number grows with the file, because what it reports is the vocabulary and the shapes this file
+/// discusses: retired names (`banderas`, `RatonReclamado`), illustrative ones (`CamelCase`,
+/// `like_this`, `Type`) and plain words in backticks. **One of the sixty-five was real.** A guard whose
+/// subject is the names that are gone cannot be judged by «cites a name the code has».
+///
+/// **The one that was real got fixed by reading all sixty-five, and it is worth knowing that happened:**
+/// the doc of [`no_comment_cites_a_name_the_code_no_longer_has`] named three live identifiers and one
+/// of them, `prioridad`, had left the tree entirely — so the sentence explaining the guard was itself
+/// one of the citations it describes. One in sixty-five is not a guard, but it is a good sweep.
+///
+/// What *can* be enforced here is a **file** name, and [`no_retired_file_name_is_still_cited`] reads
+/// this file for exactly that — it found two.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/lib.rs", "app"),
+    ("app/src/main.rs", "app"),
     ("app/src/settings.rs", "app"),
     ("app/src/fonts.rs", "app"),
     ("app/src/measure.rs", "app"),
@@ -94,6 +120,10 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/keyboard.rs", "app"),
     ("app/src/theme.rs", "app"),
     ("app/src/watcher.rs", "app"),
+    ("app/examples/fonts.rs", "app"),
+    ("app/examples/leak.rs", "app"),
+    ("app/examples/screen_demo.rs", "app"),
+    ("app/examples/sweep.rs", "app"),
 ];
 
 /// Names that are **still Spanish on purpose**, because a later delivery owns them.
@@ -171,6 +201,12 @@ const STILL_SPANISH: &[&str] = &[
 /// collapse, not to pin the glossary's size.
 const ARROWS_AT_LEAST: usize = 100;
 const TABLES_AT_LEAST: usize = 9;
+
+/// How many `` `old.rs`→`new.rs` `` arrows the annex has to still yield, for the same reason as the
+/// two above: an extractor that stops matching turns [`no_retired_file_name_is_still_cited`] into a
+/// test that passes by looking at nothing. Seventeen is what the annex carries; the floor is here to
+/// notice a collapse, not to pin the list.
+const FILE_ARROWS_AT_LEAST: usize = 17;
 
 /// Spanish function words, which give away a compound name the glossary never had to name.
 ///
@@ -534,13 +570,31 @@ fn identifiers(src: &str) -> Vec<(usize, String)> {
     found
 }
 
-/// `mouse_reporting` → `mouse`, `reporting`; `CombiningSpan` → `combining`, `span`.
+/// `mouse_reporting` → `mouse`, `reporting`; `CombiningSpan` → `combining`, `span`;
+/// `DEFAULT_WIDTH` → `default`, `width`.
+///
+/// **A piece with no lowercase letter in it is one word, and getting that wrong made this guard blind
+/// to every constant in the repository.** Splitting before *each* capital left a screaming-snake-case
+/// name as a row of single letters — a name of fourteen letters became fourteen of them — and every
+/// one was then dropped by the two-character floor in [`why_it_is_a_leftover`], so such a name could
+/// carry any Spanish word at all and no rule was ever asked about it. It had been that way since the
+/// delivery that declared the first three crates finished, which is what makes it worth this much
+/// prose: the hole was not in a rule, it was upstream of all of them. Measured when it was closed:
+/// three constants in a module already declared finished, and **nothing** in the three finished crates
+/// — those really were clean.
+///
+/// **The test for a lowercase letter is the whole rule, and a case-change boundary was tried first and
+/// thrown away.** Reading `PTYOutput` as `pty` + `output` instead of `p`, `t`, `y`, `output` is nicer
+/// to look at and changes no verdict: the letters it saves are dropped by the same floor, and the word
+/// after them is found either way. No name in the tree tells the two rules apart, and this file does
+/// not keep a mechanism with no scenario.
 fn segments(name: &str) -> Vec<String> {
     let mut out = Vec::new();
     for piece in name.split('_') {
+        let shouting = !piece.chars().any(|c| c.is_lowercase());
         let mut current = String::new();
         for c in piece.chars() {
-            if c.is_uppercase() && !current.is_empty() {
+            if c.is_uppercase() && !current.is_empty() && !shouting {
                 out.push(std::mem::take(&mut current));
             }
             current.extend(c.to_lowercase());
@@ -560,12 +614,23 @@ fn segments(name: &str) -> Vec<String> {
 /// finished crates left this guard with no file to look at, and a crate with no files reads exactly
 /// like a clean one. Measured: turning one hyphen into an underscore in a crate name left all four
 /// tests green.
-/// Everything this milestone has declared finished, whole crates and single files alike.
+/// Everything this milestone has declared clear of the glossary, whole crates and single files alike.
 ///
 /// **The two lists are walked by one function so they cannot drift apart.** Adding a guard that reads
 /// only one of them is the shape of hole this file keeps finding: a list that looks watched and is not.
 /// The label comes back with the files so a failure can name what was declared, not just the path.
-fn finished_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
+fn guarded_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
+    // **Un suelo por lista, y no uno sobre la suma.** Medido: vaciar `GLOSSARY_CLEAN_FILES` del todo
+    // dejaba las ocho pruebas verdes, porque las cajas terminadas seguían dando objetivos y la guarda
+    // de «esto no tiene ficheros» nunca se le pregunta a una lista sin elementos. Las dos listas solo
+    // crecen, así que un suelo aquí no estorba a nadie: sirve para notar que una se ha vaciado.
+    assert!(
+        FINISHED_CRATES.len() >= 3 && GLOSSARY_CLEAN_FILES.len() >= 5,
+        "the two lists this guard reads have {} crates and {} files: they only ever grow, so this is \
+         one of them being emptied and every check downstream going quiet",
+        FINISHED_CRATES.len(),
+        GLOSSARY_CLEAN_FILES.len()
+    );
     let mut out = Vec::new();
     for crate_name in FINISHED_CRATES {
         out.push((
@@ -573,7 +638,7 @@ fn finished_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
             rust_files(&root.join("crates").join(crate_name)),
         ));
     }
-    for path in FINISHED_FILES {
+    for path in GLOSSARY_CLEAN_FILES {
         let file = root.join("crates").join(path);
         out.push((
             (*path).to_string(),
@@ -662,7 +727,7 @@ fn why_it_is_a_leftover(name: &str, glossary: &Glossary) -> Option<String> {
     let pieces = segments(name);
 
     // **The compound rule, and it was the biggest hole in the first version.** The glossary stores
-    // `RatonReclamado` as one token, `ratonreclamado`; the identifier splits into `raton` + `reclamado`
+    // `RatonReclamado` as one token, `ratonreclamado`; the identifier splits into «raton» + «reclamado»
     // and neither piece is in the set, so the two never met. Eighteen of the twenty compound names
     // survived **by luck**, because they happen to carry a particle the function words catch
     // (`DeLaBarra`, `RestoDelFotograma`, `EnElAtlas`…); the two without one — `RatonReclamado` and
@@ -735,6 +800,13 @@ fn the_three_rules_answer_what_they_promise() {
         verdict("celda_de_arriba").is_some(),
         "a retired name inside a compound"
     );
+    // **The same name in CamelCase, which is a different code path**: snake_case is split by the
+    // underscore and needs no case rule at all, so without this the whole case-splitting half of
+    // [`segments`] could stop working and every assertion here would stay green.
+    assert!(
+        verdict("CeldaDeArriba").is_some(),
+        "the same compound written in CamelCase"
+    );
     assert!(
         verdict("banderas").is_some(),
         "a retired name in the plural"
@@ -767,6 +839,41 @@ fn the_three_rules_answer_what_they_promise() {
     assert!(
         verdict("celda2").is_some(),
         "a retired name with a digit stuck on the end"
+    );
+    // **A run of capitals is one word, and until this was fixed the guard could not see a single
+    // constant.** Splitting before every capital left these names as rows of single letters, and the
+    // two-character floor then dropped every one of them: no rule was ever asked. Both halves are
+    // asserted because they fail for different reasons — the first needs the function words to see
+    // «de», the second needs the retired vocabulary to see «consola» — and a segmentation that broke
+    // only one of them would still look half right. Revert [`segments`] and both of these go green
+    // while three constants of a finished module walk through.
+    assert!(
+        verdict("ANCHO_DE_FABRICA").is_some(),
+        "a screaming-snake-case name built with the Spanish «de»"
+    );
+    assert!(
+        verdict("CONSOLA_MINIMA").is_some(),
+        "a screaming-snake-case name carrying a retired noun"
+    );
+    // **Y una constante numerada, porque «sin minúsculas» no es «todo mayúsculas».** Escrito con
+    // `chars().all(char::is_uppercase)` el dígito rompe la condición, la pieza se vuelve a partir en
+    // letras sueltas y el defecto que esto cierra queda reabierto para toda constante con un número.
+    // Medido: esa versión deja las ocho pruebas verdes sin este caso.
+    assert!(
+        verdict("CONSOLA2_MINIMA").is_some(),
+        "a numbered constant: «no lowercase letter» is not «every letter uppercase»"
+    );
+    // **El suelo de dos caracteres, que hasta este PR no lo sostenía nada.** Medido: subirlo a 3 o a 5
+    // —o quitarlo— dejaba las ocho pruebas verdes, y con 5 el guardián deja de ver `celda`, `hueco`,
+    // `serie`, `nodo`, `fila` y `mitad` dentro de cualquier compuesto. Dos casos porque cada uno mata
+    // un valor distinto: un nombre de tres letras y uno de cinco.
+    assert!(
+        verdict("USO_ALTO").is_some(),
+        "a three-letter retired name, which a floor of three would skip"
+    );
+    assert!(
+        verdict("CELDA_ALTA").is_some(),
+        "a five-letter retired name, which a floor of five would skip"
     );
     // The three names that live only in the table with a «Queda» column, which no arrow carries.
     assert!(
@@ -824,6 +931,16 @@ fn the_three_rules_answer_what_they_promise() {
     // **Gluing the pieces must not have widened the Spanish side piece by piece.** Adding each piece
     // of every compound would have put `color` in there, out of `CosteDelColor` — and `color` is an
     // English identifier this repository uses everywhere.
+    // The other side of the rule: an English constant stays English. Without these, «a piece with no
+    // lowercase letter is one word» could be satisfied by never splitting a constant at all.
+    for shouting in ["DEFAULT_WIDTH", "MAX_CHARACTERS", "ATLAS_SIDE", "SIZE_TO_ASK_WITH"] {
+        assert_eq!(
+            verdict(shouting),
+            None,
+            "«{shouting}» is English, and segmenting a run of capitals must not invent a Spanish \
+             piece out of it"
+        );
+    }
     for english_word in ["color", "colors", "cost", "atlas", "points", "size"] {
         assert_eq!(
             verdict(english_word),
@@ -870,7 +987,7 @@ fn no_spanish_identifier_survives_in_a_finished_crate() {
     let root = repo();
     let mut leftovers = Vec::new();
 
-    for (what, files) in finished_targets(&root) {
+    for (what, files) in guarded_targets(&root) {
         assert!(
             !files.is_empty(),
             "«{what}» is declared finished and has not a single `.rs` file to look at: either it is \
@@ -895,9 +1012,9 @@ fn no_spanish_identifier_survives_in_a_finished_crate() {
 
     assert!(
         leftovers.is_empty(),
-        "{} identifier(s) in crates this milestone has already finished are still using a name the \
-         glossary retired. Either the rename was left half done, or the glossary changed its mind \
-         and nobody told the code:\n{}",
+        "{} identifier(s) in code this milestone has already declared clear of the glossary are \
+         still using a name it retired. Either the rename was left half done, or the glossary changed \
+         its mind and nobody told the code:\n{}",
         leftovers.len(),
         leftovers.join("\n")
     );
@@ -909,7 +1026,7 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
     let root = repo();
     let mut leftovers = Vec::new();
 
-    for (what, files) in finished_targets(&root) {
+    for (what, files) in guarded_targets(&root) {
         assert!(!files.is_empty(), "«{what}» has no files to look at");
         for file in files {
             let name = file
@@ -926,7 +1043,7 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 
     assert!(
         leftovers.is_empty(),
-        "{} file(s) of a finished crate still carry the Spanish name the glossary retired, and the \
+        "{} file(s) this guard reads still carry the Spanish name the glossary retired, and the \
          glossary lists the name they should have:\n{}",
         leftovers.len(),
         leftovers.join("\n")
@@ -943,6 +1060,8 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 const NOT_OURS: &[&str] = &[
     // Other programs, and what the operating system gives them.
     "bash",
+    // The one that writes for ever in two-byte lines, which is why the leak bench uses it.
+    "yes",
     "cat",
     "clear",
     "emacs",
@@ -1037,7 +1156,8 @@ const NOT_OURS: &[&str] = &[
     "COLR",
     "Hack",
     "Noto",
-    // Unicode property names, which belong to Unicode.
+    // Unicode property names and script codes, which belong to Unicode.
+    "Zsym",
     "Emoji_Component",
     "EmojiModifierBase",
     "EmojiOtherAndEmojiComponent",
@@ -1059,6 +1179,49 @@ const NOT_OURS: &[&str] = &[
     // of something deliberately absent. Nothing else in this list is of that kind.
     "Configuracion",
 ];
+
+/// The `.rs` file names this milestone retired, derived from the arrows in the annex.
+///
+/// **Derived and not copied**, like the vocabulary above: the annex writes the eighteen renames as
+/// `` `old.rs`→`new.rs` `` and this reads them back, so a list edited there cannot fall out of step
+/// with the guard that enforces it.
+fn retired_file_stems() -> Vec<String> {
+    let mut out = Vec::new();
+    for piece in DECISIONS.split("`→`") {
+        let Some(before) = piece.rsplit('`').next() else {
+            continue;
+        };
+        if let Some(stem) = before.strip_suffix(".rs")
+            && !stem.is_empty()
+            && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            out.push(stem.to_string());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Whether a backticked citation names this retired file: `` `old` ``, `` `old.rs` ``,
+/// `` `examples/old.rs` `` or `` `old::a_function` ``.
+///
+/// The shapes are spelled with a stem nobody retired on purpose — written with a real one, this doc
+/// comment would be reported by the very test it explains.
+fn cites_the_file(piece: &str, stem: &str) -> bool {
+    let body = piece.trim();
+    if let Some(path) = body.strip_suffix(".rs")
+        && path.rsplit('/').next() == Some(stem)
+    {
+        return true;
+    }
+    let first = body
+        .split("::")
+        .next()
+        .unwrap_or(body)
+        .trim_end_matches("()");
+    first == stem
+}
 
 /// Every identifier a pair of backticks cites — **all the segments of a path, not just the first**.
 ///
@@ -1132,9 +1295,12 @@ fn code_names(files: &[PathBuf]) -> HashSet<String> {
 /// comment is not prose and gets edited with the code — but a reference written `` `like_this` ``
 /// has no oracle at all, so the rule was kept by hand. Twenty-one of them were not.
 ///
-/// It is scoped per crate and not repo-wide on purpose: `desde`, `parar` and `prioridad` are all
-/// live identifiers **in `app`**, so a union of every crate's names would call each of these
-/// citations fine and report nothing.
+/// It is scoped per crate and not repo-wide on purpose: `desde`, `parar` and `resto` are all live
+/// identifiers **in `app`** and in no other crate, so a union of every crate's names would call a
+/// citation of any of them, made anywhere, fine — and report nothing.
+///
+/// The third name used to be `prioridad`, and it is gone from the tree entirely — which made this very
+/// sentence one of the citations it describes. Caught by the delivery that fixed seventeen others.
 #[test]
 fn no_comment_cites_a_name_the_code_no_longer_has() {
     let root = repo();
@@ -1153,6 +1319,28 @@ fn no_comment_cites_a_name_the_code_no_longer_has() {
         );
         jobs.push((files.clone(), files));
     }
+    // **«Todos los ficheros de la caja» se comprueba contra el árbol, no se cree.** Medido: quitar una
+    // entrada de la lista —incluida la que este PR añade— dejaba las ocho pruebas verdes, porque un
+    // fichero que sale de la lista simplemente deja de mirarse y nada echa de menos lo que no reporta.
+    // La única excepción es este fichero, y su razón está escrita arriba.
+    let listed: HashSet<&str> = CITATIONS_CHECKED.iter().map(|(path, _)| *path).collect();
+    for file in rust_files(&root.join("crates").join("app")) {
+        let relative = file
+            .strip_prefix(root.join("crates"))
+            .expect("a path the walk built under `crates`")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if relative == "app/tests/glossary.rs" {
+            continue;
+        }
+        assert!(
+            listed.contains(relative.as_str()),
+            "`{relative}` is a file of `app` and is not on the citations list. Every file of the crate \
+             means every file: one that leaves the list stops being read, and nothing misses what it \
+             no longer reports"
+        );
+    }
+
     for (path, crate_name) in CITATIONS_CHECKED {
         let file = root.join("crates").join(path);
         assert!(
@@ -1200,6 +1388,168 @@ fn no_comment_cites_a_name_the_code_no_longer_has() {
          something outside this tree and goes in `NOT_OURS`:\n{}",
         stale.len(),
         stale.join("\n")
+    );
+}
+
+/// A citation of a file this milestone renamed, anywhere on the code side of the tree.
+///
+/// **This is the hole the per-crate citation guard cannot close, and the reason is worth writing
+/// down.** That guard asks whether the cited name exists **anywhere in the crate**, and every single
+/// retired module name still does — as a *local variable*. «pantalla» is a `Screen` in two examples,
+/// «fuentes» is a list of faces in three modules, «sesion» is a header in the measurement module,
+/// «vigilante» is a watcher in the module now called `watcher.rs`. So a comment saying «the rule lives
+/// in fuentes» passes: the guard finds the local and calls the citation good. Four such citations
+/// were sitting in the tree with the suite green, and no widening of the other guard would have found
+/// them — the name it looks for is genuinely there.
+///
+/// What makes this one possible is that the **old** names are known: the annex writes every file
+/// rename as an arrow, so the question stops being «does this name exist?» and becomes «is this a name
+/// we retired?», which has an exact answer.
+///
+/// **It reads the code side and not the prose side**, and that boundary is a decision already taken:
+/// the annex counted 599 prose citations that were dead **before** this milestone and gave their
+/// repair to the prose and document deliveries, so `docs/`, the two `README`s and the stored knowledge
+/// are theirs. What is left here is code, its manifests and the measurement script — where a stale
+/// citation has no delivery of its own and would simply stay.
+#[test]
+fn no_retired_file_name_is_still_cited() {
+    let root = repo();
+    let stems = retired_file_stems();
+    assert!(
+        stems.len() >= FILE_ARROWS_AT_LEAST,
+        "the annex yielded {} file renames and it has to yield at least {FILE_ARROWS_AT_LEAST}: \
+         without them this test looks at every file and asks about nothing",
+        stems.len()
+    );
+    // **Contar no es identificar, y eso es el disfraz que este proyecto tiene en su ficha.** Medido:
+    // devolver los diecisiete tallos con un sufijo pegado —diecisiete nombres que no existen— deja el
+    // suelo de arriba contento y esta prueba pasa sin mirar nada. Así que se piden por nombre cuatro
+    // de los que el anexo lleva.
+    for known in ["pantalla", "fuentes", "sesion", "vigilante"] {
+        assert!(
+            stems.iter().any(|stem| stem == known),
+            "the annex has to yield «{known}» and it did not: the extractor is finding the right \
+             *number* of names and not the right names"
+        );
+    }
+
+    let mut targets = vec![root.join("Cargo.toml")];
+    for dir in ["crates", "scripts"] {
+        let mut pending = vec![root.join(dir)];
+        while let Some(here) = pending.pop() {
+            for entry in std::fs::read_dir(&here)
+                .unwrap_or_else(|failure| panic!("cannot read {}: {failure}", here.display()))
+                .flatten()
+            {
+                let path = entry.path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path
+                    .extension()
+                    .is_some_and(|e| e == "rs" || e == "toml" || e == "sh")
+                {
+                    targets.push(path);
+                }
+            }
+        }
+    }
+    assert!(
+        targets.len() > 20,
+        "the walk found {} files to read, which cannot be the code side of this repository",
+        targets.len()
+    );
+    // **One of each kind, and this is not decoration.** Measured: drop `scripts` from the walk above
+    // and every assertion below still passes, because the citations that were stale there are fixed —
+    // so the only thing left proving the walk reaches a shell script is this.
+    //
+    // **And the manifests are asked for one by one, because the root one was masking the others.** With
+    // a single «is there a `.toml`?» the manifest of the root satisfied it on its own, so dropping the
+    // whole `toml` extension from the walk stayed green — and two of the stale citations this test
+    // found lived in a crate's manifest, not in the root's.
+    let named = |what: &str| {
+        targets
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| name == what))
+    };
+    assert!(named("Cargo.toml"), "the walk did not reach a manifest at all");
+    assert!(
+        targets.iter().any(|path| {
+            path.file_name().is_some_and(|name| name == "Cargo.toml")
+                && path.parent().is_some_and(|dir| {
+                    dir.parent()
+                        .is_some_and(|up| up.file_name().is_some_and(|name| name == "crates"))
+                })
+        }),
+        "the walk reached no manifest of a crate: the one at the root was answering for all of them"
+    );
+    for kind in ["rs", "sh"] {
+        assert!(
+            targets
+                .iter()
+                .any(|path| path.extension().is_some_and(|e| e == kind)),
+            "the walk claims to read `.{kind}` files and found none: a whole kind of file would be \
+             going unread while this test stayed green"
+        );
+    }
+    targets.sort();
+
+    let mut stale = Vec::new();
+    for file in &targets {
+        let shown = file
+            .strip_prefix(&root)
+            .unwrap_or(file)
+            .display()
+            .to_string();
+        let src = std::fs::read_to_string(file).expect("a file the walk just listed");
+        for (number, line) in src.lines().enumerate() {
+            for piece in line.split('`').skip(1).step_by(2) {
+                for stem in &stems {
+                    if cites_the_file(piece, stem) {
+                        stale.push(format!("  {shown}:{}: `{piece}` → `{stem}` is gone", number + 1));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        stale.is_empty(),
+        "{} citation(s) on the code side of the tree still name a file this milestone renamed. The \
+         file is not missing — it answers to another name now, and a reader who greps for the one \
+         given here finds nothing. Cite the new name; and if the word inside the backticks was never \
+         a file at all, it was never a citation either, so write it as «a word» and not as code:\n{}",
+        stale.len(),
+        stale.join("\n")
+    );
+}
+
+/// The reader of a file citation, over its four shapes.
+///
+/// **Without this the reader had no oracle at all.** Measured: `fn cites_the_file(..) -> bool { false }`
+/// left the eight tests green, and so did breaking each of the four shapes on its own. The reason is
+/// worth writing down, because it is the shape of hole a guard is most likely to end in: the only test
+/// that calls it *looks for* citations, and the tree is clean — so **breaking the finder makes the suite
+/// greener, not redder**. A finder needs its own oracle; the absence of what it finds cannot be one.
+#[test]
+fn the_reader_of_file_citations_knows_the_four_shapes() {
+    for shape in ["pantalla", "pantalla.rs", "examples/pantalla.rs", "pantalla::draw", "pantalla()"] {
+        assert!(
+            cites_the_file(shape, "pantalla"),
+            "«{shape}» is one of the four shapes this reader promises to know"
+        );
+    }
+    assert!(
+        !cites_the_file("screen", "pantalla"),
+        "the name it was renamed to is not a citation of the name it had"
+    );
+    assert!(
+        !cites_the_file("pantallazo", "pantalla"),
+        "a longer name that merely starts the same is not this file"
+    );
+    assert!(
+        !cites_the_file("draw::pantalla", "pantalla"),
+        "only the FIRST segment of a path is the module: a member that happens to share the name is \
+         not a citation of the file"
     );
 }
 

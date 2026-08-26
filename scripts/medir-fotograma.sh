@@ -465,7 +465,7 @@ fi
 publicar() {  # publicar <directorio> <n> <cuál de las consolas>
     # **Dónde cae el temporal NO importa, y la tanda D existe para haberlo comprobado.** La sospecha
     # era que un temporal dentro del directorio vigilado despertase a la ventana por su cuenta al
-    # cerrarse, doblando los despertares por publicación. Es falso por construcción: `vigilante::repartir`
+    # cerrarse, doblando los despertares por publicación. Es falso por construcción: `watcher::repartir`
     # solo levanta la bandera cuando el aviso trae la ruta exacta `<dir>/panel.json`, así que cualquier
     # otro fichero del directorio es invisible. D lo confirma midiendo, y se conserva para que la
     # hipótesis no se vuelva a levantar.

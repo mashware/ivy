@@ -46,7 +46,7 @@ pub enum Presentation {
 /// rebuscado: un selector suelto —una cadena cortada por la mitad de un emoji— el motor lo pega a la
 /// celda que tenga delante, **aunque esté vacía**.
 ///
-/// `pegados` son los caracteres de anchura cero de la celda, tal y como los da la vista. Solo se mira
+/// `attached` son los caracteres de anchura cero de la celda, tal y como los da la vista. Solo se mira
 /// **el primero**: un selector de variación aplica al carácter que tiene justo delante, así que uno que
 /// apareciera más adentro de la secuencia no habla de este carácter.
 ///
@@ -219,7 +219,7 @@ pub struct Discoverer {
     /// Si el motor de texto **ya conoce** la familia de iconos, o sea si hubo una vuelta posterior a la
     /// que la declaró.
     ///
-    /// **Va un paso por detrás de `caras` a propósito, y sin eso la aplicación SE CAE.** `set_fonts`
+    /// **Va un paso por detrás de `faces` a propósito, y sin eso la aplicación SE CAE.** `set_fonts`
     /// guarda la configuración y el motor se rehace **en la pasada siguiente**; pero el descubrimiento
     /// corre **antes de pintar, en la misma pasada**, así que entre registrar la cara y pintar la celda no
     /// hay ninguna pasada de por medio. Ofrecer la familia ahí es pedirle a epaint una familia con nombre
@@ -359,7 +359,7 @@ impl Discoverer {
         let side = ATLAS_SIDE / 4;
         while self
             .glyphs
-            .paste(
+            .blit(
                 ctx,
                 egui::ColorImage::filled([side, side], egui::Color32::RED),
             )
@@ -470,7 +470,7 @@ impl Discoverer {
         // `Blob` vivo por **cada** fichero de fuente que la búsqueda llegó a abrir, y una búsqueda fallida
         // los abre **todos** los de la máquina: sin podar, una sesión que vea un carácter raro se queda
         // con cientos de megas residentes para siempre. Lo que de verdad hace falta ya está copiado en
-        // `caras`. Lo midió una revisión.
+        // `faces`. Lo midió una revisión.
         self.fuentes.prune(0, true);
 
         if round.registradas > 0 {
@@ -849,7 +849,7 @@ impl Glyphs {
             *saved
         } else {
             let sitio = color_glyph_of(coleccion, fuentes, which_char, height, ancho_maximo)
-                .and_then(|image| self.paste(ctx, image));
+                .and_then(|image| self.blit(ctx, image));
             self.saved_ones.insert(which_char, sitio);
             sitio
         };
@@ -860,7 +860,7 @@ impl Glyphs {
     }
 
     /// Mete una imagen en el primer hueco libre del atlas. `None` si ya no cabe.
-    fn paste(&mut self, ctx: &egui::Context, image: egui::ColorImage) -> Option<InAtlas> {
+    fn blit(&mut self, ctx: &egui::Context, image: egui::ColorImage) -> Option<InAtlas> {
         let [width, height] = [image.width(), image.height()];
         if width > ATLAS_SIDE || height > ATLAS_SIDE {
             return None;
@@ -1720,7 +1720,7 @@ mod tests {
             || egui::ColorImage::filled([side, side], egui::Color32::from_rgb(10, 20, 30));
 
         let mut attached = 0;
-        while glyphs.paste(&ctx, cuadrado()).is_some() {
+        while glyphs.blit(&ctx, cuadrado()).is_some() {
             attached += 1;
             assert!(
                 attached <= 8 * 8,
@@ -1755,7 +1755,7 @@ mod tests {
         let sitios: Vec<_> = (0..80)
             .filter_map(|n| {
                 let width = 15 + n % 7;
-                glyphs.paste(
+                glyphs.blit(
                     &ctx,
                     egui::ColorImage::filled([width, 17], egui::Color32::RED),
                 )
@@ -2064,7 +2064,7 @@ mod tests {
         let side = ATLAS_SIDE / 4;
         while discoverer
             .glyphs
-            .paste(
+            .blit(
                 &ctx,
                 egui::ColorImage::filled([side, side], egui::Color32::RED),
             )

@@ -47,7 +47,7 @@ winit = { version = "0.30", default-features = false, features = ["wayland-csd-a
 #
 # **Ojo con su enumerado: es `#[non_exhaustive]`.** Una categoría que añadan mañana cae en el caso por
 # defecto y sale monocromo, sin que la compilación diga nada. Se acepta a sabiendas — ese carácter saldría
-# **como sale hoy** — y está escrito en `fuentes.rs`, que es donde se decide.
+# **como sale hoy** — y está escrito en `fonts.rs`, que es donde se decide.
 unicode-properties = { version = "0.1.4", features = ["emoji"] }
 
 # **Quién sabe qué fuentes tiene la máquina, y cuál de ellas cubre un carácter.** Entró como dependencia
@@ -114,7 +114,7 @@ host-load = { path = "../host-load" }
 
 # **Para que las pruebas del banco corran con `cargo test`, y no solo si alguien se acuerda de pedir
 # `--examples`.** Un `example` de cargo no es un objetivo de prueba de serie: el módulo `tests` de
-# `examples/fuentes.rs` se compilaría y no se ejecutaría nunca, que es peor que no tenerlo — una prueba
+# `examples/fonts.rs` se compilaría y no se ejecutaría nunca, que es peor que no tenerlo — una prueba
 # que no corre se lee como cobertura y no lo es. Con esto entra en la suite del taller y en la de CI por
 # el mismo camino que las demás.
 [[example]]

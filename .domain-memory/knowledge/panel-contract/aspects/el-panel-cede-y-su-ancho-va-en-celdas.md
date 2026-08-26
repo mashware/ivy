@@ -15,10 +15,10 @@ file_paths:
   - crates/app/src/panel.rs
   - docs/02-decisiones.md
 symbols:
-  - ANCHO
-  - CONSOLA_MINIMA
-  - apartar
-  - Hueco
+  - DEFAULT_WIDTH
+  - MINIMUM_CONSOLE
+  - set_aside
+  - PanelTiling
 content_hashes:
   crates/app/src/panel.rs: 'sha256:6e305e69f27f7fd80801f34a64fa332f571bc0b1924c7d85017fc37faedcd0a1'
   docs/02-decisiones.md: 'sha256:e931de7f9b29b21429b9a259db1cd9648470337c6e11d13deba391055a972ea5'
@@ -56,7 +56,7 @@ La regla «el panel cede, la consola no» **aguanta el peor caso sin tocar nada*
 | Disposición | Rejilla de cada consola | Qué pasa con el panel |
 |---|---|---|
 | Dos columnas | 49×39 | entra entero (36 columnas) |
-| **Cuatro en fila** | **49×20** | a cada división le tocan unas 37 columnas, el panel no cabe y **cede hasta 17** para dejarle a la consola su suelo de **20** — exactamente `CONSOLA_MINIMA` |
+| **Cuatro en fila** | **49×20** | a cada división le tocan unas 37 columnas, el panel no cabe y **cede hasta 17** para dejarle a la consola su suelo de **20** — exactamente `MINIMUM_CONSOLE` |
 | **Cuatro en cuadro** | **24×39** | **no cede nada**: lo que se parte por la mitad es el ALTO, no el ancho |
 
 **Así que la disposición que alguien usaría de verdad —dos columnas de dos— no le quita ni una columna a la consola**, y la de cuatro en fila la deja en su suelo en vez de comerse el sitio. Nada que adelantar de F2.4.
@@ -65,4 +65,4 @@ Y de paso, lo que el mismo anexo prueba del fotograma: **el coste del framework 
 
 ## Where it lives
 
-`crates/app/src/panel.rs`: las dos constantes y la función que reparte, con su tipo `Hueco`. La geometría vive en el módulo del panel y no en el de la ventana, que es quien la llama. La comprobación con cuatro divisiones, en el anexo «Medido» de D14 (`docs/02-decisiones.md`) y en las tandas `H` e `I` de `scripts/medir-fotograma.sh`.
+`crates/app/src/panel.rs`: las dos constantes y la función que reparte, con su tipo `PanelTiling`. La geometría vive en el módulo del panel y no en el de la ventana, que es quien la llama. La comprobación con cuatro divisiones, en el anexo «Medido» de D14 (`docs/02-decisiones.md`) y en las tandas `H` e `I` de `scripts/medir-fotograma.sh`.

@@ -1397,7 +1397,7 @@ anteriores** —los suyos se tomaron con ventanas cuyo tamaño nadie apuntó— 
 3. **Encolar el pintado baja, y baja con las celdas.** 458 µs con 1 911 celdas por consola, 316 con 980,
    259 con 936. No es una mejora: es que cada consola pinta menos.
 4. **El panel cede y la consola no, comprobado en el peor caso.** Lo **medido** es esto: con las cuatro
-   **en fila** cada consola publica **20 columnas** de rejilla —exactamente `panel::CONSOLA_MINIMA`—, y en
+   **en fila** cada consola publica **20 columnas** de rejilla —exactamente `panel::MINIMUM_CONSOLE`—, y en
    **cuadro** publica las **39** de la tanda de dos. Y de ahí se **deduce** el reparto, que la cabecera no
    publica: en la tanda C cada división son 39 columnas de consola más las 36 del panel, o sea 75; en fila
    le toca la mitad de eso, unas 37, así que el panel no cabe y **cede hasta 17** para dejarle a la consola
@@ -3590,3 +3590,199 @@ conocimiento de dominio); el propio registro de decisiones lleva **152 muertas d
 Por eso **no se arreglan aquí**: arreglar 11 de 163 en un fichero sería tapar el 7 % del problema y dejar
 el documento pareciendo revisado. Lo que cambia es el encargo de las entregas de la prosa y de los
 documentos: **no traducen, reparan** — y ahora saben cuánto.
+
+#### El PR de arreglo: la guarda no veía **ningún** nombre en mayúsculas, y afirmaba lo que no había mirado
+
+Va suelto, entre la quinta entrega y la sexta, y por dos razones que no dan para esconderlo dentro de un
+renombrado: **una guarda que afirma en falso es peor que ninguna**, y la ceguera que se arregla aquí no
+es deuda de la quinta entrega — lleva puesta desde la tercera, la que declaró terminadas las tres cajas
+de fuera.
+
+**Partir un nombre antes de cada mayúscula deja una constante convertida en letras sueltas.**
+`ANCHO_DE_FABRICA` salía como catorce piezas de un carácter, y el suelo de dos caracteres que el
+comprobador aplica después las tiraba todas: **a ninguna regla se le llegaba a preguntar**. Así que un
+nombre en `MAYUSCULAS_CON_GUION` podía llevar cualquier palabra en español y la guarda lo daba por
+limpio. La regla nueva es una línea: **una pieza sin ninguna minúscula es una sola palabra**.
+
+Lo que enseñó al arreglarlo, que es la medida que justifica el PR: **tres constantes** en un módulo ya
+declarado terminado (`ANCHO_DE_FABRICA`→`DEFAULT_WIDTH` · `CONSOLA_MINIMA`→`MINIMUM_CONSOLE` ·
+`SUELO_AL_ARRASTRAR`→`DRAG_FLOOR`) y **ninguna** en las tres cajas de fuera — ésas sí estaban limpias, lo
+cual solo se sabe ahora.
+
+**Se escribió primero una regla más fina y se tiró.** Cortar donde *cambia* la caja —`PTYOutput` como
+`pty` + `output` en vez de `p`, `t`, `y`, `output`— es más bonito y **no cambia ni un veredicto**: las
+letras que ahorra las tira el mismo suelo, y la palabra de detrás se encuentra igual. Ningún nombre del
+árbol distingue las dos reglas, y este fichero no se queda mecanismos sin escenario.
+
+**Y la lista de ficheros terminados afirmaba «todos los identificadores en inglés» de cinco ficheros de
+los que no era verdad en ninguno.** Sus familias sí están renombradas y no les queda nombre que el
+glosario retirase —que es lo que la lista comprueba de verdad—, pero siguen llevando el **local en
+minúsculas que el glosario nunca tuvo que decidir**: el `resto` de un trozo, el `ahora` de un reloj, la
+`fase` de una cabecera. Eso es exactamente el punto ciego que la guarda declara en su cabecera, y la
+lista lo tapaba.
+
+**Contados: 195 identificadores distintos** — ratón 7 · teclado 30 · pintor 27 · fuentes 57 · panel 74.
+El método, porque el número sin él no vale: se extraen los identificadores de cada fichero con el mismo
+saneo que usa la guarda (fuera cadenas, caracteres y comentarios), **se quitan los nombres de función de
+prueba** —que son prosa y van con la prosa—, se deja un ejemplar de cada nombre y se clasifica a mano. La
+lista, nombre a nombre, va abajo. Los seis exentos a propósito (`Tema`, `tema`,
+`color_del_panel`, `color_del_reclamo`, `fondo_del_panel`, `con_atributos`) no cuentan. Un nombre que
+aparece en dos ficheros cuenta en los dos: el inventario es por fichero, que es la unidad de la lista.
+
+**Y el primer recuento dijo 190, que es la clase de fallo que este documento existe para no repetir.**
+Faltaban cuatro, y los cuatro por la misma razón: tres eran **locales dentro de una prueba** —`solo_clics`,
+`en_otra_distribucion`, `sin_alto`— que están **junto a una prueba cuyo nombre lleva esas mismas palabras**,
+así que leyendo el listado los tomé por nombres de prueba y los descarté; el cuarto era `Texto`, un tipo de
+otro módulo que el pintor nombra, y que cuenta por la misma regla por la que `fuentes` cuenta en tres
+ficheros. Lo destapó una revisión adversaria con un único encargo: **recontar**. La lección no es «contar
+mejor»: es que **un número producido a mano necesita que otro lo reproduzca**, y por eso el reparto por
+fichero se publica y no solo el total. (El quinto candidato, `A_EMOJI`, se cuenta: su `A_` es la
+preposición española, igual que en el `A_TEXTO` de al lado.)
+
+**Cuatro nombres que compilan y se leen mal, encontrados por las revisiones de la quinta entrega.** Los
+cuatro son de la misma clase: **dos cosas distintas con el mismo nombre a la vista**, que es justo lo que
+el glosario existe para impedir y lo que un renombrado mecánico no puede ver.
+
+| Estaba | Pasa a | Por qué |
+|---|---|---|
+| `Action::PageUp` · `PageDown` | `ScrollPageUp` · `ScrollPageDown` | En `(historial(Key::PageUp), Action::PageUp)` el mismo nombre son **dos tipos** en la misma expresión: la tecla de egui y lo que la aplicación hace con ella |
+| `Action::GoToStart` · `GoToEnd` | `ScrollToTop` · `ScrollToBottom` | Van a `Scroll::ToTop` / `Scroll::ToBottom`, así que ahora **se llaman como acaban**; y «start/end» en un terminal se lee como principio y fin de línea |
+| `Action::SplitBeside` | `SplitRight` | La propia D27 escribió `key.split-right` como ejemplo de las claves nuevas: el nombre del código decía otra cosa que la clave que lo configura |
+| `Action::SplitBelow` | `SplitDown` | Su pareja, por lo mismo |
+| `Glyphs::paste` | `Glyphs::blit` | Dos `paste` sin parentesco en la misma caja: éste **pega una imagen en el atlas**, el otro es el portapapeles |
+| `paint_character(width: bool)` | `is_wide` | A dos líneas de `metrics.width: f32`. Un `bool` llamado como una medida |
+
+Las cadenas del fichero de configuración —`"partir-al-lado"`, `"subir-una-pagina"`— **no se tocan**: son
+las claves que escribe quien usa el terminal y tienen su propia entrega.
+
+**Y la guarda de citas era ciega a los nombres de módulo, por una razón que no se ve leyéndola.** Esa
+guarda pregunta si el nombre citado existe **en alguna parte de la caja**, y **todos** los nombres de
+fichero retirados siguen existiendo — como **variable local**: «pantalla» es una `Screen` en dos
+ejemplos, «fuentes» es una lista de caras en tres módulos, «sesion» es una cabecera en el módulo de
+medida, «vigilante» es un vigilante en el módulo que ahora se llama `watcher.rs`. Así que un comentario
+que dice «la regla vive en fuentes» **pasa**: la guarda encuentra el local y da la cita por buena. Y
+ensancharla no lo habría encontrado nunca, porque el nombre que busca **está de verdad ahí**.
+
+Lo que hace posible cerrarlo es que los nombres **viejos** se conocen: el anexo escribe cada renombrado
+de fichero como una flecha, así que la pregunta deja de ser «¿existe este nombre?» y pasa a ser «¿es
+uno que retiramos?», que tiene respuesta exacta. La guarda nueva **deriva los diecisiete tallos de este
+mismo documento** —el mismo mecanismo que el glosario: derivar, nunca duplicar— y busca sus citas
+`` `así` ``, `` `así.rs` ``, `` `carpeta/así.rs` `` y `` `así::funcion` ``.
+
+Encontró **once** —medido corriendo esta guarda contra el árbol de main, que es la única forma de que el
+número sea reproducible—, y **nueve eran de verdad**: dos en el manifiesto de `app`, tres en el pintor, una en
+el fichero grande, dos en la propia guarda y una en el guion de medida —`vigilante::repartir`—. Las
+otras dos no eran citas de fichero: una era una palabra entre comillas invertidas y se reescribe como
+palabra, y la otra —«las demás pruebas llegan hasta `pantalla`»— quería decir un tipo, así que pasa a
+nombrarlo (`Screen`). Reescribir una y renombrar la otra no es la misma operación, y el guion de la
+guarda dice las dos.
+
+**Lee el lado del código y no el de la prosa**, y esa frontera es una decisión ya tomada: las 599 citas
+muertas de antes del hito tienen su entrega, así que `docs/`, los dos `README` y el conocimiento
+almacenado son de ellas. Aquí queda el código, sus manifiestos y el guion de medida — donde una cita
+muerta **no tiene entrega** y se quedaría.
+
+**Y hay una segunda mitad del mismo hueco que NO se cierra con una guarda, y conviene decir por qué.**
+El mismo mecanismo —el universo de nombres es la caja entera— deja pasar una cita muerta a un **campo o
+parámetro** en cuanto un módulo hermano tenga un local que se llame igual: `caras` sobrevive en
+`fonts.rs` porque el ejemplo de fuentes tiene un local `caras`, `problema` sobrevive en `panel.rs`
+porque `session.rs` tiene uno, `pegados` sobrevive porque lo tiene el pintor, `marcado` porque lo tiene
+el fichero grande.
+
+Estrechar el universo para una cita en minúsculas —«tiene que existir **en este fichero**»— se probó y
+se midió, sobre los diecisiete ficheros de la lista de citas y con el mismo criterio en los dos lados:
+**61 avisos sobre main, 43 sobre esta rama**. La diferencia son las citas que este PR repara. Y **de las
+43 que quedan no hay ni una de verdad**: son nombres de caja (`eframe`, `app`, `keyboard`), métodos de un
+módulo hermano que un comentario tiene derecho a nombrar (`arrancar`, `resolve`), campos del contrato que
+llegan de otra caja (`done`, `mark`, `style`, `info`, `current`), letras sueltas (`a`, `c`, `i`, `y`),
+cosas de `std` (`next`, `unwrap`, `text`), el valor de una variable de entorno entre comillas invertidas
+(`consola`) y claves del fichero de configuración (`tamano`).
+
+**Con 43 de 43 falsos no puede romper la compilación**, y la lista de excepciones que haría falta sería
+el mecanismo que se ensancha hasta que deja de fallar. Lo que sí cambia: **los 19 avisos ciertos se
+arreglan ahora** —once nombres en diez líneas del fichero grande, tres en fuentes, uno en el panel, uno
+en el teclado, dos en los ejemplos y uno en la propia guarda—, y el criterio queda apuntado con la
+condición que lo vuelve usable: **cuando el fichero grande, la medida, los ajustes y el tema estén en
+inglés**, «existe en este fichero» deja de ser ruido, porque entonces un nombre en minúsculas que no está
+en el fichero ya no es un local en español de un hermano. Ésa es la entrega que puede añadir la guarda.
+
+**Y la lista de ficheros con citas comprobadas decía «todos los ficheros de la caja» con dos
+excepciones que nadie había escrito.** El binario faltaba y entra. La propia guarda **no**, y ésa es la
+respuesta y no un descuido: metiéndola salen **65 citas** tal como esta entrega la deja —y el número
+**crece con el fichero**, porque lo que reporta es el vocabulario y las formas de las que ese fichero
+habla: nombres retirados (`banderas`, `RatonReclamado`), nombres de ejemplo (`CamelCase`, `like_this`,
+`Type`) y palabras corrientes entre comillas invertidas. Una guarda cuyo asunto son los nombres que ya
+no están no se puede juzgar por «cita un nombre que el código tiene»: **de las 65, una era de verdad**.
+
+**La que sí era de verdad salió de leerse las 56, y conviene que quede escrito:** el comentario que
+explica la guarda de citas nombraba tres identificadores vivos, y uno —`prioridad`— **había
+desaparecido del árbol entero**. O sea que la frase que explica la guarda era una de las citas que la
+guarda describe. Una de cada 65 no es una guarda, pero es un buen barrido. Lo que **sí**
+se le puede envejecer es un nombre de fichero, y la guarda nueva la lee para eso: le encontró dos.
+
+La lista pasa a llamarse por lo que comprueba —**«ficheros sin nombre que el glosario retirase»**— y los
+195 van a la entrega del fichero grande, que es la que ya tenía ese encargo para sus vecinos. **Y la
+lección se escribe entera**, porque es la de este PR: *una lista que exagera lo que miró se lee una vez,
+se cree, y la entrega siguiente la usa para decidir qué está hecho.* Es exactamente así como cinco
+ficheros acabaron declarados terminados.
+
+#### Lo que la revisión adversaria le encontró a la guarda nueva, y es la mitad del PR
+
+Un mutador con una sola instrucción —«demuestra que algo de este diff no está cubierto»— devolvió
+**seis huecos, cada uno con su mutación superviviente ejecutada**. Ninguno se veía leyendo el código, y
+uno de ellos es el disfraz que este proyecto ya tiene fichado.
+
+**1. El lector de citas de fichero no lo ejercitaba ninguna aserción.** `fn cites_the_file(..) -> bool
+{ false }` dejaba las ocho pruebas **verdes**, y también romper cada una de sus cuatro formas por
+separado. La razón hay que escribirla porque es general: **la única prueba que lo llama busca citas, y
+el árbol está limpio — así que romper el buscador deja la suite más verde, no más roja.** Un buscador
+necesita su propio oráculo; la ausencia de lo que encuentra no lo es. Entra
+`the_reader_of_file_citations_knows_the_four_shapes`, con las cuatro formas y tres negativos.
+
+**2. El suelo de diecisiete flechas contaba, no identificaba.** Devolver los diecisiete tallos con un
+sufijo pegado —diecisiete nombres que no existen— dejaba el suelo contento y la prueba pasaba sin mirar
+nada. Es exactamente «afirmar sobre el conteo en vez de sobre el efecto». Ahora se piden **cuatro
+tallos por su nombre**.
+
+**3. El suelo de dos caracteres no lo sostenía nada.** Subirlo a 3, a 5, o **quitarlo del todo**: las
+ocho verdes. Con cinco, el guardián deja de ver `celda`, `hueco`, `serie`, `nodo`, `fila` y `mitad`
+dentro de cualquier compuesto — y ese número es el que el comentario nuevo de la partición usa para
+explicar el defecto que arregla. Dos casos nuevos, uno por valor: un nombre retirado de tres letras y
+otro de cinco. Bajarlo no tiene caso y se dice: quitar un suelo solo endurece.
+
+**4. «Sin minúsculas» no es «todo mayúsculas», y la diferencia es un dígito.** Escrito
+`chars().all(char::is_uppercase)` la prueba pasaba igual, y el defecto quedaba **reabierto para toda
+constante numerada**: el dígito rompe la condición, la pieza se vuelve a partir en letras sueltas y el
+suelo las tira. Caso nuevo con un número dentro.
+
+**5. El manifiesto de la raíz tapaba los de las cajas.** Una sola pregunta «¿hay algún `.toml`?» la
+satisfacía él solo, así que quitar los `.toml` del recorrido seguía verde — y **dos de las citas
+muertas que esta guarda encontró vivían en el manifiesto de una caja**, no en el de la raíz. Ahora se
+piden los dos por separado.
+
+**6. Las dos listas se podían vaciar sin que nada fallara.** Vaciar la de ficheros limpios: verde, porque
+las cajas terminadas seguían dando objetivos y la guarda de «esto no tiene ficheros» nunca se le
+pregunta a una lista **sin elementos**. Y quitar de la lista de citas cualquier entrada —incluida la que
+este PR añade— también: un fichero que sale de la lista simplemente deja de mirarse, y nada echa de
+menos lo que no reporta. La lista de citas pasa a **derivarse del árbol** («todos los ficheros de la
+caja» se comprueba, no se cree, con este fichero como única excepción escrita) y las dos listas de
+nombres llevan suelo de cardinalidad.
+
+**Y derivarla del árbol se cobró dos citas muertas más**: al entrar los cuatro ejemplos de `app` en la
+lista salieron `` `resolver` `` en dos de ellos, cuando el método se llama `resolve` desde la entrega
+anterior. Más dos nombres ajenos que había que declarar (`yes`, el programa; `Zsym`, un código de
+escritura de Unicode).
+
+**Las diez mutaciones supervivientes se volvieron a correr una por una: las diez caen ahora.**
+
+##### Los 195, nombre a nombre
+
+**`mouse.rs` — 7:** `abajo` · `apretar` · `arriba` · `dentro` · `fuera` · `solo_clics` · `soltar`
+
+**`keyboard.rs` — 30:** `antes` · `codigo` · `cual` · `cuerpo` · `en_otra_distribucion` · `escrita` · `escrito` · `esperada` · `esperado` · `historial` · `hostil` · `letras` · `mando` · `nuevo` · `otro` · `parte` · `pelado` · `pisada` · `publicado` · `queda` · `repetida` · `salida` · `salto` · `sin_publicar` · `soltar` · `suyo` · `tabla` · `veneno` · `venenos` · `viejo`
+
+**`painter.rs` — 27:** `Texto` · `debajo` · `dibujo` · `esquina` · `fondo` · `fondo_apagado` · `fondo_realzado` · `fuentes` · `hubo_color` · `letra` · `letra_realzada` · `malla` · `muchas` · `pasada` · `pegados` · `primera_imagen` · `proporcion` · `que` · `rejilla` · `rejillas` · `salida` · `sin_selector` · `suyo` · `tamano` · `textos_sin` · `ultimo_texto` · `una`
+
+**`fonts.rs` — 57:** `A_EMOJI` · `A_TEXTO` · `Texto` · `a_buscar` · `alfa` · `alto_final` · `ancho_final` · `ancho_maximo` · `antes` · `buscados` · `canal` · `coleccion` · `comun` · `coste` · `crudo` · `cuadrado` · `cuadro` · `cubre` · `datos` · `definiciones` · `delante` · `despues` · `empezo` · `fallidos` · `familia` · `fotograma` · `fuente` · `fuentes` · `gastado` · `genericas` · `glifo` · `grande` · `icono` · `letras` · `mapa` · `mascara` · `nombre` · `origen` · `otro` · `pendientes` · `pequeno` · `pixeles` · `primera` · `registradas` · `resueltos` · `se_rindio` · `segunda` · `selector` · `siguiente` · `sin_fuentes` · `sin_presupuesto` · `sitio` · `sitios` · `suya` · `suyo` · `todas` · `uno`
+
+**`panel.rs` — 74:** `a_pintar` · `ahora` · `anchos` · `bloque` · `cabe` · `cabeza` · `callado` · `caso` · `casos` · `clave` · `contenido` · `corte` · `cual` · `cuando` · `cuerpo` · `dicho` · `disponible` · `entera` · `envejecer` · `estrecha` · `fase` · `fecha` · `fichero` · `fondos` · `frase` · `fresco` · `fuente` · `fuentes` · `identidad` · `izquierda` · `larga` · `largo` · `marcas` · `minutos` · `muchas_enes` · `otro` · `palabra` · `paso` · `pegada` · `pendiente` · `pintado` · `pintando` · `primera` · `publicada` · `publicado_hace` · `publicar` · `recien` · `recortada` · `referencia` · `relleno` · `repetida` · `resto` · `ruta` · `salida` · `saneado` · `sangrada` · `segunda` · `segundos` · `siguiente` · `sin_alto` · `sitio` · `sobran` · `suyo` · `tal_cual` · `textos` · `todos` · `tope` · `tres` · `ultimo_bueno` · `valor` · `viejo` · `vigente` · `visibles` · `visto`

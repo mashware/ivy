@@ -849,7 +849,7 @@ const INITIAL_FRACTION: f32 = 0.5;
 /// que se escribe, su respuesta, y el prompt de vuelta. Con dos, cualquier orden que conteste una línea
 /// borra ya el prompt anterior y no queda nada que leer.
 ///
-/// Es el hermano de [`panel::CONSOLA_MINIMA`] —las veinte columnas de ancho— para el otro eje, y no vale
+/// Es el hermano de [`panel::MINIMUM_CONSOLE`] —las veinte columnas de ancho— para el otro eje, y no vale
 /// el mismo número: veinte filas son una ventana entera y veinte columnas son media palabra. Lo que
 /// comparten es la regla, no la cifra.
 const MINIMUM_ROWS: f32 = 3.0;
@@ -1028,7 +1028,7 @@ const CELLS_THE_PANEL_GESTURE_CROSSES: f32 = 8.0;
 /// cruzar son bordes de celda.
 ///
 /// **Ocho es el mismo número y no la misma cuenta, y aquí el margen es estrecho.** El suelo no es el
-/// ancho mínimo del panel sino [`panel::CONSOLA_MINIMA`]: con la ventana de la tanda y dos divisiones con
+/// ancho mínimo del panel sino [`panel::MINIMUM_CONSOLE`]: con la ventana de la tanda y dos divisiones con
 /// panel, un gesto entero mueve la frontera dieciséis celdas y la consola que se estrecha baja de 39
 /// columnas a **23** — tres por encima de sus veinte. **Con diez ya toca el suelo**, medido, y entonces la
 /// mitad de los gestos serían no-ops contra él y la tanda promediaría dos regímenes bajo la misma
@@ -1501,7 +1501,7 @@ fn side_of(pane_area: egui::Rect, puntero: egui::Pos2) -> Side {
 /// publicado un `panel.json` en el último segundo.
 fn cabe_partir(pane_area: egui::Rect, cut_along: Orientation, metrics: &CellMetrics) -> bool {
     let minimo = match cut_along {
-        Orientation::Columns => panel::CONSOLA_MINIMA * metrics.width(),
+        Orientation::Columns => panel::MINIMUM_CONSOLE * metrics.width(),
         Orientation::Rows => MINIMUM_ROWS * metrics.height(),
     };
 
@@ -2204,7 +2204,7 @@ impl Pane {
             panel_reread_unpainted: std::time::Duration::ZERO,
             reflowed: std::time::Duration::ZERO,
             pending_wheel: WheelInput::default(),
-            panel_width: panel::ANCHO_DE_FABRICA,
+            panel_width: panel::DEFAULT_WIDTH,
             folded: false,
         })
     }
@@ -2697,8 +2697,8 @@ impl Pane {
         // primeros fotogramas no hay nadie arrastrando.
         let cabe = metrics.cells_in(pane_area.size()).cols as usize;
         let techo = cabe
-            .saturating_sub(panel::CONSOLA_MINIMA as usize)
-            .max(panel::SUELO_AL_ARRASTRAR);
+            .saturating_sub(panel::MINIMUM_CONSOLE as usize)
+            .max(panel::DRAG_FLOOR);
 
         // **Sin guarda contra un valor no finito, y esta vez con los cuatro caminos enumerados.** La
         // revisión avisó de que, desde que pedir menos que el suelo significa **plegar**, un cero ya no lo
@@ -2733,7 +2733,7 @@ impl Pane {
         //
         // **Y el arreglo que la revisión propuso —anclar al ancho guardado y sumarle el desplazamiento— se
         // implementó, se mutó y NO cambiaba ningún resultado.** La razón se puede seguir con lápiz: cuando
-        // el reparto recorta, lo que pinta **es** el techo (`cabe - CONSOLA_MINIMA`), así que la lectura
+        // el reparto recorta, lo que pinta **es** el techo (`cabe - MINIMUM_CONSOLE`), así que la lectura
         // directa da `techo + desplazamiento` y el ancla da `guardado + desplazamiento`, y el `min(techo)`
         // de abajo deja las dos en `techo`. Y donde no hay recorte, las dos coinciden por construcción. Un
         // mecanismo que no puede cambiar un resultado es un mecanismo sin escenario, así que fuera.
@@ -2762,7 +2762,7 @@ impl Pane {
         // > guardado. Las dos son mitades de lo decidido —el ancho de antes, y el ratón mandando— así que
         // > no se inventa estado propio para forzar una de las dos. Queda dicho porque es la clase de
         // > diferencia entre fotogramas que este proyecto ya pagó una vez sin verla.
-        if pedido < panel::SUELO_AL_ARRASTRAR {
+        if pedido < panel::DRAG_FLOOR {
             let cambio = !self.folded;
             self.folded = true;
             return cambio;
@@ -2975,10 +2975,10 @@ impl Pane {
                             }
                             // **Partir lleva la misma guarda y por lo mismo**: cada una lanza un programa, así
                             // que un segundo apretado serían treinta shells y treinta directorios.
-                            keyboard::Action::SplitBeside if !repeat => {
+                            keyboard::Action::SplitRight if !repeat => {
                                 pedidas.push(WindowRequest::Split(Orientation::Columns));
                             }
-                            keyboard::Action::SplitBelow if !repeat => {
+                            keyboard::Action::SplitDown if !repeat => {
                                 pedidas.push(WindowRequest::Split(Orientation::Rows));
                             }
                             // **Aquí la guarda es la más necesaria de las cuatro**: un segundo apretado
@@ -2995,16 +2995,16 @@ impl Pane {
                             // **Mirar el historial es del terminal, no del programa**, así que estas cuatro se
                             // consumen aquí y no se traducen a bytes. **Y la repetición vale**: mantener
                             // pulsado para subir es el gesto normal, al revés que crear o cerrar.
-                            keyboard::Action::PageUp => {
+                            keyboard::Action::ScrollPageUp => {
                                 subidas.push(Scroll::Pages(1));
                             }
-                            keyboard::Action::PageDown => {
+                            keyboard::Action::ScrollPageDown => {
                                 subidas.push(Scroll::Pages(-1));
                             }
-                            keyboard::Action::GoToStart => {
+                            keyboard::Action::ScrollToTop => {
                                 subidas.push(Scroll::ToTop);
                             }
-                            keyboard::Action::GoToEnd => subidas.push(Scroll::ToBottom),
+                            keyboard::Action::ScrollToBottom => subidas.push(Scroll::ToBottom),
                             // La repetición de crear, cerrar, partir o copiar cae aquí: se traga sin hacer
                             // nada, que es el objeto de la guarda.
                             _ => {}
@@ -3246,7 +3246,7 @@ impl Node {
         true
     }
 
-    /// Mete `nueva` junto a la hoja que se llame `nombre`, cortando en ese sentido.
+    /// Mete `new` junto a la hoja que se llame `name`, cortando en ese sentido.
     ///
     /// **Devuelve la división que no ha colocado**, que es la forma de decir «esa hoja no está por aquí»
     /// sin dejarla por el camino: una consola no se puede clonar para probar suerte en cada rama, y
@@ -3451,7 +3451,7 @@ impl Node {
         }
     }
 
-    /// Quita la consola que se llame `nombre`, y deja el árbol sin ramas que no separen nada.
+    /// Quita la consola que se llame `name`, y deja el árbol sin ramas que no separen nada.
     ///
     /// **Devuelve `None` cuando esa consola no está por aquí**, igual que [`Node::split`] devuelve la
     /// que no ha colocado: es cómo se dice «sigue buscando» sin inventar nada.
@@ -3706,7 +3706,7 @@ impl Tab {
         // siempre, la primera es la de la izquierda.
         //
         // **`expect` y no un respaldo silencioso**, por lo mismo que en [`weights_of`]: una pestaña sin
-        // ninguna consola no existe —[`opening_layout_of`] rechaza el cero en los dos ejes y [`Tab::nueva`]
+        // ninguna consola no existe —[`opening_layout_of`] rechaza el cero en los dos ejes y [`Tab::new`]
         // abre una consola por nombre—, y un respaldo convertiría ese imposible en algo plausible. El cero
         // sería el peor de todos: es el nombre de **la primera consola de la primera pestaña**, así que el
         // foco apuntaría a una consola de otra pestaña y las teclas se irían a donde nadie las espera.
@@ -3789,7 +3789,7 @@ impl Tab {
         }
     }
 
-    /// Mueve la frontera número `cual` a esa fracción. Dice si algo cambió.
+    /// Mueve la frontera número `which` a esa fracción. Dice si algo cambió.
     ///
     /// **Reparte solo entre las dos que la frontera separa y conserva lo que suman**, que es la regla
     /// del árbol: mover un divisor no toca a las hermanas que están más allá. Con dos hijos da igual;
@@ -3800,7 +3800,7 @@ impl Tab {
         Self::move_in(&mut self.root, which, fraccion, &mut van).unwrap_or(false)
     }
 
-    /// Busca la frontera número `cual` recorriendo el árbol **en el mismo orden en que se colocan**, y la
+    /// Busca la frontera número `which` recorriendo el árbol **en el mismo orden en que se colocan**, y la
     /// mueve. `van` es cuántas se han dejado atrás.
     ///
     /// **Se numeran recorriendo en vez de guardar un camino hasta la rama**, y es la misma invariante en
@@ -5913,7 +5913,7 @@ impl Window {
     /// respuesta, que es cuando esto se usa— ninguno de los tres tiene nada que pedir, así que sin esta
     /// línea la ventana se dormiría **enseñando la pestaña anterior** y el acorde parecería no haber
     /// funcionado.
-    /// `whole_window` y `metrica` son de dónde sale la geometría que **partir** necesita: hay que
+    /// `whole_window` y `metrics` son de dónde sale la geometría que **partir** necesita: hay que
     /// saber cuánto mide la división del foco para poder negarse cuando no cabe. Se pasan en vez de
     /// guardarse porque el área es de la pasada de interfaz y esto puede correr varias veces dentro de
     /// una —el mismo lote puede traer varios acordes—, y **la barra aparece o desaparece por el camino**:
@@ -6824,7 +6824,7 @@ impl eframe::App for Window {
 
 // ── La disposición, de ida y de vuelta ──────────────────────────────────────────────────────────
 //
-// **Las dos conversiones viven aquí y no en `sesion`, y la frontera es a propósito.** Los campos de una
+// **Las dos conversiones viven aquí y no en `session`, y la frontera es a propósito.** Los campos de una
 // división son privados de este módulo, y materializar es **bifurcar un proceso por hoja**: dejarlo en un
 // solo sitio es lo que hace que el otro módulo se pueda probar entero sin abrir un pseudoterminal.
 //
@@ -6912,7 +6912,7 @@ impl Node {
                 // ancho— y, como el único que escribe este campo es el propio arrastre, se queda así para
                 // siempre y en cada sesión. Recortando aquí, lo que vuelve del disco es siempre un estado
                 // que un gesto podría haber dejado.
-                pane.panel_width = hoja.ancho_del_panel.max(panel::SUELO_AL_ARRASTRAR);
+                pane.panel_width = hoja.ancho_del_panel.max(panel::DRAG_FLOOR);
                 pane.folded = hoja.plegado;
                 Ok(Self::Leaf(pane))
             }
@@ -7354,7 +7354,7 @@ mod tests {
             panel_reread_unpainted: std::time::Duration::ZERO,
             reflowed: std::time::Duration::ZERO,
             pending_wheel: WheelInput::default(),
-            panel_width: panel::ANCHO_DE_FABRICA,
+            panel_width: panel::DEFAULT_WIDTH,
             folded: false,
             received: Vec::new(),
             keystrokes: Vec::new(),
@@ -8313,7 +8313,7 @@ mod tests {
         let mut modifiers = egui::Modifiers::NONE;
         let mut keymap = keyboard::Keymap::default();
         keymap.bind(
-            keyboard::Action::SplitBeside,
+            keyboard::Action::SplitRight,
             Some(keyboard::Chord {
                 ctrl: true,
                 shift: true,
@@ -8369,7 +8369,7 @@ mod tests {
         let solo_mayusculas = egui::Modifiers::SHIFT;
         let mut keymap = keyboard::Keymap::default();
         keymap.bind(
-            keyboard::Action::SplitBeside,
+            keyboard::Action::SplitRight,
             Some(keyboard::Chord {
                 ctrl: false,
                 shift: true,
@@ -9583,7 +9583,7 @@ mod tests {
         );
 
         window.apply_the_settings(&settings::Ajustes {
-            atajos: vec![(keyboard::Action::SplitBeside, None)],
+            atajos: vec![(keyboard::Action::SplitRight, None)],
             ..Default::default()
         });
 
@@ -9608,7 +9608,7 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         window.apply_the_settings(&settings::Ajustes {
             atajos: vec![(
-                keyboard::Action::SplitBeside,
+                keyboard::Action::SplitRight,
                 Some(keyboard::Chord {
                     ctrl: true,
                     shift: true,
@@ -10442,7 +10442,7 @@ mod tests {
     #[test]
     fn el_programa_de_una_pestaña_de_fondo_se_entera_del_tamaño_que_se_le_midio() {
         // La última cláusula del criterio que este cambio cubre: que el tamaño **llegue hasta el
-        // programa de dentro**. Las demás pruebas llegan hasta `pantalla`, que es esta misma
+        // programa de dentro**. Las demás pruebas llegan hasta `Screen`, que es esta misma
         // aplicación contándose las cosas a sí misma.
         //
         // Lo que añade sobre `al_redimensionar_el_programa_de_dentro_se_entera_del_tamano_nuevo` es el
@@ -10581,7 +10581,7 @@ mod tests {
     #[test]
     fn el_acorde_cambia_de_pestaña_dentro_del_fotograma_entero() {
         // **AC8 por el camino real, y el hueco que esto tapa era literal**: lo que había ataba el acorde
-        // hasta `send_keys_to_the_focused` y luego llamaba a `aplicar` **desde la prueba**. Borrar en `ui` las
+        // hasta `send_keys_to_the_focused` y luego llamaba a `apply` **desde la prueba**. Borrar en `ui` las
         // tres líneas que aplican la orden dejaba la suite entera en verde con el acorde muerto —
         // comprobado mutándolo. Es el ayudante disfrazado de camino real que este proyecto ya ha pagado.
         //
@@ -11111,7 +11111,7 @@ mod tests {
         // consolas que no aparecen en ninguna: es la regla dura del proyecto, un número mal etiquetado es
         // peor que ningún número, y quien lo lea no tiene forma de notarlo.
         //
-        // **Se afirma sobre el informe y no sobre el campo `nombre`**, que es donde se apunta: el nombre no
+        // **Se afirma sobre el informe y no sobre el campo `name`**, que es donde se apunta: el nombre no
         // decide el directorio de panel —ése lo crea cada consola por su cuenta—, así que comprobar que las
         // identidades no se repiten pasa igual con los nombres duplicados. Comprobado mutándolo.
         let ctx = egui::Context::default();
@@ -12725,7 +12725,7 @@ mod tests {
     fn el_foco_se_queda_con_la_consola_movida_y_va_por_su_nombre_y_no_por_su_sitio() {
         // **AC3, con el disfraz de su hermana quitado.** La prueba de arriba arrastra dos consolas recién
         // abiertas, donde el nombre y el sitio de cada una son el mismo número: guardar en el foco
-        // `which_pane` en vez de `nombre` da exactamente el mismo resultado y la suite no lo nota — y ese
+        // `which_pane` en vez de `name` da exactamente el mismo resultado y la suite no lo nota — y ese
         // foco es por quién enruta el teclado, así que equivocarlo se lo entrega a otra consola.
         //
         // Con los extremos cruzados el número correcto no lo produce ninguna otra lectura. Se agarra la del
@@ -16086,7 +16086,7 @@ mod tests {
         // intercambiables en todo menos en el sitio. Lo que el usuario vería es la consola naciendo al
         // lado contrario del que pidió, y luego el foco saltando ahí.
         //
-        // Comprobado mutando: insertando en `donde` en vez de en `donde + 1`, la suite entera se queda
+        // Comprobado mutando: insertando en `at` en vez de en `at + 1`, la suite entera se queda
         // verde.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
@@ -16218,7 +16218,7 @@ mod tests {
     #[test]
     fn arrastrar_una_frontera_no_mueve_la_del_subarbol_hermano() {
         // **El defecto que partir hace alcanzable, y que se ve solo con dos ramas hermanas.** Al buscar
-        // la frontera número `cual`, el recorrido usaba el booleano de «el peso cambió» como si fuera «la
+        // la frontera número `which`, el recorrido usaba el booleano de «el peso cambió» como si fuera «la
         // encontré». Cuando la frontera pedida existe pero se le pide la fracción que ya tenía —el
         // fotograma en que el puntero no se ha movido, o cualquiera en que el recorte lo deja donde
         // estaba— ese booleano vale «no», así que la búsqueda **seguía** por el subárbol siguiente, y
@@ -18667,7 +18667,7 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[0].panel_width,
-            panel::ANCHO_DE_FABRICA - 10,
+            panel::DEFAULT_WIDTH - 10,
             "el panel no se quedó con las celdas que el puntero le dejó"
         );
         assert_eq!(
@@ -18695,11 +18695,11 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[0].panel_width,
-            panel::ANCHO_DE_FABRICA - 8
+            panel::DEFAULT_WIDTH - 8
         );
         assert_eq!(
             window.active().panes()[1].panel_width,
-            panel::ANCHO_DE_FABRICA,
+            panel::DEFAULT_WIDTH,
             "arrastrar la frontera de una división le cambió el ancho a su hermana"
         );
     }
@@ -18769,7 +18769,7 @@ mod tests {
         let pedido = window.active().panes()[0].panel_width;
         assert_ne!(
             pedido,
-            panel::ANCHO_DE_FABRICA,
+            panel::DEFAULT_WIDTH,
             "el gesto no cambió el ancho, así que partir no tiene nada que conservar"
         );
 
@@ -18816,7 +18816,7 @@ mod tests {
         );
         assert_eq!(
             window.tabs[1].panes()[0].panel_width,
-            panel::ANCHO_DE_FABRICA,
+            panel::DEFAULT_WIDTH,
             "el arrastre en vuelo se llevó por delante el panel de la pestaña de destino"
         );
     }
@@ -18845,7 +18845,7 @@ mod tests {
             .expect("hay panel")
             .width();
 
-        assert_eq!(factory, panel::ANCHO_DE_FABRICA as f32 * cell);
+        assert_eq!(factory, panel::DEFAULT_WIDTH as f32 * cell);
         assert_eq!(
             custom,
             12.0 * cell,
@@ -18887,7 +18887,7 @@ mod tests {
 
             assert_eq!(
                 window.active().panes()[0].panel_width,
-                panel::ANCHO_DE_FABRICA,
+                panel::DEFAULT_WIDTH,
                 "el panel se movió con un botón que no es el primario"
             );
         }
@@ -18914,7 +18914,7 @@ mod tests {
             window.active().panes()[0].tile_with_its_panel(suya, cell, SystemTime::now());
         let pintado = panel_split.panel.expect("hay panel").width() / cell;
         assert!(
-            pintado < panel::ANCHO_DE_FABRICA as f32,
+            pintado < panel::DEFAULT_WIDTH as f32,
             "el panel no está recortado ({pintado} celdas), así que la prueba no plantea el caso"
         );
 
@@ -18926,7 +18926,7 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[0].panel_width,
-            panel::ANCHO_DE_FABRICA,
+            panel::DEFAULT_WIDTH,
             "una pulsación sin mover se leyó como «quiero este ancho» y borró el que había pedido"
         );
     }
@@ -18948,7 +18948,7 @@ mod tests {
         let cell = with_metrics(CellMetrics::width);
         let suya = window.active().root.place(area, cell).parts[0];
         let of_the_pane = with_metrics(|m| m.cells_in(suya.size()).cols) as usize;
-        let cabe = of_the_pane - panel::CONSOLA_MINIMA as usize;
+        let cabe = of_the_pane - panel::MINIMUM_CONSOLE as usize;
         assert_eq!(
             window.active().panes()[0].panel_width,
             cabe,
@@ -18970,7 +18970,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         // Cada división se queda por debajo del suelo de la consola, así que su panel no tiene ancho.
-        let area = area_of_cells(2.0 * panel::CONSOLA_MINIMA - 4.0);
+        let area = area_of_cells(2.0 * panel::MINIMUM_CONSOLE - 4.0);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
@@ -19026,7 +19026,7 @@ mod tests {
         let pedido = window.active().panes()[0].panel_width;
         assert_ne!(
             pedido,
-            panel::ANCHO_DE_FABRICA,
+            panel::DEFAULT_WIDTH,
             "el gesto no cambió el ancho, así que no hay nada que conservar"
         );
         let quien = window.active().panes()[0].name;
@@ -19157,7 +19157,7 @@ mod tests {
         let cut_along = panel_cut(&window, 0, area);
         drag_the_panel(&mut window, &ctx, area, 0, cut_along + 9.0 * cell);
         let pedido = window.active().panes()[0].panel_width;
-        assert_eq!(pedido, panel::ANCHO_DE_FABRICA - 9);
+        assert_eq!(pedido, panel::DEFAULT_WIDTH - 9);
 
         drag_the_panel(&mut window, &ctx, area, 0, area.right() + 500.0);
 
@@ -19239,7 +19239,7 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[0].panel_width,
-            panel::ANCHO_DE_FABRICA,
+            panel::DEFAULT_WIDTH,
             "el gesto sobre una consola sin panel le cambió el ancho: hay un asidero donde no debería"
         );
         assert!(
@@ -19259,7 +19259,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let cell = with_metrics(CellMetrics::width);
         // Cada división se queda con el suelo de la consola más un pelo: al panel le sobran dos puntos.
-        let area = area_of(2.0 * (panel::CONSOLA_MINIMA * cell + 1.0) + DIVIDER_THICKNESS);
+        let area = area_of(2.0 * (panel::MINIMUM_CONSOLE * cell + 1.0) + DIVIDER_THICKNESS);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
@@ -19317,7 +19317,7 @@ mod tests {
             .width()
             / cell;
         assert!(
-            pintado < panel::ANCHO_DE_FABRICA as f32,
+            pintado < panel::DEFAULT_WIDTH as f32,
             "el panel no está recortado ({pintado} celdas), así que la prueba no plantea el caso"
         );
 
@@ -19345,7 +19345,7 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[0].panel_width,
-            panel::ANCHO_DE_FABRICA,
+            panel::DEFAULT_WIDTH,
             "un temblor de {temblor} puntos se leyó como «quiero este ancho» y borró el que había pedido"
         );
     }
@@ -19545,7 +19545,7 @@ mod tests {
         // avisar: dos empujones de ocho celdas desde el ancho de fábrica.
         assert_eq!(
             window.active().panes()[0].panel_width,
-            panel::ANCHO_DE_FABRICA - 2 * CELLS_THE_PANEL_GESTURE_CROSSES as usize,
+            panel::DEFAULT_WIDTH - 2 * CELLS_THE_PANEL_GESTURE_CROSSES as usize,
             "el gesto no dejó el ancho donde la cuenta de celdas dice"
         );
     }
@@ -19890,10 +19890,10 @@ mod tests {
         }
 
         assert!(
-            f32::from(the_least) > panel::CONSOLA_MINIMA,
+            f32::from(the_least) > panel::MINIMUM_CONSOLE,
             "el vaivén dejó una consola en {the_least} columnas y su suelo son {}: la mitad de los gestos \
              chocarían contra él y la tanda mediría dos regímenes",
-            panel::CONSOLA_MINIMA
+            panel::MINIMUM_CONSOLE
         );
     }
 
@@ -19975,7 +19975,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let cell = with_metrics(CellMetrics::width);
         // Al panel le sobran dos puntos: más que cero, menos que el asidero.
-        let area = area_of(2.0 * (panel::CONSOLA_MINIMA * cell + 1.0) + DIVIDER_THICKNESS);
+        let area = area_of(2.0 * (panel::MINIMUM_CONSOLE * cell + 1.0) + DIVIDER_THICKNESS);
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
         // Hace falta que la tanda pida gestos, porque es lo único que hace guardar lo pintado.
         window.injected_drags = InjectedDrags::new(1, InjectedGesture::ResizePanel);
@@ -20362,7 +20362,7 @@ mod tests {
         // de «salió el de fábrica».
         let ctx = egui::Context::default();
         let mut window = window_of_siblings(Orientation::Columns, &[1.0, 1.0, 1.0, 1.0]);
-        let anchos = [52, panel::ANCHO_DE_FABRICA, 24, 40];
+        let anchos = [52, panel::DEFAULT_WIDTH, 24, 40];
         let plegados = [false, false, true, false];
         for (which, pane) in window.active_mut().panes_mut().into_iter().enumerate() {
             pane.panel_width = anchos[which];
@@ -21040,7 +21040,7 @@ mod tests {
         let restaurada = window.tabs[0].panes();
         assert_eq!(
             restaurada[0].panel_width,
-            panel::SUELO_AL_ARRASTRAR,
+            panel::DRAG_FLOOR,
             "el panel volvió con un ancho que no se puede agarrar"
         );
         assert!(!restaurada[0].folded, "el plegado no era lo que se guardó");

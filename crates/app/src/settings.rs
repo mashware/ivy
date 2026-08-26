@@ -995,7 +995,7 @@ mod tests {
         assert_eq!(ajustes.atajos.len(), 3, "no llegaron los tres atajos");
         assert_eq!(
             ajustes.atajos[0].0,
-            crate::keyboard::Action::SplitBeside,
+            crate::keyboard::Action::SplitRight,
             "el orden de lectura no se conserva, y «gana la última» deja de poder decidirse"
         );
         assert_eq!(ajustes.atajos[1].1, None, "«ninguno» no desató la acción");

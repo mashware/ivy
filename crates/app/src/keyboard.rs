@@ -61,7 +61,7 @@ pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
 
 /// Lo que se le manda al programa cuando se pega texto de verdad.
 ///
-/// `marcado` es lo que el programa de dentro haya pedido: con él, el texto va rodeado de las dos
+/// `bracketed` es lo que el programa de dentro haya pedido: con él, el texto va rodeado de las dos
 /// secuencias que dicen «esto viene pegado», y un shell que las entiende lo deja escrito en vez de
 /// ejecutarlo línea a línea.
 ///
@@ -646,34 +646,34 @@ mod tests {
 /// Los dos se apagan con `copiar = no` y `pegar = no`, que es lo único que se puede hacer con ellos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
-    SplitBeside,
-    SplitBelow,
+    SplitRight,
+    SplitDown,
     ClosePane,
     NewTab,
     CloseTab,
     PreviousTab,
     NextTab,
-    PageUp,
-    PageDown,
-    GoToStart,
-    GoToEnd,
+    ScrollPageUp,
+    ScrollPageDown,
+    ScrollToTop,
+    ScrollToBottom,
 }
 
 impl Action {
     /// Cómo se escribe en el fichero de configuración.
     pub fn as_written(self) -> &'static str {
         match self {
-            Self::SplitBeside => "partir-al-lado",
-            Self::SplitBelow => "partir-debajo",
+            Self::SplitRight => "partir-al-lado",
+            Self::SplitDown => "partir-debajo",
             Self::ClosePane => "cerrar-division",
             Self::NewTab => "pestaña-nueva",
             Self::CloseTab => "cerrar-pestaña",
             Self::PreviousTab => "pestaña-anterior",
             Self::NextTab => "pestaña-siguiente",
-            Self::PageUp => "subir-una-pagina",
-            Self::PageDown => "bajar-una-pagina",
-            Self::GoToStart => "ir-al-principio",
-            Self::GoToEnd => "ir-al-final",
+            Self::ScrollPageUp => "subir-una-pagina",
+            Self::ScrollPageDown => "bajar-una-pagina",
+            Self::ScrollToTop => "ir-al-principio",
+            Self::ScrollToBottom => "ir-al-final",
         }
     }
 
@@ -690,17 +690,17 @@ impl Action {
 
 /// Las once, para recorrerlas.
 pub const ALL: [Action; 11] = [
-    Action::SplitBeside,
-    Action::SplitBelow,
+    Action::SplitRight,
+    Action::SplitDown,
     Action::ClosePane,
     Action::NewTab,
     Action::CloseTab,
     Action::PreviousTab,
     Action::NextTab,
-    Action::PageUp,
-    Action::PageDown,
-    Action::GoToStart,
-    Action::GoToEnd,
+    Action::ScrollPageUp,
+    Action::ScrollPageDown,
+    Action::ScrollToTop,
+    Action::ScrollToBottom,
 ];
 
 /// Un acorde: las teclas de mando que hacen falta, y la tecla.
@@ -840,17 +840,17 @@ impl Default for Keymap {
         };
         Self {
             tabla: vec![
-                (mando(Key::D), Action::SplitBeside),
-                (mando(Key::B), Action::SplitBelow),
+                (mando(Key::D), Action::SplitRight),
+                (mando(Key::B), Action::SplitDown),
                 (mando(Key::X), Action::ClosePane),
                 (mando(Key::T), Action::NewTab),
                 (mando(Key::W), Action::CloseTab),
                 (mando(Key::ArrowLeft), Action::PreviousTab),
                 (mando(Key::ArrowRight), Action::NextTab),
-                (historial(Key::PageUp), Action::PageUp),
-                (historial(Key::PageDown), Action::PageDown),
-                (historial(Key::Home), Action::GoToStart),
-                (historial(Key::End), Action::GoToEnd),
+                (historial(Key::PageUp), Action::ScrollPageUp),
+                (historial(Key::PageDown), Action::ScrollPageDown),
+                (historial(Key::Home), Action::ScrollToTop),
+                (historial(Key::End), Action::ScrollToBottom),
             ],
         }
     }
@@ -904,17 +904,17 @@ mod keymap_tests {
         // **La tabla de abajo se copia del documento a mano y a propósito.** Generarla del código mediría
         // que el código es consistente consigo mismo; lo que hay que atar es que lo publicado sea verdad.
         let publicado = [
-            ("partir-al-lado", "ctrl+shift+d", Action::SplitBeside),
-            ("partir-debajo", "ctrl+shift+b", Action::SplitBelow),
+            ("partir-al-lado", "ctrl+shift+d", Action::SplitRight),
+            ("partir-debajo", "ctrl+shift+b", Action::SplitDown),
             ("cerrar-division", "ctrl+shift+x", Action::ClosePane),
             ("pestaña-nueva", "ctrl+shift+t", Action::NewTab),
             ("cerrar-pestaña", "ctrl+shift+w", Action::CloseTab),
             ("pestaña-anterior", "ctrl+shift+←", Action::PreviousTab),
             ("pestaña-siguiente", "ctrl+shift+→", Action::NextTab),
-            ("subir-una-pagina", "shift+repág", Action::PageUp),
-            ("bajar-una-pagina", "shift+avpág", Action::PageDown),
-            ("ir-al-principio", "shift+home", Action::GoToStart),
-            ("ir-al-final", "shift+end", Action::GoToEnd),
+            ("subir-una-pagina", "shift+repág", Action::ScrollPageUp),
+            ("bajar-una-pagina", "shift+avpág", Action::ScrollPageDown),
+            ("ir-al-principio", "shift+home", Action::ScrollToTop),
+            ("ir-al-final", "shift+end", Action::ScrollToBottom),
         ];
         assert_eq!(
             publicado.len(),
@@ -962,17 +962,17 @@ mod keymap_tests {
         };
 
         let factory = [
-            (mando(Key::D), Action::SplitBeside),
-            (mando(Key::B), Action::SplitBelow),
+            (mando(Key::D), Action::SplitRight),
+            (mando(Key::B), Action::SplitDown),
             (mando(Key::X), Action::ClosePane),
             (mando(Key::T), Action::NewTab),
             (mando(Key::W), Action::CloseTab),
             (mando(Key::ArrowLeft), Action::PreviousTab),
             (mando(Key::ArrowRight), Action::NextTab),
-            (historial(Key::PageUp), Action::PageUp),
-            (historial(Key::PageDown), Action::PageDown),
-            (historial(Key::Home), Action::GoToStart),
-            (historial(Key::End), Action::GoToEnd),
+            (historial(Key::PageUp), Action::ScrollPageUp),
+            (historial(Key::PageDown), Action::ScrollPageDown),
+            (historial(Key::Home), Action::ScrollToTop),
+            (historial(Key::End), Action::ScrollToBottom),
         ];
 
         for (chord, esperada) in factory {
@@ -1021,10 +1021,10 @@ mod keymap_tests {
             alt: false,
             key: Key::D,
         };
-        assert_eq!(keymap.action_for(suyo), Some(Action::SplitBeside));
+        assert_eq!(keymap.action_for(suyo), Some(Action::SplitRight));
 
         assert_eq!(
-            keymap.bind(Action::SplitBeside, None),
+            keymap.bind(Action::SplitRight, None),
             None,
             "desatar no pisa a nadie"
         );
@@ -1053,11 +1053,11 @@ mod keymap_tests {
             key: Key::E,
         };
 
-        keymap.bind(Action::SplitBeside, Some(nuevo));
+        keymap.bind(Action::SplitRight, Some(nuevo));
 
         assert_eq!(
             keymap.action_for(nuevo),
-            Some(Action::SplitBeside),
+            Some(Action::SplitRight),
             "el acorde nuevo no hace nada"
         );
         assert_eq!(
@@ -1080,7 +1080,7 @@ mod keymap_tests {
             key: Key::X,
         };
 
-        let pisada = keymap.bind(Action::SplitBeside, Some(of_closing));
+        let pisada = keymap.bind(Action::SplitRight, Some(of_closing));
 
         assert_eq!(
             pisada,
@@ -1089,7 +1089,7 @@ mod keymap_tests {
         );
         assert_eq!(
             keymap.action_for(of_closing),
-            Some(Action::SplitBeside),
+            Some(Action::SplitRight),
             "no ganó la última"
         );
     }

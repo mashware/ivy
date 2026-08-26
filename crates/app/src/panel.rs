@@ -30,7 +30,7 @@ use crate::theme::Tema;
 /// El razonamiento entero —por qué en celdas, por qué el que cede es el panel, que el ancho es de cada
 /// división, qué es el mínimo del gesto y por qué plegar es un estado aparte— está en **D10** de
 /// `docs/02-decisiones.md`, con lo que se descartó en cada caso.
-pub(crate) const ANCHO_DE_FABRICA: usize = 36;
+pub(crate) const DEFAULT_WIDTH: usize = 36;
 
 /// Lo menos que se le deja a la consola cuando su panel le quita sitio, en celdas.
 ///
@@ -41,7 +41,7 @@ pub(crate) const ANCHO_DE_FABRICA: usize = 36;
 /// **Y es también el suelo que decide si una división se puede partir en dos**, que es el otro sitio
 /// donde hace falta saber cuándo una consola deja de servir. Son la misma pregunta, así que son la misma
 /// constante: dos números para «lo menos que necesita una consola» acabarían diciendo cosas distintas.
-pub(crate) const CONSOLA_MINIMA: f32 = 20.0;
+pub(crate) const MINIMUM_CONSOLE: f32 = 20.0;
 
 /// Lo menos que se le deja al panel cuando se arrastra su frontera, en celdas.
 ///
@@ -59,7 +59,7 @@ pub(crate) const CONSOLA_MINIMA: f32 = 20.0;
 /// esto es lo que el gesto lee como «ciérralo». Antes de que el plegado existiera, este mismo número
 /// servía para lo contrario —impedir llegar a cero, porque la frontera se habría ido con el panel— y esa
 /// razón ya no es la suya: ahora lo que sostiene el regreso es el asidero que sobrevive al plegado.
-pub(crate) const SUELO_AL_ARRASTRAR: usize = 1;
+pub(crate) const DRAG_FLOOR: usize = 1;
 
 /// Lo que se deja de margen a la izquierda del texto, en celdas.
 ///
@@ -110,7 +110,7 @@ pub fn set_aside(pane: Rect, cell_width: f32, panel_cells: Option<usize>) -> Pan
     };
 
     let in_points = cells as f32 * cell_width;
-    let disponible = (pane.width() - CONSOLA_MINIMA * cell_width).max(0.0);
+    let disponible = (pane.width() - MINIMUM_CONSOLE * cell_width).max(0.0);
     let corte = pane.right() - in_points.min(disponible);
 
     PanelTiling {
@@ -282,7 +282,7 @@ impl PanelState {
         // esta excepción, media hora después de acabar todo lo terminado se apagaría — y encontrar por
         // la mañana lo que acabó de noche es justo para lo que sirve.
         // Lo que sí lo desmiente es **no poder leer su fichero**, y eso es lo único que aquí se mira:
-        // `problema` es lo mismo que separa las dos clases de aviso en [`PanelState::warning`], de donde sale
+        // `problem` es lo mismo que separa las dos clases de aviso en [`PanelState::warning`], de donde sale
         // `nothing_to_confess`.
         let backed = nothing_to_confess || (class == Attention::Done && self.problem.is_none());
         Some(AttentionState { class, backed })
@@ -895,10 +895,10 @@ mod tests {
 
     #[test]
     fn el_panel_se_lleva_su_ancho_y_la_consola_el_resto() {
-        let slot = set_aside(pane_of(800.0), CELL_WIDTH, Some(ANCHO_DE_FABRICA));
+        let slot = set_aside(pane_of(800.0), CELL_WIDTH, Some(DEFAULT_WIDTH));
         let panel = slot.panel.expect("hay panel");
 
-        assert_eq!(panel.width(), ANCHO_DE_FABRICA as f32 * CELL_WIDTH);
+        assert_eq!(panel.width(), DEFAULT_WIDTH as f32 * CELL_WIDTH);
         assert_eq!(
             slot.console.width() + panel.width(),
             800.0,
@@ -916,23 +916,23 @@ mod tests {
     /// interactivo sin sitio para escribir mientras su panel conserva sus treinta y seis columnas.
     #[test]
     fn en_una_division_estrecha_el_panel_cede_y_la_consola_conserva_su_suelo() {
-        let estrecha = (CONSOLA_MINIMA + 4.0) * CELL_WIDTH;
+        let estrecha = (MINIMUM_CONSOLE + 4.0) * CELL_WIDTH;
 
-        let slot = set_aside(pane_of(estrecha), CELL_WIDTH, Some(ANCHO_DE_FABRICA));
+        let slot = set_aside(pane_of(estrecha), CELL_WIDTH, Some(DEFAULT_WIDTH));
 
         assert_eq!(
             slot.panel.expect("hay panel").width(),
             4.0 * CELL_WIDTH,
             "el panel es el que cede"
         );
-        assert_eq!(slot.console.width(), CONSOLA_MINIMA * CELL_WIDTH);
+        assert_eq!(slot.console.width(), MINIMUM_CONSOLE * CELL_WIDTH);
     }
 
     /// Y el borde del anterior: por debajo del suelo de la consola el panel desaparece del todo antes
     /// que devolver un rectángulo invertido, que es lo que haría una resta sin suelo.
     #[test]
     fn en_una_division_mas_estrecha_que_el_suelo_el_panel_se_queda_sin_ancho() {
-        let slot = set_aside(pane_of(16.0), CELL_WIDTH, Some(ANCHO_DE_FABRICA));
+        let slot = set_aside(pane_of(16.0), CELL_WIDTH, Some(DEFAULT_WIDTH));
         let panel = slot.panel.expect("el rectángulo existe, aunque vacío");
 
         assert_eq!(panel.width(), 0.0);
@@ -949,11 +949,11 @@ mod tests {
     fn el_ancho_del_panel_se_cuenta_en_celdas_y_no_en_puntos() {
         // El doble de aumento, que es el salto que hace un escritorio al pasar a una pantalla densa.
         for cell in [CELL_WIDTH, CELL_WIDTH * 2.0] {
-            let slot = set_aside(pane_of(1600.0), cell, Some(ANCHO_DE_FABRICA));
+            let slot = set_aside(pane_of(1600.0), cell, Some(DEFAULT_WIDTH));
 
             assert_eq!(
                 slot.panel.expect("hay panel").width() / cell,
-                ANCHO_DE_FABRICA as f32,
+                DEFAULT_WIDTH as f32,
                 "con celdas de {cell} puntos el panel dejó de medir sus columnas"
             );
         }

@@ -210,7 +210,7 @@ pub fn paint(
                 // tienen `Emoji=Yes`, así que `#` seguido del selector es `#️⃣` y va a color. La primera
                 // versión de este atajo descartaba todo el ASCII y se los comía; lo destapó la prueba que
                 // recorre los 128 con los dos selectores detrás, escrita justamente porque duplicar aquí
-                // una regla que vive en `fuentes` solo es aceptable si algo avisa cuando dejan de decir
+                // una regla que vive en `fonts` solo es aceptable si algo avisa cuando dejan de decir
                 // lo mismo.
                 if pasada == Presentation::Color && cell.c.is_ascii() && pegados.is_empty() {
                     continue;
@@ -289,14 +289,14 @@ fn paint_character(
     que: char,
     pegados: &[char],
     slot: Rect,
-    width: bool,
+    is_wide: bool,
     color: Color32,
     metrics: &CellMetrics,
     discoverer: &mut crate::fonts::Discoverer,
 ) {
     // **Un emoji ancho ocupa las DOS columnas que el motor le reservó**, no una. El hueco que llega es
     // el de su primera columna; el dibujo se centra en el de las dos, que es lo que su anchura declara.
-    let suyo = if width {
+    let suyo = if is_wide {
         Rect::from_min_max(slot.min, slot.max + vec2(metrics.width, 0.0))
     } else {
         slot
@@ -739,7 +739,7 @@ mod tests {
         // que pasa por una pantalla; pero `#`, `*` y los dígitos tienen `Emoji=Yes`, así que con el
         // selector detrás son teclas y van a color.
         //
-        // La prueba de la regla, en `fuentes`, no cubre esto: el atajo vive **aquí**, y mutarlo para que
+        // La prueba de la regla, en `fonts`, no cubre esto: el atajo vive **aquí**, y mutarlo para que
         // se comiera todo el ASCII dejaba aquella en verde. Se comprobó mutándolo.
         if !there_is_color_on_this_machine() {
             return;
@@ -1009,7 +1009,7 @@ mod tests {
         // **En una máquina con fuente de emoji esa caída no la ejercita ninguna otra prueba**, porque
         // aquí el color siempre está: se comprobó mutando la caída para que no pintara nada, y las 647
         // seguían en verde. La otra mitad —que con el atlas lleno no se devuelva una textura cualquiera—
-        // se ata en `fuentes`.
+        // se ata en `fonts`.
         if !there_is_color_on_this_machine() {
             return;
         }

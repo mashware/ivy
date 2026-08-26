@@ -371,7 +371,7 @@ impl eframe::App for Barrido {
             let antes = Instant::now();
             // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
             // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
-            // `resolver`, uno persistente solo acumularía apuntes que nadie mira.
+            // `resolve`, uno persistente solo acumularía apuntes que nadie mira.
             paint(
                 ui.painter(),
                 &vista,
