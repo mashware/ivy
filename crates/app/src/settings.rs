@@ -33,7 +33,7 @@ pub const FICHERO: &str = "config";
 /// **Es literalmente el de la disposición, no una copia con el mismo número.** Un comentario que diga «el
 /// mismo que aquél» junto a una constante propia es una promesa que nada obliga a cumplir: el día que una
 /// de las dos cambie, el comentario miente y nadie se entera.
-use crate::sesion::BYTES_MAXIMOS;
+use crate::session::BYTES_MAXIMOS;
 
 /// Cuántas líneas malas se dicen antes de callar.
 ///
@@ -205,7 +205,7 @@ pub struct Ajustes {
     ///
     /// **Una lista y no una tabla ya resuelta**, porque el orden importa: «gana la última» solo se puede
     /// decidir aplicándolas en el orden en que se escribieron.
-    pub atajos: Vec<(crate::teclado::Accion, Option<crate::teclado::Acorde>)>,
+    pub atajos: Vec<(crate::keyboard::Action, Option<crate::keyboard::Chord>)>,
     /// Si el fichero apagó el atajo de copiar.
     ///
     /// **Aparte de la lista, porque copiar no tiene acorde que mover.** Su acorde lo resuelve el
@@ -278,7 +278,7 @@ pub fn ruta_de(
     config: Option<&std::ffi::OsStr>,
     casa: Option<&std::ffi::OsStr>,
 ) -> Option<PathBuf> {
-    crate::sesion::directorio_de(config, casa).map(|directorio| directorio.join(FICHERO))
+    crate::session::directorio_de(config, casa).map(|directorio| directorio.join(FICHERO))
 }
 
 /// Lee el fichero de esa ruta. Devuelve lo que se entendió **y** lo que no.
@@ -302,7 +302,7 @@ pub fn leer(ruta: &Path) -> Result<(Ajustes, Avisos), Problema> {
         return Err(Problema::NoEsFichero);
     }
     let fichero = std::fs::File::open(ruta).map_err(|f| Problema::Ilegible(f.to_string()))?;
-    let crudo = crate::sesion::leer_acotado(fichero, datos.len())
+    let crudo = crate::session::leer_acotado(fichero, datos.len())
         .map_err(|fallo| Problema::Ilegible(fallo.to_string()))?;
     // **El techo va sobre los bytes LEÍDOS, no sobre los que los datos del fichero declaran.** No son lo
     // mismo: un fichero de `/proc` declara cero y entrega ciento setenta y cinco bytes, comprobado
@@ -410,21 +410,19 @@ fn aplicar(ajustes: &mut Ajustes, clave: &str, valor: &str) -> Result<(), Falta>
             ajustes.copiar = Some(false);
             return Ok(());
         }
-        let accion = crate::teclado::Accion::de_como_se_escribe(nombre)
+        let accion = crate::keyboard::Action::from_written(nombre)
             .ok_or_else(|| Falta::ClaveDesconocida(clave.to_owned()))?;
         // **`ninguno` desata la acción, y es la mitad que hace útil todo esto**: es lo que devuelve un
         // acorde al programa de dentro cuando `vim` o `tmux` lo quieren para ellos.
         let acorde = if valor.eq_ignore_ascii_case("ninguno") {
             None
         } else {
-            Some(
-                crate::teclado::Acorde::de_como_se_escribe(valor).ok_or_else(|| {
-                    Falta::ValorInvalido {
-                        clave: clave.to_owned(),
-                        valor: valor.to_owned(),
-                    }
-                })?,
-            )
+            Some(crate::keyboard::Chord::from_written(valor).ok_or_else(|| {
+                Falta::ValorInvalido {
+                    clave: clave.to_owned(),
+                    valor: valor.to_owned(),
+                }
+            })?)
         };
         ajustes.atajos.push((accion, acorde));
         return Ok(());
@@ -583,8 +581,8 @@ mod tests {
             "una línea vacía o de comentario se contó como problema"
         );
         assert_eq!(
-            crate::tema::Tema::con(&ajustes.colores).color(term_core::TermColor::Indexed(1)),
-            crate::tema::Tema::default().color(term_core::TermColor::Indexed(1)),
+            crate::theme::Tema::con(&ajustes.colores).color(term_core::TermColor::Indexed(1)),
+            crate::theme::Tema::default().color(term_core::TermColor::Indexed(1)),
             "sin nada configurado el tema dejó de ser el de fábrica"
         );
     }
@@ -997,7 +995,7 @@ mod tests {
         assert_eq!(ajustes.atajos.len(), 3, "no llegaron los tres atajos");
         assert_eq!(
             ajustes.atajos[0].0,
-            crate::teclado::Accion::PartirAlLado,
+            crate::keyboard::Action::SplitBeside,
             "el orden de lectura no se conserva, y «gana la última» deja de poder decidirse"
         );
         assert_eq!(ajustes.atajos[1].1, None, "«ninguno» no desató la acción");
@@ -1073,7 +1071,7 @@ mod tests {
             "alguna de las ocho líneas no se entendió"
         );
 
-        let tema = crate::tema::Tema::con(&ajustes.colores);
+        let tema = crate::theme::Tema::con(&ajustes.colores);
 
         assert_eq!(
             tema.color(term_core::TermColor::Indexed(0)),
@@ -1113,7 +1111,7 @@ mod tests {
         // **Es lo que permite cambiar un color sin escribir los veintidós**, y el modo de fallo es que la
         // paleta se sustituya entera en vez de hueco a hueco: quedarían quince negros.
         let (ajustes, _) = de("color.1 = #ff0000");
-        let tema = crate::tema::Tema::con(&ajustes.colores);
+        let tema = crate::theme::Tema::con(&ajustes.colores);
 
         assert_eq!(
             tema.color(term_core::TermColor::Indexed(1)),
@@ -1122,7 +1120,7 @@ mod tests {
         );
         assert_eq!(
             tema.color(term_core::TermColor::Indexed(2)),
-            crate::tema::Tema::default().color(term_core::TermColor::Indexed(2)),
+            crate::theme::Tema::default().color(term_core::TermColor::Indexed(2)),
             "pedir un color cambió otro: la paleta se está sustituyendo entera"
         );
     }

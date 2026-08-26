@@ -2473,10 +2473,10 @@ mod tests {
         // lado**: se renombran las dos mitades a la vez, queda verde, y el guion sigue sembrando el
         // nombre viejo.
         assert!(
-            GUION.contains(crate::sesion::FICHERO),
+            GUION.contains(crate::session::FICHERO),
             "el guion de medida no siembra «{}», que es el fichero que la aplicación lee: la tanda \
              que restaura abriría de fábrica y su corrida se publicaría como buena",
-            crate::sesion::FICHERO
+            crate::session::FICHERO
         );
     }
 }

@@ -118,5 +118,5 @@ host-load = { path = "../host-load" }
 # que no corre se lee como cobertura y no lo es. Con esto entra en la suite del taller y en la de CI por
 # el mismo camino que las demás.
 [[example]]
-name = "fuentes"
+name = "fonts"
 test = true

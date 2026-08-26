@@ -108,7 +108,7 @@ impl Tema {
     /// **Lo que el fichero no diga se queda de fábrica**, que es lo que permite cambiar un solo color sin
     /// escribir los veintidós. Y la paleta se sobrescribe hueco a hueco por lo mismo: pedir el color 1 no
     /// debe borrar los otros quince.
-    pub fn con(colores: &crate::ajustes::Colores) -> Self {
+    pub fn con(colores: &crate::settings::Colores) -> Self {
         let mut tema = Self::default();
         for (hueco, pedido) in tema.paleta.iter_mut().zip(colores.paleta.iter()) {
             if let Some(color) = pedido {

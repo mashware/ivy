@@ -16,10 +16,10 @@
 //!   columnas porque lo dice el parser; si la fuente los pinta más anchos o más estrechos, se ve.
 //! - Y de paso: colores nombrados, colores de la paleta de 256, negrita, atenuado y vídeo inverso.
 //!
-//! Se lanza con `cargo run --example pantalla -p app --release`.
+//! Se lanza con `cargo run --example screen_demo -p app --release`.
 
-use app::pintor::{Metrica, pintar};
-use app::tema::Tema;
+use app::painter::{CellMetrics, paint};
+use app::theme::Tema;
 use eframe::egui;
 use term_core::{Screen, Size};
 
@@ -93,14 +93,14 @@ struct Prueba {
 
 impl eframe::App for Prueba {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(14.0));
+        let metrica = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(14.0));
 
         let vista = self.pantalla.view();
         let origen = ui.max_rect().left_top();
         // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
         // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
         // `resolver`, uno persistente solo acumularía apuntes que nadie mira.
-        pintar(
+        paint(
             ui.painter(),
             &vista,
             &self.tema,

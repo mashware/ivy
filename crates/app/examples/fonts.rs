@@ -2,7 +2,7 @@
 //! hace el resto del hito.
 //!
 //! ```text
-//! cargo run --release --example fuentes -p app
+//! cargo run --release --example fonts -p app
 //! ```
 //!
 //! **No toca producción.** Igual que el banco del historial midió el motor por debajo de la fachada de

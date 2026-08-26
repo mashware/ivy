@@ -35,6 +35,26 @@ const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
 /// The crates whose identifiers are **all English**, under `crates/`. One entry per delivery.
 const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core"];
 
+/// Single **files** whose identifiers are all English, for a crate that is not finished yet.
+///
+/// **This came in once, was deleted, and is back — and the round trip is the point.** It was built to
+/// point the guard at `app/src/lib.rs`, and pointing it there proved that file could not be declared
+/// finished: it still holds hundreds of Spanish names the glossary never had to decide. With nothing
+/// left to name, a branch of the walk became reachable by nobody, so it went out — this project deletes
+/// a mechanism with no scenario. It returns with the delivery that gives it one: five modules of `app`
+/// that really are finished while their siblings are not.
+///
+/// A crate whose every file ends up here would be better spelled in [`FINISHED_CRATES`]; nothing
+/// enforces that, and it does not matter much — the two lists cannot disagree about a file, they can
+/// only both be right about it.
+const FINISHED_FILES: &[&str] = &[
+    "app/src/mouse.rs",
+    "app/src/keyboard.rs",
+    "app/src/painter.rs",
+    "app/src/fonts.rs",
+    "app/src/panel.rs",
+];
+
 /// Files whose **citations** are checked, though their identifiers are not yet.
 ///
 /// **Every file of the crate, and that is what closes the class.** The first version listed only the
@@ -63,17 +83,17 @@ const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core"];
 /// entitled to name something its sibling modules declare.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/lib.rs", "app"),
-    ("app/src/ajustes.rs", "app"),
-    ("app/src/fuentes.rs", "app"),
-    ("app/src/medida.rs", "app"),
+    ("app/src/settings.rs", "app"),
+    ("app/src/fonts.rs", "app"),
+    ("app/src/measure.rs", "app"),
     ("app/src/panel.rs", "app"),
-    ("app/src/pintor.rs", "app"),
-    ("app/src/puente.rs", "app"),
-    ("app/src/raton.rs", "app"),
-    ("app/src/sesion.rs", "app"),
-    ("app/src/teclado.rs", "app"),
-    ("app/src/tema.rs", "app"),
-    ("app/src/vigilante.rs", "app"),
+    ("app/src/painter.rs", "app"),
+    ("app/src/pty_output.rs", "app"),
+    ("app/src/mouse.rs", "app"),
+    ("app/src/session.rs", "app"),
+    ("app/src/keyboard.rs", "app"),
+    ("app/src/theme.rs", "app"),
+    ("app/src/watcher.rs", "app"),
 ];
 
 /// Names that are **still Spanish on purpose**, because a later delivery owns them.
@@ -112,21 +132,14 @@ const STILL_SPANISH: &[&str] = &[
     // Types a finished file legitimately names because they are declared in a file that is not
     // finished. **Every one of these is a line a later delivery deletes**, which is why they are
     // written out one by one: the list shrinking is how the milestone shows its progress.
-    "Accion",
-    "Acorde",
     "Ajustes",
     "Arrastres",
-    "Atajos",
     "Avisos",
     "Bandera",
     "Barra",
-    "CosteDelColor",
     "DeLaSesion",
-    "Descubridor",
     "Descubrimiento",
-    "Donde",
     "EnPuntos",
-    "Estado",
     "Guardado",
     "LecturaDeAjustes",
     "Medida",
@@ -134,11 +147,15 @@ const STILL_SPANISH: &[&str] = &[
     "Persistencia",
     "Puente",
     "Rasterizado",
-    "Reclamo",
     "Reflujo",
     "Restauracion",
     "RestoDelFotograma",
     "Tema",
+    "tema",
+    "con_atributos",
+    "color_del_reclamo",
+    "color_del_panel",
+    "fondo_del_panel",
     "Tramos",
     "Valido",
     "Vigilante",
@@ -543,6 +560,33 @@ fn segments(name: &str) -> Vec<String> {
 /// finished crates left this guard with no file to look at, and a crate with no files reads exactly
 /// like a clean one. Measured: turning one hyphen into an underscore in a crate name left all four
 /// tests green.
+/// Everything this milestone has declared finished, whole crates and single files alike.
+///
+/// **The two lists are walked by one function so they cannot drift apart.** Adding a guard that reads
+/// only one of them is the shape of hole this file keeps finding: a list that looks watched and is not.
+/// The label comes back with the files so a failure can name what was declared, not just the path.
+fn finished_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
+    let mut out = Vec::new();
+    for crate_name in FINISHED_CRATES {
+        out.push((
+            (*crate_name).to_string(),
+            rust_files(&root.join("crates").join(crate_name)),
+        ));
+    }
+    for path in FINISHED_FILES {
+        let file = root.join("crates").join(path);
+        out.push((
+            (*path).to_string(),
+            if file.is_file() {
+                vec![file]
+            } else {
+                Vec::new()
+            },
+        ));
+    }
+    out
+}
+
 fn rust_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let entries = std::fs::read_dir(dir).unwrap_or_else(|failure| {
@@ -789,8 +833,13 @@ fn the_three_rules_answer_what_they_promise() {
         );
     }
     // And the same name **as a Spanish compound** is still caught, so the rule above is not a hole.
+    //
+    // **The name here must not be one the exemption list carries**, and that is not hypothetical: this
+    // case used to be `color_del_reclamo`, and the delivery that finished the panel put that very name
+    // on the list — because the theme still declares it — which silenced the case without touching the
+    // rule. A case that an exemption can switch off is a case that stops testing while staying green.
     assert!(
-        verdict("color_del_reclamo").is_some(),
+        verdict("color_del_borde").is_some(),
         "a Spanish compound whose first piece happens to be an English word"
     );
 
@@ -821,13 +870,12 @@ fn no_spanish_identifier_survives_in_a_finished_crate() {
     let root = repo();
     let mut leftovers = Vec::new();
 
-    for crate_name in FINISHED_CRATES {
-        let files = rust_files(&root.join("crates").join(crate_name));
+    for (what, files) in finished_targets(&root) {
         assert!(
             !files.is_empty(),
-            "«{crate_name}» is declared finished and has not a single `.rs` file to look at: either \
-             the crate is gone, or its name on the list is misspelled. Either way this guard would be \
-             calling clean something it never read"
+            "«{what}» is declared finished and has not a single `.rs` file to look at: either it is \
+             gone, or its name on the list is misspelled. Either way this guard would be calling clean \
+             something it never read"
         );
         for file in files {
             let shown = file
@@ -861,9 +909,8 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
     let root = repo();
     let mut leftovers = Vec::new();
 
-    for crate_name in FINISHED_CRATES {
-        let files = rust_files(&root.join("crates").join(crate_name));
-        assert!(!files.is_empty(), "«{crate_name}» has no files to look at");
+    for (what, files) in finished_targets(&root) {
+        assert!(!files.is_empty(), "«{what}» has no files to look at");
         for file in files {
             let name = file
                 .file_name()
@@ -1179,8 +1226,8 @@ fn the_reader_of_citations_asks_about_the_right_things() {
          link, so nothing else in the tree judges it"
     );
     assert_eq!(
-        cited_names("sesion::Nodo::Rama"),
-        vec!["sesion", "Nodo", "Rama"],
+        cited_names("session::Nodo::Rama"),
+        vec!["session", "Nodo", "Rama"],
         "however many segments it has"
     );
     assert!(

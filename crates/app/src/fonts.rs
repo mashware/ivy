@@ -27,7 +27,7 @@ use unicode_properties::emoji::{
 /// pintar los dos igual es incorrecto en un sentido o en el otro: o se pierde el emoji que el programa
 /// pidió, o se pinta un dibujo a color donde había un símbolo de texto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Presentacion {
+pub enum Presentation {
     /// Por el camino de texto de siempre, con el color que diga el tema.
     Texto,
     /// Como un dibujo con sus propios colores, que la fuente trae dentro.
@@ -57,14 +57,14 @@ pub enum Presentacion {
 /// Unicode y Ghostty tratan la secuencia entera como presentación de emoji. **Resolverlo exige mirar la
 /// celda siguiente, que es información que esta función no tiene por firma**, y hoy no se ve porque nadie
 /// pinta color todavía: es trabajo de la entrega que lo traiga. Lo encontró una revisión.
-pub fn presentacion_de(c: char, pegados: &[char]) -> Presentacion {
-    match pegados.first().copied() {
+pub fn presentation_of(c: char, attached: &[char]) -> Presentation {
+    match attached.first().copied() {
         Some(selector) if is_emoji_presentation_selector(selector) && c.is_emoji_char() => {
-            Presentacion::Color
+            Presentation::Color
         }
-        Some(selector) if is_text_presentation_selector(selector) => Presentacion::Texto,
-        _ if por_defecto_va_a_color(c) => Presentacion::Color,
-        _ => Presentacion::Texto,
+        Some(selector) if is_text_presentation_selector(selector) => Presentation::Texto,
+        _ if goes_to_color_by_default(c) => Presentation::Color,
+        _ => Presentation::Texto,
     }
 }
 
@@ -81,7 +81,7 @@ pub fn presentacion_de(c: char, pegados: &[char]) -> Presentacion {
 /// caso de abajo y se pinta monocromo**, sin que la compilación diga nada. Se deja así a sabiendas: ese
 /// carácter saldría **como sale hoy**, que es el peor caso aceptable — inventarle color a una categoría
 /// que no conocemos sería lo contrario de la regla de que lo que no está no se inventa.
-fn por_defecto_va_a_color(c: char) -> bool {
+fn goes_to_color_by_default(c: char) -> bool {
     matches!(
         c.emoji_status(),
         EmojiStatus::EmojiPresentation
@@ -100,7 +100,7 @@ fn por_defecto_va_a_color(c: char) -> bool {
 /// del uso privado, se le pregunta siempre a la misma familia que al carácter con el que se compara. Un
 /// referente del uso privado se preguntaría a la familia de iconos en cuanto hubiera una, y estaría
 /// comparando peras con manzanas. Lo segundo lo señaló una revisión.
-const CUADRO_DE_REEMPLAZO: char = '\u{0378}';
+const REPLACEMENT_BOX: char = '\u{0378}';
 
 /// Cuánto tiempo se dedica a buscar fuentes en una misma vuelta.
 ///
@@ -115,7 +115,7 @@ const CUADRO_DE_REEMPLAZO: char = '\u{0378}';
 /// **La primera versión ponía el techo en la cola de espera y no en el trabajo**, y con eso un `cat` de un
 /// binario costaba **6,0–6,6 ms sostenidos en cada fotograma** —más que el fotograma entero—. Medido por
 /// una revisión, en release, y confirmado aquí antes de cambiarlo.
-const PRESUPUESTO_POR_VUELTA: std::time::Duration = std::time::Duration::from_millis(2);
+const BUDGET_PER_ROUND: std::time::Duration = std::time::Duration::from_millis(2);
 
 /// Cuántas búsquedas seguidas sin encontrar nada hacen que se deje de buscar.
 ///
@@ -126,7 +126,7 @@ const PRESUPUESTO_POR_VUELTA: std::time::Duration = std::time::Duration::from_mi
 /// igualmente.
 ///
 /// **Se reinicia en cuanto una búsqueda acierta**, así que una sesión normal nunca lo alcanza.
-const FALLOS_SEGUIDOS_MAXIMOS: usize = 12;
+const MAX_FAILURES_IN_A_ROW: usize = 12;
 
 /// Cuántos caracteres sin resolver se guardan mientras esperan a la vuelta siguiente.
 ///
@@ -135,26 +135,26 @@ const FALLOS_SEGUIDOS_MAXIMOS: usize = 12;
 /// pantalla de basura gasta lo que gastan cuarenta caracteres y el resto sale como cuadro — que es lo que
 /// habría salido igualmente. Sin él, la ventana se queda buscando fuentes para caracteres que nadie va a
 /// leer.
-const PENDIENTES_MAXIMOS: usize = 40;
+const MAX_PENDING: usize = 40;
 
 /// Cuántas familias del sistema se le llegan a registrar al motor de texto.
 ///
 /// **El techo existe porque no hay forma de preguntar qué cubre ya el motor.** `Fonts::has_glyph` no
-/// sirve —ver `Descubridor::resolver`—, así que se busca para todo lo no-ASCII y a veces se registra una
+/// sirve —ver `Discoverer::resolve`—, así que se busca para todo lo no-ASCII y a veces se registra una
 /// cara que no hacía falta: va detrás de las de fábrica y no cambia lo que se ve, pero **cada una engorda
 /// el atlas de glifos y alarga la cadena de reserva** que se recorre por carácter.
 ///
 /// **Ocho, y no es un número redondo por gusto:** cubre los casos que este hito persigue —CJK, hangul,
 /// iconos, emoji— con margen de sobra, y deja el peor caso acotado. Al llegar al techo se deja de
 /// registrar: lo que aparezca después sale como cuadro, que es exactamente lo que salía antes del hito.
-const FAMILIAS_MAXIMAS: usize = 8;
+const MAX_FAMILIES: usize = 8;
 
 /// El nombre de la familia por la que se piden los iconos de las zonas de uso privado.
 ///
 /// **Existe porque egui ordena la cadena de reserva por familia entera y no por rango**, así que la única
 /// forma de que una fuente gane en unas zonas y no en otras es darle su propia familia y que quien pinta
-/// elija cuál pedir. Ver [`Descubridor::entrega_las_caras`].
-pub const FAMILIA_DE_ICONOS: &str = "iconos-del-sistema";
+/// elija cuál pedir. Ver [`Discoverer::hand_over_the_faces`].
+pub const ICON_FAMILY: &str = "iconos-del-sistema";
 
 /// Si ese carácter vive en una de las tres zonas que Unicode deja **para uso privado**.
 ///
@@ -162,7 +162,7 @@ pub const FAMILIA_DE_ICONOS: &str = "iconos-del-sistema";
 /// falta distinguirlas: Unicode no le asigna significado a esas zonas, así que **dos fuentes distintas
 /// ponen dibujos distintos en el mismo hueco** y no hay forma de decir cuál es «la correcta» mirando el
 /// carácter. Solo la puede decir quien instaló la fuente.
-fn es_de_uso_privado(c: char) -> bool {
+fn is_private_use(c: char) -> bool {
     matches!(c, '\u{E000}'..='\u{F8FF}' | '\u{F0000}'..='\u{FFFFD}' | '\u{100000}'..='\u{10FFFD}')
 }
 
@@ -174,15 +174,15 @@ fn es_de_uso_privado(c: char) -> bool {
 /// posición** al frente de la cadena, así que el terminal cambiaría de fuente entera de golpe, sin que
 /// ningún carácter fuera de uso privado y sin pasar siquiera por el reparto de familias. Lo encontró una
 /// revisión, buscando caminos en vez de leyendo el feliz.
-const PREFIJO_DEL_SISTEMA: &str = "sistema:";
+const SYSTEM_PREFIX: &str = "sistema:";
 
 /// Una cara del sistema, y si va en la familia de iconos.
-struct CaraDelSistema {
+struct SystemFace {
     /// **Ya prefijada**: es el nombre con el que el motor de texto la conoce, no el que le da el sistema.
     familia: String,
     datos: Arc<egui::FontData>,
     /// **Solo las de iconos van delante**, y es una excepción con nombre a la regla de que las de fábrica
-    /// mandan. Ver `Descubridor::entrega_las_caras`.
+    /// mandan. Ver `Discoverer::hand_over_the_faces`.
     delante: bool,
 }
 
@@ -193,7 +193,7 @@ struct CaraDelSistema {
 /// tenga **no deja nada registrado**: sin recordar el fallo volvería a recorrer las candidatas cada vez
 /// que apareciera — y ése es justo el carácter que un programa roto escupe en bucle. Sale de **D24**.
 #[derive(Default)]
-pub struct Descubridor {
+pub struct Discoverer {
     /// Los que ya se intentaron: cubiertos **y** no cubiertos.
     resueltos: std::collections::HashSet<char>,
     /// Los que el pintor ha visto y todavía no se han buscado. Ordenado para que dos corridas con la
@@ -203,7 +203,7 @@ pub struct Descubridor {
     ///
     /// **Hace falta guardarlas** porque registrar en egui no es añadir: es entregarle la configuración
     /// **entera** otra vez. Sin esta lista, cada cara nueva borraría la anterior.
-    caras: Vec<CaraDelSistema>,
+    faces: Vec<SystemFace>,
     /// La colección del sistema, **creada la primera vez que hace falta y no antes**. Es lo que hace
     /// perezoso el descubrimiento: mientras solo aparezcan caracteres que las fuentes de fábrica cubren,
     /// esto nunca se construye y no se paga nada.
@@ -213,9 +213,9 @@ pub struct Descubridor {
     sin_fuentes: bool,
     /// Si ya se dijo que se llegó al techo de familias. Decirlo una vez informa; decirlo en cada carácter
     /// llena la salida de error de un programa que no ha hecho nada malo.
-    dijo_el_techo: bool,
-    /// Cuántas búsquedas seguidas han acabado sin encontrar nada. Ver [`FALLOS_SEGUIDOS_MAXIMOS`].
-    fallos_seguidos: usize,
+    said_the_ceiling: bool,
+    /// Cuántas búsquedas seguidas han acabado sin encontrar nada. Ver [`MAX_FAILURES_IN_A_ROW`].
+    failures_in_a_row: usize,
     /// Si el motor de texto **ya conoce** la familia de iconos, o sea si hubo una vuelta posterior a la
     /// que la declaró.
     ///
@@ -225,14 +225,14 @@ pub struct Descubridor {
     /// hay ninguna pasada de por medio. Ofrecer la familia ahí es pedirle a epaint una familia con nombre
     /// que todavía no existe, y eso **es un pánico**, no un aviso: «is not bound to any fonts».
     /// Comprobado ejecutándolo. Lo encontró una revisión sondeando ese camino exacto.
-    familia_de_iconos_lista: bool,
+    icon_family_ready: bool,
     /// Los glifos de color ya rasterizados.
     ///
     /// **Va aquí y no en un tipo aparte porque viaja siempre con el descubridor**: quien pinta un
     /// carácter necesita las dos cosas a la vez —qué familia le toca y, si va a color, qué textura— y
     /// separarlas obligaría a pasar dos referencias mutables por todas las firmas del pintor. El estado
-    /// nuevo sí queda en su propia caja: [`Glifos`] se prueba y se vacía sola.
-    glifos: Glifos,
+    /// nuevo sí queda en su propia caja: [`Glyphs`] se prueba y se vacía sola.
+    glyphs: Glyphs,
     /// Lo que se ha gastado rasterizando glifos de color, y cuántos van.
     ///
     /// **Se cronometra porque corre DENTRO del pintado, al revés que el descubrimiento de caras.**
@@ -240,37 +240,37 @@ pub struct Descubridor {
     /// así que se hace donde hace falta. Pero entonces su coste caería dentro del tramo «encolando el
     /// pintado» —que dejaría de significar lo que su nombre dice— y de ahí, por resta, en la cifra con la
     /// que **D3** juzga a egui. Un número mal etiquetado es peor que ningún número.
-    color: CosteDelColor,
+    color: ColorCost,
 }
 
 /// Lo que ha costado el camino del color, para que el informe lo declare.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CosteDelColor {
+pub struct ColorCost {
     /// Cuánto tiempo se ha gastado en total.
     pub gastado: std::time::Duration,
     /// Cuántos glifos se han rasterizado de verdad —los que ya estaban recordados no cuentan.
-    pub rasterizados: usize,
+    pub rasterized: usize,
     /// Cuántas veces se pidió un glifo de color que la máquina no pinta así.
     pub fallidos: usize,
 }
 
 /// Lo que costó una vuelta del descubrimiento, para que el informe lo pueda declarar.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Vuelta {
+pub struct Round {
     /// Cuántos caracteres se buscaron.
     pub buscados: usize,
     /// Cuántas caras nuevas se le dieron al motor de texto.
     pub registradas: usize,
 }
 
-impl Vuelta {
+impl Round {
     /// Si esta vuelta hizo algo. Una que no busca nada no cuesta nada y no merece salir en el informe.
-    pub fn hubo_trabajo(self) -> bool {
+    pub fn did_work(self) -> bool {
         self.buscados > 0
     }
 }
 
-impl Descubridor {
+impl Discoverer {
     /// Qué familia hay que pedirle al motor de texto para pintar ese carácter.
     ///
     /// Los caracteres de las zonas de uso privado van por la familia de iconos, donde manda la fuente que
@@ -278,11 +278,11 @@ impl Descubridor {
     ///
     /// **Y se pregunta aquí, no en una función suelta, porque la familia de iconos NO EXISTE hasta que el
     /// motor se rehace**: epaint entra en pánico —«is not bound to any fonts»— si se le pide una familia
-    /// con nombre que nadie ha declarado. Ver `familia_de_iconos_lista` por qué no basta con mirar si hay
+    /// con nombre que nadie ha declarado. Ver `icon_family_ready` por qué no basta con mirar si hay
     /// caras registradas.
-    pub fn familia_de(&self, c: char) -> egui::FontFamily {
-        if es_de_uso_privado(c) && self.familia_de_iconos_lista {
-            egui::FontFamily::Name(FAMILIA_DE_ICONOS.into())
+    pub fn family_of(&self, c: char) -> egui::FontFamily {
+        if is_private_use(c) && self.icon_family_ready {
+            egui::FontFamily::Name(ICON_FAMILY.into())
         } else {
             egui::FontFamily::Monospace
         }
@@ -293,23 +293,23 @@ impl Descubridor {
     /// Devuelve `None` cuando la máquina no tiene ninguna fuente que lo pinte a color: quien llama
     /// **tiene que caer al camino de texto**, que es el Contrato 5 del diseño —lo que no está, no se
     /// inventa—.
-    pub fn glifo_a_color(
+    pub fn color_glyph(
         &mut self,
         ctx: &egui::Context,
-        que: char,
-        alto: u32,
+        which_char: char,
+        height: u32,
         ancho_maximo: u32,
     ) -> Option<(egui::TextureId, egui::Rect, egui::Vec2)> {
         // **Se asegura la colección ANTES de partir `self`**, porque construirla toca dos campos más y
         // no se puede hacer con la mitad prestada.
-        if !self.asegura_la_coleccion() {
+        if !self.ensure_the_collection() {
             return None;
         }
         // **Y aquí se parte en préstamos disjuntos**: la caché de glifos, la colección y el caché de
         // ficheros son campos distintos, así que el compilador deja tener los tres a la vez. Es lo que
-        // permite que `glifo_de_color` sea una función libre en vez de un método que pediría el todo.
+        // permite que `color_glyph_of` sea una función libre en vez de un método que pediría el todo.
         let Self {
-            glifos,
+            glyphs,
             coleccion,
             fuentes,
             color,
@@ -319,31 +319,32 @@ impl Descubridor {
         // **Solo se cronometra el camino que hace trabajo.** Un glifo ya recordado se devuelve con una
         // consulta a un mapa, y meter esa consulta en el tramo lo diluiría hasta que el número dejara de
         // describir lo que cuesta rasterizar — que es lo que el informe tiene que declarar.
-        let ya_estaba = glifos.recuerda(que, alto);
-        let empezo = (!ya_estaba).then(std::time::Instant::now);
-        let medidas = glifos.textura(ctx, coleccion, fuentes, que, alto, ancho_maximo);
+        let was_already_there = glyphs.remembers(which_char, height);
+        let empezo = (!was_already_there).then(std::time::Instant::now);
+        let measurements =
+            glyphs.texture(ctx, coleccion, fuentes, which_char, height, ancho_maximo);
         if let Some(empezo) = empezo {
             color.gastado += empezo.elapsed();
-            if medidas.is_some() {
-                color.rasterizados += 1;
+            if measurements.is_some() {
+                color.rasterized += 1;
             } else {
                 color.fallidos += 1;
             }
         }
-        medidas
+        measurements
     }
 
     /// Lo que ha costado el camino del color desde la última vez que se preguntó, y se pone a cero.
     ///
     /// **Se vacía al leerlo porque el informe cuenta por fotograma**, igual que el resto de sus tramos:
     /// devolver el acumulado de la sesión daría una media que crece sola y no describe ningún fotograma.
-    pub fn coste_del_color(&mut self) -> CosteDelColor {
+    pub fn color_cost(&mut self) -> ColorCost {
         std::mem::take(&mut self.color)
     }
 
     /// Cuántos glifos de color hay recordados. Para que el informe de medida lo pueda declarar.
-    pub fn glifos_recordados(&self) -> usize {
-        self.glifos.cuantos()
+    pub fn glyphs_remembered(&self) -> usize {
+        self.glyphs.how_many()
     }
 
     /// Llena el atlas de glifos de color hasta que no cabe uno más, a esa altura de celda.
@@ -353,14 +354,14 @@ impl Descubridor {
     /// altura son de este módulo, así que desde el pintor no hay forma de dejarlo en ese estado — y
     /// llenarlo con emojis de verdad exige que la máquina tenga ochocientos distintos instalados.
     #[cfg(test)]
-    pub fn llena_el_atlas(&mut self, ctx: &egui::Context, alto: u32) {
-        self.glifos.alto = alto;
-        let lado = LADO_DEL_ATLAS / 4;
+    pub fn fill_the_atlas(&mut self, ctx: &egui::Context, height: u32) {
+        self.glyphs.height = height;
+        let side = ATLAS_SIDE / 4;
         while self
-            .glifos
-            .pegar(
+            .glyphs
+            .paste(
                 ctx,
-                egui::ColorImage::filled([lado, lado], egui::Color32::RED),
+                egui::ColorImage::filled([side, side], egui::Color32::RED),
             )
             .is_some()
         {}
@@ -370,15 +371,15 @@ impl Descubridor {
     ///
     /// **Es lo único que corre por celda, y por eso es lo único que tiene que ser barato**: un carácter ya
     /// resuelto se descarta con una consulta a un conjunto. Buscar y registrar ocurren fuera del pintado.
-    pub fn apunta(&mut self, que: char) {
+    pub fn note(&mut self, which_char: char) {
         // **El ASCII no se mira nunca.** Las fuentes de fábrica de egui lo cubren entero, y es la inmensa
         // mayoría de lo que pasa por una pantalla de terminal: preguntarlo sería pagar una consulta por
         // celda para obtener siempre lo mismo.
-        if que.is_ascii() || self.resueltos.contains(&que) || self.sin_fuentes {
+        if which_char.is_ascii() || self.resueltos.contains(&which_char) || self.sin_fuentes {
             return;
         }
-        if self.pendientes.len() < PENDIENTES_MAXIMOS {
-            self.pendientes.insert(que);
+        if self.pendientes.len() < MAX_PENDING {
+            self.pendientes.insert(which_char);
         }
     }
 
@@ -388,9 +389,9 @@ impl Descubridor {
     /// publica su productor, que es texto libre y puede venir en cualquier idioma: sin esto, un resumen
     /// en japonés salía en cuadros **para siempre**, porque nada disparaba la búsqueda. Y eso en el hito
     /// cuyo objeto es justamente que se vea. Lo encontró una revisión.
-    pub fn apunta_texto(&mut self, texto: &str) {
-        for que in texto.chars() {
-            self.apunta(que);
+    pub fn note_text(&mut self, text: &str) {
+        for which_char in text.chars() {
+            self.note(which_char);
         }
     }
 
@@ -400,14 +401,14 @@ impl Descubridor {
     /// necesita acceso exclusivo al contexto —pedirlo a mitad de una pasada de interfaz es reentrar en lo
     /// que ya está prestado—, y registrar una cara **rehace el atlas de glifos entero**, que son
     /// milisegundos y no microsegundos.
-    pub fn resolver(&mut self, ctx: &egui::Context) -> Vuelta {
+    pub fn resolve(&mut self, ctx: &egui::Context) -> Round {
         // **Lo primero de todo: la familia declarada en la vuelta ANTERIOR ya la conoce el motor.** Entre
         // aquella vuelta y ésta ha pasado un fotograma entero, que es lo que `set_fonts` necesita para
         // surtir efecto. Va aquí y no al final para que no se adelante a sí misma.
-        self.familia_de_iconos_lista = self.caras.iter().any(|cara| cara.delante);
+        self.icon_family_ready = self.faces.iter().any(|face| face.delante);
 
         if self.pendientes.is_empty() {
-            return Vuelta::default();
+            return Round::default();
         }
         let pendientes = std::mem::take(&mut self.pendientes);
 
@@ -423,31 +424,31 @@ impl Descubridor {
         // dibujo con el del cuadro de reemplazo. Dice la verdad y cuesta **cuatro órdenes de magnitud
         // menos** que recorrer las familias de la máquina.
         let a_buscar = ctx.fonts_mut(|fuentes| {
-            let cuadro = dibujo_de(fuentes, CUADRO_DE_REEMPLAZO, egui::FontFamily::Monospace);
+            let cuadro = drawing_of(fuentes, REPLACEMENT_BOX, egui::FontFamily::Monospace);
             let mut a_buscar = Vec::new();
-            for que in pendientes {
-                if dibujo_de(fuentes, que, self.familia_de(que)) != cuadro {
+            for which_char in pendientes {
+                if drawing_of(fuentes, which_char, self.family_of(which_char)) != cuadro {
                     // Ya se ve: no hay nada que buscar, y no se vuelve a mirar.
-                    self.resueltos.insert(que);
+                    self.resueltos.insert(which_char);
                 } else {
-                    a_buscar.push(que);
+                    a_buscar.push(which_char);
                 }
             }
             a_buscar
         });
 
-        let mut vuelta = Vuelta::default();
+        let mut round = Round::default();
         // **Se gasta presupuesto, no un número de vueltas.** Y se comprueba ANTES de cada búsqueda: una
         // que empiece dentro del presupuesto puede acabar fuera —el peor caso son 18 ms— y eso es
         // aceptable; empezar la siguiente ya fuera, no.
         let empezo = std::time::Instant::now();
-        for que in a_buscar {
-            let sin_presupuesto = empezo.elapsed() >= PRESUPUESTO_POR_VUELTA;
-            let se_rindio = self.fallos_seguidos >= FALLOS_SEGUIDOS_MAXIMOS;
+        for which_char in a_buscar {
+            let sin_presupuesto = empezo.elapsed() >= BUDGET_PER_ROUND;
+            let se_rindio = self.failures_in_a_row >= MAX_FAILURES_IN_A_ROW;
             if se_rindio {
                 // La máquina ya ha dicho doce veces seguidas que no tiene con qué. Se dan por resueltos
                 // sin buscar: seguir preguntando cuesta hasta 18 ms cada uno para el mismo «no».
-                self.resueltos.insert(que);
+                self.resueltos.insert(which_char);
                 continue;
             }
             if sin_presupuesto {
@@ -456,13 +457,13 @@ impl Descubridor {
                 // para siempre solo por haber llegado tarde a esta vuelta.
                 continue;
             }
-            self.resueltos.insert(que);
-            vuelta.buscados += 1;
-            if self.registra_quien_cubre(que) {
-                vuelta.registradas += 1;
-                self.fallos_seguidos = 0;
+            self.resueltos.insert(which_char);
+            round.buscados += 1;
+            if self.record_who_covers(which_char) {
+                round.registradas += 1;
+                self.failures_in_a_row = 0;
             } else {
-                self.fallos_seguidos += 1;
+                self.failures_in_a_row += 1;
             }
         }
         // **El caché de ficheros se vacía en cuanto la vuelta termina, y no es opcional.** Guarda un
@@ -472,58 +473,58 @@ impl Descubridor {
         // `caras`. Lo midió una revisión.
         self.fuentes.prune(0, true);
 
-        if vuelta.registradas > 0 {
-            self.entrega_las_caras(ctx);
+        if round.registradas > 0 {
+            self.hand_over_the_faces(ctx);
             // **Sin esto el glifo descubierto puede quedarse en cuadro indefinidamente.** Hacen falta dos
             // pasadas más —una para que `set_fonts` surta efecto y otra para repintar— y nada las provoca:
             // los repintados se piden por salida pendiente o por entrada. `echo 日本語` y parar dejaba el
             // kanji en cuadro **hasta que alguien tocara algo**. Lo encontró una revisión.
             ctx.request_repaint();
         }
-        vuelta
+        round
     }
 
     /// Busca quién cubre ese carácter y añade su cara a la lista. `true` si añadió una.
-    fn registra_quien_cubre(&mut self, que: char) -> bool {
-        if self.caras.len() >= FAMILIAS_MAXIMAS {
+    fn record_who_covers(&mut self, which_char: char) -> bool {
+        if self.faces.len() >= MAX_FAMILIES {
             // **Se dice, y una sola vez.** Un techo que se traga lo que descarta es indistinguible de un
             // fallo: quien vea un cuadro después de instalar la fuente adecuada no tendría forma de saber
             // que el terminal encontró la fuente y decidió no usarla. Es la misma regla con la que el
             // resto del proyecto declara sus límites en vez de callarlos.
-            if !self.dijo_el_techo {
+            if !self.said_the_ceiling {
                 eprintln!(
-                    "agent-terminal: ya hay {FAMILIAS_MAXIMAS} fuentes del sistema registradas, que es el \
+                    "agent-terminal: ya hay {MAX_FAMILIES} fuentes del sistema registradas, que es el \
                      techo. Los caracteres que las de fábrica no cubran seguirán saliendo como cuadros."
                 );
-                self.dijo_el_techo = true;
+                self.said_the_ceiling = true;
             }
             return false;
         }
-        let Some(cara) = self.busca(que) else {
+        let Some(face) = self.look_for(which_char) else {
             // **Y aquí acaba el intento: lo que no está, no se inventa.** El carácter se pinta con lo que
             // dé el motor —su cuadro— y no se intenta nada más. Ya está en `resueltos`, así que no se
             // vuelve a buscar.
             return false;
         };
-        let nombre = format!("{PREFIJO_DEL_SISTEMA}{}", cara.0);
-        if self.caras.iter().any(|suya| suya.familia == nombre) {
+        let nombre = format!("{SYSTEM_PREFIX}{}", face.0);
+        if self.faces.iter().any(|suya| suya.familia == nombre) {
             // Otra cara de la misma familia ya está registrada: cubre esto también.
             return false;
         }
-        self.caras.push(CaraDelSistema {
-            familia: format!("{PREFIJO_DEL_SISTEMA}{}", cara.0),
-            datos: cara.1,
-            delante: es_de_uso_privado(que),
+        self.faces.push(SystemFace {
+            familia: format!("{SYSTEM_PREFIX}{}", face.0),
+            datos: face.1,
+            delante: is_private_use(which_char),
         });
         true
     }
 
     /// La primera cara de la máquina que cubre ese carácter, con el nombre de su familia.
-    fn busca(&mut self, que: char) -> Option<(String, Arc<egui::FontData>)> {
-        // **Se comprueba aquí ADEMÁS de en `apunta`, y no es redundante:** los caracteres que ya estaban
+    fn look_for(&mut self, which_char: char) -> Option<(String, Arc<egui::FontData>)> {
+        // **Se comprueba aquí ADEMÁS de en `note`, y no es redundante:** los caracteres que ya estaban
         // en la cola cuando enumerar falló llegan igual hasta aquí, y sin esta línea cada uno volvería a
         // construir la colección entera para volver a encontrarla vacía.
-        if !self.asegura_la_coleccion() {
+        if !self.ensure_the_collection() {
             return None;
         }
         let coleccion = self.coleccion.as_mut()?;
@@ -542,14 +543,14 @@ impl Descubridor {
         // entrega no es estable: dos corridas del banco dieron familias distintas para el mismo carácter
         // hasta que se ordenó.
         todas.sort();
-        let del_resto: Vec<_> = todas
+        let of_the_rest: Vec<_> = todas
             .iter()
             .filter_map(|nombre| coleccion.family_id(nombre))
             .collect();
 
-        for ids in [&genericas, &del_resto] {
-            if let Some(cara) = primera_que_cubre(coleccion, fuentes, ids, que) {
-                return Some(cara);
+        for ids in [&genericas, &of_the_rest] {
+            if let Some(face) = first_that_covers(coleccion, fuentes, ids, which_char) {
+                return Some(face);
             }
         }
         None
@@ -557,10 +558,10 @@ impl Descubridor {
 
     /// Construye la colección del sistema si todavía no existe. Devuelve si hay con qué buscar.
     ///
-    /// **Sale de `busca` para que las dos búsquedas —la de cobertura y la de color— compartan una sola
+    /// **Sale de `look_for` para que las dos búsquedas —la de cobertura y la de color— compartan una sola
     /// colección.** Enumerar cuesta entre 15,9 y 31,0 ms (**D24**): hacerlo dos veces por tener dos
     /// funciones sería pagar el tramo más caro del módulo por duplicado.
-    fn asegura_la_coleccion(&mut self) -> bool {
+    fn ensure_the_collection(&mut self) -> bool {
         if self.sin_fuentes {
             return false;
         }
@@ -601,12 +602,12 @@ impl Descubridor {
     /// cambiarlo: descubrir un solo icono **le cambiaba el dibujo a tres de cada cinco letras**, que es
     /// exactamente lo que el Contrato 2 existe para impedir.
     ///
-    /// Con familia propia, quien pinta pide [`FAMILIA_DE_ICONOS`] **solo para los caracteres de uso
+    /// Con familia propia, quien pinta pide [`ICON_FAMILY`] **solo para los caracteres de uso
     /// privado** y la monoespaciada para todo lo demás. El orden por carácter que egui no da, lo da el
     /// pintor, que ya recorre celda a celda.
-    fn entrega_las_caras(&self, ctx: &egui::Context) {
+    fn hand_over_the_faces(&self, ctx: &egui::Context) {
         let mut definiciones = egui::FontDefinitions::default();
-        let de_fabrica = definiciones
+        let factory = definiciones
             .families
             .get(&egui::FontFamily::Monospace)
             .cloned()
@@ -614,15 +615,15 @@ impl Descubridor {
 
         definiciones
             .families
-            .insert(egui::FontFamily::Monospace, self.monoespaciada(&de_fabrica));
+            .insert(egui::FontFamily::Monospace, self.monospaced(&factory));
         definiciones.families.insert(
-            egui::FontFamily::Name(FAMILIA_DE_ICONOS.into()),
-            self.de_iconos(&de_fabrica),
+            egui::FontFamily::Name(ICON_FAMILY.into()),
+            self.icon_ones(&factory),
         );
-        for cara in &self.caras {
+        for face in &self.faces {
             definiciones
                 .font_data
-                .insert(cara.familia.clone(), Arc::clone(&cara.datos));
+                .insert(face.familia.clone(), Arc::clone(&face.datos));
         }
         ctx.set_fonts(definiciones);
     }
@@ -633,11 +634,11 @@ impl Descubridor {
     /// consume. Afirmar en su lugar sobre el dibujo que sale no distingue los casos — registrar una cara
     /// rehace el atlas y **todos** los glifos cambian de sitio, así que la comparación pasa igual con el
     /// defecto puesto y quitado. Lo destapó mutarla.
-    fn monoespaciada(&self, de_fabrica: &[String]) -> Vec<String> {
-        de_fabrica
+    fn monospaced(&self, factory: &[String]) -> Vec<String> {
+        factory
             .iter()
             .cloned()
-            .chain(self.caras.iter().map(|c| c.familia.clone()))
+            .chain(self.faces.iter().map(|c| c.familia.clone()))
             .collect()
     }
 
@@ -645,12 +646,12 @@ impl Descubridor {
     ///
     /// Solo entran las caras que se descubrieron **buscando un carácter de uso privado**: una encontrada
     /// por un kanji no se cuela aquí aunque además traiga iconos.
-    fn de_iconos(&self, de_fabrica: &[String]) -> Vec<String> {
-        self.caras
+    fn icon_ones(&self, factory: &[String]) -> Vec<String> {
+        self.faces
             .iter()
             .filter(|c| c.delante)
             .map(|c| c.familia.clone())
-            .chain(de_fabrica.iter().cloned())
+            .chain(factory.iter().cloned())
             .collect()
     }
 }
@@ -659,14 +660,14 @@ impl Descubridor {
 ///
 /// **Es el oráculo de «¿esto ya se ve?»**: comparado con el del cuadro de reemplazo dice la verdad, al
 /// contrario que `Fonts::has_glyph`. Cuesta **165 ns**, medido en release.
-fn dibujo_de(
+fn drawing_of(
     fuentes: &mut egui::epaint::text::FontsView<'_>,
-    que: char,
+    which_char: char,
     familia: egui::FontFamily,
 ) -> Option<(u16, u16)> {
     let galley = fuentes.layout_no_wrap(
-        que.to_string(),
-        egui::FontId::new(CUERPO_PARA_PREGUNTAR, familia),
+        which_char.to_string(),
+        egui::FontId::new(SIZE_TO_ASK_WITH, familia),
         egui::Color32::WHITE,
     );
     let uv = galley.rows.first()?.glyphs.first()?.uv_rect;
@@ -677,19 +678,19 @@ fn dibujo_de(
 ///
 /// **Da igual cuál sea mientras sea el mismo para los dos lados de la comparación**: lo que se compara es
 /// si dos caracteres pintan el mismo dibujo, no cuánto miden.
-const CUERPO_PARA_PREGUNTAR: f32 = 14.0;
+const SIZE_TO_ASK_WITH: f32 = 14.0;
 
 /// La primera de esas familias que trae el glifo de ese carácter.
-fn primera_que_cubre(
+fn first_that_covers(
     coleccion: &mut Collection,
     fuentes: &mut SourceCache,
     ids: &[fontique::FamilyId],
-    que: char,
+    which_char: char,
 ) -> Option<(String, Arc<egui::FontData>)> {
     for &id in ids {
         // **Se copian el nombre y las caras antes de seguir**: la familia presta de la colección, y la
         // colección hace falta en la vuelta siguiente.
-        let Some((nombre, caras)) = coleccion
+        let Some((nombre, faces)) = coleccion
             .family(id)
             .map(|familia| (familia.name().to_owned(), familia.fonts().to_vec()))
         else {
@@ -700,23 +701,23 @@ fn primera_que_cubre(
         // familia cuya Negrita o Fina se enumere antes, **todo el CJK del terminal saldría en negrita**,
         // permanentemente y sin forma de corregirlo. El desempate por índice deja el orden estable, así
         // que la respuesta tampoco cambia entre arranques.
-        let mut caras = caras;
-        caras.sort_by_key(|cara| {
+        let mut faces = faces;
+        faces.sort_by_key(|face| {
             (
-                cara.style() != fontique::FontStyle::Normal,
-                (cara.weight().value() - fontique::FontWeight::NORMAL.value()).abs() as i32,
-                ((cara.width().ratio() - fontique::FontWidth::NORMAL.ratio()).abs() * 100.0) as i32,
-                cara.index(),
+                face.style() != fontique::FontStyle::Normal,
+                (face.weight().value() - fontique::FontWeight::NORMAL.value()).abs() as i32,
+                ((face.width().ratio() - fontique::FontWidth::NORMAL.ratio()).abs() * 100.0) as i32,
+                face.index(),
             )
         });
-        for cara in caras {
-            let Some(blob) = fuentes.get(cara.source()) else {
+        for face in faces {
+            let Some(blob) = fuentes.get(face.source()) else {
                 continue;
             };
-            let cubre = cara
+            let cubre = face
                 .charmap_index()
                 .charmap(blob.data())
-                .is_some_and(|mapa| mapa.map(que as u32).is_some_and(|glifo| glifo != 0));
+                .is_some_and(|mapa| mapa.map(which_char as u32).is_some_and(|glifo| glifo != 0));
             if cubre {
                 // **Y se comprueba que el motor de texto va a poder abrirla, ANTES de dársela.** El
                 // único modo de fallo que epaint tiene para unos bytes que no entiende es
@@ -728,7 +729,7 @@ fn primera_que_cubre(
                 //
                 // Se valida con la misma caja que epaint usa por debajo, así que lo que aquí se abra,
                 // allí se abre.
-                if skrifa::FontRef::from_index(blob.data(), cara.index()).is_err() {
+                if skrifa::FontRef::from_index(blob.data(), face.index()).is_err() {
                     continue;
                 }
                 // **Con SU índice de cara, no con el cero.** Un fichero de fuente puede llevar varias
@@ -737,7 +738,7 @@ fn primera_que_cubre(
                 // cubre el carácter, y el terminal sigue pintando el cuadro después de haber pagado la
                 // búsqueda entera. Comprobado: es lo que pasaba con los iconos del Área de Uso Privado.
                 let mut datos = egui::FontData::from_owned(blob.data().to_vec());
-                datos.index = cara.index();
+                datos.index = face.index();
                 return Some((nombre, Arc::new(datos)));
             }
         }
@@ -759,7 +760,7 @@ fn primera_que_cubre(
 ///
 /// Es el mismo criterio con el que **D8** acotó la cola de salida y **D21** el historial: una entrada que
 /// llega de fuera y no la controla nadie de dentro lleva techo, y el techo se dice.
-const LADO_DEL_ATLAS: usize = 512;
+const ATLAS_SIDE: usize = 512;
 
 /// El cuerpo con el que se le pide el mapa de bits a la fuente.
 ///
@@ -768,15 +769,15 @@ const LADO_DEL_ATLAS: usize = 512;
 /// devuelve exactamente la misma imagen. Pedir el mayor de los razonables es lo único que cambia algo en
 /// una fuente que sí traiga varias: se coge la más grande y se reduce, que pierde menos que ampliar una
 /// pequeña.
-const CUERPO_PARA_RASTERIZAR: f32 = 128.0;
+const SIZE_TO_RASTERIZE_WITH: f32 = 128.0;
 
 /// Dónde está un glifo dentro del atlas y cuánto mide.
 #[derive(Debug, Clone, Copy)]
-struct EnElAtlas {
+struct InAtlas {
     /// El trozo del atlas que ocupa, en coordenadas de 0 a 1 — que es como se pide al pintar.
     uv: egui::Rect,
     /// Lo que mide de verdad, en píxeles. Quien pinta lo necesita para centrarlo sin deformarlo.
-    medidas: egui::Vec2,
+    measurements: egui::Vec2,
 }
 
 /// Los glifos de color ya rasterizados, **todos dentro de una sola textura**.
@@ -796,7 +797,7 @@ struct EnElAtlas {
 /// tenerla aquí permite **vaciar entero** el atlas en cuanto cambia, que es lo que el contrato del diseño
 /// exige y lo que impide pintar un emoji del tamaño anterior en una celda del nuevo.
 #[derive(Default)]
-struct Glifos {
+struct Glyphs {
     /// La textura donde viven todos. **No existe hasta que hace falta el primero**: una sesión sin
     /// emojis no le pide ni un byte a la tarjeta gráfica.
     atlas: Option<egui::TextureHandle>,
@@ -804,84 +805,84 @@ struct Glifos {
     ///
     /// **Recordar el fallo no es un detalle.** Sin él, un carácter que ninguna fuente de color cubre
     /// recorrería las familias de emoji **en cada fotograma** — y es justo el carácter que un programa
-    /// roto escupe en bucle. Es la misma razón por la que [`Descubridor`] recuerda los suyos.
-    guardados: std::collections::HashMap<char, Option<EnElAtlas>>,
+    /// roto escupe en bucle. Es la misma razón por la que [`Discoverer`] recuerda los suyos.
+    saved_ones: std::collections::HashMap<char, Option<InAtlas>>,
     /// Dónde empieza el hueco libre de la fila que se está llenando.
     siguiente: [usize; 2],
     /// Lo que mide de alto la fila que se está llenando. Al saltar de fila se avanza esto.
-    alto_de_la_fila: usize,
+    row_height: usize,
     /// La altura de celda a la que están rasterizados los de arriba, en píxeles físicos.
-    alto: u32,
+    height: u32,
     /// Si ya se dijo que el atlas se llenó.
-    dijo_el_techo: bool,
+    said_the_ceiling: bool,
 }
 
-impl Glifos {
+impl Glyphs {
     /// Dónde está el glifo de color de ese carácter dentro del atlas, rasterizándolo si hace falta.
     ///
     /// Devuelve `None` cuando la máquina no tiene ninguna fuente que lo pinte a color, o cuando el atlas
     /// se llenó: quien llama **tiene que caer al camino de texto**, que es el Contrato 5 del diseño —lo
     /// que no está, no se inventa—.
-    fn textura(
+    fn texture(
         &mut self,
         ctx: &egui::Context,
         coleccion: &mut Collection,
         fuentes: &mut SourceCache,
-        que: char,
-        alto: u32,
+        which_char: char,
+        height: u32,
         ancho_maximo: u32,
     ) -> Option<(egui::TextureId, egui::Rect, egui::Vec2)> {
-        if alto == 0 || ancho_maximo == 0 {
+        if height == 0 || ancho_maximo == 0 {
             return None;
         }
         // **Cambió la altura de la celda: lo recordado ya no vale.** Sin esto, subir el zoom del
         // escritorio dejaría los emojis del tamaño anterior pintados en celdas del nuevo — y como el
         // atlas nunca se vacía, para el resto de la vida del proceso.
-        if self.alto != alto {
-            self.guardados.clear();
+        if self.height != height {
+            self.saved_ones.clear();
             self.siguiente = [0, 0];
-            self.alto_de_la_fila = 0;
-            self.alto = alto;
-            self.dijo_el_techo = false;
+            self.row_height = 0;
+            self.height = height;
+            self.said_the_ceiling = false;
         }
-        let sitio = if let Some(guardado) = self.guardados.get(&que) {
-            *guardado
+        let sitio = if let Some(saved) = self.saved_ones.get(&which_char) {
+            *saved
         } else {
-            let sitio = glifo_de_color(coleccion, fuentes, que, alto, ancho_maximo)
-                .and_then(|imagen| self.pegar(ctx, imagen));
-            self.guardados.insert(que, sitio);
+            let sitio = color_glyph_of(coleccion, fuentes, which_char, height, ancho_maximo)
+                .and_then(|image| self.paste(ctx, image));
+            self.saved_ones.insert(which_char, sitio);
             sitio
         };
         // **El atlas existe siempre que haya un sitio guardado**: se crea al pegar el primer glifo, y lo
         // que se guarda es justamente el resultado de haberlo pegado.
         let sitio = sitio?;
-        Some((self.atlas.as_ref()?.id(), sitio.uv, sitio.medidas))
+        Some((self.atlas.as_ref()?.id(), sitio.uv, sitio.measurements))
     }
 
     /// Mete una imagen en el primer hueco libre del atlas. `None` si ya no cabe.
-    fn pegar(&mut self, ctx: &egui::Context, imagen: egui::ColorImage) -> Option<EnElAtlas> {
-        let [ancho, alto] = [imagen.width(), imagen.height()];
-        if ancho > LADO_DEL_ATLAS || alto > LADO_DEL_ATLAS {
+    fn paste(&mut self, ctx: &egui::Context, image: egui::ColorImage) -> Option<InAtlas> {
+        let [width, height] = [image.width(), image.height()];
+        if width > ATLAS_SIDE || height > ATLAS_SIDE {
             return None;
         }
         // Colocación por filas: se llena la fila de izquierda a derecha y se salta a la siguiente cuando
         // no cabe. **Deja huecos y da igual**: los glifos de una sesión miden todos casi lo mismo —los
         // rasteriza la misma altura de celda— así que las filas salen parejas.
-        if self.siguiente[0] + ancho > LADO_DEL_ATLAS {
-            self.siguiente = [0, self.siguiente[1] + self.alto_de_la_fila];
-            self.alto_de_la_fila = 0;
+        if self.siguiente[0] + width > ATLAS_SIDE {
+            self.siguiente = [0, self.siguiente[1] + self.row_height];
+            self.row_height = 0;
         }
-        if self.siguiente[1] + alto > LADO_DEL_ATLAS {
+        if self.siguiente[1] + height > ATLAS_SIDE {
             // **Se dice, y una sola vez.** Un techo callado es indistinguible de un fallo: quien vea sus
             // emojis en monocromo de golpe no tendría forma de saber que el terminal sabe pintarlos y se
             // ha quedado sin sitio donde guardarlos.
-            if !self.dijo_el_techo {
+            if !self.said_the_ceiling {
                 eprintln!(
-                    "agent-terminal: el atlas de glifos de color ({LADO_DEL_ATLAS}x{LADO_DEL_ATLAS} \
+                    "agent-terminal: el atlas de glifos de color ({ATLAS_SIDE}x{ATLAS_SIDE} \
                      píxeles) se ha llenado. Los emojis que no estén ya en él seguirán saliendo en \
                      monocromo."
                 );
-                self.dijo_el_techo = true;
+                self.said_the_ceiling = true;
             }
             return None;
         }
@@ -889,10 +890,7 @@ impl Glifos {
         let atlas = self.atlas.get_or_insert_with(|| {
             ctx.load_texture(
                 "glifos-de-color",
-                egui::ColorImage::filled(
-                    [LADO_DEL_ATLAS, LADO_DEL_ATLAS],
-                    egui::Color32::TRANSPARENT,
-                ),
+                egui::ColorImage::filled([ATLAS_SIDE, ATLAS_SIDE], egui::Color32::TRANSPARENT),
                 // **Lineal y no `NEAREST`**: el mapa de bits viene a 136×128 y la celda mide una fracción
                 // de eso, así que la reducción la hace el remuestreo de la CPU; lo que la tarjeta hace
                 // aquí es solo el ajuste final a píxeles físicos. Con `NEAREST` ese ajuste se ve como
@@ -903,19 +901,19 @@ impl Glifos {
         // **Solo el rectángulo del glifo nuevo, no el atlas entero.** Re-subir el megabyte completo por
         // cada emoji descubierto sería medio giga de tráfico a la tarjeta en una sesión que llegue al
         // techo, para cambiar unos cientos de bytes.
-        atlas.set_partial(sitio, imagen, egui::TextureOptions::LINEAR);
-        self.siguiente[0] = sitio[0] + ancho;
-        self.alto_de_la_fila = self.alto_de_la_fila.max(alto);
-        let lado = LADO_DEL_ATLAS as f32;
-        Some(EnElAtlas {
+        atlas.set_partial(sitio, image, egui::TextureOptions::LINEAR);
+        self.siguiente[0] = sitio[0] + width;
+        self.row_height = self.row_height.max(height);
+        let side = ATLAS_SIDE as f32;
+        Some(InAtlas {
             uv: egui::Rect::from_min_max(
-                egui::pos2(sitio[0] as f32 / lado, sitio[1] as f32 / lado),
+                egui::pos2(sitio[0] as f32 / side, sitio[1] as f32 / side),
                 egui::pos2(
-                    (sitio[0] + ancho) as f32 / lado,
-                    (sitio[1] + alto) as f32 / lado,
+                    (sitio[0] + width) as f32 / side,
+                    (sitio[1] + height) as f32 / side,
                 ),
             ),
-            medidas: egui::vec2(ancho as f32, alto as f32),
+            measurements: egui::vec2(width as f32, height as f32),
         })
     }
 
@@ -923,13 +921,13 @@ impl Glifos {
     ///
     /// **Mira también la altura**, porque un cambio de altura vacía el atlas entero: sin eso, el primer
     /// glifo tras un cambio de zoom se rasterizaría **sin** que su coste entrara en el tramo.
-    fn recuerda(&self, que: char, alto: u32) -> bool {
-        self.alto == alto && self.guardados.contains_key(&que)
+    fn remembers(&self, which_char: char, height: u32) -> bool {
+        self.height == height && self.saved_ones.contains_key(&which_char)
     }
 
     /// Cuántos glifos hay recordados.
-    fn cuantos(&self) -> usize {
-        self.guardados.len()
+    fn how_many(&self) -> usize {
+        self.saved_ones.len()
     }
 }
 
@@ -945,30 +943,30 @@ impl Glifos {
 /// **Devuelve la imagen y no la cara**: quien llama guarda texturas, no fuentes. Prestarle la cara abierta
 /// le obligaría a cargar con los veinte megas del fichero mientras la usa, y a hablar el modelo de fuente
 /// de una caja de terceros para nada.
-fn glifo_de_color(
+fn color_glyph_of(
     coleccion: &mut Collection,
     fuentes: &mut SourceCache,
-    que: char,
-    alto: u32,
+    which_char: char,
+    height: u32,
     ancho_maximo: u32,
 ) -> Option<egui::ColorImage> {
     // **Solo las familias que el sistema declara de emoji, y ahí acaba la búsqueda.** No se cae a
-    // recorrerlas todas como hace `busca`: una familia que no es de emoji y aun así cubre un emoji lo
+    // recorrerlas todas como hace `look_for`: una familia que no es de emoji y aun así cubre un emoji lo
     // pinta **en monocromo** —en esta máquina `DejaVu Sans` se lleva el 😀 teniendo `Noto Color Emoji`
     // instalada—, así que la red de debajo daría exactamente lo que esta función existe para evitar.
     let genericas: Vec<_> = coleccion.generic_families(GenericFamily::Emoji).collect();
     for id in genericas {
-        let Some(caras) = coleccion.family(id).map(|familia| familia.fonts().to_vec()) else {
+        let Some(faces) = coleccion.family(id).map(|familia| familia.fonts().to_vec()) else {
             continue;
         };
-        for cara in caras {
-            let Some(blob) = fuentes.get(cara.source()) else {
+        for face in faces {
+            let Some(blob) = fuentes.get(face.source()) else {
                 continue;
             };
-            let Ok(fuente) = skrifa::FontRef::from_index(blob.data(), cara.index()) else {
+            let Ok(fuente) = skrifa::FontRef::from_index(blob.data(), face.index()) else {
                 continue;
             };
-            let Some(glifo) = fuente.charmap().map(que) else {
+            let Some(glifo) = fuente.charmap().map(which_char) else {
                 continue;
             };
             // **Que la cubra no basta: tiene que traerla a color.** Las familias que el sistema
@@ -976,8 +974,8 @@ fn glifo_de_color(
             // mayoría son monocromas. Sin esta comprobación ganaría la primera que enumere el
             // sistema, que es el defecto que este proyecto tiene documentado desde **D24** y el que
             // Alacritty arrastra.
-            if let Some(imagen) = rasteriza(&fuente, glifo, alto, ancho_maximo) {
-                return Some(imagen);
+            if let Some(image) = rasterize(&fuente, glifo, height, ancho_maximo) {
+                return Some(image);
             }
         }
     }
@@ -987,16 +985,16 @@ fn glifo_de_color(
 /// Los píxeles de un mapa de bits, en RGBA y con **el alfa ya premultiplicado**. `None` si lo que trae
 /// no es un dibujo a color.
 ///
-/// **Está aparte de `rasteriza` para poder afirmar sobre ella, y no es un rodeo.** Cuál de los tres
+/// **Está aparte de `rasterize` para poder afirmar sobre ella, y no es un rodeo.** Cuál de los tres
 /// caminos recorre un emoji **no lo decide este proyecto: lo decide la fuente que la máquina tenga
 /// instalada**. En ésta manda `Noto Color Emoji`, que trae PNG, así que los otros dos se entregarían sin
 /// que ninguna prueba los hubiera ejecutado nunca — y son los dos que llegan por delante en **F2.7**.
-/// Comprobado mutándolos con el cuerpo dentro de `rasteriza`: quitar la vuelta de BGRA a RGBA, que pinta
+/// Comprobado mutándolos con el cuerpo dentro de `rasterize`: quitar la vuelta de BGRA a RGBA, que pinta
 /// de azul lo que el emoji tiene de rojo, dejaba las 647 pruebas en verde.
-fn pixeles_de(
+fn pixels_of(
     mapa: &skrifa::bitmap::BitmapData<'_>,
-    ancho: u32,
-    alto: u32,
+    width: u32,
+    height: u32,
 ) -> Option<image::RgbaImage> {
     match mapa {
         skrifa::bitmap::BitmapData::Png(bytes) => {
@@ -1021,7 +1019,7 @@ fn pixeles_de(
             for pixel in crudo.chunks_exact_mut(4) {
                 pixel.swap(0, 2);
             }
-            image::RgbaImage::from_raw(ancho, alto, crudo)
+            image::RgbaImage::from_raw(width, height, crudo)
         }
         // Una máscara de alfa es un dibujo **monocromo**: no es un glifo de color y no se pinta por aquí.
         skrifa::bitmap::BitmapData::Mask(_) => None,
@@ -1039,15 +1037,15 @@ fn pixeles_de(
 /// histórico de medida entero. En Linux no se nota —las fuentes de emoji del sistema son de mapa de
 /// bits— pero en Windows sí, porque `Segoe UI Emoji` es `COLR`: queda declarado como lo que le falta a
 /// **F2.7**, no como algo que aquí funcione.
-fn rasteriza(
+fn rasterize(
     fuente: &skrifa::FontRef<'_>,
     glifo: skrifa::GlyphId,
-    alto: u32,
+    height: u32,
     ancho_maximo: u32,
 ) -> Option<egui::ColorImage> {
     let mapa = skrifa::bitmap::BitmapStrikes::new(fuente)
-        .glyph_for_size(skrifa::instance::Size::new(CUERPO_PARA_RASTERIZAR), glifo)?;
-    let pixeles = pixeles_de(&mapa.data, mapa.width, mapa.height)?;
+        .glyph_for_size(skrifa::instance::Size::new(SIZE_TO_RASTERIZE_WITH), glifo)?;
+    let pixeles = pixels_of(&mapa.data, mapa.width, mapa.height)?;
     if pixeles.width() == 0 || pixeles.height() == 0 {
         return None;
     }
@@ -1057,9 +1055,9 @@ fn rasteriza(
     // lo deja **más ancho que las dos columnas** que el motor le reservó, y el emoji se comería el borde
     // de su vecina. Medido: 18 px de ancho para una celda de 17 px de alto.
     let factor =
-        (alto as f32 / pixeles.height() as f32).min(ancho_maximo as f32 / pixeles.width() as f32);
+        (height as f32 / pixeles.height() as f32).min(ancho_maximo as f32 / pixeles.width() as f32);
     let ancho_final = ((pixeles.width() as f32 * factor).round() as u32).clamp(1, ancho_maximo);
-    let alto_final = ((pixeles.height() as f32 * factor).round() as u32).clamp(1, alto);
+    let alto_final = ((pixeles.height() as f32 * factor).round() as u32).clamp(1, height);
     let pequeno = image::imageops::resize(
         &pixeles,
         ancho_final,
@@ -1088,27 +1086,27 @@ mod tests {
     fn un_emoji_de_los_de_toda_la_vida_va_a_color_sin_que_nadie_lo_pida() {
         // `Emoji_Presentation=Yes`. Exigir el selector aquí dejaría en gris la inmensa mayoría de los
         // emojis que un programa escribe, que es como se ven hoy.
-        assert_eq!(presentacion_de('😀', &[]), Presentacion::Color);
+        assert_eq!(presentation_of('😀', &[]), Presentation::Color);
     }
 
     #[test]
     fn un_simbolo_de_texto_se_queda_en_texto_aunque_exista_su_version_emoji() {
         // `☁` U+2601 tiene `Emoji=Yes` pero `Emoji_Presentation=No`. Mirar solo «es emoji» lo pintaría
         // a color, y es exactamente el caso que separa esta regla de la ingenua.
-        assert_eq!(presentacion_de('☁', &[]), Presentacion::Texto);
+        assert_eq!(presentation_of('☁', &[]), Presentation::Texto);
     }
 
     #[test]
     fn el_selector_de_emoji_lleva_a_color_un_simbolo_que_por_defecto_es_texto() {
         // Es `☁️` — la razón de ser de toda esta entrega.
-        assert_eq!(presentacion_de('☁', &[A_EMOJI]), Presentacion::Color);
+        assert_eq!(presentation_of('☁', &[A_EMOJI]), Presentation::Color);
     }
 
     #[test]
     fn el_selector_de_texto_devuelve_a_monocromo_un_emoji_que_por_defecto_va_a_color() {
         // La mitad que se olvida: la regla tiene que funcionar **en los dos sentidos**. Con solo la
         // mitad de arriba, este caso pasaría igual y la prueba no ataría nada.
-        assert_eq!(presentacion_de('😀', &[A_TEXTO]), Presentacion::Texto);
+        assert_eq!(presentation_of('😀', &[A_TEXTO]), Presentation::Texto);
     }
 
     #[test]
@@ -1117,8 +1115,8 @@ mod tests {
         // de la secuencia, se refiere a otro — mirarlo sería atribuirle a esta celda una presentación
         // que se pidió para otra cosa.
         assert_eq!(
-            presentacion_de('☁', &['\u{200D}', A_EMOJI]),
-            Presentacion::Texto
+            presentation_of('☁', &['\u{200D}', A_EMOJI]),
+            Presentation::Texto
         );
     }
 
@@ -1126,20 +1124,20 @@ mod tests {
     fn una_letra_corriente_no_es_emoji_por_mucho_que_lleve_cosas_pegadas() {
         // Una `a` con una tilde combinante pegada. Sin este caso, una regla que devolviera Color en
         // cuanto hubiera algo pegado pasaría todas las demás pruebas.
-        assert_eq!(presentacion_de('a', &['\u{0301}']), Presentacion::Texto);
+        assert_eq!(presentation_of('a', &['\u{0301}']), Presentation::Texto);
     }
     #[test]
     fn el_selector_de_emoji_sobre_un_emoji_lo_deja_a_color() {
         // **El caso donde un orden de ramas equivocado se cae.** El resultado coincide con el que daría
         // ignorar el selector, así que sin este caso la tabla del contrato queda con un hueco justo donde
         // las dos condiciones se solapan.
-        assert_eq!(presentacion_de('😀', &[A_EMOJI]), Presentacion::Color);
+        assert_eq!(presentation_of('😀', &[A_EMOJI]), Presentation::Color);
     }
 
     #[test]
     fn el_selector_de_texto_sobre_un_simbolo_de_texto_lo_deja_en_texto() {
         // La otra esquina del solape, por la misma razón: las dos condiciones apuntan al mismo lado.
-        assert_eq!(presentacion_de('☁', &[A_TEXTO]), Presentacion::Texto);
+        assert_eq!(presentation_of('☁', &[A_TEXTO]), Presentation::Texto);
     }
     #[test]
     fn un_caracter_que_no_es_emoji_no_se_va_a_color_por_llevar_el_selector_detras() {
@@ -1149,23 +1147,23 @@ mod tests {
         // programa que corte una cadena por la mitad de un emoji, y hasta de un salto de línea —el
         // motor pega un selector suelto a la celda VACÍA que tenga delante—, así que sin esta regla
         // un espacio en blanco se manda a la fuente de color.
-        assert_eq!(presentacion_de('a', &[A_EMOJI]), Presentacion::Texto);
-        assert_eq!(presentacion_de(' ', &[A_EMOJI]), Presentacion::Texto);
+        assert_eq!(presentation_of('a', &[A_EMOJI]), Presentation::Texto);
+        assert_eq!(presentation_of(' ', &[A_EMOJI]), Presentation::Texto);
     }
     // ── El descubrimiento ────────────────────────────────────────────────────────────────────────
 
     use eframe::egui;
 
     /// Un contexto de egui con su motor de texto ya montado.
-    fn contexto() -> egui::Context {
+    fn context() -> egui::Context {
         let ctx = egui::Context::default();
-        pasada(&ctx);
+        pass(&ctx);
         ctx
     }
 
     /// **`set_fonts` no surte efecto hasta la pasada siguiente**: guarda la configuración y el motor de
     /// texto se rehace después. Sin esto, cualquier comprobación mira el estado de antes.
-    fn pasada(ctx: &egui::Context) {
+    fn pass(ctx: &egui::Context) {
         ctx.run_ui(egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
     }
@@ -1173,9 +1171,9 @@ mod tests {
     /// Lo que mide el glifo de ese carácter en el atlas, en píxeles.
     ///
     /// **Es el único oráculo fiable que hay, y por eso las pruebas de aquí lo usan en vez de preguntar.**
-    /// `Fonts::has_glyph` devuelve `false` para la `'a'` —ver `Descubridor::resolver`—, así que afirmar
+    /// `Fonts::has_glyph` devuelve `false` para la `'a'` —ver `Discoverer::resolve`—, así que afirmar
     /// sobre él sería afirmar sobre un dato falso. El dibujo que sale al atlas no miente.
-    fn tamano_del_glifo(ctx: &egui::Context, c: char) -> Option<(u16, u16)> {
+    fn glyph_size(ctx: &egui::Context, c: char) -> Option<(u16, u16)> {
         ctx.fonts_mut(|f| {
             let galley = f.layout_no_wrap(
                 c.to_string(),
@@ -1193,13 +1191,13 @@ mod tests {
     /// **Medido en el mismo estado que el carácter**: el atlas se rehace al registrar una cara, así que un
     /// tamaño de antes no es comparable con uno de después.
     /// Lo que mide el glifo **pidiendo la familia que el pintor pediría** para ese carácter.
-    fn con_su_familia(
+    fn with_its_family(
         ctx: &egui::Context,
-        descubridor: &Descubridor,
+        discoverer: &Discoverer,
         c: char,
     ) -> Option<(u16, u16)> {
         ctx.fonts_mut(|f| {
-            let id = egui::FontId::new(14.0, descubridor.familia_de(c));
+            let id = egui::FontId::new(14.0, discoverer.family_of(c));
             let uv = f
                 .layout_no_wrap(c.to_string(), id, egui::Color32::WHITE)
                 .rows
@@ -1211,22 +1209,22 @@ mod tests {
         })
     }
 
-    fn sale_como_cuadro(ctx: &egui::Context, c: char) -> bool {
-        let suyo = tamano_del_glifo(ctx, c);
-        suyo.is_some() && suyo == tamano_del_glifo(ctx, '\u{10FFFD}')
+    fn comes_out_as_a_box(ctx: &egui::Context, c: char) -> bool {
+        let suyo = glyph_size(ctx, c);
+        suyo.is_some() && suyo == glyph_size(ctx, '\u{10FFFD}')
     }
 
     #[test]
     fn el_ascii_no_se_apunta_nunca() {
         // **Es lo único que corre por celda**, así que descartar el caso corriente sin tocar nada es la
         // mitad de que el hito no cueste. Las fuentes de fábrica cubren el ASCII entero.
-        let mut descubridor = Descubridor::default();
+        let mut discoverer = Discoverer::default();
         for c in ' '..='~' {
-            descubridor.apunta(c);
+            discoverer.note(c);
         }
 
         assert_eq!(
-            descubridor.pendientes.len(),
+            discoverer.pendientes.len(),
             0,
             "el ASCII acabó en la cola de lo que hay que buscar"
         );
@@ -1242,8 +1240,8 @@ mod tests {
         // El escenario es real: un `cat` de un binario produce **decenas de miles** de caracteres
         // distintos, ninguno cubierto por nada. Medido antes de acotarlo: **6,0–6,6 ms sostenidos en cada
         // fotograma**, más que el fotograma entero.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
 
         // **Se afirma sobre las BÚSQUEDAS, no sobre milisegundos, y eso no es rodear el problema.** Las
         // pruebas corren en depuración, donde todo cuesta un orden de magnitud más que en el binario que
@@ -1252,15 +1250,15 @@ mod tests {
         // búsquedas caben en una vuelta**, y eso sí es el mismo número aquí y en release.
         //
         // Diez fotogramas con **dos mil caracteres nuevos cada uno**, como los que produce un volcado.
-        let mut mas_buscados = 0;
+        let mut most_wanted = 0;
         for fotograma in 0..10u32 {
             for i in 0..2000u32 {
                 if let Some(c) = char::from_u32(0xE000 + fotograma * 2000 + i) {
-                    descubridor.apunta(c);
+                    discoverer.note(c);
                 }
             }
-            mas_buscados = mas_buscados.max(descubridor.resolver(&ctx).buscados);
-            pasada(&ctx);
+            most_wanted = most_wanted.max(discoverer.resolve(&ctx).buscados);
+            pass(&ctx);
         }
 
         // **La clave es que NO crece con la cola.** Sin frenos se buscaría la cola entera —cuarenta por
@@ -1272,8 +1270,8 @@ mod tests {
         // fallos acota el caso en que **ninguna** acierta, donde el presupuesto se repone cada fotograma
         // y nunca llegaría a cortar nada.
         assert!(
-            mas_buscados < PENDIENTES_MAXIMOS,
-            "se buscaron {mas_buscados} caracteres en una sola vuelta, que es la cola entera: el trabajo \
+            most_wanted < MAX_PENDING,
+            "se buscaron {most_wanted} caracteres en una sola vuelta, que es la cola entera: el trabajo \
              de buscar fuentes no está acotado y crece con lo que escupa el programa"
         );
     }
@@ -1284,14 +1282,14 @@ mod tests {
         // deja su cara registrada, así que el siguiente ya no busca; pero uno que NADIE cubre no deja
         // nada, y sin recordarlo se recorrerían las candidatas cada vez que apareciera — que es justo lo
         // que un programa roto escupe en bucle. Sale de **D24**.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
         // Un plano de uso privado que ninguna fuente normal cubre: la búsqueda va a fallar seguro.
-        descubridor.apunta('\u{10FFFD}');
-        let primera = descubridor.resolver(&ctx);
+        discoverer.note('\u{10FFFD}');
+        let primera = discoverer.resolve(&ctx);
 
-        descubridor.apunta('\u{10FFFD}');
-        let segunda = descubridor.resolver(&ctx);
+        discoverer.note('\u{10FFFD}');
+        let segunda = discoverer.resolve(&ctx);
 
         assert_eq!(primera.buscados, 1, "la primera vuelta no llegó a buscar");
         assert_eq!(
@@ -1308,18 +1306,18 @@ mod tests {
     fn un_caracter_que_nadie_cubre_deja_la_ventana_en_pie_y_sale_como_cuadro() {
         // **AC6.** Lo que no está, no se inventa: se pinta con lo que dé el motor y no se intenta nada
         // más. Lo que esta prueba defiende es que ese camino **no se cae** ni deja el motor a medias.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
-        descubridor.apunta('\u{10FFFD}');
-        descubridor.resolver(&ctx);
-        pasada(&ctx);
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
+        discoverer.note('\u{10FFFD}');
+        discoverer.resolve(&ctx);
+        pass(&ctx);
 
         assert!(
-            sale_como_cuadro(&ctx, '\u{10FFFD}'),
+            comes_out_as_a_box(&ctx, '\u{10FFFD}'),
             "un carácter que nadie cubre dejó de salir como cuadro, así que algo se lo inventó"
         );
         assert!(
-            !sale_como_cuadro(&ctx, 'a'),
+            !comes_out_as_a_box(&ctx, 'a'),
             "buscar un carácter imposible se llevó por delante el resto de la fuente"
         );
     }
@@ -1332,29 +1330,29 @@ mod tests {
         // fuente CJK, el kanji tiene que dejar de ser el cuadro; si no la tiene, tiene que seguir siéndolo
         // y la ventana tiene que quedar en pie — que es **AC6** y **AC9**. Saltarla en una máquina pelada
         // dejaría el camino de la escasez sin cubrir, que es justo donde se cae una implementación.
-        let ctx = contexto();
+        let ctx = context();
         assert!(
-            sale_como_cuadro(&ctx, '日'),
+            comes_out_as_a_box(&ctx, '日'),
             "el japonés ya se veía antes de descubrir nada: esta prueba no estaría probando el hito"
         );
 
-        let mut descubridor = Descubridor::default();
-        descubridor.apunta('日');
-        let vuelta = descubridor.resolver(&ctx);
-        pasada(&ctx);
+        let mut discoverer = Discoverer::default();
+        discoverer.note('日');
+        let round = discoverer.resolve(&ctx);
+        pass(&ctx);
 
-        if vuelta.registradas > 0 {
+        if round.registradas > 0 {
             assert!(
-                !sale_como_cuadro(&ctx, '日'),
+                !comes_out_as_a_box(&ctx, '日'),
                 "se registró una cara para el japonés y sigue saliendo el cuadro"
             );
         } else {
             assert!(
-                sale_como_cuadro(&ctx, '日'),
+                comes_out_as_a_box(&ctx, '日'),
                 "no se registró ninguna cara y aun así el japonés cambió: algo se lo inventó"
             );
         }
-        assert_eq!(vuelta.buscados, 1, "no llegó a buscarlo");
+        assert_eq!(round.buscados, 1, "no llegó a buscarlo");
     }
 
     #[test]
@@ -1362,16 +1360,16 @@ mod tests {
         // **Contrato 2, y es lo que impide que este hito estropee lo que ya funcionaba.** La cadena de
         // reserva se recorre en orden: una cara del sistema puesta delante le quitaría las letras a la
         // fuente del terminal, y el terminal cambiaría de aspecto por descubrir un kanji.
-        let ctx = contexto();
-        let antes = tamano_del_glifo(&ctx, 'a');
+        let ctx = context();
+        let antes = glyph_size(&ctx, 'a');
 
-        let mut descubridor = Descubridor::default();
-        descubridor.apunta('日');
-        descubridor.resolver(&ctx);
-        pasada(&ctx);
+        let mut discoverer = Discoverer::default();
+        discoverer.note('日');
+        discoverer.resolve(&ctx);
+        pass(&ctx);
 
         assert_eq!(
-            tamano_del_glifo(&ctx, 'a'),
+            glyph_size(&ctx, 'a'),
             antes,
             "registrar una cara del sistema le cambió el dibujo a una letra corriente"
         );
@@ -1386,42 +1384,39 @@ mod tests {
         //
         // **Se afirma sobre el dibujo, no sobre el orden de una lista.** Afirmar que la cara quedó la
         // primera pasaría igual aunque el motor la ignorara después.
-        let ctx = contexto();
+        let ctx = context();
         let icono = '\u{F015}';
-        let antes = tamano_del_glifo(&ctx, icono);
+        let antes = glyph_size(&ctx, icono);
 
-        let mut descubridor = Descubridor::default();
-        descubridor.apunta(icono);
-        let vuelta = descubridor.resolver(&ctx);
-        pasada(&ctx);
+        let mut discoverer = Discoverer::default();
+        discoverer.note(icono);
+        let round = discoverer.resolve(&ctx);
+        pass(&ctx);
 
-        let de_fabrica = ["Hack".to_owned(), "emoji-icon-font".to_owned()];
+        let factory = ["Hack".to_owned(), "emoji-icon-font".to_owned()];
 
-        if vuelta.registradas > 0 {
+        if round.registradas > 0 {
             assert!(
-                antes.is_some() && antes == tamano_del_glifo(&ctx, '\u{10FFFD}'),
+                antes.is_some() && antes == glyph_size(&ctx, '\u{10FFFD}'),
                 "el icono ya se veía antes: esta prueba no estaría probando nada"
             );
             assert_eq!(
-                descubridor
-                    .de_iconos(&de_fabrica)
-                    .first()
-                    .map(String::as_str),
-                Some(descubridor.caras[0].familia.as_str()),
+                discoverer.icon_ones(&factory).first().map(String::as_str),
+                Some(discoverer.faces[0].familia.as_str()),
                 "la cara descubierta para un icono no quedó la primera de la familia de iconos, así que \
                  la fuente de fábrica le seguirá ganando el glifo"
             );
             // **Y la monoespaciada NO se toca: es la otra mitad y sin ella el arreglo no vale.**
             assert_eq!(
-                descubridor.monoespaciada(&de_fabrica)[..de_fabrica.len()],
-                de_fabrica,
+                discoverer.monospaced(&factory)[..factory.len()],
+                factory,
                 "la cara de iconos se coló en la familia monoespaciada, donde le robaría las letras a la \
                  fuente del terminal"
             );
         } else {
             assert_eq!(
-                descubridor.de_iconos(&de_fabrica),
-                de_fabrica,
+                discoverer.icon_ones(&factory),
+                factory,
                 "no se registró ninguna cara y aun así la familia de iconos cambió"
             );
         }
@@ -1432,14 +1427,14 @@ mod tests {
         // **La otra mitad de la excepción, y sin ella «poner todo delante» pasaría igual.** Es el error
         // simétrico y el más caro: una cara encontrada buscando un kanji, puesta delante, le quitaría las
         // letras a la fuente del terminal.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
-        descubridor.apunta('日');
-        let vuelta = descubridor.resolver(&ctx);
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
+        discoverer.note('日');
+        let round = discoverer.resolve(&ctx);
 
-        let de_fabrica = ["Hack".to_owned()];
-        if vuelta.registradas > 0 {
-            let mono = descubridor.monoespaciada(&de_fabrica);
+        let factory = ["Hack".to_owned()];
+        if round.registradas > 0 {
+            let mono = discoverer.monospaced(&factory);
             assert_eq!(
                 mono.first().map(String::as_str),
                 Some("Hack"),
@@ -1447,8 +1442,8 @@ mod tests {
             );
             assert_eq!(mono.len(), 2, "no se añadió la cara descubierta");
             assert_eq!(
-                descubridor.de_iconos(&de_fabrica),
-                de_fabrica,
+                discoverer.icon_ones(&factory),
+                factory,
                 "una cara descubierta por un kanji se coló en la familia de iconos"
             );
         }
@@ -1462,21 +1457,21 @@ mod tests {
         // **La prueba fuerza el estado en vez de desinstalar fontconfig**, y se dice: no hay forma de
         // quitarle las fuentes a la máquina desde dentro de una prueba. Lo que sí se ata es que, una vez
         // en ese estado, no se vuelve a tocar el sistema.
-        let ctx = contexto();
-        let mut descubridor = Descubridor {
+        let ctx = context();
+        let mut discoverer = Discoverer {
             sin_fuentes: true,
             ..Default::default()
         };
-        descubridor.pendientes.insert('日');
+        discoverer.pendientes.insert('日');
 
-        let vuelta = descubridor.resolver(&ctx);
+        let round = discoverer.resolve(&ctx);
 
         assert_eq!(
-            vuelta.registradas, 0,
+            round.registradas, 0,
             "con la máquina dada por vacía se registró una cara"
         );
         assert!(
-            descubridor.coleccion.is_none(),
+            discoverer.coleccion.is_none(),
             "se volvió a enumerar las fuentes del sistema después de saber que no hay ninguna"
         );
     }
@@ -1491,20 +1486,20 @@ mod tests {
         // **Se mide con la familia que el pintor pediría para cada carácter**, que es lo único que
         // describe lo que se ve: preguntar siempre por la monoespaciada escondería precisamente el
         // mecanismo que se está probando.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
         let letras: Vec<(char, Option<(u16, u16)>)> = "aWgñ0"
             .chars()
-            .map(|c| (c, con_su_familia(&ctx, &descubridor, c)))
+            .map(|c| (c, with_its_family(&ctx, &discoverer, c)))
             .collect();
 
-        descubridor.apunta('\u{F015}');
-        descubridor.resolver(&ctx);
-        pasada(&ctx);
+        discoverer.note('\u{F015}');
+        discoverer.resolve(&ctx);
+        pass(&ctx);
 
         for (c, antes) in letras {
             assert_eq!(
-                con_su_familia(&ctx, &descubridor, c),
+                with_its_family(&ctx, &discoverer, c),
                 antes,
                 "descubrir un icono le cambió el dibujo a {c:?}: la fuente de iconos se coló en la \
                  familia monoespaciada y le está robando las letras a la fuente del terminal"
@@ -1517,10 +1512,10 @@ mod tests {
         // **Pedirle a epaint una familia con nombre que nadie ha declarado es un PÁNICO**, no un aviso:
         // «is not bound to any fonts». Y quien pinta pide familia en cada celda desde el primer fotograma,
         // mucho antes de que se haya descubierto nada. Comprobado: caía.
-        let descubridor = Descubridor::default();
+        let discoverer = Discoverer::default();
 
         assert_eq!(
-            descubridor.familia_de('\u{F015}'),
+            discoverer.family_of('\u{F015}'),
             egui::FontFamily::Monospace,
             "se pidió la familia de iconos sin haber registrado ninguna cara de iconos"
         );
@@ -1536,23 +1531,23 @@ mod tests {
         //
         // La prueba de arriba no lo cubre: aquella mira el estado inicial, y este defecto solo aparece
         // **después** de un registro con éxito.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
-        descubridor.apunta('\u{F015}');
-        let vuelta = descubridor.resolver(&ctx);
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
+        discoverer.note('\u{F015}');
+        let round = discoverer.resolve(&ctx);
 
-        if vuelta.registradas > 0 {
+        if round.registradas > 0 {
             assert_eq!(
-                descubridor.familia_de('\u{F015}'),
+                discoverer.family_of('\u{F015}'),
                 egui::FontFamily::Monospace,
                 "se ofreció la familia de iconos en el mismo fotograma que la declaró, cuando el motor \
                  todavía no la conoce: pedirla ahí es un pánico"
             );
             // Y en la vuelta siguiente sí, que es la otra mitad: sin ella, «nunca ofrecerla» pasaría.
-            descubridor.resolver(&ctx);
+            discoverer.resolve(&ctx);
             assert_eq!(
-                descubridor.familia_de('\u{F015}'),
-                egui::FontFamily::Name(FAMILIA_DE_ICONOS.into()),
+                discoverer.family_of('\u{F015}'),
+                egui::FontFamily::Name(ICON_FAMILY.into()),
                 "la familia de iconos no se llegó a ofrecer nunca"
             );
         }
@@ -1568,16 +1563,16 @@ mod tests {
         // **Se fabrica la colisión en vez de esperar a tenerla**: esta máquina no tiene ninguna familia
         // llamada `Hack`, así que una prueba que dependiera de lo instalado no probaría nada aquí y
         // fallaría en la máquina de otro.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
-        descubridor.caras.push(CaraDelSistema {
-            familia: format!("{PREFIJO_DEL_SISTEMA}Hack"),
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
+        discoverer.faces.push(SystemFace {
+            familia: format!("{SYSTEM_PREFIX}Hack"),
             datos: Arc::new(egui::FontData::from_static(&[])),
             delante: false,
         });
 
-        let de_fabrica = ["Hack".to_owned(), "emoji-icon-font".to_owned()];
-        let mono = descubridor.monoespaciada(&de_fabrica);
+        let factory = ["Hack".to_owned(), "emoji-icon-font".to_owned()];
+        let mono = discoverer.monospaced(&factory);
 
         assert_eq!(
             mono.iter().filter(|n| *n == "Hack").count(),
@@ -1596,9 +1591,9 @@ mod tests {
         let _ = ctx;
     }
     /// Si esta máquina tiene con qué pintar emojis a color.
-    fn hay_color(ctx: &egui::Context) -> bool {
-        Descubridor::default()
-            .glifo_a_color(ctx, '\u{1F600}', 20, 20)
+    fn has_color(ctx: &egui::Context) -> bool {
+        Discoverer::default()
+            .color_glyph(ctx, '\u{1F600}', 20, 20)
             .is_some()
     }
 
@@ -1611,8 +1606,8 @@ mod tests {
         // decir lo mismo. Esto es ese algo.
         for n in 0..=127u8 {
             assert_eq!(
-                presentacion_de(char::from(n), &[]),
-                Presentacion::Texto,
+                presentation_of(char::from(n), &[]),
+                Presentation::Texto,
                 "el carácter ASCII U+{n:04X} suelto pide color, y quien pinta lo descarta sin \
                  preguntar: no saldría"
             );
@@ -1627,8 +1622,8 @@ mod tests {
         // selector detrás son emojis de pleno derecho. Lo encontró la prueba de arriba al correrla.
         for c in "#*0123456789".chars() {
             assert_eq!(
-                presentacion_de(c, &['\u{FE0F}']),
-                Presentacion::Color,
+                presentation_of(c, &['\u{FE0F}']),
+                Presentation::Color,
                 "«{c}» con el selector de emoji detrás se quedó en texto: es la base de una tecla y \
                  tiene que salir a color"
             );
@@ -1644,23 +1639,23 @@ mod tests {
         // **Se afirma sobre el CONTADOR de rasterizados y no sobre el tamaño del mapa**, porque el mapa
         // guarda también los fallos: una implementación que buscara siempre y no guardara nada dejaría el
         // mapa igual de grande.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
 
-        descubridor.glifo_a_color(&ctx, '\u{1F600}', 20, 20);
-        let primera = descubridor.coste_del_color();
+        discoverer.color_glyph(&ctx, '\u{1F600}', 20, 20);
+        let primera = discoverer.color_cost();
         assert_eq!(
-            primera.rasterizados + primera.fallidos,
+            primera.rasterized + primera.fallidos,
             1,
             "la primera vez no llegó a intentar rasterizar nada"
         );
 
         for _ in 0..10 {
-            descubridor.glifo_a_color(&ctx, '\u{1F600}', 20, 20);
+            discoverer.color_glyph(&ctx, '\u{1F600}', 20, 20);
         }
-        let despues = descubridor.coste_del_color();
+        let despues = discoverer.color_cost();
         assert_eq!(
-            (despues.rasterizados, despues.fallidos),
+            (despues.rasterized, despues.fallidos),
             (0, 0),
             "diez peticiones más del mismo emoji volvieron a hacer trabajo: no se está recordando nada"
         );
@@ -1680,16 +1675,16 @@ mod tests {
         // **Se afirma sobre el TAMAÑO de la textura devuelta, no sobre que se haya vaciado el mapa.** Una
         // caché que se vacíe y vuelva a rasterizar al tamaño viejo cumpliría lo segundo y seguiría
         // pintando mal, que es el defecto que esto existe para impedir.
-        let ctx = contexto();
-        if !hay_color(&ctx) {
+        let ctx = context();
+        if !has_color(&ctx) {
             return;
         }
-        let mut descubridor = Descubridor::default();
-        let (_, _, pequeno) = descubridor
-            .glifo_a_color(&ctx, '\u{1F600}', 20, 20)
+        let mut discoverer = Discoverer::default();
+        let (_, _, pequeno) = discoverer
+            .color_glyph(&ctx, '\u{1F600}', 20, 20)
             .expect("la máquina tiene fuente de color y no dio glifo");
-        let (_, _, grande) = descubridor
-            .glifo_a_color(&ctx, '\u{1F600}', 40, 40)
+        let (_, _, grande) = discoverer
+            .color_glyph(&ctx, '\u{1F600}', 40, 40)
             .expect("no dio glifo a la altura nueva");
 
         assert!(
@@ -1698,7 +1693,7 @@ mod tests {
              anterior: la caché está devolviendo lo viejo"
         );
         assert_eq!(
-            descubridor.glifos_recordados(),
+            discoverer.glyphs_remembered(),
             1,
             "quedaron guardadas las dos alturas: la caché no se vació y la memoria crece con cada zoom"
         );
@@ -1718,25 +1713,28 @@ mod tests {
         // **Se llena con imágenes sintéticas y no con emojis de verdad**, y se dice: llenarlo de verdad
         // exige que la máquina tenga ochocientos emojis distintos instalados, que es una condición de la
         // máquina y no del código.
-        let ctx = contexto();
-        let mut glifos = Glifos::default();
-        let lado = LADO_DEL_ATLAS / 8;
+        let ctx = context();
+        let mut glyphs = Glyphs::default();
+        let side = ATLAS_SIDE / 8;
         let cuadrado =
-            || egui::ColorImage::filled([lado, lado], egui::Color32::from_rgb(10, 20, 30));
+            || egui::ColorImage::filled([side, side], egui::Color32::from_rgb(10, 20, 30));
 
-        let mut pegados = 0;
-        while glifos.pegar(&ctx, cuadrado()).is_some() {
-            pegados += 1;
-            assert!(pegados <= 8 * 8, "el atlas aceptó más de lo que cabe en él");
+        let mut attached = 0;
+        while glyphs.paste(&ctx, cuadrado()).is_some() {
+            attached += 1;
+            assert!(
+                attached <= 8 * 8,
+                "el atlas aceptó más de lo que cabe en él"
+            );
         }
         assert_eq!(
-            pegados,
+            attached,
             8 * 8,
-            "el atlas no aprovechó su superficie: caben {} cuadrados de {lado} píxeles y entraron {pegados}",
+            "el atlas no aprovechó su superficie: caben {} cuadrados de {side} píxeles y entraron {attached}",
             8 * 8
         );
         assert!(
-            glifos.dijo_el_techo,
+            glyphs.said_the_ceiling,
             "el atlas se llenó y no se dijo por la salida de error: un techo callado se lee como un fallo"
         );
     }
@@ -1750,34 +1748,34 @@ mod tests {
         // **Se comprueban todos los pares de una tanda larga y no solo los dos primeros**, porque el sitio
         // donde se pisan es el **salto de fila**: dos glifos seguidos caen bien casi con cualquier cuenta,
         // y el que estrena fila es el que se coloca encima del de arriba.
-        let ctx = contexto();
-        let mut glifos = Glifos::default();
+        let ctx = context();
+        let mut glyphs = Glyphs::default();
         // Anchos distintos a propósito: con todos iguales, una cuenta que ignorase el ancho real y
         // avanzara un paso fijo colocaría bien igualmente.
         let sitios: Vec<_> = (0..80)
             .filter_map(|n| {
-                let ancho = 15 + n % 7;
-                glifos.pegar(
+                let width = 15 + n % 7;
+                glyphs.paste(
                     &ctx,
-                    egui::ColorImage::filled([ancho, 17], egui::Color32::RED),
+                    egui::ColorImage::filled([width, 17], egui::Color32::RED),
                 )
             })
             .collect();
         assert!(
             sitios.len() > 60,
-            "solo cupieron {} glifos de 17 píxeles de alto en un atlas de {LADO_DEL_ATLAS}: la prueba no \
+            "solo cupieron {} glifos de 17 píxeles de alto en un atlas de {ATLAS_SIDE}: la prueba no \
              llega a saltar de fila varias veces",
             sitios.len()
         );
 
-        let lado = LADO_DEL_ATLAS as f32;
+        let side = ATLAS_SIDE as f32;
         for (n, uno) in sitios.iter().enumerate() {
             for otro in &sitios[n + 1..] {
                 let comun = uno.uv.intersect(otro.uv);
                 // **Menos de medio píxel de solape, no cero exacto**: dos glifos pegados comparten su
                 // borde, y en coma flotante ese borde no da una anchura de cero limpia.
                 assert!(
-                    comun.width() * lado < 0.5 || comun.height() * lado < 0.5,
+                    comun.width() * side < 0.5 || comun.height() * side < 0.5,
                     "dos glifos se solapan dentro del atlas ({:?} y {:?}): uno se pinta encima del otro \
                      y los dos emojis salen iguales",
                     uno.uv,
@@ -1795,16 +1793,16 @@ mod tests {
         //
         // Lo que ata esta prueba es la mitad comprobable sin depender de qué fuentes haya: **una máscara
         // de alfa nunca sale por aquí**, y una máscara de alfa es exactamente un dibujo monocromo.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
         // La 'a' no es emoji y ninguna fuente de emoji la trae a color: tiene que salir sin glifo.
         assert!(
-            descubridor.glifo_a_color(&ctx, 'a', 20, 20).is_none(),
+            discoverer.color_glyph(&ctx, 'a', 20, 20).is_none(),
             "una letra corriente salió por el camino del color"
         );
-        let coste = descubridor.coste_del_color();
+        let coste = discoverer.color_cost();
         assert_eq!(
-            coste.rasterizados, 0,
+            coste.rasterized, 0,
             "se rasterizó una letra corriente como si fuera un emoji"
         );
         assert_eq!(
@@ -1818,27 +1816,27 @@ mod tests {
         // **Recordar el fallo no es un detalle.** Sin él, un carácter que ninguna fuente de color cubre
         // recorrería las familias de emoji **en cada fotograma** — y es justo el carácter que un programa
         // roto escupe en bucle.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
         // **Un carácter que NINGUNA fuente pinta a color, y por eso es el sin asignar de Unicode.** La
         // primera versión de esta prueba usaba un muñeco de nieve y no probaba nada: `Noto Color Emoji`
         // lo trae, así que se recordaba por el camino del éxito y quitar el recuerdo del **fallo** la
         // dejaba pasando igual. Lo destapó mutarla.
         assert!(
-            descubridor
-                .glifo_a_color(&ctx, CUADRO_DE_REEMPLAZO, 20, 20)
+            discoverer
+                .color_glyph(&ctx, REPLACEMENT_BOX, 20, 20)
                 .is_none(),
             "el carácter sin asignar salió a color: la prueba no está midiendo el camino del fallo"
         );
-        let primera = descubridor.coste_del_color();
+        let primera = discoverer.color_cost();
         assert_eq!(primera.fallidos, 1, "el intento fallido no se contó");
 
         for _ in 0..5 {
-            descubridor.glifo_a_color(&ctx, CUADRO_DE_REEMPLAZO, 20, 20);
+            discoverer.color_glyph(&ctx, REPLACEMENT_BOX, 20, 20);
         }
-        let despues = descubridor.coste_del_color();
+        let despues = discoverer.color_cost();
         assert_eq!(
-            despues.rasterizados + despues.fallidos,
+            despues.rasterized + despues.fallidos,
             0,
             "se volvió a buscar un carácter que ya se había buscado: se paga el recorrido entero por \
              fotograma mientras esté en pantalla"
@@ -1857,22 +1855,22 @@ mod tests {
         // pequeño y **es lo correcto**: pintarlo a la altura de la línea taparía lo que el programa
         // escribió en la celda de al lado, y quién decide la anchura de un carácter es el motor, no este
         // proyecto.
-        let ctx = contexto();
-        if !hay_color(&ctx) {
+        let ctx = context();
+        if !has_color(&ctx) {
             return;
         }
-        let mut descubridor = Descubridor::default();
-        let (_, _, medidas) = descubridor
-            .glifo_a_color(&ctx, '\u{2601}', 20, 13)
+        let mut discoverer = Discoverer::default();
+        let (_, _, measurements) = discoverer
+            .color_glyph(&ctx, '\u{2601}', 20, 13)
             .expect("la máquina tiene fuente de color y no dio glifo");
         assert!(
-            medidas.x <= 13.0,
-            "el emoji de una columna salió de {medidas:?} en una celda de 13 de ancho: se come la vecina \
+            measurements.x <= 13.0,
+            "el emoji de una columna salió de {measurements:?} en una celda de 13 de ancho: se come la vecina \
              y tapa lo que el programa escribió ahí"
         );
         assert!(
-            medidas.x as u32 == 13,
-            "el emoji de una columna salió de {medidas:?} sin llenar los 13 de ancho que tiene: se ve \
+            measurements.x as u32 == 13,
+            "el emoji de una columna salió de {measurements:?} sin llenar los 13 de ancho que tiene: se ve \
              más pequeño de lo que le cabe"
         );
     }
@@ -1882,24 +1880,24 @@ mod tests {
         // **AC5, por el lado de quien rasteriza.** El pintor comprueba el rectángulo que sale a pantalla;
         // aquí se comprueba que la imagen que se le entrega ya viene acotada, que es lo que hace que ese
         // rectángulo quepa.
-        let ctx = contexto();
-        if !hay_color(&ctx) {
+        let ctx = context();
+        if !has_color(&ctx) {
             return;
         }
-        let mut descubridor = Descubridor::default();
-        for (alto, ancho) in [(20u32, 40u32), (40, 20), (17, 17)] {
-            let (_, _, medidas) = descubridor
-                .glifo_a_color(&ctx, '\u{1F600}', alto, ancho)
+        let mut discoverer = Discoverer::default();
+        for (height, width) in [(20u32, 40u32), (40, 20), (17, 17)] {
+            let (_, _, measurements) = discoverer
+                .color_glyph(&ctx, '\u{1F600}', height, width)
                 .expect("la máquina tiene fuente de color y no dio glifo");
             assert!(
-                medidas.y <= alto as f32 && medidas.x <= ancho as f32,
-                "para un hueco de {ancho}x{alto} el emoji salió de {medidas:?}: se sale de su sitio"
+                measurements.y <= height as f32 && measurements.x <= width as f32,
+                "para un hueco de {width}x{height} el emoji salió de {measurements:?}: se sale de su sitio"
             );
             // Y que quepa no basta: tiene que **llenar** uno de los dos ejes, o estaría desperdiciando
             // sitio y saldría más pequeño de lo que la celda da.
             assert!(
-                medidas.y as u32 == alto || medidas.x as u32 == ancho,
-                "para un hueco de {ancho}x{alto} el emoji salió de {medidas:?}: no llena ningún eje, \
+                measurements.y as u32 == height || measurements.x as u32 == width,
+                "para un hueco de {width}x{height} el emoji salió de {measurements:?}: no llena ningún eje, \
                  así que se ve más pequeño de lo que cabe"
             );
         }
@@ -1915,34 +1913,34 @@ mod tests {
         // **Se fuerza el estado en vez de esperar a llenarlo de verdad**, y se dice: llenar ocho huecos
         // con fuentes reales exige que la máquina tenga ocho familias que cubran ocho scripts distintos,
         // que es una condición de la máquina y no del código.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
-        for n in 0..FAMILIAS_MAXIMAS {
-            descubridor.caras.push(CaraDelSistema {
-                familia: format!("{PREFIJO_DEL_SISTEMA}relleno{n}"),
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
+        for n in 0..MAX_FAMILIES {
+            discoverer.faces.push(SystemFace {
+                familia: format!("{SYSTEM_PREFIX}relleno{n}"),
                 datos: Arc::new(egui::FontData::from_static(&[])),
                 delante: false,
             });
         }
 
-        descubridor.apunta('日');
-        let vuelta = descubridor.resolver(&ctx);
+        discoverer.note('日');
+        let round = discoverer.resolve(&ctx);
 
         assert_eq!(
-            vuelta.buscados, 1,
+            round.buscados, 1,
             "con el techo lleno ni siquiera se llegó a mirar el carácter"
         );
         assert_eq!(
-            vuelta.registradas, 0,
+            round.registradas, 0,
             "se registró una cara por encima del techo"
         );
         assert_eq!(
-            descubridor.caras.len(),
-            FAMILIAS_MAXIMAS,
+            discoverer.faces.len(),
+            MAX_FAMILIES,
             "la lista de caras pasó de su techo"
         );
         assert!(
-            descubridor.dijo_el_techo,
+            discoverer.said_the_ceiling,
             "se llegó al techo y no se dijo por la salida de error: un techo callado se lee como un fallo"
         );
     }
@@ -1965,7 +1963,7 @@ mod tests {
         });
 
         assert!(
-            pixeles_de(&mascara, 2, 2).is_none(),
+            pixels_of(&mascara, 2, 2).is_none(),
             "un dibujo monocromo salió por el camino del color: se pinta como imagen y sale teñido de lo \
              que traiga el canal, en vez de con el color que el programa pidió para esa celda"
         );
@@ -1981,7 +1979,7 @@ mod tests {
         // Un píxel rojo opaco, escrito como lo escribe la fuente: azul, verde, rojo, alfa.
         let bgra = skrifa::bitmap::BitmapData::Bgra(&[0, 0, 255, 255]);
 
-        let pixeles = pixeles_de(&bgra, 1, 1).expect("un píxel en BGRA no dio imagen");
+        let pixeles = pixels_of(&bgra, 1, 1).expect("un píxel en BGRA no dio imagen");
 
         assert_eq!(
             pixeles.get_pixel(0, 0).0,
@@ -2011,7 +2009,7 @@ mod tests {
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
             .expect("no se pudo escribir el PNG de la prueba");
 
-        let pixeles = pixeles_de(&skrifa::bitmap::BitmapData::Png(&png), 2, 1)
+        let pixeles = pixels_of(&skrifa::bitmap::BitmapData::Png(&png), 2, 1)
             .expect("el PNG de la prueba no dio imagen");
 
         assert_eq!(
@@ -2036,19 +2034,15 @@ mod tests {
         // redondear, y el de una consola aplastada contra el borde mide una fracción de punto.
         //
         // Se comprobó mutándola: sin la guarda, esta prueba no falla — revienta.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
 
         assert!(
-            descubridor
-                .glifo_a_color(&ctx, '\u{1F600}', 0, 20)
-                .is_none(),
+            discoverer.color_glyph(&ctx, '\u{1F600}', 0, 20).is_none(),
             "una celda sin alto dio glifo"
         );
         assert!(
-            descubridor
-                .glifo_a_color(&ctx, '\u{1F600}', 20, 0)
-                .is_none(),
+            discoverer.color_glyph(&ctx, '\u{1F600}', 20, 0).is_none(),
             "una celda sin ancho dio glifo"
         );
     }
@@ -2064,23 +2058,21 @@ mod tests {
         // **Se llena con imágenes sintéticas y se le fija antes la altura**, porque una altura distinta de
         // la que el atlas tiene dentro lo vacía entero: sin fijarla, la petición de abajo encontraría
         // sitio de sobra y esto no probaría nada.
-        let ctx = contexto();
-        let mut descubridor = Descubridor::default();
-        descubridor.glifos.alto = 20;
-        let lado = LADO_DEL_ATLAS / 4;
-        while descubridor
-            .glifos
-            .pegar(
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
+        discoverer.glyphs.height = 20;
+        let side = ATLAS_SIDE / 4;
+        while discoverer
+            .glyphs
+            .paste(
                 &ctx,
-                egui::ColorImage::filled([lado, lado], egui::Color32::RED),
+                egui::ColorImage::filled([side, side], egui::Color32::RED),
             )
             .is_some()
         {}
 
         assert!(
-            descubridor
-                .glifo_a_color(&ctx, '\u{1F600}', 20, 20)
-                .is_none(),
+            discoverer.color_glyph(&ctx, '\u{1F600}', 20, 20).is_none(),
             "con el atlas lleno se devolvió una textura igualmente: es el trozo que ocupa otro glifo, así \
              que el emoji sale con el dibujo de otro"
         );

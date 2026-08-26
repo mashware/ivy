@@ -15,12 +15,12 @@ use eframe::egui::{Event, Key, Modifiers};
 use std::borrow::Cow;
 
 /// Los bytes que le corresponden a un evento, o nada si ese evento no se traduce.
-pub fn bytes(evento: &Event) -> Option<Cow<'static, [u8]>> {
-    match evento {
+pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
+    match event {
         // El texto ya viene resuelto por el sistema: acentos, teclas muertas y métodos de entrada
         // incluidos. Traducirlo desde la tecla física en vez de desde aquí sería rehacer mal el
         // trabajo del escritorio.
-        Event::Text(texto) if !texto.is_empty() => Some(Cow::Owned(texto.as_bytes().to_vec())),
+        Event::Text(text) if !text.is_empty() => Some(Cow::Owned(text.as_bytes().to_vec())),
 
         // **Estas tres teclas no llegan como teclas.** La capa que traduce los eventos del sistema
         // operativo mira Ctrl+C, Ctrl+X y Ctrl+V *antes* de emitir nada y las convierte en copiar,
@@ -38,7 +38,7 @@ pub fn bytes(evento: &Event) -> Option<Cow<'static, [u8]>> {
         // **Aquí llegan los dos atajos, y por esta puerta son indistinguibles.** El escritorio emite
         // el mismo `Paste` para Ctrl+V y para Ctrl+Mayúsculas+V, sin modificadores. Quien decide cuál
         // es cuál es el bucle, que reconstruye los modificadores recorriendo los eventos en orden y
-        // llama a [`pegar`] cuando toca; lo que llegue hasta aquí es el caso sin Mayúsculas.
+        // llama a [`paste`] cuando toca; lo que llegue hasta aquí es el caso sin Mayúsculas.
         //
         // Y ese caso **no pega**: Ctrl+V vale en un terminal lo que vale el byte de control, que es
         // «lo siguiente, literal» para un shell y el bloque visual para vim. Robárselo para pegar
@@ -53,7 +53,7 @@ pub fn bytes(evento: &Event) -> Option<Cow<'static, [u8]>> {
             pressed: true,
             modifiers,
             ..
-        } => tecla(*key, *modifiers),
+        } => key_bytes(*key, *modifiers),
 
         _ => None,
     }
@@ -100,15 +100,15 @@ pub fn bytes(evento: &Event) -> Option<Cow<'static, [u8]>> {
 ///
 /// Se filtra **también cuando no se envuelve**: el modo se consulta al componer y el programa puede
 /// haberlo cambiado justo después; y el peligro del núcleo no depende del envoltorio.
-pub fn pegar(texto: &str, marcado: bool) -> Vec<u8> {
-    const ABRE: &[u8] = b"\x1b[200~";
-    const CIERRA: &[u8] = b"\x1b[201~";
+pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
+    const OPENS: &[u8] = b"\x1b[200~";
+    const CLOSES: &[u8] = b"\x1b[201~";
 
     // Se compone de una pasada y con la reserva hecha: el portapapeles puede ser de megabytes y esto
     // corre en el hilo que pinta.
-    let mut cuerpo = Vec::with_capacity(texto.len() + ABRE.len() + CIERRA.len());
-    if marcado {
-        cuerpo.extend_from_slice(ABRE);
+    let mut cuerpo = Vec::with_capacity(text.len() + OPENS.len() + CLOSES.len());
+    if bracketed {
+        cuerpo.extend_from_slice(OPENS);
     }
     let antes = cuerpo.len();
 
@@ -123,9 +123,9 @@ pub fn pegar(texto: &str, marcado: bool) -> Vec<u8> {
     // ahí un retorno de carro es mandarle **un carácter de control dentro de un texto**, y lo que hace
     // es insertarlo literal: aparece un cuadro en medio de la orden y `echo` lo imprime. Comprobado en
     // pantalla, que es como se descubrió.
-    let salto = if marcado { b'\n' } else { b'\r' };
+    let salto = if bracketed { b'\n' } else { b'\r' };
 
-    for byte in texto.bytes() {
+    for byte in text.bytes() {
         match byte {
             // El escritorio ya normaliza los pares antes de entregarlo, así que un retorno suelto que
             // llegue aquí venía solo y vale lo mismo que un salto.
@@ -142,13 +142,13 @@ pub fn pegar(texto: &str, marcado: bool) -> Vec<u8> {
         return Vec::new();
     }
 
-    if marcado {
-        cuerpo.extend_from_slice(CIERRA);
+    if bracketed {
+        cuerpo.extend_from_slice(CLOSES);
     }
     cuerpo
 }
 
-fn tecla(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
+fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
     // Alt y la tecla de comando de macOS quedan fuera del hito, y «fuera» significa silencio: Alt
     // antepone un escape, así que mandar el byte pelado no sería una aproximación, sería otra
     // tecla. Mayúsculas sí pasa, porque no cambia el código de control — es lo que hace `xterm`.
@@ -156,7 +156,7 @@ fn tecla(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
         return None;
     }
     if modifiers.ctrl
-        && let Some(codigo) = con_control(key)
+        && let Some(codigo) = with_ctrl(key)
     {
         return Some(Cow::Owned(vec![codigo]));
     }
@@ -195,7 +195,7 @@ fn tecla(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
 /// resulte ser hoy la propia letra: ese texto está pensado para enseñárselo a una persona en un
 /// menú de atajos, no es un contrato. Si mañana cambia, un byte de control cambiaría con él sin
 /// que nada dejara de compilar.
-fn con_control(key: Key) -> Option<u8> {
+fn with_ctrl(key: Key) -> Option<u8> {
     let codigo = match key {
         Key::A => 1,
         Key::B => 2,
@@ -232,7 +232,7 @@ fn con_control(key: Key) -> Option<u8> {
 mod tests {
     use super::*;
 
-    fn con(key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {
+    fn chord_of(key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {
         bytes(&Event::Key {
             key,
             physical_key: None,
@@ -243,48 +243,48 @@ mod tests {
         .map(|b| b.into_owned())
     }
 
-    fn pulsar(key: Key) -> Option<Vec<u8>> {
-        con(key, Modifiers::NONE)
+    fn press(key: Key) -> Option<Vec<u8>> {
+        chord_of(key, Modifiers::NONE)
     }
 
-    fn pulsar_con_control(key: Key) -> Option<Vec<u8>> {
-        con(key, Modifiers::CTRL)
+    fn press_with_ctrl(key: Key) -> Option<Vec<u8>> {
+        chord_of(key, Modifiers::CTRL)
     }
 
-    fn texto(s: &str) -> Option<Vec<u8>> {
+    fn text(s: &str) -> Option<Vec<u8>> {
         bytes(&Event::Text(s.into())).map(|b| b.into_owned())
     }
 
     #[test]
     fn el_texto_viaja_tal_cual_en_utf8() {
-        assert_eq!(texto("ls"), Some(b"ls".to_vec()));
+        assert_eq!(text("ls"), Some(b"ls".to_vec()));
         // Un carácter que no es ASCII ocupa varios bytes y tiene que salir entero.
-        assert_eq!(texto("ñ"), Some(vec![0xC3, 0xB1]), "la eñe son dos bytes");
+        assert_eq!(text("ñ"), Some(vec![0xC3, 0xB1]), "la eñe son dos bytes");
     }
 
     #[test]
     fn el_texto_vacio_es_nada_que_mandar_y_no_una_lista_vacia() {
         // Devolver algo vacío obligaría a quien llame a distinguir «no hay nada que mandar» de «no
         // se traduce», que son la misma decisión para él.
-        assert_eq!(texto(""), None);
+        assert_eq!(text(""), None);
     }
 
     #[test]
     fn las_cuatro_teclas_de_control_basicas() {
         // Retorno de carro, no salto de línea.
-        assert_eq!(pulsar(Key::Enter), Some(vec![0x0D]));
-        assert_eq!(pulsar(Key::Tab), Some(vec![0x09]));
+        assert_eq!(press(Key::Enter), Some(vec![0x0D]));
+        assert_eq!(press(Key::Tab), Some(vec![0x09]));
         // Borrar, no retroceso: con 0x08 el shell borra pero muchos editores no.
-        assert_eq!(pulsar(Key::Backspace), Some(vec![0x7F]));
-        assert_eq!(pulsar(Key::Escape), Some(vec![0x1B]));
+        assert_eq!(press(Key::Backspace), Some(vec![0x7F]));
+        assert_eq!(press(Key::Escape), Some(vec![0x1B]));
     }
 
     #[test]
     fn las_flechas_van_como_secuencia_de_escape() {
-        assert_eq!(pulsar(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
-        assert_eq!(pulsar(Key::ArrowDown), Some(b"\x1b[B".to_vec()));
-        assert_eq!(pulsar(Key::ArrowRight), Some(b"\x1b[C".to_vec()));
-        assert_eq!(pulsar(Key::ArrowLeft), Some(b"\x1b[D".to_vec()));
+        assert_eq!(press(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
+        assert_eq!(press(Key::ArrowDown), Some(b"\x1b[B".to_vec()));
+        assert_eq!(press(Key::ArrowRight), Some(b"\x1b[C".to_vec()));
+        assert_eq!(press(Key::ArrowLeft), Some(b"\x1b[D".to_vec()));
     }
 
     #[test]
@@ -320,18 +320,14 @@ mod tests {
         for (i, key) in letras.iter().enumerate() {
             let esperado = (i + 1) as u8;
             assert_eq!(
-                pulsar_con_control(*key),
+                press_with_ctrl(*key),
                 Some(vec![esperado]),
                 "la letra en la posición {i} no da su código de control"
             );
         }
         // Los dos que se usan a diario, nombrados para que se lea qué está en juego.
-        assert_eq!(
-            pulsar_con_control(Key::D),
-            Some(vec![4]),
-            "cierra la entrada"
-        );
-        assert_eq!(pulsar_con_control(Key::Z), Some(vec![26]), "suspende");
+        assert_eq!(press_with_ctrl(Key::D), Some(vec![4]), "cierra la entrada");
+        assert_eq!(press_with_ctrl(Key::Z), Some(vec![26]), "suspende");
     }
 
     #[test]
@@ -358,12 +354,12 @@ mod tests {
         // que produce. Si la tabla de teclas contestara también a las letras, cada carácter que
         // escribiera el usuario llegaría por duplicado al programa de dentro. El texto es el que
         // manda, y la tecla tiene que callar.
-        assert_eq!(pulsar(Key::A), None);
-        assert_eq!(pulsar(Key::Z), None);
-        assert_eq!(pulsar(Key::Space), None);
-        assert_eq!(pulsar(Key::Num0), None);
+        assert_eq!(press(Key::A), None);
+        assert_eq!(press(Key::Z), None);
+        assert_eq!(press(Key::Space), None);
+        assert_eq!(press(Key::Num0), None);
         // Y con mayúsculas igual: la «A» también viaja como texto.
-        assert_eq!(con(Key::A, Modifiers::SHIFT), None);
+        assert_eq!(chord_of(Key::A, Modifiers::SHIFT), None);
     }
 
     #[test]
@@ -373,12 +369,12 @@ mod tests {
         //
         // Se prueba con la D y no con la C, la X o la V: esas tres nunca llegan como tecla porque
         // la capa de debajo las convierte antes en copiar, cortar y pegar.
-        let ctrl_de_linux = Modifiers {
+        let linux_ctrl = Modifiers {
             ctrl: true,
             command: true,
             ..Modifiers::NONE
         };
-        assert_eq!(con(Key::D, ctrl_de_linux), Some(vec![4]));
+        assert_eq!(chord_of(Key::D, linux_ctrl), Some(vec![4]));
     }
 
     #[test]
@@ -386,20 +382,20 @@ mod tests {
         // En macOS ⌘ llega sin `ctrl` y con `mac_cmd`. Si se tratara como un Ctrl cualquiera,
         // ⌘+Q pediría salir de la aplicación y además mandaría el byte que cuelga la salida del
         // terminal.
-        let comando_de_macos = Modifiers {
+        let macos_command = Modifiers {
             mac_cmd: true,
             command: true,
             ..Modifiers::NONE
         };
-        assert_eq!(con(Key::Q, comando_de_macos), None);
-        assert_eq!(con(Key::Enter, comando_de_macos), None);
+        assert_eq!(chord_of(Key::Q, macos_command), None);
+        assert_eq!(chord_of(Key::Enter, macos_command), None);
     }
 
     #[test]
     fn mayusculas_con_enter_sigue_siendo_retorno() {
         // Mayúsculas sola no pasa por la tabla de códigos de control, así que necesita su propia
         // prueba: si se filtrara como se filtra Alt, **Mayúsculas+Enter sería una tecla muerta**.
-        assert_eq!(con(Key::Enter, Modifiers::SHIFT), Some(vec![0x0D]));
+        assert_eq!(chord_of(Key::Enter, Modifiers::SHIFT), Some(vec![0x0D]));
     }
 
     #[test]
@@ -407,9 +403,12 @@ mod tests {
         // Es la única tecla a la que Mayúsculas le cambia el significado: con ella el programa
         // retrocede el foco en vez de avanzarlo. Si esto mandara el tabulador de siempre,
         // **moverse hacia atrás por un formulario iría hacia delante**.
-        assert_eq!(con(Key::Tab, Modifiers::SHIFT), Some(b"\x1b[Z".to_vec()));
         assert_eq!(
-            pulsar(Key::Tab),
+            chord_of(Key::Tab, Modifiers::SHIFT),
+            Some(b"\x1b[Z".to_vec())
+        );
+        assert_eq!(
+            press(Key::Tab),
             Some(vec![0x09]),
             "y sin Mayúsculas, avanza"
         );
@@ -443,7 +442,7 @@ mod tests {
             command: true,
             ..Modifiers::NONE
         };
-        assert_eq!(con(Key::D, ctrl_shift), Some(vec![4]));
+        assert_eq!(chord_of(Key::D, ctrl_shift), Some(vec![4]));
     }
 
     #[test]
@@ -456,19 +455,19 @@ mod tests {
             command: true,
             ..Modifiers::NONE
         };
-        assert_eq!(con(Key::D, ctrl_alt), None);
-        assert_eq!(con(Key::Enter, Modifiers::ALT), None);
+        assert_eq!(chord_of(Key::D, ctrl_alt), None);
+        assert_eq!(chord_of(Key::Enter, Modifiers::ALT), None);
     }
 
     #[test]
     fn control_con_una_tecla_que_no_es_letra_cae_en_la_tabla_de_siempre() {
         // Quedarse mudo aquí convertiría a Ctrl+Enter en una tecla muerta, cuando lo que manda un
         // terminal es exactamente lo mismo que sin Ctrl.
-        assert_eq!(pulsar_con_control(Key::Enter), Some(vec![0x0D]));
-        assert_eq!(pulsar_con_control(Key::Backspace), Some(vec![0x7F]));
-        assert_eq!(pulsar_con_control(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
+        assert_eq!(press_with_ctrl(Key::Enter), Some(vec![0x0D]));
+        assert_eq!(press_with_ctrl(Key::Backspace), Some(vec![0x7F]));
+        assert_eq!(press_with_ctrl(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
         // Y lo que no está en ninguna de las dos tablas sigue sin mandar nada.
-        assert_eq!(pulsar_con_control(Key::F1), None);
+        assert_eq!(press_with_ctrl(Key::F1), None);
     }
 
     #[test]
@@ -504,19 +503,19 @@ mod tests {
     fn las_teclas_que_este_hito_deja_fuera_no_inventan_bytes() {
         // Están fuera a propósito, y lo que importa es que se note como silencio y no como un byte
         // equivocado que el programa de dentro interpretaría como otra cosa.
-        assert_eq!(pulsar(Key::F1), None);
-        assert_eq!(pulsar(Key::Home), None);
-        assert_eq!(pulsar(Key::PageUp), None);
-        assert_eq!(pulsar(Key::Delete), None);
+        assert_eq!(press(Key::F1), None);
+        assert_eq!(press(Key::Home), None);
+        assert_eq!(press(Key::PageUp), None);
+        assert_eq!(press(Key::Delete), None);
     }
 
     #[test]
     fn sin_marca_los_saltos_imitan_la_tecla_enter() {
         // Sin marca el programa no distingue lo pegado de lo tecleado, así que hay que imitar la
         // tecla: Enter manda retorno de carro. Mandar 0x0A sería otra tecla.
-        assert_eq!(pegar("ls\n", false), b"ls\r");
-        assert_eq!(pegar("a\nb", false), b"a\rb");
-        assert_eq!(pegar("sin saltos", false), b"sin saltos");
+        assert_eq!(paste("ls\n", false), b"ls\r");
+        assert_eq!(paste("a\nb", false), b"a\rb");
+        assert_eq!(paste("sin saltos", false), b"sin saltos");
     }
 
     #[test]
@@ -526,16 +525,16 @@ mod tests {
         // literal. Pegando dos órdenes salía «echo uno ▯ echo dos» con un cuadro en medio, y al pulsar
         // Enter el shell imprimía el cuadro. El salto tiene que ir como salto y que decida el programa.
         assert_eq!(
-            pegar("echo uno\necho dos", true),
+            paste("echo uno\necho dos", true),
             b"\x1b[200~echo uno\necho dos\x1b[201~"
         );
         // Un retorno suelto en el texto vale lo mismo que un salto, también aquí.
-        assert_eq!(pegar("a\rb", true), b"\x1b[200~a\nb\x1b[201~");
+        assert_eq!(paste("a\rb", true), b"\x1b[200~a\nb\x1b[201~");
     }
 
     #[test]
     fn con_el_programa_pidiendolo_el_texto_va_marcado_como_pegado() {
-        assert_eq!(pegar("ls\n", true), b"\x1b[200~ls\n\x1b[201~");
+        assert_eq!(paste("ls\n", true), b"\x1b[200~ls\n\x1b[201~");
     }
 
     #[test]
@@ -556,18 +555,18 @@ mod tests {
         ];
 
         for veneno in venenos {
-            let marcado = String::from_utf8(pegar(veneno, true)).expect("es texto");
-            let cuerpo = marcado
+            let bracketed = String::from_utf8(paste(veneno, true)).expect("es texto");
+            let cuerpo = bracketed
                 .strip_prefix("\x1b[200~")
                 .and_then(|s| s.strip_suffix("\x1b[201~"))
-                .unwrap_or_else(|| panic!("la marca no envuelve lo que debería: {marcado:?}"));
+                .unwrap_or_else(|| panic!("la marca no envuelve lo que debería: {bracketed:?}"));
             assert!(
                 !cuerpo.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\n'),
                 "quedó un carácter de control dentro de la marca: {cuerpo:?}"
             );
 
             // Y sin marcar tampoco: el modo se consulta al componer y puede cambiar justo después.
-            let pelado = String::from_utf8(pegar(veneno, false)).expect("es texto");
+            let pelado = String::from_utf8(paste(veneno, false)).expect("es texto");
             assert!(
                 !pelado.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\r'),
                 "pasó un carácter de control sin marcar: {pelado:?}"
@@ -583,9 +582,9 @@ mod tests {
         // entrada. Un portapapeles hostil los lleva sin que se vean al pegarlos.
         let hostil = "echo hola\x03\x1a\x1c\x04 y sigue\n";
 
-        for marcado in [true, false] {
-            let salida = pegar(hostil, marcado);
-            let cuerpo = if marcado {
+        for bracketed in [true, false] {
+            let salida = paste(hostil, bracketed);
+            let cuerpo = if bracketed {
                 &salida[6..salida.len() - 6]
             } else {
                 &salida[..]
@@ -603,24 +602,24 @@ mod tests {
     fn el_tabulador_y_los_saltos_sobreviven_al_filtro() {
         // Son los tres controles que un texto pegado lleva de verdad, y quitarlos convertiría pegar
         // una tabla o un guion en pegar una sola línea corrida.
-        assert_eq!(pegar("a\tb\nc", false), b"a\tb\rc");
-        assert_eq!(pegar("a\tb\nc", true), b"\x1b[200~a\tb\nc\x1b[201~");
+        assert_eq!(paste("a\tb\nc", false), b"a\tb\rc");
+        assert_eq!(paste("a\tb\nc", true), b"\x1b[200~a\tb\nc\x1b[201~");
         // Un retorno suelto vale lo mismo que un salto: el escritorio ya normalizó los pares.
-        assert_eq!(pegar("a\rb", false), b"a\rb");
+        assert_eq!(paste("a\rb", false), b"a\rb");
     }
 
     #[test]
     fn pegar_nada_no_manda_nada_ni_una_marca_vacia() {
-        assert!(pegar("", true).is_empty());
-        assert!(pegar("", false).is_empty());
+        assert!(paste("", true).is_empty());
+        assert!(paste("", false).is_empty());
         // Un texto que era solo controles se queda en nada, y tampoco manda la marca vacía.
-        assert!(pegar("\x1b\x1b\x1b", true).is_empty());
-        assert!(pegar("\x03\x04\x1a", true).is_empty());
+        assert!(paste("\x1b\x1b\x1b", true).is_empty());
+        assert!(paste("\x03\x04\x1a", true).is_empty());
 
         // **Pero lo que queda al quitarle el escape SÍ se manda, y eso es lo correcto.** `[201~` sin
         // su escape delante es texto corriente: se escribe en la línea, no cierra nada. Tirarlo sería
         // comerse caracteres que el usuario pegó a propósito.
-        let queda = String::from_utf8(pegar("\x1b[201~", true)).expect("es texto");
+        let queda = String::from_utf8(paste("\x1b[201~", true)).expect("es texto");
         assert_eq!(queda, "\x1b[200~[201~\x1b[201~");
     }
 
@@ -646,35 +645,35 @@ mod tests {
 ///
 /// Los dos se apagan con `copiar = no` y `pegar = no`, que es lo único que se puede hacer con ellos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Accion {
-    PartirAlLado,
-    PartirDebajo,
-    CerrarDivision,
-    PestanaNueva,
-    CerrarPestana,
-    PestanaAnterior,
-    PestanaSiguiente,
-    SubirUnaPagina,
-    BajarUnaPagina,
-    IrAlPrincipio,
-    IrAlFinal,
+pub enum Action {
+    SplitBeside,
+    SplitBelow,
+    ClosePane,
+    NewTab,
+    CloseTab,
+    PreviousTab,
+    NextTab,
+    PageUp,
+    PageDown,
+    GoToStart,
+    GoToEnd,
 }
 
-impl Accion {
+impl Action {
     /// Cómo se escribe en el fichero de configuración.
-    pub fn como_se_escribe(self) -> &'static str {
+    pub fn as_written(self) -> &'static str {
         match self {
-            Self::PartirAlLado => "partir-al-lado",
-            Self::PartirDebajo => "partir-debajo",
-            Self::CerrarDivision => "cerrar-division",
-            Self::PestanaNueva => "pestaña-nueva",
-            Self::CerrarPestana => "cerrar-pestaña",
-            Self::PestanaAnterior => "pestaña-anterior",
-            Self::PestanaSiguiente => "pestaña-siguiente",
-            Self::SubirUnaPagina => "subir-una-pagina",
-            Self::BajarUnaPagina => "bajar-una-pagina",
-            Self::IrAlPrincipio => "ir-al-principio",
-            Self::IrAlFinal => "ir-al-final",
+            Self::SplitBeside => "partir-al-lado",
+            Self::SplitBelow => "partir-debajo",
+            Self::ClosePane => "cerrar-division",
+            Self::NewTab => "pestaña-nueva",
+            Self::CloseTab => "cerrar-pestaña",
+            Self::PreviousTab => "pestaña-anterior",
+            Self::NextTab => "pestaña-siguiente",
+            Self::PageUp => "subir-una-pagina",
+            Self::PageDown => "bajar-una-pagina",
+            Self::GoToStart => "ir-al-principio",
+            Self::GoToEnd => "ir-al-final",
         }
     }
 
@@ -682,26 +681,26 @@ impl Accion {
     ///
     /// **Las eñes se admiten también sin eñe**, por lo mismo que el tamaño de letra: quien teclea desde un
     /// teclado que no es el suyo no debería quedarse sin poder configurar las pestañas.
-    pub fn de_como_se_escribe(texto: &str) -> Option<Self> {
-        TODAS.iter().copied().find(|accion| {
-            accion.como_se_escribe() == texto || accion.como_se_escribe().replace('ñ', "n") == texto
+    pub fn from_written(text: &str) -> Option<Self> {
+        ALL.iter().copied().find(|action| {
+            action.as_written() == text || action.as_written().replace('ñ', "n") == text
         })
     }
 }
 
 /// Las once, para recorrerlas.
-pub const TODAS: [Accion; 11] = [
-    Accion::PartirAlLado,
-    Accion::PartirDebajo,
-    Accion::CerrarDivision,
-    Accion::PestanaNueva,
-    Accion::CerrarPestana,
-    Accion::PestanaAnterior,
-    Accion::PestanaSiguiente,
-    Accion::SubirUnaPagina,
-    Accion::BajarUnaPagina,
-    Accion::IrAlPrincipio,
-    Accion::IrAlFinal,
+pub const ALL: [Action; 11] = [
+    Action::SplitBeside,
+    Action::SplitBelow,
+    Action::ClosePane,
+    Action::NewTab,
+    Action::CloseTab,
+    Action::PreviousTab,
+    Action::NextTab,
+    Action::PageUp,
+    Action::PageDown,
+    Action::GoToStart,
+    Action::GoToEnd,
 ];
 
 /// Un acorde: las teclas de mando que hacen falta, y la tecla.
@@ -709,54 +708,54 @@ pub const TODAS: [Accion; 11] = [
 /// **`Copy` y comparable por valor**, porque es la clave con la que se busca en la tabla una vez por
 /// evento de teclado — el camino más caliente que este proyecto tiene.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Acorde {
+pub struct Chord {
     pub ctrl: bool,
     pub shift: bool,
     pub alt: bool,
-    pub tecla: eframe::egui::Key,
+    pub key: eframe::egui::Key,
 }
 
-impl Acorde {
+impl Chord {
     /// El acorde que se escribe así, si se puede.
     ///
     /// Las partes van separadas por `+`, en cualquier orden y sin importar mayúsculas: `ctrl+shift+e`,
     /// `Shift+Prior`, `alt+f4`.
-    pub fn de_como_se_escribe(texto: &str) -> Option<Self> {
-        let mut acorde = Self {
+    pub fn from_written(text: &str) -> Option<Self> {
+        let mut chord = Self {
             ctrl: false,
             shift: false,
             alt: false,
-            tecla: eframe::egui::Key::Space,
+            key: eframe::egui::Key::Space,
         };
-        let mut tecla = None;
-        for parte in texto.split('+') {
+        let mut key = None;
+        for parte in text.split('+') {
             let parte = parte.trim();
             match parte.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => acorde.ctrl = true,
-                "shift" | "mayus" | "mayús" | "mayusculas" | "mayúsculas" => acorde.shift = true,
-                "alt" => acorde.alt = true,
+                "ctrl" | "control" => chord.ctrl = true,
+                "shift" | "mayus" | "mayús" | "mayusculas" | "mayúsculas" => chord.shift = true,
+                "alt" => chord.alt = true,
                 _ => {
                     // **Una sola tecla por acorde.** Dos serían un acorde que no se puede pulsar, y
                     // aceptarlo dejaría al usuario esperando que funcionara.
-                    if tecla.is_some() {
+                    if key.is_some() {
                         return None;
                     }
-                    tecla = Some(tecla_de(parte)?);
+                    key = Some(key_named(parte)?);
                 }
             }
         }
-        acorde.tecla = tecla?;
+        chord.key = key?;
         // **Los acordes de copiar y de pegar no se pueden reclamar, y aceptarlos sería prometer algo que
         // no ocurre.** El escritorio los resuelve **antes** de que lleguen: no aparecen como teclas, llegan
         // ya convertidos en un copiado o un pegado, y **sin decir si había Mayúsculas**. Un
         // `atajo.partir-al-lado = ctrl+shift+c` se aceptaría, no funcionaría nunca, y quien lo escribió no
         // tendría forma de saber por qué.
-        if acorde.ctrl && matches!(acorde.tecla, eframe::egui::Key::C | eframe::egui::Key::V) {
+        if chord.ctrl && matches!(chord.key, eframe::egui::Key::C | eframe::egui::Key::V) {
             return None;
         }
         // **Un acorde sin ninguna tecla de mando se le queda al programa de dentro.** Admitirlo sería
         // dejar que quien configura se quite la `a` de escribir sin que nada se lo advierta.
-        (acorde.ctrl || acorde.shift || acorde.alt).then_some(acorde)
+        (chord.ctrl || chord.shift || chord.alt).then_some(chord)
     }
 }
 
@@ -769,9 +768,9 @@ impl Acorde {
 /// **Y hay alias, en los dos idiomas.** `prior` y `next` son como los llaman los terminales de siempre —y
 /// como los llamaba el documento de este proyecto antes de que nadie comprobara que no existen—; los del
 /// español están porque el fichero se escribe en español y `supr` es lo que pone en el teclado.
-fn tecla_de(nombre: &str) -> Option<eframe::egui::Key> {
+fn key_named(name: &str) -> Option<eframe::egui::Key> {
     use eframe::egui::Key;
-    let alias = match nombre.to_ascii_lowercase().as_str() {
+    let alias = match name.to_ascii_lowercase().as_str() {
         "prior" | "pgup" | "repag" | "repág" => Some(Key::PageUp),
         "next" | "pgdn" | "avpag" | "avpág" => Some(Key::PageDown),
         "supr" | "suprimir" => Some(Key::Delete),
@@ -799,7 +798,7 @@ fn tecla_de(nombre: &str) -> Option<eframe::egui::Key> {
     Key::ALL
         .iter()
         .copied()
-        .find(|tecla| tecla.name().eq_ignore_ascii_case(nombre))
+        .find(|key| key.name().eq_ignore_ascii_case(name))
 }
 
 /// Qué acorde hace cada cosa.
@@ -813,85 +812,85 @@ fn tecla_de(nombre: &str) -> Option<eframe::egui::Key> {
 /// pestaña solo sea nuestro con más de una abierta, sigue colgando de la acción que lo necesita. Son
 /// reales y tienen que sobrevivir a que el acorde cambie.
 #[derive(Debug, Clone)]
-pub struct Atajos {
+pub struct Keymap {
     /// Pares acorde → acción. **Un vector y no un mapa**: son once como mucho, y recorrer once parejas de
     /// booleanos y un entero es más rápido que resumir el acorde a un número. Se busca una vez por evento
     /// de teclado, que es el camino más caliente del proyecto.
-    tabla: Vec<(Acorde, Accion)>,
+    tabla: Vec<(Chord, Action)>,
 }
 
-impl Default for Atajos {
+impl Default for Keymap {
     /// Los de fábrica: los mismos trece de siempre menos pegar, que no llega como tecla.
     fn default() -> Self {
         use eframe::egui::Key;
-        let mando = |tecla| Acorde {
+        let mando = |key| Chord {
             ctrl: true,
             shift: true,
             alt: false,
-            tecla,
+            key,
         };
         // **El historial va con `Mayúsculas` a secas, y no es una excepción caprichosa.** Sin ella,
         // `RePág` es del programa —un paginador la usa— y quitársela sería romper `less` dentro de esta
         // ventana.
-        let historial = |tecla| Acorde {
+        let historial = |key| Chord {
             ctrl: false,
             shift: true,
             alt: false,
-            tecla,
+            key,
         };
         Self {
             tabla: vec![
-                (mando(Key::D), Accion::PartirAlLado),
-                (mando(Key::B), Accion::PartirDebajo),
-                (mando(Key::X), Accion::CerrarDivision),
-                (mando(Key::T), Accion::PestanaNueva),
-                (mando(Key::W), Accion::CerrarPestana),
-                (mando(Key::ArrowLeft), Accion::PestanaAnterior),
-                (mando(Key::ArrowRight), Accion::PestanaSiguiente),
-                (historial(Key::PageUp), Accion::SubirUnaPagina),
-                (historial(Key::PageDown), Accion::BajarUnaPagina),
-                (historial(Key::Home), Accion::IrAlPrincipio),
-                (historial(Key::End), Accion::IrAlFinal),
+                (mando(Key::D), Action::SplitBeside),
+                (mando(Key::B), Action::SplitBelow),
+                (mando(Key::X), Action::ClosePane),
+                (mando(Key::T), Action::NewTab),
+                (mando(Key::W), Action::CloseTab),
+                (mando(Key::ArrowLeft), Action::PreviousTab),
+                (mando(Key::ArrowRight), Action::NextTab),
+                (historial(Key::PageUp), Action::PageUp),
+                (historial(Key::PageDown), Action::PageDown),
+                (historial(Key::Home), Action::GoToStart),
+                (historial(Key::End), Action::GoToEnd),
             ],
         }
     }
 }
 
-impl Atajos {
+impl Keymap {
     /// Qué acción hace ese acorde, si alguna.
     ///
     /// **Un acorde que no está en la tabla NO es de la aplicación**, y sus bytes bajan al programa de
     /// dentro. Es la mitad que hace que desatar un atajo sirva de algo.
-    pub fn accion_de(&self, acorde: Acorde) -> Option<Accion> {
+    pub fn action_for(&self, chord: Chord) -> Option<Action> {
         self.tabla
             .iter()
-            .find(|(cual, _)| *cual == acorde)
-            .map(|(_, accion)| *accion)
+            .find(|(cual, _)| *cual == chord)
+            .map(|(_, action)| *action)
     }
 
     /// Le cambia el acorde a una acción. `None` la desata.
     ///
     /// Devuelve la acción que se queda **sin** su acorde por el choque, si alguna: dos acciones no pueden
     /// compartir acorde, porque entonces pulsar no sabría cuál de las dos hacer.
-    pub fn poner(&mut self, accion: Accion, acorde: Option<Acorde>) -> Option<Accion> {
-        self.tabla.retain(|(_, cual)| *cual != accion);
-        let acorde = acorde?;
+    pub fn bind(&mut self, action: Action, chord: Option<Chord>) -> Option<Action> {
+        self.tabla.retain(|(_, cual)| *cual != action);
+        let chord = chord?;
         // **Gana la última leída, y se dice cuál perdió.** Es lo que hace que pegar un juego de atajos
         // encima de otro haga lo que se espera; callarlo dejaría a alguien media hora cambiando una línea
         // que otra de más abajo está pisando.
         let pisada = self
             .tabla
             .iter()
-            .find(|(cual, _)| *cual == acorde)
-            .map(|(_, accion)| *accion);
-        self.tabla.retain(|(cual, _)| *cual != acorde);
-        self.tabla.push((acorde, accion));
+            .find(|(cual, _)| *cual == chord)
+            .map(|(_, action)| *action);
+        self.tabla.retain(|(cual, _)| *cual != chord);
+        self.tabla.push((chord, action));
         pisada
     }
 }
 
 #[cfg(test)]
-mod pruebas_de_atajos {
+mod keymap_tests {
     use super::*;
     use eframe::egui::Key;
 
@@ -905,44 +904,40 @@ mod pruebas_de_atajos {
         // **La tabla de abajo se copia del documento a mano y a propósito.** Generarla del código mediría
         // que el código es consistente consigo mismo; lo que hay que atar es que lo publicado sea verdad.
         let publicado = [
-            ("partir-al-lado", "ctrl+shift+d", Accion::PartirAlLado),
-            ("partir-debajo", "ctrl+shift+b", Accion::PartirDebajo),
-            ("cerrar-division", "ctrl+shift+x", Accion::CerrarDivision),
-            ("pestaña-nueva", "ctrl+shift+t", Accion::PestanaNueva),
-            ("cerrar-pestaña", "ctrl+shift+w", Accion::CerrarPestana),
-            ("pestaña-anterior", "ctrl+shift+←", Accion::PestanaAnterior),
-            (
-                "pestaña-siguiente",
-                "ctrl+shift+→",
-                Accion::PestanaSiguiente,
-            ),
-            ("subir-una-pagina", "shift+repág", Accion::SubirUnaPagina),
-            ("bajar-una-pagina", "shift+avpág", Accion::BajarUnaPagina),
-            ("ir-al-principio", "shift+home", Accion::IrAlPrincipio),
-            ("ir-al-final", "shift+end", Accion::IrAlFinal),
+            ("partir-al-lado", "ctrl+shift+d", Action::SplitBeside),
+            ("partir-debajo", "ctrl+shift+b", Action::SplitBelow),
+            ("cerrar-division", "ctrl+shift+x", Action::ClosePane),
+            ("pestaña-nueva", "ctrl+shift+t", Action::NewTab),
+            ("cerrar-pestaña", "ctrl+shift+w", Action::CloseTab),
+            ("pestaña-anterior", "ctrl+shift+←", Action::PreviousTab),
+            ("pestaña-siguiente", "ctrl+shift+→", Action::NextTab),
+            ("subir-una-pagina", "shift+repág", Action::PageUp),
+            ("bajar-una-pagina", "shift+avpág", Action::PageDown),
+            ("ir-al-principio", "shift+home", Action::GoToStart),
+            ("ir-al-final", "shift+end", Action::GoToEnd),
         ];
         assert_eq!(
             publicado.len(),
-            TODAS.len(),
+            ALL.len(),
             "el documento publica {} atajos y el código tiene {}",
             publicado.len(),
-            TODAS.len()
+            ALL.len()
         );
 
-        let atajos = Atajos::default();
-        for (nombre, escrito, accion) in publicado {
+        let keymap = Keymap::default();
+        for (name, escrito, action) in publicado {
             assert_eq!(
-                Accion::de_como_se_escribe(nombre),
-                Some(accion),
-                "el documento publica el nombre «{nombre}» y el código no lo entiende"
+                Action::from_written(name),
+                Some(action),
+                "el documento publica el nombre «{name}» y el código no lo entiende"
             );
-            let acorde = Acorde::de_como_se_escribe(escrito).unwrap_or_else(|| {
+            let chord = Chord::from_written(escrito).unwrap_or_else(|| {
                 panic!("el documento publica «{escrito}» y el código no lo entiende")
             });
             assert_eq!(
-                atajos.accion_de(acorde),
-                Some(accion),
-                "el documento dice que «{nombre}» es «{escrito}» de fábrica, y no lo es"
+                keymap.action_for(chord),
+                Some(action),
+                "el documento dice que «{name}» es «{escrito}» de fábrica, y no lo es"
             );
         }
     }
@@ -952,40 +947,40 @@ mod pruebas_de_atajos {
         // **Es lo que hace que este cambio no rompa a nadie.** Los acordes de fábrica son los que el
         // terminal tenía antes de que se pudieran configurar, y una tabla que naciera con otros los
         // cambiaría de golpe a todo el mundo sin que nadie lo pidiera.
-        let atajos = Atajos::default();
-        let mando = |tecla| Acorde {
+        let keymap = Keymap::default();
+        let mando = |key| Chord {
             ctrl: true,
             shift: true,
             alt: false,
-            tecla,
+            key,
         };
-        let historial = |tecla| Acorde {
+        let historial = |key| Chord {
             ctrl: false,
             shift: true,
             alt: false,
-            tecla,
+            key,
         };
 
-        let de_fabrica = [
-            (mando(Key::D), Accion::PartirAlLado),
-            (mando(Key::B), Accion::PartirDebajo),
-            (mando(Key::X), Accion::CerrarDivision),
-            (mando(Key::T), Accion::PestanaNueva),
-            (mando(Key::W), Accion::CerrarPestana),
-            (mando(Key::ArrowLeft), Accion::PestanaAnterior),
-            (mando(Key::ArrowRight), Accion::PestanaSiguiente),
-            (historial(Key::PageUp), Accion::SubirUnaPagina),
-            (historial(Key::PageDown), Accion::BajarUnaPagina),
-            (historial(Key::Home), Accion::IrAlPrincipio),
-            (historial(Key::End), Accion::IrAlFinal),
+        let factory = [
+            (mando(Key::D), Action::SplitBeside),
+            (mando(Key::B), Action::SplitBelow),
+            (mando(Key::X), Action::ClosePane),
+            (mando(Key::T), Action::NewTab),
+            (mando(Key::W), Action::CloseTab),
+            (mando(Key::ArrowLeft), Action::PreviousTab),
+            (mando(Key::ArrowRight), Action::NextTab),
+            (historial(Key::PageUp), Action::PageUp),
+            (historial(Key::PageDown), Action::PageDown),
+            (historial(Key::Home), Action::GoToStart),
+            (historial(Key::End), Action::GoToEnd),
         ];
 
-        for (acorde, esperada) in de_fabrica {
+        for (chord, esperada) in factory {
             assert_eq!(
-                atajos.accion_de(acorde),
+                keymap.action_for(chord),
                 Some(esperada),
                 "el acorde de fábrica de «{}» cambió",
-                esperada.como_se_escribe()
+                esperada.as_written()
             );
         }
         // **Contra los pares que se acaban de ejercer, no contra un número escrito aparte.** Un literal
@@ -993,8 +988,8 @@ mod pruebas_de_atajos {
         // quede sin acorde de fábrica**: una acción nueva sin par en la lista de arriba no se dispararía
         // nunca y nada lo diría.
         assert_eq!(
-            TODAS.len(),
-            de_fabrica.len(),
+            ALL.len(),
+            factory.len(),
             "hay acciones sin acorde de fábrica, o acordes de fábrica de acciones que ya no existen"
         );
     }
@@ -1004,13 +999,13 @@ mod pruebas_de_atajos {
         // **Es la mitad que hace que desatar un atajo sirva de algo**: lo que no está en la tabla baja al
         // programa de dentro. Sin ella, `ninguno` dejaría el acorde en un limbo donde ni hace nada ni
         // llega a `vim`.
-        let atajos = Atajos::default();
+        let keymap = Keymap::default();
         assert_eq!(
-            atajos.accion_de(Acorde {
+            keymap.action_for(Chord {
                 ctrl: true,
                 shift: true,
                 alt: false,
-                tecla: Key::Z
+                key: Key::Z
             }),
             None,
             "un acorde que nadie configuró salió como de la aplicación"
@@ -1019,22 +1014,22 @@ mod pruebas_de_atajos {
 
     #[test]
     fn desatar_una_accion_le_devuelve_el_acorde_al_programa() {
-        let mut atajos = Atajos::default();
-        let suyo = Acorde {
+        let mut keymap = Keymap::default();
+        let suyo = Chord {
             ctrl: true,
             shift: true,
             alt: false,
-            tecla: Key::D,
+            key: Key::D,
         };
-        assert_eq!(atajos.accion_de(suyo), Some(Accion::PartirAlLado));
+        assert_eq!(keymap.action_for(suyo), Some(Action::SplitBeside));
 
         assert_eq!(
-            atajos.poner(Accion::PartirAlLado, None),
+            keymap.bind(Action::SplitBeside, None),
             None,
             "desatar no pisa a nadie"
         );
         assert_eq!(
-            atajos.accion_de(suyo),
+            keymap.action_for(suyo),
             None,
             "el acorde desatado sigue siendo de la aplicación, así que no llega al programa"
         );
@@ -1044,29 +1039,29 @@ mod pruebas_de_atajos {
     fn cambiar_un_acorde_deja_libre_el_viejo() {
         // **Las dos mitades del criterio**: el nuevo hace lo suyo, y el viejo deja de hacerlo. Sin la
         // segunda, reasignar sumaría acordes en vez de moverlos.
-        let mut atajos = Atajos::default();
-        let viejo = Acorde {
+        let mut keymap = Keymap::default();
+        let viejo = Chord {
             ctrl: true,
             shift: true,
             alt: false,
-            tecla: Key::D,
+            key: Key::D,
         };
-        let nuevo = Acorde {
+        let nuevo = Chord {
             ctrl: true,
             shift: true,
             alt: false,
-            tecla: Key::E,
+            key: Key::E,
         };
 
-        atajos.poner(Accion::PartirAlLado, Some(nuevo));
+        keymap.bind(Action::SplitBeside, Some(nuevo));
 
         assert_eq!(
-            atajos.accion_de(nuevo),
-            Some(Accion::PartirAlLado),
+            keymap.action_for(nuevo),
+            Some(Action::SplitBeside),
             "el acorde nuevo no hace nada"
         );
         assert_eq!(
-            atajos.accion_de(viejo),
+            keymap.action_for(viejo),
             None,
             "el acorde viejo sigue partiendo: reasignar sumó en vez de mover, y el programa nunca lo recibe"
         );
@@ -1077,53 +1072,53 @@ mod pruebas_de_atajos {
         // **Gana la última, y se dice cuál perdió.** Callarlo dejaría a alguien media hora cambiando una
         // línea que otra de más abajo está pisando; y dejar las dos con el mismo acorde haría que pulsar
         // no supiera cuál de las dos hacer.
-        let mut atajos = Atajos::default();
-        let de_cerrar = Acorde {
+        let mut keymap = Keymap::default();
+        let of_closing = Chord {
             ctrl: true,
             shift: true,
             alt: false,
-            tecla: Key::X,
+            key: Key::X,
         };
 
-        let pisada = atajos.poner(Accion::PartirAlLado, Some(de_cerrar));
+        let pisada = keymap.bind(Action::SplitBeside, Some(of_closing));
 
         assert_eq!(
             pisada,
-            Some(Accion::CerrarDivision),
+            Some(Action::ClosePane),
             "no se dijo qué acción se quedaba sin acorde"
         );
         assert_eq!(
-            atajos.accion_de(de_cerrar),
-            Some(Accion::PartirAlLado),
+            keymap.action_for(of_closing),
+            Some(Action::SplitBeside),
             "no ganó la última"
         );
     }
 
     #[test]
     fn un_acorde_se_escribe_como_lo_escribe_la_gente() {
-        for texto in [
+        for text in [
             "ctrl+shift+e",
             "Ctrl+Shift+E",
             "SHIFT+ctrl+e",
             "  ctrl + shift + e  ",
         ] {
             assert_eq!(
-                Acorde::de_como_se_escribe(texto),
-                Some(Acorde {
+                Chord::from_written(text),
+                Some(Chord {
                     ctrl: true,
                     shift: true,
                     alt: false,
-                    tecla: Key::E
+                    key: Key::E
                 }),
-                "«{texto}» no se entendió"
+                "«{text}» no se entendió"
             );
         }
         // **«Mayúsculas» también vale, con y sin tilde y con y sin eñe**, por lo mismo que el resto del
         // fichero: quien teclea desde un teclado que no es el suyo no debería quedarse fuera.
-        for texto in ["ctrl+mayusculas+e", "ctrl+mayúsculas+e", "ctrl+mayus+e"] {
+        for text in ["ctrl+mayusculas+e", "ctrl+mayúsculas+e", "ctrl+mayus+e"] {
             assert!(
-                Acorde::de_como_se_escribe(texto).is_some_and(|a| a.shift && a.ctrl),
-                "«{texto}» no se entendió"
+                Chord::from_written(text).is_some_and(|a| a.shift && a.ctrl),
+                "«{text}» no se entendió"
             );
         }
     }
@@ -1133,7 +1128,7 @@ mod pruebas_de_atajos {
         // **`Key::from_name` distingue mayúsculas y quien teclea un fichero no.** Comprobado ejecutándolo:
         // `F4` sí y `f4` no, `PageUp` sí y `pageup` no. Sin esto, la mitad de los acordes que alguien
         // escribiría a mano se rechazarían sin que se entienda por qué.
-        for (texto, esperada) in [
+        for (text, esperada) in [
             ("ctrl+f4", Key::F4),
             ("ctrl+F4", Key::F4),
             ("shift+pageup", Key::PageUp),
@@ -1142,16 +1137,16 @@ mod pruebas_de_atajos {
             ("ctrl+delete", Key::Delete),
         ] {
             assert_eq!(
-                Acorde::de_como_se_escribe(texto).map(|a| a.tecla),
+                Chord::from_written(text).map(|a| a.key),
                 Some(esperada),
-                "«{texto}» no se entendió"
+                "«{text}» no se entendió"
             );
         }
 
         // **Y los alias, en los dos idiomas.** `prior` y `next` son como los llaman los terminales de
         // siempre — y como los llamaba el documento de este proyecto antes de que nadie comprobara que no
         // existen. Los del español están porque el fichero se escribe en español.
-        for (texto, esperada) in [
+        for (text, esperada) in [
             ("shift+prior", Key::PageUp),
             ("shift+next", Key::PageDown),
             ("shift+repág", Key::PageUp),
@@ -1161,9 +1156,9 @@ mod pruebas_de_atajos {
             ("ctrl+izquierda", Key::ArrowLeft),
         ] {
             assert_eq!(
-                Acorde::de_como_se_escribe(texto).map(|a| a.tecla),
+                Chord::from_written(text).map(|a| a.key),
                 Some(esperada),
-                "«{texto}» no se entendió"
+                "«{text}» no se entendió"
             );
         }
     }
@@ -1173,7 +1168,7 @@ mod pruebas_de_atajos {
         // **Aceptarlos sería prometer algo que no ocurre**: el escritorio los resuelve antes de que
         // lleguen, así que esos acordes no aparecen nunca como teclas. Quien los escribiera vería un atajo
         // que no hace nada y no tendría forma de saber por qué.
-        for texto in [
+        for text in [
             "ctrl+shift+v",
             "ctrl+v",
             "ctrl+alt+v",
@@ -1182,16 +1177,16 @@ mod pruebas_de_atajos {
             "ctrl+alt+c",
         ] {
             assert_eq!(
-                Acorde::de_como_se_escribe(texto),
+                Chord::from_written(text),
                 None,
-                "«{texto}» se aceptó, y no llegaría nunca"
+                "«{text}» se aceptó, y no llegaría nunca"
             );
         }
         // Pero sin Ctrl son teclas como otra cualquiera.
-        for texto in ["shift+v", "shift+c", "alt+c"] {
+        for text in ["shift+v", "shift+c", "alt+c"] {
             assert!(
-                Acorde::de_como_se_escribe(texto).is_some(),
-                "«{texto}» se rechazó, y ése sí llega"
+                Chord::from_written(text).is_some(),
+                "«{text}» se rechazó, y ése sí llega"
             );
         }
     }
@@ -1200,40 +1195,36 @@ mod pruebas_de_atajos {
     fn un_acorde_sin_tecla_de_mando_no_se_admite() {
         // **Admitirlo dejaría que quien configura se quite una letra de escribir** sin que nada se lo
         // advierta: `atajo.copiar = c` haría que la `c` no llegara nunca al programa.
-        for texto in ["c", "e", "prior"] {
+        for text in ["c", "e", "prior"] {
             assert_eq!(
-                Acorde::de_como_se_escribe(texto),
+                Chord::from_written(text),
                 None,
-                "«{texto}» se aceptó como acorde, y se llevaría esa tecla por delante"
+                "«{text}» se aceptó como acorde, y se llevaría esa tecla por delante"
             );
         }
         // Y lo que no es ninguna tecla conocida tampoco.
-        for texto in ["ctrl+shift+", "ctrl+shift+noexiste", "ctrl+shift+e+f", ""] {
-            assert_eq!(
-                Acorde::de_como_se_escribe(texto),
-                None,
-                "«{texto}» se aceptó"
-            );
+        for text in ["ctrl+shift+", "ctrl+shift+noexiste", "ctrl+shift+e+f", ""] {
+            assert_eq!(Chord::from_written(text), None, "«{text}» se aceptó");
         }
     }
 
     #[test]
     fn las_acciones_se_escriben_con_y_sin_eñe() {
-        for accion in TODAS {
-            let escrita = accion.como_se_escribe();
-            assert_eq!(Accion::de_como_se_escribe(escrita), Some(accion));
+        for action in ALL {
+            let escrita = action.as_written();
+            assert_eq!(Action::from_written(escrita), Some(action));
             assert_eq!(
-                Accion::de_como_se_escribe(&escrita.replace('ñ', "n")),
-                Some(accion),
+                Action::from_written(&escrita.replace('ñ', "n")),
+                Some(action),
                 "«{escrita}» sin eñe no se entendió"
             );
         }
         assert_eq!(
-            Accion::de_como_se_escribe("pegar"),
+            Action::from_written("pegar"),
             None,
             "pegar no es un atajo reasignable"
         );
-        assert_eq!(Accion::de_como_se_escribe("inventada"), None);
+        assert_eq!(Action::from_written("inventada"), None);
     }
 
     /// **Los once nombres viven dos veces**: aquí y en el documento de configuración, escritos a mano
@@ -1251,12 +1242,12 @@ mod pruebas_de_atajos {
     /// verdad, así que caza esa mitad. Hacen falta las dos, y por eso ninguna sobra.
     #[test]
     fn cada_accion_esta_publicada_en_el_documento_de_configuracion() {
-        const DOCUMENTO: &str = include_str!("../../../docs/08-configuracion.md");
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
-        let sin_publicar: Vec<&str> = TODAS
+        let sin_publicar: Vec<&str> = ALL
             .iter()
-            .map(|accion| accion.como_se_escribe())
-            .filter(|nombre| !DOCUMENTO.contains(&format!("`{nombre}`")))
+            .map(|action| action.as_written())
+            .filter(|name| !DOCUMENT.contains(&format!("`{name}`")))
             .collect();
 
         assert!(

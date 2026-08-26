@@ -13,17 +13,17 @@
 //! Solo Linux: la medida sale de `/proc/self/status`.
 //!
 //! ```text
-//! cargo run --release --example fuga -p app -- urandom     # bytes crudos sin fin
-//! cargo run --release --example fuga -p app -- ceros       # lo mismo, sin coste de generarlos
-//! cargo run --release --example fuga -p app -- yes         # líneas de dos bytes, sin fin
-//! cargo run --release --example fuga -p app -- acotado     # ~10 MiB: termina
-//! cargo run --release --example fuga -p app -- sin-puente  # urandom, consumiendo el canal a pelo
+//! cargo run --release --example leak -p app -- urandom     # bytes crudos sin fin
+//! cargo run --release --example leak -p app -- ceros       # lo mismo, sin coste de generarlos
+//! cargo run --release --example leak -p app -- yes         # líneas de dos bytes, sin fin
+//! cargo run --release --example leak -p app -- acotado     # ~10 MiB: termina
+//! cargo run --release --example leak -p app -- sin-puente  # urandom, consumiendo el canal a pelo
 //! ```
 
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use app::puente::Puente;
+use app::pty_output::Puente;
 use term_core::{Pty, Size};
 
 /// Copiado de `app::PUMP_BUDGET`, que es privado. Si allí cambia, aquí deja de medir lo mismo.

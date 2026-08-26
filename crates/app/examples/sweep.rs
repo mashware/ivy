@@ -6,7 +6,7 @@
 //! divisiones, y este hito tiene una sola — de ahí un banco que las simula.
 //!
 //! ```text
-//! cargo run --release --example barrido -p app -- "portátil de trabajo"
+//! cargo run --release --example sweep -p app -- "portátil de trabajo"
 //! ```
 //!
 //! El argumento es la etiqueta de la tanda, opcional, y sigue el mismo criterio que `host-load`:
@@ -48,8 +48,8 @@
 //! el banco no publica nada**. Lo que no se ve no se tesela, y un número sacado de ahí diría que
 //! todo va bien precisamente por no haber dibujado.
 
-use app::pintor::{Metrica, pintar};
-use app::tema::Tema;
+use app::painter::{CellMetrics, paint};
+use app::theme::Tema;
 use eframe::egui;
 use std::time::{Duration, Instant};
 use term_core::{Screen, Size};
@@ -332,12 +332,12 @@ impl eframe::App for Barrido {
         let ahora = Instant::now();
         let intervalo = self.anterior.replace(ahora).map(|previo| ahora - previo);
 
-        let metrica = Metrica::medir(ui.ctx(), egui::FontId::monospace(CUERPO));
+        let metrica = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(CUERPO));
         let consolas = PLAN[self.fase];
         let hueco = ui.max_rect();
         let consola = egui::vec2(
-            metrica.ancho() * REJILLA.cols as f32,
-            metrica.alto() * REJILLA.rows as f32,
+            metrica.width() * REJILLA.cols as f32,
+            metrica.height() * REJILLA.rows as f32,
         );
 
         // La disposición se decide **con el mayor N del plan y no con el de esta fase**: si las dos
@@ -372,7 +372,7 @@ impl eframe::App for Barrido {
             // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
             // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
             // `resolver`, uno persistente solo acumularía apuntes que nadie mira.
-            pintar(
+            paint(
                 ui.painter(),
                 &vista,
                 &self.tema,

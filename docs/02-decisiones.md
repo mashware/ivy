@@ -170,7 +170,7 @@ Dos consolas cuestan **1,96×** lo que cuesta una: escala lineal, no super-linea
 fotograma gasta el **36 %** de su hueco de 8,4 ms —y su **peor** fotograma, el 68 %—. Medido con
 pantallas **llenas** —cada celda con fondo propio, que obliga a dibujar un rectángulo por celda
 además del glifo— y en repintado continuo, que es el techo y no el uso normal. El instrumento es
-`cargo run --release --example barrido -p app`, y llama al pintor de verdad, no a una copia.
+`cargo run --release --example sweep -p app`, y llama al pintor de verdad, no a una copia.
 
 **El tamaño de esas consolas importa y hay que decirlo antes de leer el número:** son de 24×80 cada
 una, así que las dos juntas suman 3 840 celdas — **menos que las 6 954 de una sola ventana real** de
@@ -2730,7 +2730,7 @@ que lo cubra. **Elegido con los números delante**, igual que el techo del histo
 
 ### Los números, medidos aquí
 
-`cargo run --release --example fuentes -p app`, cinco muestras por punto y **tres corridas del binario con
+`cargo run --release --example fonts -p app`, cinco muestras por punto y **tres corridas del binario con
 la máquina en reposo**. Máquina de desarrollo con **259 familias** instaladas.
 
 **En frío y en caliente van por separado, y ésa es la mitad del anexo.** El banco cachea los ficheros que
