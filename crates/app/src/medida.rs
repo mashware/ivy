@@ -135,7 +135,7 @@ pub struct Tramos {
     /// cambió, repartir el ancho, **atender la frontera del panel** y **pintarlo**.
     ///
     /// **Las seis cosas, y decirlo entero importa.** El número lo componen **dos tramos disjuntos** de
-    /// `Ventana::pintar_division`, sumados: uno antes de pintar la consola —mirar la fecha, leer si
+    /// `crate::Window::paint_pane`, sumados: uno antes de pintar la consola —mirar la fecha, leer si
     /// cambió, repartir el ancho, atender el arrastre de su frontera y volver a repartir si el ancho
     /// cambió— y otro después —pintar el panel—. Lo que queda **en medio**, que es
     /// encolar el pintado de la consola, tiene su propio campo y no entra aquí. Describir el conjunto

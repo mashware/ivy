@@ -3492,3 +3492,101 @@ Para lo que el programa de dentro **pide** sobre el ratón, el estándar dice *m
 `bypass_mouse_reporting_modifiers` en WezTerm). Dos revisiones dieron nombres distintos y **las dos
 citas son buenas**. Manda **D19**: el vocabulario de su usuario. Queda `MouseReporting`, y queda
 escrito que la otra opción tenía argumento.
+
+#### Lo que se aprendió renombrando `app`, y no estaba previsto
+
+La entrega que renombró la familia de la ventana dejó cuatro cosas escritas, todas encontradas al
+hacer el trabajo y ninguna deducible del plan.
+
+**Un renombrado que se le va a otro fichero siempre compila.** Es la propiedad que lo hace peligroso:
+el compilador no puede objetar, porque el nombre está cambiado en la declaración *y* en todos los usos.
+En esta entrega el mapa se fue a tres ficheros que no le tocaban, y cada uno enseñó algo distinto:
+
+- Al `Gesto` del ratón le puso `InjectedGesture`, que es el nombre que este mismo anexo reserva para el
+  **otro** `Gesto`. Lo que aquí arriba se escribió para que dos homónimos no se confundieran acabó
+  produciendo la confusión al revés: **el nombre correcto, en el tipo equivocado**.
+- Al `Accion` del teclado le tradujo **una** variante de veintiuna. Es la misma forma que la fuga de
+  `Lado` de la entrega anterior, y sobrevivió al mismo barrido por la misma razón: **una expresión
+  regular de declaraciones no ve nunca una variante de `enum`**. El oráculo que sí la ve es diferenciar
+  los **conjuntos** de nombres declarados antes y después, no buscar líneas de declaración.
+- A `Hueco` le puso `PanelTiling` **con la razón equivocada**, diciendo que un enlace de rustdoc lo
+  obligaba. El enlace nombra un tipo del fichero que sí se estaba renombrando, así que actualizar la
+  cita bastaba. Y lo que hace este caso el más instructivo de los tres es que **la conclusión era
+  correcta**: el reparto de `Layout`, más arriba, dicta `Hueco`→`PanelTiling` y dice que el
+  emparejamiento con `Reparto` es a propósito. Se revirtió creyéndolo fuga y volvió al comprobar el diff
+  contra los 84 pares del anexo. Dos lecciones, no una: **una razón plausible no es una razón
+  verdadera**, y **una conclusión correcta con razón falsa no se defiende sola** — la primera vez que
+  alguien la audite, se cae.
+
+**La lista de exenciones se compara con la caja puesta.** La guarda del glosario lleva una lista de
+nombres que siguen en español a propósito porque los declara un fichero de una entrega posterior. Se
+comparaba en minúsculas, y así cada entrada cubría **dos cosas distintas**: el tipo ajeno y el local
+propio del mismo nombre — `Gesto` y `gesto`, `Nodo` y `nodo`, `Hueco` y `hueco`. Lo segundo es
+precisamente lo que la guarda existe para cazar. Rust lo resuelve gratis, porque los tipos van en
+`CamelCase` y los locales en `snake_case`.
+
+**Una exención que nombra algo del propio fichero no protege a nadie: esconde trabajo.** Dos entradas
+de esa lista —`ArrastresInyectados` y `QueHaceElArrastre`— se declaran en `lib.rs`, o sea en el fichero
+que la entrega estaba renombrando. Estaban ahí por descuido y su efecto era exactamente el contrario
+del que la lista busca. Regla: **cada entrada de la lista se verifica contra el fichero que declara el
+nombre**, no contra la intención de quien la escribió.
+
+**«Terminado» es una afirmación, y se parte en dos cuando no se puede sostener entera.** La guarda tenía
+una sola lista, `FINISHED`, y se le añadió la capacidad de declarar terminado **un fichero** para poder
+apuntarla a `lib.rs`. Apuntándola se vio que no se puede: además de los nombres que ese fichero solo
+*alcanza* —declarados en ficheros de entregas posteriores—, quedan **499 identificadores en español que
+el glosario nunca tuvo que decidir**, el `desde` de un rango o el `cual` de un índice, y eso ya sin contar
+los 356 nombres de función de prueba, que son prosa. Llamar «terminado» a eso sería un número mal
+etiquetado, que es lo que **D13** prohíbe.
+
+Así que hay dos listas, y cada una dice lo que de verdad afirma:
+
+| Lista | Qué afirma | Qué la lee |
+|---|---|---|
+| `FINISHED` | una caja cuyos identificadores están **todos** en inglés | las tres guardas |
+| `CITATIONS_CHECKED` | un fichero cuyas **citas** están comprobadas, aunque sus identificadores no | la guarda de las citas |
+
+**Y la segunda lista lleva dos mitades, no una**: el fichero, y **la caja cuyos nombres puede citar**.
+Un comentario de `lib.rs` tiene derecho a nombrar algo que declara un módulo hermano; sin esa segunda
+mitad, la guarda denunciaba setenta citas perfectamente vivas. Lo descartado: darle a la guarda el árbol
+entero como universo, que la habría vuelto ciega a una cita a un nombre de otra caja.
+
+Lo que esto compra, medido en su primer uso: **ciento cincuenta y ocho comentarios** que nombraban
+identificadores que ya no existen, **dos de ellos doblemente muertos** —apuntando a un nombre que un
+renombrado *anterior* ya había retirado y nadie había notado—. Un comentario así no lo caza el
+compilador, no lo caza la suite, y quien busca el nombre que le dan no encuentra nada.
+
+#### Lo que ninguna guarda de este hito puede ver, dicho antes de que muerda
+
+Tres clases, encontradas las tres renombrando la ventana y ninguna cazable por la guarda.
+
+**Un nombre de tipo que además es una palabra corriente, reemplazado en prosa.** `Hueco` es las dos
+cosas, y el reemplazo alcanzó dos comentarios donde era la palabra: «hueco de medida conocido» —la
+fórmula con la que este proyecto declara un tramo que **no** cronometra— dejó de decir eso. La guarda de
+citas lee lo que va **entre comillas invertidas**, y aquí el nombre iba a pelo en el texto. Lo cazó
+barrer los nombres nuevos en `CamelCase` buscándolos **fuera** de comillas, y **eso hay que hacerlo a
+mano en cada entrega que renombre un tipo cuyo nombre sea también una palabra del idioma**.
+
+**Un intercambio de nombres entre dos cosas del mismo tipo.** Todos los oráculos de diferencia de
+conjuntos —nombres declarados, literales, números— son **invariantes bajo un intercambio**: si `ancho` y
+`alto` se cambian el nombre entre sí, el conjunto sale idéntico y el compilador calla. Lo que sí lo ve es
+un oráculo **posicional**: emparejar las líneas cambiadas una a una y comprobar, token por token en la
+misma posición, que cada identificador cambió a lo que la cadena de renombrados dice. Medido en esta
+entrega: **5.693 líneas emparejadas, 0 cambios sin explicar**. Sale barato y hay que hacerlo.
+
+**Un nombre de prueba que cita un método.** `absorber_conserva_la_geometria…` mientras el método ya se
+llama `absorb`. No lo ve la resta de nombres declarados —no cambió— ni la guarda de citas —no es un
+comentario—. Y no tiene arreglo mecánico: **328 de los 366 nombres de prueba** del fichero grande llevan
+alguna palabra que esta entrega renombró, y casi todas son la palabra del idioma dentro de una frase, no
+una cita. Van con la prosa, que es una entrega y no un barrido.
+
+#### Y una cifra que nadie había contado: la prosa llevaba muchas entregas mintiendo
+
+Al comprobar qué citas de fuera del código mató este renombrado salió el número de al lado, que es el
+que importa: **599 citas de la prosa ya nombraban cosas que el código no tiene, y son de antes de este
+hito.** Esta entrega mató 121 más (11 en el registro de decisiones, 1 en el de configuración, 109 en el
+conocimiento de dominio); el propio registro de decisiones lleva **152 muertas de antes** y 11 nuevas.
+
+Por eso **no se arreglan aquí**: arreglar 11 de 163 en un fichero sería tapar el 7 % del problema y dejar
+el documento pareciendo revisado. Lo que cambia es el encargo de las entregas de la prosa y de los
+documentos: **no traducen, reparan** — y ahora saben cuánto.

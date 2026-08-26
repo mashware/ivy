@@ -69,10 +69,10 @@ const MARGEN: f32 = 1.0;
 
 /// Cómo queda repartido el rectángulo de una división entre lo que se ve.
 ///
-/// Tiene nombre, y no es una tupla, por lo mismo que lo tiene [`crate::Reparto`], que hace lo propio
+/// Tiene nombre, y no es una tupla, por lo mismo que lo tiene [`crate::Tiling`], que hace lo propio
 /// entre las dos consolas: dos repartos en el mismo fotograma que se leyeran distinto serían dos
 /// idiomas para una sola idea.
-pub struct Hueco {
+pub struct PanelTiling {
     /// Lo que le queda a la consola, que es contra lo que hay que medir su rejilla.
     pub consola: Rect,
     /// Dónde va el panel, y **el panel que va ahí**. Van juntos porque no existe el uno sin el otro:
@@ -101,9 +101,13 @@ pub struct Hueco {
 ///
 /// El nombre dice la unidad a propósito: aquí conviven celdas y puntos, y un mismo nombre para las dos
 /// deja al lector sin saber cuál está mirando.
-pub fn apartar(division: Rect, ancho_de_celda: f32, celdas_del_panel: Option<usize>) -> Hueco {
+pub fn apartar(
+    division: Rect,
+    ancho_de_celda: f32,
+    celdas_del_panel: Option<usize>,
+) -> PanelTiling {
     let Some(celdas) = celdas_del_panel else {
-        return Hueco {
+        return PanelTiling {
             consola: division,
             panel: None,
         };
@@ -113,7 +117,7 @@ pub fn apartar(division: Rect, ancho_de_celda: f32, celdas_del_panel: Option<usi
     let disponible = (division.width() - CONSOLA_MINIMA * ancho_de_celda).max(0.0);
     let corte = division.right() - en_puntos.min(disponible);
 
-    Hueco {
+    PanelTiling {
         consola: Rect::from_min_max(division.left_top(), Pos2::new(corte, division.bottom())),
         panel: Some(Rect::from_min_max(
             Pos2::new(corte, division.top()),
@@ -1013,7 +1017,10 @@ mod tests {
     fn pintando(estado: &mut Estado, sitio: Rect, ahora: SystemTime) -> Vec<eframe::egui::Shape> {
         let ctx = eframe::egui::Context::default();
         let mut salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            let metrica = Metrica::medir(ui.ctx(), eframe::egui::FontId::monospace(crate::CUERPO));
+            let metrica = Metrica::medir(
+                ui.ctx(),
+                eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE),
+            );
             pintar(
                 &ui.painter_at(sitio),
                 estado,
@@ -1423,7 +1430,10 @@ mod tests {
         let ctx = eframe::egui::Context::default();
         let mut medida = (0.0, 0.0);
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            let metrica = Metrica::medir(ui.ctx(), eframe::egui::FontId::monospace(crate::CUERPO));
+            let metrica = Metrica::medir(
+                ui.ctx(),
+                eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE),
+            );
             medida = (metrica.ancho(), metrica.alto());
         })
         .drop_without_applying_deltas();
@@ -1734,7 +1744,7 @@ mod tests {
         let mut anchos = Vec::new();
         let mut celda = 0.0;
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            let fuente = eframe::egui::FontId::monospace(crate::CUERPO);
+            let fuente = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
             ui.ctx().fonts_mut(|fuentes| {
                 celda = fuentes.glyph_width(&fuente, 'M');
                 anchos = marcas
@@ -2460,7 +2470,7 @@ mod tests {
         let mut anchos = Vec::new();
         let mut celda = 0.0;
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            let fuente = eframe::egui::FontId::monospace(crate::CUERPO);
+            let fuente = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
             ui.ctx().fonts_mut(|fuentes| {
                 celda = fuentes.glyph_width(&fuente, 'M');
                 anchos = Attention::ALL

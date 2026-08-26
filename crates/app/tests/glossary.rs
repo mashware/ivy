@@ -32,12 +32,117 @@ use std::path::{Path, PathBuf};
 /// The decisions record, which carries the glossary in its annex.
 const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
 
-/// The crates whose identifiers are **finished**.
-///
-/// One entry per delivery that finishes a crate. `app` joins the list when the second half of its
-/// names lands; until then its Spanish identifiers are the expected state, not a defect, and having
-/// them reported would train everybody to ignore this test.
+/// The crates whose identifiers are **all English**, under `crates/`. One entry per delivery.
 const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core"];
+
+/// Files whose **citations** are checked, though their identifiers are not yet.
+///
+/// **Every file of the crate, and that is what closes the class.** The first version listed only the
+/// file the delivery was renaming, which left the other direction unguarded: nobody checked what a
+/// *sibling* cites **towards** the renamed file. Four citations shipped broken that way — two in
+/// `sesion.rs` sitting two and three lines from citations the same delivery did update, one in
+/// `medida.rs`, and one in an example whose comment exists precisely to say «copied from
+/// `app::PUMP_BUDGET`; if it changes there, this stops measuring the same thing». It changed there.
+///
+/// The price is thirty entries in [`NOT_OURS`], because a sibling's comments cite font tables, shell
+/// commands and Unicode property names. They are listed once and they stay true.
+///
+/// **This is a weaker claim than [`FINISHED_CRATES`] and it is a separate list so it cannot be read as the
+/// same one.** `app/src/lib.rs` has had its window family renamed and its own locals with it, but it
+/// still holds hundreds of Spanish names the glossary never had to decide — the `desde` of a range,
+/// the `cual` of an index — and a later delivery takes them. Calling it finished would be a claim the
+/// guard cannot back.
+///
+/// What *can* be claimed today is the one thing renaming breaks and nothing else notices: **a comment
+/// that still cites a name the code no longer has**. The compiler does not read comments, the suite
+/// does not either, and a reader who greps for the name a comment gives them finds nothing. This
+/// delivery renamed a hundred and thirty names in that file; without this, a hundred and fifty-eight
+/// comments would have been left pointing at names that no longer exist.
+///
+/// The second half of each entry is the crate whose names the file may cite: a comment in `lib.rs` is
+/// entitled to name something its sibling modules declare.
+const CITATIONS_CHECKED: &[(&str, &str)] = &[
+    ("app/src/lib.rs", "app"),
+    ("app/src/ajustes.rs", "app"),
+    ("app/src/fuentes.rs", "app"),
+    ("app/src/medida.rs", "app"),
+    ("app/src/panel.rs", "app"),
+    ("app/src/pintor.rs", "app"),
+    ("app/src/puente.rs", "app"),
+    ("app/src/raton.rs", "app"),
+    ("app/src/sesion.rs", "app"),
+    ("app/src/teclado.rs", "app"),
+    ("app/src/tema.rs", "app"),
+    ("app/src/vigilante.rs", "app"),
+];
+
+/// Names that are **still Spanish on purpose**, because a later delivery owns them.
+///
+/// Every entry is a name a finished file still carries, with the delivery that takes it. They are
+/// listed one by one instead of being matched by a rule: **a short explicit list ages better than a
+/// criterion that widens until it stops failing**, and every line here is a line somebody has to
+/// delete, which is the point.
+///
+/// The seven at the top are the types whose field and variant names **are the layout file on disk**:
+/// they move with the measurement bench and the version bump, so that renaming the format and
+/// reseeding the script that writes it happen in one commit. The rest are types a finished file
+/// legitimately names because a file this milestone has not reached yet declares them.
+///
+/// **Every entry is checked against the file that declares the name, not against the intention of
+/// whoever added it.** Three entries have already been deleted for failing that check: two named
+/// types declared in the very file the delivery was renaming — so they hid its own work instead of
+/// somebody else's — and one, `MEDIR`, matched no identifier at all.
+///
+/// **And this list exempts nothing today. Measured:** make the exemption below never fire and
+/// [`no_spanish_identifier_survives_in_a_finished_crate`] stays green, because the three finished
+/// crates have no name that needs exempting — they are finished. Its user is the delivery that puts
+/// `app/src/lib.rs` in [`FINISHED_CRATES`], and it is written now because that is when it was
+/// **derived**: pointing the guard at that file printed these names one by one, each verified against
+/// the file that declares it. Saying so here is the point — a list that quietly exempted nothing
+/// would read, to the next person, as a list that was doing work.
+const STILL_SPANISH: &[&str] = &[
+    // The seven whose field and variant names **are** the layout file on disk.
+    "Hoja",
+    "Orientacion",
+    "Nodo",
+    "Hijo",
+    "Pestaña",
+    "Documento",
+    "Sonda",
+    // Types a finished file legitimately names because they are declared in a file that is not
+    // finished. **Every one of these is a line a later delivery deletes**, which is why they are
+    // written out one by one: the list shrinking is how the milestone shows its progress.
+    "Accion",
+    "Acorde",
+    "Ajustes",
+    "Arrastres",
+    "Atajos",
+    "Avisos",
+    "Bandera",
+    "Barra",
+    "CosteDelColor",
+    "DeLaSesion",
+    "Descubridor",
+    "Descubrimiento",
+    "Donde",
+    "EnPuntos",
+    "Estado",
+    "Guardado",
+    "LecturaDeAjustes",
+    "Medida",
+    "Metrica",
+    "Persistencia",
+    "Puente",
+    "Rasterizado",
+    "Reclamo",
+    "Reflujo",
+    "Restauracion",
+    "RestoDelFotograma",
+    "Tema",
+    "Tramos",
+    "Valido",
+    "Vigilante",
+];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
 ///
@@ -87,15 +192,23 @@ struct Glossary {
     from_tables: usize,
 }
 
-/// Lowercase, and Spanish accents folded onto ASCII.
+/// Spanish accents folded onto ASCII, **with the case left alone**.
 ///
-/// **Both sides get folded, and that is what closes a whole family of leftovers.** The glossary
-/// writes `Pestaña` and `TamañoPedido`; the code writes `pestanas` and `tamano_pedido`, because
-/// identifiers in this repository avoid the tilde on purpose. Without folding, the two never meet —
-/// measured, with `TAMANO`, which is a real constant of the measurement script.
-fn fold(text: &str) -> String {
-    text.to_lowercase()
-        .chars()
+/// **The exemption list is matched with this and not with [`fold`], and the difference is what keeps
+/// the list from blinding the guard.** A type a later delivery owns folds, lowercased, onto the very
+/// name a file gives its locals: `Gesto` and `gesto`, `Hueco` and `hueco`, `Nodo` and `nodo`. Listing
+/// the type would exempt the local too — and the local is the one thing this guard exists to catch.
+///
+/// **Said plainly: today this changes no verdict.** None of the three finished crates has a local
+/// named after a listed type, so lowercasing and not lowercasing give the same answer for every file
+/// the guard currently reads. It was found while renaming the crate that comes next, where seventeen
+/// names did land on an entry that was never about them, and it is one line — so it goes in now
+/// rather than after the delivery it would have bitten.
+///
+/// Rust settles it for free: types are `CamelCase`, locals and fields are `snake_case`, so keeping
+/// the case makes the two unable to collide in the first place.
+fn unaccent(text: &str) -> String {
+    text.chars()
         .map(|c| match c {
             'á' => 'a',
             'é' => 'e',
@@ -103,9 +216,25 @@ fn fold(text: &str) -> String {
             'ó' => 'o',
             'ú' | 'ü' => 'u',
             'ñ' => 'n',
+            'Á' => 'A',
+            'É' => 'E',
+            'Í' => 'I',
+            'Ó' => 'O',
+            'Ú' | 'Ü' => 'U',
+            'Ñ' => 'N',
             other => other,
         })
         .collect()
+}
+
+/// Lowercase, and Spanish accents folded onto ASCII.
+///
+/// **Both sides get folded, and that is what closes a whole family of leftovers.** The glossary
+/// writes `Pestaña` and `TamañoPedido`; the code writes `pestanas` and `tamano_pedido`, because
+/// identifiers in this repository avoid the tilde on purpose. Without folding, the two never meet —
+/// measured, with `TAMANO`, which is a real constant of the measurement script.
+fn fold(text: &str) -> String {
+    unaccent(text).to_lowercase()
 }
 
 fn glossary() -> Glossary {
@@ -406,7 +535,9 @@ fn segments(name: &str) -> Vec<String> {
     out
 }
 
-/// The `.rs` files under a directory, and **it panics if it cannot read it**.
+/// The `.rs` files under a path, which may be a directory or a single file.
+///
+/// **It panics if it cannot read it.**
 ///
 /// Returning an empty list was a silence of the expensive kind: a misspelled name in the list of
 /// finished crates left this guard with no file to look at, and a crate with no files reads exactly
@@ -463,6 +594,22 @@ fn the_glossary_is_still_where_this_test_reads_it_from() {
 /// of the answers below are only ever reached by names that do not exist in the tree yet, and a rule
 /// with no oracle is the same thing as no rule.
 fn why_it_is_a_leftover(name: &str, glossary: &Glossary) -> Option<String> {
+    // **Still Spanish on purpose, matched by the WHOLE name and with the CASE KEPT.** Matching by
+    // segment would have exempted every identifier carrying one of these pieces — a local called
+    // `pestanas` as much as the stored type `Pestaña` — and the local is precisely what has to be
+    // caught. Case matters for the same reason and it cost a pass to see: lowercased, the entry for
+    // somebody else's `Gesto` would also exempt a file's own `gesto`. See [`unaccent`].
+    //
+    // **A prefix form used to be accepted here and it exempted nothing.** It was put in for the
+    // measurement gate's variables, on the belief that they are identifiers starting with `MEDIR_`;
+    // they are not — those are the environment variables' **strings**, and the constants that hold
+    // them are called `VARIABLE_DE_LAS_PESTAÑAS` and the like. So the entry matched no name, the
+    // prefix matched no entry, and both are gone. Whole name or nothing.
+    let whole = unaccent(name);
+    if STILL_SPANISH.iter().any(|kept| whole == unaccent(kept)) {
+        return None;
+    }
+
     // An identifier with a letter outside ASCII cannot be English. It is the cheapest half of this
     // guard and it needs no glossary at all.
     if name.chars().any(|c| c.is_alphabetic() && !c.is_ascii()) {
@@ -646,6 +793,26 @@ fn the_three_rules_answer_what_they_promise() {
         verdict("color_del_reclamo").is_some(),
         "a Spanish compound whose first piece happens to be an English word"
     );
+
+    // **The exemption list keeps the case, and this is the pair that forced it.** `Gesto` is on the
+    // list because a file this milestone has not reached yet declares it; `gesto` is what a finished
+    // file called the local that holds one. Lowercased they are the same string, so the entry for the
+    // type exempted the local — and the local is the whole reason this guard runs. Same shape for
+    // `Nodo`/`nodo` and `Hueco`/`hueco`, which is seventeen names in the file this delivery finishes.
+    for kept in STILL_SPANISH {
+        assert_eq!(
+            verdict(kept),
+            None,
+            "«{kept}» is on the exemption list and has to come out exempt"
+        );
+    }
+    for own in ["gesto", "nodo", "hueco", "orientacion"] {
+        assert!(
+            verdict(own).is_some(),
+            "«{own}» is what a finished file calls its own local, and the exemption list carries the \
+             CamelCase type of the same word: lowercasing the comparison would let this one through"
+        );
+    }
 }
 
 #[test]
@@ -716,6 +883,321 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
          glossary lists the name they should have:\n{}",
         leftovers.len(),
         leftovers.join("\n")
+    );
+}
+
+/// Names a comment may cite that are **not** identifiers of the crate and never will be.
+///
+/// This one list is copied rather than derived, and there is no source to derive it from: a program
+/// the prose names (`vim`), a constant of the system (`OPOST`), an item of a dependency
+/// (`LineWriter`) and a method of `std` (`recv`) are all outside every crate in this tree. Keeping
+/// it closed is what makes the guard below safe to break the build with — and the failure message
+/// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
+const NOT_OURS: &[&str] = &[
+    // Other programs, and what the operating system gives them.
+    "bash",
+    "cat",
+    "clear",
+    "emacs",
+    "exec",
+    "exit",
+    "fork",
+    "htop",
+    "ioctl",
+    "less",
+    "ls",
+    "man",
+    "nano",
+    "nvim",
+    "O_APPEND",
+    "OPOST",
+    "printf",
+    "sh",
+    "strace",
+    "stty",
+    "tmux",
+    "vim",
+    "xterm",
+    // Environment variables — ours and other people's. A variable is not an identifier of this tree,
+    // and the ones the measurement script exports leave with the script, in a later delivery.
+    "MEDIR_MIB",
+    "MEDIR_TANDA",
+    "PANEL_DIR",
+    "PANEL_ID",
+    "PWD",
+    "SHELL",
+    "SHLVL",
+    "TAMANO",
+    "TERM",
+    // Items of the crates this one depends on.
+    "click",
+    "click_and_drag",
+    "CLICK_AND_DRAG",
+    "content_rect",
+    "distance_sq_to_pos",
+    "dragged",
+    "FOCUSABLE",
+    "inner_size",
+    "InputState",
+    "interact_radius",
+    "LineWriter",
+    "NaN",
+    "NonZeroUsize",
+    "on_hover_cursor",
+    "or_else",
+    "portable_pty",
+    "prepare_raw_input",
+    "recv",
+    "serde",
+    "set_var",
+    "vars_os",
+    "with",
+    // Values, not names: what a key is called in the settings file, what the panel contract admits
+    // for its `attention` field, what the measurement variable accepts, and what a report line is
+    // labelled. Every one of them is a string, so no set of identifiers can hold it — and every one
+    // is translated with the file that defines it, not with this one.
+    "block",
+    "Ctrl",
+    "Fin",
+    "frontera",
+    "Inicio",
+    "ninguno",
+    "restauradas",
+    "stale_after_minutes",
+    "wait",
+    // Single letters standing for a quantity in prose.
+    "f",
+    "w",
+    // ── What the sibling files cite, now that their citations are checked too ──
+    // The standard library and the language.
+    "fsync",
+    "read",
+    // Other programs, and the shell.
+    "echo",
+    "grep",
+    "sed",
+    "VTE",
+    // Items of the crates this one depends on.
+    "break_on_newline",
+    "Fonts",
+    "from_name",
+    "has_glyph",
+    "has_glyphs",
+    "NEAREST",
+    "Single",
+    // Font tables and font families, which belong to whoever made the font.
+    "cmap",
+    "COLR",
+    "Hack",
+    "Noto",
+    // Unicode property names, which belong to Unicode.
+    "Emoji_Component",
+    "EmojiModifierBase",
+    "EmojiOtherAndEmojiComponent",
+    "Emoji_Presentation",
+    // Another environment variable.
+    "HOSTNAME",
+    // More values that are not names: keys of the settings file, values of the panel contract, and
+    // what a key is called when somebody types it.
+    "Alt",
+    "f4",
+    "pageup",
+    "pending",
+    "prior",
+    "supr",
+    "waiting",
+    // **A name that never existed, and the argument needs it.** The measurement bench's naming rule
+    // is stated by counter-example — «a type called `Configuracion` inside the measurement module
+    // would read as *the configuration* instead of as *what it cost to read it*» — so the citation is
+    // of something deliberately absent. Nothing else in this list is of that kind.
+    "Configuracion",
+];
+
+/// Every identifier a pair of backticks cites — **all the segments of a path, not just the first**.
+///
+/// Shapes: `` `name` ``, `` `name()` ``, `` `name: Type` `` (a field with its type, which is how this
+/// repository writes a measured layout) and `` `Type::member` `` with any number of segments.
+///
+/// **The qualified form used to be skipped, and the reason written here for skipping it was false.**
+/// It said `` `Panel::written_at` `` is «a rustdoc link that `cargo doc` already judges». It is not:
+/// rustdoc resolves links inside **brackets** — `[`Panel::written_at`]` — and a bare pair of
+/// backticks is code formatting, nothing more. Worse, most of these live in `//` comments, which
+/// rustdoc does not read at all. Fourteen citations naming methods and types this milestone had
+/// already renamed were sitting behind that sentence with the suite green, two of them left by the
+/// delivery that wrote the sentence. Measured, and the lesson is the one this project keeps
+/// relearning: a plausible written justification is the cheapest place for a hole to hide.
+///
+/// So every segment is asked about. A bracketed rustdoc link passes anyway — its segments all exist,
+/// or `cargo doc-check` was already failing — and the overlap costs nothing.
+fn cited_names(inside: &str) -> Vec<&str> {
+    let inside = inside.strip_suffix("()").unwrap_or(inside);
+    // A single colon separates a field from its type; a double one separates path segments.
+    let path = match inside.split_once(':') {
+        Some((_, rest)) if rest.starts_with(':') => inside,
+        Some((before, _)) => before.trim_end(),
+        None => inside,
+    };
+    let segments: Vec<&str> = path.split("::").collect();
+    let an_identifier = |name: &str| {
+        let mut chars = name.chars();
+        chars.next().is_some_and(|first| {
+            (first.is_ascii_alphabetic() || first == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    };
+    // **All or nothing.** `panel.json` splits into one segment that is not an identifier, and so does
+    // `cargo test`; reporting the good half of something that is not a citation at all would be a
+    // false alarm, and a guard that breaks the build has to be wrong less often than the code.
+    if segments.iter().all(|s| an_identifier(s)) {
+        segments
+    } else {
+        Vec::new()
+    }
+}
+
+/// Every identifier a crate's code actually defines or uses, comments and literals excluded.
+fn code_names(files: &[PathBuf]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for file in files {
+        let src = std::fs::read_to_string(file).expect("a file the walk just listed");
+        names.extend(identifiers(&src).into_iter().map(|(_, name)| name));
+        // The scanner drops the name of the function under a `#[test]`, which is exactly right when
+        // it is hunting Spanish and exactly wrong here: a comment is allowed to cite a test by name.
+        for line in src.lines() {
+            if let Some((_, rest)) = line.split_once("fn ") {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    names.insert(name);
+                }
+            }
+        }
+    }
+    names
+}
+
+/// A comment that cites an identifier by a name the code no longer has.
+///
+/// **This is the half of a rename that nothing else in the tree can see.** The compiler checks the
+/// code, `cargo doc` checks the `[`link`]` form, and this delivery's own rule says a reference in a
+/// comment is not prose and gets edited with the code — but a reference written `` `like_this` ``
+/// has no oracle at all, so the rule was kept by hand. Twenty-one of them were not.
+///
+/// It is scoped per crate and not repo-wide on purpose: `desde`, `parar` and `prioridad` are all
+/// live identifiers **in `app`**, so a union of every crate's names would call each of these
+/// citations fine and report nothing.
+#[test]
+fn no_comment_cites_a_name_the_code_no_longer_has() {
+    let root = repo();
+    let mut stale = Vec::new();
+
+    // Two kinds of entry, and the difference is **which files supply the names**: a finished crate
+    // answers for itself, while a single file answers with its whole crate behind it, because a
+    // comment there is entitled to cite what a sibling module declares.
+    let mut jobs: Vec<(Vec<PathBuf>, Vec<PathBuf>)> = Vec::new();
+    for crate_name in FINISHED_CRATES {
+        let files = rust_files(&root.join("crates").join(crate_name));
+        assert!(
+            !files.is_empty(),
+            "«{crate_name}» is declared finished and has no file to look at: its name on the list \
+             is misspelled, and without this the guard would report a crate it never read as clean"
+        );
+        jobs.push((files.clone(), files));
+    }
+    for (path, crate_name) in CITATIONS_CHECKED {
+        let file = root.join("crates").join(path);
+        assert!(
+            file.is_file(),
+            "«{path}» is on the citations list and is not a file: the name is misspelled, and \
+             without this the guard would report a file it never read as clean"
+        );
+        jobs.push((
+            vec![file],
+            rust_files(&root.join("crates").join(crate_name)),
+        ));
+    }
+
+    for (to_read, for_names) in jobs {
+        let files = to_read;
+        let names = code_names(&for_names);
+        for file in &files {
+            let shown = file
+                .strip_prefix(&root)
+                .unwrap_or(file)
+                .display()
+                .to_string();
+            let src = std::fs::read_to_string(file).expect("a file the walk just listed");
+            for (number, line) in src.lines().enumerate() {
+                if !line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for piece in line.split('`').skip(1).step_by(2) {
+                    for cited in cited_names(piece) {
+                        if names.contains(cited) || NOT_OURS.contains(&cited) {
+                            continue;
+                        }
+                        stale.push(format!("  {shown}:{}: `{cited}`", number + 1));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        stale.is_empty(),
+        "{} comment(s) cite an identifier the crate around them does not have. A rename \
+         does not break a comment, it makes it lie — and a reader who greps for the name it gives \
+         finds nothing. Either the citation has to move to the new name, or the name belongs to \
+         something outside this tree and goes in `NOT_OURS`:\n{}",
+        stale.len(),
+        stale.join("\n")
+    );
+}
+
+/// The reader of citations, over the shapes that decide whether one is even asked about.
+///
+/// **Half of these are exemptions, and an exemption with no test is what lets a guard go quiet.**
+/// The double colon is the one that matters: this repository writes hundreds of
+/// `[`Type::method`]` links and every one of them would be reported as a stale citation.
+#[test]
+fn the_reader_of_citations_asks_about_the_right_things() {
+    assert_eq!(cited_names("cuantos"), vec!["cuantos"], "a bare name");
+    assert_eq!(cited_names("lo_quiere()"), vec!["lo_quiere"], "a call");
+    assert_eq!(
+        cited_names("desde: u32"),
+        vec!["desde"],
+        "a field with its type, which is how this repository writes a measured layout"
+    );
+    // **The qualified form, which used to come back empty behind a false reason.** Both halves are
+    // asked about, because both can die: `Ventana::pintar_division` was two dead names at once.
+    assert_eq!(
+        cited_names("Panel::written_at"),
+        vec!["Panel", "written_at"],
+        "a qualified path is every one of its segments: a bare pair of backticks is not a rustdoc \
+         link, so nothing else in the tree judges it"
+    );
+    assert_eq!(
+        cited_names("sesion::Nodo::Rama"),
+        vec!["sesion", "Nodo", "Rama"],
+        "however many segments it has"
+    );
+    assert!(
+        cited_names("panel.json").is_empty(),
+        "a file name is not an identifier"
+    );
+    assert!(cited_names("cargo test").is_empty(), "nor is a command");
+    assert!(
+        cited_names("").is_empty(),
+        "nor is an empty pair of backticks"
+    );
+    assert!(cited_names("--mib").is_empty(), "nor is a flag");
+    // **All or nothing, and this is the case that forced it.** Splitting on `::` first would have
+    // turned a version number into two «identifiers» and reported the half that looks like one.
+    assert!(
+        cited_names("egui::0.29").is_empty(),
+        "a path with one segment that is not an identifier is not a citation at all"
     );
 }
 

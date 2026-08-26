@@ -6,7 +6,7 @@
 //! el `fork` en un solo sitio.
 //!
 //! **Y los tipos de aquí son un espejo, no los de la disposición viva.** Cambiarle un campo al árbol de
-//! [`crate::Nodo`] no debe cambiar lo que hay escrito en el disco de nadie; el precio es una conversión
+//! [`crate::Node`] no debe cambiar lo que hay escrito en el disco de nadie; el precio es una conversión
 //! de ida y otra de vuelta, y lo que compra es que las dos formas evolucionen por separado. La única
 //! excepción, y por su razón, es el peso: ver [`Hijo::peso`].
 //!
@@ -84,7 +84,7 @@ pub struct Hoja {
 
 /// En qué sentido reparte una rama.
 ///
-/// **Es un tipo propio y no [`crate::Orientacion`], a propósito.** Los nombres de este enum son **el
+/// **Es un tipo propio y no [`crate::Orientation`], a propósito.** Los nombres de este enum son **el
 /// formato**: aparecen literalmente en el fichero de todo el que use la aplicación. Reutilizar el tipo
 /// vivo ataría el fichero a un nombre que el código puede querer cambiar mañana por razones que no
 /// tienen nada que ver con el disco. El precio son cuatro líneas de conversión.
@@ -117,9 +117,9 @@ pub enum Nodo {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Hijo {
     /// **Un número suelto, y no el tipo del peso vivo, y esto sí es deliberado.** Derivar la lectura
-    /// sobre [`crate::Peso`] **se saltaría su constructor**, que es lo único que hace imposible una suma
+    /// sobre [`crate::Weight`] **se saltaría su constructor**, que es lo único que hace imposible una suma
     /// de pesos igual a cero — el `NaN` en un rectángulo que ese tipo existe para evitar. Así que el
-    /// cable lleva `f32` y la validación lo pasa por `Peso::nuevo`: **una sola implementación de la
+    /// cable lleva `f32` y la validación lo pasa por `crate::Weight::new`: **una sola implementación de la
     /// invariante**, la que ya estaba probada.
     pub peso: f32,
     pub nodo: Nodo,
@@ -148,7 +148,7 @@ pub struct Documento {
 ///
 /// **El campo es privado y no hay más forma de construirlo que [`validar`]**, así que «este árbol está
 /// bien formado» es propiedad del tipo y no de que alguien se acuerde de comprobarlo antes. Es la misma
-/// doctrina que [`crate::Peso`] un nivel más arriba, y por el mismo motivo: este proyecto tiene contado
+/// doctrina que [`crate::Weight`] un nivel más arriba, y por el mismo motivo: este proyecto tiene contado
 /// con números lo que pasa con las invariantes que dependen de la memoria de quien escribe.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Valido {
@@ -417,7 +417,7 @@ fn revisar(nodo: &Nodo, de_fuera: Option<Orientacion>, pestaña: usize) -> Resul
         // par**, así que un peso sube hasta el 99 % de lo que sumaban dos vecinos. Lo que el reparto
         // necesita de verdad no es un peso acotado: es **una suma de rama finita**, y eso se comprueba
         // abajo.
-        if crate::Peso::nuevo(hijo.peso).is_none() {
+        if crate::Weight::new(hijo.peso).is_none() {
             return Err(Problema::PesoInvalido { pestaña });
         }
         hojas += revisar(&hijo.nodo, Some(*orientacion), pestaña)?;
@@ -1212,10 +1212,10 @@ mod tests_de_los_techos {
         // comprobado ejecutándolo, `1e-40 · 1e-40 / 2e-40` da **cero**— pero cerrarlo aquí, rechazando el
         // documento, era cerrarlo en el sitio equivocado: **a estos números se llega arrastrando**, así que
         // lo que este rechazo tiraba era la disposición de quien había usado la aplicación. La respuesta
-        // vive ahora donde el producto ocurre, en `Peso::escalado`, y por eso aquí se aceptan.
+        // vive ahora donde el producto ocurre, en `crate::Weight::scaled`, y por eso aquí se aceptan.
         let diminuto = 1.0e-40_f32;
         assert!(
-            crate::Peso::nuevo(diminuto).is_some(),
+            crate::Weight::new(diminuto).is_some(),
             "cada peso por separado tiene que ser válido, o esta prueba no prueba nada"
         );
         assert_eq!(
@@ -1231,7 +1231,7 @@ mod tests_de_los_techos {
     fn dos_pesos_finitos_cuya_suma_no_es_un_numero_se_rechazan() {
         let al_limite = 3.0e38_f32;
         assert!(
-            crate::Peso::nuevo(al_limite).is_some(),
+            crate::Weight::new(al_limite).is_some(),
             "cada peso por separado tiene que ser válido"
         );
         assert!(

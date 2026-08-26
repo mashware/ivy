@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use app::puente::Puente;
 use term_core::{Pty, Size};
 
-/// Copiado de `app::PRESUPUESTO`, que es privado. Si allí cambia, aquí deja de medir lo mismo.
+/// Copiado de `app::PUMP_BUDGET`, que es privado. Si allí cambia, aquí deja de medir lo mismo.
 const PRESUPUESTO: usize = 128 * 1024;
 
 /// El hueco entre recogidas: lo que dura un fotograma a 60 por segundo.
