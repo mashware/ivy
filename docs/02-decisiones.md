@@ -3184,3 +3184,311 @@ testigo de las fuentes—, y esos textos los buscan guardas de `scripts/medir-fo
 Renombrar sin mirar no rompe una prueba: **rompe una guarda**, y una guarda rota publica como buena una
 corrida mentirosa. Es el mismo modo de fallo que este proyecto ya pagó una vez, cuando la guarda del
 guion estaba muerta y su verificación fue falsa.
+
+### El glosario, y las dos fronteras que lo ordenan
+
+Esto es lo que el hito tenía que decidir antes de escribir código, y lo que las nueve entregas
+siguientes aplican sin volver a discutir. **No es una tabla de traducción: es una tabla de decisiones**,
+y cada fila que no es obvia lleva su razón al lado.
+
+#### La primera frontera: de quién es el nombre
+
+Después de este hito ya no hay dos idiomas, así que la frontera **deja de separar idiomas y pasa a
+separar dueños**: cuándo se adopta la palabra que el ecosistema ya usa y cuándo se acuña una propia.
+La pregunta sobrevive a la traducción, y por eso hay que contestarla.
+
+> **Un nombre nuevo se decide con tres preguntas, y manda la primera que dé «sí».**
+>
+> 1. **¿El tipo *es* el de una dependencia** —reexportado, o envoltura que tiene que seguirle la
+>    forma? **Se adopta su nombre.** `Pty`, `Screen`, `Size`, `Dims`, `TermColor`, `Underline`,
+>    `Watcher`.
+> 2. **¿Es una palabra que quien usa el terminal ya tiene?** El listón es su usuario (**D19**), así
+>    que el criterio es comprobable y no de gusto: **la palabra aparece en la configuración, la
+>    documentación o los nombres de acción de dos o más de {WezTerm, Kitty, Ghostty, tmux, Zellij}**.
+>    Si sí, **se adopta aunque el tipo sea nuestro**: `Pane`, `Tab`, `Cell`, `Divider`,
+>    `MouseReporting`, `Tiling`.
+> 3. **Si no es ninguna de las dos, el nombre es nuestro** y describe **nuestro** mecanismo: `Pump`,
+>    `Weight`, `PtyOutput`.
+>
+> **Y una prohibición que gobierna las tres: no se adopta una palabra que el ecosistema ya usa para
+> otra cosa.** Eso descalifica `Window` para la división —es lo que Kitty llama a una división y lo
+> que tmux llama a una pestaña— y `Border` para la frontera, que en Kitty y en tmux es el marco *de*
+> un panel.
+>
+> **Y la asimetría que eso deja hay que decirla, porque salta a la vista:** `Window` sí es el nombre
+> de la ventana de verdad. No es una excepción a la prohibición, es la prohibición leída bien — lo que
+> prohíbe es adoptar una palabra **que significa otra cosa**, y para la ventana del sistema `Window`
+> significa exactamente eso, igual que en `winit`. Quien la usa para otra cosa es `egui`, donde una
+> «window» es un panel flotante dentro de la aplicación; ése es el nombre del que hay que cuidarse al
+> importar, no el concepto.
+
+**Esta regla no es nueva: `term-core` la practica desde F1.1 y la tiene escrita tres veces**, las
+tres en el mismo fichero, en los comentarios de la celda, del ratón reclamado y del desplazamiento. La
+que la enuncia entera es la del desplazamiento: **«Vocabulario propio, no el del motor, por lo mismo
+que el resto de esta caja: quien la use no tiene que conocer los tipos de sus dependencias ni migrar
+con ellos.»**
+
+> Y aquí una corrección que este anexo se hace a sí mismo, porque el registro de decisiones no puede
+> llevar una cita falsa: la primera versión decía **cuatro** veces e incluía el tipo de los caracteres
+> combinantes, que **no lleva ese comentario** —su rustdoc habla de por qué no va dentro de la celda—;
+> y la frase que citaba era **un injerto de dos de los tres comentarios**. Son tres, y la cita literal
+> es la de arriba.
+
+Lo que faltaba no era la regla, era **enunciarla y decir dónde no se aplica**: su argumento tiene
+sujeto —«quien use esta caja»— y **en `app` no hay nadie**, porque no se publica. Ahí manda la
+pregunta 2, la del usuario, y no la de la migración que nadie va a hacer.
+
+#### Cuando el nombre correcto choca con un `use`, se le pone alias al ajeno
+
+Dos nombres de este glosario **no compilan tal cual**, y los dos por la misma razón: el módulo donde
+vive el tipo propio ya importa un nombre idéntico de una dependencia.
+
+| Nombre propio | Qué lo bloquea |
+|---|---|
+| `Scroll` (el desplazamiento por el historial) | su fichero importa `Scroll` de `alacritty_terminal::grid` |
+| `Watcher` (el vigilante del directorio del panel) | su fichero importa el *trait* `Watcher` de `notify`, y **tiene que estar en ámbito** para poder llamar a `watch` |
+
+> **La solución no es cambiar el nombre propio: es ponerle alias al ajeno.** Un `use … as GridScroll`
+> para el tipo, y un `use notify::Watcher as _;` —importación anónima de trait, que es justo para
+> esto— para el que solo hace falta en ámbito. El vocabulario del proyecto no cede el sitio al de una
+> dependencia que además no debería asomar: eso es lo que esta caja lleva defendiendo desde F1.1.
+
+**Y una clasificación de la primera versión que estaba mal, no solo estorbando:** el vigilante
+figuraba como nombre **adoptado** por la pregunta 1, «el tipo *es* el de una dependencia». No lo es.
+`notify::Watcher` es un **trait** con `watch` y `unwatch`, y el tipo propio no le sigue la forma:
+guarda un vigilante dentro y levanta una bandera. Es un nombre **acuñado** por la pregunta 3, y da la
+casualidad de que coincide con el del ecosistema.
+
+**Avisos que hoy no rompen y conviene tener escritos**, porque están a un `use` de distancia: `Cell`
+—el fichero hermano ya importa la celda de `alacritty_terminal`—, `Flag` —`notify::event::Flag`
+existe, en la misma lista de importación que ese módulo ya usa—, `Row` —`epaint::text::Row` es «una
+fila de texto maquetado», exactamente lo que el tipo propio es— y `Theme` —`egui::Theme` existe, misma
+palabra y mismo dominio—. Ninguno colisiona hoy; los cuatro colisionarían con un `use` más.
+
+#### La segunda frontera: lo vivo y lo que está en disco
+
+También estaba escrita, y en el sitio correcto: el enumerado que dice en qué sentido reparte una rama
+existe **aparte** de su gemelo vivo porque «**los nombres de este enum son el formato**: aparecen
+literalmente en el fichero de todo el que use la aplicación; reutilizar el tipo vivo ataría el fichero
+a un nombre que el código puede querer cambiar mañana». Lo mismo con el nodo, el hijo y la pestaña,
+que existen dos veces por esa razón.
+
+**Si los dos gemelos acaban llamándose igual en inglés, se pierde justo esa distinción.** Así que:
+
+> **Un tipo cuyos nombres son el formato en disco lleva el prefijo `Stored`.** El test es mecánico y
+> **sin excepciones**: ¿el tipo deriva `Serialize` o `Deserialize` en ese módulo? Prefijo.
+
+| Vivo | En disco |
+|---|---|
+| — (`Documento`) | **`StoredDocument`** — la raíz: sus dos campos *son* `{"v":…, "pestañas":[…]}` |
+| `Tab` | `StoredTab` |
+| `Node` | `StoredNode` |
+| `Child` | `StoredChild` |
+| — (`Hoja`) | `StoredLeaf` |
+| `Orientation` | `StoredOrientation` |
+| — (`Sonda`) | **`StoredProbe`** — solo lee la versión, pero la lee *del fichero* |
+
+La primera versión de esta regla **se incumplía a sí misma dos veces**: dejaba fuera la raíz del
+formato y el tipo que lee la versión, los dos con `derive` puesto. Un test mecánico con dos
+excepciones escritas a mano no es un test mecánico, y por eso ahora no las tiene. Los tipos de ese
+módulo que **no** derivan serde —el problema del documento, la política de guardado, el fallo de
+escritura, el documento ya validado— no llevan prefijo.
+
+**Y el prefijo avisa del tipo, pero el formato lo hacen los campos *y las variantes*.** Dos enumerados
+llevan `rename_all`, así que **los nombres de sus variantes son el fichero**: renombrar la variante de
+las filas deja el fichero escribiendo `"rows"` mientras el guion de medida sigue sembrando `"filas"`.
+Eso **no lo caza el compilador, ni la suite, ni el prefijo**: solo la guarda de la tanda que restaura,
+y solo si alguien la corre. Es el agujero real de este hito, y está aquí escrito para que nadie lo
+descubra dos veces.
+
+**`panel-contract` no lleva prefijo**, y es coherente: **la caja entera es el formato**, así que su
+nombre ya es la etiqueta.
+
+#### La división es un `Pane`, y el gesto es `split`
+
+Comprobado con fuente y no de memoria, que es lo que este proyecto exige de cualquier API ajena:
+
+| Terminal | Sustantivo | Dónde |
+|---|---|---|
+| WezTerm | **`pane`** | `trait Pane` en `mux/src/pane.rs`; `ActivatePaneDirection`, `PaneSelect` |
+| tmux | **`pane`** | `select-pane`, `pane-border-style` |
+| Zellij | **`pane`** | `Action::NewPane`, el bloque `pane {}` de su configuración |
+| Ghostty | `split` | `new_split`, `goto_split`, `split-divider-color` |
+| Kitty | `window` | una división es un «kitty window» dentro de un tab |
+| Alacritty | — | no tiene el concepto; lo delega |
+
+**`Pane` la cosa** —tres de cinco, y `Division` **no lo usa nadie**: es la forma española—, y **`split`
+el gesto**, que ya estaba comprometido sin que nadie se diera cuenta: esta misma decisión escribió
+`key.split-right` como ejemplo de las claves nuevas, que es exactamente lo que hacen WezTerm y
+Ghostty. Las once claves de atajo pasan a `key.*`.
+
+**Un hueco que se declara en vez de rellenarse:** ninguno de los cinco tiene palabra para el **peso**
+de un panel en un árbol n-ario. Lo más cercano son el `bias` de Kitty —**un entero de 10 a 90**, y de
+una pareja— y el `ratio` de Ghostty —un 0–1, también de una pareja, y **que además no es vocabulario
+de usuario**: vive en su árbol de divisiones interno y no en su configuración, así que **no pasa la
+propia pregunta 2 de este glosario**—. Aquí los pesos son n y suman lo que sea. Por eso `Weight` es
+acuñado y no adoptado: adoptar `bias` o `ratio` **mentiría sobre la aritmética del árbol**.
+
+#### La trampa del calco, que se cobró cinco nombres
+
+**Un calco que coincide con un nombre del ecosistema y no significa lo mismo es peor que una
+traducción libre.** La regla se escribió al empezar el glosario y aun así cazó cinco nombres ya
+propuestos:
+
+| Tipo | Primer nombre, y por qué cae | Queda |
+|---|---|---|
+| `Resultado` | `Result` es de `std` y significa otra cosa | **`Outcome`** |
+| `Recogida` | `Drain`: `vec::Drain` y `HashMap::Drain` son **iteradores**, y este tipo es un resultado con dos campos | **`Pickup`** |
+| `Adjuntos` | `Combining` nombra el **referente**, no el tipo: el tipo es un tramo empaquetado de 27+5 bits que apunta a un vector aparte | **`CombiningSpan`** |
+| `Reparto` | `Partition` es de disco y `Iterator::partition` reparte por un predicado; y `Allotment`, para un nativo, es un huerto de alquiler | **`Tiling`** |
+| `Gesto` (del ratón) | `MouseEvent` nombra una **entrada**, y el tipo es una **salida**: el informe ya dice «informes al programa» | **`MouseReport`** |
+| `Puente` | `Reader` sin implementar `io::Read` miente por convención, y lo que el tipo hace —traer la salida **y la señal de muerte**— es justo lo que un `Reader` no hace | **`PtyOutput`** |
+
+#### El reparto de `Layout`, que es el choque de verdad
+
+Tres tipos y un fichero querían la misma palabra:
+
+| Hoy | Qué es | Queda | Por qué |
+|---|---|---|---|
+| `Reparto` | los rectángulos de las partes de un área **y las líneas que las separan** | `Tiling` | «tiling» es el término de los gestores de ventanas en mosaico, que es este dominio exacto |
+| `Hueco` | el reparto **dentro** de una división, entre consola y panel | `PanelTiling` | **emparejado a propósito**: su comentario dice que tiene nombre «por lo mismo que lo tiene `Reparto`… dos repartos que se leyeran distinto serían **dos idiomas para una sola idea**» |
+| `Maqueta` | una maqueta de texto ya calculada | `PanelLayout` | aquí `Layout` sí es lo que es: texto colocado |
+| `Disposicion` | con cuántas consolas abre cada pestaña | `OpeningLayout` | es lo que se **pide** al abrir, no lo que resulta |
+| `disposicion.json` | el fichero | `layout.json` | el nombre que espera quien abre su carpeta de configuración |
+
+#### Lo que no se traduce nunca
+
+- **Las claves y valores de `panel.json`.** Y la razón buena **no** es que ya estén en inglés: son
+  **contrato con productores de fuera** (**D17**), así que la licencia de «sin compatibilidad» que
+  esta decisión concede **no las alcanza**. Esa licencia cubre las claves de atajo y el fichero de
+  disposición, que solo lee esta máquina. Ojo además con tres que **no se llaman como su campo**: la
+  clave es `v`, `stale_after_minutes` y `ref`.
+- **Identificadores del sistema y del protocolo:** `OPOST`, `SIGWINCH`, `TIOCSWINSZ`, `SGR`, `CSI`,
+  `XDG_CONFIG_HOME`, `SHELL`, `PANEL_ID`, `PANEL_DIR`.
+- **Nombres de caja:** `alacritty_terminal`, `egui`, `eframe`, `epaint`, `serde`, `serde_json`,
+  `notify`, `skrifa`, `fontique`, `portable-pty`, `winit`, y los propios `term-core`,
+  `panel-contract`, `host-load`. (**No `fontdb`**, que la primera versión de esta lista citaba: no
+  está en el árbol — la caja de fuentes de este proyecto es `fontique`.)
+- **Nombres propios y etiquetas:** `WezTerm`, `Ghostty`, `Kitty`, `tmux`, `vim`, `htop`, `Nerd Font`,
+  `COLR`, `D1`–`D27`, `F1.0`–`F2.12`, y **las letras de tanda `A`–`Q`**, que no tienen idioma.
+- **Y los literales cuya *longitud* es la carga de prueba.** El ejemplo que pinta la pantalla de
+  comprobación coloca un carácter ancho **justo en el borde de la columna 80**, y su comentario dice
+  que «sin esta fila, la rama del pintor que trata ese hueco no la mira nadie». **Ese fichero no tiene
+  ni una prueba.** Traducir ese texto mueve el carácter de sitio y **desactiva la rama en silencio**.
+  Un texto así se mide en columnas, no en palabras.
+
+#### Los homónimos, que no son duplicación
+
+Se creyó que la coexistencia de un `Problem` inglés con dos `Problema` españoles era el precio de no
+haber escrito la frontera. **Es falso**: uno es «lo que le pasa al fichero de configuración entero» y
+otro «por qué un documento de disposición no sirve». Son tipos distintos en módulos distintos, y el
+idioma solo los estaba haciendo parecer parientes. **No se fusiona ninguno** —fusionar cambia
+comportamiento bajo suite verde, y eso es otro hito— y el criterio da tres respuestas:
+
+- **Mismo concepto, referente distinto → sustantivo compartido y calificador propio:**
+  `ConfigProblem`, `LayoutProblem`, y el `Problem` de `panel-contract` se queda como está porque su
+  caja ya lo califica. Igual `Linea` (la del fichero de configuración) → **`ConfigLine`**, frente al `Line` del panel, que se queda.
+- **Concepto idéntico duplicado a propósito → nombre idéntico:** los dos `Directorio` de prueba pasan
+  **los dos a `TestDir`**, porque su comentario dice «el mismo molde que usa el módulo hermano» y
+  calificarlos esconderían que son un patrón. No `TempDir`: es de `tempfile`.
+- **Conceptos distintos que compartían nombre por accidente → nombres sin nada en común:** los dos
+  `Gesto` no son parientes. El de la ventana es lo que **la tanda de medida se inyecta** →
+  `InjectedGesture`; el del ratón es lo que el ratón hizo para codificárselo al programa →
+  `MouseReport`. Traducir los dos a `Gesture` convertiría el accidente en intencionado.
+
+#### El resto del glosario
+
+**Núcleo de la ventana:** `Ventana`→`Window` · `Pestaña`→`Tab` · `Division`→`Pane` ·
+`Consola`→`Console` · `Nodo`→`Node` · `Hijo`→`Child` · `Peso`→`Weight` · `Frontera`→`Divider` ·
+`Orientacion`→`Orientation` con variantes `Columns`/`Rows` —**las variantes nombran el resultado y no
+el eje**, que es lo que su comentario defiende— · `Lado`→`Side` · `Cierre`→`Closing` ·
+`TamañoPedido`→`RequestedSize` · `ConQueAbrir`→`OpenWith` · `Puerta`→`Entry` · `Bombeo`→`Pump` ·
+`Orden`→`WindowRequest` (**no `Command`**: ya está tomado por lo que se lanza).
+
+**La familia de «lo que X deja para el resto del fotograma» son cuatro, no siete**, y comparten
+sufijo porque su valor es reconocerse entre sí: `DelRaton`→`MouseOutcome` ·
+`DeLaRuedaAlPrograma`→`WheelOutcome` · `DeLaBarra`→`TabBarOutcome` · `DeLaDivision`→`PaneOutcome`.
+
+Y los otros tres **no son de la familia y no llevan el sufijo**: `DeLaRueda`→`WheelInput`, porque es
+lo que la rueda **pidió** y no lo que deja; `DelBoton`→`ButtonPress`, que es un evento; y
+`DeLaSesion`→`SessionHeader`, que es la cabecera del informe.
+
+**Ratón y teclado:** `RatonReclamado`→`MouseReporting` · `QueHaceElArrastre`→`DragIntent` ·
+`QuienSeQuedaLaRueda`→`WheelOwner` · `Donde`→`CellPos` · `Accion`→`Action` · `Acorde`→`Chord` ·
+`Atajos`→`Keymap` · `Desplazamiento`→`Scroll` · `Mitad`→`Half`.
+
+**Configuración, sesión y panel:** `Ajustes`→`Settings` · `Colores`→`Colors` · `Aviso`→`Warning` ·
+`Avisos`→`Warnings` · `Falta`→`Missing` · `Valido`→`Validated` ·
+`Fallo`→`SaveFailure` · `Persistencia`→`Persistence` · `Estado`→`PanelState` ·
+`Reclamo`→`AttentionState` (**no `Claim`**: en inglés es «afirmación» o «derecho») · `Fila`→`Row` ·
+`Vigilante`→`Watcher` · `Vigilada`→`Watched` · `Bandera`→`Flag` · `Cola`→`Queue` · `Tema`→`Theme` ·
+`Metrica`→`CellMetrics`.
+
+**El banco de medida** — su regla ya estaba escrita y se conserva: **«se llama por el acto y no por la
+cosa»**, porque un tipo llamado `Configuracion` dentro del módulo de medida se leería como «la
+configuración» en vez de como «lo que costó leerla». `Serie`→`Series` · `Tramos`→`Spans` ·
+`Medida`→`Timings` · `RestoDelFotograma`→`RestOfFrame` · `Guardado`→`Saving` ·
+`Descubrimiento`→`Discovery` · `Rasterizado`→`Rasterizing` · `EnPuntos`→`SizeInPoints` ·
+`Reflujo`→`Reflow` · `Barra`→`TabBar` · `Restauracion`→`Restoring` ·
+`LecturaDeAjustes`→`ReadingSettings` (**no `SettingsRead`**, que se lee como participio y rompe la
+familia en `-ing`) · `Arrastres`→`Drags` · `ArrastresInyectados`→`InjectedDrags` · `Vuelta`→`Round` ·
+`CosteDelColor`→`ColorCost` · `Despertares`→`Wakeups` · `Resumen`→`Summary` · `Barrido`→`Sweep` ·
+`Prueba`→`TestCase` · `Veredicto`→`Verdict` · `Montaje`→`Harness`.
+
+**Los que la primera versión se dejó fuera**, encontrados cruzando el glosario con los tipos que
+existen hoy: `Opciones`→`Options` (los argumentos de la línea de órdenes del medidor de carga) ·
+`Entrega`→`Delivery` (lo que costó volcar el fichero) · `Recogida`→`Pickup` (el resultado de una
+recogida de la cola, que solo se deducía de la fila del calco) · y los cuatro del contrato del panel,
+internos o de ejemplos: `Banco`→`Bench` · `Contador`→`Counter` · `Forma`→`Filler` · `Uso`→`Usage`.
+
+**Fuentes y glifos:** `Cara`→`Face` · `CaraDelSistema`→`SystemFace` · `Descubridor`→`Discoverer` ·
+`Presentacion`→`Presentation` · `EnElAtlas`→`InAtlas` · `Glifos`→`Glyphs` · `Celda`→`Cell` ·
+`Adjuntos`→`CombiningSpan`.
+
+#### Tres cifras del cuerpo que el inventario deja atrás
+
+D27 se escribió con los números de su día y **el inventario del hito los subió**. No se corrigen
+arriba —este documento añade con fecha, no edita hacia atrás— pero quedan aquí para que nadie los
+cite viejos: **46.458 líneas** propias y no 43.860, **859 nombres de prueba** y no 853, y **dieciocho
+ficheros** con nombre español y no diez. La diferencia no es un error de cuenta: **F2.10 entró en
+medio**, y es la demostración literal del «cuanto más tarde, más caro» que la propia decisión usa
+como argumento.
+
+#### Qué significa «enteros, de una vez» para los documentos
+
+D27 dice que los documentos «se traducen **enteros**, de una vez, en su entrega — no se van mezclando
+fichero a fichero», y la frase admite dos lecturas. **Manda la que su propia razón sostiene**: el
+ejemplo que da es «una decisión en inglés dentro de un `02-decisiones.md` en español», o sea **la
+mezcla dentro de un fichero**. Así que:
+
+> **«Entero» es cada documento, y «de una vez» es su entrega.** Ningún documento se queda a medias
+> —eso es lo prohibido—, y la entrega puede llevar un cambio por documento. Con 3.186 líneas solo en
+> este fichero, un único cambio con los ocho documentos dentro no lo revisa nadie, y lo que D27
+> protege no es el tamaño del cambio: es que no se lea medio documento en cada idioma.
+
+Queda escrito porque la lectura contraria es defendible leyendo solo la frase, y una decisión que
+admite dos lecturas se discute otra vez dentro de tres semanas.
+
+#### Los ficheros son dieciocho, no diez
+
+La decisión contó los diez de `app/src` y se dejó ocho: `ajustes.rs`→`settings.rs` ·
+`teclado.rs`→`keyboard.rs` · `sesion.rs`→`session.rs` · `fuentes.rs`→`fonts.rs` ·
+`medida.rs`→`measure.rs` · `pintor.rs`→`painter.rs` · `tema.rs`→`theme.rs` ·
+`vigilante.rs`→`watcher.rs` · `puente.rs`→`pty_output.rs` · `raton.rs`→`mouse.rs` ·
+`barrido.rs`→`sweep.rs` · `fuga.rs`→`leak.rs` · `pantalla.rs`→`screen_demo.rs` ·
+`lectura.rs`→`read.rs` · `entrega.rs`→`delivery.rs` · `historial.rs`→`scrollback.rs` ·
+`api_sin_terceros.rs`→`api_without_deps.rs`, más el ejemplo de fuentes de `app`.
+
+**Y uno más que no estaba en ninguna lista: el propio `scripts/medir-fotograma.sh`**, que pasa a
+`measure-frame.sh`. Su nombre se cita en **quince ficheros** —tres módulos, este documento y diez del
+conocimiento almacenado—, así que se renombra en la entrega del banco y **sus citas en prosa se
+corrigen en las entregas de prosa**: una cita al nombre viejo dentro de un comentario que todavía está
+en español no rompe nada ejecutable, y el alternativo es un cambio que cruza el repositorio entero.
+
+#### Una discrepancia que se declara en vez de resolverse en silencio
+
+Para lo que el programa de dentro **pide** sobre el ratón, el estándar dice *mouse tracking* (DECSET
+1000–1003) y los terminales del listón dicen *reporting* (`mouse-reporting` en Ghostty,
+`bypass_mouse_reporting_modifiers` en WezTerm). Dos revisiones dieron nombres distintos y **las dos
+citas son buenas**. Manda **D19**: el vocabulario de su usuario. Queda `MouseReporting`, y queda
+escrito que la otra opción tenía argumento.
