@@ -35,7 +35,7 @@ pub use panel::{
 /// tiene que descartar los avisos de cualquier otra ruta, así que necesita nombrar este fichero; sin
 /// exportarlo, la cadena se volvería a escribir a mano en cada sitio y el contrato dejaría de vivir
 /// en uno solo.
-pub const FICHERO_DEL_PANEL: &str = "panel.json";
+pub const PANEL_FILE: &str = "panel.json";
 
 /// Los nombres de las dos variables del contrato, en un solo sitio.
 ///
@@ -53,7 +53,7 @@ pub const ENV_NAMES: [&str; 2] = ["PANEL_ID", "PANEL_DIR"];
 #[derive(Debug)]
 pub struct PanelDir {
     id: String,
-    ruta: PathBuf,
+    path: PathBuf,
 }
 
 impl PanelDir {
@@ -65,11 +65,11 @@ impl PanelDir {
     /// Por eso también la ruta añade **un solo componente**: no hay ningún tramo intermedio que
     /// hubiera que crear antes, ni que un tercero pueda dejar preparado en un temporal compartido.
     pub fn create() -> io::Result<Self> {
-        let id = identificador()?;
-        let ruta = base().join(format!("agent-terminal-{id}"));
-        crear(&ruta)?;
+        let id = generate_id()?;
+        let path = base_dir().join(format!("agent-terminal-{id}"));
+        create_dir(&path)?;
 
-        Ok(Self { id, ruta })
+        Ok(Self { id, path })
     }
 
     pub fn id(&self) -> &str {
@@ -77,7 +77,7 @@ impl PanelDir {
     }
 
     pub fn path(&self) -> &Path {
-        &self.ruta
+        &self.path
     }
 
     /// Las dos variables que el proceso de la división hereda.
@@ -91,7 +91,7 @@ impl PanelDir {
     pub fn env(&self) -> [(&'static str, &OsStr); 2] {
         [
             (ENV_NAMES[0], OsStr::new(&self.id)),
-            (ENV_NAMES[1], self.ruta.as_os_str()),
+            (ENV_NAMES[1], self.path.as_os_str()),
         ]
     }
 }
@@ -107,10 +107,10 @@ impl Drop for PanelDir {
         // Se avisa porque el respaldo a un temporal del sistema **no** se vacía al cerrar la sesión,
         // al contrario que el directorio de ejecución del usuario: sin esta línea, un resto ahí sería
         // invisible y se iría acumulando en cuanto haya productores que escriban de verdad.
-        if let Some(fallo) = borrar(&self.ruta) {
+        if let Some(failure) = remove(&self.path) {
             eprintln!(
-                "queda el directorio del panel {} ({fallo})",
-                self.ruta.display()
+                "queda el directorio del panel {} ({failure})",
+                self.path.display()
             );
         }
     }
@@ -123,14 +123,14 @@ impl Drop for PanelDir {
 ///
 /// Está separado del destructor para poder comprobarse: un destructor no devuelve nada, y la decisión
 /// de qué se calla y qué se dice es justo lo que hay que poder afirmar.
-fn borrar(ruta: &Path) -> Option<io::Error> {
+fn remove(path: &Path) -> Option<io::Error> {
     // Que no esté es lo normal: hasta que alguien publique, el directorio está vacío.
-    let _ = std::fs::remove_file(ruta.join(FICHERO_DEL_PANEL));
+    let _ = std::fs::remove_file(path.join(PANEL_FILE));
 
-    match std::fs::remove_dir(ruta) {
+    match std::fs::remove_dir(path) {
         Ok(()) => None,
-        Err(fallo) if fallo.kind() == io::ErrorKind::NotFound => None,
-        Err(fallo) => Some(fallo),
+        Err(failure) if failure.kind() == io::ErrorKind::NotFound => None,
+        Err(failure) => Some(failure),
     }
 }
 
@@ -139,8 +139,8 @@ fn borrar(ruta: &Path) -> Option<io::Error> {
 /// Sin recursión por las dos razones: no hay tramo intermedio que crear, y el modo de crear que sí
 /// admite tramos intermedios tampoco protesta cuando la ruta ya está — adoptaría un directorio que
 /// esta caja no hizo.
-fn crear(ruta: &Path) -> io::Result<()> {
-    let mut como = DirBuilder::new();
+fn create_dir(path: &Path) -> io::Result<()> {
+    let mut builder = DirBuilder::new();
     // Sin esto el modo sale de la máscara de la sesión —medido: `0775` con la de esta máquina—, y
     // ahí va a vivir un fichero que cuenta en qué anda el usuario. Bajo el directorio de ejecución
     // del usuario no se alcanzaría, porque ya es suyo y solo suyo; pero el respaldo puede ser un
@@ -148,9 +148,9 @@ fn crear(ruta: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
-        como.mode(0o700);
+        builder.mode(0o700);
     }
-    como.create(ruta)
+    builder.create(path)
 }
 
 /// Ocho dígitos hexadecimales.
@@ -158,11 +158,11 @@ fn crear(ruta: &Path) -> io::Result<()> {
 /// Los cuatro del ejemplo de la decisión que fija esto son 65.536 nombres, y con una creación que
 /// falla si el nombre ya existe una colisión deja a una división sin identidad. Treinta y dos bits
 /// cuestan lo mismo.
-fn identificador() -> io::Result<String> {
+fn generate_id() -> io::Result<String> {
     // El error se convierte a mano y no con `?` para no tener que activarle a `getrandom` la feature
     // que trae esa conversión: ya está compilado en el árbol sin ella, y pedirla lo recompilaría.
-    let azar = getrandom::u32().map_err(|fallo| io::Error::other(fallo.to_string()))?;
-    Ok(formatear(azar))
+    let random = getrandom::u32().map_err(|failure| io::Error::other(failure.to_string()))?;
+    Ok(format_id(random))
 }
 
 /// El formato, aparte del sorteo, para poder comprobarlo con valores dados.
@@ -170,8 +170,8 @@ fn identificador() -> io::Result<String> {
 /// El relleno con ceros es lo que hace que sean **siempre** ocho dígitos: sin él, un número pequeño
 /// daría un nombre más corto, y una prueba que mire la longitud de un identificador sorteado al azar
 /// casi nunca lo notaría.
-fn formatear(azar: u32) -> String {
-    format!("{azar:08x}")
+fn format_id(random: u32) -> String {
+    format!("{random:08x}")
 }
 
 /// Dónde viven los directorios de las divisiones.
@@ -180,8 +180,8 @@ fn formatear(azar: u32) -> String {
 /// memoria, y el sistema lo vacía al cerrar la sesión. Cuando no existe —macOS, o una sesión de
 /// Linux sin gestor— se cae al temporal del sistema, que es la única alternativa que existe en todas
 /// partes.
-fn base() -> PathBuf {
-    base_de(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
+fn base_dir() -> PathBuf {
+    base_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
 }
 
 /// La decisión, separada de leer el entorno para poder comprobarla sin tocarlo.
@@ -189,9 +189,9 @@ fn base() -> PathBuf {
 /// **Una variable definida y vacía no es una ruta**: dejarla pasar daría una ruta relativa, y el
 /// directorio se crearía dentro del directorio de trabajo de la aplicación — sin fallar, que es lo
 /// peor que podría hacer.
-fn base_de(variable: Option<&OsStr>) -> PathBuf {
-    match variable {
-        Some(ruta) if !ruta.is_empty() => PathBuf::from(ruta),
+fn base_dir_from(value: Option<&OsStr>) -> PathBuf {
+    match value {
+        Some(path) if !path.is_empty() => PathBuf::from(path),
         _ => std::env::temp_dir(),
     }
 }
@@ -205,7 +205,7 @@ mod tests {
         let panel = PanelDir::create().expect("crear el directorio del panel");
 
         assert!(panel.path().is_dir(), "no es un directorio: {panel:?}");
-        std::fs::write(panel.path().join(FICHERO_DEL_PANEL), b"{}")
+        std::fs::write(panel.path().join(PANEL_FILE), b"{}")
             .expect("el productor tiene que poder publicar ahí");
     }
 
@@ -213,24 +213,24 @@ mod tests {
     fn la_ruta_termina_en_el_identificador() {
         let panel = PanelDir::create().expect("crear el directorio del panel");
 
-        let ultimo = panel
+        let last = panel
             .path()
             .file_name()
             .expect("la ruta tiene un último tramo")
             .to_string_lossy()
             .into_owned();
 
-        assert_eq!(ultimo, format!("agent-terminal-{}", panel.id()));
+        assert_eq!(last, format!("agent-terminal-{}", panel.id()));
     }
 
     #[test]
     fn al_soltarlo_el_directorio_desaparece() {
-        let ruta = {
+        let path = {
             let panel = PanelDir::create().expect("crear el directorio del panel");
             panel.path().to_path_buf()
         };
 
-        assert!(!ruta.exists(), "quedó el directorio: {}", ruta.display());
+        assert!(!path.exists(), "quedó el directorio: {}", path.display());
     }
 
     /// El fichero del contrato lo escribe el productor, no esta caja — y aun así se lo lleva al
@@ -238,21 +238,21 @@ mod tests {
     /// por división en cuanto alguien publicara de verdad.
     #[test]
     fn al_soltarlo_se_lleva_el_fichero_del_contrato() {
-        let ruta = {
+        let path = {
             let panel = PanelDir::create().expect("crear el directorio del panel");
-            std::fs::write(panel.path().join(FICHERO_DEL_PANEL), b"{\"lines\":[]}")
+            std::fs::write(panel.path().join(PANEL_FILE), b"{\"lines\":[]}")
                 .expect("publicar un panel");
             panel.path().to_path_buf()
         };
 
-        assert!(!ruta.exists(), "quedó el directorio: {}", ruta.display());
+        assert!(!path.exists(), "quedó el directorio: {}", path.display());
     }
 
     /// La cara B del borrado sin recursión: lo que no es del contrato no se toca, y por eso el
     /// directorio sigue ahí. Es la propiedad que se quiere, no un descuido.
     #[test]
     fn un_fichero_que_no_es_del_contrato_deja_el_directorio_en_pie() {
-        let ruta = {
+        let path = {
             let panel = PanelDir::create().expect("crear el directorio del panel");
             std::fs::write(panel.path().join("registro.log"), b"trabajo del productor")
                 .expect("escribir algo ajeno al contrato");
@@ -261,34 +261,31 @@ mod tests {
 
         // Se recoge el hecho y se limpia **antes** de afirmar: con la limpieza detrás del `assert`, un
         // fallo del test dejaría el directorio ahí para siempre.
-        let sobrevivio = ruta.join("registro.log").is_file();
-        std::fs::remove_dir_all(&ruta).expect("limpiar lo que el test dejó a propósito");
+        let survived = path.join("registro.log").is_file();
+        std::fs::remove_dir_all(&path).expect("limpiar lo que el test dejó a propósito");
 
-        assert!(sobrevivio, "se borró algo que no era del contrato");
+        assert!(survived, "se borró algo que no era del contrato");
     }
 
     #[test]
     fn dos_directorios_no_comparten_ni_identificador_ni_ruta() {
-        let una = PanelDir::create().expect("crear el primero");
-        let otra = PanelDir::create().expect("crear el segundo");
+        let first = PanelDir::create().expect("crear el primero");
+        let second = PanelDir::create().expect("crear el segundo");
 
-        assert_ne!(una.id(), otra.id());
-        assert_ne!(una.path(), otra.path());
+        assert_ne!(first.id(), second.id());
+        assert_ne!(first.path(), second.path());
     }
 
     #[test]
     fn las_dos_variables_son_las_del_contrato_y_apuntan_al_directorio() {
         let panel = PanelDir::create().expect("crear el directorio del panel");
 
-        let [
-            (nombre_del_id, valor_del_id),
-            (nombre_del_dir, valor_del_dir),
-        ] = panel.env();
+        let [(id_name, id_value), (dir_name, dir_value)] = panel.env();
 
-        assert_eq!(nombre_del_id, "PANEL_ID");
-        assert_eq!(nombre_del_dir, "PANEL_DIR");
-        assert_eq!(valor_del_id, OsStr::new(panel.id()));
-        assert_eq!(valor_del_dir, panel.path().as_os_str());
+        assert_eq!(id_name, "PANEL_ID");
+        assert_eq!(dir_name, "PANEL_DIR");
+        assert_eq!(id_value, OsStr::new(panel.id()));
+        assert_eq!(dir_value, panel.path().as_os_str());
     }
 
     /// La unicidad no se comprueba: se obtiene de que crear falle. Si esto dejara de fallar, dos
@@ -297,10 +294,10 @@ mod tests {
     fn crear_sobre_un_directorio_que_ya_existe_falla() {
         let panel = PanelDir::create().expect("crear el directorio del panel");
 
-        let otra_vez = crear(panel.path());
+        let again = create_dir(panel.path());
 
         assert!(
-            otra_vez.is_err(),
+            again.is_err(),
             "crear sobre lo que ya existe tiene que fallar"
         );
     }
@@ -312,7 +309,7 @@ mod tests {
 
         let panel = PanelDir::create().expect("crear el directorio del panel");
 
-        let modo = panel
+        let mode = panel
             .path()
             .metadata()
             .expect("leer los permisos")
@@ -320,12 +317,12 @@ mod tests {
             .mode()
             & 0o777;
 
-        assert_eq!(modo, 0o700, "modo {modo:o}, y ahí va a vivir el panel");
+        assert_eq!(mode, 0o700, "modo {mode:o}, y ahí va a vivir el panel");
     }
 
     #[test]
     fn el_identificador_de_verdad_tiene_ocho_digitos_hexadecimales() {
-        let id = identificador().expect("generar un identificador");
+        let id = generate_id().expect("generar un identificador");
 
         assert_eq!(id.len(), 8, "no son ocho dígitos: {id}");
         assert!(
@@ -340,41 +337,41 @@ mod tests {
     /// cada dieciséis.
     #[test]
     fn el_formato_rellena_con_ceros_hasta_ocho() {
-        assert_eq!(formatear(0), "00000000");
-        assert_eq!(formatear(0xff), "000000ff");
-        assert_eq!(formatear(0x0abcdef1), "0abcdef1");
-        assert_eq!(formatear(u32::MAX), "ffffffff");
+        assert_eq!(format_id(0), "00000000");
+        assert_eq!(format_id(0xff), "000000ff");
+        assert_eq!(format_id(0x0abcdef1), "0abcdef1");
+        assert_eq!(format_id(u32::MAX), "ffffffff");
     }
 
     /// El caso que no falla y hace lo incorrecto: con la variable **definida y vacía** la ruta saldría
     /// relativa, y el directorio del panel acabaría dentro del directorio de trabajo.
     #[test]
     fn una_variable_de_entorno_vacia_no_cuenta_como_ruta() {
-        assert_eq!(base_de(Some(OsStr::new(""))), std::env::temp_dir());
+        assert_eq!(base_dir_from(Some(OsStr::new(""))), std::env::temp_dir());
     }
 
     #[test]
     fn sin_directorio_de_ejecucion_se_cae_al_temporal_del_sistema() {
-        assert_eq!(base_de(None), std::env::temp_dir());
+        assert_eq!(base_dir_from(None), std::env::temp_dir());
     }
 
     #[test]
     fn con_directorio_de_ejecucion_se_usa_ese() {
         assert_eq!(
-            base_de(Some(OsStr::new("/run/user/1000"))),
+            base_dir_from(Some(OsStr::new("/run/user/1000"))),
             PathBuf::from("/run/user/1000")
         );
     }
 
     #[test]
     fn borrar_lo_que_ya_no_esta_no_merece_aviso() {
-        let ruta = {
+        let path = {
             let panel = PanelDir::create().expect("crear el directorio del panel");
             panel.path().to_path_buf()
         };
 
         assert!(
-            borrar(&ruta).is_none(),
+            remove(&path).is_none(),
             "avisó de un directorio que ya no estaba"
         );
     }
@@ -385,11 +382,11 @@ mod tests {
         std::fs::write(panel.path().join("registro.log"), b"del productor")
             .expect("escribir algo ajeno al contrato");
 
-        let aviso = borrar(panel.path());
+        let warning = remove(panel.path());
         std::fs::remove_dir_all(panel.path()).expect("limpiar lo que el test dejó a propósito");
 
         assert!(
-            aviso.is_some(),
+            warning.is_some(),
             "el directorio sobrevivió con algo dentro y nadie lo dijo"
         );
     }

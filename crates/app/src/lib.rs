@@ -53,7 +53,7 @@ use pintor::Metrica;
 use puente::Puente;
 use std::time::{Duration, Instant, SystemTime};
 use tema::Tema;
-use term_core::{Celda, Desplazamiento, Mitad, Pty, Screen, Size};
+use term_core::{Cell, Half, Pty, Screen, Scroll, Size};
 use vigilante::{Bandera, Vigilante};
 
 /// El nombre con el que la ventana se presenta al escritorio.
@@ -707,7 +707,7 @@ impl ArrastresInyectados {
 
 /// Lo que la rueda ha pedido en un fotograma, **antes de convertirlo a movimiento entero**.
 ///
-/// **En crudo y no ya en [`Desplazamiento`], y ahí estaba el defecto que la revisión encontró.** Un panel
+/// **En crudo y no ya en [`Scroll`], y ahí estaba el defecto que la revisión encontró.** Un panel
 /// táctil manda **puntos**, y un roce son unos pocos: divididos por el alto de una celda dan **menos de
 /// una línea**. Convirtiendo aquí mismo a un entero, esa fracción se truncaba a cero, el resto se tiraba y
 /// el evento se consumía igual — o sea que **arrastrar dos dedos despacio no movía el historial nunca**, y
@@ -2220,7 +2220,7 @@ impl Division {
         division: egui::Rect,
         punto: egui::Pos2,
         metrica: &Metrica,
-    ) -> Option<Celda> {
+    ) -> Option<Cell> {
         let dentro = punto - division.min;
         let columna = dentro.x / metrica.ancho();
         let fila = dentro.y / metrica.alto();
@@ -2228,10 +2228,10 @@ impl Division {
             && fila >= 0.0
             && columna < f32::from(self.medido.cols)
             && fila < f32::from(self.medido.rows))
-        .then(|| Celda {
-            fila: fila as u16,
-            columna: columna as u16,
-            mitad: Mitad::de_la_fraccion(columna.fract()),
+        .then(|| Cell {
+            row: fila as u16,
+            col: columna as u16,
+            half: Half::from_fraction(columna.fract()),
         })
     }
 
@@ -2254,20 +2254,20 @@ impl Division {
         division: egui::Rect,
         punto: egui::Pos2,
         metrica: &Metrica,
-    ) -> Celda {
+    ) -> Cell {
         let dentro = punto - division.min;
         let ultima_columna = f32::from(self.medido.cols.saturating_sub(1));
         let columna = dentro.x / metrica.ancho();
         let fila = dentro.y / metrica.alto();
         let mitad = if columna >= ultima_columna {
-            Mitad::Derecha
+            Half::Right
         } else {
-            Mitad::de_la_fraccion(columna.fract())
+            Half::from_fraction(columna.fract())
         };
-        Celda {
-            fila: fila as u16,
-            columna: columna as u16,
-            mitad,
+        Cell {
+            row: fila as u16,
+            col: columna as u16,
+            half: mitad,
         }
     }
 
@@ -2277,12 +2277,12 @@ impl Division {
     /// al motor, que lo lleva a su rejilla por su cuenta; aquí lo que se hace con la celda es **contársela
     /// al programa**, y una columna que su rejilla no tiene es una celda inventada. Ocurre en cuanto un
     /// arrastre termina fuera de la consola donde empezó, que es el final normal de un gesto.
-    fn celda_acotada(&self, division: egui::Rect, punto: egui::Pos2, metrica: &Metrica) -> Celda {
+    fn celda_acotada(&self, division: egui::Rect, punto: egui::Pos2, metrica: &Metrica) -> Cell {
         let suelta = self.celda_para_extender(division, punto, metrica);
-        Celda {
-            fila: suelta.fila.min(self.medido.rows.saturating_sub(1)),
-            columna: suelta.columna.min(self.medido.cols.saturating_sub(1)),
-            mitad: suelta.mitad,
+        Cell {
+            row: suelta.row.min(self.medido.rows.saturating_sub(1)),
+            col: suelta.col.min(self.medido.cols.saturating_sub(1)),
+            half: suelta.half,
         }
     }
 
@@ -2301,7 +2301,7 @@ impl Division {
         &mut self,
         pedido: DeLaRueda,
         acorde: egui::Modifiers,
-        donde: Celda,
+        donde: Cell,
     ) -> Option<DeLaRuedaAlPrograma> {
         self.rueda_pendiente.lineas += pedido.lineas;
         self.rueda_pendiente.paginas += pedido.paginas;
@@ -2317,12 +2317,10 @@ impl Division {
                 // que no hace nada, y publicarla haría creer a quien lea el código que el fotograma
                 // desplazó.
                 if lineas != 0.0 {
-                    self.pantalla
-                        .desplazar(Desplazamiento::Lineas(lineas as i32));
+                    self.pantalla.scroll_by(Scroll::Lines(lineas as i32));
                 }
                 if paginas != 0.0 {
-                    self.pantalla
-                        .desplazar(Desplazamiento::Paginas(paginas as i32));
+                    self.pantalla.scroll_by(Scroll::Pages(paginas as i32));
                 }
                 None
             }
@@ -2349,9 +2347,9 @@ impl Division {
     fn quien_se_queda_la_rueda(&self, acorde: egui::Modifiers) -> QuienSeQuedaLaRueda {
         if acorde.shift {
             QuienSeQuedaLaRueda::ElHistorial
-        } else if self.pantalla.raton_reclamado().lo_quiere() {
+        } else if self.pantalla.mouse_reporting().wants_mouse() {
             QuienSeQuedaLaRueda::ElPrograma
-        } else if self.pantalla.la_rueda_va_como_flechas() {
+        } else if self.pantalla.wheel_acts_as_arrows() {
             QuienSeQuedaLaRueda::LasFlechas
         } else {
             QuienSeQuedaLaRueda::ElHistorial
@@ -2366,7 +2364,7 @@ impl Division {
         &mut self,
         quien: QuienSeQuedaLaRueda,
         cuantas: i32,
-        donde: Celda,
+        donde: Cell,
     ) -> Option<DeLaRuedaAlPrograma> {
         let empezo = Instant::now();
         let arriba = cuantas > 0;
@@ -2392,8 +2390,8 @@ impl Division {
                     // la rueda movía siempre la de arriba a la izquierda, mirase el puntero donde mirase.
                     if let Some(informe) = raton::informe(
                         gesto,
-                        raton::Donde::desde_cero(donde.fila, donde.columna),
-                        self.pantalla.raton_reclamado(),
+                        raton::Donde::desde_cero(donde.row, donde.col),
+                        self.pantalla.mouse_reporting(),
                         egui::Modifiers::NONE,
                     ) {
                         bytes.extend_from_slice(&informe);
@@ -2428,14 +2426,14 @@ impl Division {
     fn mandar_al_programa_el_raton(
         &mut self,
         gesto: raton::Gesto,
-        celda: Celda,
+        celda: Cell,
         acorde: egui::Modifiers,
     ) -> Option<Duration> {
         let empezo = Instant::now();
         let bytes = raton::informe(
             gesto,
-            raton::Donde::desde_cero(celda.fila, celda.columna),
-            self.pantalla.raton_reclamado(),
+            raton::Donde::desde_cero(celda.row, celda.col),
+            self.pantalla.mouse_reporting(),
             acorde,
         )?;
         if let Err(fallo) = self.pty.write(&bytes) {
@@ -2818,10 +2816,10 @@ impl Division {
         // lo pone el programa de dentro con lo que escribe, y lo que escribe se interpreta en la otra
         // mitad del fotograma. (Preguntarlo dentro del cierre también compilaría —los dos campos son
         // préstamos disjuntos—, así que esto es una elección, no una pared.)
-        let marcado = self.pantalla.pegado_marcado();
+        let marcado = self.pantalla.bracketed_paste();
         let mut pegado = false;
         let mut ordenes = Vec::new();
-        let mut historial: Vec<Desplazamiento> = Vec::new();
+        let mut historial: Vec<Scroll> = Vec::new();
         let mut al_portapapeles: Option<String> = None;
 
         // Los eventos que van al programa **se consumen**, no se leen y se dejan. Un fotograma
@@ -2895,7 +2893,7 @@ impl Division {
                 if matches!(evento, egui::Event::Copy) && acorde.shift && copiar_encendido {
                     // Se traga el evento **haya o no algo marcado**: devolverlo lo dejaría caer en la
                     // tabla, y pedir copiar sin nada marcado interrumpiría el programa.
-                    copiar = self.pantalla.texto_seleccionado();
+                    copiar = self.pantalla.selected_text();
                     return false;
                 }
 
@@ -2996,15 +2994,15 @@ impl Division {
                             // consumen aquí y no se traducen a bytes. **Y la repetición vale**: mantener
                             // pulsado para subir es el gesto normal, al revés que crear o cerrar.
                             teclado::Accion::SubirUnaPagina => {
-                                subidas.push(Desplazamiento::Paginas(1));
+                                subidas.push(Scroll::Pages(1));
                             }
                             teclado::Accion::BajarUnaPagina => {
-                                subidas.push(Desplazamiento::Paginas(-1));
+                                subidas.push(Scroll::Pages(-1));
                             }
                             teclado::Accion::IrAlPrincipio => {
-                                subidas.push(Desplazamiento::AlPrincipio);
+                                subidas.push(Scroll::ToTop);
                             }
-                            teclado::Accion::IrAlFinal => subidas.push(Desplazamiento::AlFinal),
+                            teclado::Accion::IrAlFinal => subidas.push(Scroll::ToBottom),
                             // La repetición de crear, cerrar, partir o copiar cae aquí: se traga sin hacer
                             // nada, que es el objeto de la guarda.
                             _ => {}
@@ -3034,7 +3032,7 @@ impl Division {
         // pantalla convive con el de los eventos, y este módulo ya paga bastante por mantener esos dos
         // préstamos separados.
         for cuanto in historial {
-            self.pantalla.desplazar(cuanto);
+            self.pantalla.scroll_by(cuanto);
         }
 
         // **Y el portapapeles, también fuera**, pero por otra razón: escribir en él es pedirle algo al
@@ -3054,7 +3052,7 @@ impl Division {
         // está escribiendo**: el programa responde abajo, fuera de la pantalla, y la ventana parece
         // colgada. Va aquí y no en cada tecla porque la condición es exactamente ésta — que algo haya
         // salido hacia el programa.
-        self.pantalla.desplazar(Desplazamiento::AlFinal);
+        self.pantalla.scroll_by(Scroll::ToBottom);
         if let Err(fallo) = self.pty.write(&self.pulsaciones) {
             // Lo que se acaba de teclear no ha llegado. Una tecla que se pierde en silencio es de
             // los fallos que más tardan en entenderse desde el otro lado de la pantalla.
@@ -5092,7 +5090,7 @@ impl Ventana {
             if respuesta.clicked()
                 && let Some(division) = self.division_llamada(nombre)
             {
-                division.pantalla.quitar_la_seleccion();
+                division.pantalla.clear_selection();
             }
 
             // **Solo el botón primario mueve consolas.** `dragged()` y `drag_stopped()` no miran qué botón
@@ -5277,7 +5275,7 @@ impl Ventana {
             // **El primer informe del arrastre se siembra aquí.** Sin esto, el fotograma siguiente vuelve
             // a contar la celda que el apretón acaba de contar: una escritura al pseudoterminal de más
             // por gesto, que es justo lo que ese campo existe para evitar.
-            self.ultima_celda_informada = Some((nombre, celda.fila, celda.columna));
+            self.ultima_celda_informada = Some((nombre, celda.row, celda.col));
             self.informar(
                 nombre,
                 raton::Gesto::Apretar(boton.boton),
@@ -5327,7 +5325,7 @@ impl Ventana {
         &mut self,
         nombre: usize,
         gesto: raton::Gesto,
-        celda: Celda,
+        celda: Cell,
         acorde: egui::Modifiers,
     ) {
         if let Some(division) = self.division_llamada(nombre)
@@ -5358,7 +5356,7 @@ impl Ventana {
     /// Si el programa de esa consola ha pedido el ratón.
     fn quiere_el_raton(&mut self, nombre: usize) -> bool {
         self.division_llamada(nombre)
-            .is_some_and(|division| division.pantalla.raton_reclamado().lo_quiere())
+            .is_some_and(|division| division.pantalla.mouse_reporting().wants_mouse())
     }
 
     /// Los apretones y soltados de la cola de este fotograma.
@@ -5414,10 +5412,10 @@ impl Ventana {
         else {
             return;
         };
-        if self.ultima_celda_informada == Some((nombre, celda.fila, celda.columna)) {
+        if self.ultima_celda_informada == Some((nombre, celda.row, celda.col)) {
             return;
         }
-        self.ultima_celda_informada = Some((nombre, celda.fila, celda.columna));
+        self.ultima_celda_informada = Some((nombre, celda.row, celda.col));
         // **El acorde es el del apretón, no «ninguno».** Con `Modifiers::NONE` fijo, una tecla mantenida
         // durante el arrastre viajaba en el apretón y en el soltado pero **en ninguno de los informes de
         // en medio**: para un programa que distingue el arrastre con acorde —selección por bloques en un
@@ -5498,7 +5496,7 @@ impl Ventana {
             // panel y arrastrar cambiaba solo lo que había marcado y `Ctrl+Mayúsculas+C` copiaba un texto
             // que nadie señaló.
             match consola.celda_bajo(division, puntero, metrica) {
-                Some(celda) => consola.pantalla.empezar_seleccion(celda),
+                Some(celda) => consola.pantalla.start_selection(celda),
                 None => self.arrastre_en_curso = None,
             }
             return;
@@ -5506,8 +5504,8 @@ impl Ventana {
 
         // Extender **no** rechaza: arrastrar más allá del borde y seguir marcando es el gesto de siempre.
         let celda = consola.celda_para_extender(division, puntero, metrica);
-        consola.pantalla.extender_seleccion(celda);
-        let marco = consola.pantalla.hay_seleccion();
+        consola.pantalla.extend_selection(celda);
+        let marco = consola.pantalla.has_selection();
 
         // **Y se apunta si de verdad quedó algo marcado, para el informe de una tanda.** Ver
         // [`medida::Arrastres::marcados`]: es lo que distingue «se inyectó el gesto» de «el gesto marcó»,
@@ -7885,7 +7883,7 @@ mod tests {
                 .as_ref()
                 .expect("la consola tiene que arrancar con su directorio")
                 .path()
-                .join(panel_contract::FICHERO_DEL_PANEL);
+                .join(panel_contract::PANEL_FILE);
 
             division
                 .pty
@@ -11643,15 +11641,15 @@ mod tests {
         division.pantalla.resize(Size { rows: 4, cols: 10 });
         division.pantalla.advance("0123456日本".as_bytes());
 
-        division.pantalla.empezar_seleccion(Celda {
-            fila: 0,
-            columna: 0,
-            mitad: Mitad::Izquierda,
+        division.pantalla.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
         });
-        division.pantalla.extender_seleccion(Celda {
-            fila: 1,
-            columna: 9,
-            mitad: Mitad::Derecha,
+        division.pantalla.extend_selection(Cell {
+            row: 1,
+            col: 9,
+            half: Half::Right,
         });
 
         assert_eq!(
@@ -11670,15 +11668,15 @@ mod tests {
         let mut division = division_con("sleep 30", 0);
         let mut modificadores = egui::Modifiers::NONE;
         division.pantalla.advance(b"hola mundo");
-        division.pantalla.empezar_seleccion(Celda {
-            fila: 0,
-            columna: 0,
-            mitad: Mitad::Izquierda,
+        division.pantalla.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
         });
-        division.pantalla.extender_seleccion(Celda {
-            fila: 0,
-            columna: 3,
-            mitad: Mitad::Derecha,
+        division.pantalla.extend_selection(Cell {
+            row: 0,
+            col: 3,
+            half: Half::Right,
         });
 
         encolar(
@@ -11812,9 +11810,7 @@ mod tests {
 
     /// Lo que esa consola tiene marcado ahora mismo.
     fn marcado_en(ventana: &Ventana, cual: usize) -> Option<String> {
-        ventana.activa().divisiones()[cual]
-            .pantalla
-            .texto_seleccionado()
+        ventana.activa().divisiones()[cual].pantalla.selected_text()
     }
 
     #[test]
@@ -11890,7 +11886,7 @@ mod tests {
                 .activa()
                 .divisiones()
                 .iter()
-                .all(|division| division.pantalla.texto_seleccionado().is_none()),
+                .all(|division| division.pantalla.selected_text().is_none()),
             "el gesto de mover dejó texto marcado por el camino"
         );
     }
@@ -12265,7 +12261,7 @@ mod tests {
                 .activa()
                 .divisiones()
                 .iter()
-                .all(|division| division.pantalla.texto_seleccionado().is_none()),
+                .all(|division| division.pantalla.selected_text().is_none()),
             "soltar el acorde a mitad del arrastre puso a marcar texto un gesto que era de mover"
         );
     }
@@ -14638,15 +14634,15 @@ mod tests {
 
         let division = &mut ventana.activa_mut().divisiones_mut()[0];
         division.pantalla.advance(b"hola mundo");
-        division.pantalla.empezar_seleccion(Celda {
-            fila: 0,
-            columna: 0,
-            mitad: Mitad::Izquierda,
+        division.pantalla.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
         });
-        division.pantalla.extender_seleccion(Celda {
-            fila: 0,
-            columna: 3,
-            mitad: Mitad::Derecha,
+        division.pantalla.extend_selection(Cell {
+            row: 0,
+            col: 3,
+            half: Half::Right,
         });
         division.pulsaciones.clear();
 
@@ -14674,15 +14670,15 @@ mod tests {
         un_fotograma_en(&mut ventana, &ctx, area_de(1200.0), Vec::new());
         let division = &mut ventana.activa_mut().divisiones_mut()[0];
         division.pantalla.advance(b"hola mundo");
-        division.pantalla.empezar_seleccion(Celda {
-            fila: 0,
-            columna: 0,
-            mitad: Mitad::Izquierda,
+        division.pantalla.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
         });
-        division.pantalla.extender_seleccion(Celda {
-            fila: 0,
-            columna: 3,
-            mitad: Mitad::Derecha,
+        division.pantalla.extend_selection(Cell {
+            row: 0,
+            col: 3,
+            half: Half::Right,
         });
         division.pulsaciones.clear();
 
@@ -15014,7 +15010,7 @@ mod tests {
                 .as_ref()
                 .expect("la división tiene directorio")
                 .path()
-                .join(panel_contract::FICHERO_DEL_PANEL),
+                .join(panel_contract::PANEL_FILE),
             contenido,
         )
         .expect("publicar el panel");
@@ -21345,7 +21341,7 @@ mod tests {
             .as_ref()
             .expect("la división tiene directorio")
             .path()
-            .join(panel_contract::FICHERO_DEL_PANEL);
+            .join(panel_contract::PANEL_FILE);
         std::fs::File::open(&ruta)
             .expect("abrir el panel")
             .set_modified(SystemTime::now() - std::time::Duration::from_secs(60 * 60))
@@ -21852,7 +21848,7 @@ mod tests {
             String::from_utf8_lossy(&division.pulsaciones)
         );
         assert!(
-            division.pantalla.view().desplazamiento() > 0,
+            division.pantalla.view().scroll() > 0,
             "y la vista tenía que haber subido"
         );
     }
@@ -21870,10 +21866,8 @@ mod tests {
                 .pantalla
                 .advance(format!("linea {n}\r\n").as_bytes());
         }
-        division
-            .pantalla
-            .desplazar(term_core::Desplazamiento::AlPrincipio);
-        assert!(division.pantalla.view().desplazamiento() > 0);
+        division.pantalla.scroll_by(term_core::Scroll::ToTop);
+        assert!(division.pantalla.view().scroll() > 0);
 
         encolar(&ctx, vec![egui::Event::Text("a".to_owned())]);
         division.teclear(
@@ -21886,7 +21880,7 @@ mod tests {
         );
 
         assert_eq!(
-            division.pantalla.view().desplazamiento(),
+            division.pantalla.view().scroll(),
             0,
             "se tecleó y la vista se quedó arriba: no se vería lo que se escribe"
         );
@@ -21949,7 +21943,7 @@ mod tests {
         let izquierda = &mut ventana.activa_mut().divisiones_mut()[0];
         esperar_a_que_la_pantalla_diga(izquierda, "listo");
         assert!(
-            izquierda.pantalla.raton_reclamado().lo_quiere(),
+            izquierda.pantalla.mouse_reporting().wants_mouse(),
             "el programa de la prueba no llegó a pedir el ratón"
         );
         ventana
@@ -22044,10 +22038,7 @@ mod tests {
 
         esperar_a_que_la_consola_diga(&mut ventana, 0, "^[[<64;4;3M");
         assert_eq!(
-            ventana.activa().divisiones()[0]
-                .pantalla
-                .view()
-                .desplazamiento(),
+            ventana.activa().divisiones()[0].pantalla.view().scroll(),
             0,
             "el giro se le contó al programa y ADEMÁS movió el historial"
         );
@@ -22153,10 +22144,7 @@ mod tests {
         );
 
         assert_eq!(
-            ventana.activa().divisiones()[0]
-                .pantalla
-                .view()
-                .desplazamiento(),
+            ventana.activa().divisiones()[0].pantalla.view().scroll(),
             3,
             "con Mayúsculas el giro se fue al programa en vez de subir por el historial"
         );
@@ -22189,7 +22177,7 @@ mod tests {
         assert!(
             ventana.activa().divisiones()[0]
                 .pantalla
-                .la_rueda_va_como_flechas(),
+                .wheel_acts_as_arrows(),
             "el programa de la prueba no llegó a la pantalla alterna"
         );
 
@@ -22728,11 +22716,11 @@ mod tests {
     }
 
     /// La celda de arriba a la izquierda: la que da el puntero cuando la prueba no se ocupa de él.
-    fn arriba_a_la_izquierda() -> Celda {
-        Celda {
-            fila: 0,
-            columna: 0,
-            mitad: Mitad::Izquierda,
+    fn arriba_a_la_izquierda() -> Cell {
+        Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
         }
     }
 
@@ -22807,10 +22795,7 @@ mod tests {
         }
 
         assert_eq!(
-            ventana.activa().divisiones()[0]
-                .pantalla
-                .view()
-                .desplazamiento(),
+            ventana.activa().divisiones()[0].pantalla.view().scroll(),
             1,
             "tres roces de un tercio de línea tenían que subir exactamente una: el resto se está tirando"
         );
@@ -22833,8 +22818,8 @@ mod tests {
 
         assert_eq!(
             (
-                izquierda.pantalla.view().desplazamiento(),
-                derecha.pantalla.view().desplazamiento()
+                izquierda.pantalla.view().scroll(),
+                derecha.pantalla.view().scroll()
             ),
             (0, 0),
             "media línea movió algo: se está redondeando en vez de guardar el resto"
@@ -22844,8 +22829,8 @@ mod tests {
 
         assert_eq!(
             (
-                izquierda.pantalla.view().desplazamiento(),
-                derecha.pantalla.view().desplazamiento()
+                izquierda.pantalla.view().scroll(),
+                derecha.pantalla.view().scroll()
             ),
             (1, 0),
             "el resto de una consola se le contó a la otra"
@@ -22880,7 +22865,7 @@ mod tests {
             pasada_de_interfaz(&mut ventana, &ctx, area, entrada);
             let division = &ventana.activa().divisiones()[0];
             (
-                division.pantalla.view().desplazamiento(),
+                division.pantalla.view().scroll(),
                 division.pantalla.size().rows,
             )
         };
@@ -22908,10 +22893,8 @@ mod tests {
         let ctx = egui::Context::default();
         let arriba = {
             let mut division = division_con_historial();
-            division
-                .pantalla
-                .desplazar(term_core::Desplazamiento::AlPrincipio);
-            division.pantalla.view().desplazamiento()
+            division.pantalla.scroll_by(term_core::Scroll::ToTop);
+            division.pantalla.view().scroll()
         };
         assert!(arriba > 0, "la consola de prueba no tiene historial detrás");
 
@@ -22929,8 +22912,8 @@ mod tests {
             let mut modificadores = egui::Modifiers::NONE;
             division
                 .pantalla
-                .desplazar(term_core::Desplazamiento::Lineas(desde as i32));
-            let antes = division.pantalla.view().desplazamiento();
+                .scroll_by(term_core::Scroll::Lines(desde as i32));
+            let antes = division.pantalla.view().scroll();
 
             encolar(
                 &ctx,
@@ -22947,7 +22930,7 @@ mod tests {
                 &teclado::Atajos::default(),
                 true,
             );
-            let despues = division.pantalla.view().desplazamiento();
+            let despues = division.pantalla.view().scroll();
 
             if esperado == usize::MAX {
                 // Las dos de página no van a un sitio fijo: lo que se ata es el SENTIDO. **Y que se
@@ -22986,10 +22969,8 @@ mod tests {
         ] {
             let mut division = division_con_historial();
             let mut modificadores = egui::Modifiers::NONE;
-            division
-                .pantalla
-                .desplazar(term_core::Desplazamiento::Lineas(3));
-            let antes = division.pantalla.view().desplazamiento();
+            division.pantalla.scroll_by(term_core::Scroll::Lines(3));
+            let antes = division.pantalla.view().scroll();
 
             encolar(&ctx, vec![tecla(key, egui::Modifiers::NONE)]);
             division.teclear(
@@ -23002,7 +22983,7 @@ mod tests {
             );
 
             assert_eq!(
-                division.pantalla.view().desplazamiento(),
+                division.pantalla.view().scroll(),
                 antes,
                 "{key:?} sin Mayúsculas movió el historial: se la hemos quitado al programa de dentro"
             );
@@ -23083,12 +23064,12 @@ mod tests {
 
         let divisiones = ventana.activa().divisiones();
         assert_eq!(
-            divisiones[0].pantalla.view().desplazamiento(),
+            divisiones[0].pantalla.view().scroll(),
             0,
             "la rueda movió la consola del foco en vez de la que estaba bajo el puntero"
         );
         assert!(
-            divisiones[1].pantalla.view().desplazamiento() > 0,
+            divisiones[1].pantalla.view().scroll() > 0,
             "la consola bajo el puntero no subió por su historial"
         );
     }
@@ -23153,7 +23134,7 @@ mod tests {
         // Líneas más largas que la rejilla, que son las que de verdad se recolocan al estrechar: una que
         // cabe entera se empuja de un tirón y sale por la puerta barata.
         let larga = "x".repeat(usize::from(ancha.cols) * 3);
-        for _ in 0..term_core::HISTORIAL {
+        for _ in 0..term_core::SCROLLBACK {
             con_texto.pantalla.advance(larga.as_bytes());
             con_texto.pantalla.advance(b"\r\n");
         }
@@ -23178,7 +23159,7 @@ mod tests {
             con_texto.recolocado > vacia.recolocado * 5,
             "recolocar {} líneas que envuelven costó {:?} y hacerlo sin nada que recolocar {:?}: el \
              cronómetro no está cubriendo el recorrido del historial",
-            term_core::HISTORIAL,
+            term_core::SCROLLBACK,
             con_texto.recolocado,
             vacia.recolocado
         );
@@ -23226,9 +23207,7 @@ mod tests {
                 .pantalla
                 .advance(format!("linea {n}\r\n").as_bytes());
         }
-        division
-            .pantalla
-            .desplazar(term_core::Desplazamiento::AlPrincipio);
+        division.pantalla.scroll_by(term_core::Scroll::ToTop);
         let mirando = texto_visible(&division);
         assert!(
             mirando.contains("linea 0"),
@@ -23255,7 +23234,7 @@ mod tests {
              programa escribe se queda sin poder leerlo"
         );
         assert!(
-            division.pantalla.view().desplazamiento() > 0,
+            division.pantalla.view().scroll() > 0,
             "el bombeo devolvió el desplazamiento a cero"
         );
     }

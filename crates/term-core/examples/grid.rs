@@ -20,39 +20,39 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Sin argumentos, un shell de login. Con argumentos, lo que se pida tal cual: `-l` significa
     // cosas distintas en cada programa (en `vim` es modo lisp), así que no se cuela por detrás.
     let mut cli = std::env::args().skip(1);
-    let programa = cli.next().unwrap_or_else(|| "zsh".to_string());
+    let program = cli.next().unwrap_or_else(|| "zsh".to_string());
     let args: Vec<String> = match cli.collect::<Vec<_>>() {
-        v if v.is_empty() && programa == "zsh" => vec!["-l".to_string()],
+        v if v.is_empty() && program == "zsh" => vec!["-l".to_string()],
         v => v,
     };
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let inicial = Size { rows: 24, cols: 80 };
+    let initial = Size { rows: 24, cols: 80 };
 
-    let (mut pty, salida_del_pty) = Pty::spawn(&programa, &args, inicial)?;
-    let mut pantalla = Screen::new(inicial);
+    let (mut pty, pty_output) = Pty::spawn(&program, &args, initial)?;
+    let mut screen = Screen::new(initial);
 
-    bombear(&salida_del_pty, &mut pantalla, Duration::from_secs(2));
-    println!("── rejilla {}×{} ──", inicial.rows, inicial.cols);
-    println!("{}", pantalla.to_text());
+    pump(&pty_output, &mut screen, Duration::from_secs(2));
+    println!("── rejilla {}×{} ──", initial.rows, initial.cols);
+    println!("{}", screen.to_text());
 
     // Las dos mitades del redimensionado: la rejilla refluye, y el programa se entera y repinta.
     // La rejilla va primero a propósito: en cuanto el programa sepa el tamaño nuevo empieza a
     // mandar bytes para él, y si la rejilla siguiera siendo la vieja se interpretarían contra unas
     // dimensiones equivocadas.
-    let nuevo = Size {
+    let resized = Size {
         rows: 30,
         cols: 100,
     };
-    pantalla.resize(nuevo);
-    pty.resize(nuevo)?;
+    screen.resize(resized);
+    pty.resize(resized)?;
 
-    bombear(&salida_del_pty, &mut pantalla, Duration::from_secs(2));
+    pump(&pty_output, &mut screen, Duration::from_secs(2));
     println!(
         "\n── rejilla {}×{} tras redimensionar ──",
-        nuevo.rows, nuevo.cols
+        resized.rows, resized.cols
     );
-    println!("{}", pantalla.to_text());
+    println!("{}", screen.to_text());
 
     Ok(())
 }
@@ -63,11 +63,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 /// pasada. Ojo, esto **no** es ascendible tal cual al bucle de pintado: `recv_timeout` bloquea y se
 /// queda con el hilo hasta agotar el plazo, y un frame es una llamada que tiene que devolver el
 /// control. Lo que se hereda es la forma, no el código.
-fn bombear(salida_del_pty: &Receiver<Vec<u8>>, pantalla: &mut Screen, durante: Duration) {
-    let hasta = Instant::now() + durante;
-    while Instant::now() < hasta {
-        match salida_del_pty.recv_timeout(Duration::from_millis(50)) {
-            Ok(bytes) => pantalla.advance(&bytes),
+fn pump(pty_output: &Receiver<Vec<u8>>, screen: &mut Screen, for_how_long: Duration) {
+    let until = Instant::now() + for_how_long;
+    while Instant::now() < until {
+        match pty_output.recv_timeout(Duration::from_millis(50)) {
+            Ok(bytes) => screen.advance(&bytes),
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
         }

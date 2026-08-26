@@ -94,7 +94,7 @@ use std::time::Duration;
 pub const CHUNK: usize = 8 * 1024;
 
 /// Cada cuántas líneas la carga repinta la barra de estado.
-const LINEAS_POR_REPINTADO: usize = 50;
+const LINES_PER_REPAINT: usize = 50;
 
 /// Construye la carga.
 ///
@@ -106,28 +106,28 @@ const LINEAS_POR_REPINTADO: usize = 50;
 /// alimentar un terminal con un solo carácter repetido recorre el camino rápido de su parser y da
 /// un número que miente sobre el caso real.
 ///
-/// Se dejan de añadir líneas al llegar a `bytes_objetivo`, sin cortar la última: truncar a mitad
+/// Se dejan de añadir líneas al llegar a `target_bytes`, sin cortar la última: truncar a mitad
 /// dejaría una secuencia de escape partida, y eso ya no sería la misma carga.
-pub fn build_load(bytes_objetivo: usize) -> Vec<u8> {
-    let mut carga = Vec::with_capacity(bytes_objetivo + 256);
+pub fn build_load(target_bytes: usize) -> Vec<u8> {
+    let mut load = Vec::with_capacity(target_bytes + 256);
     let mut i: usize = 1;
-    while carga.len() < bytes_objetivo {
+    while load.len() < target_bytes {
         let color = 31 + i % 7;
         let ms = 3 + i % 40;
-        carga.extend_from_slice(
+        load.extend_from_slice(
             format!(
                 "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m compilando el módulo {i} … \x1b[32mhecho\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
             )
             .as_bytes(),
         );
-        if i.is_multiple_of(LINEAS_POR_REPINTADO) {
+        if i.is_multiple_of(LINES_PER_REPAINT) {
             // Guardar cursor, saltar al origen, pintar en vídeo inverso, volver: lo que hace una
             // interfaz de texto y lo que más trabajo le da al que pinta.
-            carga.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
+            load.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
         }
         i += 1;
     }
-    carga
+    load
 }
 
 /// Los caracteres con los que la carga en CJK escribe, y por qué éstos.
@@ -135,7 +135,7 @@ pub fn build_load(bytes_objetivo: usize) -> Vec<u8> {
 /// **Cubren los tres bloques que el hito de las fuentes persigue** —kanji, hiragana y hangul— más un
 /// icono del Área de Uso Privado, que es el otro caso. Ninguno lo cubren las fuentes de fábrica de egui,
 /// así que cada uno **dispara de verdad** el camino de descubrimiento en vez de rozarlo.
-const LETRAS_CJK: &[char] = &[
+const CJK_LETTERS: &[char] = &[
     '日', '本', '語', '漢', '字', '中', '文', 'あ', 'い', 'う', 'え', 'お', '한', '국', '어',
     '\u{f015}',
 ];
@@ -147,29 +147,29 @@ const LETRAS_CJK: &[char] = &[
 /// tanda que mide el descubrimiento de fuentes.
 ///
 /// **Determinista igual que la otra**: el contenido de la línea `i` depende solo de `i`.
-pub fn build_load_cjk(bytes_objetivo: usize) -> Vec<u8> {
-    let mut carga = Vec::with_capacity(bytes_objetivo + 256);
+pub fn build_load_cjk(target_bytes: usize) -> Vec<u8> {
+    let mut load = Vec::with_capacity(target_bytes + 256);
     let mut i: usize = 1;
-    while carga.len() < bytes_objetivo {
+    while load.len() < target_bytes {
         let color = 31 + i % 7;
         // **Una palabra distinta por línea, rotando**, para que no sea siempre el mismo carácter: quien
         // pinta cachea por carácter, así que repetir uno solo recorrería el camino rápido y mediría el
         // descubrimiento de **una** fuente en vez del de una pantalla de verdad.
-        let palabra: String = (0..4)
-            .map(|n| LETRAS_CJK[(i + n) % LETRAS_CJK.len()])
+        let word: String = (0..4)
+            .map(|n| CJK_LETTERS[(i + n) % CJK_LETTERS.len()])
             .collect();
-        carga.extend_from_slice(
+        load.extend_from_slice(
             format!(
-                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {palabra} — compilando el módulo {i} … \x1b[32m完了\x1b[0m\n"
+                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {word} — compilando el módulo {i} … \x1b[32m完了\x1b[0m\n"
             )
             .as_bytes(),
         );
-        if i.is_multiple_of(LINEAS_POR_REPINTADO) {
-            carga.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
+        if i.is_multiple_of(LINES_PER_REPAINT) {
+            load.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
         }
         i += 1;
     }
-    carga
+    load
 }
 
 /// Los emojis con los que escribe la carga a color, y por qué éstos.
@@ -203,25 +203,25 @@ const EMOJIS: &[&str] = &[
 /// que mide lo que cuesta rasterizar un glifo de color.
 ///
 /// **Determinista igual que las otras**: el contenido de la línea `i` depende solo de `i`.
-pub fn build_load_color(bytes_objetivo: usize) -> Vec<u8> {
-    let mut carga = Vec::with_capacity(bytes_objetivo + 256);
+pub fn build_load_color(target_bytes: usize) -> Vec<u8> {
+    let mut load = Vec::with_capacity(target_bytes + 256);
     let mut i: usize = 1;
-    while carga.len() < bytes_objetivo {
+    while load.len() < target_bytes {
         let color = 31 + i % 7;
-        let cara: String = (0..3).map(|n| EMOJIS[(i + n) % EMOJIS.len()]).collect();
+        let face: String = (0..3).map(|n| EMOJIS[(i + n) % EMOJIS.len()]).collect();
         let ms = 3 + i % 40;
-        carga.extend_from_slice(
+        load.extend_from_slice(
             format!(
-                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {cara} compilando el módulo {i} … \x1b[32mhecho\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
+                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {face} compilando el módulo {i} … \x1b[32mhecho\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
             )
             .as_bytes(),
         );
-        if i.is_multiple_of(LINEAS_POR_REPINTADO) {
-            carga.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
+        if i.is_multiple_of(LINES_PER_REPAINT) {
+            load.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
         }
         i += 1;
     }
-    carga
+    load
 }
 
 /// Primer instante alineado en el que arrancar, contado desde la época.
@@ -230,19 +230,19 @@ pub fn build_load_color(bytes_objetivo: usize) -> Vec<u8> {
 /// restaba dos épocas ya truncadas a segundo y dormía esa diferencia entera, con lo que la fracción
 /// del lanzamiento se arrastraba intacta: dos divisiones lanzadas con medio segundo de diferencia
 /// arrancaban con medio segundo de diferencia — medido, 470,314 contra 470,807 cuando las dos
-/// debían salir en 470,000. Peor todavía, con `ahora` = 120,5 y `at` = 30 el objetivo truncado caía
+/// debían salir en 470,000. Peor todavía, con `now` = 120,5 y `at` = 30 el objetivo truncado caía
 /// **en el pasado** y esa división salía disparada mientras otra lanzada 0,5 s después esperaba
 /// 29 s. Alinear mal es peor que no alinear: la desalineación queda escondida.
 ///
-/// Con `at` a cero, ahora mismo. Si `ahora` cae exactamente en un múltiplo, es `ahora`.
-pub fn start_instant(ahora: Duration, at: u64) -> Duration {
+/// Con `at` a cero, ahora mismo. Si `now` cae exactamente en un múltiplo, es `now`.
+pub fn start_instant(now: Duration, at: u64) -> Duration {
     if at == 0 {
-        return ahora;
+        return now;
     }
-    let periodo = u128::from(at) * 1_000_000_000;
-    match ahora.as_nanos() % periodo {
-        0 => ahora,
-        resto => ahora + Duration::from_nanos((periodo - resto) as u64),
+    let period = u128::from(at) * 1_000_000_000;
+    match now.as_nanos() % period {
+        0 => now,
+        remainder => now + Duration::from_nanos((period - remainder) as u64),
     }
 }
 
@@ -252,21 +252,21 @@ pub fn start_instant(ahora: Duration, at: u64) -> Duration {
 /// alcanzarlo**. Si el terminal no da el caudal pedido, el caudal real sale por debajo, y eso *es*
 /// el resultado de la medida.
 pub fn pace_delay(
-    bytes_escritos: u64,
-    transcurrido: Duration,
-    caudal: Option<f64>,
+    bytes_written: u64,
+    elapsed: Duration,
+    rate_bytes: Option<f64>,
 ) -> Option<Duration> {
-    let caudal = caudal?;
-    if caudal <= 0.0 {
+    let rate_bytes = rate_bytes?;
+    if rate_bytes <= 0.0 {
         return None;
     }
-    let deberia_llevar = bytes_escritos as f64 / caudal;
-    let sobra = deberia_llevar - transcurrido.as_secs_f64();
+    let should_have_taken = bytes_written as f64 / rate_bytes;
+    let spare = should_have_taken - elapsed.as_secs_f64();
     // `Duration::from_secs_f64` entra en pánico con un valor no finito o desbordado, y un caudal
     // absurdamente pequeño (`--rate 1e-25`) lo produce. Comprobarlo aquí es lo que evita que la
     // herramienta reviente en vez de decir que no va a esperar.
-    (sobra > 0.0 && sobra.is_finite() && sobra < Duration::MAX.as_secs_f64())
-        .then(|| Duration::from_secs_f64(sobra))
+    (spare > 0.0 && spare.is_finite() && spare < Duration::MAX.as_secs_f64())
+        .then(|| Duration::from_secs_f64(spare))
 }
 
 /// Una medida: lo que una división escribió y cuánto tardó su terminal en tragarlo.
@@ -294,7 +294,7 @@ pub struct Run {
 ///
 /// No es cosmético: un tabulador parte la línea en campos que no son y la medida se pierde en
 /// silencio; un salto de línea permite **colar una medida inventada** en el fichero de resultados.
-fn etiqueta_en_una_linea(tag: &str) -> String {
+fn tag_on_one_line(tag: &str) -> String {
     tag.replace(['\t', '\n', '\r'], " ")
 }
 
@@ -305,14 +305,14 @@ impl Run {
     }
 
     /// Los dos regímenes no se comparan entre sí; esto es lo que los distingue.
-    fn regimen(&self) -> Option<u64> {
+    fn regime(&self) -> Option<u64> {
         self.rate.map(f64::to_bits)
     }
 
     pub fn to_line(&self) -> String {
         format!(
             "{}\t{}\t{:.6}\t{:.6}\t{}\t{}\t{}",
-            etiqueta_en_una_linea(&self.tag),
+            tag_on_one_line(&self.tag),
             self.bytes,
             self.seconds,
             self.start,
@@ -331,32 +331,32 @@ impl Run {
     /// **no finitos**. Un `seconds` a `NaN` no se descartaba solo: `f64::max` y `f64::min` ignoran
     /// los `NaN`, así que la medida no aportaba ni al final más temprano ni a la más lenta, pero
     /// sus bytes sí entraban en la suma e **inflaban el agregado**.
-    pub fn from_line(linea: &str) -> Option<Self> {
-        let campos: Vec<&str> = linea.split('\t').collect();
-        if campos.len() != 7 {
+    pub fn from_line(line: &str) -> Option<Self> {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != 7 {
             return None;
         }
-        let seconds: f64 = campos[2].parse().ok()?;
-        let start: f64 = campos[3].parse().ok()?;
+        let seconds: f64 = fields[2].parse().ok()?;
+        let start: f64 = fields[3].parse().ok()?;
         if !seconds.is_finite() || seconds < 0.0 || !start.is_finite() || start < 0.0 {
             return None;
         }
-        let rate = match campos[5] {
+        let rate = match fields[5] {
             "-" => None,
-            otro => {
-                let r: f64 = otro.parse().ok()?;
+            other => {
+                let r: f64 = other.parse().ok()?;
                 r.is_finite().then_some(r)?;
                 Some(r)
             }
         };
         Some(Self {
-            tag: campos[0].to_string(),
-            bytes: campos[1].parse().ok()?,
+            tag: fields[0].to_string(),
+            bytes: fields[1].parse().ok()?,
             seconds,
             start,
-            at: campos[4].parse().ok()?,
+            at: fields[4].parse().ok()?,
             rate,
-            tty: campos[6] == "si",
+            tty: fields[6] == "si",
         })
     }
 
@@ -390,7 +390,7 @@ pub struct Aggregate {
 
 /// Agrega las medidas de una etiqueta.
 ///
-/// El agregado es `Σ bytes / max(segundos)`. Se divide por el **máximo** y no por la media porque
+/// El agregado es `Σ bytes / max(seconds)`. Se divide por el **máximo** y no por la media porque
 /// la tanda ocupa el terminal hasta que termina la última división: con la media, cuatro divisiones
 /// de 8, 12, 12 y 12 s parecerían más rápidas de lo que fueron.
 ///
@@ -400,50 +400,50 @@ pub struct Aggregate {
 /// bajo la misma etiqueta.
 pub fn aggregate(runs: Vec<Run>) -> Aggregate {
     let mut excluded = Vec::new();
-    let mut candidatos = Vec::new();
+    let mut candidates = Vec::new();
     for run in runs {
         if run.tty {
-            candidatos.push(run);
+            candidates.push(run);
         } else {
             excluded.push((run, Excluded::NoTty));
         }
     }
 
-    if candidatos.is_empty() {
-        return sin_agregado(excluded);
+    if candidates.is_empty() {
+        return without_aggregate(excluded);
     }
 
     // Régimen: la mayoría manda, y lo que no encaje se declara fuera en vez de contaminar la suma.
-    let regimen = candidatos[0].regimen();
-    if candidatos.iter().any(|r| r.regimen() != regimen) {
-        excluded.extend(candidatos.into_iter().map(|r| (r, Excluded::MixedRegime)));
-        return sin_agregado(excluded);
+    let regime = candidates[0].regime();
+    if candidates.iter().any(|r| r.regime() != regime) {
+        excluded.extend(candidates.into_iter().map(|r| (r, Excluded::MixedRegime)));
+        return without_aggregate(excluded);
     }
 
     // Solapan todas si el arranque más tardío cae antes del final más temprano. Con una sola medida
     // no hay nada con lo que solapar, así que la comprobación no aplica — comprobarla igualmente
     // descartaba una medida legítima de duración cero.
-    if candidatos.len() > 1 {
-        let arranque_mas_tardio = candidatos.iter().map(|r| r.start).fold(f64::MIN, f64::max);
-        let final_mas_temprano = candidatos.iter().map(Run::end).fold(f64::MAX, f64::min);
-        if arranque_mas_tardio >= final_mas_temprano {
-            excluded.extend(candidatos.into_iter().map(|r| (r, Excluded::NoOverlap)));
-            return sin_agregado(excluded);
+    if candidates.len() > 1 {
+        let latest_start = candidates.iter().map(|r| r.start).fold(f64::MIN, f64::max);
+        let earliest_end = candidates.iter().map(Run::end).fold(f64::MAX, f64::min);
+        if latest_start >= earliest_end {
+            excluded.extend(candidates.into_iter().map(|r| (r, Excluded::NoOverlap)));
+            return without_aggregate(excluded);
         }
     }
 
-    let bytes: u64 = candidatos.iter().map(|r| r.bytes).sum();
-    let mas_lenta = candidatos.iter().map(|r| r.seconds).fold(0.0, f64::max);
-    let mib_s = (mas_lenta > 0.0).then(|| bytes as f64 / mas_lenta / 1_048_576.0);
+    let bytes: u64 = candidates.iter().map(|r| r.bytes).sum();
+    let slowest = candidates.iter().map(|r| r.seconds).fold(0.0, f64::max);
+    let mib_s = (slowest > 0.0).then(|| bytes as f64 / slowest / 1_048_576.0);
 
     Aggregate {
-        included: candidatos,
+        included: candidates,
         excluded,
         mib_s,
     }
 }
 
-fn sin_agregado(excluded: Vec<(Run, Excluded)>) -> Aggregate {
+fn without_aggregate(excluded: Vec<(Run, Excluded)>) -> Aggregate {
     Aggregate {
         included: Vec::new(),
         excluded,
@@ -474,53 +474,53 @@ mod tests {
 
     #[test]
     fn la_carga_lleva_el_patron_que_no_toma_el_camino_rapido_del_parser() {
-        let carga = build_load(200_000);
-        let texto = String::from_utf8_lossy(&carga);
+        let load = build_load(200_000);
+        let text = String::from_utf8_lossy(&load);
 
-        assert!(texto.contains("\x1b[1m"), "falta la negrita");
-        assert!(texto.contains("\x1b[2m"), "falta el atenuado");
-        assert!(texto.contains("\x1b[32m"), "falta el color");
+        assert!(text.contains("\x1b[1m"), "falta la negrita");
+        assert!(text.contains("\x1b[2m"), "falta el atenuado");
+        assert!(text.contains("\x1b[32m"), "falta el color");
         assert!(
-            texto.contains("\x1b7") && texto.contains("\x1b8"),
+            text.contains("\x1b7") && text.contains("\x1b8"),
             "falta el repintado que guarda y restaura el cursor"
         );
         assert!(
-            texto.contains("\x1b[7m"),
+            text.contains("\x1b[7m"),
             "falta el vídeo inverso de la barra"
         );
     }
 
     #[test]
     fn la_carga_llega_al_tamano_pedido_sin_cortar_a_mitad() {
-        for objetivo in [1_000, 100_000, 1_000_000] {
-            let carga = build_load(objetivo);
-            assert!(carga.len() >= objetivo, "se quedó corta con {objetivo}");
+        for target in [1_000, 100_000, 1_000_000] {
+            let load = build_load(target);
+            assert!(load.len() >= target, "se quedó corta con {target}");
             // Toda unidad que se añade acaba en salto de línea o en el `\x1b8` que restaura el
             // cursor: si acabara en otra cosa, se habría cortado una secuencia de escape a mitad.
-            let ultimo = *carga.last().expect("carga vacía");
+            let last = *load.last().expect("carga vacía");
             assert!(
-                ultimo == b'\n' || ultimo == b'8',
-                "la carga de {objetivo} acabó a mitad, en el byte {ultimo}"
+                last == b'\n' || last == b'8',
+                "la carga de {target} acabó a mitad, en el byte {last}"
             );
         }
     }
 
     #[test]
     fn el_instante_alineado_es_el_siguiente_multiplo() {
-        let alineado = start_instant(Duration::from_secs(1_000_001), 30);
-        assert_eq!(alineado, Duration::from_secs(1_000_020));
+        let aligned = start_instant(Duration::from_secs(1_000_001), 30);
+        assert_eq!(aligned, Duration::from_secs(1_000_020));
     }
 
     #[test]
     fn si_ya_esta_alineado_no_espera_un_ciclo_de_mas() {
-        let alineado = start_instant(Duration::from_secs(1_000_020), 30);
-        assert_eq!(alineado, Duration::from_secs(1_000_020));
+        let aligned = start_instant(Duration::from_secs(1_000_020), 30);
+        assert_eq!(aligned, Duration::from_secs(1_000_020));
     }
 
     #[test]
     fn con_at_cero_arranca_ya() {
-        let ahora = Duration::from_millis(1_000_001_500);
-        assert_eq!(start_instant(ahora, 0), ahora);
+        let now = Duration::from_millis(1_000_001_500);
+        assert_eq!(start_instant(now, 0), now);
     }
 
     #[test]
@@ -537,19 +537,16 @@ mod tests {
     fn un_instante_fraccionario_ya_pasado_el_multiplo_espera_al_siguiente() {
         // Con truncado a segundo, 1.000.020,5 daba objetivo 1.000.020 —en el pasado— y esa
         // división salía disparada mientras otra lanzada medio segundo después esperaba 29 s.
-        let alineado = start_instant(Duration::from_micros(1_000_020_500_000), 30);
-        assert_eq!(alineado, Duration::from_secs(1_000_050));
+        let aligned = start_instant(Duration::from_micros(1_000_020_500_000), 30);
+        assert_eq!(aligned, Duration::from_secs(1_000_050));
     }
 
     #[test]
     fn el_caudal_espera_lo_que_le_sobra() {
         // 1 MiB escrito con un objetivo de 1 MiB/s debería llevar 1 s; lleva 0,25 → espera 0,75.
-        let espera = pace_delay(1_048_576, Duration::from_millis(250), Some(1_048_576.0))
+        let wait = pace_delay(1_048_576, Duration::from_millis(250), Some(1_048_576.0))
             .expect("debería esperar");
-        assert!(
-            (espera.as_secs_f64() - 0.75).abs() < 1e-6,
-            "esperó {espera:?}"
-        );
+        assert!((wait.as_secs_f64() - 0.75).abs() < 1e-6, "esperó {wait:?}");
     }
 
     #[test]
@@ -570,7 +567,7 @@ mod tests {
     fn un_caudal_absurdo_no_hace_reventar_la_herramienta() {
         // Antes de la comprobación de finitud, esto entraba en pánico dentro de
         // `Duration::from_secs_f64`: la espera calculada se iba a infinito.
-        for absurdo in [
+        for absurd in [
             f64::MIN_POSITIVE,
             1e-320,
             1e-25,
@@ -579,7 +576,7 @@ mod tests {
             f64::NAN,
             f64::INFINITY,
         ] {
-            let _ = pace_delay(1_048_576, Duration::from_millis(1), Some(absurdo));
+            let _ = pace_delay(1_048_576, Duration::from_millis(1), Some(absurd));
         }
     }
 
@@ -587,14 +584,14 @@ mod tests {
     fn la_linea_de_resultados_va_y_vuelve_igual() {
         let mut original = run(22_700_000, 1.234_567, 1_800_000_000.5, true);
         original.rate = Some(10.0);
-        let vuelta = Run::from_line(&original.to_line()).expect("no se pudo releer la línea");
-        assert_eq!(original.tag, vuelta.tag);
-        assert_eq!(original.bytes, vuelta.bytes);
-        assert_eq!(original.rate, vuelta.rate);
-        assert_eq!(original.tty, vuelta.tty);
-        assert!((original.seconds - vuelta.seconds).abs() < 1e-6);
+        let round_trip = Run::from_line(&original.to_line()).expect("no se pudo releer la línea");
+        assert_eq!(original.tag, round_trip.tag);
+        assert_eq!(original.bytes, round_trip.bytes);
+        assert_eq!(original.rate, round_trip.rate);
+        assert_eq!(original.tty, round_trip.tty);
+        assert!((original.seconds - round_trip.seconds).abs() < 1e-6);
         assert!(
-            (original.start - vuelta.start).abs() < 1e-6,
+            (original.start - round_trip.start).abs() < 1e-6,
             "se perdió la fracción del instante de arranque"
         );
     }
@@ -603,10 +600,10 @@ mod tests {
     fn una_etiqueta_con_tabulador_o_salto_no_parte_la_linea() {
         let mut r = run(1, 1.0, 0.0, true);
         r.tag = "con\ttabulador\ny salto".into();
-        let linea = r.to_line();
-        assert_eq!(linea.split('\t').count(), 7);
+        let line = r.to_line();
+        assert_eq!(line.split('\t').count(), 7);
         assert!(
-            !linea.contains('\n'),
+            !line.contains('\n'),
             "un salto permitiría colar una medida inventada"
         );
     }
@@ -615,11 +612,11 @@ mod tests {
     fn una_medida_con_segundos_no_finitos_se_rechaza_al_releerla() {
         // No basta con ignorarla en los máximos y mínimos: sus bytes entrarían en la suma e
         // inflarían el agregado.
-        for veneno in ["NaN", "inf", "-1"] {
-            let linea = format!("t\t1048576\t{veneno}\t100.0\t30\t-\tsi");
+        for poison in ["NaN", "inf", "-1"] {
+            let line = format!("t\t1048576\t{poison}\t100.0\t30\t-\tsi");
             assert!(
-                Run::from_line(&linea).is_none(),
-                "debería rechazarse: {linea}"
+                Run::from_line(&line).is_none(),
+                "debería rechazarse: {line}"
             );
         }
     }
@@ -654,7 +651,7 @@ mod tests {
         assert!(
             a.excluded
                 .iter()
-                .all(|(_, por)| *por == Excluded::NoOverlap)
+                .all(|(_, why)| *why == Excluded::NoOverlap)
         );
     }
 
@@ -689,15 +686,15 @@ mod tests {
 
     #[test]
     fn no_mezcla_rafaga_con_caudal_sostenido() {
-        let rafaga = run(1_048_576, 1.0, 100.0, true);
-        let mut sostenida = run(1_048_576, 1.0, 100.0, true);
-        sostenida.rate = Some(10.0);
-        let a = aggregate(vec![rafaga, sostenida]);
+        let burst = run(1_048_576, 1.0, 100.0, true);
+        let mut sustained = run(1_048_576, 1.0, 100.0, true);
+        sustained.rate = Some(10.0);
+        let a = aggregate(vec![burst, sustained]);
         assert!(a.mib_s.is_none(), "responden a preguntas distintas");
         assert!(
             a.excluded
                 .iter()
-                .all(|(_, por)| *por == Excluded::MixedRegime)
+                .all(|(_, why)| *why == Excluded::MixedRegime)
         );
     }
 
@@ -715,18 +712,18 @@ mod tests {
         // la regla de presentación de Unicode: un emoji que va a color **por defecto**, uno de texto **con**
         // el selector —que tiene que salir a color— y uno de texto **sin** él —que no—. Una carga que solo
         // trajera del primer tipo recorrería un camino y publicaría su coste como si fueran los tres.
-        let carga = String::from_utf8(build_load_color(64 * 1024)).expect("la carga no es texto");
+        let load = String::from_utf8(build_load_color(64 * 1024)).expect("la carga no es texto");
         assert!(
-            carga.contains('\u{1F600}'),
+            load.contains('\u{1F600}'),
             "no hay ningún emoji de los que van a color por defecto"
         );
         assert!(
-            carga.contains("\u{2601}\u{FE0F}"),
+            load.contains("\u{2601}\u{FE0F}"),
             "no hay ningún símbolo de texto CON selector de emoji: falta el caso que la regla convierte"
         );
         assert!(
-            carga.contains('\u{2601}')
-                && carga.matches('\u{2601}').count() > carga.matches("\u{2601}\u{FE0F}").count(),
+            load.contains('\u{2601}')
+                && load.matches('\u{2601}').count() > load.matches("\u{2601}\u{FE0F}").count(),
             "no hay ningún símbolo de texto SIN selector: falta el caso que tiene que quedarse en gris"
         );
     }
@@ -747,9 +744,9 @@ mod tests {
     fn una_sola_division_no_tiene_con_quien_solapar() {
         // Incluida la de duración cero, que la comprobación de solape descartaba por comparar una
         // medida consigo misma.
-        for segundos in [1.0, 0.0] {
-            let a = aggregate(vec![run(1_048_576, segundos, 100.0, true)]);
-            assert_eq!(a.included.len(), 1, "con seconds = {segundos}");
+        for seconds in [1.0, 0.0] {
+            let a = aggregate(vec![run(1_048_576, seconds, 100.0, true)]);
+            assert_eq!(a.included.len(), 1, "con seconds = {seconds}");
         }
     }
 }

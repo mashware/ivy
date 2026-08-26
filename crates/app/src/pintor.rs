@@ -200,7 +200,7 @@ pub fn pintar(
                 if celda.c == ' ' || celda.hidden {
                     continue;
                 }
-                let pegados = vista.adjuntos_de(celda);
+                let pegados = vista.combining_of(celda);
                 // **Un ASCII SIN NADA PEGADO se descarta de la pasada del color sin consultar las tablas
                 // de Unicode.** Es la inmensa mayoría de lo que pasa por una pantalla de terminal.
                 //
@@ -405,7 +405,7 @@ fn pintar_cursor(
                 pintar_caracter(
                     painter,
                     debajo.c,
-                    vista.adjuntos_de(debajo),
+                    vista.combining_of(debajo),
                     metrica.celda(origen, cursor.row, cursor.col),
                     debajo.width == CellWidth::WideHead,
                     colores_de(debajo, tema).1,
@@ -909,7 +909,7 @@ mod tests {
              distingue nada"
         );
 
-        pantalla.desplazar(term_core::Desplazamiento::AlPrincipio);
+        pantalla.scroll_by(term_core::Scroll::ToTop);
         assert_eq!(
             pantalla.view().cursor(),
             None,

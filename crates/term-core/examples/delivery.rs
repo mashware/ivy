@@ -2,7 +2,7 @@
 //! procesamiento de salida del núcleo.
 //!
 //! ```text
-//! cargo run --release --example entrega -p term-core
+//! cargo run --release --example delivery -p term-core
 //! ```
 //!
 //! Los dos números salen de la **misma** cadena y de la misma máquina: el programa de dentro
@@ -30,39 +30,39 @@ const BYTES: usize = 12 * 1024 * 1024;
 
 /// Margen por lectura. No es el tiempo total: es cuánto se espera a que llegue *algo más* antes de
 /// dar por terminada la entrega.
-const PLAZO: Duration = Duration::from_secs(60);
+const DEADLINE: Duration = Duration::from_secs(60);
 
 fn main() {
     // Se vuelca un fichero con `cat` y no se generan las líneas con un bucle del shell. Medido: un
     // `while` de `sh` con `printf` entrega 12 MiB/s **con el interruptor puesto de las dos formas**,
     // porque el cuello es el propio bucle. Con eso, la medida daba «1×» y habría enterrado el
     // hallazgo del ticket con un número tranquilizador y falso.
-    for (etiqueta, linea) in [
+    for (tag, line) in [
         (
             "línea de log (70 B)",
             &b"lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod\n"[..],
         ),
         ("línea corta   (2 B)", &b"y\n"[..]),
     ] {
-        let fichero = sembrar(linea);
-        let sin = medir(&fichero, "stty -opost");
-        let con = medir(&fichero, "stty opost onlcr");
-        let _ = std::fs::remove_file(&fichero);
+        let file = seed(line);
+        let without_lines = measure(&file, "stty -opost");
+        let with_lines = measure(&file, "stty opost onlcr");
+        let _ = std::fs::remove_file(&file);
 
-        println!("{etiqueta} — {} líneas", BYTES / linea.len());
-        informe("procesando en el núcleo", &con);
-        informe("sin procesar en el núcleo", &sin);
+        println!("{tag} — {} líneas", BYTES / line.len());
+        report("procesando en el núcleo", &with_lines);
+        report("sin procesar en el núcleo", &without_lines);
         println!(
             "  relación: {:.0}×\n",
-            con.tardado.as_secs_f64() / sin.tardado.as_secs_f64()
+            with_lines.took.as_secs_f64() / without_lines.took.as_secs_f64()
         );
     }
 }
 
 /// Lo que costó volcar el fichero, y cuánto llegó de verdad al otro lado.
-struct Entrega {
-    tardado: Duration,
-    entregado: usize,
+struct Delivery {
+    took: Duration,
+    delivered: usize,
 }
 
 /// El caudal se calcula sobre lo que **escribió el programa**, no sobre lo que se entregó.
@@ -70,44 +70,46 @@ struct Entrega {
 /// No son lo mismo y por eso importa: con el procesamiento encendido llegan más bytes de los que se
 /// escribieron —un retorno de carro por salto, y dos si además se traduce aquí—, así que dividir por
 /// lo entregado premiaría a la configuración lenta por hacer bulto.
-fn informe(etiqueta: &str, entrega: &Entrega) {
-    let escrito = BYTES as f64 / (1024.0 * 1024.0);
-    let entregado = entrega.entregado as f64 / (1024.0 * 1024.0);
+fn report(tag: &str, delivery: &Delivery) {
+    let written = BYTES as f64 / (1024.0 * 1024.0);
+    let delivered = delivery.delivered as f64 / (1024.0 * 1024.0);
     println!(
-        "  {etiqueta:<26}: {:>9.3?}  →  {:>6.1} MiB/s   ({entregado:.1} MiB entregados)",
-        entrega.tardado,
-        escrito / entrega.tardado.as_secs_f64(),
+        "  {tag:<26}: {:>9.3?}  →  {:>6.1} MiB/s   ({delivered:.1} MiB entregados)",
+        delivery.took,
+        written / delivery.took.as_secs_f64(),
     );
 }
 
 /// Escribe el fichero que se volcará.
-fn sembrar(linea: &[u8]) -> PathBuf {
-    let ruta = std::env::temp_dir().join("term-core-entrega.txt");
-    let mut fichero = std::fs::File::create(&ruta).expect("crear el fichero de la medida");
-    let mut escrito = 0;
-    while escrito < BYTES {
-        fichero.write_all(linea).expect("escribir el fichero");
-        escrito += linea.len();
+fn seed(line: &[u8]) -> PathBuf {
+    let path = std::env::temp_dir().join("term-core-entrega.txt");
+    let mut file = std::fs::File::create(&path).expect("crear el fichero de la medida");
+    let mut written = 0;
+    while written < BYTES {
+        file.write_all(line).expect("escribir el fichero");
+        written += line.len();
     }
-    fichero.flush().expect("cerrar el fichero");
-    ruta
+    file.flush().expect("cerrar el fichero");
+    path
 }
 
-fn medir(fichero: &Path, ajuste: &str) -> Entrega {
-    let orden = format!("{ajuste}; cat {}", fichero.display());
-    let (_pty, canal) = Pty::spawn("sh", &["-c", &orden], Size::default()).expect("lanzar sh");
+fn measure(file: &Path, variant: &str) -> Delivery {
+    let command = format!("{variant}; cat {}", file.display());
+    let (_pty, channel) = Pty::spawn("sh", &["-c", &command], Size::default()).expect("lanzar sh");
 
     // El reloj arranca con el primer byte, no antes: arrancar el shell y abrir el fichero no es lo
     // que se está midiendo.
-    let primero = canal.recv_timeout(PLAZO).expect("el programa no escribió");
-    let inicio = Instant::now();
-    let mut entregado = primero.len();
-    while let Ok(trozo) = canal.recv_timeout(PLAZO) {
-        entregado += trozo.len();
+    let first = channel
+        .recv_timeout(DEADLINE)
+        .expect("el programa no escribió");
+    let start = Instant::now();
+    let mut delivered = first.len();
+    while let Ok(chunk) = channel.recv_timeout(DEADLINE) {
+        delivered += chunk.len();
     }
 
-    Entrega {
-        tardado: inicio.elapsed(),
-        entregado,
+    Delivery {
+        took: start.elapsed(),
+        delivered,
     }
 }

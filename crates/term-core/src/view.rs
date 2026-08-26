@@ -103,17 +103,17 @@ pub enum Underline {
 /// Así que este número **no preserva nada concreto**: pone un techo donde el motor no tiene ninguno, y
 /// dieciséis es holgado para todo lo que se ha visto llegar. Si algún día algo real se corta aquí, se
 /// sube — con la secuencia delante, que es lo que faltaba la primera vez.
-const ADJUNTOS_POR_CELDA: usize = 16;
+const COMBINING_PER_CELL: usize = 16;
 
-// El tramo se empaqueta en un solo entero de 32 bits (ver `Adjuntos`), así que el techo tiene que caber
-// en los cinco bits bajos. Sin esto, subirlo a 32 haría que `cuantos` diera la vuelta **en silencio** y
+// El tramo se empaqueta en un solo entero de 32 bits (ver `CombiningSpan`), así que el techo tiene que caber
+// en los cinco bits bajos. Sin esto, subirlo a 32 haría que `count` diera la vuelta **en silencio** y
 // todas las celdas declararan que no llevan nada.
-const _: () = assert!(ADJUNTOS_POR_CELDA <= CUANTOS_MAXIMO as usize);
+const _: () = assert!(COMBINING_PER_CELL <= MAX_COUNT as usize);
 
 /// Los caracteres de anchura cero que van pegados a una celda: **dónde están, no cuáles son**.
 ///
 /// Es opaco a propósito. Los caracteres viven en un vector plano de la [`View`], y esto es el tramo que
-/// los señala; se leen con [`View::adjuntos_de`].
+/// los señala; se leen con [`View::combining_of`].
 ///
 /// **Por qué no van dentro de la celda.** [`ViewCell`] es `Copy` y la rejilla se reconstruye **entera cada
 /// fotograma**, así que un `Vec` por celda sería una reserva de memoria por celda y por fotograma en el
@@ -125,43 +125,43 @@ const _: () = assert!(ADJUNTOS_POR_CELDA <= CUANTOS_MAXIMO as usize);
 /// caracteres, no cuáles son, así que dos celdas que muestran exactamente lo mismo en dos vistas
 /// distintas pueden salir **distintas**, y dentro de una misma vista dos celdas sin nada pegado salen
 /// iguales solo porque su tramo vacío arranca en el mismo sitio. Hoy no las compara nadie; el día que
-/// alguien lo necesite, lo que quiere comparar es el carácter y lo que [`View::adjuntos_de`] devuelva.
-/// **Va en UN entero y no en dos campos, y son cuatro bytes por celda.** Medido: con `desde: u32` y
-/// `cuantos: u8` como campos de un tipo anidado, la celda pasa de 24 a **32** bytes, porque el tipo trae
+/// alguien lo necesite, lo que quiere comparar es el carácter y lo que [`View::combining_of`] devuelva.
+/// **Va en UN entero y no en dos campos, y son cuatro bytes por celda.** Medido: con `offset: u32` y
+/// `count: u8` como campos de un tipo anidado, la celda pasa de 24 a **32** bytes, porque el tipo trae
 /// su propio relleno y el `u8` no puede colarse en el hueco que la celda ya tenía. Empaquetado son **28**.
 /// Cuatro bytes por celda, reservados y puestos a cero **cada fotograma**, en el camino que este mismo
 /// módulo vigila con una prueba.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Adjuntos(u32);
+pub struct CombiningSpan(u32);
 
 /// Cuántos caben en los cinco bits bajos del tramo.
-const CUANTOS_MAXIMO: u32 = 31;
+const MAX_COUNT: u32 = 31;
 /// Y cuántos caracteres puede haber por delante en el vector, en los veintisiete de arriba.
-const DESDE_MAXIMO: u32 = (1 << 27) - 1;
+const MAX_OFFSET: u32 = (1 << 27) - 1;
 
-impl Adjuntos {
-    /// El tramo que empieza en `desde` y dura `cuantos`, **o nada si alguno no cabe**.
+impl CombiningSpan {
+    /// El tramo que empieza en `offset` y dura `count`, **o nada si alguno no cabe**.
     ///
-    /// **Nada, y no un tramo recortado**: un `desde` que no quepa y se sature apuntaría a caracteres
+    /// **Nada, y no un tramo recortado**: un `offset` que no quepa y se sature apuntaría a caracteres
     /// **reales de otra celda**, que es peor que no tener ninguno. La primera versión saturaba, y una
     /// revisión lo cazó. Es inalcanzable —el vector está acotado por celdas × dieciséis, y aquí caben
     /// ciento treinta y cuatro millones— así que esto no defiende de nada: **elige el modo de fallo**.
-    fn nuevo(desde: usize, cuantos: usize) -> Self {
-        let (Ok(desde), Ok(cuantos)) = (u32::try_from(desde), u32::try_from(cuantos)) else {
+    fn new(offset: usize, count: usize) -> Self {
+        let (Ok(offset), Ok(count)) = (u32::try_from(offset), u32::try_from(count)) else {
             return Self::default();
         };
-        if desde > DESDE_MAXIMO || cuantos > CUANTOS_MAXIMO {
+        if offset > MAX_OFFSET || count > MAX_COUNT {
             return Self::default();
         }
-        Self(desde << 5 | cuantos)
+        Self(offset << 5 | count)
     }
 
-    fn desde(self) -> usize {
+    fn offset(self) -> usize {
         (self.0 >> 5) as usize
     }
 
-    fn cuantos(self) -> usize {
-        (self.0 & CUANTOS_MAXIMO) as usize
+    fn count(self) -> usize {
+        (self.0 & MAX_COUNT) as usize
     }
 }
 
@@ -176,8 +176,8 @@ pub struct ViewCell {
     /// segunda lleva detrás el selector de emoji— y quien pinta no tenía forma de distinguirlos: el
     /// carácter que los separa no ocupa columna, así que se quedaba en el motor.
     ///
-    /// Los caracteres se leen con [`View::adjuntos_de`]; esto solo dice dónde están.
-    pub adjuntos: Adjuntos,
+    /// Los caracteres se leen con [`View::combining_of`]; esto solo dice dónde están.
+    pub combining: CombiningSpan,
     /// Color del carácter. **El vídeo inverso ya está aplicado**: si el programa lo pidió, este es
     /// el fondo declarado. Resolverlo aquí evita que cada capa de pintado repita la misma regla, y
     /// que una de ellas se olvide.
@@ -225,7 +225,7 @@ impl Default for ViewCell {
     fn default() -> Self {
         Self {
             c: ' ',
-            adjuntos: Adjuntos::default(),
+            combining: CombiningSpan::default(),
             fg: TermColor::Foreground,
             bg: TermColor::Background,
             width: CellWidth::Single,
@@ -271,7 +271,7 @@ pub struct Cursor {
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
     /// Privado con el resto: la densidad es un invariante entre el tamaño y las celdas, y con el
-    /// tamaño público cualquiera podía escribir `vista.size.cols = 5` sobre una vista de 80. A
+    /// tamaño público cualquiera podía escribir `view.size.cols = 5` sobre una vista de 80. A
     /// partir de ahí `cell(1, 0)` devolvería una celda real pero equivocada en vez de `None`, y
     /// nada fallaría — la comprobación del constructor solo corre en depuración.
     size: Size,
@@ -279,8 +279,8 @@ pub struct View {
     /// Todo lo que va pegado a las celdas, **plano y en un solo sitio**.
     ///
     /// Cada celda que lleve algo señala aquí su tramo; las que no llevan nada —casi todas— no ocupan.
-    /// Ver [`Adjuntos`] para por qué no van dentro de la celda.
-    adjuntos: Vec<char>,
+    /// Ver [`CombiningSpan`] para por qué no van dentro de la celda.
+    combining: Vec<char>,
     /// Dónde está el cursor, **si es que se ve**.
     ///
     /// **Es opcional desde que hay historial, y no es prudencia**: subiendo por el historial el
@@ -295,35 +295,35 @@ pub struct View {
     /// su propio hito. Lo que sostiene mientras tanto es que se pueda **comprobar el efecto** de subir
     /// desde fuera de este módulo, que es la única forma de que una prueba del historial afirme sobre lo
     /// que se ve y no sobre el campo donde se apunta.
-    desplazamiento: usize,
+    scroll: usize,
 }
 
 impl View {
     pub(crate) fn new(
         size: Size,
         cells: Vec<ViewCell>,
-        adjuntos: Vec<char>,
+        combining: Vec<char>,
         cursor: Option<Cursor>,
-        desplazamiento: usize,
+        scroll: usize,
     ) -> Self {
         debug_assert_eq!(cells.len(), size.rows as usize * size.cols as usize);
         Self {
             size,
             cells,
-            adjuntos,
+            combining,
             cursor,
-            desplazamiento,
+            scroll,
         }
     }
 
     /// Los caracteres de anchura cero pegados a una celda, en el orden en que llegaron.
     ///
-    /// Vacío es el caso corriente. **La celda se pasa entera y no su tramo**: `vista.adjuntos(celda.adjuntos)`
+    /// Vacío es el caso corriente. **La celda se pasa entera y no su tramo**: `view.combining_of(cell.combining)`
     /// decía dos veces la misma palabra, y esa repetición era la señal de que la costura estaba puesta
     /// donde no se usa.
-    pub fn adjuntos_de(&self, celda: &ViewCell) -> &[char] {
-        let tramo = celda.adjuntos;
-        let (desde, hasta) = (tramo.desde(), tramo.desde() + tramo.cuantos());
+    pub fn combining_of(&self, cell: &ViewCell) -> &[char] {
+        let span = cell.combining;
+        let (offset, end) = (span.offset(), span.offset() + span.count());
         // **Un tramo que se saliera es una vista mal construida, no un dato del programa**, así que salta
         // en las pruebas en vez de disfrazarse de «esta celda no llevaba nada». En producción degrada a
         // vacío, que es lo único seguro que se puede hacer con un índice en el que ya no se confía.
@@ -331,11 +331,11 @@ impl View {
         // La primera versión decía esto mismo en un comentario y hacía lo contrario: devolvía vacío **sin
         // saltar**, o sea exactamente el disfraz que decía evitar. Lo cazó una revisión.
         debug_assert!(
-            hasta <= self.adjuntos.len(),
-            "un tramo de la vista apunta fuera de su propio vector: {desde}..{hasta} de {}",
-            self.adjuntos.len()
+            end <= self.combining.len(),
+            "un tramo de la vista apunta fuera de su propio vector: {offset}..{end} de {}",
+            self.combining.len()
         );
-        self.adjuntos.get(desde..hasta).unwrap_or_default()
+        self.combining.get(offset..end).unwrap_or_default()
     }
 
     /// El tamaño de la rejilla que retrata esta vista.
@@ -352,8 +352,8 @@ impl View {
     }
 
     /// Cuántas líneas se ha subido por el historial. **Cero es «se está mirando lo último»**.
-    pub fn desplazamiento(&self) -> usize {
-        self.desplazamiento
+    pub fn scroll(&self) -> usize {
+        self.scroll
     }
 
     /// Una celda por fila y columna, o `None` si cae fuera.
@@ -370,9 +370,9 @@ impl View {
         if row >= self.size.rows {
             return None;
         }
-        let ancho = self.size.cols as usize;
-        let desde = row as usize * ancho;
-        self.cells.get(desde..desde + ancho)
+        let width = self.size.cols as usize;
+        let offset = row as usize * width;
+        self.cells.get(offset..offset + width)
     }
 
     /// Todas las celdas, en orden de lectura.
@@ -392,10 +392,14 @@ impl View {
 // rompería la API de esta caja sin que nadie tocara una línea nuestra — que es exactamente lo que
 // el criterio existe para impedir. Se comprobó generando la doc y buscando `From<Color>`.
 
-use alacritty_terminal::term::cell::{Cell, Flags};
+// `Cell` con alias, como `CursorShape` justo debajo: esta caja **exporta su propio `Cell`**
+// desde el módulo hermano, y con el ajeno importado a pelo el mismo nombre significaría dos
+// cosas distintas según el fichero — un enlace de rustdoc `[`Cell`]` escrito aquí apuntaría
+// al de la dependencia y resolvería sin avisar. El alias va al ajeno, que es la regla.
+use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
 use alacritty_terminal::vte::ansi::{Color, CursorShape as AlacrittyShape, NamedColor};
 
-pub(crate) fn color_desde(color: Color) -> TermColor {
+pub(crate) fn color_from(color: Color) -> TermColor {
     match color {
         Color::Spec(rgb) => TermColor::Rgb {
             r: rgb.r,
@@ -403,11 +407,11 @@ pub(crate) fn color_desde(color: Color) -> TermColor {
             b: rgb.b,
         },
         Color::Indexed(i) => TermColor::Indexed(i),
-        Color::Named(n) => color_con_nombre(n),
+        Color::Named(n) => named_color(n),
     }
 }
 
-fn color_con_nombre(named: NamedColor) -> TermColor {
+fn named_color(named: NamedColor) -> TermColor {
     {
         use NamedColor::*;
         match named {
@@ -447,7 +451,7 @@ fn color_con_nombre(named: NamedColor) -> TermColor {
     }
 }
 
-pub(crate) fn forma_desde(shape: AlacrittyShape) -> CursorShape {
+pub(crate) fn shape_from(shape: AlacrittyShape) -> CursorShape {
     match shape {
         AlacrittyShape::Block => CursorShape::Block,
         AlacrittyShape::Underline => CursorShape::Underline,
@@ -460,16 +464,16 @@ pub(crate) fn forma_desde(shape: AlacrittyShape) -> CursorShape {
 /// El estilo de subrayado, que son cinco banderas mutuamente excluyentes.
 ///
 /// La librería las retira todas antes de poner la que toca, así que como mucho hay una puesta.
-fn subrayado_desde(banderas: Flags) -> Underline {
-    if banderas.contains(Flags::DOUBLE_UNDERLINE) {
+fn underline_from(flags: Flags) -> Underline {
+    if flags.contains(Flags::DOUBLE_UNDERLINE) {
         Underline::Double
-    } else if banderas.contains(Flags::UNDERCURL) {
+    } else if flags.contains(Flags::UNDERCURL) {
         Underline::Curl
-    } else if banderas.contains(Flags::DOTTED_UNDERLINE) {
+    } else if flags.contains(Flags::DOTTED_UNDERLINE) {
         Underline::Dotted
-    } else if banderas.contains(Flags::DASHED_UNDERLINE) {
+    } else if flags.contains(Flags::DASHED_UNDERLINE) {
         Underline::Dashed
-    } else if banderas.contains(Flags::UNDERLINE) {
+    } else if flags.contains(Flags::UNDERLINE) {
         Underline::Single
     } else {
         Underline::None
@@ -483,31 +487,35 @@ fn subrayado_desde(banderas: Flags) -> Underline {
 /// celda si el rango la incluye, y preguntárselo aquí obligaría a pasarle el rango entero —o sea a
 /// filtrar un tipo del motor hasta este módulo.
 ///
-/// **`adjuntos` es el vector de toda la vista, y esta función escribe en él.** Lo que va pegado a la celda
-/// no cabe dentro de ella —ver [`Adjuntos`]—, así que se copia al final del vector común y la celda se
+/// **`combining` es el vector de toda la vista, y esta función escribe en él.** Lo que va pegado a la celda
+/// no cabe dentro de ella —ver [`CombiningSpan`]—, así que se copia al final del vector común y la celda se
 /// queda con el tramo.
-pub(crate) fn celda_desde(celda: &Cell, seleccionada: bool, adjuntos: &mut Vec<char>) -> ViewCell {
+pub(crate) fn cell_from(
+    cell: &AlacrittyCell,
+    selected: bool,
+    combining: &mut Vec<char>,
+) -> ViewCell {
     {
-        let banderas = celda.flags;
+        let flags = cell.flags;
 
-        let pegados = celda.zerowidth().unwrap_or_default();
-        let cuantos = pegados.len().min(ADJUNTOS_POR_CELDA);
-        // **El tramo se toma antes de copiar**, que es cuando `desde` vale el final actual del vector.
-        let tramo = Adjuntos::nuevo(adjuntos.len(), cuantos);
+        let attached = cell.zerowidth().unwrap_or_default();
+        let count = attached.len().min(COMBINING_PER_CELL);
+        // **El tramo se toma antes de copiar**, que es cuando `offset` vale el final actual del vector.
+        let span = CombiningSpan::new(combining.len(), count);
         // **Los PRIMEROS, no los últimos.** Lo que decide la presentación es el carácter que va justo
         // detrás del de la celda, así que recortar por el otro extremo se llevaría por delante justo el
         // que importa.
-        adjuntos.extend_from_slice(&pegados[..cuantos]);
+        combining.extend_from_slice(&attached[..count]);
 
         // Son tres banderas, no dos: además del carácter ancho y su acompañante, el terminal marca
         // el hueco que deja al final de una fila cuando el carácter no cabe y lo baja entera a la
         // siguiente. Tratarlo como celda normal sería perder la única señal de que ese espacio no
         // lo escribió el programa.
-        let width = if banderas.contains(Flags::WIDE_CHAR) {
+        let width = if flags.contains(Flags::WIDE_CHAR) {
             CellWidth::WideHead
-        } else if banderas.contains(Flags::WIDE_CHAR_SPACER) {
+        } else if flags.contains(Flags::WIDE_CHAR_SPACER) {
             CellWidth::WideTail
-        } else if banderas.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
+        } else if flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
             CellWidth::WrapFiller
         } else {
             CellWidth::Single
@@ -516,26 +524,26 @@ pub(crate) fn celda_desde(celda: &Cell, seleccionada: bool, adjuntos: &mut Vec<c
         // El vídeo inverso se resuelve aquí, intercambiando los dos colores. Es una regla del
         // terminal, no del tema: dejarla para quien pinta la haría repetirse en cada capa de
         // pintado, y basta con que una se la salte para que el cursor de `vim` se vuelva invisible.
-        let (fg, bg) = if banderas.contains(Flags::INVERSE) {
-            (color_desde(celda.bg), color_desde(celda.fg))
+        let (fg, bg) = if flags.contains(Flags::INVERSE) {
+            (color_from(cell.bg), color_from(cell.fg))
         } else {
-            (color_desde(celda.fg), color_desde(celda.bg))
+            (color_from(cell.fg), color_from(cell.bg))
         };
 
         ViewCell {
-            c: celda.c,
-            adjuntos: tramo,
+            c: cell.c,
+            combining: span,
             fg,
             bg,
             width,
-            inverse: banderas.contains(Flags::INVERSE),
-            bold: banderas.contains(Flags::BOLD),
-            dim: banderas.contains(Flags::DIM),
-            italic: banderas.contains(Flags::ITALIC),
-            underline: subrayado_desde(banderas),
-            strikeout: banderas.contains(Flags::STRIKEOUT),
-            hidden: banderas.contains(Flags::HIDDEN),
-            selected: seleccionada,
+            inverse: flags.contains(Flags::INVERSE),
+            bold: flags.contains(Flags::BOLD),
+            dim: flags.contains(Flags::DIM),
+            italic: flags.contains(Flags::ITALIC),
+            underline: underline_from(flags),
+            strikeout: flags.contains(Flags::STRIKEOUT),
+            hidden: flags.contains(Flags::HIDDEN),
+            selected,
         }
     }
 }
@@ -545,20 +553,20 @@ mod tests {
     use super::*;
 
     /// Una vista de una sola celda con ese vector de caracteres pegados detrás.
-    fn vista_con(adjuntos: Vec<char>) -> View {
+    fn view_with(combining: Vec<char>) -> View {
         View::new(
             Size { rows: 1, cols: 1 },
             vec![ViewCell::default()],
-            adjuntos,
+            combining,
             None,
             0,
         )
     }
 
     /// Una celda que señala ese tramo.
-    fn celda_que_senala(tramo: Adjuntos) -> ViewCell {
+    fn cell_pointing_to(span: CombiningSpan) -> ViewCell {
         ViewCell {
-            adjuntos: tramo,
+            combining: span,
             ..ViewCell::default()
         }
     }
@@ -566,19 +574,19 @@ mod tests {
     #[test]
     fn un_tramo_que_no_cabe_en_el_entero_deja_la_celda_sin_nada_en_vez_de_recortarse() {
         // **Recortar al máximo que cabe sería enseñar lo de la celda de al lado como si fuera de
-        // ésta.** Los caracteres de todas las celdas viven en un vector común, así que un `cuantos`
+        // ésta.** Los caracteres de todas las celdas viven en un vector común, así que un `count`
         // saturado a los treinta y uno que caben en el entero se lleva por delante los de quien venga
         // detrás — y el que mira no tiene forma de saber que lo que ve no lo escribió ahí nadie.
         // Rendirse deja la celda sin nada pegado, que es exactamente como se veía antes de esta
         // entrega.
         //
-        // Los cuarenta caracteres del vector son los que un `cuantos` saturado devolvería: si se
+        // Los cuarenta caracteres del vector son los que un `count` saturado devolvería: si se
         // recortara, esta celda se quedaría con treinta y uno de ellos.
-        let vista = vista_con(vec!['\u{0301}'; 40]);
-        let celda = celda_que_senala(Adjuntos::nuevo(0, 40));
+        let view = view_with(vec!['\u{0301}'; 40]);
+        let cell = cell_pointing_to(CombiningSpan::new(0, 40));
 
         assert!(
-            vista.adjuntos_de(&celda).is_empty(),
+            view.combining_of(&cell).is_empty(),
             "un tramo que no cabe se recortó en vez de rendirse, y lo recortado son caracteres de otra celda"
         );
     }
@@ -592,9 +600,9 @@ mod tests {
         // y se manifestaría como un emoji que perdió su selector — a mil líneas de donde se rompió.
         // En depuración salta aquí; en producción degrada a vacío, que es lo único seguro que se
         // puede hacer con un índice del que ya no te fías.
-        let vista = vista_con(vec!['\u{FE0F}']);
-        let celda = celda_que_senala(Adjuntos::nuevo(0, 2));
+        let view = view_with(vec!['\u{FE0F}']);
+        let cell = cell_pointing_to(CombiningSpan::new(0, 2));
 
-        let _ = vista.adjuntos_de(&celda);
+        let _ = view.combining_of(&cell);
     }
 }

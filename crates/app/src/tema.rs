@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn los_tres_reclamos_no_se_pintan_todos_igual() {
         let t = tema();
-        let colores = Attention::TODAS.map(|clase| t.color_del_reclamo(clase, true));
+        let colores = Attention::ALL.map(|clase| t.color_del_reclamo(clase, true));
 
         for (i, uno) in colores.iter().enumerate() {
             for otro in &colores[i + 1..] {
@@ -743,7 +743,7 @@ mod tests {
     fn un_reclamo_sin_sostener_es_su_propio_color_atenuado() {
         let t = tema();
 
-        for clase in Attention::TODAS {
+        for clase in Attention::ALL {
             assert_eq!(
                 t.color_del_reclamo(clase, false),
                 t.apagar(t.color_del_reclamo(clase, true)),
@@ -757,7 +757,7 @@ mod tests {
     #[test]
     fn un_reclamo_sin_sostener_se_ve_distinto_del_mismo_sostenido() {
         let t = tema();
-        for clase in Attention::TODAS {
+        for clase in Attention::ALL {
             assert_ne!(
                 t.color_del_reclamo(clase, true),
                 t.color_del_reclamo(clase, false),

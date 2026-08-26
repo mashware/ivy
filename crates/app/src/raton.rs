@@ -17,7 +17,7 @@
 //! [`teclado`]: crate::teclado
 
 use eframe::egui::{Modifiers, PointerButton};
-use term_core::RatonReclamado;
+use term_core::MouseReporting;
 
 /// La columna o fila más alta que la codificación antigua puede decir.
 ///
@@ -68,14 +68,14 @@ impl Donde {
 pub fn informe(
     gesto: Gesto,
     donde: Donde,
-    reclamado: RatonReclamado,
+    reclamado: MouseReporting,
     acorde: Modifiers,
 ) -> Option<Vec<u8>> {
     if !pide_esto(gesto, reclamado) {
         return None;
     }
     let boton = numero_del_boton(gesto)? + suma_del_acorde(acorde);
-    if reclamado.extendido {
+    if reclamado.extended {
         return Some(extendido(gesto, boton, donde));
     }
     antiguo(gesto, boton, donde)
@@ -86,14 +86,14 @@ pub fn informe(
 /// **Pedir los clics no es pedir el arrastre**, y son banderas distintas justamente porque un programa
 /// que solo quiere saber dónde se pincha no quiere un informe por cada celda que el puntero recorre con
 /// el botón apretado.
-fn pide_esto(gesto: Gesto, reclamado: RatonReclamado) -> bool {
+fn pide_esto(gesto: Gesto, reclamado: MouseReporting) -> bool {
     match gesto {
         // **La rueda va con los botones.** Un programa que pide los clics recibe los giros: es lo que
         // hace que la rueda mueva la lista de `htop` sin pedir nada más.
         Gesto::Apretar(_) | Gesto::Soltar(_) | Gesto::RuedaArriba | Gesto::RuedaAbajo => {
-            reclamado.lo_quiere()
+            reclamado.wants_mouse()
         }
-        Gesto::Arrastrar(_) => reclamado.arrastre || reclamado.movimiento,
+        Gesto::Arrastrar(_) => reclamado.drag || reclamado.motion,
     }
 }
 
@@ -177,18 +177,18 @@ mod tests {
     use super::*;
 
     /// Un programa que pidió los clics y el arrastre, en la codificación antigua.
-    fn como_htop() -> RatonReclamado {
-        RatonReclamado {
-            botones: true,
-            arrastre: true,
-            ..RatonReclamado::default()
+    fn como_htop() -> MouseReporting {
+        MouseReporting {
+            buttons: true,
+            drag: true,
+            ..MouseReporting::default()
         }
     }
 
     /// Lo mismo, pero pidiendo la codificación extendida.
-    fn con_la_extendida() -> RatonReclamado {
-        RatonReclamado {
-            extendido: true,
+    fn con_la_extendida() -> MouseReporting {
+        MouseReporting {
+            extended: true,
             ..como_htop()
         }
     }
@@ -201,7 +201,7 @@ mod tests {
             informe(
                 Gesto::Apretar(PointerButton::Primary),
                 Donde::desde_cero(0, 0),
-                RatonReclamado::default(),
+                MouseReporting::default(),
                 Modifiers::NONE,
             ),
             None
@@ -303,9 +303,9 @@ mod tests {
         // **Son banderas distintas porque significan cosas distintas.** Un programa que solo quiere
         // saber dónde se pincha recibiría, si no, un informe por cada celda que el puntero recorre con
         // el botón apretado — decenas por gesto, y ninguno pedido.
-        let solo_clics = RatonReclamado {
-            botones: true,
-            ..RatonReclamado::default()
+        let solo_clics = MouseReporting {
+            buttons: true,
+            ..MouseReporting::default()
         };
 
         assert_eq!(

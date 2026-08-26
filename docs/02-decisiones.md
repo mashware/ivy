@@ -1084,7 +1084,7 @@ convirtiendo cada salto de línea en retorno de carro más salto. Se paga el cos
 tomó al revés primero, se entregó, y se revirtió al descubrir por qué no puede funcionar** — lo que
 sigue es esa autopsia, que vale más que la decisión.
 
-**Lo que cuesta, medido en este repo** con `cargo run --release --example entrega -p term-core`,
+**Lo que cuesta, medido en este repo** con `cargo run --release --example delivery -p term-core`,
 volcando doce megas con `cat` por un pseudoterminal real:
 
 | Línea | Procesando en el núcleo | Sin procesar | Relación |
@@ -2229,7 +2229,7 @@ se hereda** el del motor —10 000—. El **3 500 sale del listón**: es el defe
 quien **D19** dice que nos medimos. Lo que las medidas hacen es **descartar los demás** y poner precio
 al elegido.
 
-**Lo medido**, con `cargo run --release --example historial -p term-core`, rejilla de 49×180, volcado de
+**Lo medido**, con `cargo run --release --example scrollback -p term-core`, rejilla de 49×180, volcado de
 8 MiB, **cinco muestras por punto** y publicando la mediana:
 
 | Techo | Techo de memoria por consola | Recolocar: líneas cortas | Recolocar: **líneas que envuelven** | Leer 8 MiB |

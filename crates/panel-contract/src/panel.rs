@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 ///
 /// **El multiplicador depende de la forma del fichero, no de su tamaño**, y por eso hay tres números y
 /// no uno. Con 256 KiB justos, medido en `--release` con
-/// `cargo run --release --example lectura -p panel-contract`:
+/// `cargo run --release --example read -p panel-contract`:
 ///
 /// | Forma | Pico | Factor | Interpretar |
 /// |---|---|---|---|
@@ -140,14 +140,14 @@ pub enum Attention {
 impl Attention {
     /// Las tres, para quien tenga que recorrerlas — una tabla de color, una de símbolos, una prueba.
     ///
-    /// **Vive aquí, pegada a `prioridad`, y no en cada sitio que las recorre.** Una lista literal
+    /// **Vive aquí, pegada a `priority`, y no en cada sitio que las recorre.** Una lista literal
     /// repetida por ahí admite una cuarta variante **en silencio**, que es justo lo que el `match` de
     /// abajo impide para las tablas de producción: quien añada una no compilará hasta tocar
-    /// `prioridad`, y entonces tiene esta lista tres líneas más arriba.
-    pub const TODAS: [Self; 3] = [Self::Wait, Self::Block, Self::Done];
+    /// `priority`, y entonces tiene esta lista tres líneas más arriba.
+    pub const ALL: [Self; 3] = [Self::Wait, Self::Block, Self::Done];
 
     /// Cuánto reclama, para poder comparar dos. Números sin más significado que su orden.
-    fn prioridad(self) -> u8 {
+    fn priority(self) -> u8 {
         match self {
             Self::Done => 0,
             Self::Block => 1,
@@ -157,14 +157,14 @@ impl Attention {
 }
 
 impl Ord for Attention {
-    fn cmp(&self, otro: &Self) -> std::cmp::Ordering {
-        self.prioridad().cmp(&otro.prioridad())
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.priority().cmp(&other.priority())
     }
 }
 
 impl PartialOrd for Attention {
-    fn partial_cmp(&self, otro: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(otro))
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -210,8 +210,8 @@ impl std::fmt::Display for Problem {
             Self::Missing => write!(f, "sin publicar todavía"),
             Self::NotRegular => write!(f, "hay algo ahí que no es un fichero"),
             Self::TooBig => write!(f, "pasa de {} KiB", MAX_BYTES / 1024),
-            Self::Unreadable(fallo) => write!(f, "no se pudo leer ({fallo})"),
-            Self::Invalid(motivo) => write!(f, "no se entiende ({motivo})"),
+            Self::Unreadable(failure) => write!(f, "no se pudo leer ({failure})"),
+            Self::Invalid(reason) => write!(f, "no se entiende ({reason})"),
         }
     }
 }
@@ -223,11 +223,11 @@ impl Panel {
     /// reloj adelantado o un sistema de ficheros ajeno. Con la resta ingenua de tiempos eso es un
     /// pánico, y este camino no puede entrar en pánico por nada que venga de fuera.
     pub fn is_stale_at(&self, now: SystemTime) -> bool {
-        let Some(escrito) = self.written_at else {
+        let Some(written) = self.written_at else {
             return false;
         };
-        match now.duration_since(escrito) {
-            Ok(silencio) => silencio > self.stale_after,
+        match now.duration_since(written) {
+            Ok(silence) => silence > self.stale_after,
             // El fichero dice que se escribió en el futuro: no hay silencio que medir.
             Err(_) => false,
         }
@@ -247,14 +247,20 @@ impl Panel {
 ///
 /// Sin fichero se devuelve el problema, no `None`: «desapareció» y «sigue igual» son cosas distintas
 /// para quien pinta.
-pub fn read_if_newer(dir: &Path, visto: Option<SystemTime>) -> Result<Option<Panel>, Problem> {
-    match std::fs::metadata(dir.join(crate::FICHERO_DEL_PANEL)) {
-        Ok(datos) if datos.modified().is_ok_and(|fecha| Some(fecha) == visto) => Ok(None),
+pub fn read_if_newer(dir: &Path, seen: Option<SystemTime>) -> Result<Option<Panel>, Problem> {
+    match std::fs::metadata(dir.join(crate::PANEL_FILE)) {
+        Ok(metadata)
+            if metadata
+                .modified()
+                .is_ok_and(|modified| Some(modified) == seen) =>
+        {
+            Ok(None)
+        }
         // **La ausencia se resuelve aquí y no volviendo a [`read`]**, que es el caso más frecuente de
         // todos: una consola cuyo productor no publica nada pasa por aquí en cada fotograma, y
         // dejarla seguir pediría los datos del fichero **dos veces** para llegar a la misma
         // conclusión.
-        Err(fallo) if fallo.kind() == std::io::ErrorKind::NotFound => Err(Problem::Missing),
+        Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => Err(Problem::Missing),
         _ => read(dir).map(Some),
     }
 }
@@ -264,19 +270,21 @@ pub fn read_if_newer(dir: &Path, visto: Option<SystemTime>) -> Result<Option<Pan
 /// El nombre del fichero lo pone esta caja, no quien llama: es parte del contrato y vive en un solo
 /// sitio.
 pub fn read(dir: &Path) -> Result<Panel, Problem> {
-    let ruta = dir.join(crate::FICHERO_DEL_PANEL);
+    let path = dir.join(crate::PANEL_FILE);
 
-    let datos = match std::fs::metadata(&ruta) {
-        Ok(datos) => datos,
-        Err(fallo) if fallo.kind() == std::io::ErrorKind::NotFound => return Err(Problem::Missing),
-        Err(fallo) => return Err(Problem::Unreadable(fallo)),
+    let metadata = match std::fs::metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Problem::Missing);
+        }
+        Err(failure) => return Err(Problem::Unreadable(failure)),
     };
-    if !datos.is_file() {
+    if !metadata.is_file() {
         return Err(Problem::NotRegular);
     }
 
-    let fichero = std::fs::File::open(&ruta).map_err(Problem::Unreadable)?;
-    let bytes = leer_acotado(fichero, datos.len()).map_err(Problem::Unreadable)?;
+    let file = std::fs::File::open(&path).map_err(Problem::Unreadable)?;
+    let bytes = read_capped(file, metadata.len()).map_err(Problem::Unreadable)?;
     // **El tope y la codificación se deciden por separado, y en este orden.** Leer directamente a
     // texto ataba las dos cosas: el corte del tope parte un carácter de varios bytes —y aquí hay
     // acentos y guiones largos en todos los ficheros reales—, así que un fichero enorme salía como
@@ -284,11 +292,11 @@ pub fn read(dir: &Path) -> Result<Panel, Problem> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err(Problem::TooBig);
     }
-    let texto =
+    let text =
         String::from_utf8(bytes).map_err(|_| Problem::Invalid("no es texto UTF-8".to_owned()))?;
 
-    let mut panel = interpretar(&texto)?;
-    panel.written_at = datos.modified().ok();
+    let mut panel = parse(&text)?;
+    panel.written_at = metadata.modified().ok();
     Ok(panel)
 }
 
@@ -303,7 +311,7 @@ pub fn read(dir: &Path) -> Result<Panel, Problem> {
 /// resto **para poder afirmar cuánto se lee**: mirando solo el resultado de [`read`], un tope que no
 /// acotara nada daría el mismo error, porque la comprobación de después lo taparía.
 ///
-/// **`esperado` es una pista de tamaño, no una comprobación**, y la distinción es justo la que la
+/// **`expected` es una pista de tamaño, no una comprobación**, y la distinción es justo la que la
 /// decisión de arriba defiende: nadie decide nada con ese número, solo se reserva sitio de una vez.
 /// Sin él, `read_to_end` empieza por 32 bytes y duplica: medido, **nueve llamadas al sistema para un
 /// panel de 861 bytes y diecisiete para uno en el techo**, que además deja reservado el doble de lo que
@@ -311,9 +319,9 @@ pub fn read(dir: &Path) -> Result<Panel, Problem> {
 /// mucho en uno de red, donde cada ida y vuelta son milisegundos dentro del fotograma. Si el productor
 /// machaca el fichero con uno mayor entre el `metadata` y la lectura, la pista se queda corta y
 /// `read_to_end` crece solo: el techo lo sigue poniendo el `take`.
-fn leer_acotado(fichero: std::fs::File, esperado: u64) -> std::io::Result<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(esperado.min(MAX_BYTES) as usize + 1);
-    fichero.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+fn read_capped(file: std::fs::File, expected: u64) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::with_capacity(expected.min(MAX_BYTES) as usize + 1);
+    file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
@@ -325,31 +333,31 @@ fn leer_acotado(fichero: std::fs::File, esperado: u64) -> std::io::Result<Vec<u8
 /// mano: pasará, y perder el panel completo por un campo que nadie mira sería lo peor que podría hacer.
 ///
 /// Solo hay dos formas de que un fichero no valga: que no sea JSON, o que no traiga líneas.
-fn interpretar(texto: &str) -> Result<Panel, Problem> {
-    let crudo: serde_json::Value =
-        serde_json::from_str(texto).map_err(|fallo| Problem::Invalid(fallo.to_string()))?;
+fn parse(text: &str) -> Result<Panel, Problem> {
+    let raw: serde_json::Value =
+        serde_json::from_str(text).map_err(|failure| Problem::Invalid(failure.to_string()))?;
 
-    let lineas = crudo
+    let lines = raw
         .get("lines")
         .and_then(serde_json::Value::as_array)
         .ok_or_else(|| Problem::Invalid("no trae «lines»".to_owned()))?;
 
     Ok(Panel {
-        version: crudo.get("v").and_then(serde_json::Value::as_u64),
-        updated_at: cadena(&crudo, "updated_at"),
-        phase: cadena(&crudo, "phase"),
-        header: crudo
+        version: raw.get("v").and_then(serde_json::Value::as_u64),
+        updated_at: string(&raw, "updated_at"),
+        phase: string(&raw, "phase"),
+        header: raw
             .get("header")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(true),
-        stale_after: crudo
+        stale_after: raw
             .get("stale_after_minutes")
             .and_then(serde_json::Value::as_u64)
-            .map_or(STALE_AFTER, |minutos| {
-                Duration::from_secs(minutos.saturating_mul(60))
+            .map_or(STALE_AFTER, |minutes| {
+                Duration::from_secs(minutes.saturating_mul(60))
             }),
-        attention: cadena_cruda(&crudo, "attention").and_then(atencion),
-        lines: lineas.iter().filter_map(linea).collect(),
+        attention: string_ref(&raw, "attention").and_then(attention),
+        lines: lines.iter().filter_map(line).collect(),
         written_at: None,
     })
 }
@@ -358,38 +366,38 @@ fn interpretar(texto: &str) -> Result<Panel, Problem> {
 ///
 /// Un elemento que no es ni cadena ni objeto —un número, un nulo— no es una línea de nada: pintarlo
 /// como una línea en blanco sería inventar contenido a partir de basura.
-fn linea(crudo: &serde_json::Value) -> Option<Line> {
+fn line(raw: &serde_json::Value) -> Option<Line> {
     // Una cadena suelta es una línea normal, y la cadena vacía es un hueco: los dos casos son lo mismo
     // aquí, y es quien pinta el que sabe que un texto vacío deja un espacio.
-    if let Some(texto) = crudo.as_str() {
+    if let Some(text) = raw.as_str() {
         return Some(Line {
-            text: texto.to_owned(),
+            text: text.to_owned(),
             ..Line::default()
         });
     }
-    if !crudo.is_object() {
+    if !raw.is_object() {
         return None;
     }
 
     Some(Line {
-        text: cadena(crudo, "text").unwrap_or_default(),
-        mark: cadena_cruda(crudo, "mark").and_then(marca),
-        reference: cadena(crudo, "ref"),
-        style: cadena_cruda(crudo, "style").and_then(estilo),
+        text: string(raw, "text").unwrap_or_default(),
+        mark: string_ref(raw, "mark").and_then(mark),
+        reference: string(raw, "ref"),
+        style: string_ref(raw, "style").and_then(style),
         // Acotada **aquí**, que es la frontera con lo que viene de fuera: quien pinte va a repetir
         // ese número de espacios, y un valor absurdo sería un pánico por reservar memoria. El techo
         // también evita que la conversión trunque en silencio donde el entero de máquina sea menor.
-        indent: crudo
+        indent: raw
             .get("indent")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0)
             .min(MAX_INDENT) as usize,
-        link: cadena(crudo, "link"),
+        link: string(raw, "link"),
     })
 }
 
-fn cadena(crudo: &serde_json::Value, campo: &str) -> Option<String> {
-    cadena_cruda(crudo, campo).map(str::to_owned)
+fn string(raw: &serde_json::Value, field: &str) -> Option<String> {
+    string_ref(raw, field).map(str::to_owned)
 }
 
 /// Lo mismo, **sin copiar**: para los campos cuyo valor se traduce a un tipo propio y se tira.
@@ -398,12 +406,12 @@ fn cadena(crudo: &serde_json::Value, campo: &str) -> Option<String> {
 /// y el reclamo— convierten la cadena en un `enum` que cabe en un byte y sueltan el texto una llamada
 /// después; pedir memoria para eso son tres reservas por línea que nadie llega a usar, en una caja con
 /// un módulo entero dedicado a contar reservas y una tabla de picos en su documentación.
-fn cadena_cruda<'a>(crudo: &'a serde_json::Value, campo: &str) -> Option<&'a str> {
-    crudo.get(campo).and_then(serde_json::Value::as_str)
+fn string_ref<'a>(raw: &'a serde_json::Value, field: &str) -> Option<&'a str> {
+    raw.get(field).and_then(serde_json::Value::as_str)
 }
 
-fn atencion(nombre: &str) -> Option<Attention> {
-    match nombre {
+fn attention(name: &str) -> Option<Attention> {
+    match name {
         "wait" => Some(Attention::Wait),
         "block" => Some(Attention::Block),
         "done" => Some(Attention::Done),
@@ -411,8 +419,8 @@ fn atencion(nombre: &str) -> Option<Attention> {
     }
 }
 
-fn marca(nombre: &str) -> Option<Mark> {
-    match nombre {
+fn mark(name: &str) -> Option<Mark> {
+    match name {
         "done" => Some(Mark::Done),
         "current" => Some(Mark::Current),
         "pending" => Some(Mark::Pending),
@@ -423,8 +431,8 @@ fn marca(nombre: &str) -> Option<Mark> {
     }
 }
 
-fn estilo(nombre: &str) -> Option<Style> {
-    match nombre {
+fn style(name: &str) -> Option<Style> {
+    match name {
         "normal" => Some(Style::Normal),
         "dim" => Some(Style::Dim),
         "title" => Some(Style::Title),
@@ -443,7 +451,7 @@ mod tests {
 
     /// Compuesto con las rarezas de varios `panel.json` de verdad del repo —no es la copia de uno—: **estilo y marca en la
     /// misma línea**, la versión ausente, y referencias de anchos muy distintos con un guion largo.
-    const REAL: &str = r##"{
+    const ACTUAL: &str = r##"{
       "updated_at": "2026-08-11T22:00:00+02:00",
       "phase": "done",
       "header": true,
@@ -458,16 +466,15 @@ mod tests {
       ]
     }"##;
 
-    fn panel_en(dir: &PanelDir, contenido: &str) -> Result<Panel, Problem> {
-        std::fs::write(dir.path().join(crate::FICHERO_DEL_PANEL), contenido)
-            .expect("publicar el panel");
+    fn panel_in(dir: &PanelDir, contents: &str) -> Result<Panel, Problem> {
+        std::fs::write(dir.path().join(crate::PANEL_FILE), contents).expect("publicar el panel");
         read(dir.path())
     }
 
     #[test]
     fn un_panel_de_verdad_se_lee_entero_y_en_orden() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_en(&dir, REAL).expect("leer el panel");
+        let panel = panel_in(&dir, ACTUAL).expect("leer el panel");
 
         assert_eq!(panel.lines.len(), 6);
         assert_eq!(panel.lines[0].style, Some(Style::Title));
@@ -485,17 +492,17 @@ mod tests {
     #[test]
     fn una_linea_puede_traer_marca_y_estilo_a_la_vez() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_en(&dir, REAL).expect("leer el panel");
+        let panel = panel_in(&dir, ACTUAL).expect("leer el panel");
 
-        let ahora = &panel.lines[4];
-        assert_eq!(ahora.mark, Some(Mark::Info));
-        assert_eq!(ahora.style, Some(Style::Ok));
+        let now_line = &panel.lines[4];
+        assert_eq!(now_line.mark, Some(Mark::Info));
+        assert_eq!(now_line.style, Some(Style::Ok));
     }
 
     #[test]
     fn la_version_puede_faltar() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_en(&dir, REAL).expect("leer el panel");
+        let panel = panel_in(&dir, ACTUAL).expect("leer el panel");
 
         assert_eq!(
             panel.version, None,
@@ -507,11 +514,11 @@ mod tests {
     fn la_cabecera_se_da_por_puesta_y_se_puede_quitar() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let sin_decirlo = panel_en(&dir, r#"{"lines":[]}"#).expect("leer");
-        assert!(sin_decirlo.header, "por omisión la pone la aplicación");
+        let unstated = panel_in(&dir, r#"{"lines":[]}"#).expect("leer");
+        assert!(unstated.header, "por omisión la pone la aplicación");
 
-        let quitada = panel_en(&dir, r#"{"header":false,"lines":[]}"#).expect("leer");
-        assert!(!quitada.header);
+        let removed = panel_in(&dir, r#"{"header":false,"lines":[]}"#).expect("leer");
+        assert!(!removed.header);
     }
 
     /// **La tolerancia es por campo, no por documento.** Quien publica es un agente escribiendo JSON a
@@ -520,7 +527,7 @@ mod tests {
     #[test]
     fn un_campo_que_no_se_entiende_no_tira_el_fichero() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_en(
+        let panel = panel_in(
             &dir,
             r#"{"v":"uno","header":"sí","stale_after_minutes":-5,"attention":3,
                 "lines":[{"text":"vale","mark":"inventada","style":42,"indent":"mucha"}]}"#,
@@ -551,20 +558,20 @@ mod tests {
     fn el_silencio_tolerado_lo_dice_el_productor() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let suyo = panel_en(&dir, r#"{"stale_after_minutes":5,"lines":[]}"#).expect("leer");
-        assert_eq!(suyo.stale_after, Duration::from_secs(300));
+        let its_own = panel_in(&dir, r#"{"stale_after_minutes":5,"lines":[]}"#).expect("leer");
+        assert_eq!(its_own.stale_after, Duration::from_secs(300));
 
-        let por_omision = panel_en(&dir, r#"{"lines":[]}"#).expect("leer");
-        assert_eq!(por_omision.stale_after, STALE_AFTER);
+        let by_default = panel_in(&dir, r#"{"lines":[]}"#).expect("leer");
+        assert_eq!(by_default.stale_after, STALE_AFTER);
     }
 
     #[test]
     fn sin_lineas_no_es_un_panel() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let fallo = panel_en(&dir, r#"{"phase":"algo"}"#).expect_err("sin líneas no vale");
+        let failure = panel_in(&dir, r#"{"phase":"algo"}"#).expect_err("sin líneas no vale");
 
-        assert!(matches!(fallo, Problem::Invalid(_)), "fue {fallo:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
     }
 
     /// Un `lines` que no es una lista **no es un panel vacío**: si se leyera como tal, quien pinta
@@ -574,15 +581,15 @@ mod tests {
     fn unas_lineas_que_no_son_una_lista_no_son_un_panel() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        for texto in [
+        for text in [
             r#"{"lines":"una sola"}"#,
             r#"{"lines":{"1":"una"}}"#,
             r#"{"lines":7}"#,
         ] {
-            let fallo = panel_en(&dir, texto).expect_err("«lines» tiene que ser una lista");
+            let failure = panel_in(&dir, text).expect_err("«lines» tiene que ser una lista");
             assert!(
-                matches!(fallo, Problem::Invalid(_)),
-                "con {texto} fue {fallo:?}"
+                matches!(failure, Problem::Invalid(_)),
+                "con {text} fue {failure:?}"
             );
         }
     }
@@ -593,11 +600,11 @@ mod tests {
     fn un_json_que_no_es_un_objeto_en_la_raiz_no_es_un_panel() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        for texto in [r#"["una","otra"]"#, r#""solo una cadena""#, "42", "null"] {
-            let fallo = panel_en(&dir, texto).expect_err("la raíz tiene que ser un objeto");
+        for text in [r#"["una","otra"]"#, r#""solo una cadena""#, "42", "null"] {
+            let failure = panel_in(&dir, text).expect_err("la raíz tiene que ser un objeto");
             assert!(
-                matches!(fallo, Problem::Invalid(_)),
-                "con {texto} fue {fallo:?}"
+                matches!(failure, Problem::Invalid(_)),
+                "con {text} fue {failure:?}"
             );
         }
     }
@@ -607,9 +614,9 @@ mod tests {
         let dir = PanelDir::create().expect("crear el directorio");
 
         // Un fichero a medio escribir es exactamente esto: JSON cortado por la mitad.
-        let fallo = panel_en(&dir, r#"{"lines":[{"text":"a med"#).expect_err("no es JSON");
+        let failure = panel_in(&dir, r#"{"lines":[{"text":"a med"#).expect_err("no es JSON");
 
-        assert!(matches!(fallo, Problem::Invalid(_)), "fue {fallo:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
     }
 
     /// **El fichero de cero bytes es el instante intermedio de cada publicación**: el productor que
@@ -619,18 +626,18 @@ mod tests {
     fn un_fichero_vacio_es_una_escritura_a_medias_y_no_un_panel_sin_lineas() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let fallo = panel_en(&dir, "").expect_err("un fichero vacío no es un panel");
+        let failure = panel_in(&dir, "").expect_err("un fichero vacío no es un panel");
 
-        assert!(matches!(fallo, Problem::Invalid(_)), "fue {fallo:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
     }
 
     #[test]
     fn sin_publicar_todavia_no_es_un_error_raro() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let fallo = read(dir.path()).expect_err("no hay fichero");
+        let failure = read(dir.path()).expect_err("no hay fichero");
 
-        assert!(matches!(fallo, Problem::Missing), "fue {fallo:?}");
+        assert!(matches!(failure, Problem::Missing), "fue {failure:?}");
     }
 
     /// «Todavía no ha publicado» y «hay algo ahí que no puedo leer» son dos cosas distintas que
@@ -642,42 +649,42 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = PanelDir::create().expect("crear el directorio");
-        let ruta = dir.path().join(crate::FICHERO_DEL_PANEL);
-        std::fs::write(&ruta, r#"{"lines":[]}"#).expect("publicar el panel");
-        let modo = |ruta: &Path, modo| {
-            std::fs::set_permissions(ruta, std::fs::Permissions::from_mode(modo))
+        let path = dir.path().join(crate::PANEL_FILE);
+        std::fs::write(&path, r#"{"lines":[]}"#).expect("publicar el panel");
+        let mode = |path: &Path, mode| {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
                 .expect("cambiar los permisos")
         };
 
         // Los permisos se devuelven enseguida, **antes** de afirmar nada: con la restauración detrás
         // del `assert`, un fallo del test dejaría un directorio que su destructor ya no puede vaciar.
-        modo(&ruta, 0o000);
+        mode(&path, 0o000);
         // Quien corra la suite como administrador puede leer igualmente, y entonces aquí no hay nada
         // que comprobar. Se pregunta en vez de suponerlo, que sale más barato que traer una
         // biblioteca solo para mirar el usuario efectivo.
-        let sin_permiso = std::fs::File::open(&ruta).is_err();
-        let del_fichero = read(dir.path());
-        modo(&ruta, 0o600);
+        let unreadable = std::fs::File::open(&path).is_err();
+        let from_file = read(dir.path());
+        mode(&path, 0o600);
 
-        modo(dir.path(), 0o000);
-        let del_directorio = read(dir.path());
-        modo(dir.path(), 0o700);
+        mode(dir.path(), 0o000);
+        let from_dir = read(dir.path());
+        mode(dir.path(), 0o700);
 
-        if sin_permiso {
+        if unreadable {
             assert!(
-                matches!(del_fichero, Err(Problem::Unreadable(_))),
-                "el fichero sin permisos salió como {del_fichero:?}"
+                matches!(from_file, Err(Problem::Unreadable(_))),
+                "el fichero sin permisos salió como {from_file:?}"
             );
             assert!(
-                matches!(del_directorio, Err(Problem::Unreadable(_))),
-                "el directorio sin permisos salió como {del_directorio:?}"
+                matches!(from_dir, Err(Problem::Unreadable(_))),
+                "el directorio sin permisos salió como {from_dir:?}"
             );
         }
     }
 
     /// **La misma propiedad que la de abajo, pero sobre el camino de verdad.**
     ///
-    /// La de abajo llama a [`leer_acotado`] directamente, así que solo ata al ayudante: sustituyendo
+    /// La de abajo llama a [`read_capped`] directamente, así que solo ata al ayudante: sustituyendo
     /// dentro de [`read`] esa llamada por un `std::fs::read` —reservar el fichero entero, que es justo
     /// lo que el techo existe para impedir— **la suite seguía verde**, porque la comprobación de
     /// después devuelve [`Problem::TooBig`] igual. Medido: el error no distingue los dos caminos, solo
@@ -690,18 +697,17 @@ mod tests {
     #[test]
     fn leer_un_fichero_enorme_no_reserva_lo_que_ocupa() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let relleno = "x".repeat(MAX_BYTES as usize * 8);
-        let contenido = format!(r#"{{"lines":["{relleno}"]}}"#);
-        std::fs::write(dir.path().join(crate::FICHERO_DEL_PANEL), &contenido)
-            .expect("publicar uno enorme");
-        drop(contenido);
+        let padding = "x".repeat(MAX_BYTES as usize * 8);
+        let contents = format!(r#"{{"lines":["{padding}"]}}"#);
+        std::fs::write(dir.path().join(crate::PANEL_FILE), &contents).expect("publicar uno enorme");
+        drop(contents);
 
-        let (fallo, pico) = midiendo(|| read(dir.path()));
+        let (failure, peak) = while_measuring(|| read(dir.path()));
 
-        assert!(matches!(fallo, Err(Problem::TooBig)), "fue {fallo:?}");
+        assert!(matches!(failure, Err(Problem::TooBig)), "fue {failure:?}");
         assert!(
-            pico < MAX_BYTES as usize * 4,
-            "reservó {pico} bytes leyendo un fichero que se rechaza por grande"
+            peak < MAX_BYTES as usize * 4,
+            "reservó {peak} bytes leyendo un fichero que se rechaza por grande"
         );
     }
 
@@ -714,13 +720,13 @@ mod tests {
     #[test]
     fn de_un_fichero_enorme_solo_se_leen_los_primeros_bytes() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let ruta = dir.path().join(crate::FICHERO_DEL_PANEL);
-        std::fs::write(&ruta, "x".repeat(MAX_BYTES as usize * 4)).expect("escribir uno enorme");
+        let path = dir.path().join(crate::PANEL_FILE);
+        std::fs::write(&path, "x".repeat(MAX_BYTES as usize * 4)).expect("escribir uno enorme");
 
-        let leido = leer_acotado(std::fs::File::open(&ruta).expect("abrir"), 0).expect("leer");
+        let read_back = read_capped(std::fs::File::open(&path).expect("abrir"), 0).expect("leer");
 
         assert_eq!(
-            leido.len() as u64,
+            read_back.len() as u64,
             MAX_BYTES + 1,
             "se leyó más que el techo y un byte"
         );
@@ -729,12 +735,12 @@ mod tests {
     #[test]
     fn un_fichero_enorme_no_se_lee_entero() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let relleno = "x".repeat(MAX_BYTES as usize + 1024);
-        let gordo = format!(r#"{{"lines":["{relleno}"]}}"#);
+        let padding = "x".repeat(MAX_BYTES as usize + 1024);
+        let too_big = format!(r#"{{"lines":["{padding}"]}}"#);
 
-        let fallo = panel_en(&dir, &gordo).expect_err("se pasa del techo");
+        let failure = panel_in(&dir, &too_big).expect_err("se pasa del techo");
 
-        assert!(matches!(fallo, Problem::TooBig), "fue {fallo:?}");
+        assert!(matches!(failure, Problem::TooBig), "fue {failure:?}");
     }
 
     /// **Con acentos, que es lo normal aquí**: todos los ficheros reales del repo llevan tildes y
@@ -744,12 +750,12 @@ mod tests {
     #[test]
     fn un_fichero_enorme_con_acentos_sigue_siendo_demasiado_grande() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let relleno = "ñ".repeat(MAX_BYTES as usize);
+        let padding = "ñ".repeat(MAX_BYTES as usize);
 
-        let fallo = panel_en(&dir, &format!(r#"{{"lines":["{relleno}"]}}"#))
+        let failure = panel_in(&dir, &format!(r#"{{"lines":["{padding}"]}}"#))
             .expect_err("se pasa del techo");
 
-        assert!(matches!(fallo, Problem::TooBig), "fue {fallo:?}");
+        assert!(matches!(failure, Problem::TooBig), "fue {failure:?}");
     }
 
     /// Un fichero que no es texto no es «no se pudo leer» —eso suena a permisos— sino «no se entiende».
@@ -757,12 +763,12 @@ mod tests {
     #[test]
     fn lo_que_no_es_texto_se_dice_como_lo_que_es() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let ruta = dir.path().join(crate::FICHERO_DEL_PANEL);
-        std::fs::write(&ruta, b"{\"lines\":[\"caf\xe9\"]}").expect("escribir bytes crudos");
+        let path = dir.path().join(crate::PANEL_FILE);
+        std::fs::write(&path, b"{\"lines\":[\"caf\xe9\"]}").expect("escribir bytes crudos");
 
-        let fallo = read(dir.path()).expect_err("no es UTF-8");
+        let failure = read(dir.path()).expect_err("no es UTF-8");
 
-        assert!(matches!(fallo, Problem::Invalid(_)), "fue {fallo:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
     }
 
     /// Lo que no es ni cadena ni objeto no es una línea: pintarlo en blanco sería inventar contenido a
@@ -771,7 +777,7 @@ mod tests {
     fn lo_que_no_es_una_linea_se_descarta_en_vez_de_pintarse_en_blanco() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let panel = panel_en(&dir, r#"{"lines":[null,42,"buena",{"text":"también"}]}"#)
+        let panel = panel_in(&dir, r#"{"lines":[null,42,"buena",{"text":"también"}]}"#)
             .expect("las buenas se leen");
 
         assert_eq!(panel.lines.len(), 2, "el nulo y el número no son líneas");
@@ -784,7 +790,7 @@ mod tests {
     fn un_tiempo_de_tolerancia_absurdo_no_desborda() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let panel = panel_en(
+        let panel = panel_in(
             &dir,
             r#"{"stale_after_minutes":18446744073709551615,"lines":[]}"#,
         )
@@ -798,15 +804,15 @@ mod tests {
     fn las_tres_clases_de_reclamo_se_leen() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        for (escrito, esperado) in [
+        for (written, expected) in [
             ("wait", Attention::Wait),
             ("block", Attention::Block),
             ("done", Attention::Done),
         ] {
-            let panel = panel_en(&dir, &format!(r#"{{"attention":"{escrito}","lines":[]}}"#))
+            let panel = panel_in(&dir, &format!(r#"{{"attention":"{written}","lines":[]}}"#))
                 .expect("leer");
 
-            assert_eq!(panel.attention, Some(esperado), "con «{escrito}»");
+            assert_eq!(panel.attention, Some(expected), "con «{written}»");
         }
     }
 
@@ -819,7 +825,7 @@ mod tests {
     /// **Lo que esta prueba NO puede cubrir, y por eso la prioridad se escribe a mano**: una cuarta
     /// clase de reclamo que alguien añadiera mañana no aparecería en ninguna de estas listas, así que la
     /// prueba seguiría en verde con la prioridad nueva sin decidir. Lo que lo impide es que el `match`
-    /// de `prioridad` deja de compilar.
+    /// de `priority` deja de compilar.
     #[test]
     fn lo_que_mas_reclama_es_el_maximo() {
         use Attention::{Block, Done, Wait};
@@ -836,7 +842,7 @@ mod tests {
     fn un_reclamo_que_no_existe_se_lee_como_si_no_hubiera_dicho_nada() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let panel = panel_en(
+        let panel = panel_in(
             &dir,
             r#"{"attention":"waiting","phase":"validate","lines":[{"text":"algo"}]}"#,
         )
@@ -863,7 +869,7 @@ mod tests {
     fn una_marca_del_cuerpo_no_es_un_reclamo_de_la_division() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let panel = panel_en(
+        let panel = panel_in(
             &dir,
             r#"{"lines":[{"text":"esperé aprobación el martes","mark":"wait"},{"text":"y esto","mark":"block"}]}"#,
         )
@@ -885,7 +891,7 @@ mod tests {
     fn una_sangria_absurda_se_acota() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let panel = panel_en(
+        let panel = panel_in(
             &dir,
             r#"{"lines":[{"text":"t","indent":18446744073709551615}]}"#,
         )
@@ -901,7 +907,7 @@ mod tests {
     fn una_sangria_negativa_no_da_la_vuelta() {
         let dir = PanelDir::create().expect("crear el directorio");
 
-        let panel = panel_en(&dir, r#"{"lines":[{"text":"t","indent":-3}]}"#).expect("leer");
+        let panel = panel_in(&dir, r#"{"lines":[{"text":"t","indent":-3}]}"#).expect("leer");
 
         assert_eq!(panel.lines[0].indent, 0);
     }
@@ -911,15 +917,18 @@ mod tests {
     #[test]
     fn lo_que_no_es_un_fichero_se_rechaza_antes_de_abrirlo() {
         let dir = PanelDir::create().expect("crear el directorio");
-        std::fs::create_dir(dir.path().join(crate::FICHERO_DEL_PANEL))
+        std::fs::create_dir(dir.path().join(crate::PANEL_FILE))
             .expect("poner un directorio donde iba el fichero");
 
-        let fallo = read(dir.path());
+        let failure = read(dir.path());
         // Se limpia **antes** de afirmar: con la limpieza detrás, un fallo del test dejaría un
         // directorio que el destructor tampoco puede borrar, porque no está vacío.
-        std::fs::remove_dir(dir.path().join(crate::FICHERO_DEL_PANEL)).expect("limpiar");
+        std::fs::remove_dir(dir.path().join(crate::PANEL_FILE)).expect("limpiar");
 
-        assert!(matches!(fallo, Err(Problem::NotRegular)), "fue {fallo:?}");
+        assert!(
+            matches!(failure, Err(Problem::NotRegular)),
+            "fue {failure:?}"
+        );
     }
 
     /// **El caso para el que existe el mecanismo, y hasta ahora no estaba probado.** El test de arriba
@@ -933,17 +942,20 @@ mod tests {
     #[test]
     fn una_tuberia_con_nombre_se_rechaza_en_vez_de_colgar_la_ventana() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let ruta = dir.path().join(crate::FICHERO_DEL_PANEL);
-        let hecha = std::process::Command::new("mkfifo")
-            .arg(&ruta)
+        let path = dir.path().join(crate::PANEL_FILE);
+        let mkfifo = std::process::Command::new("mkfifo")
+            .arg(&path)
             .status()
-            .is_ok_and(|salida| salida.success());
-        assert!(hecha, "no se pudo crear la tubería con nombre");
+            .is_ok_and(|status| status.success());
+        assert!(mkfifo, "no se pudo crear la tubería con nombre");
 
-        let fallo = read(dir.path());
-        std::fs::remove_file(&ruta).expect("limpiar la tubería");
+        let failure = read(dir.path());
+        std::fs::remove_file(&path).expect("limpiar la tubería");
 
-        assert!(matches!(fallo, Err(Problem::NotRegular)), "fue {fallo:?}");
+        assert!(
+            matches!(failure, Err(Problem::NotRegular)),
+            "fue {failure:?}"
+        );
     }
 
     /// **La cara B de exigir un fichero: un enlace a un fichero normal sí vale.** Lo que se rechaza es
@@ -953,11 +965,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn un_enlace_a_un_fichero_normal_se_lee_como_el_fichero_que_apunta() {
-        let destino = PanelDir::create().expect("crear el directorio del productor");
+        let producer_dir = PanelDir::create().expect("crear el directorio del productor");
         let dir = PanelDir::create().expect("crear el directorio de la división");
-        let publicado = destino.path().join(crate::FICHERO_DEL_PANEL);
-        std::fs::write(&publicado, r#"{"lines":["desde el otro lado"]}"#).expect("publicar");
-        std::os::unix::fs::symlink(&publicado, dir.path().join(crate::FICHERO_DEL_PANEL))
+        let published = producer_dir.path().join(crate::PANEL_FILE);
+        std::fs::write(&published, r#"{"lines":["desde el otro lado"]}"#).expect("publicar");
+        std::os::unix::fs::symlink(&published, dir.path().join(crate::PANEL_FILE))
             .expect("enlazar el fichero del contrato");
 
         let panel = read(dir.path()).expect("un enlace a un fichero normal se lee");
@@ -972,18 +984,18 @@ mod tests {
     #[test]
     fn la_antiguedad_sale_de_la_fecha_del_fichero_leido() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_en(&dir, r#"{"stale_after_minutes":1,"lines":[]}"#).expect("leer");
+        let panel = panel_in(&dir, r#"{"stale_after_minutes":1,"lines":[]}"#).expect("leer");
 
-        let escrito = panel
+        let written = panel
             .written_at
             .expect("la fecha del fichero tiene que venir puesta");
 
         assert!(
-            !panel.is_stale_at(escrito),
+            !panel.is_stale_at(written),
             "recién escrito no puede estar rancio"
         );
         assert!(
-            panel.is_stale_at(escrito + Duration::from_secs(120)),
+            panel.is_stale_at(written + Duration::from_secs(120)),
             "dos minutos de silencio con un tope de uno es rancio"
         );
     }
@@ -993,7 +1005,7 @@ mod tests {
     #[test]
     fn se_leen_las_seis_marcas_y_los_siete_estilos() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_en(
+        let panel = panel_in(
             &dir,
             r#"{"lines":[
                 {"text":"a","mark":"done"},{"text":"b","mark":"current"},
@@ -1007,9 +1019,9 @@ mod tests {
         )
         .expect("leer");
 
-        let marcas: Vec<Option<Mark>> = panel.lines[..6].iter().map(|l| l.mark).collect();
+        let marks: Vec<Option<Mark>> = panel.lines[..6].iter().map(|l| l.mark).collect();
         assert_eq!(
-            marcas,
+            marks,
             [
                 Some(Mark::Done),
                 Some(Mark::Current),
@@ -1020,9 +1032,9 @@ mod tests {
             ]
         );
 
-        let estilos: Vec<Option<Style>> = panel.lines[6..].iter().map(|l| l.style).collect();
+        let styles: Vec<Option<Style>> = panel.lines[6..].iter().map(|l| l.style).collect();
         assert_eq!(
-            estilos,
+            styles,
             [
                 Some(Style::Normal),
                 Some(Style::Dim),
@@ -1040,7 +1052,7 @@ mod tests {
     #[test]
     fn se_leen_la_version_la_marca_de_tiempo_del_productor_y_el_enlace() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_en(
+        let panel = panel_in(
             &dir,
             r#"{"v":1,"updated_at":"2026-08-06T18:12:00+02:00",
                 "lines":[{"text":"t","link":"https://example.test/1","indent":3}]}"#,
@@ -1063,15 +1075,15 @@ mod tests {
     #[test]
     fn justo_en_el_techo_se_acepta_y_un_byte_mas_no() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let hueco = r#"{"lines":["ANCHO"]}"#.len() - "ANCHO".len();
-        let justo = "x".repeat(MAX_BYTES as usize - hueco);
+        let overhead = r#"{"lines":["ANCHO"]}"#.len() - "ANCHO".len();
+        let exact_fit = "x".repeat(MAX_BYTES as usize - overhead);
 
-        let cabe = panel_en(&dir, &format!(r#"{{"lines":["{justo}"]}}"#)).expect("justo cabe");
-        assert_eq!(cabe.lines.len(), 1);
+        let fits = panel_in(&dir, &format!(r#"{{"lines":["{exact_fit}"]}}"#)).expect("justo cabe");
+        assert_eq!(fits.lines.len(), 1);
 
-        let fallo =
-            panel_en(&dir, &format!(r#"{{"lines":["{justo}x"]}}"#)).expect_err("uno más, no");
-        assert!(matches!(fallo, Problem::TooBig), "fue {fallo:?}");
+        let failure =
+            panel_in(&dir, &format!(r#"{{"lines":["{exact_fit}x"]}}"#)).expect_err("uno más, no");
+        assert!(matches!(failure, Problem::TooBig), "fue {failure:?}");
     }
 
     #[test]
@@ -1079,7 +1091,7 @@ mod tests {
         let panel = Panel {
             stale_after: Duration::from_secs(60),
             written_at: Some(SystemTime::UNIX_EPOCH),
-            ..panel_vacio()
+            ..empty_panel()
         };
 
         assert!(!panel.is_stale_at(SystemTime::UNIX_EPOCH + Duration::from_secs(60)));
@@ -1091,7 +1103,7 @@ mod tests {
         let panel = Panel {
             stale_after: Duration::from_secs(60),
             written_at: Some(SystemTime::UNIX_EPOCH),
-            ..panel_vacio()
+            ..empty_panel()
         };
 
         assert!(panel.is_stale_at(SystemTime::UNIX_EPOCH + Duration::from_secs(120)));
@@ -1105,7 +1117,7 @@ mod tests {
         let panel = Panel {
             stale_after: Duration::from_secs(60),
             written_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(7200)),
-            ..panel_vacio()
+            ..empty_panel()
         };
 
         assert!(!panel.is_stale_at(SystemTime::UNIX_EPOCH + Duration::from_secs(60)));
@@ -1113,10 +1125,10 @@ mod tests {
 
     #[test]
     fn sin_saber_cuando_se_escribio_no_hay_rancio_que_medir() {
-        assert!(!panel_vacio().is_stale_at(SystemTime::now()));
+        assert!(!empty_panel().is_stale_at(SystemTime::now()));
     }
 
-    fn panel_vacio() -> Panel {
+    fn empty_panel() -> Panel {
         Panel {
             version: None,
             updated_at: None,
@@ -1144,67 +1156,67 @@ mod tests {
     ///
     /// Se inicializan sin reservar —de ahí el `const`—: un valor perezoso reservaría memoria dentro del
     /// asignador la primera vez que se mira, que es una llamada a sí mismo.
-    mod cuenta {
+    mod counting {
         use std::cell::Cell;
 
         thread_local! {
-            pub static VIVOS: Cell<usize> = const { Cell::new(0) };
-            pub static PICO: Cell<usize> = const { Cell::new(0) };
+            pub static LIVE: Cell<usize> = const { Cell::new(0) };
+            pub static PEAK: Cell<usize> = const { Cell::new(0) };
         }
     }
 
-    struct Contador;
+    struct Counter;
 
     /// Suma o resta lo vivo y se queda con el máximo.
     ///
     /// `try_with` y no `with`: al deshacerse un hilo, sus variables locales ya no están, y ahí todavía
     /// se libera memoria. Con `with` eso sería un pánico dentro del asignador.
-    fn anotar(delta: isize) {
-        let _ = cuenta::VIVOS.try_with(|vivos| {
-            let ahora = vivos.get().saturating_add_signed(delta);
-            vivos.set(ahora);
-            let _ = cuenta::PICO.try_with(|pico| pico.set(pico.get().max(ahora)));
+    fn record(delta: isize) {
+        let _ = counting::LIVE.try_with(|live| {
+            let current = live.get().saturating_add_signed(delta);
+            live.set(current);
+            let _ = counting::PEAK.try_with(|peak| peak.set(peak.get().max(current)));
         });
     }
 
-    unsafe impl std::alloc::GlobalAlloc for Contador {
-        unsafe fn alloc(&self, plano: std::alloc::Layout) -> *mut u8 {
-            let puntero = unsafe { std::alloc::System.alloc(plano) };
-            if !puntero.is_null() {
-                anotar(plano.size() as isize);
+    unsafe impl std::alloc::GlobalAlloc for Counter {
+        unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+            let pointer = unsafe { std::alloc::System.alloc(layout) };
+            if !pointer.is_null() {
+                record(layout.size() as isize);
             }
-            puntero
+            pointer
         }
 
-        unsafe fn dealloc(&self, puntero: *mut u8, plano: std::alloc::Layout) {
-            anotar(-(plano.size() as isize));
-            unsafe { std::alloc::System.dealloc(puntero, plano) }
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: std::alloc::Layout) {
+            record(-(layout.size() as isize));
+            unsafe { std::alloc::System.dealloc(pointer, layout) }
         }
 
         unsafe fn realloc(
             &self,
-            puntero: *mut u8,
-            plano: std::alloc::Layout,
-            nuevo: usize,
+            pointer: *mut u8,
+            layout: std::alloc::Layout,
+            new_size: usize,
         ) -> *mut u8 {
-            let movido = unsafe { std::alloc::System.realloc(puntero, plano, nuevo) };
-            if !movido.is_null() {
-                anotar(nuevo as isize - plano.size() as isize);
+            let moved = unsafe { std::alloc::System.realloc(pointer, layout, new_size) };
+            if !moved.is_null() {
+                record(new_size as isize - layout.size() as isize);
             }
-            movido
+            moved
         }
     }
 
     #[global_allocator]
-    static ASIGNADOR: Contador = Contador;
+    static ALLOCATOR: Counter = Counter;
 
     /// Ejecuta el trabajo y devuelve, además de lo que produjo, **cuánto llegó a tener vivo de más**.
-    fn midiendo<T>(trabajo: impl FnOnce() -> T) -> (T, usize) {
-        let base = cuenta::VIVOS.get();
-        cuenta::PICO.set(base);
+    fn while_measuring<T>(work: impl FnOnce() -> T) -> (T, usize) {
+        let baseline = counting::LIVE.get();
+        counting::PEAK.set(baseline);
 
-        let hecho = trabajo();
+        let produced = work();
 
-        (hecho, cuenta::PICO.get().saturating_sub(base))
+        (produced, counting::PEAK.get().saturating_sub(baseline))
     }
 }

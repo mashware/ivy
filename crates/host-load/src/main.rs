@@ -19,11 +19,11 @@ use host_load::{
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
-const MIB_POR_DEFECTO: usize = 22;
-const AT_POR_DEFECTO: u64 = 30;
-const UN_MIB: usize = 1_048_576;
+const DEFAULT_MIB: usize = 22;
+const DEFAULT_AT: u64 = 30;
+const ONE_MIB: usize = 1_048_576;
 
-const USO: &str = "\
+const USAGE: &str = "\
 host-load — mide cuánto tarda un terminal en vaciar una carga fija
 
   host-load run    [--mib N] [--at S] [--rate M] [--tag T] [--results RUTA] [--dump RUTA]
@@ -40,7 +40,7 @@ host-load — mide cuánto tarda un terminal en vaciar una carga fija
 ";
 
 fn main() -> ExitCode {
-    match ejecutar() {
+    match dispatch() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("host-load: {e}");
@@ -49,16 +49,16 @@ fn main() -> ExitCode {
     }
 }
 
-fn ejecutar() -> Result<(), Error> {
+fn dispatch() -> Result<(), Error> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("run") => run(&args[1..]),
         Some("report") => report(&args[1..]),
         Some("--help" | "-h") | None => {
-            print!("{USO}");
+            print!("{USAGE}");
             Ok(())
         }
-        Some(otro) => Err(format!("orden desconocida «{otro}»\n\n{USO}").into()),
+        Some(other) => Err(format!("orden desconocida «{other}»\n\n{USAGE}").into()),
     }
 }
 
@@ -66,7 +66,7 @@ fn ejecutar() -> Result<(), Error> {
 ///
 /// Se parsean a mano y no con una caja de terceros: son seis opciones y esta caja no tiene ninguna
 /// dependencia, lo que la hace compilable en cualquier sitio donde haya que medir.
-struct Opciones {
+struct Options {
     mib: usize,
     /// Si la carga se escribe en CJK. Solo la pide la tanda del descubrimiento de fuentes.
     cjk: bool,
@@ -78,12 +78,12 @@ struct Opciones {
     dump: Option<std::path::PathBuf>,
 }
 
-fn parsear(args: &[String]) -> Result<Opciones, Error> {
-    let mut o = Opciones {
-        mib: MIB_POR_DEFECTO,
+fn parse_args(args: &[String]) -> Result<Options, Error> {
+    let mut o = Options {
+        mib: DEFAULT_MIB,
         cjk: false,
         emoji: false,
-        at: AT_POR_DEFECTO,
+        at: DEFAULT_AT,
         rate: None,
         tag: "sin-etiqueta".to_string(),
         // Ruta **absoluta** a propósito: las N divisiones pueden estar en directorios distintos y
@@ -102,20 +102,20 @@ fn parsear(args: &[String]) -> Result<Opciones, Error> {
 
     let mut i = 0;
     while i < args.len() {
-        let valor = |i: usize| -> Result<&String, Error> {
+        let value = |i: usize| -> Result<&String, Error> {
             args.get(i + 1)
                 .ok_or_else(|| format!("«{}» necesita un valor", args[i]).into())
         };
         match args[i].as_str() {
-            "--mib" => o.mib = valor(i)?.parse()?,
+            "--mib" => o.mib = value(i)?.parse()?,
             "--cjk" => o.cjk = true,
             "--emoji" => o.emoji = true,
-            "--at" => o.at = valor(i)?.parse()?,
-            "--rate" => o.rate = Some(valor(i)?.parse()?),
-            "--tag" => o.tag = valor(i)?.clone(),
-            "--results" => o.results = valor(i)?.into(),
-            "--dump" => o.dump = Some(valor(i)?.into()),
-            otro => return Err(format!("opción desconocida «{otro}»\n\n{USO}").into()),
+            "--at" => o.at = value(i)?.parse()?,
+            "--rate" => o.rate = Some(value(i)?.parse()?),
+            "--tag" => o.tag = value(i)?.clone(),
+            "--results" => o.results = value(i)?.into(),
+            "--dump" => o.dump = Some(value(i)?.into()),
+            other => return Err(format!("opción desconocida «{other}»\n\n{USAGE}").into()),
         }
         i += 2;
     }
@@ -126,24 +126,24 @@ fn parsear(args: &[String]) -> Result<Opciones, Error> {
 ///
 /// La fracción es lo que hace que N divisiones arranquen de verdad a la vez; truncarla aquí fue el
 /// fallo que dejaba pasar por concurrentes dos medidas desfasadas casi un segundo.
-fn ahora() -> Result<Duration, Error> {
+fn now() -> Result<Duration, Error> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?)
 }
 
 fn run(args: &[String]) -> Result<(), Error> {
-    let o = parsear(args)?;
+    let o = parse_args(args)?;
     // Sin `checked_mul`, un `--mib` disparatado desbordaría en silencio al compilar en release y
     // mediría un tamaño que no es el pedido.
     let bytes = o
         .mib
-        .checked_mul(UN_MIB)
+        .checked_mul(ONE_MIB)
         .ok_or_else(|| format!("--mib {} es demasiado grande", o.mib))?;
     // **Las cargas en CJK y con emojis solo las piden las tandas de las fuentes.** La de siempre no se
     // toca, para que las tandas nuevas sigan siendo comparables con los anexos publicados.
     //
     // **Y las dos banderas juntas no significan nada**, así que se rechaza en vez de elegir una en
     // silencio: una tanda lanzada con las dos publicaría el coste de un idioma creyendo medir el otro.
-    let carga = match (o.cjk, o.emoji) {
+    let load = match (o.cjk, o.emoji) {
         (true, true) => {
             return Err("--cjk y --emoji miden cosas distintas: hay que elegir una".into());
         }
@@ -152,12 +152,12 @@ fn run(args: &[String]) -> Result<(), Error> {
         (false, false) => build_load(bytes),
     };
 
-    if let Some(ruta) = o.dump {
-        std::fs::write(&ruta, &carga)?;
+    if let Some(path) = o.dump {
+        std::fs::write(&path, &load)?;
         eprintln!(
             "carga de {} bytes escrita en {}",
-            carga.len(),
-            ruta.display()
+            load.len(),
+            path.display()
         );
         return Ok(());
     }
@@ -170,40 +170,40 @@ fn run(args: &[String]) -> Result<(), Error> {
         eprintln!("host-load: la salida no es un terminal; esta medida NO mide un terminal");
     }
 
-    let objetivo = start_instant(ahora()?, o.at);
-    if let Some(espera) = objetivo.checked_sub(ahora()?)
-        && !espera.is_zero()
+    let target = start_instant(now()?, o.at);
+    if let Some(wait) = target.checked_sub(now()?)
+        && !wait.is_zero()
     {
         eprintln!(
             "host-load: arrancando en {:.1} s (lanza el resto de divisiones ahora)",
-            espera.as_secs_f64()
+            wait.as_secs_f64()
         );
-        thread::sleep(espera);
+        thread::sleep(wait);
     }
 
-    let caudal = o.rate.map(|mib_s| mib_s * UN_MIB as f64);
-    let salida = std::io::stdout();
-    let mut salida = salida.lock();
+    let rate_bytes = o.rate.map(|mib_s| mib_s * ONE_MIB as f64);
+    let out = std::io::stdout();
+    let mut out = out.lock();
 
-    let comienzo_real = ahora()?.as_secs_f64();
-    let reloj = Instant::now();
-    let mut escritos: u64 = 0;
-    for trozo in carga.chunks(CHUNK) {
-        salida.write_all(trozo)?;
-        escritos += trozo.len() as u64;
-        if let Some(espera) = pace_delay(escritos, reloj.elapsed(), caudal) {
-            salida.flush()?;
-            thread::sleep(espera);
+    let real_start = now()?.as_secs_f64();
+    let clock = Instant::now();
+    let mut written: u64 = 0;
+    for chunk in load.chunks(CHUNK) {
+        out.write_all(chunk)?;
+        written += chunk.len() as u64;
+        if let Some(wait) = pace_delay(written, clock.elapsed(), rate_bytes) {
+            out.flush()?;
+            thread::sleep(wait);
         }
     }
-    salida.flush()?;
-    let transcurrido = reloj.elapsed().as_secs_f64();
+    out.flush()?;
+    let elapsed = clock.elapsed().as_secs_f64();
 
-    let medida = Run {
+    let measurement = Run {
         tag: o.tag,
-        bytes: carga.len() as u64,
-        seconds: transcurrido,
-        start: comienzo_real,
+        bytes: load.len() as u64,
+        seconds: elapsed,
+        start: real_start,
         at: o.at,
         rate: o.rate,
         tty,
@@ -213,30 +213,30 @@ fn run(args: &[String]) -> Result<(), Error> {
     // siguiente que redirija, y aquí ya no hay nada que medir.
     eprintln!(
         "\n── {:.2} s · {:.1} MiB/s · {:.1} MiB · etiqueta {} ──",
-        medida.seconds,
-        medida.mib_s(),
-        medida.bytes as f64 / UN_MIB as f64,
-        medida.tag
+        measurement.seconds,
+        measurement.mib_s(),
+        measurement.bytes as f64 / ONE_MIB as f64,
+        measurement.tag
     );
 
-    let mut fichero = OpenOptions::new()
+    let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&o.results)?;
     // Una sola escritura, salto de línea incluido. `writeln!` emite dos —la línea y el `\n`— y
     // `O_APPEND` solo hace atómica cada llamada, no el par: con N divisiones terminando a la vez,
     // dos líneas se intercalarían y las dos se perderían al releerlas.
-    fichero.write_all(format!("{}\n", medida.to_line()).as_bytes())?;
+    file.write_all(format!("{}\n", measurement.to_line()).as_bytes())?;
     eprintln!("anotado en {}", o.results.display());
     Ok(())
 }
 
 fn report(args: &[String]) -> Result<(), Error> {
-    let o = parsear(args)?;
+    let o = parse_args(args)?;
     // Que el fichero no exista todavía es normal: aún no se ha medido nada. Cualquier **otro**
     // fallo de lectura sí se propaga — tratarlos todos como «vacío» convertiría un problema de
     // permisos en un «sin resultados» que se lee como si de verdad no hubiera medidas.
-    let contenido = match std::fs::read_to_string(&o.results) {
+    let contents = match std::fs::read_to_string(&o.results) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(format!("no se pudo leer {}: {e}", o.results.display()).into()),
@@ -244,52 +244,52 @@ fn report(args: &[String]) -> Result<(), Error> {
 
     // Las líneas ilegibles se cuentan y se dicen. Descartarlas en silencio hacía indistinguible
     // «solo hubo 3 medidas» de «hubo 4 y una se corrompió», que es justo lo que hay que saber.
-    let mut ilegibles = 0usize;
-    let mut medidas = Vec::new();
-    for linea in contenido.lines().filter(|l| !l.trim().is_empty()) {
-        match Run::from_line(linea) {
-            Some(r) if r.tag == o.tag => medidas.push(r),
+    let mut unreadable = 0usize;
+    let mut measurements = Vec::new();
+    for line in contents.lines().filter(|l| !l.trim().is_empty()) {
+        match Run::from_line(line) {
+            Some(r) if r.tag == o.tag => measurements.push(r),
             Some(_) => {}
-            None => ilegibles += 1,
+            None => unreadable += 1,
         }
     }
 
-    if ilegibles > 0 {
+    if unreadable > 0 {
         println!(
-            "aviso: {ilegibles} línea(s) del fichero no se pudieron leer (formato antiguo o escritura corrupta)"
+            "aviso: {unreadable} línea(s) del fichero no se pudieron leer (formato antiguo o escritura corrupta)"
         );
     }
 
-    if medidas.is_empty() {
+    if measurements.is_empty() {
         println!("sin resultados para la etiqueta «{}»", o.tag);
         return Ok(());
     }
 
-    let n = medidas.len();
-    let resultado = aggregate(medidas);
+    let n = measurements.len();
+    let aggregated = aggregate(measurements);
 
     println!("etiqueta «{}» — {n} medida(s)", o.tag);
-    for r in &resultado.included {
+    for r in &aggregated.included {
         println!("  {:>7.2} s · {:>7.1} MiB/s", r.seconds, r.mib_s());
     }
-    for (r, por) in &resultado.excluded {
-        let motivo = match por {
+    for (r, why) in &aggregated.excluded {
+        let reason = match why {
             Excluded::NoTty => "fuera: la salida no era un terminal",
             Excluded::NoOverlap => "fuera: no coincidió en el tiempo con las demás",
             Excluded::MixedRegime => "fuera: la etiqueta mezcla ráfaga con caudal sostenido",
         };
         println!(
-            "  {:>7.2} s · {:>7.1} MiB/s  ← {motivo}",
+            "  {:>7.2} s · {:>7.1} MiB/s  ← {reason}",
             r.seconds,
             r.mib_s()
         );
     }
 
-    match resultado.mib_s {
-        Some(agregado) => println!(
+    match aggregated.mib_s {
+        Some(aggregate) => println!(
             "\nagregado: {:.1} MiB/s sobre {} división(es)",
-            agregado,
-            resultado.included.len()
+            aggregate,
+            aggregated.included.len()
         ),
         None => println!(
             "\nsin agregado: no hay medidas comparables en esta etiqueta.\n\

@@ -867,7 +867,7 @@ fn recortar(filas: &[Fila], caben: usize) -> (&[Fila], usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use panel_contract::{FICHERO_DEL_PANEL, PanelDir};
+    use panel_contract::{PANEL_FILE, PanelDir};
 
     /// Un panel leído de un fichero de verdad, para probar la maqueta sin pasar por el pintado.
     fn panel_con(fichero: &str) -> Panel {
@@ -879,7 +879,7 @@ mod tests {
     }
 
     fn publicar(dir: &PanelDir, contenido: &str) {
-        std::fs::write(dir.path().join(FICHERO_DEL_PANEL), contenido).expect("publicar el panel");
+        std::fs::write(dir.path().join(PANEL_FILE), contenido).expect("publicar el panel");
     }
 
     /// Adelanta la fecha del fichero para que la relectura la vea cambiada.
@@ -887,7 +887,7 @@ mod tests {
     /// A mano y no dejándolo al reloj: dos escrituras seguidas caen dentro del mismo tic en algunos
     /// sistemas de ficheros, y entonces la prueba pasaría o fallaría según la máquina.
     fn envejecer(dir: &PanelDir, segundos: u64) {
-        let ruta = dir.path().join(FICHERO_DEL_PANEL);
+        let ruta = dir.path().join(PANEL_FILE);
         std::fs::File::open(&ruta)
             .expect("abrir")
             .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(segundos))
@@ -1043,7 +1043,7 @@ mod tests {
     fn publicado_hace(fichero: &str, cuanto: Duration) -> Estado {
         let dir = PanelDir::create().expect("crear el directorio");
         publicar(&dir, fichero);
-        std::fs::File::open(dir.path().join(FICHERO_DEL_PANEL))
+        std::fs::File::open(dir.path().join(PANEL_FILE))
             .expect("abrir")
             .set_modified(SystemTime::now() - cuanto)
             .expect("mover la fecha");
@@ -1223,7 +1223,7 @@ mod tests {
         let mut estado = Estado::default();
         estado.refrescar(dir.path());
 
-        std::fs::remove_file(dir.path().join(FICHERO_DEL_PANEL)).expect("borrar el panel");
+        std::fs::remove_file(dir.path().join(PANEL_FILE)).expect("borrar el panel");
         estado.refrescar(dir.path());
 
         let pintado = textos(pintando(&mut estado, SITIO, SystemTime::now()));
@@ -1367,7 +1367,7 @@ mod tests {
         estado.refrescar(dir.path());
 
         // El fichero se vuelve ilegible un instante y luego se recupera, sin cambiar de fecha.
-        let ruta = dir.path().join(FICHERO_DEL_PANEL);
+        let ruta = dir.path().join(PANEL_FILE);
         let fecha = std::fs::metadata(&ruta)
             .expect("mirar la fecha")
             .modified()
@@ -2322,7 +2322,7 @@ mod tests {
             .expect("la lectura trae la fecha del fichero");
 
         publicar(&dir, r#"{"lines":["la segunda"]}"#);
-        std::fs::File::open(dir.path().join(FICHERO_DEL_PANEL))
+        std::fs::File::open(dir.path().join(PANEL_FILE))
             .expect("abrir")
             .set_modified(fecha)
             .expect("devolver la fecha a donde estaba");
@@ -2463,7 +2463,7 @@ mod tests {
             let fuente = eframe::egui::FontId::monospace(crate::CUERPO);
             ui.ctx().fonts_mut(|fuentes| {
                 celda = fuentes.glyph_width(&fuente, 'M');
-                anchos = Attention::TODAS
+                anchos = Attention::ALL
                     .iter()
                     .map(|clase| {
                         let simbolo = simbolo_del_reclamo(*clase);
@@ -2511,7 +2511,7 @@ mod tests {
             Mark::Info,
         ]
         .map(simbolo);
-        for clase in Attention::TODAS {
+        for clase in Attention::ALL {
             let suyo = simbolo_del_reclamo(clase);
             assert!(
                 !del_cuerpo.contains(&suyo),

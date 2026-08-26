@@ -124,7 +124,7 @@ impl Vigilante {
             .iter()
             .map(|(dir, bandera)| Vigilada {
                 dir: dir.to_path_buf(),
-                fichero: dir.join(panel_contract::FICHERO_DEL_PANEL),
+                fichero: dir.join(panel_contract::PANEL_FILE),
                 bandera: bandera.clone(),
             })
             .collect();
@@ -357,7 +357,7 @@ mod tests {
 
     impl Consola {
         fn panel(&self) -> PathBuf {
-            self.dir.join(panel_contract::FICHERO_DEL_PANEL)
+            self.dir.join(panel_contract::PANEL_FILE)
         }
     }
 
