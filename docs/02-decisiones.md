@@ -3777,6 +3777,10 @@ escritura de Unicode).
 
 ##### Los 195, nombre a nombre
 
+**Ya no están**: los renombró la entrega de los ocho módulos, que es la sección siguiente. La lista se
+conserva porque es la medida con la que se decidió partir esa entrega en dos, y porque el reparto por
+fichero es lo que permitió a otro reproducir el número.
+
 **`mouse.rs` — 7:** `abajo` · `apretar` · `arriba` · `dentro` · `fuera` · `solo_clics` · `soltar`
 
 **`keyboard.rs` — 30:** `antes` · `codigo` · `cual` · `cuerpo` · `en_otra_distribucion` · `escrita` · `escrito` · `esperada` · `esperado` · `historial` · `hostil` · `letras` · `mando` · `nuevo` · `otro` · `parte` · `pelado` · `pisada` · `publicado` · `queda` · `repetida` · `salida` · `salto` · `sin_publicar` · `soltar` · `suyo` · `tabla` · `veneno` · `venenos` · `viejo`
@@ -3786,3 +3790,139 @@ escritura de Unicode).
 **`fonts.rs` — 57:** `A_EMOJI` · `A_TEXTO` · `Texto` · `a_buscar` · `alfa` · `alto_final` · `ancho_final` · `ancho_maximo` · `antes` · `buscados` · `canal` · `coleccion` · `comun` · `coste` · `crudo` · `cuadrado` · `cuadro` · `cubre` · `datos` · `definiciones` · `delante` · `despues` · `empezo` · `fallidos` · `familia` · `fotograma` · `fuente` · `fuentes` · `gastado` · `genericas` · `glifo` · `grande` · `icono` · `letras` · `mapa` · `mascara` · `nombre` · `origen` · `otro` · `pendientes` · `pequeno` · `pixeles` · `primera` · `registradas` · `resueltos` · `se_rindio` · `segunda` · `selector` · `siguiente` · `sin_fuentes` · `sin_presupuesto` · `sitio` · `sitios` · `suya` · `suyo` · `todas` · `uno`
 
 **`panel.rs` — 74:** `a_pintar` · `ahora` · `anchos` · `bloque` · `cabe` · `cabeza` · `callado` · `caso` · `casos` · `clave` · `contenido` · `corte` · `cual` · `cuando` · `cuerpo` · `dicho` · `disponible` · `entera` · `envejecer` · `estrecha` · `fase` · `fecha` · `fichero` · `fondos` · `frase` · `fresco` · `fuente` · `fuentes` · `identidad` · `izquierda` · `larga` · `largo` · `marcas` · `minutos` · `muchas_enes` · `otro` · `palabra` · `paso` · `pegada` · `pendiente` · `pintado` · `pintando` · `primera` · `publicada` · `publicado_hace` · `publicar` · `recien` · `recortada` · `referencia` · `relleno` · `repetida` · `resto` · `ruta` · `salida` · `saneado` · `sangrada` · `segunda` · `segundos` · `siguiente` · `sin_alto` · `sitio` · `sobran` · `suyo` · `tal_cual` · `textos` · `todos` · `tope` · `tres` · `ultimo_bueno` · `valor` · `viejo` · `vigente` · `visibles` · `visto`
+
+#### La entrega de los ocho módulos: 340 nombres, y por qué la entrega se partió en dos
+
+**El plan decía 419 nombres y eran 638.** La cifra del plan se escribió antes de que nadie contara los
+cinco ficheros que la quinta entrega declaró terminados; con sus 195 dentro, la entrega que iba a llevar
+«el fichero grande y los tres módulos sin entrega» se convertía en **nueve ficheros y 33.000 líneas de
+fuente tocada**, el doble de la cuarta entrega, que ya dejó tres fugas de alcance con siete oráculos
+delante. Se parte en dos, y el corte no es por tamaño sino **por producto**:
+
+- **Los ocho módulos de esta entrega**: ratón, teclado, pintor, fuentes, panel, tema, watcher y
+  pty_output.
+- **El fichero grande a solas**, que es un fichero y 23.142 líneas, y el que más pruebas tiene del
+  repositorio.
+
+**340 nombres**, uno por uno: panel 74 · pty_output 60 · fuentes 53 · watcher 47 · theme 43 · teclado 30 ·
+pintor 26 · ratón 7. Cuatro de ellos tienen **dos destinos** porque nombraban dos cosas —el `SourceCache`
+y la vista de fuentes de egui eran los dos «fuentes», el mapa de bits y el charmap eran los dos «mapa»,
+la imagen reducida y un tamaño de prueba eran los dos «pequeño», y el trozo que sale del canal y la
+cuenta de bytes que se lleva el fotograma eran los dos «trozo»—, así que el mapa **no es apto para un
+`sed`** y eso hay que decirlo antes de escribirlo, no después.
+
+**Y la cuenta a mano volvió a fallar, dos veces, en la misma dirección.** Los tres módulos que la quinta
+entrega renombró de fichero pero no de contenido se estimaron en 99 nombres, luego en 123 con un filtro,
+y son **150** (theme 43, watcher 47, pty_output 60). Las dos veces el error fue el mismo: **filtrar la
+lista de identificadores antes de leerla**. El filtro descartaba lo que ya estaba en el corpus inglés del
+repositorio, y con él se iban `con`, `marca`, `estilo`, `base` y una docena más de nombres cortos que
+resultan ser palabras de las dos lenguas. La lección, escrita porque ya cuesta tres intentos: **la lista
+completa se lee entera o no se lee**; un filtro que ahorra trabajo de lectura ahorra exactamente el
+trabajo que encuentra los nombres.
+
+**El método que sí converge, y es el que hay que repetir en la entrega del fichero grande:** aplicar el
+mapa, **volver a escanear el fichero**, y lo que quede en español es o un descuido o un nombre del
+hermano. Lo destapó theme: al reescanear salió `brillante`, un local de prueba que la lista de contexto
+me había mostrado solo en tres líneas de comentario.
+
+**Lo que queda, y de quién es.** De los ocho módulos, siete no conservan **ni un** identificador en
+español. El octavo, `theme.rs`, conserva seis: `Colores` y los cinco campos que lee de él
+—`paleta`, `texto`, `fondo`, `divisor`, `foco`—, que los declara `settings.rs` y **son de la entrega de
+las claves de configuración**. `Colores` entra en la lista de exenciones por eso; los otros cinco no hacen
+falta, porque el glosario nunca los decidió y la guarda no los ve.
+
+**Y el encuadre con el que se escribió esta entrega era falso, dicho porque es la falta que este hito
+lleva castigando.** «Todo `app` menos su fichero grande» se lee como que la superficie está cerrada, y
+**`app/src` tiene doce módulos, no nueve**: además de `lib.rs` siguen enteros en español `measure.rs`
+(96 raíces españolas), `session.rs` (93), `settings.rs` (57) y `main.rs`, que son cuatro líneas cuya
+única función es la de `lib.rs`. Cada uno tiene su entrega escrita —la medida y el formato en disco, las
+claves de configuración, y `main.rs` con el fichero grande—, así que **no falta nada del plan**; lo que
+faltaba era la frase. Lo cazó una revisión adversaria a la que se le pidió refutar la afirmación, no
+comprobarla, y es la diferencia entre las dos cosas.
+
+**Ocho ficheros en la lista de la guarda, y ni una afirmación nueva.** Los ocho entran en la lista de
+«ficheros sin nombre que el glosario retirase», que es lo que la guarda **comprueba**. La afirmación más
+fuerte —«todos sus identificadores en inglés»— es cierta hoy de siete de ellos, y **no se convierte en
+una lista**: la guarda no puede verificarla, y este hito ya cerró un PR entero por una lista que afirmaba
+lo que nadie había mirado. Se escribe aquí, con su método y su residuo, que es donde una medida vive.
+
+**La lista de exenciones baja de 27 entradas a 20.** Salen las ocho que existían porque `theme.rs` y
+`watcher.rs` no estaban traducidos (`Tema`, `tema`, `con_atributos`, `color_del_panel`,
+`color_del_reclamo`, `fondo_del_panel`, `Bandera`, `Vigilante`) y la de `pty_output.rs` (`Puente`); entra
+`Colores`. Cada línea que sale es una línea que alguien tenía que borrar, que es para lo que la lista está
+escrita así.
+
+**Tres hallazgos que ningún renombrado mecánico podía dar, y los tres los dio una revisión adversaria
+antes de escribir código:**
+
+1. **Un ayudante de prueba sin `#[test]`** en `watcher.rs` —`un_vecino_del_directorio_no_levanta_nada`—
+   que la guarda **sí** ve, porque lleva una palabra funcional española, y que habría roto la compilación
+   en el instante en que el fichero entrase en la lista. Parece prosa y no lo es.
+2. **Dos cosas con el mismo nombre a la vista, las dos ya en inglés.** En `fonts.rs`, un local `attached`
+   que cuenta cuadrados pegados al atlas, doscientas líneas de un parámetro `attached` que lleva los
+   caracteres de anchura cero de una celda. **Ninguna guarda puede verlo**: las dos son inglesas. Pasa a
+   `pasted`.
+3. **La documentación de la guarda de citas envejeció otra vez.** Nombraba tres identificadores vivos
+   para explicar por qué su universo es una caja y no el árbol; uno se había ido antes del PR anterior, y
+   el segundo —`parar`— se va con el módulo que lo declaraba. **Dos veces es un patrón**, así que queda
+   escrito en su sitio: *el comentario de una guarda envejece igual que el código que vigila, y no tiene
+   guarda*.
+
+**Y un aviso sobre el universo de nombres, que es la otra cara de lo mismo.** Tres citas muertas
+aparecieron **sin que este PR las escribiera**: `` `tamano` `` en los ajustes, `` `nuevo` `` en el fichero
+grande y `` `parar` `` en la propia guarda dejaron de estar cubiertas en el momento en que el nombre que
+las tapaba se fue de un módulo hermano. No son regresiones de esta entrega: son las que **ya estaban
+mintiendo** y sobrevivían porque el universo es la caja entera. Cada módulo que se traduce destapa las
+suyas, y eso significa que **las entregas que quedan van a encontrar más, no menos**.
+
+**Lo que las cuatro revisiones de la entrega cambiaron, que es la mitad de su valor.** Ninguna encontró
+un cambio de comportamiento —el oráculo posicional emparejó **1.667 líneas token a token con cero
+desajustes**, cero literales de cadena movidos que no sean captura de formato y cero literales
+numéricos—, y aun así el PR salió distinto de como entró:
+
+- **Tres citas muertas que la guarda no veía, y un hueco nuevo del lector de citas.** Una cita escrita
+  `` `Tema::con(...)` `` volvía **vacía**: el lector solo quitaba un `()` sin argumentos, así que la
+  regla de todo-o-nada la descartaba entera y a `Tema` nunca se le preguntaba — un tipo que ya no existe
+  en el árbol. Aceptar la forma `nombre(argumentos)` da **cuatro avisos, tres de verdad**, y los tres
+  nombran cosas que una entrega renombró hace dos PR (`Lineas(0)`, `Ir(1)`, `desplazar(AlFinal)`).
+  **La versión ancha de la misma idea se midió y se tiró**: partir una cita por los espacios y preguntar
+  por cada palabra da **309 avisos y ninguno de verdad**, porque `cargo doc`, `panel.json` y
+  `Mayúsculas` son palabras entre comillas invertidas que no citan nada. Cuatro contra 309: la línea
+  entra, la otra no.
+- **Dos citas que no se leen ni con eso**, y las dos siguen arregladas a mano: `visibles + sobran` y
+  `Tema::con(...)` llevan espacios o argumentos, y ese hueco **no es el declarado** en la cabecera de la
+  guarda —el de «sobrevive en un módulo hermano»—: aquí el nombre no sobrevive en ninguno, simplemente
+  no se lee.
+- **Cuatro nombres nuevos que mentían, y salieron de leer lo que nombran.** `to_paint` era el peor: su
+  propio comentario dice que **el pintado no lo usa** y que dejarlo en producción sería una puerta
+  abierta, así que el nombre afirmaba justo el papel que el comentario prohíbe; pasa a
+  `last_understood`.
+  `dispatch` no despacha a nadie: levanta banderas y devuelve un booleano, así que pasa a
+  `raise_matching`. `answered` se lee como «ya atendido» y el valor es un reclamo que **nadie** ha
+  atendido, así que pasa a `answer`. Y `cap`, sin calificar en una función larga, pasa a `head_cap`.
+- **Cuatro nombres para dos conceptos en quince líneas.** El tema recibía `faint: bool` mientras quien
+  llama le pasa `cell.dim`, y dentro convivían ese `faint`, las variantes `Dim`/`DimForeground` y un
+  método `dim()` cuyo comentario dice «acerca un color al fondo». El parámetro pasa a llamarse como el
+  campo que recibe (`dim`) y el método a decir lo que hace (`toward_background`).
+- **Un hueco de cobertura anterior al hito, cerrado porque esta entrega toca esa función.** De los seis
+  colores que el fichero de configuración puede cambiar, **el del cursor no lo comprobaba nada**:
+  cambiar su asignación por la del foco dejaba las 718 pruebas en verde. Ahora se afirma **por
+  `TermColor::Cursor`**, que es la puerta por la que el pintor pide ese color — afirmar sobre el campo
+  comprobaría que el valor está apuntado, no que se usa.
+
+**Y dos homónimos que se aceptan a sabiendas, con su razón escrita.** El tipo `Flag` de este proyecto
+convive con `notify::event::Flag`, y el tipo `Watcher` con el *trait* `notify::Watcher`, que por eso
+entra sin nombre (`as _`). Los dos nombres los **decide el glosario** (`Bandera`→`Flag`,
+`Vigilante`→`Watcher`) y los dos choques se resuelven con idioma corriente de Rust —ruta completa y
+`as _`—, así que no se reabre una decisión sin una razón nueva. Lo que **sí** queda dicho es el precio:
+un futuro `use notify::Watcher` en ese fichero no compila, y quien lo escriba tiene que saber por qué.
+
+**Un aviso que esta misma sección se ganó al escribirse, y hay que contarlo aquí porque es el precio de
+derivar.** La guarda **saca el vocabulario de este documento**, y le basta con encontrar un nombre entre
+comillas invertidas, una flecha y otro nombre entre comillas invertidas para meter el primero en el
+vocabulario retirado — aunque la frase sea prosa corriente y la flecha, puntuación. Pasó: una
+explicación de por qué una función cambiaba de nombre puso el tipo booleano de Rust en el lado español,
+y la guarda reportó **101 identificadores** en las tres cajas de fuera, todos ellos ese tipo. Se arregla
+**reescribiendo la frase y no debilitando el extractor**: esa sensibilidad *es* el mecanismo, y aflojarla
+para que la prosa quepa es exactamente cómo un glosario derivado deja de derivar. La regla de uso queda
+dicha: **en este documento, una flecha entre dos nombres es vocabulario, no puntuación.**

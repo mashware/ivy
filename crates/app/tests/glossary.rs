@@ -62,6 +62,9 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/painter.rs",
     "app/src/fonts.rs",
     "app/src/panel.rs",
+    "app/src/theme.rs",
+    "app/src/watcher.rs",
+    "app/src/pty_output.rs",
 ];
 
 /// Files whose **citations** are checked, though their identifiers are not yet.
@@ -163,9 +166,9 @@ const STILL_SPANISH: &[&str] = &[
     // finished. **Every one of these is a line a later delivery deletes**, which is why they are
     // written out one by one: the list shrinking is how the milestone shows its progress.
     "Ajustes",
+    "Colores",
     "Arrastres",
     "Avisos",
-    "Bandera",
     "Barra",
     "DeLaSesion",
     "Descubrimiento",
@@ -175,20 +178,12 @@ const STILL_SPANISH: &[&str] = &[
     "Medida",
     "Metrica",
     "Persistencia",
-    "Puente",
     "Rasterizado",
     "Reflujo",
     "Restauracion",
     "RestoDelFotograma",
-    "Tema",
-    "tema",
-    "con_atributos",
-    "color_del_reclamo",
-    "color_del_panel",
-    "fondo_del_panel",
     "Tramos",
     "Valido",
-    "Vigilante",
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
@@ -1118,6 +1113,11 @@ const NOT_OURS: &[&str] = &[
     "set_var",
     "vars_os",
     "with",
+    // **The settings-file key for the font size, in both spellings.** It stopped being covered by
+    // anything the moment the painter's local called `tamano` was renamed, which is the useful part:
+    // a word in backticks that survives only because some sibling happens to have an identifier by
+    // that name was never a citation of anything.
+    "tamano",
     // Values, not names: what a key is called in the settings file, what the panel contract admits
     // for its `attention` field, what the measurement variable accepts, and what a report line is
     // labelled. Every one of them is a string, so no set of identifiers can hold it — and every one
@@ -1156,6 +1156,9 @@ const NOT_OURS: &[&str] = &[
     "COLR",
     "Hack",
     "Noto",
+    // `std`, which is not a crate of this tree either.
+    "sync_channel",
+    "each_ref",
     // Unicode property names and script codes, which belong to Unicode.
     "Zsym",
     "Emoji_Component",
@@ -1240,7 +1243,17 @@ fn cites_the_file(piece: &str, stem: &str) -> bool {
 /// So every segment is asked about. A bracketed rustdoc link passes anyway — its segments all exist,
 /// or `cargo doc-check` was already failing — and the overlap costs nothing.
 fn cited_names(inside: &str) -> Vec<&str> {
-    let inside = inside.strip_suffix("()").unwrap_or(inside);
+    // **A call with arguments in it, and the four it found are why it is here.** Until this line the
+    // reader only stripped an empty `()`, so `` `Tema::con(...)` `` came back as nothing at all and the
+    // guard never asked about `Tema` — a type that had left the tree entirely. Measured over the whole
+    // citations list: four reports, three of them real, all three naming things a delivery renamed two
+    // PRs ago. The wider version of the same idea — split a citation on spaces and ask about every word
+    // — was measured too and thrown away: **309 reports and not one real**, because `cargo doc`,
+    // `panel.json` and `Mayúsculas` are all words in backticks that are not citations of anything.
+    let inside = match inside.find('(') {
+        Some(at) if inside.ends_with(')') && !inside[..at].is_empty() => &inside[..at],
+        _ => inside,
+    };
     // A single colon separates a field from its type; a double one separates path segments.
     let path = match inside.split_once(':') {
         Some((_, rest)) if rest.starts_with(':') => inside,
@@ -1295,12 +1308,15 @@ fn code_names(files: &[PathBuf]) -> HashSet<String> {
 /// comment is not prose and gets edited with the code — but a reference written `` `like_this` ``
 /// has no oracle at all, so the rule was kept by hand. Twenty-one of them were not.
 ///
-/// It is scoped per crate and not repo-wide on purpose: `desde`, `parar` and `resto` are all live
-/// identifiers **in `app`** and in no other crate, so a union of every crate's names would call a
-/// citation of any of them, made anywhere, fine — and report nothing.
+/// It is scoped per crate and not repo-wide on purpose: `desde` and `resto` are live identifiers **in
+/// `app`** and in no other crate, so a union of every crate's names would call a citation of either of
+/// them, made anywhere, fine — and report nothing.
 ///
-/// The third name used to be `prioridad`, and it is gone from the tree entirely — which made this very
-/// sentence one of the citations it describes. Caught by the delivery that fixed seventeen others.
+/// **This sentence has now been one of the citations it describes twice.** It named three names; one,
+/// `prioridad`, had left the tree entirely and the delivery before this one caught it, and the third,
+/// `parar`, left with the module that owned it — caught by the review that proposed that module's map,
+/// because nothing here reads this file for identifier citations and the reason is written above. Two
+/// is a pattern: **the doc of a guard ages exactly like the code it guards**, and it has no guard.
 #[test]
 fn no_comment_cites_a_name_the_code_no_longer_has() {
     let root = repo();
@@ -1574,6 +1590,24 @@ fn the_reader_of_citations_asks_about_the_right_things() {
         vec!["Panel", "written_at"],
         "a qualified path is every one of its segments: a bare pair of backticks is not a rustdoc \
          link, so nothing else in the tree judges it"
+    );
+    // **A call with its arguments written in, which used to come back empty.** Both shapes: the one
+    // with a real argument and the one with an ellipsis, which is how this repository writes «and the
+    // rest». Without this the guard skips the citation entirely instead of asking about it.
+    assert_eq!(
+        cited_names("Theme::from_colors(...)"),
+        vec!["Theme", "from_colors"],
+        "a call with its arguments elided is still a citation of the thing being called"
+    );
+    assert_eq!(
+        cited_names("scroll_by(ToBottom)"),
+        vec!["scroll_by"],
+        "and one with a real argument: the argument is a name of its own and is not asked about here"
+    );
+    assert_eq!(
+        cited_names("panel.json"),
+        Vec::<&str>::new(),
+        "a file name is not a citation, and stays that way"
     );
     assert_eq!(
         cited_names("session::Nodo::Rama"),

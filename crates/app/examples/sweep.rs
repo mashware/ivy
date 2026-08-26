@@ -49,7 +49,7 @@
 //! todo va bien precisamente por no haber dibujado.
 
 use app::painter::{CellMetrics, paint};
-use app::theme::Tema;
+use app::theme::Theme;
 use eframe::egui;
 use std::time::{Duration, Instant};
 use term_core::{Screen, Size};
@@ -108,7 +108,7 @@ fn main() -> eframe::Result {
         Box::new(move |_cc| {
             Ok(Box::new(Barrido {
                 pantallas,
-                tema: Tema::default(),
+                tema: Theme::default(),
                 etiqueta,
                 fase: 0,
                 vistos: 0,
@@ -202,7 +202,7 @@ impl Resumen {
 
 struct Barrido {
     pantallas: Vec<Screen>,
-    tema: Tema,
+    tema: Theme,
     etiqueta: Option<String>,
     fase: usize,
     vistos: usize,
@@ -409,6 +409,6 @@ impl eframe::App for Barrido {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.tema.fondo().to_normalized_gamma_f32()
+        self.tema.background().to_normalized_gamma_f32()
     }
 }

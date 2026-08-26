@@ -35,7 +35,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use notify::event::{AccessKind, AccessMode, ModifyKind, RenameMode};
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode};
+// **El *trait* entra sin nombre**, y hace falta: `backend.watch(..)` es suyo, y su nombre choca con el
+// tipo de este módulo desde que dejó de llamarse en español.
+use notify::Watcher as _;
 
 /// «El directorio de esta consola ha cambiado: mira otra vez.»
 ///
@@ -47,21 +50,21 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 /// hay nada que adquirir ni que liberar — pedir un orden más fuerte afirmaría una sincronización que
 /// no existe.
 #[derive(Clone)]
-pub struct Bandera(Arc<AtomicBool>);
+pub struct Flag(Arc<AtomicBool>);
 
-impl Bandera {
+impl Flag {
     /// Una bandera ya levantada, que es como nacen.
     ///
     /// **Y no es `Default`**: un `Default` que vale `true` se lee al revés en el sitio donde se usa.
     /// Nacer levantada cubre un hueco real —el vigilante se arma cuando la ventana ya tiene sus
     /// consolas abiertas, así que un productor rapidísimo puede haber publicado antes de que nadie
     /// mirara su directorio— y cuesta una lectura en el primer fotograma.
-    pub fn levantada() -> Self {
+    pub fn raised() -> Self {
         Self(Arc::new(AtomicBool::new(true)))
     }
 
     /// La levanta. Que ya lo estuviera no es un caso raro: es el normal.
-    pub fn levantar(&self) {
+    pub fn raise(&self) {
         self.0.store(true, Ordering::Relaxed);
     }
 
@@ -70,95 +73,95 @@ impl Bandera {
     /// **Bajarla antes de leer y no después** es lo que hace que un aviso llegado *durante* la lectura
     /// no se pierda: levanta la bandera otra vez y el fotograma siguiente vuelve. Al revés se leería
     /// el fichero a medio escribir y se bajaría la bandera que avisaba de la otra mitad.
-    pub fn recoger(&self) -> bool {
+    pub fn take(&self) -> bool {
         self.0.swap(false, Ordering::Relaxed)
     }
 }
 
 /// Una consola vigilada: dónde publica y a quién hay que avisar.
-struct Vigilada {
+struct Watched {
     /// El directorio, que es lo que se sigue de verdad. Se guarda para reconocer el aviso de que ha
     /// dejado de existir, que llega con **su** ruta y no con la del fichero.
     dir: PathBuf,
     /// La ruta exacta del `panel.json`. Se guarda hecha porque se compara en cada aviso, y los avisos
     /// llegan de a varios por escritura.
-    fichero: PathBuf,
-    bandera: Bandera,
+    file: PathBuf,
+    flag: Flag,
 }
 
 /// El vigilante de la ventana.
-pub struct Vigilante {
+pub struct Watcher {
     /// **Se guarda por su vida, no por su interfaz**: soltarlo termina su hilo y deja de llegar nada.
     /// `None` significa que no hay nada que vigilar o que no se pudo armar; cuál de las dos cosas lo
-    /// dice [`Vigilante::esta_ciego`], que no es lo mismo.
-    _seguimiento: Option<RecommendedWatcher>,
+    /// dice [`Watcher::is_blind`], que no es lo mismo.
+    _backend: Option<RecommendedWatcher>,
     /// Si el vigilante ha dejado de ser de fiar. Lo comparte con su hilo, porque **casi todas las
     /// formas de quedarse ciego ocurren después de armarlo** y solo el hilo las ve.
-    ciego: Arc<AtomicBool>,
+    blind: Arc<AtomicBool>,
 }
 
-impl Vigilante {
+impl Watcher {
     /// Arma el vigilante sobre el directorio de cada consola.
     ///
-    /// `despertar` es cómo se saca a la ventana del reposo, y llega como función por lo mismo que al
+    /// `wake` es cómo se saca a la ventana del reposo, y llega como función por lo mismo que al
     /// puente: **este módulo no depende del framework de interfaz**, que es justo lo que se va a
     /// reescribir. Se llama desde el hilo del vigilante, así que no puede entrar en pánico.
     ///
     /// **No poder armarlo no impide abrir la ventana**, igual que no poder crear el directorio de una
     /// consola no impide abrirla: se dice por la salida de errores y se sigue en el modo degradado que
-    /// describe [`Vigilante::esta_ciego`].
-    pub fn nuevo(despertar: impl Fn() + Send + 'static, consolas: &[(&Path, Bandera)]) -> Self {
-        let ciego = Arc::new(AtomicBool::new(false));
+    /// describe [`Watcher::is_blind`].
+    pub fn new(wake: impl Fn() + Send + 'static, consoles: &[(&Path, Flag)]) -> Self {
+        let blind = Arc::new(AtomicBool::new(false));
 
         // Sin consolas con directorio no hay nada que seguir, y montar una instancia del vigilante
         // del sistema y su hilo para no mirar nada sería pagar por no hacer nada. **Y no es estar
         // ciego**: no hay ningún panel que se pueda quedar viejo.
-        if consolas.is_empty() {
+        if consoles.is_empty() {
             return Self {
-                _seguimiento: None,
-                ciego,
+                _backend: None,
+                blind,
             };
         }
 
-        let vigiladas = consolas
+        let watchlist = consoles
             .iter()
-            .map(|(dir, bandera)| Vigilada {
+            .map(|(dir, flag)| Watched {
                 dir: dir.to_path_buf(),
-                fichero: dir.join(panel_contract::PANEL_FILE),
-                bandera: bandera.clone(),
+                file: dir.join(panel_contract::PANEL_FILE),
+                flag: flag.clone(),
             })
             .collect();
 
-        let manejador = manejador(despertar, vigiladas, Arc::clone(&ciego));
-        let mut seguimiento = match notify::recommended_watcher(manejador) {
-            Ok(seguimiento) => seguimiento,
-            Err(fallo) => {
-                eprintln!("no se pudo armar el vigilante de los paneles ({fallo})");
-                ciego.store(true, Ordering::Relaxed);
+        let handler = handler(wake, watchlist, Arc::clone(&blind));
+        let mut backend = match notify::recommended_watcher(handler) {
+            Ok(backend) => backend,
+            Err(failure) => {
+                eprintln!("no se pudo armar el vigilante de los paneles ({failure})");
+                blind.store(true, Ordering::Relaxed);
                 return Self {
-                    _seguimiento: None,
-                    ciego,
+                    _backend: None,
+                    blind,
                 };
             }
         };
 
-        for (dir, _) in consolas {
-            if let Err(fallo) = seguimiento.watch(dir, RecursiveMode::NonRecursive) {
+        for (dir, _) in consoles {
+            if let Err(failure) = backend.watch(dir, RecursiveMode::NonRecursive) {
                 // Se renuncia al vigilante **entero** y no solo a esta consola. Un vigilante a medias
                 // sería una ventana en la que un panel se entera y el de al lado no, sin nada que lo
                 // distinga al mirarla; el respaldo de releer es correcto para todas.
-                eprintln!("no se pudo vigilar {} ({fallo})", dir.display());
-                ciego.store(true, Ordering::Relaxed);
+                eprintln!("no se pudo vigilar {} ({failure})", dir.display());
+                blind.store(true, Ordering::Relaxed);
                 return Self {
-                    _seguimiento: None,
-                    ciego,
+                    _backend: None,
+                    blind,
                 };
             }
         }
 
         Self {
-            _seguimiento: Some(seguimiento),
-            ciego,
+            _backend: Some(backend),
+            blind,
         }
     }
 
@@ -174,8 +177,8 @@ impl Vigilante {
     ///
     /// Sin este respaldo el panel se quedaría **congelado para siempre y en silencio**, enseñando algo
     /// plausible de hace una hora, que es exactamente lo que este hito viene a evitar.
-    pub fn esta_ciego(&self) -> bool {
-        self.ciego.load(Ordering::Relaxed)
+    pub fn is_blind(&self) -> bool {
+        self.blind.load(Ordering::Relaxed)
     }
 }
 
@@ -184,29 +187,29 @@ impl Vigilante {
 /// Está aparte y devuelve la función **para poder invocarla desde una prueba con un aviso puesto a
 /// mano**: que el aviso llegue de verdad desde el sistema de ficheros se puede probar, pero es lento y
 /// depende del núcleo. Lo que aquí importa —a quién despierta cada aviso— no necesita al núcleo.
-fn manejador(
-    despertar: impl Fn() + Send + 'static,
-    vigiladas: Vec<Vigilada>,
-    ciego: Arc<AtomicBool>,
+fn handler(
+    wake: impl Fn() + Send + 'static,
+    watchlist: Vec<Watched>,
+    blind: Arc<AtomicBool>,
 ) -> impl FnMut(notify::Result<notify::Event>) + Send + 'static {
-    move |aviso| {
-        let evento = match aviso {
-            Ok(evento) => evento,
+    move |notice| {
+        let event = match notice {
+            Ok(event) => event,
             // Después de un fallo **el estado del vigilante es desconocido**, así que se pasa al
             // respaldo en vez de seguir confiando en unos avisos que quizá ya no lleguen.
-            Err(fallo) => {
-                return cegar(&ciego, &despertar, &format!("el vigilante falló ({fallo})"));
+            Err(failure) => {
+                return go_blind(&blind, &wake, &format!("el vigilante falló ({failure})"));
             }
         };
 
         // El único aviso que significa «te has perdido cosas», y viene **sin rutas**: no hay a quién
         // repartirlo, así que se mira todo. No deja ciego a nadie —la cola desbordada es de un
         // instante, no una avería— pero el aviso que se perdió detrás no vuelve.
-        if evento.need_rescan() {
-            for vigilada in &vigiladas {
-                vigilada.bandera.levantar();
+        if event.need_rescan() {
+            for watched in &watchlist {
+                watched.flag.raise();
             }
-            despertar();
+            wake();
             return;
         }
 
@@ -214,24 +217,24 @@ fn manejador(
         // sus mapas y **no lo vuelve a registrar nunca**. Aquí no llega la ruta del `panel.json`, sino
         // la del directorio, así que sin esto el aviso se descartaría y nadie se enteraría de que a
         // partir de ahora no llega nada.
-        if se_perdio_un_directorio(&evento, &vigiladas) {
-            return cegar(
-                &ciego,
-                &despertar,
+        if lost_a_watched_dir(&event, &watchlist) {
+            return go_blind(
+                &blind,
+                &wake,
                 "el directorio que se vigilaba ha dejado de existir",
             );
         }
 
-        if no_trae_nada_nuevo(&evento.kind) {
+        if is_nothing_new(&event.kind) {
             return;
         }
 
-        if repartir(&evento.paths, &vigiladas) {
+        if raise_matching(&event.paths, &watchlist) {
             // **Pedir el fotograma es la pieza central de este hito, no una precaución.** La ventana
             // repinta solo cuando se lo piden, y la única petición que había estaba atada a que el
             // pseudoterminal produjera: con la ventana en reposo la bandera se levantaría y el
             // fotograma siguiente no llegaría nunca.
-            despertar();
+            wake();
         }
     }
 }
@@ -242,36 +245,36 @@ fn manejador(
 /// sigue, así que un fallo que persista sería un chorro sin techo de líneas por la salida de errores.
 /// Y se escribe sin poder entrar en pánico, porque esto corre en el hilo del vigilante: con la salida
 /// de errores por una tubería sin lector, un `eprintln!` mataría el hilo y no llegaría nada más.
-fn cegar(ciego: &AtomicBool, despertar: &impl Fn(), motivo: &str) {
-    if !ciego.swap(true, Ordering::Relaxed) {
+fn go_blind(blind: &AtomicBool, wake: &impl Fn(), reason: &str) {
+    if !blind.swap(true, Ordering::Relaxed) {
         let _ = writeln!(
             std::io::stderr(),
-            "los paneles se releerán en cada fotograma: {motivo}"
+            "los paneles se releerán en cada fotograma: {reason}"
         );
-        despertar();
+        wake();
     }
 }
 
 /// Si el aviso dice que un directorio vigilado ya no está donde estaba.
 ///
 /// Las dos formas de perderlo —borrarlo y moverlo— llegan con la ruta del propio directorio.
-fn se_perdio_un_directorio(evento: &notify::Event, vigiladas: &[Vigilada]) -> bool {
-    let se_pierde = matches!(
-        evento.kind,
+fn lost_a_watched_dir(event: &notify::Event, watchlist: &[Watched]) -> bool {
+    let lost = matches!(
+        event.kind,
         EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(RenameMode::From))
     );
 
-    se_pierde
-        && vigiladas
+    lost
+        && watchlist
             .iter()
-            .any(|vigilada| evento.paths.contains(&vigilada.dir))
+            .any(|watched| event.paths.contains(&watched.dir))
 }
 
 /// Los dos avisos que **no** cuentan como una publicación nueva.
 ///
 /// Descartarlos no se nota en lo que se ve; se nota en cuántos fotogramas cuesta publicar, que es lo
 /// que este hito paga por enterarse.
-fn no_trae_nada_nuevo(kind: &EventKind) -> bool {
+fn is_nothing_new(kind: &EventKind) -> bool {
     match kind {
         // **Cerrar tras escribir sí es publicar**: no puede ser nuestro, porque aquí solo se lee, y es
         // la única señal que llega cuando el productor ya ha terminado de escribir.
@@ -296,17 +299,17 @@ fn no_trae_nada_nuevo(kind: &EventKind) -> bool {
 ///
 /// Un aviso trae varias rutas y una sola escritura provoca varios avisos. Lo que **no** se mira es qué
 /// clase de evento es: crear, escribir y renombrar encima acaban todos en la misma lectura.
-fn repartir(rutas: &[PathBuf], vigiladas: &[Vigilada]) -> bool {
-    let mut alguna = false;
+fn raise_matching(paths: &[PathBuf], watchlist: &[Watched]) -> bool {
+    let mut any_raised = false;
 
-    for vigilada in vigiladas {
-        if rutas.contains(&vigilada.fichero) {
-            vigilada.bandera.levantar();
-            alguna = true;
+    for watched in watchlist {
+        if paths.contains(&watched.file) {
+            watched.flag.raise();
+            any_raised = true;
         }
     }
 
-    alguna
+    any_raised
 }
 
 #[cfg(test)]
@@ -323,17 +326,17 @@ mod tests {
     /// reposo primero —cuatro pasadas en vacío— y afirmaba sobre la contabilidad interna de egui en
     /// vez de sobre lo que este módulo hace.
     #[derive(Clone, Default)]
-    struct Despertares(Arc<AtomicUsize>);
+    struct Wakeups(Arc<AtomicUsize>);
 
-    impl Despertares {
-        fn cuantos(&self) -> usize {
+    impl Wakeups {
+        fn count(&self) -> usize {
             self.0.load(Ordering::Relaxed)
         }
 
-        fn despertador(&self) -> impl Fn() + Send + 'static {
-            let cuenta = Arc::clone(&self.0);
+        fn wake_fn(&self) -> impl Fn() + Send + 'static {
+            let count = Arc::clone(&self.0);
             move || {
-                cuenta.fetch_add(1, Ordering::Relaxed);
+                count.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
@@ -343,94 +346,94 @@ mod tests {
     /// Se devuelve el manejador y no las piezas sueltas **a propósito**: lo que hay que atar es lo que
     /// corre en el hilo del vigilante. Una prueba sobre el repartidor a solas demostraría que el
     /// repartidor funciona, no que alguien lo llame ni que se despierte a nadie.
-    struct Montaje {
-        manejador: Box<dyn FnMut(notify::Result<Event>)>,
-        consolas: [Consola; 2],
-        despertares: Despertares,
-        ciego: Arc<AtomicBool>,
+    struct Harness {
+        handler: Box<dyn FnMut(notify::Result<Event>)>,
+        consoles: [Console; 2],
+        wakeups: Wakeups,
+        blind: Arc<AtomicBool>,
     }
 
-    struct Consola {
+    struct Console {
         dir: PathBuf,
-        bandera: Bandera,
+        flag: Flag,
     }
 
-    impl Consola {
+    impl Console {
         fn panel(&self) -> PathBuf {
             self.dir.join(panel_contract::PANEL_FILE)
         }
     }
 
-    fn dos_consolas() -> Montaje {
-        let consolas = [
-            Consola {
+    fn two_consoles() -> Harness {
+        let consoles = [
+            Console {
                 dir: PathBuf::from("/no-importa/una"),
-                bandera: Bandera::levantada(),
+                flag: Flag::raised(),
             },
-            Consola {
+            Console {
                 dir: PathBuf::from("/no-importa/otra"),
-                bandera: Bandera::levantada(),
+                flag: Flag::raised(),
             },
         ];
 
-        let despertares = Despertares::default();
-        let ciego = Arc::new(AtomicBool::new(false));
-        let manejador = manejador(
-            despertares.despertador(),
-            consolas
+        let wakeups = Wakeups::default();
+        let blind = Arc::new(AtomicBool::new(false));
+        let handler = handler(
+            wakeups.wake_fn(),
+            consoles
                 .iter()
-                .map(|consola| Vigilada {
-                    dir: consola.dir.clone(),
-                    fichero: consola.panel(),
-                    bandera: consola.bandera.clone(),
+                .map(|console| Watched {
+                    dir: console.dir.clone(),
+                    file: console.panel(),
+                    flag: console.flag.clone(),
                 })
                 .collect(),
-            Arc::clone(&ciego),
+            Arc::clone(&blind),
         );
 
         // Las banderas nacen levantadas para que el primer fotograma mire; lo que estas pruebas miden
         // es lo que pasa **a partir de ahí**, así que se recogen antes de empezar.
-        for consola in &consolas {
-            consola.bandera.recoger();
+        for console in &consoles {
+            console.flag.take();
         }
 
-        Montaje {
-            manejador: Box::new(manejador),
-            consolas,
-            despertares,
-            ciego,
+        Harness {
+            handler: Box::new(handler),
+            consoles,
+            wakeups,
+            blind,
         }
     }
 
     /// El aviso de que se ha escrito algo en una ruta.
-    fn escrito_en(ruta: PathBuf) -> notify::Result<Event> {
-        Ok(Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Any))).add_path(ruta))
+    fn written_to(path: PathBuf) -> notify::Result<Event> {
+        Ok(Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Any))).add_path(path))
     }
 
     #[test]
     fn un_aviso_levanta_la_bandera_de_su_consola_y_no_la_de_la_otra() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(escrito_en(montaje.consolas[0].panel()));
+        (harness.handler)(written_to(harness.consoles[0].panel()));
 
         assert!(
-            montaje.consolas[0].bandera.recoger(),
+            harness.consoles[0].flag.take(),
             "la consola cuyo panel cambió no se ha enterado"
         );
         assert!(
-            !montaje.consolas[1].bandera.recoger(),
+            !harness.consoles[1].flag.take(),
             "la consola de al lado releerá su fichero sin que nadie lo haya tocado"
         );
     }
 
     #[test]
     fn un_aviso_despierta_a_la_ventana() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(escrito_en(montaje.consolas[0].panel()));
+        (harness.handler)(written_to(harness.consoles[0].panel()));
 
         assert_eq!(
-            montaje.despertares.cuantos(),
+            harness.wakeups.count(),
             1,
             "se levantó la bandera y nadie despertó a la ventana: el panel no se movería"
         );
@@ -440,48 +443,48 @@ mod tests {
     /// como el contrato recomienda escribe `panel.json.tmp` en ese mismo directorio y lo renombra
     /// encima: sin filtrar, cada publicación provocaría una lectura de más del fichero que todavía no
     /// es el bueno.
-    fn un_vecino_del_directorio_no_levanta_nada(vecino: &str) {
-        let mut montaje = dos_consolas();
+    fn a_neighbor_raises_nothing(neighbor: &str) {
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(escrito_en(montaje.consolas[0].dir.join(vecino)));
+        (harness.handler)(written_to(harness.consoles[0].dir.join(neighbor)));
 
         assert!(
-            !montaje.consolas[0].bandera.recoger(),
-            "«{vecino}» hizo releer el panel de su consola"
+            !harness.consoles[0].flag.take(),
+            "«{neighbor}» hizo releer el panel de su consola"
         );
         assert!(
-            !montaje.consolas[1].bandera.recoger(),
-            "«{vecino}» despertó a la de al lado"
+            !harness.consoles[1].flag.take(),
+            "«{neighbor}» despertó a la de al lado"
         );
         assert_eq!(
-            montaje.despertares.cuantos(),
+            harness.wakeups.count(),
             0,
-            "«{vecino}» sacó a la ventana del reposo para no hacer nada"
+            "«{neighbor}» sacó a la ventana del reposo para no hacer nada"
         );
     }
 
     #[test]
     fn el_temporal_de_la_escritura_atomica_no_levanta_nada() {
-        un_vecino_del_directorio_no_levanta_nada("panel.json.tmp");
+        a_neighbor_raises_nothing("panel.json.tmp");
     }
 
     #[test]
     fn un_fichero_cualquiera_del_directorio_no_levanta_nada() {
-        un_vecino_del_directorio_no_levanta_nada("notas.txt");
+        a_neighbor_raises_nothing("notas.txt");
     }
 
     /// **Un aviso trae varias rutas**, y el crate no promete cuáles: si solo se mirara la primera, una
     /// publicación se perdería según en qué orden llegue.
     #[test]
     fn un_aviso_con_varias_rutas_mira_todas() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(Ok(Event::new(EventKind::Create(CreateKind::File))
-            .add_path(montaje.consolas[0].dir.join("panel.json.tmp"))
-            .add_path(montaje.consolas[0].panel())));
+        (harness.handler)(Ok(Event::new(EventKind::Create(CreateKind::File))
+            .add_path(harness.consoles[0].dir.join("panel.json.tmp"))
+            .add_path(harness.consoles[0].panel())));
 
         assert!(
-            montaje.consolas[0].bandera.recoger(),
+            harness.consoles[0].flag.take(),
             "el panel.json venía en el aviso y nadie lo vio"
         );
     }
@@ -492,29 +495,29 @@ mod tests {
     /// pide **1,88 fotogramas** en vez de uno, medido en la aplicación de verdad.
     #[test]
     fn el_eco_de_un_renombrado_no_pide_un_segundo_fotograma() {
-        let mut montaje = dos_consolas();
-        let (temporal, panel) = (
-            montaje.consolas[0].dir.join("panel.json.tmp"),
-            montaje.consolas[0].panel(),
+        let mut harness = two_consoles();
+        let (temp, panel) = (
+            harness.consoles[0].dir.join("panel.json.tmp"),
+            harness.consoles[0].panel(),
         );
 
         // Los dos avisos del renombre, en el orden en que llegan.
-        (montaje.manejador)(Ok(Event::new(EventKind::Modify(ModifyKind::Name(
+        (harness.handler)(Ok(Event::new(EventKind::Modify(ModifyKind::Name(
             RenameMode::To,
         )))
         .add_path(panel.clone())));
-        (montaje.manejador)(Ok(Event::new(EventKind::Modify(ModifyKind::Name(
+        (harness.handler)(Ok(Event::new(EventKind::Modify(ModifyKind::Name(
             RenameMode::Both,
         )))
-        .add_path(temporal)
+        .add_path(temp)
         .add_path(panel)));
 
         assert!(
-            montaje.consolas[0].bandera.recoger(),
+            harness.consoles[0].flag.take(),
             "el renombre encima es una publicación y no se ha visto"
         );
         assert_eq!(
-            montaje.despertares.cuantos(),
+            harness.wakeups.count(),
             1,
             "una sola publicación pidió dos fotogramas"
         );
@@ -527,22 +530,22 @@ mod tests {
     /// duerme nunca, con su lectura de disco por fotograma y sin nada en pantalla que lo explique.
     #[test]
     fn abrir_el_fichero_para_leerlo_no_levanta_ninguna_bandera() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        for nuestro in [
+        for ours in [
             EventKind::Access(AccessKind::Open(AccessMode::Any)),
             EventKind::Access(AccessKind::Read),
             EventKind::Access(AccessKind::Close(AccessMode::Read)),
         ] {
-            (montaje.manejador)(Ok(Event::new(nuestro).add_path(montaje.consolas[0].panel())));
+            (harness.handler)(Ok(Event::new(ours).add_path(harness.consoles[0].panel())));
 
             assert!(
-                !montaje.consolas[0].bandera.recoger(),
-                "{nuestro:?}: leer el fichero se cuenta como una publicación y la lectura se realimenta"
+                !harness.consoles[0].flag.take(),
+                "{ours:?}: leer el fichero se cuenta como una publicación y la lectura se realimenta"
             );
         }
 
-        assert_eq!(montaje.despertares.cuantos(), 0);
+        assert_eq!(harness.wakeups.count(), 0);
     }
 
     /// Y la otra mitad, que es la que impide arreglar lo de arriba de más: **cerrar tras escribir sí
@@ -550,15 +553,15 @@ mod tests {
     /// y sin ella el panel se quedaría con lo que se leyó a medio escribir.
     #[test]
     fn cerrar_tras_escribir_si_levanta_la_bandera() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(Ok(Event::new(EventKind::Access(AccessKind::Close(
+        (harness.handler)(Ok(Event::new(EventKind::Access(AccessKind::Close(
             AccessMode::Write,
         )))
-        .add_path(montaje.consolas[0].panel())));
+        .add_path(harness.consoles[0].panel())));
 
         assert!(
-            montaje.consolas[0].bandera.recoger(),
+            harness.consoles[0].flag.take(),
             "el productor terminó de escribir y el panel no se entera"
         );
     }
@@ -568,19 +571,19 @@ mod tests {
     /// llegará, así que hay que volver a mirarlo todo.
     #[test]
     fn el_aviso_de_que_se_han_perdido_avisos_hace_mirar_a_todas() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(Ok(
+        (harness.handler)(Ok(
             Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan)
         ));
 
         assert!(
-            montaje.consolas[0].bandera.recoger() && montaje.consolas[1].bandera.recoger(),
+            harness.consoles[0].flag.take() && harness.consoles[1].flag.take(),
             "se perdieron avisos y ninguna consola vuelve a mirar su fichero"
         );
-        assert_eq!(montaje.despertares.cuantos(), 1, "y hay que ir a mirarlos");
+        assert_eq!(harness.wakeups.count(), 1, "y hay que ir a mirarlos");
         assert!(
-            !montaje.ciego.load(Ordering::Relaxed),
+            !harness.blind.load(Ordering::Relaxed),
             "una cola desbordada es de un instante, no una avería: no hay que degradarse por ella"
         );
     }
@@ -591,17 +594,17 @@ mod tests {
     /// se descartaría y nadie sabría que a partir de ahí no llega nada.
     #[test]
     fn perder_el_directorio_vigilado_deja_ciego_al_vigilante() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(Ok(Event::new(EventKind::Remove(RemoveKind::Folder))
-            .add_path(montaje.consolas[0].dir.clone())));
+        (harness.handler)(Ok(Event::new(EventKind::Remove(RemoveKind::Folder))
+            .add_path(harness.consoles[0].dir.clone())));
 
         assert!(
-            montaje.ciego.load(Ordering::Relaxed),
+            harness.blind.load(Ordering::Relaxed),
             "se perdió el seguimiento y la ventana seguirá creyendo que alguien la avisa"
         );
         assert_eq!(
-            montaje.despertares.cuantos(),
+            harness.wakeups.count(),
             1,
             "hay que despertar para que el respaldo arranque, o no arranca hasta que pase otra cosa"
         );
@@ -611,18 +614,18 @@ mod tests {
     /// puede volver a publicar. Es la mitad que distingue el hallazgo de arriba de tirar la toalla.
     #[test]
     fn borrar_el_panel_no_deja_ciego_pero_si_hace_mirar() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(Ok(
-            Event::new(EventKind::Remove(RemoveKind::File)).add_path(montaje.consolas[0].panel())
+        (harness.handler)(Ok(
+            Event::new(EventKind::Remove(RemoveKind::File)).add_path(harness.consoles[0].panel())
         ));
 
         assert!(
-            !montaje.ciego.load(Ordering::Relaxed),
+            !harness.blind.load(Ordering::Relaxed),
             "el directorio sigue ahí y el vigilante se ha dado por muerto"
         );
         assert!(
-            montaje.consolas[0].bandera.recoger(),
+            harness.consoles[0].flag.take(),
             "el panel desapareció y su consola no vuelve a mirar"
         );
     }
@@ -631,12 +634,12 @@ mod tests {
     /// ahí no se puede seguir confiando en unos avisos que quizá ya no lleguen.
     #[test]
     fn un_fallo_deja_ciego_al_vigilante_sin_entrar_en_panico() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
-        (montaje.manejador)(Err(notify::Error::generic("se acabaron los avisos")));
+        (harness.handler)(Err(notify::Error::generic("se acabaron los avisos")));
 
         assert!(
-            montaje.ciego.load(Ordering::Relaxed),
+            harness.blind.load(Ordering::Relaxed),
             "el vigilante falló y la ventana seguirá esperando avisos suyos"
         );
     }
@@ -646,14 +649,14 @@ mod tests {
     /// cada vuelta.
     #[test]
     fn un_fallo_que_se_repite_solo_despierta_una_vez() {
-        let mut montaje = dos_consolas();
+        let mut harness = two_consoles();
 
         for _ in 0..10 {
-            (montaje.manejador)(Err(notify::Error::generic("y van diez")));
+            (harness.handler)(Err(notify::Error::generic("y van diez")));
         }
 
         assert_eq!(
-            montaje.despertares.cuantos(),
+            harness.wakeups.count(),
             1,
             "un fallo que se repite despierta a la ventana en cada vuelta"
         );
@@ -665,10 +668,10 @@ mod tests {
     fn un_vigilante_armado_no_esta_ciego() {
         let dir = panel_contract::PanelDir::create().expect("crear el directorio");
 
-        let vigilante = Vigilante::nuevo(|| {}, &[(dir.path(), Bandera::levantada())]);
+        let watcher = Watcher::new(|| {}, &[(dir.path(), Flag::raised())]);
 
         assert!(
-            !vigilante.esta_ciego(),
+            !watcher.is_blind(),
             "el vigilante se armó sobre un directorio que existe y se declara ciego"
         );
     }
@@ -682,12 +685,12 @@ mod tests {
     #[test]
     fn un_directorio_que_no_existe_deja_al_vigilante_ciego() {
         let dir = panel_contract::PanelDir::create().expect("crear el directorio");
-        let inexistente = dir.path().join("no-existe");
+        let missing = dir.path().join("no-existe");
 
-        let vigilante = Vigilante::nuevo(|| {}, &[(inexistente.as_path(), Bandera::levantada())]);
+        let watcher = Watcher::new(|| {}, &[(missing.as_path(), Flag::raised())]);
 
         assert!(
-            vigilante.esta_ciego(),
+            watcher.is_blind(),
             "no se pudo vigilar nada y la ventana creerá que alguien la avisa"
         );
     }
@@ -697,14 +700,14 @@ mod tests {
     /// ciego haría que la ventana releyera en cada fotograma unos ficheros que no existen.
     #[test]
     fn sin_consolas_no_se_arma_nada_y_no_se_esta_ciego() {
-        let vigilante = Vigilante::nuevo(|| {}, &[]);
+        let watcher = Watcher::new(|| {}, &[]);
 
         assert!(
-            vigilante._seguimiento.is_none(),
+            watcher._backend.is_none(),
             "se armó para no mirar nada"
         );
         assert!(
-            !vigilante.esta_ciego(),
+            !watcher.is_blind(),
             "no hay ningún panel que se quede viejo"
         );
     }

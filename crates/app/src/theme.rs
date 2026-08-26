@@ -14,44 +14,44 @@ use term_core::TermColor;
 /// Es gusto puro: la especificación dice «menos intenso» y no cuánto. La mitad se lee como
 /// claramente apagado sin llegar a desaparecer sobre este fondo, que es lo que se pierde al pasar
 /// de dos tercios.
-const ATENUACION: f32 = 0.5;
+const DIM_FACTOR: f32 = 0.5;
 
 /// Los seis niveles por canal del cubo de color de la paleta de 256.
 ///
 /// No son equidistantes, y no es un capricho: es la tabla que fija `xterm` y que todo el ecosistema
 /// da por supuesta. Repartirlos a intervalos regulares daría colores que no coinciden con los que
 /// el programa espera ver.
-const NIVELES_CUBO: [u8; 6] = [0, 95, 135, 175, 215, 255];
+const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
 /// Cuánto tapa el velo que señala la consola sobre la que se soltaría la que se arrastra, de 0 a 255.
 ///
 /// Es gusto, pero acotado por los dos lados: tiene que verse sobre una consola llena de texto y tiene que
 /// dejar leer lo que hay debajo, porque lo que hay debajo es lo que el usuario está mirando para decidir
 /// si suelta ahí. Una sexta parte cumple las dos.
-const VELO_DEL_DESTINO: u8 = 40;
+const DROP_TARGET_ALPHA: u8 = 40;
 
 /// El tema: qué color de pantalla le corresponde a cada color que pide un programa.
 #[derive(Debug, Clone, Copy)]
-pub struct Tema {
+pub struct Theme {
     /// Las dieciséis entradas con nombre. De la 0 a la 7 las normales, de la 8 a la 15 las
     /// brillantes.
-    paleta: [Color32; 16],
-    fondo: Color32,
-    primer_plano: Color32,
+    palette: [Color32; 16],
+    background: Color32,
+    foreground: Color32,
     cursor: Color32,
     /// La línea que separa dos consolas.
-    divisor: Color32,
+    divider: Color32,
     /// Con qué se señala la consola a la que va el teclado.
     ///
     /// **Es un color de la aplicación, no de la paleta del terminal**, y esa distinción importa: la
     /// paleta la pide el programa de dentro y describe *su* contenido. Esto describe el estado de la
     /// aplicación, así que un programa no puede reclamarlo ni cambiarlo.
-    foco: Color32,
+    focus: Color32,
     /// El fondo del panel de estado, que es lo que lo separa visualmente de su consola sin una línea.
-    fondo_del_panel: Color32,
+    panel_background: Color32,
 }
 
-impl Default for Tema {
+impl Default for Theme {
     /// La estética del proyecto.
     ///
     /// El prototipo aporta **nueve** colores, y ninguno de ellos es rojo, cian, magenta ni un
@@ -64,7 +64,7 @@ impl Default for Tema {
     /// apagado y el blanco brillante es blanco puro.
     fn default() -> Self {
         Self {
-            paleta: [
+            palette: [
                 Color32::from_rgb(0x1E, 0x1E, 0x1E), // 0  negro — el mismo del fondo
                 Color32::from_rgb(0xCF, 0x6A, 0x4C), // 1  rojo
                 Color32::from_rgb(0x8F, 0x9D, 0x6A), // 2  verde
@@ -82,52 +82,52 @@ impl Default for Tema {
                 Color32::from_rgb(0x9F, 0xBC, 0xB8), // 14 cian brillante
                 Color32::from_rgb(0xFF, 0xFF, 0xFF), // 15 blanco brillante — blanco puro
             ],
-            fondo: Color32::from_rgb(0x1E, 0x1E, 0x1E),
-            primer_plano: Color32::from_rgb(0xA7, 0xA7, 0xA7),
+            background: Color32::from_rgb(0x1E, 0x1E, 0x1E),
+            foreground: Color32::from_rgb(0xA7, 0xA7, 0xA7),
             cursor: Color32::from_rgb(0xA7, 0xA7, 0xA7),
             // El gris apagado del prototipo, que es el negro brillante de la paleta: se ve contra el
             // fondo sin llamar la atención. Un divisor no es contenido, así que competir con las letras
             // sería exactamente lo que no debe hacer.
-            divisor: Color32::from_rgb(0x5F, 0x5A, 0x60),
+            divider: Color32::from_rgb(0x5F, 0x5A, 0x60),
             // El azul de la familia, un paso por encima del divisor en presencia. Tiene que
             // distinguirse **del divisor** a simple vista, porque los dos se pintan pegados y si se
             // parecieran no habría forma de saber qué consola escucha el teclado.
-            foco: Color32::from_rgb(0x75, 0x87, 0xA6),
+            focus: Color32::from_rgb(0x75, 0x87, 0xA6),
             // Un paso por debajo del fondo de la consola, no por encima: el panel es el margen y la
             // consola es el contenido, así que lo que tiene que retroceder es el panel. Subirlo —hacerlo
             // más claro— convertiría cada división en dos bloques compitiendo, y con dos divisiones
             // serían cuatro.
-            fondo_del_panel: Color32::from_rgb(0x18, 0x18, 0x18),
+            panel_background: Color32::from_rgb(0x18, 0x18, 0x18),
         }
     }
 }
 
-impl Tema {
+impl Theme {
     /// El tema de fábrica con los colores que el fichero de configuración pida encima.
     ///
     /// **Lo que el fichero no diga se queda de fábrica**, que es lo que permite cambiar un solo color sin
     /// escribir los veintidós. Y la paleta se sobrescribe hueco a hueco por lo mismo: pedir el color 1 no
     /// debe borrar los otros quince.
-    pub fn con(colores: &crate::settings::Colores) -> Self {
-        let mut tema = Self::default();
-        for (hueco, pedido) in tema.paleta.iter_mut().zip(colores.paleta.iter()) {
-            if let Some(color) = pedido {
-                *hueco = *color;
+    pub fn from_colors(colors: &crate::settings::Colores) -> Self {
+        let mut theme = Self::default();
+        for (slot, asked_for) in theme.palette.iter_mut().zip(colors.paleta.iter()) {
+            if let Some(color) = asked_for {
+                *slot = *color;
             }
         }
-        for (hueco, pedido) in [
-            (&mut tema.fondo, colores.fondo),
-            (&mut tema.primer_plano, colores.texto),
-            (&mut tema.cursor, colores.cursor),
-            (&mut tema.divisor, colores.divisor),
-            (&mut tema.foco, colores.foco),
-            (&mut tema.fondo_del_panel, colores.panel),
+        for (slot, asked_for) in [
+            (&mut theme.background, colors.fondo),
+            (&mut theme.foreground, colors.texto),
+            (&mut theme.cursor, colors.cursor),
+            (&mut theme.divider, colors.divisor),
+            (&mut theme.focus, colors.foco),
+            (&mut theme.panel_background, colors.panel),
         ] {
-            if let Some(color) = pedido {
-                *hueco = color;
+            if let Some(color) = asked_for {
+                *slot = color;
             }
         }
-        tema
+        theme
     }
 }
 
@@ -137,10 +137,10 @@ impl Tema {
 /// y a un palmo el uno del otro; con dos juegos de verdes o de rojos distintos, la pantalla se leería
 /// como dos aplicaciones pegadas. Lo que cambia respecto a la consola es *quién* elige el color: aquí
 /// lo elige el vocabulario del contrato, no el programa de dentro.
-impl Tema {
+impl Theme {
     /// El fondo del panel de estado.
-    pub fn fondo_del_panel(&self) -> Color32 {
-        self.fondo_del_panel
+    pub fn panel_background(&self) -> Color32 {
+        self.panel_background
     }
 
     /// El color de una línea del panel, según lo que el productor haya dicho de ella.
@@ -151,28 +151,28 @@ impl Tema {
     ///
     /// Sin ninguno de los dos, el color del texto normal de la consola: una línea sin adjetivos no es
     /// una línea apagada.
-    pub fn color_del_panel(&self, marca: Option<Mark>, estilo: Option<Style>) -> Color32 {
-        match (estilo, marca) {
-            (Some(estilo), _) => self.por_estilo(estilo),
-            (None, Some(marca)) => self.por_marca(marca),
-            (None, None) => self.primer_plano,
+    pub fn panel_color(&self, mark: Option<Mark>, style: Option<Style>) -> Color32 {
+        match (style, mark) {
+            (Some(style), _) => self.by_style(style),
+            (None, Some(mark)) => self.by_mark(mark),
+            (None, None) => self.foreground,
         }
     }
 
     /// Los siete estilos del contrato.
-    fn por_estilo(&self, estilo: Style) -> Color32 {
-        match estilo {
-            Style::Normal => self.primer_plano,
+    fn by_style(&self, style: Style) -> Color32 {
+        match style {
+            Style::Normal => self.foreground,
             // Apagado es «esto está aquí por si acaso»: el mismo gesto que el atenuado del terminal,
             // que ya significa eso mismo para el programa de dentro.
-            Style::Dim => self.apagar(self.primer_plano),
+            Style::Dim => self.toward_background(self.foreground),
             // El título es lo único que se pinta más claro que el texto normal. No lleva color propio:
             // un título de color competiría con las marcas, que sí lo usan para decir algo.
-            Style::Title => self.paleta[15],
-            Style::Accent => self.paleta[4],
-            Style::Ok => self.paleta[2],
-            Style::Warn => self.paleta[3],
-            Style::Error => self.paleta[1],
+            Style::Title => self.palette[15],
+            Style::Accent => self.palette[4],
+            Style::Ok => self.palette[2],
+            Style::Warn => self.palette[3],
+            Style::Error => self.palette[1],
         }
     }
 
@@ -181,14 +181,14 @@ impl Tema {
     /// **`done` y `pending` van apagadas, y las dos por la misma razón**: lo terminado y lo que ni ha
     /// empezado son los dos estados en los que no hay nada que hacer. Lo que tiene que saltar a la vista
     /// es `current` —dónde va la cosa— y `block` —qué la para—.
-    fn por_marca(&self, marca: Mark) -> Color32 {
-        match marca {
-            Mark::Done => self.apagar(self.paleta[2]),
-            Mark::Current => self.paleta[4],
-            Mark::Pending => self.apagar(self.primer_plano),
-            Mark::Wait => self.paleta[3],
-            Mark::Block => self.paleta[1],
-            Mark::Info => self.primer_plano,
+    fn by_mark(&self, mark: Mark) -> Color32 {
+        match mark {
+            Mark::Done => self.toward_background(self.palette[2]),
+            Mark::Current => self.palette[4],
+            Mark::Pending => self.toward_background(self.foreground),
+            Mark::Wait => self.palette[3],
+            Mark::Block => self.palette[1],
+            Mark::Info => self.foreground,
         }
     }
 
@@ -202,26 +202,26 @@ impl Tema {
     /// **Sin sostener es lo mismo atenuado**: el reclamo sigue ahí —la aplicación no esconde lo que su
     /// productor dijo— pero nadie lo está sosteniendo, y eso se ve antes de leer nada. El detalle
     /// —desde cuándo, o qué falló— lo dice la línea del aviso, que va justo debajo.
-    pub fn color_del_reclamo(&self, clase: Attention, sostenido: bool) -> Color32 {
-        let color = match clase {
-            Attention::Wait => self.paleta[3],
-            Attention::Block => self.paleta[1],
-            Attention::Done => self.paleta[2],
+    pub fn attention_color(&self, class: Attention, backed: bool) -> Color32 {
+        let color = match class {
+            Attention::Wait => self.palette[3],
+            Attention::Block => self.palette[1],
+            Attention::Done => self.palette[2],
         };
-        if sostenido { color } else { self.apagar(color) }
+        if backed { color } else { self.toward_background(color) }
     }
 }
 
-impl Tema {
+impl Theme {
     /// El color de pantalla que le toca a un color pedido por un programa.
     ///
-    /// No aplica las políticas de negrita ni de atenuado: para eso está [`Tema::con_atributos`].
+    /// No aplica las políticas de negrita ni de atenuado: para eso está [`Theme::with_attributes`].
     pub fn color(&self, c: TermColor) -> Color32 {
         match c {
-            TermColor::Indexed(i) => self.indexado(i),
+            TermColor::Indexed(i) => self.indexed(i),
             TermColor::Rgb { r, g, b } => Color32::from_rgb(r, g, b),
-            TermColor::Foreground => self.primer_plano,
-            TermColor::Background => self.fondo,
+            TermColor::Foreground => self.foreground,
+            TermColor::Background => self.background,
             TermColor::Cursor => self.cursor,
             // La variante atenuada solo la producen las ocho primeras entradas. Se enmascara en vez
             // de indexar a pelo porque esta función la llama el pintor una vez por celda y un
@@ -232,10 +232,10 @@ impl Tema {
                     i < 8,
                     "la variante atenuada solo cubre las ocho primeras entradas"
                 );
-                self.apagar(self.paleta[(i & 0b111) as usize])
+                self.toward_background(self.palette[(i & 0b111) as usize])
             }
-            TermColor::BrightForeground => self.paleta[15],
-            TermColor::DimForeground => self.apagar(self.primer_plano),
+            TermColor::BrightForeground => self.palette[15],
+            TermColor::DimForeground => self.toward_background(self.foreground),
         }
     }
 
@@ -245,43 +245,43 @@ impl Tema {
     /// Con vídeo inverso, el color que el programa declaró como primer plano —y que es el que la
     /// negrita y el atenuado describen— viaja en el campo del fondo. Quien pinta sabe eso; el tema
     /// solo sabe en qué consisten las dos políticas.
-    pub fn con_atributos(&self, c: TermColor, negrita: bool, atenuado: bool) -> Color32 {
+    pub fn with_attributes(&self, c: TermColor, bold: bool, dim: bool) -> Color32 {
         // La atenuación llega por dos caminos —como color propio y como atributo de la celda— y
         // aquí se juntan, así que primero se normaliza a uno solo. Sin esto, un color que ya viene
         // atenuado y además trae el atributo se apagaría dos veces, y la negrita no lo alcanzaría
         // por quedar escondido tras una variante que ella no reconoce.
-        let (base, atenuado) = match c {
+        let (base, dim) = match c {
             TermColor::Dim(i) => (TermColor::Indexed(i & 0b111), true),
             TermColor::DimForeground => (TermColor::Foreground, true),
-            otro => (otro, atenuado),
+            other => (other, dim),
         };
-        let base = if negrita { abrillantar(base) } else { base };
-        let resuelto = self.color(base);
-        if atenuado {
-            self.apagar(resuelto)
+        let base = if bold { brighten(base) } else { base };
+        let resolved = self.color(base);
+        if dim {
+            self.toward_background(resolved)
         } else {
-            resuelto
+            resolved
         }
     }
 
     /// El fondo por defecto, que es también el de la ventana entera.
-    pub fn fondo(&self) -> Color32 {
-        self.fondo
+    pub fn background(&self) -> Color32 {
+        self.background
     }
 
     /// El color de las letras por defecto, para el texto que pinta la aplicación y no el programa.
-    pub fn primer_plano(&self) -> Color32 {
-        self.primer_plano
+    pub fn foreground(&self) -> Color32 {
+        self.foreground
     }
 
     /// El color de la línea que separa dos consolas.
-    pub fn divisor(&self) -> Color32 {
-        self.divisor
+    pub fn divider(&self) -> Color32 {
+        self.divider
     }
 
     /// El color con el que se señala la consola a la que va el teclado.
-    pub fn foco(&self) -> Color32 {
-        self.foco
+    pub fn focus(&self) -> Color32 {
+        self.focus
     }
 
     /// El color con el que se señala la consola sobre la que se soltaría la que se arrastra.
@@ -292,25 +292,25 @@ impl Tema {
     ///
     /// Traslúcido porque se pinta **encima** de lo que la consola esté escribiendo: opaco taparía el
     /// contenido justo cuando el usuario está decidiendo si soltar ahí.
-    pub fn destino_del_arrastre(&self) -> Color32 {
-        let foco = self.foco;
-        Color32::from_rgba_unmultiplied(foco.r(), foco.g(), foco.b(), VELO_DEL_DESTINO)
+    pub fn drop_target(&self) -> Color32 {
+        let focus = self.focus;
+        Color32::from_rgba_unmultiplied(focus.r(), focus.g(), focus.b(), DROP_TARGET_ALPHA)
     }
 
     /// Acerca un color al fondo. Es lo que aquí significa «atenuado».
-    fn apagar(&self, c: Color32) -> Color32 {
-        mezclar(c, self.fondo, ATENUACION)
+    fn toward_background(&self, c: Color32) -> Color32 {
+        mix(c, self.background, DIM_FACTOR)
     }
 
-    fn indexado(&self, i: u8) -> Color32 {
+    fn indexed(&self, i: u8) -> Color32 {
         match i {
-            0..=15 => self.paleta[i as usize],
+            0..=15 => self.palette[i as usize],
             16..=231 => {
                 let n = i - 16;
                 Color32::from_rgb(
-                    NIVELES_CUBO[(n / 36) as usize],
-                    NIVELES_CUBO[((n / 6) % 6) as usize],
-                    NIVELES_CUBO[(n % 6) as usize],
+                    CUBE_LEVELS[(n / 36) as usize],
+                    CUBE_LEVELS[((n / 6) % 6) as usize],
+                    CUBE_LEVELS[(n % 6) as usize],
                 )
             }
             // Los veinticuatro grises, de casi negro a casi blanco. Ninguno de los dos extremos
@@ -328,21 +328,21 @@ impl Tema {
 /// Es la convención que dan por supuesta los programas que usan negrita para destacar, y que hace
 /// legible un `ls` en color. Solo sube las ocho primeras entradas con nombre: un color exacto o una
 /// entrada del cubo ya es el color que el programa quiso, y aclararlo sería desobedecerle.
-fn abrillantar(c: TermColor) -> TermColor {
+fn brighten(c: TermColor) -> TermColor {
     match c {
         TermColor::Indexed(i) if i < 8 => TermColor::Indexed(i + 8),
         TermColor::Foreground => TermColor::BrightForeground,
-        otro => otro,
+        other => other,
     }
 }
 
 /// Mezcla dos colores, con `p` como la parte que se lleva el segundo.
-fn mezclar(a: Color32, b: Color32, p: f32) -> Color32 {
-    let canal = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * p).round() as u8;
+fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
+    let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * p).round() as u8;
     Color32::from_rgb(
-        canal(a.r(), b.r()),
-        canal(a.g(), b.g()),
-        canal(a.b(), b.b()),
+        channel(a.r(), b.r()),
+        channel(a.g(), b.g()),
+        channel(a.b(), b.b()),
     )
 }
 
@@ -350,8 +350,8 @@ fn mezclar(a: Color32, b: Color32, p: f32) -> Color32 {
 mod tests {
     use super::*;
 
-    fn tema() -> Tema {
-        Tema::default()
+    fn theme() -> Theme {
+        Theme::default()
     }
 
     /// **La regla del contrato que es fácil leer al revés.** Su tabla describe `style` como algo «para
@@ -360,31 +360,31 @@ mod tests {
     /// ese color se perdería sin que nadie se enterase.
     #[test]
     fn el_estilo_manda_sobre_la_marca_cuando_vienen_los_dos() {
-        let t = tema();
+        let t = theme();
 
         assert_eq!(
-            t.color_del_panel(Some(Mark::Info), Some(Style::Ok)),
-            t.color_del_panel(None, Some(Style::Ok)),
+            t.panel_color(Some(Mark::Info), Some(Style::Ok)),
+            t.panel_color(None, Some(Style::Ok)),
             "el color tiene que salir del estilo, no de la marca"
         );
         assert_ne!(
-            t.color_del_panel(Some(Mark::Info), Some(Style::Ok)),
-            t.color_del_panel(Some(Mark::Info), None),
+            t.panel_color(Some(Mark::Info), Some(Style::Ok)),
+            t.panel_color(Some(Mark::Info), None),
             "con estilo y sin él no puede verse igual"
         );
     }
 
     #[test]
     fn una_linea_sin_marca_ni_estilo_se_pinta_como_el_texto_normal() {
-        assert_eq!(tema().color_del_panel(None, None), tema().primer_plano);
+        assert_eq!(theme().panel_color(None, None), theme().foreground);
     }
 
     /// Los trece nombres del contrato, cada uno con su color. Sin esto, devolver el mismo para todos
     /// dejaría la suite verde y el panel en un solo tono.
     #[test]
     fn las_seis_marcas_y_los_siete_estilos_no_se_pintan_todos_igual() {
-        let t = tema();
-        let marcas = [
+        let t = theme();
+        let marks = [
             Mark::Done,
             Mark::Current,
             Mark::Pending,
@@ -392,7 +392,7 @@ mod tests {
             Mark::Block,
             Mark::Info,
         ];
-        let estilos = [
+        let styles = [
             Style::Normal,
             Style::Dim,
             Style::Title,
@@ -405,29 +405,29 @@ mod tests {
         // Se cuentan los colores **distintos** dentro de cada juego, y no se comparan entre juegos:
         // `normal` y `info` valen el mismo a propósito —los dos son «texto sin adjetivos»— y exigir
         // trece colores obligaría a inventar una diferencia que no significa nada.
-        let de_marcas: std::collections::HashSet<_> =
-            marcas.iter().map(|m| t.por_marca(*m)).collect();
-        let de_estilos: std::collections::HashSet<_> =
-            estilos.iter().map(|e| t.por_estilo(*e)).collect();
+        let from_marks: std::collections::HashSet<_> =
+            marks.iter().map(|m| t.by_mark(*m)).collect();
+        let from_styles: std::collections::HashSet<_> =
+            styles.iter().map(|e| t.by_style(*e)).collect();
 
-        assert_eq!(de_marcas.len(), 6, "las seis marcas son distintas entre sí");
-        assert_eq!(de_estilos.len(), 7, "los siete estilos son distintos");
+        assert_eq!(from_marks.len(), 6, "las seis marcas son distintas entre sí");
+        assert_eq!(from_styles.len(), 7, "los siete estilos son distintos");
         assert_ne!(
-            t.por_marca(Mark::Current),
-            t.por_marca(Mark::Block),
+            t.by_mark(Mark::Current),
+            t.by_mark(Mark::Block),
             "«en marcha» y «bloqueado» son lo que hay que distinguir de un vistazo"
         );
     }
 
     #[test]
     fn el_fondo_del_panel_se_distingue_del_de_la_consola() {
-        let t = tema();
-        assert_ne!(t.fondo_del_panel(), t.fondo());
+        let t = theme();
+        assert_ne!(t.panel_background(), t.background());
     }
 
     #[test]
     fn los_tres_colores_por_defecto_son_los_del_proyecto() {
-        let t = tema();
+        let t = theme();
         assert_eq!(
             t.color(TermColor::Background),
             Color32::from_rgb(0x1E, 0x1E, 0x1E)
@@ -444,23 +444,23 @@ mod tests {
 
     #[test]
     fn el_divisor_y_el_foco_se_ven_y_se_distinguen_entre_si() {
-        let t = tema();
+        let t = theme();
         // Tres desigualdades, y cada una cubre una forma distinta de que esto quede inservible sin que
         // nada falle: un divisor del color del fondo es un divisor invisible —dos consolas pegadas que
         // se leen como una—, y un realce igual al divisor deja la ventana sin decir a cuál de las dos
         // va el teclado, que es justo lo que el realce existe para decir.
-        assert_ne!(t.divisor(), t.fondo(), "el divisor no se vería");
-        assert_ne!(t.foco(), t.fondo(), "el realce del foco no se vería");
+        assert_ne!(t.divider(), t.background(), "el divisor no se vería");
+        assert_ne!(t.focus(), t.background(), "el realce del foco no se vería");
         assert_ne!(
-            t.foco(),
-            t.divisor(),
+            t.focus(),
+            t.divider(),
             "el realce no se distingue del divisor y van pegados"
         );
     }
 
     #[test]
     fn el_borde_entre_los_nombrados_y_el_cubo() {
-        let t = tema();
+        let t = theme();
         // 15 es la última entrada con nombre; 16 es la primera del cubo, y es negro puro —no el
         // fondo del tema—. Confundir estos dos es el error que este test existe para cazar.
         assert_eq!(
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn el_borde_entre_el_cubo_y_los_grises() {
-        let t = tema();
+        let t = theme();
         // 231 es la última del cubo y es blanco puro; 232 es el primer gris y **no** es negro.
         assert_eq!(
             t.color(TermColor::Indexed(231)),
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn el_cubo_reparte_los_canales_en_el_orden_correcto() {
-        let t = tema();
+        let t = theme();
         // 196 es el rojo puro del cubo: 196-16 = 180 = 5*36, así que rojo al máximo y los otros a
         // cero. Si alguien invierte el orden de los canales, este es el test que se pone rojo.
         assert_eq!(
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn las_brillantes_cumplen_la_regla_con_la_que_se_escribieron() {
-        let t = tema();
+        let t = theme();
         // El doc de la paleta afirma que las brillantes salen de acercar su color normal a blanco
         // una cuarta parte. Una afirmación escrita y no comprobada se convierte en mentira en
         // cuanto alguien retoca una entrada, así que aquí se comprueba.
@@ -517,10 +517,10 @@ mod tests {
         // brillantes vienen del prototipo, no de la regla.
         for i in 1..=6u8 {
             let normal = t.color(TermColor::Indexed(i));
-            let brillante = t.color(TermColor::Indexed(i + 8));
+            let bright = t.color(TermColor::Indexed(i + 8));
             assert_eq!(
-                brillante,
-                mezclar(normal, Color32::WHITE, 0.25),
+                bright,
+                mix(normal, Color32::WHITE, 0.25),
                 "la entrada brillante {} no sale de la regla",
                 i + 8
             );
@@ -529,79 +529,79 @@ mod tests {
 
     #[test]
     fn un_color_exacto_pasa_sin_tocarse() {
-        let t = tema();
+        let t = theme();
         let c = TermColor::Rgb { r: 1, g: 2, b: 3 };
         assert_eq!(t.color(c), Color32::from_rgb(1, 2, 3));
     }
 
     #[test]
     fn la_negrita_sube_a_la_variante_brillante() {
-        let t = tema();
-        let rojo = TermColor::Indexed(1);
+        let t = theme();
+        let red = TermColor::Indexed(1);
         assert_eq!(
-            t.con_atributos(rojo, false, false),
+            t.with_attributes(red, false, false),
             Color32::from_rgb(0xCF, 0x6A, 0x4C)
         );
         assert_eq!(
-            t.con_atributos(rojo, true, false),
+            t.with_attributes(red, true, false),
             Color32::from_rgb(0xDB, 0x8F, 0x79)
         );
         assert_eq!(
-            t.con_atributos(rojo, true, false),
+            t.with_attributes(red, true, false),
             t.color(TermColor::Indexed(9))
         );
     }
 
     #[test]
     fn la_negrita_no_toca_lo_que_el_programa_eligio_a_mano() {
-        let t = tema();
+        let t = theme();
         // Ni un color exacto ni una entrada del cubo se aclaran: ya son el color que se pidió.
-        let exacto = TermColor::Rgb {
+        let exact = TermColor::Rgb {
             r: 10,
             g: 20,
             b: 30,
         };
         assert_eq!(
-            t.con_atributos(exacto, true, false),
+            t.with_attributes(exact, true, false),
             Color32::from_rgb(10, 20, 30)
         );
-        let del_cubo = TermColor::Indexed(196);
+        let from_the_cube = TermColor::Indexed(196);
         assert_eq!(
-            t.con_atributos(del_cubo, true, false),
+            t.with_attributes(from_the_cube, true, false),
             Color32::from_rgb(0xFF, 0x00, 0x00)
         );
         // Y una entrada que ya es brillante no vuelve a subir: la 9 no se convierte en la 17.
         assert_eq!(
-            t.con_atributos(TermColor::Indexed(9), true, false),
+            t.with_attributes(TermColor::Indexed(9), true, false),
             t.color(TermColor::Indexed(9))
         );
     }
 
     #[test]
     fn el_atenuado_acerca_el_color_al_fondo() {
-        let t = tema();
+        let t = theme();
         // El rojo a medio camino de #1E1E1E.
         assert_eq!(
-            t.con_atributos(TermColor::Indexed(1), false, true),
+            t.with_attributes(TermColor::Indexed(1), false, true),
             Color32::from_rgb(0x77, 0x44, 0x35)
         );
         // Y el fondo atenuado sigue siendo el fondo: no hay a dónde acercarse.
         assert_eq!(
-            t.con_atributos(TermColor::Background, false, true),
+            t.with_attributes(TermColor::Background, false, true),
             t.color(TermColor::Background)
         );
     }
 
     #[test]
     fn la_variante_atenuada_de_la_libreria_da_lo_mismo_que_el_atributo() {
-        let t = tema();
+        let t = theme();
         // Son los dos caminos por los que llega lo mismo: el color `Dim(n)` que entrega el motor y
         // el atributo de atenuado sobre el color normal. Si divergieran, la misma secuencia de
         // escape se vería de dos colores distintos según por dónde entrara.
         for n in 0..8u8 {
             assert_eq!(
                 t.color(TermColor::Dim(n)),
-                t.con_atributos(TermColor::Indexed(n), false, true),
+                t.with_attributes(TermColor::Indexed(n), false, true),
                 "el índice {n} no coincide por los dos caminos"
             );
         }
@@ -609,43 +609,43 @@ mod tests {
 
     #[test]
     fn un_color_ya_atenuado_no_se_apaga_dos_veces() {
-        let t = tema();
-        // Quien pinte va a llamar a `con_atributos` con el color y los atributos de la celda tal
+        let t = theme();
+        // Quien pinte va a llamar a `with_attributes` con el color y los atributos de la celda tal
         // como vienen, sin mirar si el color ya es de los atenuados. Si no se normalizara, el
         // atenuado se aplicaría dos veces y el color quedaría a un cuarto del recorrido al fondo en
         // vez de a la mitad — más apagado por haber entrado por la puerta de al lado.
         for n in 0..8u8 {
             assert_eq!(
-                t.con_atributos(TermColor::Dim(n), false, true),
+                t.with_attributes(TermColor::Dim(n), false, true),
                 t.color(TermColor::Dim(n)),
                 "el índice {n} se apaga dos veces"
             );
         }
         assert_eq!(
-            t.con_atributos(TermColor::DimForeground, false, true),
+            t.with_attributes(TermColor::DimForeground, false, true),
             t.color(TermColor::DimForeground)
         );
     }
 
     #[test]
     fn la_negrita_alcanza_a_un_color_que_ya_venia_atenuado() {
-        let t = tema();
+        let t = theme();
         // Un rojo atenuado y en negrita sube a rojo brillante y luego se apaga, igual que si la
         // atenuación hubiera llegado por el atributo. Sin normalizar, la negrita no lo tocaría: la
         // variante atenuada no es una de las que sabe subir.
         assert_eq!(
-            t.con_atributos(TermColor::Dim(1), true, false),
-            t.con_atributos(TermColor::Indexed(1), true, true)
+            t.with_attributes(TermColor::Dim(1), true, false),
+            t.with_attributes(TermColor::Indexed(1), true, true)
         );
         assert_eq!(
-            t.con_atributos(TermColor::DimForeground, true, false),
-            t.con_atributos(TermColor::Foreground, true, true)
+            t.with_attributes(TermColor::DimForeground, true, false),
+            t.with_attributes(TermColor::Foreground, true, true)
         );
     }
 
     #[test]
     fn el_primer_plano_tiene_sus_dos_variantes() {
-        let t = tema();
+        let t = theme();
         assert_eq!(
             t.color(TermColor::BrightForeground),
             Color32::from_rgb(0xFF, 0xFF, 0xFF)
@@ -657,27 +657,27 @@ mod tests {
         // La negrita sobre el primer plano por defecto lleva a su variante brillante, no a la
         // entrada 8 de la paleta, que es el gris apagado.
         assert_eq!(
-            t.con_atributos(TermColor::Foreground, true, false),
+            t.with_attributes(TermColor::Foreground, true, false),
             t.color(TermColor::BrightForeground)
         );
     }
 
     #[test]
     fn negrita_y_atenuado_a_la_vez_aclaran_y_luego_apagan() {
-        let t = tema();
+        let t = theme();
         // El orden importa y está fijado: primero se sube a brillante, luego se apaga. Al revés
         // daría otro color, y dos capas que lo hicieran en distinto orden no coincidirían.
-        let esperado = mezclar(
+        let expected = mix(
             Color32::from_rgb(0xDB, 0x8F, 0x79),
             Color32::from_rgb(0x1E, 0x1E, 0x1E),
-            ATENUACION,
+            DIM_FACTOR,
         );
-        assert_eq!(t.con_atributos(TermColor::Indexed(1), true, true), esperado);
+        assert_eq!(t.with_attributes(TermColor::Indexed(1), true, true), expected);
     }
 
     #[test]
     fn ningun_indice_de_la_paleta_de_256_hace_estallar_la_tabla() {
-        let t = tema();
+        let t = theme();
         for i in 0..=255u8 {
             let _ = t.color(TermColor::Indexed(i));
         }
@@ -693,12 +693,12 @@ mod tests {
     /// y callaría **cuál**, que es lo único que decide si hay que ir corriendo o no.
     #[test]
     fn los_tres_reclamos_no_se_pintan_todos_igual() {
-        let t = tema();
-        let colores = Attention::ALL.map(|clase| t.color_del_reclamo(clase, true));
+        let t = theme();
+        let colors = Attention::ALL.map(|class| t.attention_color(class, true));
 
-        for (i, uno) in colores.iter().enumerate() {
-            for otro in &colores[i + 1..] {
-                assert_ne!(uno, otro, "dos reclamos comparten color: {colores:?}");
+        for (i, one) in colors.iter().enumerate() {
+            for other in &colors[i + 1..] {
+                assert_ne!(one, other, "dos reclamos comparten color: {colors:?}");
             }
         }
     }
@@ -706,20 +706,20 @@ mod tests {
     /// **La copia peligrosa de este hito, atada donde se nota.** La tabla de las marcas del cuerpo
     /// apaga `done` porque lo terminado es donde ya no queda nada que hacer; aquí `done` dice lo
     /// contrario —terminó y **nadie lo ha mirado**—, así que reutilizarla apagaría justo lo que
-    /// reclama. Con `por_marca` de por medio esta prueba cae, y sin ella la suite seguiría verde con el
+    /// reclama. Con `by_mark` de por medio esta prueba cae, y sin ella la suite seguiría verde con el
     /// reclamo más silencioso de los tres pintado de gris.
     #[test]
     fn el_reclamo_terminado_no_se_pinta_apagado_como_su_marca_del_cuerpo() {
-        let t = tema();
+        let t = theme();
 
         assert_ne!(
-            t.color_del_reclamo(Attention::Done, true),
-            t.color_del_panel(Some(Mark::Done), None),
+            t.attention_color(Attention::Done, true),
+            t.panel_color(Some(Mark::Done), None),
             "el reclamo terminado se está pintando con la tabla del cuerpo, que lo apaga"
         );
         assert_eq!(
-            t.color_del_reclamo(Attention::Done, true),
-            t.paleta[2],
+            t.attention_color(Attention::Done, true),
+            t.palette[2],
             "sostenido se pinta con el color entero, sin atenuar"
         );
     }
@@ -730,24 +730,24 @@ mod tests {
     /// el disfraz de siempre: afirmar sobre el sitio donde se apunta el valor en vez de sobre el valor.
     #[test]
     fn cada_reclamo_lleva_el_color_que_la_decision_le_asigno() {
-        let t = tema();
+        let t = theme();
 
-        assert_eq!(t.color_del_reclamo(Attention::Wait, true), t.paleta[3]);
-        assert_eq!(t.color_del_reclamo(Attention::Block, true), t.paleta[1]);
-        assert_eq!(t.color_del_reclamo(Attention::Done, true), t.paleta[2]);
+        assert_eq!(t.attention_color(Attention::Wait, true), t.palette[3]);
+        assert_eq!(t.attention_color(Attention::Block, true), t.palette[1]);
+        assert_eq!(t.attention_color(Attention::Done, true), t.palette[2]);
     }
 
     /// Y sin sostener es **ese mismo color atenuado**, no otro: el atenuado dice «nadie lo sostiene»,
     /// no «es otra cosa». Con un color propio para el rancio, la clase dejaría de leerse.
     #[test]
     fn un_reclamo_sin_sostener_es_su_propio_color_atenuado() {
-        let t = tema();
+        let t = theme();
 
-        for clase in Attention::ALL {
+        for class in Attention::ALL {
             assert_eq!(
-                t.color_del_reclamo(clase, false),
-                t.apagar(t.color_del_reclamo(clase, true)),
-                "{clase:?} sin sostener no es su color apagado"
+                t.attention_color(class, false),
+                t.toward_background(t.attention_color(class, true)),
+                "{class:?} sin sostener no es su color apagado"
             );
         }
     }
@@ -756,12 +756,12 @@ mod tests {
     /// detrás, y con los dos colores iguales la ficha mentiría sobre lo fresco que es el reclamo.
     #[test]
     fn un_reclamo_sin_sostener_se_ve_distinto_del_mismo_sostenido() {
-        let t = tema();
-        for clase in Attention::ALL {
+        let t = theme();
+        for class in Attention::ALL {
             assert_ne!(
-                t.color_del_reclamo(clase, true),
-                t.color_del_reclamo(clase, false),
-                "{clase:?} se ve igual lo sostenga alguien o no"
+                t.attention_color(class, true),
+                t.attention_color(class, false),
+                "{class:?} se ve igual lo sostenga alguien o no"
             );
         }
     }

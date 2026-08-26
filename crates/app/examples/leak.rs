@@ -23,7 +23,7 @@
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use app::pty_output::Puente;
+use app::pty_output::PtyOutput;
 use term_core::{Pty, Size};
 
 /// Copiado de `app::PUMP_BUDGET`, que es privado. Si allí cambia, aquí deja de medir lo mismo.
@@ -147,7 +147,7 @@ enum Veredicto {
 /// Es lo que hace la aplicación de verdad, con el pintado quitado. Que el pintado no esté es
 /// justamente lo que hace concluyente la medida: lo que crezca aquí no lo puede haber causado.
 fn bombear_por_el_puente(salida: Receiver<Vec<u8>>, residente_al_empezar: u64) -> Veredicto {
-    let puente = Puente::nuevo(salida, || {});
+    let puente = PtyOutput::new(salida, || {});
     let mut recibido = Vec::with_capacity(PRESUPUESTO);
     let mut recogido: u64 = 0;
 
@@ -157,7 +157,7 @@ fn bombear_por_el_puente(salida: Receiver<Vec<u8>>, residente_al_empezar: u64) -
 
     loop {
         recibido.clear();
-        puente.recoger(&mut recibido, PRESUPUESTO);
+        puente.pick_up(&mut recibido, PRESUPUESTO);
         recogido += recibido.len() as u64;
 
         let residente = residente_kib().unwrap_or(residente_al_empezar);
@@ -176,7 +176,7 @@ fn bombear_por_el_puente(salida: Receiver<Vec<u8>>, residente_al_empezar: u64) -
             };
         }
         // El programa ha muerto y ya no queda nada por recoger: la única salida limpia.
-        if !puente.sigue_vivo() && recibido.is_empty() {
+        if !puente.is_alive() && recibido.is_empty() {
             return Veredicto::Terminado {
                 segundos: empezado.elapsed().as_secs_f64(),
                 crecimiento: crecimiento_maximo,

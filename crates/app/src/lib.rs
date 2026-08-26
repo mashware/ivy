@@ -50,11 +50,11 @@ use eframe::egui;
 use measure::{Medida, RestoDelFotograma};
 use painter::CellMetrics;
 use panel_contract::PanelDir;
-use pty_output::Puente;
+use pty_output::PtyOutput;
 use std::time::{Duration, Instant, SystemTime};
 use term_core::{Cell, Half, Pty, Screen, Scroll, Size};
-use theme::Tema;
-use watcher::{Bandera, Vigilante};
+use theme::Theme;
+use watcher::{Flag, Watcher};
 
 /// El nombre con el que la ventana se presenta al escritorio.
 const APP_NAME: &str = "agent-terminal";
@@ -1256,7 +1256,7 @@ impl Weight {
     /// órdenes de magnitud antes.
     ///
     /// **Lo no finito se recorta aunque no haya camino que llegue aquí con un infinito**, y la razón no es
-    /// defensiva: es que **este tipo no puede tener dos nociones de peso válido**. `nuevo` exige finito, así
+    /// defensiva: es que **este tipo no puede tener dos nociones de peso válido**. `new` exige finito, así
     /// que un `scaled` que dejara pasar un infinito construiría lo que el otro constructor rechaza, y la
     /// invariante pasaría a depender de por qué puerta se entró.
     fn scaled(valor: f32) -> Self {
@@ -2019,7 +2019,7 @@ struct Pane {
     /// el pseudoterminal, no mientras viva el puente: separarlos dejaría un hilo y una cola sin
     /// dueño, creciendo.
     pty: Pty,
-    pty_output: Puente,
+    pty_output: PtyOutput,
     /// El directorio donde el programa de esta consola publica su estado, y el identificador con el
     /// que se le conoce. Se borra al soltar la consola porque el tipo lo borra al morir.
     ///
@@ -2039,7 +2039,7 @@ struct Pane {
     /// **Es de la división y no del vigilante** porque es lo que hace que un aviso despierte a una
     /// consola y no a las dos: el vigilante es uno para todas y lo único que las distingue es a qué
     /// bandera llega su aviso.
-    to_reread: Bandera,
+    to_reread: Flag,
     screen: Screen,
     /// Lo que se recoge del puente en un fotograma, reutilizado entre ellos para no reservar
     /// memoria en cada uno. Nunca crece más allá del presupuesto: se pide con tope y se
@@ -2186,7 +2186,7 @@ impl Pane {
         // entra en pánico, que es la condición que el puente pone: si lo hiciera, su hilo moriría
         // y publicaría una muerte que no ha ocurrido.
         let despertador = ctx.clone();
-        let pty_output = Puente::nuevo(salida, move || despertador.request_repaint());
+        let pty_output = PtyOutput::new(salida, move || despertador.request_repaint());
 
         Ok(Self {
             name,
@@ -2194,7 +2194,7 @@ impl Pane {
             pty_output,
             panel,
             panel_state: panel::PanelState::default(),
-            to_reread: Bandera::levantada(),
+            to_reread: Flag::raised(),
             screen: Screen::new(INITIAL_GRID),
             received: Vec::new(),
             keystrokes: Vec::new(),
@@ -2322,7 +2322,7 @@ impl Pane {
 
         match self.who_takes_the_wheel(chord) {
             WheelOwner::Scrollback => {
-                // **Solo lo que mueve algo.** Un `Lineas(0)` no es inocuo de balde: es una orden al motor
+                // **Solo lo que mueve algo.** Un `Lines(0)` no es inocuo de balde: es una orden al motor
                 // que no hace nada, y publicarla haría creer a quien lea el código que el fotograma
                 // desplazó.
                 if lines != 0.0 {
@@ -2484,7 +2484,7 @@ impl Pane {
     /// Devuelve si el presupuesto cortó el bombeo y quedó cola por tragar.
     fn pump(&mut self) -> bool {
         self.received.clear();
-        let pickup = self.pty_output.recoger(&mut self.received, PUMP_BUDGET);
+        let pickup = self.pty_output.pick_up(&mut self.received, PUMP_BUDGET);
         let collected_at = Instant::now();
 
         let antes = Instant::now();
@@ -2493,8 +2493,8 @@ impl Pane {
 
         // El encolado del pintado se mide en la pasada de interfaz, que viene después; aquí se
         // apunta lo que ya se sabe y allí se completa.
-        self.pending_measurement = Some((pickup.esperando_desde, collected_at, interpretado));
-        pickup.queda_cola
+        self.pending_measurement = Some((pickup.waiting_since, collected_at, interpretado));
+        pickup.left_a_queue
     }
 
     /// Se lleva **todo** lo que esta consola ha hecho en este fotograma y todavía no ha declarado nadie,
@@ -2535,7 +2535,7 @@ impl Pane {
     /// Sin directorio no hay nada que leer: es el caso de la consola que no pudo crear el suyo, que
     /// tiene que seguir viéndose como antes de que existiera el panel.
     fn refresh_its_panel(&mut self) {
-        if !self.to_reread.recoger() {
+        if !self.to_reread.take() {
             return;
         }
 
@@ -3091,7 +3091,7 @@ impl Pane {
     /// hacerlo, y dar la división por terminada con cola pendiente se comería justo el final, que es
     /// la parte que se estaba mirando.
     fn terminada(&self, queda_cola: bool) -> bool {
-        !self.pty_output.sigue_vivo() && !queda_cola
+        !self.pty_output.is_alive() && !queda_cola
     }
 }
 
@@ -3875,7 +3875,7 @@ struct Window {
     modifiers: egui::Modifiers,
     /// Quien avisa de que un productor ha publicado. Vive con la ventana porque sus rutas son las de
     /// las consolas que la ventana tiene abiertas, y es la ventana quien sabe a quién despertar.
-    watcher: Vigilante,
+    watcher: Watcher,
     /// Quién busca en la máquina las fuentes que hacen falta, **cuando hacen falta**.
     ///
     /// **Uno por ventana y no uno por consola**, porque las caras se le registran al motor de texto, que
@@ -3887,7 +3887,7 @@ struct Window {
     discovery: measure::Descubrimiento,
     /// Lo que cuesta rasterizar los glifos de color, para que no acabe dentro del tramo del pintado.
     color: measure::Rasterizado,
-    theme: Tema,
+    theme: Theme,
     /// Qué acorde hace cada cosa.
     ///
     /// **Va junto al tema porque sale de lo mismo**: es lo que quien usa el terminal configuró.
@@ -4234,7 +4234,7 @@ impl Window {
     /// llevarlo dentro obligaría a pasarlo por tres constructores con decenas de llamadas, y ninguna de
     /// ellas configura nada.
     fn apply_the_settings(&mut self, settings: &settings::Ajustes) {
-        self.theme = Tema::con(&settings.colores);
+        self.theme = Theme::from_colors(&settings.colores);
         // **Lo que el fichero no pida se queda como está**, que es lo que permite configurar solo un color
         // sin heredar de paso un cuerpo de letra que nadie escribió.
         if let Some(font_size) = settings.cuerpo {
@@ -4286,7 +4286,7 @@ impl Window {
             discoverer: fonts::Discoverer::default(),
             discovery: measure::Descubrimiento::default(),
             color: measure::Rasterizado::default(),
-            theme: Tema::default(),
+            theme: Theme::default(),
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
             font_size: DEFAULT_FONT_SIZE,
@@ -4386,7 +4386,7 @@ impl Window {
     ///
     /// Una consola sin directorio no se vigila porque no hay nada que vigilar: nadie puede publicarle
     /// un panel. Su bandera se queda como esté y su lectura no encuentra dónde mirar.
-    fn watch<'a>(ctx: &egui::Context, panes: impl IntoIterator<Item = &'a Pane>) -> Vigilante {
+    fn watch<'a>(ctx: &egui::Context, panes: impl IntoIterator<Item = &'a Pane>) -> Watcher {
         let consoles: Vec<_> = panes
             .into_iter()
             .filter_map(|pane| {
@@ -4400,7 +4400,7 @@ impl Window {
         // el repintado no entra en pánico, que es la condición de quien lo llama desde otro hilo.
         let despertador = ctx.clone();
 
-        Vigilante::nuevo(move || despertador.request_repaint(), &consoles)
+        Watcher::new(move || despertador.request_repaint(), &consoles)
     }
 
     /// **El latido: despertar a tiempo de decir que un panel está viejo.**
@@ -5659,7 +5659,7 @@ impl Window {
     fn paint_the_drag(&mut self, ui: &egui::Ui, target: egui::Rect, side: Side) {
         let empezo = Instant::now();
         ui.painter()
-            .rect_filled(half(target, side), 0.0, self.theme.destino_del_arrastre());
+            .rect_filled(half(target, side), 0.0, self.theme.drop_target());
         self.timed_separately += empezo.elapsed();
     }
 
@@ -5727,7 +5727,7 @@ impl Window {
         let empezo = Instant::now();
         let mut marked = 0;
         ui.painter_at(tab_bar)
-            .rect_filled(tab_bar, 0.0, self.theme.fondo());
+            .rect_filled(tab_bar, 0.0, self.theme.background());
 
         for which_tab in 0..self.tabs.len() {
             let sitio = ficha(tab_bar, which_tab, self.tabs.len());
@@ -5738,7 +5738,7 @@ impl Window {
             // «el teclado va aquí», a dos escalas distintas, y darles dos colores diría que son dos
             // estados que no tienen nada que ver.
             if is_the_active_one {
-                pintor.rect_filled(sitio, 0.0, self.theme.foco());
+                pintor.rect_filled(sitio, 0.0, self.theme.focus());
             }
 
             pintor.text(
@@ -5750,9 +5750,9 @@ impl Window {
                 which_tab + 1,
                 metrics.font(),
                 if is_the_active_one {
-                    self.theme.fondo()
+                    self.theme.background()
                 } else {
-                    self.theme.primer_plano()
+                    self.theme.foreground()
                 },
             );
 
@@ -5772,7 +5772,7 @@ impl Window {
                             egui::vec2(2.0 * TAB_BAR_MARGIN + metrics.width(), sitio.height()),
                         ),
                         0.0,
-                        self.theme.fondo(),
+                        self.theme.background(),
                     );
                 }
                 pintor.text(
@@ -5781,7 +5781,7 @@ impl Window {
                     panel::attention_symbol(attention.class),
                     metrics.font(),
                     self.theme
-                        .color_del_reclamo(attention.class, attention.backed),
+                        .attention_color(attention.class, attention.backed),
                 );
                 marked += 1;
             }
@@ -6258,7 +6258,7 @@ impl Window {
 
         self.watcher = watcher;
         for pane in self.all_panes() {
-            pane.to_reread.levantar();
+            pane.to_reread.raise();
         }
     }
 
@@ -6272,7 +6272,7 @@ impl Window {
         ui: &egui::Ui,
         pane: &mut Pane,
         rect: egui::Rect,
-        theme: &Tema,
+        theme: &Theme,
         metrics: &CellMetrics,
         discoverer: &mut fonts::Discoverer,
     ) -> PaneOutcome {
@@ -6335,7 +6335,7 @@ impl Window {
         // rehacen el atlas, pero subir una textura no invalida nada. Sin esta resta, «encolando el
         // pintado» mediría además lo que cuesta decodificar un PNG y reducirlo.
         let color = discoverer.color_cost();
-        let encolado = antes.elapsed().saturating_sub(color.gastado);
+        let encolado = antes.elapsed().saturating_sub(color.spent);
 
         let before_painting_it = Instant::now();
         if let (Some(sitio), Some(dir)) = (panel_split.panel, pane.panel.as_ref()) {
@@ -6475,9 +6475,9 @@ impl eframe::App for Window {
         // **Todas, también las que no se ven**, al revés que el despertador: levantar una bandera es
         // una escritura atómica y lo que compra es que al volver a una pestaña su panel esté al día.
         // Por qué el despertador sí se acota, en [`Window::set_the_alarm`].
-        if self.watcher.esta_ciego() {
+        if self.watcher.is_blind() {
             for pane in self.all_panes() {
-                pane.to_reread.levantar();
+                pane.to_reread.raise();
             }
             ctx.request_repaint_after(POLL_WITHOUT_A_WATCHER);
         }
@@ -6571,7 +6571,7 @@ impl eframe::App for Window {
             let how_much = buscando.elapsed();
             self.timed_separately += how_much;
             self.discovery
-                .anotar(how_much, round.buscados, round.registradas);
+                .anotar(how_much, round.searched, round.registered);
         }
 
         let recorrido = Instant::now();
@@ -6645,7 +6645,7 @@ impl eframe::App for Window {
 
         for divisor in &tiling.dividers {
             ui.painter()
-                .rect_filled(divisor.rect, 0.0, self.theme.divisor());
+                .rect_filled(divisor.rect, 0.0, self.theme.divider());
         }
 
         let rectangulos = tiling.parts;
@@ -6677,12 +6677,12 @@ impl eframe::App for Window {
                 Self::paint_pane(ui, pane, rect, &self.theme, &metrics, &mut self.discoverer);
             // **Se anota por división y no una vez por fotograma**, porque es de la división de la que se
             // restó: dos consolas que rasterizan en el mismo fotograma pagan cada una lo suyo.
-            if suyo.color.rasterized + suyo.color.fallidos > 0 {
-                self.timed_separately += suyo.color.gastado;
+            if suyo.color.rasterized + suyo.color.failed > 0 {
+                self.timed_separately += suyo.color.spent;
                 self.color.anotar(
-                    suyo.color.gastado,
+                    suyo.color.spent,
                     suyo.color.rasterized,
-                    suyo.color.fallidos,
+                    suyo.color.failed,
                 );
             }
             if there_is_a_gesture {
@@ -6703,7 +6703,7 @@ impl eframe::App for Window {
             ui.painter().rect_stroke(
                 rectangulos[at],
                 0.0,
-                egui::Stroke::new(1.0, self.theme.foco()),
+                egui::Stroke::new(1.0, self.theme.focus()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -6818,7 +6818,7 @@ impl eframe::App for Window {
         // primer frame y los huecos de un redimensionado, donde todavía no ha corrido ningún
         // panel: sin esto asoma el gris por defecto de eframe. Y es el mismo fondo que el pintor
         // da por puesto: las celdas que lo llevan no se dibujan.
-        self.theme.fondo().to_normalized_gamma_f32()
+        self.theme.background().to_normalized_gamma_f32()
     }
 }
 
@@ -7344,10 +7344,10 @@ mod tests {
         Pane {
             name,
             pty,
-            pty_output: Puente::nuevo(salida, || {}),
+            pty_output: PtyOutput::new(salida, || {}),
             panel: None,
             panel_state: panel::PanelState::default(),
-            to_reread: Bandera::levantada(),
+            to_reread: Flag::raised(),
             screen: Screen::new(INITIAL_GRID),
             timings: Medida::default(),
             pending_measurement: None,
@@ -7424,7 +7424,7 @@ mod tests {
             tabs,
             active: 0,
             modifiers: egui::Modifiers::NONE,
-            theme: Tema::default(),
+            theme: Theme::default(),
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
             font_size: DEFAULT_FONT_SIZE,
@@ -7485,7 +7485,7 @@ mod tests {
     /// trozos parta el pseudoterminal la salida, y el test daría un número distinto cada vez.
     fn wait_for_it_to_die(pane: &Pane) {
         let limite = Instant::now() + Duration::from_secs(5);
-        while pane.pty_output.sigue_vivo() {
+        while pane.pty_output.is_alive() {
             assert!(Instant::now() < limite, "el programa no terminó");
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -7534,7 +7534,7 @@ mod tests {
         // Y esta es la premisa de la que depende cerrar la ventana solo cuando además no queda
         // cola: el programa ya ha muerto y todavía tiene salida sin mostrar. Cerrar aquí se comería
         // el final, que es la parte que se estaba mirando.
-        assert!(!pane.pty_output.sigue_vivo());
+        assert!(!pane.pty_output.is_alive());
 
         let mut fotogramas = 1;
         while queda {
@@ -7794,11 +7794,11 @@ mod tests {
         let window = Window::with_tabs(&egui::Context::default(), 1, OpeningLayout::DEFAULT, None)
             .expect("no se pudo abrir la ventana con sus dos consolas");
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "la ventana abrió sin nadie que la avise"
         );
         for pane in window.active().panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
 
         publish_at(window.active().panes()[which], r#"{"lines":["ya estoy"]}"#);
@@ -7808,7 +7808,7 @@ mod tests {
             "la ventana no vigila el directorio de esa consola",
         );
         assert!(
-            !window.active().panes()[1 - which].to_reread.recoger(),
+            !window.active().panes()[1 - which].to_reread.take(),
             "publicar en una consola hizo releer a la otra"
         );
     }
@@ -7831,11 +7831,11 @@ mod tests {
         window.watcher = Window::watch(&ctx, window.active().panes());
 
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "una consola sin sitio donde publicar apagó el vigilante de la que sí lo tiene"
         );
         for pane in window.active().panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
         publish_at(window.active().panes()[0], r#"{"lines":["aquí sí"]}"#);
         wait_for_the_flag(
@@ -8136,7 +8136,7 @@ mod tests {
         );
         for (which, pane) in window.all_panes().enumerate() {
             assert!(
-                pane.pty_output.sigue_vivo(),
+                pane.pty_output.is_alive(),
                 "el fallo al abrir se llevó por delante el programa de la consola {which}"
             );
         }
@@ -8627,20 +8627,20 @@ mod tests {
         let mut window = Window::with_tabs(&ctx, 2, OpeningLayout::DEFAULT, None)
             .expect("no se pudo abrir la ventana");
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "la ventana abrió ya ciega, así que esta prueba no probaría nada"
         );
 
         one_frame_with(&mut window, &ctx, chord_with(egui::Key::T));
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "crear una pestaña dejó ciego al vigilante"
         );
 
         window.active = 1;
         one_frame_with(&mut window, &ctx, chord_with(egui::Key::W));
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "cerrar una pestaña dejó ciego al vigilante: se soltó antes de rearmarlo"
         );
     }
@@ -8656,29 +8656,29 @@ mod tests {
             .expect("no se pudo abrir la ventana");
         // Armarlo sobre una ruta que no existe es la forma de conseguir uno ciego sin agotar los del
         // núcleo, que es lo que lo provoca de verdad.
-        window.watcher = Vigilante::nuevo(
+        window.watcher = Watcher::new(
             || {},
             &[(
                 std::path::Path::new("/no/existe/ningun/directorio/de/panel"),
-                Bandera::levantada(),
+                Flag::raised(),
             )],
         );
         assert!(
-            window.watcher.esta_ciego(),
+            window.watcher.is_blind(),
             "no se pudo montar la ceguera que esta prueba necesita"
         );
 
         one_frame_with(&mut window, &ctx, chord_with(egui::Key::T));
 
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "abrir una pestaña no rearmó el vigilante, así que la ceguera dura el resto de la sesión"
         );
     }
 
     #[test]
     fn la_ventana_se_entera_de_lo_que_publica_una_pestaña_recien_creada() {
-        // AC9, y es el hueco que `esta_ciego()` **no** ve: si al crear no se rearmara el vigilante, el
+        // AC9, y es el hueco que `is_blind()` **no** ve: si al crear no se rearmara el vigilante, el
         // viejo seguiría perfectamente sano —vigilando las pestañas de antes— y no estaría ciego. Lo que
         // no haría es mirar la pestaña nueva, así que su panel no se releería **nunca**: un agente que
         // publique ahí trabajaría con un panel congelado desde el primer fotograma. Comprobado quitando
@@ -8693,7 +8693,7 @@ mod tests {
         // El rearme levanta todas las banderas; se recogen para que lo que se mire después sea solo lo
         // que provoca la publicación.
         for pane in window.all_panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
 
         publish_at(window.tabs[1].panes()[0], r#"{"lines":["ya estoy"]}"#);
@@ -8714,14 +8714,14 @@ mod tests {
         let mut window = Window::with_tabs(&ctx, 2, OpeningLayout::DEFAULT, None)
             .expect("no se pudo abrir la ventana");
         for pane in window.all_panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
 
         window.rearm_the_watcher(&ctx);
 
         for (which, pane) in window.all_panes().enumerate() {
             assert!(
-                pane.to_reread.recoger(),
+                pane.to_reread.take(),
                 "la división {which} quedó sin bandera tras rearmar, así que su panel puede haberse \
                  publicado en el hueco y nadie lo vería"
             );
@@ -8762,7 +8762,7 @@ mod tests {
         let pump = window.pump_them_all();
 
         assert!(
-            !window.active().panes()[0].pty_output.sigue_vivo(),
+            !window.active().panes()[0].pty_output.is_alive(),
             "la primera consola debería haber muerto ya"
         );
         assert!(
@@ -8890,7 +8890,7 @@ mod tests {
             window.tabs[1].panes()[0],
             r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
         );
-        window.tabs[1].panes()[0].to_reread.levantar();
+        window.tabs[1].panes()[0].to_reread.raise();
         window.active = 1;
         // Con la pestaña delante, su panel se lee y la alarma queda armada: es el estado de partida.
         what_the_window_expects(&mut window, &ctx);
@@ -8936,7 +8936,7 @@ mod tests {
             in_the_background,
             r#"{"stale_after_minutes":0,"lines":["algo"]}"#,
         );
-        in_the_background.to_reread.levantar();
+        in_the_background.to_reread.raise();
 
         // Fotogramas con la otra pestaña delante. La comprobación de cada uno no es un adorno: si la de
         // fondo se estuviera pintando, la aserción de abajo pasaría sin haber vuelto de ninguna parte.
@@ -10287,7 +10287,7 @@ mod tests {
 
         // Y ahora el productor publica, con su pestaña todavía de fondo.
         publish_at(window.tabs[1].panes()[0], r#"{"lines":["algo publicado"]}"#);
-        window.tabs[1].panes()[0].to_reread.levantar();
+        window.tabs[1].panes()[0].to_reread.raise();
         ui_pass(&mut window, &ctx, area, egui::RawInput::default());
 
         let in_the_background = window.tabs[1].panes()[0].measured;
@@ -10320,7 +10320,7 @@ mod tests {
         window.tabs[1].panes_mut()[0].panel =
             Some(PanelDir::create().expect("crear el directorio"));
         publish_at(window.tabs[1].panes()[0], r#"{"lines":["algo publicado"]}"#);
-        window.tabs[1].panes()[0].to_reread.levantar();
+        window.tabs[1].panes()[0].to_reread.raise();
 
         // El tramo del panel viaja con la vuelta que deja el bombeo, así que hay que bombear. Lo que
         // interpretó se guarda aparte para poder afirmar sobre **el panel** y no sobre la suma: sin
@@ -10675,7 +10675,7 @@ mod tests {
     fn un_clic_lleva_a_la_ficha_que_se_pulso_y_no_a_la_de_al_lado() {
         // **El clic va a la ficha que se pulsa, y eso no es lo mismo que «cambia de pestaña».** Con dos
         // pestañas las dos frases se cumplen a la vez, y por eso sustituir el desplazamiento calculado por
-        // un `Ir(1)` fijo dejaba la suite en verde. Con tres se separan: saltar a la tercera desde la
+        // un `Go(1)` fijo dejaba la suite en verde. Con tres se separan: saltar a la tercera desde la
         // primera son dos, y volver a pulsar la ficha en la que ya se está son **cero**.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([
@@ -10744,9 +10744,9 @@ mod tests {
                 (
                     ficha(tab_bar, 0, 2),
                     "1".to_owned(),
-                    window.theme.primer_plano()
+                    window.theme.foreground()
                 ),
-                (ficha(tab_bar, 1, 2), "2".to_owned(), window.theme.fondo()),
+                (ficha(tab_bar, 1, 2), "2".to_owned(), window.theme.background()),
             ],
             // Empiezan en uno: los ceros son del informe, que es un instrumento, y esto es lo que lee
             // quien tiene la ventana delante.
@@ -10757,7 +10757,7 @@ mod tests {
             .iter()
             .filter_map(|recortada| match &recortada.shape {
                 egui::Shape::Rect(pintada)
-                    if pintada.fill == window.theme.foco()
+                    if pintada.fill == window.theme.focus()
                         && tab_bar.contains_rect(recortada.clip_rect) =>
                 {
                     Some(recortada.clip_rect)
@@ -11428,14 +11428,14 @@ mod tests {
             "dos consolas comparten directorio, así que se pisarían el estado"
         );
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "la ventana abrió sin nadie que la avise"
         );
     }
 
     #[test]
     fn la_ventana_se_entera_de_lo_que_publica_una_consola_de_la_ultima_pestaña() {
-        // **`esta_ciego` no distingue vigilar una pestaña de vigilarlas todas.** Armar el vigilante solo
+        // **`is_blind` no distingue vigilar una pestaña de vigilarlas todas.** Armar el vigilante solo
         // sobre las divisiones de la primera dejaba la suite entera en verde —comprobado mutándolo— y los
         // paneles de las de fondo congelados hasta que alguien mirase esa pestaña, que es exactamente lo
         // contrario de lo que promete el hito. Se publica en la **última** porque es la que se queda fuera
@@ -11444,7 +11444,7 @@ mod tests {
             .expect("no se pudieron abrir las tres pestañas");
         let in_the_background = &window.tabs[2].panes()[1];
         for pane in window.all_panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
 
         publish_at(in_the_background, r#"{"lines":["desde el fondo"]}"#);
@@ -14001,7 +14001,7 @@ mod tests {
         );
         for hoja in arbol.hojas() {
             assert!(
-                hoja.pty_output.sigue_vivo(),
+                hoja.pty_output.is_alive(),
                 "el programa de una consola murió al moverla"
             );
         }
@@ -14285,15 +14285,15 @@ mod tests {
                 ui,
                 tabs[0].panes_mut()[0],
                 area_of(802.0),
-                &Tema::default(),
+                &Theme::default(),
                 &metrics,
                 discoverer,
             );
-            if suyo.color.rasterized + suyo.color.fallidos > 0 {
+            if suyo.color.rasterized + suyo.color.failed > 0 {
                 color.anotar(
-                    suyo.color.gastado,
+                    suyo.color.spent,
                     suyo.color.rasterized,
-                    suyo.color.fallidos,
+                    suyo.color.failed,
                 );
             }
         });
@@ -14701,7 +14701,7 @@ mod tests {
                     ui,
                     pane,
                     rect,
-                    &Tema::default(),
+                    &Theme::default(),
                     &metrics,
                     &mut fonts::Discoverer::default(),
                 );
@@ -14952,7 +14952,7 @@ mod tests {
                 ui,
                 pane,
                 area_of(800.0),
-                &Tema::default(),
+                &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
             );
@@ -14964,7 +14964,7 @@ mod tests {
     fn what_is_visible(pane: &Pane) -> &str {
         &pane
             .panel_state
-            .a_pintar()
+            .last_understood()
             .expect("hay panel que pintar")
             .lines[0]
             .text
@@ -14974,9 +14974,9 @@ mod tests {
     ///
     /// El límite es generoso —cinco segundos— porque lo que mide no es cuánto tarda el núcleo sino si
     /// llega: en la práctica llega en milisegundos.
-    fn wait_for_the_flag(bandera: &Bandera, si_no_llega: &str) {
+    fn wait_for_the_flag(bandera: &Flag, si_no_llega: &str) {
         let limite = Instant::now() + Duration::from_secs(5);
-        while !bandera.recoger() {
+        while !bandera.take() {
             assert!(Instant::now() < limite, "{si_no_llega}");
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -15035,7 +15035,7 @@ mod tests {
         let mut pane = pane_with("sleep 30", 0);
         pane.panel = Some(PanelDir::create().expect("crear el directorio"));
         assert!(
-            pane.panel_state.a_pintar().is_none(),
+            pane.panel_state.last_understood().is_none(),
             "todavía no hay nada publicado"
         );
 
@@ -15111,7 +15111,7 @@ mod tests {
             window.active().panes()[0],
             r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
         );
-        window.active().panes()[0].to_reread.levantar();
+        window.active().panes()[0].to_reread.raise();
         let with_panel = what_the_window_expects(&mut window, &ctx);
 
         assert!(
@@ -15142,7 +15142,7 @@ mod tests {
             window.active().panes()[0],
             r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
         );
-        window.active().panes()[0].to_reread.levantar();
+        window.active().panes()[0].to_reread.raise();
         // Una pasada entera primero, que es donde el panel se lee.
         what_the_window_expects(&mut window, &ctx);
 
@@ -15194,7 +15194,7 @@ mod tests {
         let mut pane = pane_with_panel(r#"{"lines":["lo primero"]}"#);
 
         publish_at(&pane, r#"{"lines":["lo segundo"]}"#);
-        pane.to_reread.levantar();
+        pane.to_reread.raise();
         one_frame_over(&mut pane);
 
         assert_eq!(
@@ -15219,10 +15219,10 @@ mod tests {
         let dir = PanelDir::create().expect("crear el directorio");
         let without_arming = dir.path().join("no-existe");
         window.watcher =
-            Vigilante::nuevo(|| {}, &[(without_arming.as_path(), Bandera::levantada())]);
-        assert!(window.watcher.esta_ciego(), "el respaldo no está activo");
+            Watcher::new(|| {}, &[(without_arming.as_path(), Flag::raised())]);
+        assert!(window.watcher.is_blind(), "el respaldo no está activo");
         for pane in window.active().panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
         // **Dormirla primero, o la aserción de abajo es vacía**: un contexto recién hecho ya pide
         // repintado por su cuenta, así que sin esto pasaría igual con el respaldo sin pedir nada.
@@ -15232,7 +15232,7 @@ mod tests {
 
         for (which, pane) in window.active().panes().into_iter().enumerate() {
             assert!(
-                pane.to_reread.recoger(),
+                pane.to_reread.take(),
                 "sin nadie que avise, el panel de la consola {which} se queda congelado"
             );
         }
@@ -15254,10 +15254,10 @@ mod tests {
         let dir = PanelDir::create().expect("crear el directorio");
         let without_arming = dir.path().join("no-existe");
         window.watcher =
-            Vigilante::nuevo(|| {}, &[(without_arming.as_path(), Bandera::levantada())]);
-        assert!(window.watcher.esta_ciego(), "el respaldo no está activo");
+            Watcher::new(|| {}, &[(without_arming.as_path(), Flag::raised())]);
+        assert!(window.watcher.is_blind(), "el respaldo no está activo");
         for pane in window.all_panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
         put_the_window_to_sleep(&ctx);
 
@@ -15265,7 +15265,7 @@ mod tests {
 
         for (which, pane) in window.tabs[1].panes().into_iter().enumerate() {
             assert!(
-                pane.to_reread.recoger(),
+                pane.to_reread.take(),
                 "el panel de la consola {which} de la pestaña de fondo se queda congelado hasta que \
                  alguien vuelva a mirarla"
             );
@@ -15291,7 +15291,7 @@ mod tests {
                 ui,
                 &mut pane,
                 area_of(800.0),
-                &Tema::default(),
+                &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
             );
@@ -15342,7 +15342,7 @@ mod tests {
                 ui,
                 &mut pane,
                 entera,
-                &Tema::default(),
+                &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
             );
@@ -15380,7 +15380,7 @@ mod tests {
                 ui,
                 &mut pane,
                 entera,
-                &Tema::default(),
+                &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
             );
@@ -16300,7 +16300,7 @@ mod tests {
         let foco_antes = window.active().focus;
         // Las banderas se recogen para que lo único que pueda levantarlas después sea un rearme.
         for pane in window.all_panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
 
         window.graft_the_new_one(
@@ -16321,7 +16321,7 @@ mod tests {
         );
         for (which, pane) in window.all_panes().enumerate() {
             assert!(
-                pane.pty_output.sigue_vivo(),
+                pane.pty_output.is_alive(),
                 "el fallo al partir se llevó por delante el programa de la consola {which}"
             );
         }
@@ -16331,7 +16331,7 @@ mod tests {
         // publicación — que en un agente que acaba de terminar puede no llegar nunca.
         for (which, pane) in window.all_panes().enumerate() {
             assert!(
-                !pane.to_reread.recoger(),
+                !pane.to_reread.take(),
                 "un fallo al partir rearmó el vigilante y levantó la bandera de la consola {which}"
             );
         }
@@ -16481,7 +16481,7 @@ mod tests {
             let pane = &mut suyas[0];
             pane.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
             publish_at(pane, r#"{"lines":["trabajando"]}"#);
-            pane.to_reread.levantar();
+            pane.to_reread.raise();
             pane.refresh_its_panel();
         }
 
@@ -16907,7 +16907,7 @@ mod tests {
 
     #[test]
     fn la_ventana_se_entera_de_lo_que_publica_la_consola_que_acaba_de_nacer() {
-        // El rearme del vigilante, que es lo que `esta_ciego()` **no** ve: sin rearmar, el vigilante viejo
+        // El rearme del vigilante, que es lo que `is_blind()` **no** ve: sin rearmar, el vigilante viejo
         // sigue sano vigilando las de antes, y la que acaba de nacer no se relee **nunca**. Un agente que
         // arrancara ahí trabajaría con un panel congelado desde su primer fotograma.
         let ctx = egui::Context::default();
@@ -16925,7 +16925,7 @@ mod tests {
         // El rearme levanta todas las banderas; se recogen para que lo que se mire después sea solo lo
         // que provoca la publicación.
         for pane in window.all_panes() {
-            pane.to_reread.recoger();
+            pane.to_reread.take();
         }
         let nacida = window.active().where_the_focus_is().expect("el foco vive");
         publish_at(window.active().panes()[nacida], r#"{"lines":["ya estoy"]}"#);
@@ -17217,7 +17217,7 @@ mod tests {
             of_the_one_that_stays.display()
         );
         assert!(
-            !window.watcher.esta_ciego(),
+            !window.watcher.is_blind(),
             "cerrar una consola dejó ciego al vigilante: vio desaparecer el directorio que seguía y a \
              partir de ahí la ventana relee todos los paneles en cada fotograma"
         );
@@ -18499,7 +18499,7 @@ mod tests {
         let realce = shapes
             .iter()
             .find_map(|recortada| match &recortada.shape {
-                egui::Shape::Rect(shape) if shape.stroke.color == Tema::default().foco() => {
+                egui::Shape::Rect(shape) if shape.stroke.color == Theme::default().focus() => {
                     Some(shape.rect)
                 }
                 _ => None,
@@ -18587,7 +18587,7 @@ mod tests {
         let pane = &mut suyas[which];
         pane.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
         publish_at(pane, contenido);
-        pane.to_reread.levantar();
+        pane.to_reread.raise();
         pane.refresh_its_panel();
     }
 
@@ -21259,7 +21259,7 @@ mod tests {
         let pane = &mut panes[which];
         pane.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
         publish_at(pane, contenido);
-        pane.to_reread.levantar();
+        pane.to_reread.raise();
     }
 
     /// Manda hacia atrás la fecha del `panel.json` de una división, para que su panel nazca **rancio de
@@ -21350,7 +21350,7 @@ mod tests {
                 "?".to_owned(),
                 window
                     .theme
-                    .color_del_reclamo(panel_contract::Attention::Wait, true)
+                    .attention_color(panel_contract::Attention::Wait, true)
             )],
             "la ficha de la pestaña de fondo no dijo que su consola te reclama, y no hizo falta abrirla"
         );
@@ -21387,7 +21387,7 @@ mod tests {
                 vec![(
                     ficha(tab_bar, 0, 2),
                     symbol.to_owned(),
-                    window.theme.color_del_reclamo(wins, true)
+                    window.theme.attention_color(wins, true)
                 )],
                 "con «{one}» y «{other}» en la misma pestaña tenía que ganar «{wins:?}»"
             );
@@ -21432,7 +21432,7 @@ mod tests {
                 *color,
                 window
                     .theme
-                    .color_del_reclamo(panel_contract::Attention::Wait, true),
+                    .attention_color(panel_contract::Attention::Wait, true),
                 "con el muerto en la división {muerto}, ganó el reclamo que nadie sostiene y la ficha \
                  manda a la consola que ya no contesta"
             );
@@ -21460,7 +21460,7 @@ mod tests {
                 "⊘".to_owned(),
                 window
                     .theme
-                    .color_del_reclamo(panel_contract::Attention::Block, true)
+                    .attention_color(panel_contract::Attention::Block, true)
             )]
         );
     }
@@ -21512,7 +21512,7 @@ mod tests {
             *color,
             window
                 .theme
-                .color_del_reclamo(panel_contract::Attention::Wait, false),
+                .attention_color(panel_contract::Attention::Wait, false),
             "el reclamo de un panel que ya nace rancio llegó a la ficha como si alguien lo sostuviera"
         );
     }
@@ -21605,7 +21605,7 @@ mod tests {
             .iter()
             .filter_map(|recortada| match &recortada.shape {
                 egui::Shape::Rect(pintada)
-                    if pintada.fill == window.theme.fondo() && suya.contains_rect(pintada.rect) =>
+                    if pintada.fill == window.theme.background() && suya.contains_rect(pintada.rect) =>
                 {
                     Some(pintada.rect)
                 }
@@ -21676,7 +21676,7 @@ mod tests {
                     "?".to_owned(),
                     window
                         .theme
-                        .color_del_reclamo(panel_contract::Attention::Wait, true)
+                        .attention_color(panel_contract::Attention::Wait, true)
                 )],
                 "con «{request:?}» en la misma pestaña tenía que ganar «wait»"
             );
@@ -23096,7 +23096,7 @@ mod tests {
     ///
     /// **Se prueba por el bombeo de la consola y no por la pantalla.** La pantalla ya tiene su prueba en
     /// `term-core`; lo que aquí se ata es que el camino por el que la salida del programa entra en la
-    /// aplicación no arrastre la vista al final — un `desplazar(AlFinal)` de más en `pump`, que es la
+    /// aplicación no arrastre la vista al final — un `scroll_by(ToBottom)` de más en `pump`, que es la
     /// forma más natural de escribir «que se vea siempre lo último», deja el historial inservible y no
     /// rompe ninguna prueba de `term-core`.
     ///

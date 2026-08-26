@@ -228,21 +228,21 @@ mod tests {
         // **La letra final es lo único que los separa**, y es lo que un editor usa para saber que
         // terminaste de arrastrar la selección. Mandar siempre la misma deja el gesto abierto para
         // siempre desde el punto de vista del programa.
-        let apretar = encode(
+        let press = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(4, 9),
             with_the_extended(),
             Modifiers::NONE,
         );
-        let soltar = encode(
+        let release = encode(
             MouseReport::Release(PointerButton::Primary),
             CellPos::from_zero(4, 9),
             with_the_extended(),
             Modifiers::NONE,
         );
 
-        assert_eq!(apretar.as_deref(), Some(&b"\x1b[<0;10;5M"[..]));
-        assert_eq!(soltar.as_deref(), Some(&b"\x1b[<0;10;5m"[..]));
+        assert_eq!(press.as_deref(), Some(&b"\x1b[<0;10;5M"[..]));
+        assert_eq!(release.as_deref(), Some(&b"\x1b[<0;10;5m"[..]));
     }
 
     #[test]
@@ -265,21 +265,21 @@ mod tests {
         // **Silencio, no un byte aproximado.** Cada número viaja en un byte con 32 sumado, así que la
         // 224 no cabe: saturarla en 223 le diría al programa que se pinchó en un sitio donde no se
         // pinchó, y volver a empezar por el 0 sería peor todavía.
-        let dentro = encode(
+        let inside = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(0, 222),
             like_htop(),
             Modifiers::NONE,
         );
-        let fuera = encode(
+        let outside = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(0, 223),
             like_htop(),
             Modifiers::NONE,
         );
 
-        assert!(dentro.is_some(), "la columna 223 sí cabe y se calló");
-        assert_eq!(fuera, None, "la columna 224 no cabe y se mandó igual");
+        assert!(inside.is_some(), "la columna 223 sí cabe y se calló");
+        assert_eq!(outside, None, "la columna 224 no cabe y se mandó igual");
     }
 
     #[test]
@@ -302,7 +302,7 @@ mod tests {
         // **Son banderas distintas porque significan cosas distintas.** Un programa que solo quiere
         // saber dónde se pincha recibiría, si no, un informe por cada celda que el puntero recorre con
         // el botón apretado — decenas por gesto, y ninguno pedido.
-        let solo_clics = MouseReporting {
+        let clicks_only = MouseReporting {
             buttons: true,
             ..MouseReporting::default()
         };
@@ -311,7 +311,7 @@ mod tests {
             encode(
                 MouseReport::Drag(PointerButton::Primary),
                 CellPos::from_zero(1, 1),
-                solo_clics,
+                clicks_only,
                 Modifiers::NONE,
             ),
             None
@@ -320,7 +320,7 @@ mod tests {
             encode(
                 MouseReport::Press(PointerButton::Primary),
                 CellPos::from_zero(1, 1),
-                solo_clics,
+                clicks_only,
                 Modifiers::NONE,
             )
             .is_some(),
@@ -348,21 +348,21 @@ mod tests {
     fn la_rueda_viaja_con_sus_dos_numeros() {
         // 64 y 65, y son lo que hace que la lista de `htop` suba y baje. Intercambiarlos deja la rueda
         // andando al revés, que es un defecto que se nota a diario y no rompe ninguna otra cosa.
-        let arriba = encode(
+        let wheel_up = encode(
             MouseReport::WheelUp,
             CellPos::from_zero(0, 0),
             with_the_extended(),
             Modifiers::NONE,
         );
-        let abajo = encode(
+        let wheel_down = encode(
             MouseReport::WheelDown,
             CellPos::from_zero(0, 0),
             with_the_extended(),
             Modifiers::NONE,
         );
 
-        assert_eq!(arriba.as_deref(), Some(&b"\x1b[<64;1;1M"[..]));
-        assert_eq!(abajo.as_deref(), Some(&b"\x1b[<65;1;1M"[..]));
+        assert_eq!(wheel_up.as_deref(), Some(&b"\x1b[<64;1;1M"[..]));
+        assert_eq!(wheel_down.as_deref(), Some(&b"\x1b[<65;1;1M"[..]));
     }
 
     #[test]

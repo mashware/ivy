@@ -106,11 +106,11 @@ pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
 
     // Se compone de una pasada y con la reserva hecha: el portapapeles puede ser de megabytes y esto
     // corre en el hilo que pinta.
-    let mut cuerpo = Vec::with_capacity(text.len() + OPENS.len() + CLOSES.len());
+    let mut body = Vec::with_capacity(text.len() + OPENS.len() + CLOSES.len());
     if bracketed {
-        cuerpo.extend_from_slice(OPENS);
+        body.extend_from_slice(OPENS);
     }
-    let antes = cuerpo.len();
+    let before = body.len();
 
     // **Cómo sale un salto de línea depende de si hay marca, y meter la pata aquí se ve en pantalla.**
     //
@@ -123,29 +123,29 @@ pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
     // ahí un retorno de carro es mandarle **un carácter de control dentro de un texto**, y lo que hace
     // es insertarlo literal: aparece un cuadro en medio de la orden y `echo` lo imprime. Comprobado en
     // pantalla, que es como se descubrió.
-    let salto = if bracketed { b'\n' } else { b'\r' };
+    let newline = if bracketed { b'\n' } else { b'\r' };
 
     for byte in text.bytes() {
         match byte {
             // El escritorio ya normaliza los pares antes de entregarlo, así que un retorno suelto que
             // llegue aquí venía solo y vale lo mismo que un salto.
-            b'\n' | b'\r' => cuerpo.push(salto),
-            b'\t' => cuerpo.push(b'\t'),
+            b'\n' | b'\r' => body.push(newline),
+            b'\t' => body.push(b'\t'),
             0x00..=0x1f | 0x7f => {}
-            otro => cuerpo.push(otro),
+            other => body.push(other),
         }
     }
 
     // Sin nada que mandar no se manda ni la marca: un envoltorio vacío es ruido que el programa de
     // dentro tiene que interpretar para nada.
-    if cuerpo.len() == antes {
+    if body.len() == before {
         return Vec::new();
     }
 
     if bracketed {
-        cuerpo.extend_from_slice(CLOSES);
+        body.extend_from_slice(CLOSES);
     }
-    cuerpo
+    body
 }
 
 fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
@@ -156,13 +156,13 @@ fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
         return None;
     }
     if modifiers.ctrl
-        && let Some(codigo) = with_ctrl(key)
+        && let Some(control_byte) = with_ctrl(key)
     {
-        return Some(Cow::Owned(vec![codigo]));
+        return Some(Cow::Owned(vec![control_byte]));
     }
     // Si Ctrl acompaña a algo que no es una letra, se cae a la tabla de siempre en vez de callar:
     // Ctrl+Enter manda retorno igual que Enter, y quedarse mudo sería una tecla muerta.
-    let salida: &'static [u8] = match key {
+    let bytes_out: &'static [u8] = match key {
         // Retorno de carro, no salto de línea: es lo que envía un terminal, y lo que el programa
         // de dentro traduce según le convenga.
         Key::Enter => b"\r",
@@ -183,7 +183,7 @@ fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
         Key::ArrowLeft => b"\x1b[D",
         _ => return None,
     };
-    Some(Cow::Borrowed(salida))
+    Some(Cow::Borrowed(bytes_out))
 }
 
 /// Ctrl con una letra da los códigos de control del 1 al 26.
@@ -196,7 +196,7 @@ fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
 /// menú de atajos, no es un contrato. Si mañana cambia, un byte de control cambiaría con él sin
 /// que nada dejara de compilar.
 fn with_ctrl(key: Key) -> Option<u8> {
-    let codigo = match key {
+    let control_byte = match key {
         Key::A => 1,
         Key::B => 2,
         Key::C => 3,
@@ -225,7 +225,7 @@ fn with_ctrl(key: Key) -> Option<u8> {
         Key::Z => 26,
         _ => return None,
     };
-    Some(codigo)
+    Some(control_byte)
 }
 
 #[cfg(test)]
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn las_veintiseis_letras_caen_en_su_sitio_y_ninguna_se_sale() {
-        let letras = [
+        let letters = [
             Key::A,
             Key::B,
             Key::C,
@@ -317,11 +317,11 @@ mod tests {
             Key::Y,
             Key::Z,
         ];
-        for (i, key) in letras.iter().enumerate() {
-            let esperado = (i + 1) as u8;
+        for (i, key) in letters.iter().enumerate() {
+            let expected = (i + 1) as u8;
             assert_eq!(
                 press_with_ctrl(*key),
-                Some(vec![esperado]),
+                Some(vec![expected]),
                 "la letra en la posición {i} no da su código de control"
             );
         }
@@ -419,7 +419,7 @@ mod tests {
         // La capa de debajo manda las dos: la que dice la distribución del teclado y la posición
         // física. En una distribución que no sea la inglesa no coinciden, y hacer caso a la
         // posición mandaría el byte de control **de otra letra**.
-        let en_otra_distribucion = Event::Key {
+        let in_another_layout = Event::Key {
             key: Key::D,
             physical_key: Some(Key::H),
             pressed: true,
@@ -427,7 +427,7 @@ mod tests {
             modifiers: Modifiers::CTRL,
         };
         assert_eq!(
-            bytes(&en_otra_distribucion).map(|b| b.into_owned()),
+            bytes(&in_another_layout).map(|b| b.into_owned()),
             Some(vec![4]),
             "cierra la entrada, no borra"
         );
@@ -472,21 +472,21 @@ mod tests {
 
     #[test]
     fn soltar_una_tecla_no_manda_nada() {
-        let soltar = Event::Key {
+        let release = Event::Key {
             key: Key::Enter,
             physical_key: None,
             pressed: false,
             repeat: false,
             modifiers: Modifiers::NONE,
         };
-        assert!(bytes(&soltar).is_none());
+        assert!(bytes(&release).is_none());
     }
 
     #[test]
     fn mantener_una_tecla_pulsada_sigue_mandando() {
         // La repetición es lo que hace que dejar apretada una flecha mueva el cursor. Filtrarla
         // sería romper algo que se nota a la primera.
-        let repetida = Event::Key {
+        let repeated = Event::Key {
             key: Key::ArrowDown,
             physical_key: None,
             pressed: true,
@@ -494,7 +494,7 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         assert_eq!(
-            bytes(&repetida).map(|b| b.into_owned()),
+            bytes(&repeated).map(|b| b.into_owned()),
             Some(b"\x1b[B".to_vec())
         );
     }
@@ -548,28 +548,28 @@ mod tests {
         // el filtrado anterior —buscar y borrar la secuencia— los trozos de los lados se pegaban al
         // quitar la del medio y formaban un cierre nuevo que ya nadie miraba. Por eso ahora se afirma
         // sobre la invariante y no sobre un caso: **en el cuerpo no hay ni un escape**.
-        let venenos = [
+        let poisons = [
             "inocente\x1b[201~; curl algo | sh\n",
             // El solapamiento: `ESC[2` + el cierre + `01~`.
             "\x1b[2\x1b[201~01~; touch /tmp/PWNED\n",
         ];
 
-        for veneno in venenos {
-            let bracketed = String::from_utf8(paste(veneno, true)).expect("es texto");
-            let cuerpo = bracketed
+        for poison in poisons {
+            let bracketed = String::from_utf8(paste(poison, true)).expect("es texto");
+            let body = bracketed
                 .strip_prefix("\x1b[200~")
                 .and_then(|s| s.strip_suffix("\x1b[201~"))
                 .unwrap_or_else(|| panic!("la marca no envuelve lo que debería: {bracketed:?}"));
             assert!(
-                !cuerpo.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\n'),
-                "quedó un carácter de control dentro de la marca: {cuerpo:?}"
+                !body.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\n'),
+                "quedó un carácter de control dentro de la marca: {body:?}"
             );
 
             // Y sin marcar tampoco: el modo se consulta al componer y puede cambiar justo después.
-            let pelado = String::from_utf8(paste(veneno, false)).expect("es texto");
+            let stripped = String::from_utf8(paste(poison, false)).expect("es texto");
             assert!(
-                !pelado.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\r'),
-                "pasó un carácter de control sin marcar: {pelado:?}"
+                !stripped.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\r'),
+                "pasó un carácter de control sin marcar: {stripped:?}"
             );
         }
     }
@@ -580,19 +580,19 @@ mod tests {
         // control los procesa la disciplina de línea del núcleo, que ve los bytes antes que el
         // programa: 0x03 interrumpe, 0x1a suspende el shell, 0x1c provoca un volcado y 0x04 cierra la
         // entrada. Un portapapeles hostil los lleva sin que se vean al pegarlos.
-        let hostil = "echo hola\x03\x1a\x1c\x04 y sigue\n";
+        let hostile = "echo hola\x03\x1a\x1c\x04 y sigue\n";
 
         for bracketed in [true, false] {
-            let salida = paste(hostil, bracketed);
-            let cuerpo = if bracketed {
-                &salida[6..salida.len() - 6]
+            let bytes_out = paste(hostile, bracketed);
+            let body = if bracketed {
+                &bytes_out[6..bytes_out.len() - 6]
             } else {
-                &salida[..]
+                &bytes_out[..]
             };
-            for byte in cuerpo {
+            for byte in body {
                 assert!(
                     *byte >= 0x20 || *byte == b'\t' || *byte == b'\n' || *byte == b'\r',
-                    "un control llegó al programa: {byte:#04x} en {cuerpo:?}"
+                    "un control llegó al programa: {byte:#04x} en {body:?}"
                 );
             }
         }
@@ -619,8 +619,8 @@ mod tests {
         // **Pero lo que queda al quitarle el escape SÍ se manda, y eso es lo correcto.** `[201~` sin
         // su escape delante es texto corriente: se escribe en la línea, no cierra nada. Tirarlo sería
         // comerse caracteres que el usuario pegó a propósito.
-        let queda = String::from_utf8(paste("\x1b[201~", true)).expect("es texto");
-        assert_eq!(queda, "\x1b[200~[201~\x1b[201~");
+        let left = String::from_utf8(paste("\x1b[201~", true)).expect("es texto");
+        assert_eq!(left, "\x1b[200~[201~\x1b[201~");
     }
 
     #[test]
@@ -728,9 +728,9 @@ impl Chord {
             key: eframe::egui::Key::Space,
         };
         let mut key = None;
-        for parte in text.split('+') {
-            let parte = parte.trim();
-            match parte.to_ascii_lowercase().as_str() {
+        for part in text.split('+') {
+            let part = part.trim();
+            match part.to_ascii_lowercase().as_str() {
                 "ctrl" | "control" => chord.ctrl = true,
                 "shift" | "mayus" | "mayús" | "mayusculas" | "mayúsculas" => chord.shift = true,
                 "alt" => chord.alt = true,
@@ -740,7 +740,7 @@ impl Chord {
                     if key.is_some() {
                         return None;
                     }
-                    key = Some(key_named(parte)?);
+                    key = Some(key_named(part)?);
                 }
             }
         }
@@ -816,14 +816,14 @@ pub struct Keymap {
     /// Pares acorde → acción. **Un vector y no un mapa**: son once como mucho, y recorrer once parejas de
     /// booleanos y un entero es más rápido que resumir el acorde a un número. Se busca una vez por evento
     /// de teclado, que es el camino más caliente del proyecto.
-    tabla: Vec<(Chord, Action)>,
+    table: Vec<(Chord, Action)>,
 }
 
 impl Default for Keymap {
     /// Los de fábrica: los mismos trece de siempre menos pegar, que no llega como tecla.
     fn default() -> Self {
         use eframe::egui::Key;
-        let mando = |key| Chord {
+        let with_the_chord = |key| Chord {
             ctrl: true,
             shift: true,
             alt: false,
@@ -832,25 +832,25 @@ impl Default for Keymap {
         // **El historial va con `Mayúsculas` a secas, y no es una excepción caprichosa.** Sin ella,
         // `RePág` es del programa —un paginador la usa— y quitársela sería romper `less` dentro de esta
         // ventana.
-        let historial = |key| Chord {
+        let scrollback = |key| Chord {
             ctrl: false,
             shift: true,
             alt: false,
             key,
         };
         Self {
-            tabla: vec![
-                (mando(Key::D), Action::SplitRight),
-                (mando(Key::B), Action::SplitDown),
-                (mando(Key::X), Action::ClosePane),
-                (mando(Key::T), Action::NewTab),
-                (mando(Key::W), Action::CloseTab),
-                (mando(Key::ArrowLeft), Action::PreviousTab),
-                (mando(Key::ArrowRight), Action::NextTab),
-                (historial(Key::PageUp), Action::ScrollPageUp),
-                (historial(Key::PageDown), Action::ScrollPageDown),
-                (historial(Key::Home), Action::ScrollToTop),
-                (historial(Key::End), Action::ScrollToBottom),
+            table: vec![
+                (with_the_chord(Key::D), Action::SplitRight),
+                (with_the_chord(Key::B), Action::SplitDown),
+                (with_the_chord(Key::X), Action::ClosePane),
+                (with_the_chord(Key::T), Action::NewTab),
+                (with_the_chord(Key::W), Action::CloseTab),
+                (with_the_chord(Key::ArrowLeft), Action::PreviousTab),
+                (with_the_chord(Key::ArrowRight), Action::NextTab),
+                (scrollback(Key::PageUp), Action::ScrollPageUp),
+                (scrollback(Key::PageDown), Action::ScrollPageDown),
+                (scrollback(Key::Home), Action::ScrollToTop),
+                (scrollback(Key::End), Action::ScrollToBottom),
             ],
         }
     }
@@ -862,9 +862,9 @@ impl Keymap {
     /// **Un acorde que no está en la tabla NO es de la aplicación**, y sus bytes bajan al programa de
     /// dentro. Es la mitad que hace que desatar un atajo sirva de algo.
     pub fn action_for(&self, chord: Chord) -> Option<Action> {
-        self.tabla
+        self.table
             .iter()
-            .find(|(cual, _)| *cual == chord)
+            .find(|(chord_of, _)| *chord_of == chord)
             .map(|(_, action)| *action)
     }
 
@@ -873,19 +873,19 @@ impl Keymap {
     /// Devuelve la acción que se queda **sin** su acorde por el choque, si alguna: dos acciones no pueden
     /// compartir acorde, porque entonces pulsar no sabría cuál de las dos hacer.
     pub fn bind(&mut self, action: Action, chord: Option<Chord>) -> Option<Action> {
-        self.tabla.retain(|(_, cual)| *cual != action);
+        self.table.retain(|(_, chord_of)| *chord_of != action);
         let chord = chord?;
         // **Gana la última leída, y se dice cuál perdió.** Es lo que hace que pegar un juego de atajos
         // encima de otro haga lo que se espera; callarlo dejaría a alguien media hora cambiando una línea
         // que otra de más abajo está pisando.
-        let pisada = self
-            .tabla
+        let displaced = self
+            .table
             .iter()
-            .find(|(cual, _)| *cual == chord)
+            .find(|(chord_of, _)| *chord_of == chord)
             .map(|(_, action)| *action);
-        self.tabla.retain(|(cual, _)| *cual != chord);
-        self.tabla.push((chord, action));
-        pisada
+        self.table.retain(|(chord_of, _)| *chord_of != chord);
+        self.table.push((chord, action));
+        displaced
     }
 }
 
@@ -903,7 +903,7 @@ mod keymap_tests {
         //
         // **La tabla de abajo se copia del documento a mano y a propósito.** Generarla del código mediría
         // que el código es consistente consigo mismo; lo que hay que atar es que lo publicado sea verdad.
-        let publicado = [
+        let published = [
             ("partir-al-lado", "ctrl+shift+d", Action::SplitRight),
             ("partir-debajo", "ctrl+shift+b", Action::SplitDown),
             ("cerrar-division", "ctrl+shift+x", Action::ClosePane),
@@ -917,27 +917,27 @@ mod keymap_tests {
             ("ir-al-final", "shift+end", Action::ScrollToBottom),
         ];
         assert_eq!(
-            publicado.len(),
+            published.len(),
             ALL.len(),
             "el documento publica {} atajos y el código tiene {}",
-            publicado.len(),
+            published.len(),
             ALL.len()
         );
 
         let keymap = Keymap::default();
-        for (name, escrito, action) in publicado {
+        for (name, written, action) in published {
             assert_eq!(
                 Action::from_written(name),
                 Some(action),
                 "el documento publica el nombre «{name}» y el código no lo entiende"
             );
-            let chord = Chord::from_written(escrito).unwrap_or_else(|| {
-                panic!("el documento publica «{escrito}» y el código no lo entiende")
+            let chord = Chord::from_written(written).unwrap_or_else(|| {
+                panic!("el documento publica «{written}» y el código no lo entiende")
             });
             assert_eq!(
                 keymap.action_for(chord),
                 Some(action),
-                "el documento dice que «{name}» es «{escrito}» de fábrica, y no lo es"
+                "el documento dice que «{name}» es «{written}» de fábrica, y no lo es"
             );
         }
     }
@@ -948,13 +948,13 @@ mod keymap_tests {
         // terminal tenía antes de que se pudieran configurar, y una tabla que naciera con otros los
         // cambiaría de golpe a todo el mundo sin que nadie lo pidiera.
         let keymap = Keymap::default();
-        let mando = |key| Chord {
+        let with_the_chord = |key| Chord {
             ctrl: true,
             shift: true,
             alt: false,
             key,
         };
-        let historial = |key| Chord {
+        let scrollback = |key| Chord {
             ctrl: false,
             shift: true,
             alt: false,
@@ -962,25 +962,25 @@ mod keymap_tests {
         };
 
         let factory = [
-            (mando(Key::D), Action::SplitRight),
-            (mando(Key::B), Action::SplitDown),
-            (mando(Key::X), Action::ClosePane),
-            (mando(Key::T), Action::NewTab),
-            (mando(Key::W), Action::CloseTab),
-            (mando(Key::ArrowLeft), Action::PreviousTab),
-            (mando(Key::ArrowRight), Action::NextTab),
-            (historial(Key::PageUp), Action::ScrollPageUp),
-            (historial(Key::PageDown), Action::ScrollPageDown),
-            (historial(Key::Home), Action::ScrollToTop),
-            (historial(Key::End), Action::ScrollToBottom),
+            (with_the_chord(Key::D), Action::SplitRight),
+            (with_the_chord(Key::B), Action::SplitDown),
+            (with_the_chord(Key::X), Action::ClosePane),
+            (with_the_chord(Key::T), Action::NewTab),
+            (with_the_chord(Key::W), Action::CloseTab),
+            (with_the_chord(Key::ArrowLeft), Action::PreviousTab),
+            (with_the_chord(Key::ArrowRight), Action::NextTab),
+            (scrollback(Key::PageUp), Action::ScrollPageUp),
+            (scrollback(Key::PageDown), Action::ScrollPageDown),
+            (scrollback(Key::Home), Action::ScrollToTop),
+            (scrollback(Key::End), Action::ScrollToBottom),
         ];
 
-        for (chord, esperada) in factory {
+        for (chord, expected) in factory {
             assert_eq!(
                 keymap.action_for(chord),
-                Some(esperada),
+                Some(expected),
                 "el acorde de fábrica de «{}» cambió",
-                esperada.as_written()
+                expected.as_written()
             );
         }
         // **Contra los pares que se acaban de ejercer, no contra un número escrito aparte.** Un literal
@@ -1015,13 +1015,13 @@ mod keymap_tests {
     #[test]
     fn desatar_una_accion_le_devuelve_el_acorde_al_programa() {
         let mut keymap = Keymap::default();
-        let suyo = Chord {
+        let its_own = Chord {
             ctrl: true,
             shift: true,
             alt: false,
             key: Key::D,
         };
-        assert_eq!(keymap.action_for(suyo), Some(Action::SplitRight));
+        assert_eq!(keymap.action_for(its_own), Some(Action::SplitRight));
 
         assert_eq!(
             keymap.bind(Action::SplitRight, None),
@@ -1029,7 +1029,7 @@ mod keymap_tests {
             "desatar no pisa a nadie"
         );
         assert_eq!(
-            keymap.action_for(suyo),
+            keymap.action_for(its_own),
             None,
             "el acorde desatado sigue siendo de la aplicación, así que no llega al programa"
         );
@@ -1040,28 +1040,28 @@ mod keymap_tests {
         // **Las dos mitades del criterio**: el nuevo hace lo suyo, y el viejo deja de hacerlo. Sin la
         // segunda, reasignar sumaría acordes en vez de moverlos.
         let mut keymap = Keymap::default();
-        let viejo = Chord {
+        let old = Chord {
             ctrl: true,
             shift: true,
             alt: false,
             key: Key::D,
         };
-        let nuevo = Chord {
+        let new = Chord {
             ctrl: true,
             shift: true,
             alt: false,
             key: Key::E,
         };
 
-        keymap.bind(Action::SplitRight, Some(nuevo));
+        keymap.bind(Action::SplitRight, Some(new));
 
         assert_eq!(
-            keymap.action_for(nuevo),
+            keymap.action_for(new),
             Some(Action::SplitRight),
             "el acorde nuevo no hace nada"
         );
         assert_eq!(
-            keymap.action_for(viejo),
+            keymap.action_for(old),
             None,
             "el acorde viejo sigue partiendo: reasignar sumó en vez de mover, y el programa nunca lo recibe"
         );
@@ -1080,10 +1080,10 @@ mod keymap_tests {
             key: Key::X,
         };
 
-        let pisada = keymap.bind(Action::SplitRight, Some(of_closing));
+        let displaced = keymap.bind(Action::SplitRight, Some(of_closing));
 
         assert_eq!(
-            pisada,
+            displaced,
             Some(Action::ClosePane),
             "no se dijo qué acción se quedaba sin acorde"
         );
@@ -1128,7 +1128,7 @@ mod keymap_tests {
         // **`Key::from_name` distingue mayúsculas y quien teclea un fichero no.** Comprobado ejecutándolo:
         // `F4` sí y `f4` no, `PageUp` sí y `pageup` no. Sin esto, la mitad de los acordes que alguien
         // escribiría a mano se rechazarían sin que se entienda por qué.
-        for (text, esperada) in [
+        for (text, expected) in [
             ("ctrl+f4", Key::F4),
             ("ctrl+F4", Key::F4),
             ("shift+pageup", Key::PageUp),
@@ -1138,7 +1138,7 @@ mod keymap_tests {
         ] {
             assert_eq!(
                 Chord::from_written(text).map(|a| a.key),
-                Some(esperada),
+                Some(expected),
                 "«{text}» no se entendió"
             );
         }
@@ -1146,7 +1146,7 @@ mod keymap_tests {
         // **Y los alias, en los dos idiomas.** `prior` y `next` son como los llaman los terminales de
         // siempre — y como los llamaba el documento de este proyecto antes de que nadie comprobara que no
         // existen. Los del español están porque el fichero se escribe en español.
-        for (text, esperada) in [
+        for (text, expected) in [
             ("shift+prior", Key::PageUp),
             ("shift+next", Key::PageDown),
             ("shift+repág", Key::PageUp),
@@ -1157,7 +1157,7 @@ mod keymap_tests {
         ] {
             assert_eq!(
                 Chord::from_written(text).map(|a| a.key),
-                Some(esperada),
+                Some(expected),
                 "«{text}» no se entendió"
             );
         }
@@ -1211,12 +1211,12 @@ mod keymap_tests {
     #[test]
     fn las_acciones_se_escriben_con_y_sin_eñe() {
         for action in ALL {
-            let escrita = action.as_written();
-            assert_eq!(Action::from_written(escrita), Some(action));
+            let written = action.as_written();
+            assert_eq!(Action::from_written(written), Some(action));
             assert_eq!(
-                Action::from_written(&escrita.replace('ñ', "n")),
+                Action::from_written(&written.replace('ñ', "n")),
                 Some(action),
-                "«{escrita}» sin eñe no se entendió"
+                "«{written}» sin eñe no se entendió"
             );
         }
         assert_eq!(
@@ -1244,15 +1244,15 @@ mod keymap_tests {
     fn cada_accion_esta_publicada_en_el_documento_de_configuracion() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
-        let sin_publicar: Vec<&str> = ALL
+        let unpublished: Vec<&str> = ALL
             .iter()
             .map(|action| action.as_written())
             .filter(|name| !DOCUMENT.contains(&format!("`{name}`")))
             .collect();
 
         assert!(
-            sin_publicar.is_empty(),
-            "estas acciones se pueden configurar y el documento no las publica: {sin_publicar:?}. \
+            unpublished.is_empty(),
+            "estas acciones se pueden configurar y el documento no las publica: {unpublished:?}. \
              Quien lea el documento no sabría que existen, y quien lo siga escribiría una clave que \
              la aplicación rechaza"
         );

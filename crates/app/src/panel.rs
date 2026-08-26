@@ -15,7 +15,7 @@ use eframe::egui::{Align2, Color32, Painter, Pos2, Rect};
 use panel_contract::{Attention, Line, Mark, Panel, Problem, Style};
 
 use crate::painter::CellMetrics;
-use crate::theme::Tema;
+use crate::theme::Theme;
 
 /// Con cuántas celdas de la fuente nace el panel de una división.
 ///
@@ -110,13 +110,13 @@ pub fn set_aside(pane: Rect, cell_width: f32, panel_cells: Option<usize>) -> Pan
     };
 
     let in_points = cells as f32 * cell_width;
-    let disponible = (pane.width() - MINIMUM_CONSOLE * cell_width).max(0.0);
-    let corte = pane.right() - in_points.min(disponible);
+    let available = (pane.width() - MINIMUM_CONSOLE * cell_width).max(0.0);
+    let cut = pane.right() - in_points.min(available);
 
     PanelTiling {
-        console: Rect::from_min_max(pane.left_top(), Pos2::new(corte, pane.bottom())),
+        console: Rect::from_min_max(pane.left_top(), Pos2::new(cut, pane.bottom())),
         panel: Some(Rect::from_min_max(
-            Pos2::new(corte, pane.top()),
+            Pos2::new(cut, pane.top()),
             pane.right_bottom(),
         )),
     }
@@ -155,19 +155,19 @@ pub struct AttentionState {
 /// orden de los campos en el fichero, así que quien los reordenara —o metiera uno en medio— cambiaría
 /// cuál gana **en silencio**.
 impl Ord for AttentionState {
-    fn cmp(&self, otro: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // **Se destructura para que un campo nuevo no compile.** Comparando por `self.campo` a mano, el
         // día que este tipo gane un tercer campo el orden lo ignoraría en silencio y dejaría de ser
         // coherente con el `Eq` derivado — que es justo lo que el orden de [`Attention`] evita con su
         // `match` exhaustivo, y la razón de que aquí no haya un `derive`.
         let Self { class, backed } = self;
-        class.cmp(&otro.class).then(backed.cmp(&otro.backed))
+        class.cmp(&other.class).then(backed.cmp(&other.backed))
     }
 }
 
 impl PartialOrd for AttentionState {
-    fn partial_cmp(&self, otro: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(otro))
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -180,7 +180,7 @@ impl PartialOrd for AttentionState {
 /// decirlo esconde a un productor roto detrás de un resumen plausible de hace una hora.
 #[derive(Default)]
 pub struct PanelState {
-    ultimo_bueno: Option<Panel>,
+    last_good: Option<Panel>,
     /// Lo maquetado, y para qué se maquetó.
     ///
     /// **Existe por coste, y el escenario es presente**: mientras una consola vuelca, la ventana
@@ -211,14 +211,14 @@ impl PanelState {
     pub fn refresh(&mut self, dir: &std::path::Path) {
         // La fecha con la que se compara es la de la última lectura buena, que es la que el propio
         // contrato devuelve. Guardarla aparte sería tener dos copias del mismo dato.
-        let visto = self
-            .ultimo_bueno
+        let seen = self
+            .last_good
             .as_ref()
             .and_then(|panel| panel.written_at);
 
-        match panel_contract::read_if_newer(dir, visto) {
+        match panel_contract::read_if_newer(dir, seen) {
             Ok(Some(panel)) => {
-                self.ultimo_bueno = Some(panel);
+                self.last_good = Some(panel);
                 self.problem = None;
                 self.layout = None;
             }
@@ -240,8 +240,8 @@ impl PanelState {
     /// de la aplicación— y dejarlo como método de producción sería una puerta abierta a que alguien
     /// vuelva a decidir «hay panel» por su cuenta, que es justo lo que [`PanelState::is_visible`] centraliza.
     #[cfg(test)]
-    pub(crate) fn a_pintar(&self) -> Option<&Panel> {
-        self.ultimo_bueno.as_ref()
+    pub(crate) fn last_understood(&self) -> Option<&Panel> {
+        self.last_good.as_ref()
     }
 
     /// Si esta consola tiene algo que enseñar, sea del productor o de la propia aplicación.
@@ -253,8 +253,8 @@ impl PanelState {
     /// **Que el fichero no exista todavía no cuenta**, y esa es la raya que sostiene la promesa de que
     /// una consola sin productor se ve exactamente como antes de este hito: no hay panel, no se
     /// descuenta ancho, no hay nada.
-    pub fn is_visible(&self, ahora: SystemTime) -> bool {
-        self.ultimo_bueno.is_some() || self.warning(ahora).is_some()
+    pub fn is_visible(&self, now: SystemTime) -> bool {
+        self.last_good.is_some() || self.warning(now).is_some()
     }
 
     /// Qué reclama esta división **ahora**, si reclama algo.
@@ -266,8 +266,8 @@ impl PanelState {
     /// **Sin panel bueno no hay reclamo**, aunque la aplicación tenga algo que confesar: lo que se
     /// confiesa entonces es que no hay panel, y un panel que no se ha podido leer nunca no dijo nada
     /// que reclamar.
-    pub fn attention(&self, ahora: SystemTime) -> Option<AttentionState> {
-        self.attention_with(self.warning(ahora).is_none())
+    pub fn attention(&self, now: SystemTime) -> Option<AttentionState> {
+        self.attention_with(self.warning(now).is_none())
     }
 
     /// Lo mismo, para quien ya tiene el aviso en la mano.
@@ -276,7 +276,7 @@ impl PanelState {
     /// pintado ya lo necesita entero, y volver a pedirlo aquí solo para preguntarle si es `None` cuesta
     /// un formateo de cadena en cada fotograma de una ventana que puede estar repintándose a sesenta.
     fn attention_with(&self, nothing_to_confess: bool) -> Option<AttentionState> {
-        let class = self.ultimo_bueno.as_ref()?.attention?;
+        let class = self.last_good.as_ref()?.attention?;
         // **Lo terminado no necesita a nadie detrás.** Quien acabó deja de publicar *por definición*,
         // así que el silencio no desmiente su «terminó y nadie lo ha mirado»: es su estado normal. Sin
         // esta excepción, media hora después de acabar todo lo terminado se apagaría — y encontrar por
@@ -294,18 +294,18 @@ impl PanelState {
     /// bandera decide si se pinta la identidad de la división, no si la aplicación puede ser honesta.
     /// Un productor que la apagara para esconder que su panel está roto sería justo el caso que esto
     /// viene a impedir.
-    fn warning(&self, ahora: SystemTime) -> Option<String> {
+    fn warning(&self, now: SystemTime) -> Option<String> {
         // **El fichero que todavía no existe es la excepción, y va primero por eso.** El resto se
         // ordena por lo que hay que decir: primero los fallos de lectura, que son lo más reciente que
         // se sabe, y solo si no hay ninguno se mira el reloj.
-        match (&self.problem, &self.ultimo_bueno) {
-            (Some(cual), _) if is_a_missing_file(cual) => self
-                .ultimo_bueno
+        match (&self.problem, &self.last_good) {
+            (Some(problem), _) if is_a_missing_file(problem) => self
+                .last_good
                 .as_ref()
                 .map(|_| "el fichero del panel ya no está".to_owned()),
-            (Some(cual), Some(_)) => Some(format!("lo que se ve no es lo último: {cual}")),
-            (Some(cual), None) => Some(format!("sin panel: {cual}")),
-            (None, Some(panel)) if panel.is_stale_at(ahora) => Some(no_news(panel, ahora)),
+            (Some(problem), Some(_)) => Some(format!("lo que se ve no es lo último: {problem}")),
+            (Some(problem), None) => Some(format!("sin panel: {problem}")),
+            (None, Some(panel)) if panel.is_stale_at(now) => Some(no_news(panel, now)),
             (None, _) => None,
         }
     }
@@ -321,13 +321,13 @@ impl PanelState {
     /// hay que volver cuando ese número cambie. Sin eso, un panel que se marcó viejo a los cinco
     /// minutos seguiría diciendo «5 min» tres horas después — acertando en lo cualitativo y mintiendo
     /// justo en el dato que sirve para decidir si el agente está muerto o solo lento.
-    pub fn how_long_until_warning(&self, ahora: SystemTime) -> Option<Duration> {
+    pub fn how_long_until_warning(&self, now: SystemTime) -> Option<Duration> {
         // Con un problema el aviso ya está puesto y no cambia con el tiempo: no hay a qué volver.
         if self.problem.is_some() {
             return None;
         }
-        let panel = self.ultimo_bueno.as_ref()?;
-        let silence = ahora.duration_since(panel.written_at?).ok()?;
+        let panel = self.last_good.as_ref()?;
+        let silence = now.duration_since(panel.written_at?).ok()?;
 
         match panel.stale_after.checked_sub(silence) {
             // Todavía no es viejo: lo próximo que cambia es que lo sea.
@@ -342,11 +342,11 @@ impl PanelState {
         &mut self,
         id: &str,
         width: usize,
-        theme: &Tema,
+        theme: &Theme,
         warning: Option<String>,
         attention: Option<AttentionState>,
     ) -> Option<&[Row]> {
-        if self.ultimo_bueno.is_none() && warning.is_none() {
+        if self.last_good.is_none() && warning.is_none() {
             return None;
         }
 
@@ -354,12 +354,12 @@ impl PanelState {
         // el aviso —que sí está— y su clase solo cambia al releer el fichero, que tira la maqueta
         // entera. Meterlo sería un término que ninguna prueba puede tumbar. Quien cambie el criterio de
         // «sostenido» y lo despegue del aviso tiene que añadirlo aquí.
-        let vigente =
+        let still_valid =
             matches!(&self.layout, Some(done) if done.width == width && done.warning == warning);
-        if !vigente {
+        if !still_valid {
             self.layout = Some(PanelLayout {
                 rows: lay_out(
-                    self.ultimo_bueno.as_ref(),
+                    self.last_good.as_ref(),
                     id,
                     width,
                     theme,
@@ -384,8 +384,8 @@ fn is_a_missing_file(problem: &Problem) -> bool {
 /// **Sin cuánto cuando el plazo es de menos de un minuto**: el contrato permite un
 /// `stale_after_minutes` de cero, y «sin noticias desde hace 0 min» un segundo después de publicar se
 /// lee como un fallo de la aplicación, no como una confesión.
-fn no_news(panel: &Panel, ahora: SystemTime) -> String {
-    match ahora.duration_since(panel.written_at.unwrap_or(ahora)) {
+fn no_news(panel: &Panel, now: SystemTime) -> String {
+    match now.duration_since(panel.written_at.unwrap_or(now)) {
         Ok(silence) if silence.as_secs() >= 60 => {
             format!("sin noticias desde hace {}", in_words(silence))
         }
@@ -399,10 +399,10 @@ fn no_news(panel: &Panel, ahora: SystemTime) -> String {
 /// número que cambia cada segundo en una esquina de la pantalla es ruido, no información — y cada
 /// cambio cuesta un fotograma, porque hay que despertar a la ventana para pintarlo.
 fn in_words(how_much: Duration) -> String {
-    let minutos = how_much.as_secs() / 60;
-    match minutos {
-        0..=119 => format!("{minutos} min"),
-        _ => format!("{} h", minutos / 60),
+    let minutes = how_much.as_secs() / 60;
+    match minutes {
+        0..=119 => format!("{minutes} min"),
+        _ => format!("{} h", minutes / 60),
     }
 }
 
@@ -412,13 +412,13 @@ fn in_words(how_much: Duration) -> String {
 /// mientras se digan minutos se vuelve al siguiente minuto, y cuando se digan horas, a la siguiente
 /// hora.
 fn until_the_next_step(silence: Duration) -> Duration {
-    let paso = if silence.as_secs() < 2 * 60 * 60 {
+    let step = if silence.as_secs() < 2 * 60 * 60 {
         60
     } else {
         60 * 60
     };
 
-    Duration::from_secs(paso - silence.as_secs() % paso)
+    Duration::from_secs(step - silence.as_secs() % step)
 }
 
 /// Lo más largo que se pinta de una línea, en caracteres.
@@ -541,23 +541,23 @@ fn lay_out(
     panel: Option<&Panel>,
     id: &str,
     width: usize,
-    theme: &Tema,
+    theme: &Theme,
     warning: Option<&str>,
     attention: Option<AttentionState>,
 ) -> Vec<Row> {
     let mut rows = Vec::new();
 
     if panel.is_none_or(|panel| panel.header) {
-        let fase = panel.and_then(|panel| panel.phase.as_deref());
-        let identidad = match fase {
-            Some(fase) => format!("{id} · {fase}"),
+        let phase = panel.and_then(|panel| panel.phase.as_deref());
+        let identity = match phase {
+            Some(phase) => format!("{id} · {phase}"),
             None => id.to_owned(),
         };
         wrap(
             &mut rows,
             0,
-            &sanitize(&identidad),
-            theme.color_del_panel(None, None),
+            &sanitize(&identity),
+            theme.panel_color(None, None),
             width,
         );
     }
@@ -575,7 +575,7 @@ fn lay_out(
                 attention_symbol(attention.class),
                 attention_text(attention.class)
             ),
-            theme.color_del_reclamo(attention.class, attention.backed),
+            theme.attention_color(attention.class, attention.backed),
             width,
         );
     }
@@ -587,7 +587,7 @@ fn lay_out(
             &mut rows,
             0,
             &sanitize(warning),
-            theme.color_del_panel(None, Some(Style::Warn)),
+            theme.panel_color(None, Some(Style::Warn)),
             width,
         );
     }
@@ -606,22 +606,22 @@ fn lay_out(
         return rows;
     };
 
-    for bloque in blocks(&panel.lines) {
+    for block in blocks(&panel.lines) {
         // **El ancho de la columna se calcula por bloque, y esa es la regla del contrato.** Con un
         // ancho global, un solo bloque con una referencia larga desplazaría el texto de todos los
         // demás, y lo que el panel gana alineando lo perdería en margen desperdiciado.
         // **Y la columna se acota contra el ancho del panel.** El contrato no le pone techo a la
         // referencia, así que una sola larguísima fijaría un ancho de columna que empuja el texto de
         // todo su bloque fuera del rectángulo. Lo que no cabe se corta, como se corta el texto.
-        let column = bloque
+        let column = block
             .iter()
             .filter_map(|line| line.reference.as_deref())
-            .map(|referencia| sanitize(referencia).chars().count())
+            .map(|reference| sanitize(reference).chars().count())
             .max()
             .unwrap_or(0)
             .min(width.saturating_sub(MINIMUM_SLOT).saturating_sub(3));
 
-        for line in bloque {
+        for line in block {
             rows.extend(lay_out_line(line, column, width, theme));
         }
     }
@@ -649,13 +649,13 @@ fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
 }
 
 /// Maqueta una línea: su símbolo, su referencia alineada, su sangría y su texto envuelto.
-fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Tema) -> Vec<Row> {
-    let color = theme.color_del_panel(line.mark, line.style);
-    let referencia = line.reference.as_deref().map(sanitize).unwrap_or_default();
+fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<Row> {
+    let color = theme.panel_color(line.mark, line.style);
+    let reference = line.reference.as_deref().map(sanitize).unwrap_or_default();
     let text = sanitize(&line.text);
 
     // Un hueco de verdad no lleva prefijo ni ocupa columna: es solo una fila en blanco.
-    if text.is_empty() && referencia.is_empty() && line.mark.is_none() {
+    if text.is_empty() && reference.is_empty() && line.mark.is_none() {
         return vec![Row {
             column: 0,
             text: String::new(),
@@ -668,45 +668,45 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Tema) -> Vec<R
     // —forma legal: el contrato no le pone techo— sacaba esa fila entera fuera del rectángulo y con
     // ella todas sus continuaciones. Lo que sobra de la referencia se corta, igual que se corta el
     // texto: lo que no cabe no se puede leer, y fingir que sí desplaza todo lo demás.
-    let tope = width.saturating_sub(MINIMUM_SLOT);
+    let head_cap = width.saturating_sub(MINIMUM_SLOT);
     // Se corta al ancho de la columna, que ya viene acotado contra el panel: más larga que su columna,
     // la referencia empujaría el texto de su propia línea y rompería la alineación del bloque.
-    let referencia: String = referencia.chars().take(column).collect();
+    let reference: String = reference.chars().take(column).collect();
 
-    let mut cabeza = String::new();
+    let mut head = String::new();
     match line.mark {
-        Some(mark) => cabeza.push(symbol(mark)),
+        Some(mark) => head.push(symbol(mark)),
         // El hueco del símbolo se reserva también sin marca: es lo que mantiene el texto de todas las
         // líneas en la misma columna, que es de lo que va alinear.
-        None => cabeza.push(' '),
+        None => head.push(' '),
     }
-    cabeza.push(' ');
+    head.push(' ');
     if column > 0 {
-        cabeza.push_str(&format!("{referencia:column$} "));
+        head.push_str(&format!("{reference:column$} "));
     }
     // La sangría se acota contra lo mismo: un `indent` de 40 celdas es forma legal —el contrato admite
     // hasta 64— y en un panel de 36 dejaría la continuación fuera del rectángulo, invisible y contada
     // como fila visible, comiéndose renglones y falseando el aviso de cuántas faltan.
-    cabeza.push_str(&" ".repeat(line.indent.min(tope.saturating_sub(cabeza.chars().count()))));
+    head.push_str(&" ".repeat(line.indent.min(head_cap.saturating_sub(head.chars().count()))));
 
-    let indent = cabeza.chars().count().min(tope);
+    let indent = head.chars().count().min(head_cap);
     let mut rows = Vec::new();
     wrap(&mut rows, indent, &text, color, width);
 
     // La cabeza se pega a la primera fila; las de continuación arrancan ya sangradas, que es lo que
     // alinea la envoltura bajo el texto y no bajo el símbolo.
     match rows.first_mut() {
-        Some(primera) => {
-            primera.text = format!("{cabeza}{}", primera.text);
+        Some(first) => {
+            first.text = format!("{head}{}", first.text);
             // **Y la primera fila arranca en cero, lleve texto o no.** La rama de texto vacío de la
             // envoltura devuelve su sangría —correcto para una continuación, no para la fila que lleva
             // la cabeza pegada—, así que una línea con marca y sin texto salía desplazada por el ancho
             // de su propio símbolo. Es forma legal del contrato.
-            primera.column = 0;
+            first.column = 0;
         }
         None => rows.push(Row {
             column: 0,
-            text: cabeza,
+            text: head,
             color,
         }),
     }
@@ -720,9 +720,9 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Tema) -> Vec<R
 /// no sirven para alinear.
 fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: usize) {
     let slot = width.saturating_sub(indent).max(MINIMUM_SLOT);
-    let mut pendiente: Vec<&str> = text.split_whitespace().rev().collect();
+    let mut pending: Vec<&str> = text.split_whitespace().rev().collect();
 
-    if pendiente.is_empty() {
+    if pending.is_empty() {
         rows.push(Row {
             column: indent,
             text: String::new(),
@@ -731,29 +731,29 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
         return;
     }
 
-    while let Some(palabra) = pendiente.pop() {
+    while let Some(word) = pending.pop() {
         let mut line = String::new();
-        let mut palabra = palabra;
+        let mut word = word;
         loop {
-            let cabe = slot - line.chars().count();
-            if palabra.chars().count() > cabe {
+            let room = slot - line.chars().count();
+            if word.chars().count() > room {
                 if line.is_empty() {
                     // Una palabra sola más larga que el hueco: se parte por caracteres, porque
                     // dejarla entera desbordaría el panel y saltar de línea no la haría caber nunca.
-                    let corte = palabra
+                    let cut = word
                         .char_indices()
-                        .nth(cabe)
-                        .map_or(palabra.len(), |(i, _)| i);
-                    line.push_str(&palabra[..corte]);
-                    pendiente.push(&palabra[corte..]);
+                        .nth(room)
+                        .map_or(word.len(), |(i, _)| i);
+                    line.push_str(&word[..cut]);
+                    pending.push(&word[cut..]);
                 }
                 break;
             }
-            line.push_str(palabra);
-            match pendiente.last() {
-                Some(siguiente) if line.chars().count() + 1 + siguiente.chars().count() <= slot => {
+            line.push_str(word);
+            match pending.last() {
+                Some(next) if line.chars().count() + 1 + next.chars().count() <= slot => {
                     line.push(' ');
-                    palabra = pendiente.pop().expect("acabo de mirarla");
+                    word = pending.pop().expect("acabo de mirarla");
                 }
                 _ => break,
             }
@@ -784,19 +784,19 @@ pub fn paint(
     painter: &Painter,
     state: &mut PanelState,
     id: &str,
-    theme: &Tema,
+    theme: &Theme,
     metrics: &CellMetrics,
-    ahora: SystemTime,
+    now: SystemTime,
     discoverer: &mut crate::fonts::Discoverer,
 ) {
     let rect = painter.clip_rect();
-    painter.rect_filled(rect, 0.0, theme.fondo_del_panel());
+    painter.rect_filled(rect, 0.0, theme.panel_background());
 
     // El ancho en celdas se descuenta el margen de los dos lados aunque solo se pinte el de la
     // izquierda: sin el de la derecha, la envoltura llenaría hasta el borde exacto del panel y el texto
     // quedaría pegado a la consola de al lado.
     let width = ((rect.width() / metrics.width()) as usize).saturating_sub(2 * MARGIN as usize);
-    let warning = state.warning(ahora);
+    let warning = state.warning(now);
     let attention = state.attention_with(warning.is_none());
     let Some(rows) = state.lay_out_if_needed(id, width, theme, warning, attention) else {
         return;
@@ -809,11 +809,11 @@ pub fn paint(
     if fit == 0 {
         return;
     }
-    let (visibles, sobran) = clip(rows, fit);
+    let (visible, leftover) = clip(rows, fit);
 
-    let izquierda = rect.left() + MARGIN * metrics.width();
-    for (n, row) in visibles.iter().enumerate() {
-        let x = izquierda + row.column as f32 * metrics.width();
+    let text_left = rect.left() + MARGIN * metrics.width();
+    for (n, row) in visible.iter().enumerate() {
+        let x = text_left + row.column as f32 * metrics.width();
         let y = rect.top() + n as f32 * metrics.height();
         if row.text.is_empty() {
             continue;
@@ -831,14 +831,14 @@ pub fn paint(
         );
     }
 
-    if sobran > 0 {
-        let y = rect.top() + (visibles.len() as f32) * metrics.height();
+    if leftover > 0 {
+        let y = rect.top() + (visible.len() as f32) * metrics.height();
         painter.text(
-            Pos2::new(izquierda, y),
+            Pos2::new(text_left, y),
             Align2::LEFT_TOP,
-            format!("… {sobran} más"),
+            format!("… {leftover} más"),
             metrics.font(),
-            theme.color_del_panel(Some(Mark::Pending), None),
+            theme.panel_color(Some(Mark::Pending), None),
         );
     }
 }
@@ -851,8 +851,8 @@ fn clip(rows: &[Row], fit: usize) -> (&[Row], usize) {
     if rows.len() <= fit {
         return (rows, 0);
     }
-    let visibles = fit.saturating_sub(1);
-    (&rows[..visibles], rows.len() - visibles)
+    let visible = fit.saturating_sub(1);
+    (&rows[..visible], rows.len() - visible)
 }
 
 #[cfg(test)]
@@ -861,27 +861,27 @@ mod tests {
     use panel_contract::{PANEL_FILE, PanelDir};
 
     /// Un panel leído de un fichero de verdad, para probar la maqueta sin pasar por el pintado.
-    fn panel_with(fichero: &str) -> Panel {
+    fn panel_with(file: &str) -> Panel {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, fichero);
+        publish(&dir, file);
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        state.a_pintar().expect("hay panel").clone()
+        state.last_understood().expect("hay panel").clone()
     }
 
-    fn publicar(dir: &PanelDir, contenido: &str) {
-        std::fs::write(dir.path().join(PANEL_FILE), contenido).expect("publicar el panel");
+    fn publish(dir: &PanelDir, content: &str) {
+        std::fs::write(dir.path().join(PANEL_FILE), content).expect("publicar el panel");
     }
 
     /// Adelanta la fecha del fichero para que la relectura la vea cambiada.
     ///
     /// A mano y no dejándolo al reloj: dos escrituras seguidas caen dentro del mismo tic en algunos
     /// sistemas de ficheros, y entonces la prueba pasaría o fallaría según la máquina.
-    fn envejecer(dir: &PanelDir, segundos: u64) {
-        let ruta = dir.path().join(PANEL_FILE);
-        std::fs::File::open(&ruta)
+    fn age_the_file(dir: &PanelDir, seconds: u64) {
+        let path = dir.path().join(PANEL_FILE);
+        std::fs::File::open(&path)
             .expect("abrir")
-            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(segundos))
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(seconds))
             .expect("mover la fecha");
     }
 
@@ -916,9 +916,9 @@ mod tests {
     /// interactivo sin sitio para escribir mientras su panel conserva sus treinta y seis columnas.
     #[test]
     fn en_una_division_estrecha_el_panel_cede_y_la_consola_conserva_su_suelo() {
-        let estrecha = (MINIMUM_CONSOLE + 4.0) * CELL_WIDTH;
+        let narrow = (MINIMUM_CONSOLE + 4.0) * CELL_WIDTH;
 
-        let slot = set_aside(pane_of(estrecha), CELL_WIDTH, Some(DEFAULT_WIDTH));
+        let slot = set_aside(pane_of(narrow), CELL_WIDTH, Some(DEFAULT_WIDTH));
 
         assert_eq!(
             slot.panel.expect("hay panel").width(),
@@ -963,11 +963,11 @@ mod tests {
     /// rectángulo: la división se ve exactamente como antes de que existiera el panel.
     #[test]
     fn sin_panel_que_pintar_la_consola_se_queda_con_todo() {
-        let entera = pane_of(800.0);
+        let whole = pane_of(800.0);
 
-        let slot = set_aside(entera, CELL_WIDTH, None);
+        let slot = set_aside(whole, CELL_WIDTH, None);
 
-        assert_eq!(slot.console, entera);
+        assert_eq!(slot.console, whole);
         assert!(slot.panel.is_none());
     }
 
@@ -980,63 +980,63 @@ mod tests {
     /// Devuelve las formas enteras y no solo su texto porque dos propiedades del pintado no son
     /// texto: **el fondo**, que es lo único que separa el panel de su consola, y **dónde cae** cada
     /// fila.
-    fn what_gets_queued(fichero: &str, sitio: Rect) -> Vec<eframe::egui::Shape> {
+    fn what_gets_queued(file: &str, place: Rect) -> Vec<eframe::egui::Shape> {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, fichero);
+        publish(&dir, file);
         let mut state = PanelState::default();
         state.refresh(dir.path());
         assert!(
-            state.a_pintar().is_some(),
+            state.last_understood().is_some(),
             "el fichero de la prueba no se leyó"
         );
 
-        pintando(&mut state, sitio, SystemTime::now())
+        paint_the_state(&mut state, place, SystemTime::now())
     }
 
     /// Pinta el estado que se le dé, en el momento que se le diga.
     ///
     /// Separado de [`what_gets_queued`] porque la confesión depende de **cuándo** se mire: el mismo
     /// panel se pinta distinto si ha pasado su plazo.
-    fn pintando(
+    fn paint_the_state(
         state: &mut PanelState,
-        sitio: Rect,
-        ahora: SystemTime,
+        place: Rect,
+        now: SystemTime,
     ) -> Vec<eframe::egui::Shape> {
         let ctx = eframe::egui::Context::default();
-        let mut salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let metrics = CellMetrics::measure(
                 ui.ctx(),
                 eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE),
             );
             paint(
-                &ui.painter_at(sitio),
+                &ui.painter_at(place),
                 state,
                 "a1b2",
-                &Tema::default(),
+                &Theme::default(),
                 &metrics,
-                ahora,
+                now,
                 &mut crate::fonts::Discoverer::default(),
             );
         });
 
         // Las formas se sacan **antes** de soltar la salida: una pasada de interfaz que se suelta sin
         // aplicar sus texturas entra en pánico, y aquí no hay pantalla donde aplicarlas.
-        let shapes = std::mem::take(&mut salida.shapes);
-        salida.drop_without_applying_deltas();
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
 
         shapes
             .into_iter()
-            .map(|recortada| recortada.shape)
+            .map(|clipped| clipped.shape)
             .collect()
     }
 
     /// Un estado con un panel publicado hace lo que se diga.
     ///
-    /// La fecha se mueve a mano y no se espera al reloj, por lo mismo que en [`envejecer`]: una prueba
+    /// La fecha se mueve a mano y no se espera al reloj, por lo mismo que en [`age_the_file`]: una prueba
     /// que dependa de cuánto tarda en correr da un resultado distinto en cada máquina.
-    fn publicado_hace(fichero: &str, how_much: Duration) -> PanelState {
+    fn published_ago(file: &str, how_much: Duration) -> PanelState {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, fichero);
+        publish(&dir, file);
         std::fs::File::open(dir.path().join(PANEL_FILE))
             .expect("abrir")
             .set_modified(SystemTime::now() - how_much)
@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     /// El texto de lo que se pintó, fila a fila.
-    fn textos(shapes: Vec<eframe::egui::Shape>) -> Vec<String> {
+    fn texts(shapes: Vec<eframe::egui::Shape>) -> Vec<String> {
         shapes
             .into_iter()
             .filter_map(|shape| match shape {
@@ -1065,32 +1065,32 @@ mod tests {
         // 45 min **y medio**: el silencio se trunca a minutos enteros, y con la fecha justo en la
         // frontera un sistema de ficheros que redondeara al alza diría «44 min» y la prueba señalaría
         // al código sin que el código tenga nada.
-        let mut state = publicado_hace(
+        let mut state = published_ago(
             r#"{"stale_after_minutes":5,"lines":["lo que decía"]}"#,
             Duration::from_secs(45 * 60 + 30),
         );
 
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            pintado.iter().any(|row| row.contains("sin noticias")),
-            "el panel lleva 45 minutos sin tocarse y se enseña como si fuera de ahora: {pintado:?}"
+            painted.iter().any(|row| row.contains("sin noticias")),
+            "el panel lleva 45 minutos sin tocarse y se enseña como si fuera de ahora: {painted:?}"
         );
         assert!(
-            pintado.iter().any(|row| row.contains("45 min")),
-            "el aviso no dice cuánto lleva callado: {pintado:?}"
+            painted.iter().any(|row| row.contains("45 min")),
+            "el aviso no dice cuánto lleva callado: {painted:?}"
         );
         assert!(
-            pintado.iter().any(|row| row.contains("lo que decía")),
-            "se perdió lo que el productor había publicado: {pintado:?}"
+            painted.iter().any(|row| row.contains("lo que decía")),
+            "se perdió lo que el productor había publicado: {painted:?}"
         );
 
         // **Y va arriba, no al final.** Abajo es donde el recorte se come lo que no cabe: en un panel
         // largo, el aviso de que no es de fiar sería lo primero en desaparecer.
-        let where_at = |text: &str| pintado.iter().position(|row| row.contains(text));
+        let where_at = |text: &str| painted.iter().position(|row| row.contains(text));
         assert!(
             where_at("sin noticias") < where_at("lo que decía"),
-            "el aviso se pinta detrás del cuerpo del productor: {pintado:?}"
+            "el aviso se pinta detrás del cuerpo del productor: {painted:?}"
         );
     }
 
@@ -1098,16 +1098,16 @@ mod tests {
     /// bueno y el panel tendría una línea de ruido permanente.
     #[test]
     fn un_panel_recien_publicado_no_confiesa_nada() {
-        let mut state = publicado_hace(
+        let mut state = published_ago(
             r#"{"stale_after_minutes":5,"lines":["recién puesto"]}"#,
             Duration::from_secs(10),
         );
 
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            !pintado.iter().any(|row| row.contains("sin noticias")),
-            "un panel de hace diez segundos se anuncia como viejo: {pintado:?}"
+            !painted.iter().any(|row| row.contains("sin noticias")),
+            "un panel de hace diez segundos se anuncia como viejo: {painted:?}"
         );
     }
 
@@ -1117,24 +1117,24 @@ mod tests {
     #[test]
     fn una_publicacion_que_no_se_entiende_se_confiesa_sin_perder_lo_bueno() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, r#"{"lines":["lo bueno de antes"]}"#);
+        publish(&dir, r#"{"lines":["lo bueno de antes"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
-        publicar(&dir, "esto no es json");
-        envejecer(&dir, 1);
+        publish(&dir, "esto no es json");
+        age_the_file(&dir, 1);
         state.refresh(dir.path());
 
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
-            pintado
+            painted
                 .iter()
                 .any(|row| row.contains("no es lo último") && row.contains("no se entiende")),
-            "se sigue enseñando lo viejo como si fuera lo último: {pintado:?}"
+            "se sigue enseñando lo viejo como si fuera lo último: {painted:?}"
         );
         assert!(
-            pintado.iter().any(|row| row.contains("lo bueno de antes")),
-            "confesar no puede costar lo último que sí se entendió: {pintado:?}"
+            painted.iter().any(|row| row.contains("lo bueno de antes")),
+            "confesar no puede costar lo último que sí se entendió: {painted:?}"
         );
     }
 
@@ -1144,7 +1144,7 @@ mod tests {
     #[test]
     fn una_consola_sin_nada_bueno_ensena_el_aviso_a_solas() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, "ni esto tampoco");
+        publish(&dir, "ni esto tampoco");
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
@@ -1152,12 +1152,12 @@ mod tests {
             state.is_visible(SystemTime::now()),
             "hay un productor publicando algo ilegible y la división se ve como si no lo hubiera"
         );
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
-            pintado
+            painted
                 .iter()
                 .any(|row| row.contains("sin panel") && row.contains("no se entiende")),
-            "no se dice por qué no hay panel: {pintado:?}"
+            "no se dice por qué no hay panel: {painted:?}"
         );
     }
 
@@ -1168,8 +1168,8 @@ mod tests {
     #[test]
     fn un_panel_que_pasa_del_techo_no_se_pinta_pero_se_dice_por_que() {
         let dir = PanelDir::create().expect("crear el directorio");
-        let relleno = "x".repeat(panel_contract::MAX_BYTES as usize);
-        publicar(&dir, &format!(r#"{{"lines":["{relleno}"]}}"#));
+        let filler = "x".repeat(panel_contract::MAX_BYTES as usize);
+        publish(&dir, &format!(r#"{{"lines":["{filler}"]}}"#));
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
@@ -1177,16 +1177,16 @@ mod tests {
             state.is_visible(SystemTime::now()),
             "hay un productor publicando algo enorme y la división se ve como si no lo hubiera"
         );
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
-            pintado
+            painted
                 .iter()
                 .any(|row| row.contains("sin panel") && row.contains("KiB")),
-            "no se dice por qué no hay panel: {pintado:?}"
+            "no se dice por qué no hay panel: {painted:?}"
         );
         assert!(
-            !pintado.iter().any(|row| row.contains("xxxx")),
-            "se pintó contenido de un fichero que pasa del techo: {pintado:?}"
+            !painted.iter().any(|row| row.contains("xxxx")),
+            "se pintó contenido de un fichero que pasa del techo: {painted:?}"
         );
     }
 
@@ -1211,17 +1211,17 @@ mod tests {
     #[test]
     fn que_el_fichero_desaparezca_despues_si_se_confiesa() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, r#"{"lines":["estuve aquí"]}"#);
+        publish(&dir, r#"{"lines":["estuve aquí"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
         std::fs::remove_file(dir.path().join(PANEL_FILE)).expect("borrar el panel");
         state.refresh(dir.path());
 
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
-            pintado.iter().any(|row| row.contains("ya no está")),
-            "el fichero se borró y el panel sigue como si nada: {pintado:?}"
+            painted.iter().any(|row| row.contains("ya no está")),
+            "el fichero se borró y el panel sigue como si nada: {painted:?}"
         );
     }
 
@@ -1229,20 +1229,20 @@ mod tests {
     /// apagara, a un productor le bastaría con ponerlo para que su panel roto no lo pareciera.
     #[test]
     fn el_aviso_sale_aunque_el_productor_apague_la_cabecera() {
-        let mut state = publicado_hace(
+        let mut state = published_ago(
             r#"{"header":false,"stale_after_minutes":1,"lines":["sin cabecera"]}"#,
             Duration::from_secs(60 * 60),
         );
 
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            pintado.iter().any(|row| row.contains("sin noticias")),
-            "apagar la cabecera escondió el aviso de la app: {pintado:?}"
+            painted.iter().any(|row| row.contains("sin noticias")),
+            "apagar la cabecera escondió el aviso de la app: {painted:?}"
         );
         assert!(
-            !pintado.iter().any(|row| row.contains("a1b2")),
-            "`header: false` tiene que seguir escondiendo la identidad: {pintado:?}"
+            !painted.iter().any(|row| row.contains("a1b2")),
+            "`header: false` tiene que seguir escondiendo la identidad: {painted:?}"
         );
     }
 
@@ -1251,22 +1251,22 @@ mod tests {
     /// enseñando la maqueta de cuando era fresco y el aviso no aparecería nunca.
     #[test]
     fn envejecer_tira_la_maqueta_aunque_el_fichero_no_cambie() {
-        let mut state = publicado_hace(
+        let mut state = published_ago(
             r#"{"stale_after_minutes":10,"lines":["lo mismo de siempre"]}"#,
             Duration::from_secs(60),
         );
 
-        let fresco = textos(pintando(&mut state, PLACE, SystemTime::now()));
-        let viejo = textos(pintando(
+        let fresh = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
+        let stale = texts(paint_the_state(
             &mut state,
             PLACE,
             SystemTime::now() + Duration::from_secs(30 * 60),
         ));
 
-        assert!(!fresco.iter().any(|row| row.contains("sin noticias")));
+        assert!(!fresh.iter().any(|row| row.contains("sin noticias")));
         assert!(
-            viejo.iter().any(|row| row.contains("sin noticias")),
-            "el panel envejeció y se siguió pintando la maqueta de cuando era fresco: {viejo:?}"
+            stale.iter().any(|row| row.contains("sin noticias")),
+            "el panel envejeció y se siguió pintando la maqueta de cuando era fresco: {stale:?}"
         );
     }
 
@@ -1274,7 +1274,7 @@ mod tests {
     /// sabría cuándo despertarse, y con la consola callada el aviso no llegaría nunca.
     #[test]
     fn se_sabe_cuanto_falta_para_que_toque_avisar() {
-        let state = publicado_hace(
+        let state = published_ago(
             r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
             Duration::from_secs(4 * 60),
         );
@@ -1297,7 +1297,7 @@ mod tests {
     /// miente en el dato que sirve para decidir si está muerto o solo lento.
     #[test]
     fn un_panel_ya_viejo_vuelve_a_despertar_cuando_su_numero_cambie() {
-        let state = publicado_hace(
+        let state = published_ago(
             r#"{"stale_after_minutes":1,"lines":["algo"]}"#,
             Duration::from_secs(45 * 60 + 40),
         );
@@ -1320,7 +1320,7 @@ mod tests {
     /// cuando cambia, y cada cambio cuesta despertar a la ventana.
     #[test]
     fn con_horas_de_silencio_se_despierta_una_vez_por_hora() {
-        let state = publicado_hace(
+        let state = published_ago(
             r#"{"stale_after_minutes":1,"lines":["algo"]}"#,
             Duration::from_secs(5 * 60 * 60 + 10 * 60),
         );
@@ -1354,34 +1354,34 @@ mod tests {
     #[test]
     fn un_fallo_pasajero_no_deja_al_panel_acusado_para_siempre() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, r#"{"lines":["lo último de verdad"]}"#);
+        publish(&dir, r#"{"lines":["lo último de verdad"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
         // El fichero se vuelve ilegible un instante y luego se recupera, sin cambiar de fecha.
-        let ruta = dir.path().join(PANEL_FILE);
-        let fecha = std::fs::metadata(&ruta)
+        let path = dir.path().join(PANEL_FILE);
+        let date = std::fs::metadata(&path)
             .expect("mirar la fecha")
             .modified()
             .expect("hay fecha");
-        std::fs::write(&ruta, "roto").expect("romperlo");
-        std::fs::File::open(&ruta)
+        std::fs::write(&path, "roto").expect("romperlo");
+        std::fs::File::open(&path)
             .expect("abrir")
-            .set_modified(fecha + Duration::from_secs(1))
+            .set_modified(date + Duration::from_secs(1))
             .expect("mover la fecha");
         state.refresh(dir.path());
-        publicar(&dir, r#"{"lines":["lo último de verdad"]}"#);
-        std::fs::File::open(&ruta)
+        publish(&dir, r#"{"lines":["lo último de verdad"]}"#);
+        std::fs::File::open(&path)
             .expect("abrir")
-            .set_modified(fecha)
+            .set_modified(date)
             .expect("devolver la fecha");
 
         state.refresh(dir.path());
 
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
-            !pintado.iter().any(|row| row.contains("no es lo último")),
-            "el fichero se lee bien y su panel sigue acusado: {pintado:?}"
+            !painted.iter().any(|row| row.contains("no es lo último")),
+            "el fichero se lee bien y su panel sigue acusado: {painted:?}"
         );
     }
 
@@ -1389,20 +1389,20 @@ mod tests {
     /// noticias desde hace 0 min» un segundo después de publicar se lee como un fallo de la aplicación.
     #[test]
     fn con_un_plazo_de_cero_el_aviso_no_dice_cero_minutos() {
-        let mut state = publicado_hace(
+        let mut state = published_ago(
             r#"{"stale_after_minutes":0,"lines":["algo"]}"#,
             Duration::from_secs(5),
         );
 
-        let pintado = textos(pintando(&mut state, PLACE, SystemTime::now()));
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            pintado.iter().any(|row| row.contains("sin noticias")),
-            "con plazo cero el panel es viejo desde el primer segundo: {pintado:?}"
+            painted.iter().any(|row| row.contains("sin noticias")),
+            "con plazo cero el panel es viejo desde el primer segundo: {painted:?}"
         );
         assert!(
-            !pintado.iter().any(|row| row.contains("0 min")),
-            "el aviso dice «hace 0 min», que se lee como un fallo: {pintado:?}"
+            !painted.iter().any(|row| row.contains("0 min")),
+            "el aviso dice «hace 0 min», que se lee como un fallo: {painted:?}"
         );
     }
 
@@ -1429,9 +1429,9 @@ mod tests {
     ///
     /// Sin esto, todo lo que ocurre dentro de `paint` es invisible para la suite: se puede dejar de
     /// leer el estilo, pintarlo todo del mismo color o **no pintar nada**, y las pruebas de
-    /// `Tema::color_del_panel` siguen verdes porque afirman sobre el ayudante, no sobre el camino.
-    fn what_gets_painted(fichero: &str) -> Vec<(String, Color32)> {
-        texts_and_colors(what_gets_queued(fichero, PLACE))
+    /// `Theme::panel_color` siguen verdes porque afirman sobre el ayudante, no sobre el camino.
+    fn what_gets_painted(file: &str) -> Vec<(String, Color32)> {
+        texts_and_colors(what_gets_queued(file, PLACE))
     }
 
     /// Lo mismo, para cuando la prueba necesita pintar en un momento concreto y no puede pasar por el
@@ -1449,8 +1449,8 @@ mod tests {
     }
 
     /// Dónde cae cada fila de texto, en el orden en que se encolaron.
-    fn where_each_row_falls(fichero: &str, sitio: Rect) -> Vec<(Pos2, String)> {
-        what_gets_queued(fichero, sitio)
+    fn where_each_row_falls(file: &str, place: Rect) -> Vec<(Pos2, String)> {
+        what_gets_queued(file, place)
             .into_iter()
             .filter_map(|shape| match shape {
                 eframe::egui::Shape::Text(text) => Some((text.pos, text.galley.text().to_owned())),
@@ -1491,9 +1491,9 @@ mod tests {
     fn cada_linea_se_pinta_en_su_orden_y_las_vacias_dejan_su_hueco() {
         let rows = what_gets_painted(r#"{"header":false,"lines":["la primera","","la tercera"]}"#);
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
-            textos,
+            texts,
             ["  la primera", "  la tercera"],
             "el hueco no se pinta, pero las dos que hay van en orden"
         );
@@ -1503,7 +1503,7 @@ mod tests {
     /// `paint` cae en rojo; sin ella, la suite seguía verde con el panel entero monocromo.
     #[test]
     fn el_color_de_cada_linea_sale_de_su_estilo_y_de_su_marca() {
-        let theme = Tema::default();
+        let theme = Theme::default();
         let rows = what_gets_painted(
             r#"{"header":false,"lines":[
                 {"text":"un fallo","style":"error"},
@@ -1518,22 +1518,22 @@ mod tests {
             vec![
                 (
                     "  un fallo".to_owned(),
-                    theme.color_del_panel(None, Some(panel_contract::Style::Error))
+                    theme.panel_color(None, Some(panel_contract::Style::Error))
                 ),
                 (
                     "× bloqueada".to_owned(),
-                    theme.color_del_panel(Some(panel_contract::Mark::Block), None)
+                    theme.panel_color(Some(panel_contract::Mark::Block), None)
                 ),
                 (
                     "› y su color es el dato".to_owned(),
-                    theme.color_del_panel(
+                    theme.panel_color(
                         Some(panel_contract::Mark::Info),
                         Some(panel_contract::Style::Ok)
                     )
                 ),
                 (
                     "  sin adjetivos".to_owned(),
-                    theme.color_del_panel(None, None)
+                    theme.panel_color(None, None)
                 ),
             ]
         );
@@ -1545,16 +1545,16 @@ mod tests {
     fn la_cabecera_lleva_la_identidad_de_la_division_y_su_fase() {
         let rows = what_gets_painted(r#"{"phase":"build","lines":["el cuerpo"]}"#);
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(textos, ["a1b2 · build", "  el cuerpo"]);
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["a1b2 · build", "  el cuerpo"]);
     }
 
     #[test]
     fn con_la_cabecera_quitada_no_se_pinta_la_identidad() {
         let rows = what_gets_painted(r#"{"header":false,"phase":"build","lines":["el cuerpo"]}"#);
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(textos, ["  el cuerpo"], "la fase va dentro de la identidad");
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["  el cuerpo"], "la fase va dentro de la identidad");
     }
 
     /// **El saneo, comprobado sobre lo que llega al pintor y no sobre la función suelta.**
@@ -1571,19 +1571,19 @@ mod tests {
     /// ventana por encima de su presupuesto para siempre.
     #[test]
     fn una_linea_absurdamente_larga_se_corta_antes_de_pintarse() {
-        let largo = "A".repeat(60_000);
+        let long = "A".repeat(60_000);
 
-        let rows = what_gets_painted(&format!(r#"{{"header":false,"lines":["{largo}"]}}"#));
+        let rows = what_gets_painted(&format!(r#"{{"header":false,"lines":["{long}"]}}"#));
 
         // **Se cuenta el total, no la primera fila.** Con la envoltura puesta, el tope no se ve en una
         // fila suelta: la línea se reparte en varias, y lo que hay que acotar es cuánto texto se
         // maqueta en total. Contar solo la primera dejaría pasar mil filas de cuarenta caracteres.
-        let pintado: usize = rows.iter().map(|(t, _)| t.chars().count()).sum();
+        let painted: usize = rows.iter().map(|(t, _)| t.chars().count()).sum();
         // Los dos de margen son la columna del símbolo, que se reserva aunque la línea no traiga
         // marca: es lo que mantiene el texto de todas alineado.
         assert!(
-            pintado <= MAX_CHARACTERS + 2,
-            "se maquetaron {pintado} caracteres de una línea de 60.000"
+            painted <= MAX_CHARACTERS + 2,
+            "se maquetaron {painted} caracteres de una línea de 60.000"
         );
         assert!(rows.len() > 1, "y se envolvió en varias filas");
     }
@@ -1599,7 +1599,7 @@ mod tests {
     fn un_panel_sin_lineas_ni_cabecera_pinta_su_fondo_y_nada_mas() {
         let shapes = what_gets_queued(r#"{"header":false,"lines":[]}"#, PLACE);
 
-        let fondos: Vec<_> = shapes
+        let backgrounds: Vec<_> = shapes
             .iter()
             .filter_map(|shape| match shape {
                 eframe::egui::Shape::Rect(rect) => Some((rect.rect, rect.fill)),
@@ -1607,8 +1607,8 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            fondos,
-            vec![(PLACE, Tema::default().fondo_del_panel())],
+            backgrounds,
+            vec![(PLACE, Theme::default().panel_background())],
             "el panel tiene que cubrir su rectángulo con su propio fondo"
         );
         assert!(
@@ -1627,15 +1627,15 @@ mod tests {
     /// entrar en pánico.
     #[test]
     fn en_un_panel_sin_alto_no_se_encola_ninguna_fila() {
-        let sin_alto = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 0.0));
+        let no_height = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 0.0));
         let the_other_way_round = Rect::from_min_max(Pos2::new(0.0, 100.0), Pos2::new(400.0, 0.0));
 
-        for sitio in [sin_alto, the_other_way_round] {
-            let rows = where_each_row_falls(r#"{"header":false,"lines":["una","otra"]}"#, sitio);
+        for place in [no_height, the_other_way_round] {
+            let rows = where_each_row_falls(r#"{"header":false,"lines":["una","otra"]}"#, place);
 
             assert!(
                 rows.is_empty(),
-                "en {sitio:?} no cabe ninguna fila y se encolaron {rows:?}"
+                "en {place:?} no cabe ninguna fila y se encolaron {rows:?}"
             );
         }
     }
@@ -1647,8 +1647,8 @@ mod tests {
     fn la_fase_pasa_por_el_mismo_saneo_que_las_lineas() {
         let rows = what_gets_painted(r#"{"phase":"build\nfalsa","lines":["el cuerpo"]}"#);
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(textos, ["a1b2 · build falsa", "  el cuerpo"]);
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["a1b2 · build falsa", "  el cuerpo"]);
     }
 
     /// Y el tope también: una fase larguísima es el mismo peor caso de teselado que una línea larguísima
@@ -1659,14 +1659,14 @@ mod tests {
     /// identidad.
     #[test]
     fn una_fase_absurdamente_larga_no_se_pinta_entera() {
-        let larga = "F".repeat(60_000);
+        let long = "F".repeat(60_000);
 
-        let rows = what_gets_painted(&format!(r#"{{"phase":"{larga}","lines":[]}}"#));
+        let rows = what_gets_painted(&format!(r#"{{"phase":"{long}","lines":[]}}"#));
 
-        let pintado: usize = rows.iter().map(|(t, _)| t.chars().count()).sum();
+        let painted: usize = rows.iter().map(|(t, _)| t.chars().count()).sum();
         assert!(
-            pintado <= MAX_CHARACTERS + "a1b2 · ".len(),
-            "se maquetaron {pintado} caracteres de una fase de 60.000"
+            painted <= MAX_CHARACTERS + "a1b2 · ".len(),
+            "se maquetaron {painted} caracteres de una fase de 60.000"
         );
         assert!(
             rows.iter()
@@ -1686,19 +1686,19 @@ mod tests {
 
         let rows = where_each_row_falls(r#"{"phase":"build","lines":["el cuerpo"]}"#, PLACE);
 
-        let [(identidad, _), (cuerpo, _)] = rows.as_slice() else {
+        let [(identity, _), (body, _)] = rows.as_slice() else {
             panic!("tenían que ser dos filas y son {rows:?}");
         };
         // La celda de margen va escrita aquí y no como `MARGIN`: una expectativa que sale de la misma
         // constante que describe se cumple sola, la pongan en el valor que la pongan.
         assert_eq!(
-            identidad.x,
+            identity.x,
             PLACE.left() + width,
             "el texto tiene que arrancar a una celda del borde"
         );
-        assert_eq!(cuerpo.x, identidad.x, "el cuerpo no arranca donde ella");
+        assert_eq!(body.x, identity.x, "el cuerpo no arranca donde ella");
         assert_eq!(
-            cuerpo.y - identidad.y,
+            body.y - identity.y,
             2.0 * height,
             "entre la identidad y el cuerpo tiene que quedar una fila en blanco"
         );
@@ -1713,7 +1713,7 @@ mod tests {
     /// fuentes de emoji mide más, que es lo que **descuadra la columna**.
     #[test]
     fn los_seis_simbolos_estan_en_la_fuente_y_miden_una_celda() {
-        let marcas = [
+        let marks = [
             Mark::Done,
             Mark::Current,
             Mark::Pending,
@@ -1723,21 +1723,21 @@ mod tests {
         ];
 
         let ctx = eframe::egui::Context::default();
-        let mut anchos = Vec::new();
+        let mut widths = Vec::new();
         let mut cell = 0.0;
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            let fuente = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
-            ui.ctx().fonts_mut(|fuentes| {
-                cell = fuentes.glyph_width(&fuente, 'M');
-                anchos = marcas
+            let font = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
+            ui.ctx().fonts_mut(|fonts| {
+                cell = fonts.glyph_width(&font, 'M');
+                widths = marks
                     .iter()
-                    .map(|m| (symbol(*m), fuentes.glyph_width(&fuente, symbol(*m))))
+                    .map(|m| (symbol(*m), fonts.glyph_width(&font, symbol(*m))))
                     .collect();
             });
         })
         .drop_without_applying_deltas();
 
-        for (symbol, width) in anchos {
+        for (symbol, width) in widths {
             assert!(
                 (width - cell).abs() < 0.01,
                 "«{symbol}» mide {width} y una celda mide {cell}: {}",
@@ -1773,7 +1773,7 @@ mod tests {
 
     #[test]
     fn ninguna_marca_comparte_simbolo_con_otra() {
-        let todos: std::collections::HashSet<char> = [
+        let all: std::collections::HashSet<char> = [
             Mark::Done,
             Mark::Current,
             Mark::Pending,
@@ -1785,7 +1785,7 @@ mod tests {
         .map(|m| symbol(*m))
         .collect();
 
-        assert_eq!(todos.len(), 6);
+        assert_eq!(all.len(), 6);
     }
 
     /// **La regla del contrato que hace legible un panel: la columna se calcula por bloque.**
@@ -1804,9 +1804,9 @@ mod tests {
             ]}"##,
         );
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
-            textos,
+            texts,
             ["  #1      corta", "  #10-#25 larga", "  #2 otro bloque"],
             "el segundo bloque tiene que volver a su propio ancho"
         );
@@ -1823,7 +1823,7 @@ mod tests {
         );
 
         assert!(rows.len() > 1, "tenía que envolverse: {rows:?}");
-        let (primera, resto) = rows.split_first().expect("hay filas");
+        let (first, rest) = rows.split_first().expect("hay filas");
 
         // **La propiedad es la igualdad, no «más a la derecha».** Con solo `>`, cualquier sangría
         // constante distinta de cero pasa —incluida una celda, o sea debajo del símbolo, que es
@@ -1832,8 +1832,8 @@ mod tests {
         // la x de la primera más lo que ocupa su cabeza.
         let (cell_width, _) = cell();
         // En caracteres, no en bytes: el símbolo de la marca ocupa tres bytes y una sola celda.
-        let cabeza = primera.1.chars().count()
-            - primera
+        let head = first.1.chars().count()
+            - first
                 .1
                 .split_once("palabras")
                 .expect("la primera fila lleva su cabeza y luego el texto")
@@ -1841,9 +1841,9 @@ mod tests {
                 .chars()
                 .count()
             - "palabras".chars().count();
-        let under_the_text = primera.0.x + cabeza as f32 * cell_width;
+        let under_the_text = first.0.x + head as f32 * cell_width;
 
-        for (where_at, text) in resto {
+        for (where_at, text) in rest {
             assert!(
                 (where_at.x - under_the_text).abs() < 0.01,
                 "«{text}» arrancó en {} y el texto de la primera empieza en {under_the_text}",
@@ -1915,27 +1915,27 @@ mod tests {
     #[test]
     fn la_maqueta_se_recuerda_y_se_tira_cuando_cambia_el_ancho() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, r#"{"header":false,"lines":["algo que envolver"]}"#);
+        publish(&dir, r#"{"header":false,"lines":["algo que envolver"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
+        let theme = Theme::default();
 
-        let primera = state
+        let first = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("hay panel")
             .to_vec();
-        let repetida = state
+        let repeated = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("hay panel")
             .to_vec();
-        assert_eq!(primera, repetida, "el mismo ancho da la misma maqueta");
+        assert_eq!(first, repeated, "el mismo ancho da la misma maqueta");
 
-        let estrecha = state
+        let narrow = state
             .lay_out_if_needed("a1b2", 12, &theme, None, None)
             .expect("hay panel")
             .to_vec();
         assert_ne!(
-            primera, estrecha,
+            first, narrow,
             "con otro ancho hay que volver a envolver"
         );
     }
@@ -1944,14 +1944,14 @@ mod tests {
     #[test]
     fn la_maqueta_se_tira_cuando_el_productor_publica() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, r#"{"header":false,"lines":["lo viejo"]}"#);
+        publish(&dir, r#"{"header":false,"lines":["lo viejo"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
+        let theme = Theme::default();
         state.lay_out_if_needed("a1b2", 40, &theme, None, None);
 
-        publicar(&dir, r#"{"header":false,"lines":["lo nuevo"]}"#);
-        envejecer(&dir, 1);
+        publish(&dir, r#"{"header":false,"lines":["lo nuevo"]}"#);
+        age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         let rows = state
@@ -1977,13 +1977,13 @@ mod tests {
     /// recorrer caracteres, y un bucle con dos salidas.
     #[test]
     fn la_envoltura_aguanta_cualquier_cosa_sin_panico_ni_cuelgue() {
-        let muchas_enes = "ñ".repeat(300);
-        let casos = [
+        let many_tildes = "ñ".repeat(300);
+        let cases = [
             "",
             " ",
             "                    ",
             "a",
-            muchas_enes.as_str(),
+            many_tildes.as_str(),
             "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂",
             "e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}",
             "palabra corta",
@@ -1993,19 +1993,19 @@ mod tests {
         ];
 
         for width in [0, 1, 2, 7, 8, 9, 40] {
-            for caso in casos {
+            for case in cases {
                 let mut rows = Vec::new();
-                wrap(&mut rows, 0, caso, Color32::WHITE, width);
+                wrap(&mut rows, 0, case, Color32::WHITE, width);
                 wrap(
                     &mut rows,
                     width.saturating_add(5),
-                    caso,
+                    case,
                     Color32::WHITE,
                     width,
                 );
                 assert!(
                     rows.len() < 5_000,
-                    "con ancho {width} y «{caso}» salieron {} filas: la envoltura no progresa",
+                    "con ancho {width} y «{case}» salieron {} filas: la envoltura no progresa",
                     rows.len()
                 );
             }
@@ -2019,14 +2019,14 @@ mod tests {
     #[test]
     fn una_sangria_legal_del_contrato_no_saca_el_texto_del_panel() {
         let width = 36;
-        let fichero =
+        let file =
             r#"{"lines":[{"indent":40,"text":"una frase larga que no cabe de ninguna manera"}]}"#;
 
         let rows = lay_out(
-            Some(&panel_with(fichero)),
+            Some(&panel_with(file)),
             "a1b2",
             width,
-            &Tema::default(),
+            &Theme::default(),
             None,
             None,
         );
@@ -2046,14 +2046,14 @@ mod tests {
     #[test]
     fn una_referencia_larguisima_tampoco_saca_el_texto_del_panel() {
         let width = 36;
-        let larga = "R".repeat(50);
-        let fichero = format!(r##"{{"lines":[{{"ref":"{larga}","text":"algo que decir"}}]}}"##);
+        let long = "R".repeat(50);
+        let file = format!(r##"{{"lines":[{{"ref":"{long}","text":"algo que decir"}}]}}"##);
 
         let rows = lay_out(
-            Some(&panel_with(&fichero)),
+            Some(&panel_with(&file)),
             "a1b2",
             width,
-            &Tema::default(),
+            &Theme::default(),
             None,
             None,
         );
@@ -2083,7 +2083,7 @@ mod tests {
             )),
             "a1b2",
             36,
-            &Tema::default(),
+            &Theme::default(),
             None,
             None,
         );
@@ -2101,15 +2101,15 @@ mod tests {
     #[test]
     fn una_referencia_mas_larga_que_el_panel_no_desborda_la_primera_fila() {
         let width = 36;
-        let larga = "R".repeat(48);
+        let long = "R".repeat(48);
 
         let rows = lay_out(
             Some(&panel_with(&format!(
-                r##"{{"header":false,"lines":[{{"ref":"{larga}","text":"un texto cualquiera"}}]}}"##
+                r##"{{"header":false,"lines":[{{"ref":"{long}","text":"un texto cualquiera"}}]}}"##
             ))),
             "a1b2",
             width,
-            &Tema::default(),
+            &Theme::default(),
             None,
             None,
         );
@@ -2136,15 +2136,15 @@ mod tests {
             )),
             "a1b2",
             36,
-            &Tema::default(),
+            &Theme::default(),
             None,
             None,
         );
 
-        let pegada = rows[0].text.find("pegada").expect("está");
-        let sangrada = rows[1].text.find("sangrada").expect("está");
+        let flush = rows[0].text.find("pegada").expect("está");
+        let indented = rows[1].text.find("sangrada").expect("está");
         assert_eq!(
-            sangrada - pegada,
+            indented - flush,
             4,
             "la segunda tiene que arrancar cuatro celdas más a la derecha: {rows:?}"
         );
@@ -2161,7 +2161,7 @@ mod tests {
             )),
             "a1b2",
             16,
-            &Tema::default(),
+            &Theme::default(),
             None,
             None,
         );
@@ -2169,8 +2169,8 @@ mod tests {
         for row in &rows {
             let text = row.text.trim();
             assert!(
-                text.split_whitespace().all(|palabra| {
-                    ["alfa", "beta", "gamma", "delta", "epsilon", "zeta"].contains(&palabra)
+                text.split_whitespace().all(|word| {
+                    ["alfa", "beta", "gamma", "delta", "epsilon", "zeta"].contains(&word)
                 }),
                 "«{text}» trae una palabra partida: {rows:?}"
             );
@@ -2183,22 +2183,22 @@ mod tests {
     #[test]
     fn la_maqueta_no_se_recalcula_cuando_ya_vale() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, r#"{"header":false,"lines":["algo que envolver"]}"#);
+        publish(&dir, r#"{"header":false,"lines":["algo que envolver"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
+        let theme = Theme::default();
 
-        let primera = state
+        let first = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("hay panel")
             .as_ptr();
-        let segunda = state
+        let second = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("hay panel")
             .as_ptr();
 
         assert_eq!(
-            primera, segunda,
+            first, second,
             "se volvió a maquetar sin que cambiara ni el fichero ni el ancho"
         );
     }
@@ -2207,12 +2207,12 @@ mod tests {
     #[test]
     fn el_aviso_de_lo_que_falta_va_al_final_y_con_su_margen() {
         let (cell_width, height) = cell();
-        let tres =
+        let three_rows =
             Rect::from_min_size(Pos2::new(0.0, 0.0), eframe::egui::vec2(400.0, height * 3.0));
 
         let rows = where_each_row_falls(
             r#"{"header":false,"lines":["una","dos","tres","cuatro"]}"#,
-            tres,
+            three_rows,
         );
 
         let (where_at, text) = rows.last().expect("hay filas");
@@ -2222,10 +2222,10 @@ mod tests {
             "el aviso se pintó encima de la primera fila"
         );
         assert!(
-            (where_at.x - (tres.left() + cell_width)).abs() < 0.01,
+            (where_at.x - (three_rows.left() + cell_width)).abs() < 0.01,
             "el aviso arrancó en {} y el margen deja el texto en {}",
             where_at.x,
-            tres.left() + cell_width
+            three_rows.left() + cell_width
         );
     }
 
@@ -2248,21 +2248,21 @@ mod tests {
             )),
             "a1b2",
             36,
-            &Tema::default(),
+            &Theme::default(),
             None,
             None,
         );
 
-        let column_of = |row: &Row, palabra: &str| {
+        let column_of = |row: &Row, word: &str| {
             row.text.chars().count()
                 - row
                     .text
-                    .split_once(palabra)
+                    .split_once(word)
                     .expect("lleva su texto")
                     .1
                     .chars()
                     .count()
-                - palabra.chars().count()
+                - word.chars().count()
         };
         assert_eq!(
             column_of(&rows[0], "arriba"),
@@ -2283,18 +2283,18 @@ mod tests {
 
         state.refresh(dir.path());
 
-        assert!(state.a_pintar().is_none());
+        assert!(state.last_understood().is_none());
     }
 
     #[test]
     fn lo_publicado_se_lee_y_queda_listo_para_pintar() {
         let dir = PanelDir::create().expect("crear el directorio");
         let mut state = PanelState::default();
-        publicar(&dir, r#"{"phase":"build","lines":["una","otra"]}"#);
+        publish(&dir, r#"{"phase":"build","lines":["una","otra"]}"#);
 
         state.refresh(dir.path());
 
-        let panel = state.a_pintar().expect("hay panel");
+        let panel = state.last_understood().expect("hay panel");
         assert_eq!(panel.lines.len(), 2);
         assert_eq!(panel.phase.as_deref(), Some("build"));
     }
@@ -2307,22 +2307,22 @@ mod tests {
     fn no_se_vuelve_a_leer_si_la_fecha_del_fichero_no_ha_cambiado() {
         let dir = PanelDir::create().expect("crear el directorio");
         let mut state = PanelState::default();
-        publicar(&dir, r#"{"lines":["la primera"]}"#);
+        publish(&dir, r#"{"lines":["la primera"]}"#);
         state.refresh(dir.path());
-        let fecha = state
-            .a_pintar()
+        let date = state
+            .last_understood()
             .and_then(|panel| panel.written_at)
             .expect("la lectura trae la fecha del fichero");
 
-        publicar(&dir, r#"{"lines":["la segunda"]}"#);
+        publish(&dir, r#"{"lines":["la segunda"]}"#);
         std::fs::File::open(dir.path().join(PANEL_FILE))
             .expect("abrir")
-            .set_modified(fecha)
+            .set_modified(date)
             .expect("devolver la fecha a donde estaba");
         state.refresh(dir.path());
 
         assert_eq!(
-            state.a_pintar().expect("sigue habiendo panel").lines[0].text,
+            state.last_understood().expect("sigue habiendo panel").lines[0].text,
             "la primera",
             "releyó un fichero cuya fecha no había cambiado"
         );
@@ -2332,15 +2332,15 @@ mod tests {
     fn con_la_fecha_movida_si_se_relee() {
         let dir = PanelDir::create().expect("crear el directorio");
         let mut state = PanelState::default();
-        publicar(&dir, r#"{"lines":["la primera"]}"#);
+        publish(&dir, r#"{"lines":["la primera"]}"#);
         state.refresh(dir.path());
 
-        publicar(&dir, r#"{"lines":["la segunda"]}"#);
-        envejecer(&dir, 1);
+        publish(&dir, r#"{"lines":["la segunda"]}"#);
+        age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         assert_eq!(
-            state.a_pintar().expect("hay panel").lines[0].text,
+            state.last_understood().expect("hay panel").lines[0].text,
             "la segunda"
         );
     }
@@ -2351,15 +2351,15 @@ mod tests {
     fn una_escritura_a_medias_no_borra_el_ultimo_panel_bueno() {
         let dir = PanelDir::create().expect("crear el directorio");
         let mut state = PanelState::default();
-        publicar(&dir, r#"{"lines":["lo bueno"]}"#);
+        publish(&dir, r#"{"lines":["lo bueno"]}"#);
         state.refresh(dir.path());
 
-        publicar(&dir, r#"{"lines":[{"text":"a med"#);
-        envejecer(&dir, 1);
+        publish(&dir, r#"{"lines":[{"text":"a med"#);
+        age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         assert_eq!(
-            state.a_pintar().expect("el último bueno sigue ahí").lines[0].text,
+            state.last_understood().expect("el último bueno sigue ahí").lines[0].text,
             "lo bueno"
         );
     }
@@ -2369,10 +2369,10 @@ mod tests {
     /// Sin sanear, un `panel.json` con un `\n` en su texto tapa el resto del panel.
     #[test]
     fn un_salto_de_linea_en_el_texto_no_puede_pintar_dos_filas() {
-        let saneado = sanitize("primera\nsegunda");
+        let sanitized = sanitize("primera\nsegunda");
 
-        assert_eq!(saneado, "primera segunda");
-        assert!(!saneado.contains('\n'));
+        assert_eq!(sanitized, "primera segunda");
+        assert!(!sanitized.contains('\n'));
     }
 
     /// El tabulador es el otro caso: avanza el ancho de varias celdas mientras la medida de anchura lo
@@ -2396,8 +2396,8 @@ mod tests {
 
     #[test]
     fn el_texto_normal_pasa_intacto() {
-        let tal_cual = "F1.6: el panel · 35.392 tokens — 18 %";
-        assert_eq!(sanitize(tal_cual), tal_cual);
+        let as_is = "F1.6: el panel · 35.392 tokens — 18 %";
+        assert_eq!(sanitize(as_is), as_is);
     }
 
     /// **Lo que el gesto de estrechar el panel vuelve alcanzable.** Antes de que su frontera se pudiera
@@ -2415,15 +2415,15 @@ mod tests {
     /// y su respuesta cambia con el plegado, no con esto.
     ///
     /// **Y lo que esta prueba NO afirma, para que nadie la lea como más fuerte de lo que es.** Llevaba una
-    /// comprobación de que la cuenta del aviso cuadraba y se quitó al mutarla: `visibles + sobran` es
+    /// comprobación de que la cuenta del aviso cuadraba y se quitó al mutarla: `visible + leftover` es
     /// igual al total con el recorte bueno **y con el roto**, porque las dos versiones reparten las mismas
     /// filas entre los dos números. El recorte lo atan sus propias pruebas; aquí lo que se demuestra es
     /// que el camino se recorre entero sin romperse.
     #[test]
     fn con_el_panel_al_minimo_se_maqueta_y_se_recorta_sin_panico() {
-        let theme = Tema::default();
+        let theme = Theme::default();
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r##"{"lines":[{"ref":"#12","text":"una linea larga que no cabe de ninguna manera","mark":"current","indent":8},{"text":"otra"},{"text":"y otra"}]}"##,
         );
@@ -2450,24 +2450,24 @@ mod tests {
     #[test]
     fn los_tres_simbolos_del_reclamo_miden_una_celda() {
         let ctx = eframe::egui::Context::default();
-        let mut anchos = Vec::new();
+        let mut widths = Vec::new();
         let mut cell = 0.0;
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
-            let fuente = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
-            ui.ctx().fonts_mut(|fuentes| {
-                cell = fuentes.glyph_width(&fuente, 'M');
-                anchos = Attention::ALL
+            let font = eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE);
+            ui.ctx().fonts_mut(|fonts| {
+                cell = fonts.glyph_width(&font, 'M');
+                widths = Attention::ALL
                     .iter()
                     .map(|class| {
                         let symbol = attention_symbol(*class);
-                        (symbol, fuentes.glyph_width(&fuente, symbol))
+                        (symbol, fonts.glyph_width(&font, symbol))
                     })
                     .collect();
             });
         })
         .drop_without_applying_deltas();
 
-        for (symbol, width) in anchos {
+        for (symbol, width) in widths {
             assert!(
                 (width - cell).abs() < 0.01,
                 "«{symbol}» mide {width} y una celda mide {cell}: {}",
@@ -2505,10 +2505,10 @@ mod tests {
         ]
         .map(symbol);
         for class in Attention::ALL {
-            let suyo = attention_symbol(class);
+            let its_own = attention_symbol(class);
             assert!(
-                !of_the_body.contains(&suyo),
-                "«{suyo}» ya lo usa una marca del cuerpo: el panel diría dos cosas con un solo signo"
+                !of_the_body.contains(&its_own),
+                "«{its_own}» ya lo usa una marca del cuerpo: el panel diría dos cosas con un solo signo"
             );
         }
     }
@@ -2519,7 +2519,7 @@ mod tests {
     /// desaparecería del radar sin que nadie lo notara.
     #[test]
     fn el_reclamo_se_pinta_aunque_el_productor_apague_su_cabecera() {
-        let theme = Tema::default();
+        let theme = Theme::default();
 
         let rows =
             what_gets_painted(r#"{"header":false,"attention":"wait","lines":["lo que sea"]}"#);
@@ -2529,9 +2529,9 @@ mod tests {
             vec![
                 (
                     "? te espera a ti".to_owned(),
-                    theme.color_del_reclamo(Attention::Wait, true)
+                    theme.attention_color(Attention::Wait, true)
                 ),
-                ("  lo que sea".to_owned(), theme.color_del_panel(None, None)),
+                ("  lo que sea".to_owned(), theme.panel_color(None, None)),
             ]
         );
     }
@@ -2543,9 +2543,9 @@ mod tests {
         let rows =
             what_gets_painted(r#"{"phase":"build","attention":"done","lines":["el cuerpo"]}"#);
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
-            textos,
+            texts,
             [
                 "a1b2 · build",
                 "∎ terminó y nadie lo ha mirado",
@@ -2563,8 +2563,8 @@ mod tests {
             r#"{"header":false,"lines":[{"text":"esperé aprobación el martes","mark":"block"}]}"#,
         );
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(textos, ["× esperé aprobación el martes"]);
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["× esperé aprobación el martes"]);
     }
 
     /// **Un reclamo que nadie sostiene se atenúa, y no se apaga.** El idioma de este panel es confesar
@@ -2574,15 +2574,15 @@ mod tests {
     #[test]
     fn un_reclamo_que_nadie_sostiene_se_atenua_y_el_panel_lo_confiesa_aparte() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["lo que sea"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
+        let theme = Theme::default();
 
-        let rows = texts_and_colors(pintando(
+        let rows = texts_and_colors(paint_the_state(
             &mut state,
             PLACE,
             SystemTime::now() + Duration::from_secs(60 * 60),
@@ -2592,12 +2592,12 @@ mod tests {
             rows[0],
             (
                 "⊘ atascada por algo que no eres tú".to_owned(),
-                theme.color_del_reclamo(Attention::Block, false)
+                theme.attention_color(Attention::Block, false)
             )
         );
         assert_ne!(
             rows[0].1,
-            theme.color_del_reclamo(Attention::Block, true),
+            theme.attention_color(Attention::Block, true),
             "sin nadie que lo sostenga tiene que verse distinto, o el atenuado no dice nada"
         );
         assert!(
@@ -2611,19 +2611,19 @@ mod tests {
     #[test]
     fn el_mismo_reclamo_se_pinta_entero_mientras_su_productor_lo_sostiene() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["lo que sea"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
+        let theme = Theme::default();
 
-        let rows = texts_and_colors(pintando(&mut state, PLACE, SystemTime::now()));
+        let rows = texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert_eq!(
             rows[0].1,
-            theme.color_del_reclamo(Attention::Block, true),
+            theme.attention_color(Attention::Block, true),
             "recién publicado, nadie tiene nada que confesar: {rows:?}"
         );
     }
@@ -2634,37 +2634,37 @@ mod tests {
     #[test]
     fn un_panel_que_nunca_se_pudo_leer_no_reclama_nada() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(&dir, "esto no es json");
+        publish(&dir, "esto no es json");
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let ahora = SystemTime::now();
+        let now = SystemTime::now();
 
         assert!(
-            state.warning(ahora).is_some(),
+            state.warning(now).is_some(),
             "la aplicación tenía que tener algo que confesar aquí"
         );
-        assert_eq!(state.attention(ahora), None);
+        assert_eq!(state.attention(now), None);
     }
 
     /// El reclamo se va cuando su productor lo quita, y no se queda pegado a la maqueta de antes.
     #[test]
     fn el_reclamo_desaparece_cuando_el_productor_deja_de_reclamar() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r#"{"header":false,"attention":"wait","lines":["lo que sea"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        pintando(&mut state, PLACE, SystemTime::now());
+        paint_the_state(&mut state, PLACE, SystemTime::now());
 
-        publicar(&dir, r#"{"header":false,"lines":["lo que sea"]}"#);
-        envejecer(&dir, 1);
+        publish(&dir, r#"{"header":false,"lines":["lo que sea"]}"#);
+        age_the_file(&dir, 1);
         state.refresh(dir.path());
-        let rows = texts_and_colors(pintando(&mut state, PLACE, SystemTime::now()));
+        let rows = texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(textos, ["  lo que sea"]);
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["  lo que sea"]);
     }
 
     /// **La fila del reclamo se envuelve como cualquier otra.** Sus frases son las del contrato, y la
@@ -2679,7 +2679,7 @@ mod tests {
             Some(&panel_with(r#"{"header":false,"lines":["lo que sea"]}"#)),
             "a1b2",
             width,
-            &Tema::default(),
+            &Theme::default(),
             None,
             Some(AttentionState {
                 class: Attention::Block,
@@ -2710,22 +2710,22 @@ mod tests {
     fn en_un_panel_de_un_solo_renglon_lo_que_queda_es_el_reclamo() {
         let (_, height) = cell();
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["lo que sea"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
-        let rows = texts_and_colors(pintando(
+        let rows = texts_and_colors(paint_the_state(
             &mut state,
             Rect::from_min_size(Pos2::new(0.0, 0.0), eframe::egui::vec2(400.0, 2.0 * height)),
             SystemTime::now() + Duration::from_secs(60 * 60),
         ));
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
-            textos,
+            texts,
             ["? te espera a ti", "… 3 más"],
             "el reclamo tiene que ser lo primero que se pinta, y lo que falta tiene que decirse"
         );
@@ -2741,15 +2741,15 @@ mod tests {
     #[test]
     fn lo_terminado_se_sigue_viendo_entero_por_mucho_que_calle() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r#"{"header":false,"attention":"done","stale_after_minutes":1,"lines":["lo que sea"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
+        let theme = Theme::default();
 
-        let rows = texts_and_colors(pintando(
+        let rows = texts_and_colors(paint_the_state(
             &mut state,
             PLACE,
             SystemTime::now() + Duration::from_secs(60 * 60),
@@ -2757,7 +2757,7 @@ mod tests {
 
         assert_eq!(
             rows[0].1,
-            theme.color_del_reclamo(Attention::Done, true),
+            theme.attention_color(Attention::Done, true),
             "una hora callado, y lo terminado sigue entero: {rows:?}"
         );
         assert!(
@@ -2773,22 +2773,22 @@ mod tests {
     #[test]
     fn lo_terminado_si_se_apaga_cuando_su_fichero_deja_de_leerse() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r#"{"header":false,"attention":"done","lines":["lo que sea"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
+        let theme = Theme::default();
 
-        publicar(&dir, "esto ya no es json");
-        envejecer(&dir, 1);
+        publish(&dir, "esto ya no es json");
+        age_the_file(&dir, 1);
         state.refresh(dir.path());
-        let rows = texts_and_colors(pintando(&mut state, PLACE, SystemTime::now()));
+        let rows = texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert_eq!(
             rows[0].1,
-            theme.color_del_reclamo(Attention::Done, false),
+            theme.attention_color(Attention::Done, false),
             "sin poder leer su fichero, nadie sostiene lo que se ve: {rows:?}"
         );
     }
@@ -2797,20 +2797,20 @@ mod tests {
     /// apagándose al quedarse sin nadie detrás, porque ahí el silencio sí desmiente lo que dicen.
     #[test]
     fn la_excepcion_de_lo_terminado_no_alcanza_a_las_otras_dos_clases() {
-        let theme = Tema::default();
+        let theme = Theme::default();
 
-        for (class, valor) in [(Attention::Wait, "wait"), (Attention::Block, "block")] {
+        for (class, value) in [(Attention::Wait, "wait"), (Attention::Block, "block")] {
             let dir = PanelDir::create().expect("crear el directorio");
-            publicar(
+            publish(
                 &dir,
                 &format!(
-                    r#"{{"header":false,"attention":"{valor}","stale_after_minutes":1,"lines":["x"]}}"#
+                    r#"{{"header":false,"attention":"{value}","stale_after_minutes":1,"lines":["x"]}}"#
                 ),
             );
             let mut state = PanelState::default();
             state.refresh(dir.path());
 
-            let rows = texts_and_colors(pintando(
+            let rows = texts_and_colors(paint_the_state(
                 &mut state,
                 PLACE,
                 SystemTime::now() + Duration::from_secs(60 * 60),
@@ -2818,7 +2818,7 @@ mod tests {
 
             assert_eq!(
                 rows[0].1,
-                theme.color_del_reclamo(class, false),
+                theme.attention_color(class, false),
                 "{class:?} tenía que apagarse tras una hora callada: {rows:?}"
             );
         }
@@ -2838,8 +2838,8 @@ mod tests {
             r#"{"attention":"waiting","phase":"validate","lines":["el cuerpo"]}"#,
         );
 
-        let textos: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(textos, ["a1b2 · validate", "  el cuerpo"]);
+        let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(texts, ["a1b2 · validate", "  el cuerpo"]);
     }
 
     /// **Lo que [`PanelState::attention`] contesta desde fuera es lo mismo que el panel pinta.** Son dos
@@ -2853,18 +2853,18 @@ mod tests {
     #[test]
     fn lo_que_reclamo_contesta_desde_fuera_es_lo_que_el_panel_pinta() {
         let dir = PanelDir::create().expect("crear el directorio");
-        publicar(
+        publish(
             &dir,
             r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["lo que sea"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        let theme = Tema::default();
-        let recien = SystemTime::now();
-        let callado = recien + Duration::from_secs(60 * 60);
+        let theme = Theme::default();
+        let just_now = SystemTime::now();
+        let gone_quiet = just_now + Duration::from_secs(60 * 60);
 
         assert_eq!(
-            state.attention(recien),
+            state.attention(just_now),
             Some(AttentionState {
                 class: Attention::Wait,
                 backed: true
@@ -2872,7 +2872,7 @@ mod tests {
             "recién publicado no hay nada que confesar de este panel"
         );
         assert_eq!(
-            state.attention(callado),
+            state.attention(gone_quiet),
             Some(AttentionState {
                 class: Attention::Wait,
                 backed: false
@@ -2880,12 +2880,12 @@ mod tests {
             "tras una hora callado ya no hay nadie detrás de lo que se enseña"
         );
 
-        for cuando in [recien, callado] {
-            let dicho = state.attention(cuando).expect("reclama");
-            let rows = texts_and_colors(pintando(&mut state, PLACE, cuando));
+        for when in [just_now, gone_quiet] {
+            let answer = state.attention(when).expect("reclama");
+            let rows = texts_and_colors(paint_the_state(&mut state, PLACE, when));
             assert_eq!(
                 rows[0].1,
-                theme.color_del_reclamo(dicho.class, dicho.backed),
+                theme.attention_color(answer.class, answer.backed),
                 "lo que se pinta no es lo que se contesta desde fuera: {rows:?}"
             );
         }
@@ -2906,18 +2906,18 @@ mod tests {
         // cualquier trozo suelto: «a ti» está dentro de «te espera a ti». Eso es exactamente lo que
         // el mensaje de abajo dice impedir, así que el `contains` suelto no cubría su propia
         // promesa. La fila la identifica la clave del contrato, que va en la primera columna.
-        for (class, clave) in [
+        for (class, key) in [
             (Attention::Wait, "wait"),
             (Attention::Block, "block"),
             (Attention::Done, "done"),
         ] {
-            let frase = attention_text(class);
+            let phrase = attention_text(class);
             let row = CONTRACT
                 .lines()
-                .find(|line| line.starts_with(&format!("| `{clave}`")))
+                .find(|line| line.starts_with(&format!("| `{key}`")))
                 .unwrap_or_else(|| {
                     panic!(
-                        "el documento del contrato no tiene fila para «{clave}»: o cambió de forma, \
+                        "el documento del contrato no tiene fila para «{key}»: o cambió de forma, \
                          o dejó de publicar un valor que la aplicación sí pinta"
                     )
                 });
@@ -2925,17 +2925,17 @@ mod tests {
             // con la frase truncada —«te espera» está dentro de «te espera a ti»—, y la frase larga
             // es justo lo que su comentario defiende: el «a ti» es lo que la separa de la segunda.
             // Así que se saca lo que la fila publica como frase y se comparan por igualdad.
-            let publicada = row
+            let published = row
                 .split('|')
                 .nth(2)
                 .expect("la fila del contrato tiene tres columnas")
                 .trim()
                 .replace("**", "");
-            let publicada = publicada.split(':').next().unwrap_or(&publicada).trim();
+            let published = published.split(':').next().unwrap_or(&published).trim();
             assert_eq!(
-                publicada, frase,
-                "el panel pinta «{frase}» para {class:?} y la fila de «{clave}» del contrato publica \
-                 «{publicada}»: el productor que lea el contrato espera un texto y ve otro"
+                published, phrase,
+                "el panel pinta «{phrase}» para {class:?} y la fila de «{key}» del contrato publica \
+                 «{published}»: el productor que lea el contrato espera un texto y ve otro"
             );
         }
     }

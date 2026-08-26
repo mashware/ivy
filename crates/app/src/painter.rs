@@ -9,7 +9,7 @@
 //! la fuente y el alto de su altura de línea. Calcularlo a ojo es lo que descuadra las filas.
 
 use crate::fonts::Presentation;
-use crate::theme::Tema;
+use crate::theme::Theme;
 use eframe::egui::{
     Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, vec2,
 };
@@ -49,7 +49,7 @@ impl CellMetrics {
     /// cambia de tamaño, y una medida guardada descuadraría la rejilla entera sin avisar.
     pub fn measure(ctx: &Context, font: FontId) -> Self {
         let (width, height) =
-            ctx.fonts_mut(|fuentes| (fuentes.glyph_width(&font, 'M'), fuentes.row_height(&font)));
+            ctx.fonts_mut(|fonts| (fonts.glyph_width(&font, 'M'), fonts.row_height(&font)));
         Self {
             width,
             height,
@@ -100,8 +100,8 @@ impl CellMetrics {
 
     /// El rectángulo que ocupa la celda de una fila y columna, desde el origen dado.
     fn cell(&self, origin: Pos2, row: u16, column: u16) -> Rect {
-        let esquina = origin + vec2(column as f32 * self.width, row as f32 * self.height);
-        Rect::from_min_size(esquina, vec2(self.width, self.height))
+        let corner = origin + vec2(column as f32 * self.width, row as f32 * self.height);
+        Rect::from_min_size(corner, vec2(self.width, self.height))
     }
 }
 
@@ -119,28 +119,28 @@ impl CellMetrics {
 pub fn paint(
     painter: &Painter,
     view: &View,
-    theme: &Tema,
+    theme: &Theme,
     metrics: &CellMetrics,
     origin: Pos2,
     discoverer: &mut crate::fonts::Discoverer,
 ) {
-    let tamano = view.size();
+    let grid_size = view.size();
     // El fondo por defecto es el mismo para toda la pantalla: preguntarlo una vez por celda serían
     // casi dos mil consultas por pasada para obtener siempre lo mismo.
-    let window_background = theme.fondo();
+    let window_background = theme.background();
 
     // Se recorre la rejilla entera en trozos de una fila. La vista es densa por contrato —hay
     // exactamente filas por columnas celdas— así que esto no puede dejarse ninguna fuera, y no hay
     // ningún caso imposible que fingir que se trata.
-    let width = tamano.cols as usize;
+    let width = grid_size.cols as usize;
     for (row, cells) in view.cells().chunks_exact(width).enumerate() {
         let row = row as u16;
         for (column, cell) in cells.iter().enumerate() {
-            let (_, fondo) = colors_of(cell, theme);
+            let (_, background) = colors_of(cell, theme);
             // El fondo por defecto ya lo pinta la ventana entera: repetirlo celda a celda es
             // trabajo por nada y, con el antialias activo, una costura por cada frontera.
-            if fondo != window_background {
-                painter.rect_filled(metrics.cell(origin, row, column as u16), 0.0, fondo);
+            if background != window_background {
+                painter.rect_filled(metrics.cell(origin, row, column as u16), 0.0, background);
             }
         }
     }
@@ -170,9 +170,9 @@ pub fn paint(
     // la misma tanda con japonés dan 280 y 301 µs en el tramo del pintado, así que cualquier diferencia
     // menor que esos 21 µs no se puede afirmar. Se hace por la forma —no recorrer la rejilla para no pintar
     // nada— y no porque haya un número detrás.
-    let mut hubo_color = false;
-    for pasada in [Presentation::Texto, Presentation::Color] {
-        if pasada == Presentation::Color && !hubo_color {
+    let mut there_was_color = false;
+    for pass in [Presentation::Text, Presentation::Color] {
+        if pass == Presentation::Color && !there_was_color {
             break;
         }
         for (row, cells) in view.cells().chunks_exact(width).enumerate() {
@@ -182,7 +182,7 @@ pub fn paint(
                 // carácter ASCII o ya resuelto se descarta sin tocar nada. Buscar la fuente y registrarla
                 // ocurren fuera de esta pasada — ver `Discoverer::resolve`. Va solo en la primera de
                 // las dos: apuntar dos veces lo mismo no cambia nada, pero se pagaría dos veces.
-                if pasada == Presentation::Texto {
+                if pass == Presentation::Text {
                     discoverer.note(cell.c);
                 }
                 // El acompañante de un carácter ancho **no pinta nada**. El glifo entero lo dibuja su
@@ -196,7 +196,7 @@ pub fn paint(
                 if cell.c == ' ' || cell.hidden {
                     continue;
                 }
-                let pegados = view.combining_of(cell);
+                let attached = view.combining_of(cell);
                 // **Un ASCII SIN NADA PEGADO se descarta de la pasada del color sin consultar las tablas
                 // de Unicode.** Es la inmensa mayoría de lo que pasa por una pantalla de terminal.
                 //
@@ -212,19 +212,19 @@ pub fn paint(
                 // recorre los 128 con los dos selectores detrás, escrita justamente porque duplicar aquí
                 // una regla que vive en `fonts` solo es aceptable si algo avisa cuando dejan de decir
                 // lo mismo.
-                if pasada == Presentation::Color && cell.c.is_ascii() && pegados.is_empty() {
+                if pass == Presentation::Color && cell.c.is_ascii() && attached.is_empty() {
                     continue;
                 }
                 // Cada celda se pinta en la pasada que le toca por su presentación, y en la otra no.
-                if crate::fonts::presentation_of(cell.c, pegados) != pasada {
+                if crate::fonts::presentation_of(cell.c, attached) != pass {
                     // Si en la pasada del texto una celda pide color, la del color tiene trabajo.
-                    hubo_color |= pasada == Presentation::Texto;
+                    there_was_color |= pass == Presentation::Text;
                     continue;
                 }
                 paint_character(
                     painter,
                     cell.c,
-                    pegados,
+                    attached,
                     metrics.cell(origin, row, column as u16),
                     cell.width == CellWidth::WideHead,
                     colors_of(cell, theme).0,
@@ -244,15 +244,15 @@ pub fn paint(
 /// vídeo inverso ese color es el que viaja en el fondo — el motor lo entrega intercambiado y marca
 /// que lo está. Aplicar la intensidad siempre al primer plano parece lo natural y es el error:
 /// atenúa un color que ya no se ve y deja el otro a plena intensidad.
-fn colors_of(cell: &ViewCell, theme: &Tema) -> (Color32, Color32) {
-    let (letra, fondo) = if cell.inverse {
+fn colors_of(cell: &ViewCell, theme: &Theme) -> (Color32, Color32) {
+    let (foreground, background) = if cell.inverse {
         (
             theme.color(cell.fg),
-            theme.con_atributos(cell.bg, cell.bold, cell.dim),
+            theme.with_attributes(cell.bg, cell.bold, cell.dim),
         )
     } else {
         (
-            theme.con_atributos(cell.fg, cell.bold, cell.dim),
+            theme.with_attributes(cell.fg, cell.bold, cell.dim),
             theme.color(cell.bg),
         )
     };
@@ -267,9 +267,9 @@ fn colors_of(cell: &ViewCell, theme: &Tema) -> (Color32, Color32) {
     // devuelve a sus colores de origen. Es lo correcto y lo que se espera: seleccionar por encima del
     // cursor de `vim` lo enseña como el resto del texto en vez de dejarlo indistinguible.
     if cell.selected {
-        (fondo, letra)
+        (background, foreground)
     } else {
-        (letra, fondo)
+        (foreground, background)
     }
 }
 
@@ -286,8 +286,8 @@ fn colors_of(cell: &ViewCell, theme: &Tema) -> (Color32, Color32) {
 )]
 fn paint_character(
     painter: &Painter,
-    que: char,
-    pegados: &[char],
+    character: char,
+    attached: &[char],
     slot: Rect,
     is_wide: bool,
     color: Color32,
@@ -296,13 +296,13 @@ fn paint_character(
 ) {
     // **Un emoji ancho ocupa las DOS columnas que el motor le reservó**, no una. El hueco que llega es
     // el de su primera columna; el dibujo se centra en el de las dos, que es lo que su anchura declara.
-    let suyo = if is_wide {
+    let its_own = if is_wide {
         Rect::from_min_max(slot.min, slot.max + vec2(metrics.width, 0.0))
     } else {
         slot
     };
-    if crate::fonts::presentation_of(que, pegados) == crate::fonts::Presentation::Color
-        && paint_in_color(painter, que, suyo, discoverer)
+    if crate::fonts::presentation_of(character, attached) == crate::fonts::Presentation::Color
+        && paint_in_color(painter, character, its_own, discoverer)
     {
         return;
     }
@@ -314,8 +314,8 @@ fn paint_character(
     // su cadena de reserva por familia entera, no por rango: para que la fuente de iconos que el usuario
     // instaló gane en las zonas de uso privado **sin** quitarle las letras a la del terminal, tiene que
     // vivir en su propia familia y pedirse solo donde toca. Quien recorre celda a celda es esto.
-    let font = eframe::egui::FontId::new(metrics.font.size, discoverer.family_of(que));
-    painter.text(slot.left_top(), Align2::LEFT_TOP, que, font, color);
+    let font = eframe::egui::FontId::new(metrics.font.size, discoverer.family_of(character));
+    painter.text(slot.left_top(), Align2::LEFT_TOP, character, font, color);
 }
 
 /// Pinta el glifo de color de ese carácter, centrado en su hueco. Dice si llegó a pintar algo.
@@ -326,7 +326,7 @@ fn paint_character(
 /// no tiene.
 fn paint_in_color(
     painter: &Painter,
-    que: char,
+    character: char,
     slot: Rect,
     discoverer: &mut crate::fonts::Discoverer,
 ) -> bool {
@@ -336,22 +336,22 @@ fn paint_in_color(
     let per_point = painter.ctx().pixels_per_point();
     let height = (slot.height() * per_point).round() as u32;
     let width = (slot.width() * per_point).round() as u32;
-    let Some((atlas, uv, measurements)) = discoverer.color_glyph(painter.ctx(), que, height, width)
+    let Some((atlas, uv, measurements)) = discoverer.color_glyph(painter.ctx(), character, height, width)
     else {
         return false;
     };
     // **Centrado en su hueco, y por eso hace falta el tamaño real de la textura**: el reescalado conserva
     // la proporción del dibujo, así que casi nunca llena el hueco exacto — sobra en un eje. Estirarlo
     // para que llene deformaría el emoji.
-    let dibujo = Rect::from_center_size(slot.center(), measurements / per_point);
-    painter.image(atlas, dibujo, uv, Color32::WHITE);
+    let drawing = Rect::from_center_size(slot.center(), measurements / per_point);
+    painter.image(atlas, drawing, uv, Color32::WHITE);
     true
 }
 
 fn paint_cursor(
     painter: &Painter,
     view: &View,
-    theme: &Tema,
+    theme: &Theme,
     metrics: &CellMetrics,
     origin: Pos2,
     discoverer: &mut crate::fonts::Discoverer,
@@ -369,13 +369,13 @@ fn paint_cursor(
     if cursor.shape == CursorShape::Hidden {
         return;
     }
-    let Some(debajo) = view.cell(cursor.row, cursor.col) else {
+    let Some(under_cursor) = view.cell(cursor.row, cursor.col) else {
         return;
     };
     let mut slot = metrics.cell(origin, cursor.row, cursor.col);
     // Sobre un carácter ancho, el cursor cubre **las dos columnas** que ese carácter ocupa. Cubrir
     // solo una deja media letra tapada y la otra media no, que se lee como un error de dibujo.
-    if debajo.width == CellWidth::WideHead {
+    if under_cursor.width == CellWidth::WideHead {
         slot.max.x += metrics.width;
     }
     let color = theme.color(TermColor::Cursor);
@@ -388,7 +388,7 @@ fn paint_cursor(
             // El bloque es opaco y va después de los glifos, así que se come el carácter que hay
             // debajo. Se repinta encima, en el color del fondo: es lo que hace un terminal, y sin
             // esto el cursor **borra** la letra sobre la que está en vez de resaltarla.
-            if debajo.c != ' ' && !debajo.hidden {
+            if under_cursor.c != ' ' && !under_cursor.hidden {
                 // **Por el mismo camino que el pintado normal, y no con un `painter.text` propio.** Sin
                 // esto, el repintado no sabría ni de la familia de iconos —un separador de Powerline
                 // cambiaba de símbolo al pasarle el cursor por encima, lo encontró una revisión— ni de
@@ -400,11 +400,11 @@ fn paint_cursor(
                 // que se lee.
                 paint_character(
                     painter,
-                    debajo.c,
-                    view.combining_of(debajo),
+                    under_cursor.c,
+                    view.combining_of(under_cursor),
                     metrics.cell(origin, cursor.row, cursor.col),
-                    debajo.width == CellWidth::WideHead,
-                    colors_of(debajo, theme).1,
+                    under_cursor.width == CellWidth::WideHead,
+                    colors_of(under_cursor, theme).1,
                     metrics,
                     discoverer,
                 );
@@ -451,24 +451,24 @@ mod tests {
         // tenía, que por fuerza eran legibles el uno sobre el otro. Se afirma sobre los **colores que
         // salen**, no sobre el campo de la celda: pintar el realce con el mismo fondo de siempre dejaría
         // la selección invisible y el campo puesto igual.
-        let theme = Tema::default();
+        let theme = Theme::default();
         let mut cell = ViewCell {
             fg: TermColor::Indexed(1),
             bg: TermColor::Indexed(4),
             ..ViewCell::default()
         };
 
-        let (letra, fondo) = colors_of(&cell, &theme);
+        let (foreground, background) = colors_of(&cell, &theme);
         cell.selected = true;
-        let (letra_realzada, fondo_realzado) = colors_of(&cell, &theme);
+        let (selected_foreground, selected_background) = colors_of(&cell, &theme);
 
         assert_eq!(
-            (letra_realzada, fondo_realzado),
-            (fondo, letra),
+            (selected_foreground, selected_background),
+            (background, foreground),
             "lo seleccionado no salió con sus dos colores intercambiados"
         );
         assert_ne!(
-            fondo_realzado, fondo,
+            selected_background, background,
             "el fondo de la celda realzada es el mismo de antes: la selección no se vería"
         );
     }
@@ -480,7 +480,7 @@ mod tests {
         // apagado, y con vídeo inverso ese color viaja en el fondo. Intercambiando antes de aplicar la
         // intensidad, lo apagado sería el color equivocado — el mismo defecto que una revisión ya
         // encontró en este pintor sin la selección de por medio.
-        let theme = Tema::default();
+        let theme = Theme::default();
         let cell = ViewCell {
             fg: TermColor::Indexed(1),
             bg: TermColor::Indexed(4),
@@ -489,8 +489,8 @@ mod tests {
             ..ViewCell::default()
         };
 
-        let (_, fondo_apagado) = colors_of(&cell, &theme);
-        let (letra_realzada, _) = colors_of(
+        let (_, dim_background) = colors_of(&cell, &theme);
+        let (selected_foreground, _) = colors_of(
             &ViewCell {
                 selected: true,
                 ..cell
@@ -499,12 +499,12 @@ mod tests {
         );
 
         assert_eq!(
-            letra_realzada, fondo_apagado,
+            selected_foreground, dim_background,
             "la letra de la celda realzada no es el color que iba atenuado: el realce se intercambió \
              antes de aplicar la intensidad"
         );
         assert_ne!(
-            letra_realzada,
+            selected_foreground,
             theme.color(TermColor::Indexed(4)),
             "la letra salió a plena intensidad: el atenuado que el programa pidió se perdió"
         );
@@ -512,11 +512,11 @@ mod tests {
 
     #[test]
     fn el_espacio_se_reparte_en_celdas_enteras() {
-        let rejilla = metrics(10.0, 20.0).cells_in(vec2(805.0, 419.0));
+        let grid = metrics(10.0, 20.0).cells_in(vec2(805.0, 419.0));
 
         // Las celdas que no caben enteras no cuentan: media columna pintada al borde sería medio
         // carácter cortado.
-        assert_eq!(rejilla, Size { rows: 20, cols: 80 });
+        assert_eq!(grid, Size { rows: 20, cols: 80 });
     }
 
     #[test]
@@ -532,31 +532,31 @@ mod tests {
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
 
-        let mut rejillas = Vec::new();
+        let mut grids = Vec::new();
         ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let metrics = CellMetrics::measure(ui.ctx(), eframe::egui::FontId::monospace(96.0));
             for slot in [vec2(320.0, 200.0), vec2(40.0, 30.0), vec2(0.0, 0.0)] {
-                rejillas.push(metrics.cells_in(slot));
+                grids.push(metrics.cells_in(slot));
             }
         })
         .drop_without_applying_deltas();
 
-        for rejilla in rejillas {
+        for grid in grids {
             assert!(
-                rejilla.cols >= 1 && rejilla.rows >= 1,
+                grid.cols >= 1 && grid.rows >= 1,
                 "con el cuerpo máximo la rejilla salió {}x{}: una consola de cero columnas es una \
                  división entre cero esperando a ocurrir",
-                rejilla.cols,
-                rejilla.rows
+                grid.cols,
+                grid.rows
             );
         }
     }
 
     #[test]
     fn una_ventana_mas_estrecha_que_una_celda_sigue_dando_una_columna() {
-        let rejilla = metrics(10.0, 20.0).cells_in(vec2(3.0, 4.0));
+        let grid = metrics(10.0, 20.0).cells_in(vec2(3.0, 4.0));
 
-        assert_eq!(rejilla, Size { rows: 1, cols: 1 });
+        assert_eq!(grid, Size { rows: 1, cols: 1 });
     }
 
     #[test]
@@ -564,9 +564,9 @@ mod tests {
         // Diez mil puntos de lado es lo que egui responde mientras el escritorio no ha dicho
         // cuánto mide la ventana. Sin techo eso son 743 000 celdas reservadas y un aviso de tamaño
         // absurdo al programa de dentro.
-        let rejilla = metrics(8.4, 16.0).cells_in(vec2(10_000.0, 10_000.0));
+        let grid = metrics(8.4, 16.0).cells_in(vec2(10_000.0, 10_000.0));
 
-        assert_eq!(rejilla, CEILING);
+        assert_eq!(grid, CEILING);
     }
 
     #[test]
@@ -583,17 +583,17 @@ mod tests {
             vec2(f32::INFINITY, f32::INFINITY),
             vec2(1e9, 1e9),
         ] {
-            let rejilla = metrics(10.0, 20.0).cells_in(space);
+            let grid = metrics(10.0, 20.0).cells_in(space);
 
             assert!(
-                rejilla.rows >= 1 && rejilla.cols >= 1,
-                "{space:?} produjo una rejilla que hace estallar la pantalla: {rejilla:?}"
+                grid.rows >= 1 && grid.cols >= 1,
+                "{space:?} produjo una rejilla que hace estallar la pantalla: {grid:?}"
             );
             assert!(
-                rejilla.rows <= CEILING.rows && rejilla.cols <= CEILING.cols,
-                "{space:?} se saltó el techo: {rejilla:?}"
+                grid.rows <= CEILING.rows && grid.cols <= CEILING.cols,
+                "{space:?} se saltó el techo: {grid:?}"
             );
-            screen.resize(rejilla);
+            screen.resize(grid);
         }
     }
 
@@ -624,7 +624,7 @@ mod tests {
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
         let view = screen.view();
-        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
                 eframe::egui::Id::new("la rejilla"),
@@ -632,17 +632,17 @@ mod tests {
             paint(
                 &painter,
                 &view,
-                &Tema::default(),
+                &Theme::default(),
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 discoverer,
             );
         });
         let (mut images, mut texts) = (0, 0);
-        for shape in &salida.shapes {
+        for shape in &output.shapes {
             count(&shape.shape, &mut images, &mut texts);
         }
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
         (images, texts)
     }
 
@@ -652,15 +652,15 @@ mod tests {
     /// cualquier malla que el marco pinte por su cuenta.
     fn count(shape: &eframe::egui::Shape, images: &mut usize, texts: &mut usize) {
         match shape {
-            eframe::egui::Shape::Mesh(malla)
-                if malla.texture_id != eframe::egui::TextureId::default() =>
+            eframe::egui::Shape::Mesh(mesh)
+                if mesh.texture_id != eframe::egui::TextureId::default() =>
             {
                 *images += 1;
             }
             eframe::egui::Shape::Text(_) => *texts += 1,
-            eframe::egui::Shape::Vec(muchas) => {
-                for una in muchas {
-                    count(una, images, texts);
+            eframe::egui::Shape::Vec(many) => {
+                for one in many {
+                    count(one, images, texts);
                 }
             }
             _ => {}
@@ -716,12 +716,12 @@ mod tests {
         // **AC4, y las dos mitades en la misma prueba a propósito.** `☁` y `☁️` son **el mismo carácter**
         // con presentación distinta: comprobar solo una de las dos pasaría con un pintor que mandara todo
         // a color, o todo a texto.
-        let (sin_selector, textos_sin) = shapes_of(&of_text("\u{2601}"));
+        let (no_selector, texts_without) = shapes_of(&of_text("\u{2601}"));
         assert_eq!(
-            sin_selector, 0,
+            no_selector, 0,
             "una nube sin selector se pintó a color: es un símbolo de texto y así se pierde"
         );
-        assert_eq!(textos_sin, 1, "la nube no se pintó de ninguna manera");
+        assert_eq!(texts_without, 1, "la nube no se pintó de ninguna manera");
 
         let (with_selector, _) = shapes_of(&of_text("\u{2601}\u{FE0F}"));
         if there_is_color_on_this_machine() {
@@ -790,7 +790,7 @@ mod tests {
         let ctx = Context::default();
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
-        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
                 eframe::egui::Id::new("un emoji"),
@@ -798,44 +798,44 @@ mod tests {
             paint(
                 &painter,
                 &view,
-                &Tema::default(),
+                &Theme::default(),
                 &metrics,
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
             );
         });
-        let mut dibujo = None;
-        for shape in &salida.shapes {
-            if let eframe::egui::Shape::Mesh(malla) = &shape.shape
-                && malla.texture_id != eframe::egui::TextureId::default()
+        let mut drawing = None;
+        for shape in &output.shapes {
+            if let eframe::egui::Shape::Mesh(mesh) = &shape.shape
+                && mesh.texture_id != eframe::egui::TextureId::default()
             {
-                dibujo = Some(malla.calc_bounds());
+                drawing = Some(mesh.calc_bounds());
             }
         }
-        salida.drop_without_applying_deltas();
-        let dibujo = dibujo.expect("el emoji no se pintó como imagen");
+        output.drop_without_applying_deltas();
+        let drawing = drawing.expect("el emoji no se pintó como imagen");
 
         // Las dos columnas que su anchura declara, y ni un punto más.
-        let suyo = Rect::from_min_size(Pos2::ZERO, vec2(metrics.width * 2.0, metrics.height));
+        let its_own = Rect::from_min_size(Pos2::ZERO, vec2(metrics.width * 2.0, metrics.height));
         assert!(
-            suyo.contains_rect(dibujo),
-            "el emoji ocupa {dibujo:?} y sus dos columnas son {suyo:?}: se sale sobre la celda vecina"
+            its_own.contains_rect(drawing),
+            "el emoji ocupa {drawing:?} y sus dos columnas son {its_own:?}: se sale sobre la celda vecina"
         );
         // **Y que no se haya deformado para llenarlas.** El margen es ceñido a propósito: con uno de una
         // décima, estirar el emoji al hueco entero —proporción 1,000 contra la suya, 1,062— pasaba esta
         // prueba. Se comprobó mutándolo, y es el disfraz que este proyecto tiene fichado: un margen
         // elegido con el que el defecto y el arreglo dan el mismo resultado.
-        let proporcion = dibujo.width() / dibujo.height();
+        let ratio = drawing.width() / drawing.height();
         assert!(
-            (proporcion - 136.0 / 128.0).abs() < 0.03,
-            "el emoji se pintó con proporción {proporcion:.3} en vez de la suya (1,062): está estirado"
+            (ratio - 136.0 / 128.0).abs() < 0.03,
+            "el emoji se pintó con proporción {ratio:.3} en vez de la suya (1,062): está estirado"
         );
         // **Y la otra cara de lo mismo, que es la que se ve**: conservar la proporción dentro de un hueco
         // que no la tiene obliga a que sobre sitio en uno de los dos ejes. Un dibujo que llena el hueco
         // exacto está estirado por definición.
         assert!(
-            dibujo.width() < suyo.width() || dibujo.height() < suyo.height(),
-            "el emoji llena su hueco exacto ({dibujo:?} contra {suyo:?}): está estirado para llenarlo"
+            drawing.width() < its_own.width() || drawing.height() < its_own.height(),
+            "el emoji llena su hueco exacto ({drawing:?} contra {its_own:?}): está estirado para llenarlo"
         );
     }
 
@@ -866,7 +866,7 @@ mod tests {
 
     fn cursor_shapes(view: &View) -> usize {
         let ctx = Context::default();
-        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
                 eframe::egui::Id::new("solo el cursor"),
@@ -874,14 +874,14 @@ mod tests {
             paint_cursor(
                 &painter,
                 view,
-                &Tema::default(),
+                &Theme::default(),
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
             );
         });
-        let shapes = salida.shapes.len();
-        salida.drop_without_applying_deltas();
+        let shapes = output.shapes.len();
+        output.drop_without_applying_deltas();
         shapes
     }
 
@@ -926,7 +926,7 @@ mod tests {
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
         let view = screen.view();
-        let salida = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
                 eframe::egui::Id::new("el orden"),
@@ -934,31 +934,31 @@ mod tests {
             paint(
                 &painter,
                 &view,
-                &Tema::default(),
+                &Theme::default(),
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
             );
         });
         let mut order = Vec::new();
-        for shape in &salida.shapes {
+        for shape in &output.shapes {
             note_down(&shape.shape, &mut order);
         }
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
         order
     }
 
     fn note_down(shape: &eframe::egui::Shape, order: &mut Vec<&'static str>) {
         match shape {
-            eframe::egui::Shape::Mesh(malla)
-                if malla.texture_id != eframe::egui::TextureId::default() =>
+            eframe::egui::Shape::Mesh(mesh)
+                if mesh.texture_id != eframe::egui::TextureId::default() =>
             {
                 order.push("imagen");
             }
             eframe::egui::Shape::Text(_) => order.push("texto"),
-            eframe::egui::Shape::Vec(muchas) => {
-                for una in muchas {
-                    note_down(una, order);
+            eframe::egui::Shape::Vec(many) => {
+                for one in many {
+                    note_down(one, order);
                 }
             }
             _ => {}
@@ -983,18 +983,18 @@ mod tests {
         let order = order_of(&of_text("a\u{1F600}b\u{1F600}c"));
 
         assert_eq!(
-            order.iter().filter(|que| **que == "imagen").count(),
+            order.iter().filter(|character| **character == "imagen").count(),
             2,
             "no salieron los dos emojis como imagen ({order:?}): la prueba no está mirando lo que dice"
         );
         assert!(
-            order.iter().filter(|que| **que == "texto").count() >= 3,
+            order.iter().filter(|character| **character == "texto").count() >= 3,
             "no salieron las tres letras ({order:?}): la prueba no está mirando lo que dice"
         );
-        let primera_imagen = order.iter().position(|que| *que == "imagen");
-        let ultimo_texto = order.iter().rposition(|que| *que == "texto");
+        let first_image = order.iter().position(|what| *what == "imagen");
+        let last_text = order.iter().rposition(|what| *what == "texto");
         assert!(
-            primera_imagen > ultimo_texto,
+            first_image > last_text,
             "los emojis se encolaron entre las letras ({order:?}): el motor parte el lote de dibujo en \
              cada uno, que es exactamente lo que el atlas existe para evitar"
         );

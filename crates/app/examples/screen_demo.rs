@@ -19,7 +19,7 @@
 //! Se lanza con `cargo run --example screen_demo -p app --release`.
 
 use app::painter::{CellMetrics, paint};
-use app::theme::Tema;
+use app::theme::Theme;
 use eframe::egui;
 use term_core::{Screen, Size};
 
@@ -80,7 +80,7 @@ fn main() -> eframe::Result {
         Box::new(|_cc| {
             Ok(Box::new(Prueba {
                 pantalla,
-                tema: Tema::default(),
+                tema: Theme::default(),
             }))
         }),
     )
@@ -88,7 +88,7 @@ fn main() -> eframe::Result {
 
 struct Prueba {
     pantalla: Screen,
-    tema: Tema,
+    tema: Theme,
 }
 
 impl eframe::App for Prueba {
@@ -111,6 +111,6 @@ impl eframe::App for Prueba {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.tema.fondo().to_normalized_gamma_f32()
+        self.tema.background().to_normalized_gamma_f32()
     }
 }

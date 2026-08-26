@@ -581,8 +581,8 @@ mod tests {
             "una línea vacía o de comentario se contó como problema"
         );
         assert_eq!(
-            crate::theme::Tema::con(&ajustes.colores).color(term_core::TermColor::Indexed(1)),
-            crate::theme::Tema::default().color(term_core::TermColor::Indexed(1)),
+            crate::theme::Theme::from_colors(&ajustes.colores).color(term_core::TermColor::Indexed(1)),
+            crate::theme::Theme::default().color(term_core::TermColor::Indexed(1)),
             "sin nada configurado el tema dejó de ser el de fábrica"
         );
     }
@@ -1059,7 +1059,7 @@ mod tests {
     #[test]
     fn los_veintidos_colores_llegan_al_tema() {
         // **Se afirma sobre el color que el tema devuelve, con el valor literal escrito en la prueba.**
-        // Compararlo contra `Tema::con(...)` otra vez mediría que el código es consistente consigo mismo:
+        // Compararlo contra `Theme::from_colors(...)` otra vez mediría que el código es consistente consigo mismo:
         // cruzar dos colores dejaría los dos lados de la igualdad cambiados y la prueba en verde. Este
         // proyecto ya tiene fichado ese disfraz, con 525 pruebas sobreviviendo a un cruce de colores.
         let texto = "color.0 = #010101\ncolor.15 = #0f0f0f\nfondo = #020202\ntexto = #030303\n\
@@ -1071,7 +1071,7 @@ mod tests {
             "alguna de las ocho líneas no se entendió"
         );
 
-        let tema = crate::theme::Tema::con(&ajustes.colores);
+        let tema = crate::theme::Theme::from_colors(&ajustes.colores);
 
         assert_eq!(
             tema.color(term_core::TermColor::Indexed(0)),
@@ -1084,25 +1084,35 @@ mod tests {
             "el color 15 no llegó: la paleta se está copiando a medias"
         );
         assert_eq!(
-            tema.fondo(),
+            tema.background(),
             Color32::from_rgb(2, 2, 2),
             "el fondo no llegó"
         );
         assert_eq!(
-            tema.primer_plano(),
+            tema.foreground(),
             Color32::from_rgb(3, 3, 3),
             "el texto no llegó"
         );
         assert_eq!(
-            tema.divisor(),
+            tema.divider(),
             Color32::from_rgb(5, 5, 5),
             "el divisor no llegó"
         );
-        assert_eq!(tema.foco(), Color32::from_rgb(6, 6, 6), "el foco no llegó");
+        assert_eq!(tema.focus(), Color32::from_rgb(6, 6, 6), "el foco no llegó");
         assert_eq!(
-            tema.fondo_del_panel(),
+            tema.panel_background(),
             Color32::from_rgb(7, 7, 7),
             "el fondo del panel no llegó"
+        );
+        // **El cursor se afirma por donde el pintor lo lee, y era el único de los seis que nadie
+        // comprobaba.** Medido: cambiar su asignación por la del foco dejaba las 718 pruebas de `app`
+        // en verde, así que el defecto y el arreglo daban el mismo resultado. Y va por `TermColor`
+        // porque es la puerta por la que el pintor pide ese color, no por un campo: afirmar sobre el
+        // campo comprobaría que el valor está apuntado, no que se usa.
+        assert_eq!(
+            tema.color(term_core::TermColor::Cursor),
+            Color32::from_rgb(4, 4, 4),
+            "el color del cursor no llegó"
         );
     }
 
@@ -1111,7 +1121,7 @@ mod tests {
         // **Es lo que permite cambiar un color sin escribir los veintidós**, y el modo de fallo es que la
         // paleta se sustituya entera en vez de hueco a hueco: quedarían quince negros.
         let (ajustes, _) = de("color.1 = #ff0000");
-        let tema = crate::theme::Tema::con(&ajustes.colores);
+        let tema = crate::theme::Theme::from_colors(&ajustes.colores);
 
         assert_eq!(
             tema.color(term_core::TermColor::Indexed(1)),
@@ -1120,7 +1130,7 @@ mod tests {
         );
         assert_eq!(
             tema.color(term_core::TermColor::Indexed(2)),
-            crate::theme::Tema::default().color(term_core::TermColor::Indexed(2)),
+            crate::theme::Theme::default().color(term_core::TermColor::Indexed(2)),
             "pedir un color cambió otro: la paleta se está sustituyendo entera"
         );
     }

@@ -27,64 +27,64 @@ use std::time::{Duration, Instant};
 /// Un megabyte son ocho fotogramas de trabajo por delante con el presupuesto actual: suficiente
 /// para que el pintado nunca se quede esperando bytes, y poco para que retenerlo dé igual. Lo que
 /// no cabe no se pierde: se queda en el programa que lo escribió, que espera.
-const TECHO: usize = 1024 * 1024;
+const QUEUE_CEILING: usize = 1024 * 1024;
 
 /// Cada cuánto se despierta el hilo a comprobar por su cuenta si ya hay sitio.
 ///
 /// La señal de quien recoge es lo que despierta normalmente; este plazo solo existe para que una
 /// señal perdida cueste un milisegundo y no un cuelgue.
-const REVISION: Duration = Duration::from_millis(1);
+const RECHECK: Duration = Duration::from_millis(1);
 
 /// Lo que hay en la cola: los bytes y cuándo llegó cada tanda.
 #[derive(Default)]
-struct Cola {
+struct Queue {
     bytes: VecDeque<u8>,
     /// Cuándo llegó cada tanda y hasta qué byte llega, contando desde el principio de todo lo que
     /// ha pasado por aquí. Existe para poder responder **cuánto lleva esperando** lo que se recoge:
     /// en un volcado esa espera es el tramo que domina el retraso visual —más de un segundo, frente
     /// a los microsegundos de todo lo demás— y sin sellarla el número diría que la aplicación es
     /// instantánea justo cuando no lo es.
-    llegadas: VecDeque<(u64, Instant)>,
+    arrivals: VecDeque<(u64, Instant)>,
     /// Cuántos bytes se han recogido ya en total. Es el origen contra el que se leen las llegadas.
-    recogidos: u64,
+    bytes_picked_up: u64,
 }
 
 /// El resultado de una recogida: si queda cola, y desde cuándo esperaba lo que se ha llevado.
-pub struct Recogida {
+pub struct Pickup {
     /// El presupuesto cortó el bombeo y queda cola por tragar.
-    pub queda_cola: bool,
+    pub left_a_queue: bool,
     /// Cuándo llegó el más antiguo de los bytes recogidos, o nada si no se recogió ninguno. Es el
     /// principio del tramo que el usuario ve como retraso.
-    pub esperando_desde: Option<Instant>,
+    pub waiting_since: Option<Instant>,
 }
 
 /// Lo que el programa ha escrito y todavía no se ha recogido, más la señal de si sigue vivo.
-pub struct Puente {
+pub struct PtyOutput {
     /// Una cola por los dos extremos y no un vector: se añade por el final y se saca por el
     /// principio, y sacar del principio de un vector copia todo lo que queda detrás. Con un
     /// volcado en marcha eso serían megabytes copiados en cada fotograma, y ese coste acabaría
     /// dentro del número que este hito existe para medir.
-    cola: Arc<Mutex<Cola>>,
+    queue: Arc<Mutex<Queue>>,
     /// Avisa al hilo de que se ha hecho sitio en la cola y puede volver a recoger del canal.
     ///
-    /// Va aparte del candado y no dentro de `Cola` porque quien espera y quien avisa son hilos
+    /// Va aparte del candado y no dentro de `Queue` porque quien espera y quien avisa son hilos
     /// distintos y ninguno de los dos es dueño del otro.
-    hay_sitio: Arc<Condvar>,
+    room: Arc<Condvar>,
     /// Saca al hilo de la espera por sitio cuando este objeto deja de existir.
     ///
     /// Esperar sitio es lo único que el hilo hace **sin** mirar el canal, así que ahí no se entera
     /// de que el programa ha muerto ni de que ya nadie va a recoger. Sin esta bandera, un puente
     /// destruido con la cola en el techo deja su hilo girando para siempre.
-    parar: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
     /// No transporta nada: lo que importa es **cuándo se cierra**, que es cuando el hilo termina.
     /// El tipo vacío deja escrito en la firma que por aquí no va a llegar ningún valor.
-    defuncion: Receiver<std::convert::Infallible>,
+    death: Receiver<std::convert::Infallible>,
 }
 
-impl Puente {
+impl PtyOutput {
     /// Arranca el hilo que se queda con la salida del programa.
     ///
-    /// `despertar` es lo que hay que hacer para que la ventana se entere de que hay algo nuevo; en
+    /// `wake` es lo que hay que hacer para que la ventana se entere de que hay algo nuevo; en
     /// la aplicación es pedirle un repintado. Se recibe como una función en vez de recibir la
     /// ventana entera por dos razones: así este módulo no depende del framework de interfaz —que
     /// es lo que se va a reescribir— y así **el despertar se puede comprobar en un test**, que es
@@ -93,7 +93,7 @@ impl Puente {
     /// Pedir el repintado de más no cuesta —se agrupan solos— y pedirlo de menos es una ventana
     /// quieta con trabajo por mostrar.
     ///
-    /// **`despertar` no puede entrar en pánico.** Si lo hiciera, el hilo moriría, se publicaría una
+    /// **`wake` no puede entrar en pánico.** Si lo hiciera, el hilo moriría, se publicaría una
     /// muerte que no ha ocurrido, y de paso se destruiría el canal de salida: el lector de la caja
     /// de debajo rompería al enviar, dejaría de vaciar el pseudoterminal y el programa acabaría
     /// bloqueado al escribir.
@@ -102,75 +102,75 @@ impl Puente {
     /// muera el programa— o que se destruya este objeto. Lo segundo hace falta porque esperar sitio
     /// es lo único que el hilo hace sin mirar el canal, y ahí no se enteraría de ninguna de las dos
     /// cosas. Aun así conviene tenerlo junto al `Pty`: separarlos deja una cola sin dueño.
-    pub fn nuevo(salida: Receiver<Vec<u8>>, despertar: impl Fn() + Send + 'static) -> Self {
-        let cola = Arc::new(Mutex::new(Cola::default()));
-        let cola_del_hilo = Arc::clone(&cola);
-        let hay_sitio = Arc::new(Condvar::new());
-        let hay_sitio_del_hilo = Arc::clone(&hay_sitio);
-        let parar = Arc::new(AtomicBool::new(false));
-        let parar_del_hilo = Arc::clone(&parar);
-        let (defuncion_emisor, defuncion) = channel();
+    pub fn new(output: Receiver<Vec<u8>>, wake: impl Fn() + Send + 'static) -> Self {
+        let queue = Arc::new(Mutex::new(Queue::default()));
+        let thread_queue = Arc::clone(&queue);
+        let room = Arc::new(Condvar::new());
+        let thread_room = Arc::clone(&room);
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let (death_sender, death) = channel();
 
         std::thread::spawn(move || {
             // El emisor viaja al hilo sin usarse: soltarlo **es** la señal de que el programa ha
             // muerto. Se suelta a mano más abajo, y el orden con el aviso final no es un detalle:
             // ver el comentario de ahí.
-            let defuncion_emisor = defuncion_emisor;
+            let death_sender = death_sender;
             // `for` sobre el canal termina exactamente cuando el otro extremo se cierra, que es
             // cuando el programa muere. La etiqueta es para la otra salida, la de más abajo.
-            'recogida: for trozo in salida {
+            'pickup: for chunk in output {
                 // El sello se toma **antes** de pedir el candado: si el fotograma lo tuviera
                 // tomado, esperar por él se contaría como tiempo de llegada y la espera que se
                 // publica saldría inflada por la contención, que no es lo que se quiere medir.
-                let llegada = Instant::now();
+                let arrival = Instant::now();
                 // El candado se toma y se suelta en cada trozo: el fotograma también lo quiere, y
                 // retenerlo mientras se espera al siguiente trozo sería bloquear el pintado
                 // justamente durante la espera que este hilo existe para evitar.
                 // Si el candado está envenenado, el dato de dentro sigue siendo válido: lo que
                 // hubo fue un pánico en otro sitio. Recuperarlo es lo correcto; descartar en
                 // silencio dejaría la ventana congelada sin que nada lo explicara.
-                let mut cola = cola_del_hilo.lock().unwrap_or_else(PoisonError::into_inner);
+                let mut queue = thread_queue.lock().unwrap_or_else(PoisonError::into_inner);
                 // **Aquí es donde este hilo deja de recoger, y por eso el programa se frena.**
                 // Mientras se espera, el canal de la caja de abajo se llena, su hilo lector deja de
                 // vaciar el pseudoterminal, el búfer del núcleo se llena y el programa se bloquea al
                 // escribir. Se espera con el trozo ya en la mano —recibido pero sin encolar—, que es
                 // lo que hace que el canal note el atasco.
-                while cola.bytes.len() >= TECHO {
+                while queue.bytes.len() >= QUEUE_CEILING {
                     // Quien recoge es quien hace sitio, así que si este objeto ya no existe, el
                     // sitio no va a llegar nunca. Se sale por el epílogo de abajo y no con un
                     // `return` para no saltarse el orden entre publicar la muerte y avisar.
-                    if parar_del_hilo.load(Ordering::Relaxed) {
-                        break 'recogida;
+                    if thread_stop.load(Ordering::Relaxed) {
+                        break 'pickup;
                     }
-                    let (siguiente, _) = hay_sitio_del_hilo
-                        .wait_timeout(cola, REVISION)
+                    let (reacquired, _) = thread_room
+                        .wait_timeout(queue, RECHECK)
                         .unwrap_or_else(PoisonError::into_inner);
-                    cola = siguiente;
+                    queue = reacquired;
                 }
-                cola.bytes.extend(&trozo);
-                let hasta = cola.recogidos + cola.bytes.len() as u64;
-                cola.llegadas.push_back((hasta, llegada));
-                drop(cola);
-                despertar();
+                queue.bytes.extend(&chunk);
+                let up_to = queue.bytes_picked_up + queue.bytes.len() as u64;
+                queue.arrivals.push_back((up_to, arrival));
+                drop(queue);
+                wake();
             }
             // **Primero se publica la muerte y después se avisa.** Al revés hay una carrera con
             // final silencioso: el fotograma que despierta ese último aviso puede llegar antes de
             // que la señal esté publicada, ver el programa como vivo, y no recibir ningún aviso
             // más nunca — la ventana se quedaría enseñando como vivo algo que ya murió, que es
             // justo lo que este módulo existe para impedir.
-            drop(defuncion_emisor);
-            despertar();
+            drop(death_sender);
+            wake();
         });
 
         Self {
-            cola,
-            hay_sitio,
-            parar,
-            defuncion,
+            queue,
+            room,
+            stop,
+            death,
         }
     }
 
-    /// Se lleva hasta `maximo` bytes de lo acumulado. Devuelve si ha quedado algo sin recoger.
+    /// Se lleva hasta `max` bytes de lo acumulado. Devuelve si ha quedado algo sin recoger.
     ///
     /// **El máximo no es un adorno y llevárselo todo no era una opción.** Un volcado entrega dos
     /// órdenes de magnitud más rápido de lo que la rejilla interpreta, así que vaciar la cola
@@ -178,67 +178,67 @@ impl Puente {
     /// Con el tope, el búfer de quien llama no crece nunca más allá de lo que va a interpretar.
     ///
     /// **El máximo no es el techo de la cola**, y conviene no confundirlos: este acota el trabajo
-    /// de un fotograma, y el techo ([`TECHO`]) acota la memoria. Recoger es además lo que hace
+    /// de un fotograma, y el techo ([`QUEUE_CEILING`]) acota la memoria. Recoger es además lo que hace
     /// sitio, así que dejar de llamar a esto acaba frenando al programa de dentro — que es
     /// justamente lo que se quiere cuando el pintado no da abasto.
     ///
     /// Recibe el destino en vez de devolver uno nuevo para que el fotograma pueda reutilizar
     /// siempre el mismo y no reservar memoria una vez por fotograma.
-    pub fn recoger(&self, destino: &mut Vec<u8>, maximo: usize) -> Recogida {
-        let mut cola = self.cola.lock().unwrap_or_else(PoisonError::into_inner);
+    pub fn pick_up(&self, destination: &mut Vec<u8>, max: usize) -> Pickup {
+        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
 
         // La cola guarda sus bytes en dos tramos —da la vuelta al llegar al final—, así que hay
         // que copiar de los dos. Copiar de las rebanadas y no del iterador es lo que hace que esto
         // cueste lo que se lleva y no lo que se queda.
-        let trozo = cola.bytes.len().min(maximo);
-        let (primero, segundo) = cola.bytes.as_slices();
-        let del_primero = primero.len().min(trozo);
-        destino.extend_from_slice(&primero[..del_primero]);
-        destino.extend_from_slice(&segundo[..trozo - del_primero]);
-        cola.bytes.drain(..trozo);
+        let to_take = queue.bytes.len().min(max);
+        let (first, second) = queue.bytes.as_slices();
+        let from_first = first.len().min(to_take);
+        destination.extend_from_slice(&first[..from_first]);
+        destination.extend_from_slice(&second[..to_take - from_first]);
+        queue.bytes.drain(..to_take);
 
         // Cuándo llegó el primero de los bytes que se acaban de llevar: la tanda cuyo último byte
         // cae más allá de lo ya recogido. Es el más antiguo de los que van en esta entrega, así que
         // la espera que mide es la peor de las que se resuelven en este fotograma — la que se ve.
-        let esperando_desde = cola
-            .llegadas
+        let waiting_since = queue
+            .arrivals
             .iter()
-            .find(|(hasta, _)| *hasta > cola.recogidos)
-            .map(|(_, cuando)| *cuando);
+            .find(|(up_to, _)| *up_to > queue.bytes_picked_up)
+            .map(|(_, when)| *when);
 
-        cola.recogidos += trozo as u64;
+        queue.bytes_picked_up += to_take as u64;
         // Las tandas ya servidas enteras dejan de importar. Sin esta purga la lista crecería para
         // siempre durante un volcado, que es justo cuando no puede permitírselo.
-        let recogidos = cola.recogidos;
-        cola.llegadas.retain(|(hasta, _)| *hasta > recogidos);
+        let bytes_picked_up = queue.bytes_picked_up;
+        queue.arrivals.retain(|(up_to, _)| *up_to > bytes_picked_up);
 
-        let recogida = Recogida {
-            queda_cola: !cola.bytes.is_empty(),
-            esperando_desde,
+        let pickup = Pickup {
+            left_a_queue: !queue.bytes.is_empty(),
+            waiting_since,
         };
         // Se suelta el candado **antes** de avisar: si no, el hilo despierta y lo primero que hace
         // es esperar a que lo soltemos.
-        drop(cola);
-        self.hay_sitio.notify_one();
-        recogida
+        drop(queue);
+        self.room.notify_one();
+        pickup
     }
 
     /// Si el programa de dentro sigue vivo.
     ///
     /// Deja de serlo en cuanto el hilo termina, que es cuando su canal de salida se cierra.
-    pub fn sigue_vivo(&self) -> bool {
-        !matches!(self.defuncion.try_recv(), Err(TryRecvError::Disconnected))
+    pub fn is_alive(&self) -> bool {
+        !matches!(self.death.try_recv(), Err(TryRecvError::Disconnected))
     }
 }
 
-impl Drop for Puente {
+impl Drop for PtyOutput {
     fn drop(&mut self) {
         // No se espera al hilo: puede estar dentro de una lectura del canal que tarde lo que tarde
         // el programa en escribir, y bloquear el cierre de la ventana por eso sería cambiar un
         // cuelgue por otro. Basta con que deje de esperar sitio, que es lo único de lo que no
         // saldría solo.
-        self.parar.store(true, Ordering::Relaxed);
-        self.hay_sitio.notify_all();
+        self.stop.store(true, Ordering::Relaxed);
+        self.room.notify_all();
     }
 }
 
@@ -251,10 +251,10 @@ mod tests {
 
     /// Espera a que se cumpla algo, con un tope para que un fallo salga como fallo y no como un
     /// test colgado para siempre.
-    fn esperar_a(mut que: impl FnMut() -> bool) -> bool {
-        let limite = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < limite {
-            if que() {
+    fn wait_for(mut condition: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if condition() {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -264,17 +264,17 @@ mod tests {
 
     #[test]
     fn lo_que_el_programa_escribe_llega_a_la_cola() {
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
+        let pty_output = PtyOutput::new(output, || {});
 
-        let mut recogido = Vec::new();
-        let llego = esperar_a(|| {
-            puente.recoger(&mut recogido, usize::MAX);
-            recogido.windows(4).any(|v| v == b"hola")
+        let mut received = Vec::new();
+        let arrived = wait_for(|| {
+            pty_output.pick_up(&mut received, usize::MAX);
+            received.windows(4).any(|v| v == b"hola")
         });
 
-        assert!(llego, "no llegó lo que el programa escribió: {recogido:?}");
+        assert!(arrived, "no llegó lo que el programa escribió: {received:?}");
     }
 
     #[test]
@@ -282,12 +282,12 @@ mod tests {
         // Este es el contrato que se rompe en silencio meses después: ceder el canal a otro hilo
         // se lleva consigo la única señal de que el programa ha muerto. Si este test se pone rojo,
         // la ventana se quedaría abierta y viva delante de un programa que ya no existe.
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "exit 0"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "exit 0"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
+        let pty_output = PtyOutput::new(output, || {});
 
         assert!(
-            esperar_a(|| !puente.sigue_vivo()),
+            wait_for(|| !pty_output.is_alive()),
             "el programa terminó y el puente sigue diciendo que está vivo"
         );
     }
@@ -302,35 +302,35 @@ mod tests {
         // Se caza así: el programa no escribe nada, con lo que el único aviso es el final; y el
         // despertador se entretiene dentro, de modo que el test puede mirar el estado **mientras**
         // el hilo sigue dentro de esa llamada. Con el orden equivocado, aquí se leería «vivo».
-        let avisado = Arc::new(AtomicUsize::new(0));
-        let marca = Arc::clone(&avisado);
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "exit 0"], Size { rows: 24, cols: 80 })
+        let wakeups = Arc::new(AtomicUsize::new(0));
+        let thread_wakeups = Arc::clone(&wakeups);
+        let (_pty, output) = Pty::spawn("sh", &["-c", "exit 0"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, move || {
-            marca.fetch_add(1, Ordering::SeqCst);
+        let pty_output = PtyOutput::new(output, move || {
+            thread_wakeups.fetch_add(1, Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(300));
         });
 
         assert!(
-            esperar_a(|| avisado.load(Ordering::SeqCst) > 0),
+            wait_for(|| wakeups.load(Ordering::SeqCst) > 0),
             "no llegó el aviso de que el programa terminó"
         );
         assert!(
-            !puente.sigue_vivo(),
+            !pty_output.is_alive(),
             "el aviso final llegó antes de que la muerte estuviera publicada"
         );
     }
 
     #[test]
     fn mientras_el_programa_vive_el_puente_lo_dice() {
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
+        let pty_output = PtyOutput::new(output, || {});
 
         // Sin esta comprobación, un puente que dijera «muerto» desde el primer instante pasaría el
         // test de la defunción sin haber retransmitido nada.
         std::thread::sleep(Duration::from_millis(100));
-        assert!(puente.sigue_vivo(), "el programa sigue corriendo");
+        assert!(pty_output.is_alive(), "el programa sigue corriendo");
     }
 
     #[test]
@@ -343,49 +343,49 @@ mod tests {
         // manda al despedirse taparía el que aquí se prueba, y el test pasaría aunque nadie
         // despertara al llegar los bytes. Comprobado mutando el código: sin el aviso del bucle,
         // este test se pone rojo.
-        let avisos = Arc::new(AtomicUsize::new(0));
-        let contador = Arc::clone(&avisos);
-        let (_pty, salida) = Pty::spawn(
+        let wakeups = Arc::new(AtomicUsize::new(0));
+        let thread_wakeups = Arc::clone(&wakeups);
+        let (_pty, output) = Pty::spawn(
             "sh",
             &["-c", "printf algo; sleep 30"],
             Size { rows: 24, cols: 80 },
         )
         .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, move || {
-            contador.fetch_add(1, Ordering::SeqCst);
+        let pty_output = PtyOutput::new(output, move || {
+            thread_wakeups.fetch_add(1, Ordering::SeqCst);
         });
 
-        let mut recogido = Vec::new();
-        assert!(esperar_a(|| {
-            puente.recoger(&mut recogido, usize::MAX);
-            !recogido.is_empty()
+        let mut received = Vec::new();
+        assert!(wait_for(|| {
+            pty_output.pick_up(&mut received, usize::MAX);
+            !received.is_empty()
         }));
         assert!(
-            avisos.load(Ordering::SeqCst) > 0,
+            wakeups.load(Ordering::SeqCst) > 0,
             "llegaron bytes y nadie despertó a la ventana"
         );
     }
 
     #[test]
     fn recoger_deja_la_cola_vacia() {
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "printf uno"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf uno"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
+        let pty_output = PtyOutput::new(output, || {});
 
         // Se espera a que el programa termine antes de recoger. Con un programa vivo, el
         // pseudoterminal podría partir «uno» en dos entregas y el test fallaría un día de cada
         // muchos por una razón que no tiene que ver con lo que prueba.
-        assert!(esperar_a(|| !puente.sigue_vivo()));
+        assert!(wait_for(|| !pty_output.is_alive()));
 
-        let mut primera = Vec::new();
-        puente.recoger(&mut primera, usize::MAX);
-        assert!(!primera.is_empty(), "no llegó nada que recoger");
+        let mut first = Vec::new();
+        pty_output.pick_up(&mut first, usize::MAX);
+        assert!(!first.is_empty(), "no llegó nada que recoger");
 
         // Lo ya recogido no se vuelve a entregar: si se repitiera, la pantalla mostraría el mismo
         // texto dos veces sin que el programa lo hubiera escrito dos veces.
-        let mut segunda = Vec::new();
-        puente.recoger(&mut segunda, usize::MAX);
-        assert!(segunda.is_empty(), "la cola devolvió lo mismo dos veces");
+        let mut second = Vec::new();
+        pty_output.pick_up(&mut second, usize::MAX);
+        assert!(second.is_empty(), "la cola devolvió lo mismo dos veces");
     }
 
     #[test]
@@ -393,30 +393,30 @@ mod tests {
         // Sin el máximo, quien recoge se lleva la cola entera: en un volcado eso es duplicar
         // megabytes en el búfer de quien pinta, y el presupuesto por fotograma no acota nada
         // porque el gasto ya se hizo antes de llegar a él.
-        let (_pty, salida) = Pty::spawn(
+        let (_pty, output) = Pty::spawn(
             "sh",
             &["-c", "printf 0123456789"],
             Size { rows: 24, cols: 80 },
         )
         .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
-        assert!(esperar_a(|| !puente.sigue_vivo()));
+        let pty_output = PtyOutput::new(output, || {});
+        assert!(wait_for(|| !pty_output.is_alive()));
 
-        let mut primeros = Vec::new();
-        let recogida = puente.recoger(&mut primeros, 4);
-        assert_eq!(primeros, b"0123", "no se respetó el máximo");
-        assert!(recogida.queda_cola, "quedaban bytes y dijo que no");
+        let mut first = Vec::new();
+        let pickup = pty_output.pick_up(&mut first, 4);
+        assert_eq!(first, b"0123", "no se respetó el máximo");
+        assert!(pickup.left_a_queue, "quedaban bytes y dijo que no");
 
         // Y lo que sobró sigue ahí, en su orden, sin haberse perdido ni repetido: es lo que hace
         // que un volcado se vea entero aunque tarde varios fotogramas.
-        let mut resto = Vec::new();
-        let recogida = puente.recoger(&mut resto, usize::MAX);
-        assert_eq!(resto, b"456789", "lo que sobró no salió entero ni en orden");
-        assert!(!recogida.queda_cola, "la cola quedó vacía y dijo que no");
+        let mut rest = Vec::new();
+        let pickup = pty_output.pick_up(&mut rest, usize::MAX);
+        assert_eq!(rest, b"456789", "lo que sobró no salió entero ni en orden");
+        assert!(!pickup.left_a_queue, "la cola quedó vacía y dijo que no");
     }
 
     /// Deja una cola cuyo contenido está **partido en dos tramos**: el anillo da la vuelta y sus
-    /// dos rebanadas son las dos mitades de `contenido`, con `en_el_primero` bytes en la de
+    /// dos rebanadas son las dos mitades de `content`, con `in_first` bytes en la de
     /// delante.
     ///
     /// Se monta a mano, y no llenando el puente por su canal, porque desde fuera no hay forma de
@@ -425,38 +425,38 @@ mod tests {
     /// pasaría casi siempre **sin haber probado nunca el caso**, que es peor que no tenerlo. Por
     /// eso las dos comprobaciones del final: si un día la biblioteca cambia de política y esto deja
     /// de dar la vuelta, el test falla aquí en vez de volverse verde para siempre.
-    fn cola_partida_en_dos(contenido: &[u8], en_el_primero: usize) -> VecDeque<u8> {
-        let mut cola: VecDeque<u8> = VecDeque::with_capacity(contenido.len() * 2);
-        let capacidad = cola.capacity();
+    fn queue_split_in_two(content: &[u8], in_first: usize) -> VecDeque<u8> {
+        let mut queue: VecDeque<u8> = VecDeque::with_capacity(content.len() * 2);
+        let capacity = queue.capacity();
 
         // Se llena hasta el borde y se vacía todo menos el primer tramo: la cabeza queda pegada al
         // final del anillo, así que lo siguiente que entre tiene que dar la vuelta.
-        let relleno = capacidad - en_el_primero;
-        cola.extend(std::iter::repeat_n(b'.', relleno));
-        cola.extend(&contenido[..en_el_primero]);
-        cola.drain(..relleno);
-        cola.extend(&contenido[en_el_primero..]);
+        let filler = capacity - in_first;
+        queue.extend(std::iter::repeat_n(b'.', filler));
+        queue.extend(&content[..in_first]);
+        queue.drain(..filler);
+        queue.extend(&content[in_first..]);
 
-        assert_eq!(cola.capacity(), capacidad, "la cola creció y se recolocó");
-        assert!(!cola.as_slices().1.is_empty(), "la cola no dio la vuelta");
-        cola
+        assert_eq!(queue.capacity(), capacity, "la cola creció y se recolocó");
+        assert!(!queue.as_slices().1.is_empty(), "la cola no dio la vuelta");
+        queue
     }
 
     /// Un puente sin programa detrás, con la cola puesta a mano.
     ///
     /// El emisor se devuelve y hay que conservarlo vivo: soltarlo cierra el canal, y eso el puente
     /// lo lee como que el programa ha muerto.
-    fn puente_con_cola(bytes: VecDeque<u8>) -> (std::sync::mpsc::Sender<Vec<u8>>, Puente) {
-        let (emisor, salida) = channel();
-        let puente = Puente::nuevo(salida, || {});
-        let mut cola = puente.cola.lock().unwrap_or_else(PoisonError::into_inner);
+    fn pty_output_with_queue(bytes: VecDeque<u8>) -> (std::sync::mpsc::Sender<Vec<u8>>, PtyOutput) {
+        let (sender, output) = channel();
+        let pty_output = PtyOutput::new(output, || {});
+        let mut queue = pty_output.queue.lock().unwrap_or_else(PoisonError::into_inner);
         // Una sola llegada que cubre todo lo puesto a mano: sin ella, recoger no sabría desde
         // cuándo esperaba y devolvería que no hay nada que esperar, que es distinto de cero.
-        cola.llegadas
+        queue.arrivals
             .push_back((bytes.len() as u64, Instant::now()));
-        cola.bytes = bytes;
-        drop(cola);
-        (emisor, puente)
+        queue.bytes = bytes;
+        drop(queue);
+        (sender, pty_output)
     }
 
     #[test]
@@ -464,55 +464,55 @@ mod tests {
         // La cola guarda sus bytes en dos trozos en cuanto da la vuelta. Quien copie solo el
         // primero se deja la mitad del volcado en silencio, y quien los junte al revés escribe en
         // la pantalla lo que el programa mandó después antes que lo que mandó primero.
-        let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
+        let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
-        let mut destino = Vec::new();
-        let recogida = puente.recoger(&mut destino, usize::MAX);
+        let mut destination = Vec::new();
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX);
 
         assert_eq!(
-            destino, b"0123456789",
+            destination, b"0123456789",
             "los dos tramos no salieron en orden"
         );
         assert!(
-            !recogida.queda_cola,
+            !pickup.left_a_queue,
             "se llevó la cola entera y dijo que quedaba algo"
         );
     }
 
     #[test]
     fn el_maximo_que_cae_dentro_del_primer_tramo_no_toca_el_segundo() {
-        let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
+        let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
-        let mut destino = Vec::new();
+        let mut destination = Vec::new();
         assert!(
-            puente.recoger(&mut destino, 4).queda_cola,
+            pty_output.pick_up(&mut destination, 4).left_a_queue,
             "quedaban seis bytes"
         );
-        assert_eq!(destino, b"0123", "no se respetó el máximo");
+        assert_eq!(destination, b"0123", "no se respetó el máximo");
 
         // Y lo que quedó sigue estando a caballo de la vuelta, entero y en su orden.
-        let mut resto = Vec::new();
-        assert!(!puente.recoger(&mut resto, usize::MAX).queda_cola);
-        assert_eq!(resto, b"456789");
+        let mut rest = Vec::new();
+        assert!(!pty_output.pick_up(&mut rest, usize::MAX).left_a_queue);
+        assert_eq!(rest, b"456789");
     }
 
     #[test]
     fn el_maximo_que_cae_pasada_la_vuelta_se_lleva_de_los_dos_tramos() {
-        let (_emisor, puente) = puente_con_cola(cola_partida_en_dos(b"0123456789", 6));
+        let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
-        let mut destino = Vec::new();
+        let mut destination = Vec::new();
         assert!(
-            puente.recoger(&mut destino, 8).queda_cola,
+            pty_output.pick_up(&mut destination, 8).left_a_queue,
             "quedaban dos bytes"
         );
 
         // Seis del primer tramo y dos del segundo: el corte cae dentro del segundo, que es donde
         // una cuenta mal hecha se sale de rango o se deja bytes por el camino.
-        assert_eq!(destino, b"01234567");
+        assert_eq!(destination, b"01234567");
 
-        let mut resto = Vec::new();
-        assert!(!puente.recoger(&mut resto, usize::MAX).queda_cola);
-        assert_eq!(resto, b"89");
+        let mut rest = Vec::new();
+        assert!(!pty_output.pick_up(&mut rest, usize::MAX).left_a_queue);
+        assert_eq!(rest, b"89");
     }
 
     #[test]
@@ -521,20 +521,20 @@ mod tests {
         // la espera —que en un volcado es más de un segundo— no se puede medir, y el resto de
         // tramos son microsegundos: el número diría que la aplicación va instantánea justo cuando
         // se la ve ir por detrás.
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
-        assert!(esperar_a(|| !puente.sigue_vivo()));
+        let pty_output = PtyOutput::new(output, || {});
+        assert!(wait_for(|| !pty_output.is_alive()));
 
         std::thread::sleep(Duration::from_millis(50));
-        let mut destino = Vec::new();
-        let recogida = puente.recoger(&mut destino, usize::MAX);
+        let mut destination = Vec::new();
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX);
 
-        let esperando = recogida
-            .esperando_desde
+        let waiting_since = pickup
+            .waiting_since
             .expect("se recogieron bytes y no dijo desde cuándo esperaban");
         assert!(
-            esperando.elapsed() >= Duration::from_millis(50),
+            waiting_since.elapsed() >= Duration::from_millis(50),
             "la espera salió más corta de lo que el test durmió"
         );
     }
@@ -544,15 +544,15 @@ mod tests {
         // Un fotograma sin salida no es una espera instantánea: es que no hubo nada que esperar.
         // Devolver cero metería un cero en la serie y bajaría la media publicada por fotogramas en
         // los que no pasó nada.
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
+        let pty_output = PtyOutput::new(output, || {});
 
-        let mut destino = Vec::new();
-        let recogida = puente.recoger(&mut destino, usize::MAX);
+        let mut destination = Vec::new();
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX);
 
-        assert!(destino.is_empty());
-        assert!(recogida.esperando_desde.is_none());
+        assert!(destination.is_empty());
+        assert!(pickup.waiting_since.is_none());
     }
 
     #[test]
@@ -560,22 +560,22 @@ mod tests {
         // Durante un volcado entran miles de tandas. Si las marcas no se purgaran al servirlas, la
         // lista crecería sin parar y buscar en ella se haría más caro cada fotograma — dentro del
         // candado que el hilo del programa también necesita.
-        let (emisor, puente) = puente_con_cola(VecDeque::new());
+        let (sender, pty_output) = pty_output_with_queue(VecDeque::new());
         for _ in 0..50 {
-            emisor.send(b"abcd".to_vec()).expect("el puente sigue vivo");
+            sender.send(b"abcd".to_vec()).expect("el puente sigue vivo");
         }
 
-        let mut destino = Vec::new();
-        assert!(esperar_a(|| {
-            puente.recoger(&mut destino, usize::MAX);
-            destino.len() == 200
+        let mut destination = Vec::new();
+        assert!(wait_for(|| {
+            pty_output.pick_up(&mut destination, usize::MAX);
+            destination.len() == 200
         }));
 
-        let cola = puente.cola.lock().unwrap_or_else(PoisonError::into_inner);
+        let queue = pty_output.queue.lock().unwrap_or_else(PoisonError::into_inner);
         assert!(
-            cola.llegadas.is_empty(),
+            queue.arrivals.is_empty(),
             "quedaron {} marcas de tandas ya servidas",
-            cola.llegadas.len()
+            queue.arrivals.len()
         );
     }
 
@@ -583,16 +583,16 @@ mod tests {
     fn el_destino_conserva_lo_que_ya_tenia() {
         // El fotograma reutiliza su búfer y puede llamar con restos de la pasada anterior todavía
         // sin procesar. Si recoger los pisara, se perderían bytes ya leídos del programa.
-        let (_pty, salida) = Pty::spawn("sh", &["-c", "printf dos"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("sh", &["-c", "printf dos"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
+        let pty_output = PtyOutput::new(output, || {});
 
-        let mut destino = b"antes".to_vec();
-        assert!(esperar_a(|| {
-            puente.recoger(&mut destino, usize::MAX);
-            destino.len() > b"antes".len()
+        let mut destination = b"antes".to_vec();
+        assert!(wait_for(|| {
+            pty_output.pick_up(&mut destination, usize::MAX);
+            destination.len() > b"antes".len()
         }));
-        assert!(destino.starts_with(b"antes"), "se perdió lo que ya había");
+        assert!(destination.starts_with(b"antes"), "se perdió lo que ya había");
     }
 
     #[test]
@@ -600,24 +600,24 @@ mod tests {
         // Antes del arreglo, un programa que escribe sin parar y al que nadie recoge hacía
         // crecer esta cola sin freno: con `cat /dev/zero` se midieron cientos de MiB por
         // segundo en el diagnóstico. Aquí se deja el programa escribiendo y **no se llama a
-        // `recoger` en ningún momento** durante la espera: llamarlo aunque fuera una vez le
+        // `pick_up` en ningún momento** durante la espera: llamarlo aunque fuera una vez le
         // haría sitio al hilo y este seguiría recogiendo, con lo que se mediría el drenaje y no
         // el techo.
-        let (pty, salida) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
+        let (pty, output) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, || {});
+        let pty_output = PtyOutput::new(output, || {});
 
         // A los cientos de MiB/s medidos, medio segundo de margen basta de sobra para que la
         // cola alcance el techo si el freno funciona, y para que se dispare muy por encima de
         // la cota si no lo hace.
         std::thread::sleep(Duration::from_millis(500));
 
-        // Se mira el tamaño de la cola con el candado, directamente, y no con `recoger`:
-        // `recoger(destino, usize::MAX)` se llevaría la cola entera y le haría sitio al hilo,
+        // Se mira el tamaño de la cola con el candado, directamente, y no con `pick_up`:
+        // `pick_up(destination, usize::MAX)` se llevaría la cola entera y le haría sitio al hilo,
         // así que solo serviría para medir una vez — y esta comprobación necesita ver la cola
         // mientras el hilo sigue bloqueado esperando, no después de haberla vaciado.
-        let acumulados = puente
-            .cola
+        let accumulated = pty_output
+            .queue
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .bytes
@@ -634,17 +634,17 @@ mod tests {
         // Sumado, algo por encima de 1,1 MiB. Se deja hasta 4 MiB para no depender de
         // temporización fina, y con eso de sobra: a los ritmos medidos en el diagnóstico, sin
         // freno los mismos 500 ms habrían acumulado varias decenas de MiB, no unos pocos.
-        const COTA_SUPERIOR: usize = 4 * 1024 * 1024;
+        const UPPER_BOUND: usize = 4 * 1024 * 1024;
 
         assert!(
-            acumulados >= TECHO,
-            "la cola no llegó ni al techo ({TECHO} bytes) en 500 ms: solo {acumulados} bytes; \
+            accumulated >= QUEUE_CEILING,
+            "la cola no llegó ni al techo ({QUEUE_CEILING} bytes) en 500 ms: solo {accumulated} bytes; \
              la prueba no está sometiendo el puente a presión de verdad"
         );
         assert!(
-            acumulados <= COTA_SUPERIOR,
-            "la cola creció muy por encima del techo y su margen: {acumulados} bytes \
-             acumulados en 500 ms, cota {COTA_SUPERIOR} bytes — el freno que impide que esta \
+            accumulated <= UPPER_BOUND,
+            "la cola creció muy por encima del techo y su margen: {accumulated} bytes \
+             acumulados en 500 ms, cota {UPPER_BOUND} bytes — el freno que impide que esta \
              cola crezca sin límite no está actuando"
         );
 
@@ -653,10 +653,10 @@ mod tests {
         // vive el resto del módulo, se hace sobre un puente que ha salido de la espera por las
         // buenas y no por la parada de emergencia del test siguiente.
         drop(pty);
-        let mut resto = Vec::new();
-        assert!(esperar_a(|| {
-            puente.recoger(&mut resto, usize::MAX);
-            !puente.sigue_vivo()
+        let mut rest = Vec::new();
+        assert!(wait_for(|| {
+            pty_output.pick_up(&mut rest, usize::MAX);
+            !pty_output.is_alive()
         }));
     }
 
@@ -673,35 +673,35 @@ mod tests {
     /// resto de la suite.
     #[test]
     fn destruir_el_puente_con_la_cola_llena_termina_su_hilo() {
-        let testigo = Arc::new(());
-        let del_hilo = Arc::clone(&testigo);
+        let witness = Arc::new(());
+        let thread_witness = Arc::clone(&witness);
 
         // El `Pty` se mantiene vivo a propósito durante toda la prueba: si se cerrara, el hilo
         // saldría por el camino de siempre y esto pasaría aunque la parada no existiera.
-        let (_pty, salida) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
+        let (_pty, output) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
             .expect("no se pudo abrir el pseudoterminal");
-        let puente = Puente::nuevo(salida, move || {
-            let _ = &del_hilo;
+        let pty_output = PtyOutput::new(output, move || {
+            let _ = &thread_witness;
         });
 
         // Sin recoger ni una vez: la cola llega al techo y el hilo se queda esperando sitio.
         assert!(
-            esperar_a(|| {
-                puente
-                    .cola
+            wait_for(|| {
+                pty_output
+                    .queue
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .bytes
                     .len()
-                    >= TECHO
+                    >= QUEUE_CEILING
             }),
             "la cola no llegó al techo: la prueba no está dejando al hilo donde tiene que estar"
         );
 
-        drop(puente);
+        drop(pty_output);
 
         assert!(
-            esperar_a(|| Arc::strong_count(&testigo) == 1),
+            wait_for(|| Arc::strong_count(&witness) == 1),
             "el hilo sigue vivo después de destruir el puente: se quedó esperando un sitio que ya \
              nadie le va a hacer"
         );
