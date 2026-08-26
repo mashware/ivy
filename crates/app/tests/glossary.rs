@@ -65,6 +65,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/theme.rs",
     "app/src/watcher.rs",
     "app/src/pty_output.rs",
+    "app/src/lib.rs",
 ];
 
 /// Files whose **citations** are checked, though their identifiers are not yet.
@@ -146,6 +147,12 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
 /// types declared in the very file the delivery was renaming — so they hid its own work instead of
 /// somebody else's — and one, `MEDIR`, matched no identifier at all.
 ///
+/// **A fourth entry has now been deleted, and by the same check: `Metrica`.** The type it named became
+/// `CellMetrics` three deliveries ago, so the entry matched no identifier in the tree — verified by
+/// removing it and finding every test still green. Four deletions out of the same rule: **every entry
+/// is checked against the file that declares the name**, and an entry whose name is gone exempts
+/// nothing while looking like it protects something.
+///
 /// **And this list exempts nothing today. Measured:** make the exemption below never fire and
 /// [`no_spanish_identifier_survives_in_a_finished_crate`] stays green, because the three finished
 /// crates have no name that needs exempting — they are finished. Its user is the delivery that puts
@@ -167,6 +174,51 @@ const STILL_SPANISH: &[&str] = &[
     // written out one by one: the list shrinking is how the milestone shows its progress.
     "Ajustes",
     "Colores",
+    // **Los veintiocho que el fichero grande NOMBRA sin declararlos**, y entran aquí porque esta
+    // guarda juzga a un fichero por los identificadores que **aparecen** en él, no por los que
+    // declara. Los veintiocho están verificados contra el fichero que los declara, agrupados por
+    // dueño, y **cada línea la borra la entrega de su módulo**: la lista es el marcador de progreso
+    // que su propio comentario dice que es. Sin ellos, el fichero grande no puede entrar en la lista
+    // de arriba aunque no le quede ni un nombre propio en español, que es justo lo que esa entrega
+    // consigue.
+    //
+    // **Y lo que esa lista NO compra, dicho aquí porque el número lo desmiente:** el vocabulario
+    // español se **deriva** de las flechas del anexo, y los 317 nombres que la entrega del fichero
+    // grande tradujo **no son flechas** — son locales, campos y parámetros, y el glosario decide
+    // tipos. Medido por una revisión: devolver uno de los 317 a su nombre español deja estas nueve
+    // pruebas en verde. Lo que protegió esa entrega fue el oráculo posicional del diff, no esta lista.
+    //
+    // Del módulo de medida (14), que se traduce con el banco y el formato en disco:
+    "anotar_ida_del_raton",
+    "anotar_vuelta",
+    "arrastres",
+    "avisos",
+    "barra",
+    "con_efecto",
+    "consolas",
+    "de_una_vuelta",
+    "gesto",
+    "lado",
+    "llevarse_lo_pendiente",
+    "publicar_tramos",
+    "reflujo",
+    "restauracion",
+    // De la sesión (11), que se traduce con el formato en disco:
+    "Filas",
+    "ancho_del_panel",
+    "avisar_de_lo_que_no_se_puede_guardar",
+    "del_entorno",
+    "hijos",
+    "merece_aviso",
+    "nodo",
+    "orientacion",
+    "peso",
+    "pestañas",
+    "ruta_de",
+    // De los ajustes (3), que se traducen con las claves de configuración:
+    "atajos",
+    "colores",
+    "guardados",
     "Arrastres",
     "Avisos",
     "Barra",
@@ -176,7 +228,6 @@ const STILL_SPANISH: &[&str] = &[
     "Guardado",
     "LecturaDeAjustes",
     "Medida",
-    "Metrica",
     "Persistencia",
     "Rasterizado",
     "Reflujo",
@@ -707,10 +758,19 @@ fn why_it_is_a_leftover(name: &str, glossary: &Glossary) -> Option<String> {
     // **A prefix form used to be accepted here and it exempted nothing.** It was put in for the
     // measurement gate's variables, on the belief that they are identifiers starting with `MEDIR_`;
     // they are not — those are the environment variables' **strings**, and the constants that hold
-    // them are called `VARIABLE_DE_LAS_PESTAÑAS` and the like. So the entry matched no name, the
+    // them were called `VARIABLE_DE_LAS_PESTAÑAS` and the like, before this milestone reached them. So the entry matched no name, the
     // prefix matched no entry, and both are gone. Whole name or nothing.
-    let whole = unaccent(name);
-    if STILL_SPANISH.iter().any(|kept| whole == unaccent(kept)) {
+    // **Se compara el nombre ENTERO y tal cual: ni la caja ni las tildes se doblan.** Doblar la caja
+    // ya costó una pasada —la entrada del `Gesto` de otro fichero exentaba el `gesto` propio— y doblar
+    // las tildes costó otra: la entrada `pestañas`, que hace falta porque la sesión declara ese campo,
+    // exentaba de paso el caso `pestanas` de [`the_three_rules_answer_what_they_promise`], que es el
+    // único sujeto posible de la regla del plural con tilde. Una exención que apaga un caso de prueba
+    // deja la prueba en verde sin comprobar nada, y este fichero ya tiene ese disfraz fichado dos veces.
+    //
+    // Y la distinción no es un parche: **un nombre escrito con tilde y el mismo sin ella son dos
+    // identificadores distintos**, y este repositorio escribe unos con y otros sin a propósito. Exentar
+    // uno no puede exentar al otro.
+    if STILL_SPANISH.contains(&name) {
         return None;
     }
 
@@ -788,6 +848,23 @@ fn why_it_is_a_leftover(name: &str, glossary: &Glossary) -> Option<String> {
 fn the_three_rules_answer_what_they_promise() {
     let glossary = glossary();
     let verdict = |name: &str| why_it_is_a_leftover(name, &glossary);
+
+    // **Esto va primero a propósito.** Cada nombre que este test usa como caso POSITIVO tiene que
+    // estar fuera de la lista de exenciones: el día que alguien añada uno de ellos —y son nombres
+    // corrientes, así que ocurrirá— el caso deja de comprobar su regla y pasa por la exención. Va
+    // antes que los casos para que el mensaje diga **la causa** y no el síntoma: sin esto, lo que se
+    // lee es «a retired name in the plural» y el motivo está a treinta líneas de distancia.
+    //
+    // Tres veces ya es un patrón: lo pagó `color_del_reclamo` en una entrega, `pestanas` y `gesto` en
+    // ésta.
+    for case in POSITIVE_CASES {
+        assert!(
+            !STILL_SPANISH.contains(case),
+            "«{case}» is a positive case of this test and somebody put it on the exemption list: the \
+             case now passes through the exemption and asserts nothing. Pick another subject for the \
+             rule, or the rule stops being tested"
+        );
+    }
 
     // Retired vocabulary, as a whole name and as a piece of a compound.
     assert!(verdict("Celda").is_some(), "a retired type name");
@@ -967,14 +1044,63 @@ fn the_three_rules_answer_what_they_promise() {
             "«{kept}» is on the exemption list and has to come out exempt"
         );
     }
-    for own in ["gesto", "nodo", "hueco", "orientacion"] {
+    // **Los pares se derivan de la lista, no se escriben.** La primera versión los enumeraba a mano
+    // —`gesto`, `nodo`, `hueco`, `orientacion`— y dos de los cuatro acabaron **en la propia lista** por
+    // derecho propio, porque el módulo de medida declara un campo `gesto` y la sesión un `nodo`. En ese
+    // momento el caso deja de comprobar la regla y pasa por la exención: verde sin comprobar nada, que
+    // es el disfraz que este fichero lleva fichado tres veces. Derivados, el conjunto se ajusta solo.
+    // Y se filtran por **lo que el glosario retiró**: una entrada en `CamelCase` cuya forma en
+    // minúsculas el glosario nunca decidió no la caza ninguna regla, así que exigirle un veredicto
+    // sería pedirle a este test que compruebe otra cosa.
+    let pairs: Vec<String> = STILL_SPANISH
+        .iter()
+        .filter(|kept| kept.chars().next().is_some_and(char::is_uppercase))
+        .map(|kept| kept.to_lowercase())
+        .filter(|lowered| !STILL_SPANISH.contains(&lowered.as_str()))
+        .filter(|lowered| glossary.spanish.contains(&fold(lowered)))
+        .collect();
+    assert!(
+        !pairs.is_empty(),
+        "no CamelCase entry of the exemption list has a free lowercase twin, so this case is testing \
+         nothing: the rule it defends is that the list must not exempt a file's own local"
+    );
+    for own in &pairs {
         assert!(
             verdict(own).is_some(),
-            "«{own}» is what a finished file calls its own local, and the exemption list carries the \
-             CamelCase type of the same word: lowercasing the comparison would let this one through"
+            "«{own}» is what a file calls its own local, and the exemption list carries the CamelCase \
+             type of the same word: lowercasing the comparison would let this one through"
         );
     }
+
 }
+
+/// Los nombres que [`the_three_rules_answer_what_they_promise`] usa como casos **positivos**.
+///
+/// Están aquí en vez de solo en el cuerpo del test para que la guarda de arriba pueda recorrerlos. Es
+/// la lista de sujetos, no la de reglas: si un caso cambia de sujeto, se cambia aquí también.
+const POSITIVE_CASES: &[&str] = &[
+    "Celda",
+    "celda_de_arriba",
+    "CeldaDeArriba",
+    "banderas",
+    "base_de",
+    "lo_quiere",
+    "que_pestaña",
+    "RatonReclamado",
+    "en_puntos",
+    "tamano_pedido",
+    "pestanas",
+    "celda2",
+    "ANCHO_DE_FABRICA",
+    "CONSOLA_MINIMA",
+    "CONSOLA2_MINIMA",
+    "USO_ALTO",
+    "CELDA_ALTA",
+    "reparto",
+    "maqueta",
+    "Resultado",
+    "color_del_borde",
+];
 
 #[test]
 fn no_spanish_identifier_survives_in_a_finished_crate() {

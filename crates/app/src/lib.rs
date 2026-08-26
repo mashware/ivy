@@ -165,7 +165,7 @@ impl Side {
     }
 
     /// Si la que llega va **antes** que la que ya estaba, en el orden en que se pintan.
-    fn antes(self) -> bool {
+    fn before(self) -> bool {
         matches!(self, Self::Left | Self::Top)
     }
 
@@ -193,7 +193,7 @@ struct MouseOutcome {
     the_tree_changed: bool,
 }
 
-/// Los gestos de arrastre que la tanda de medida se hace a sí misma. Ver [`VARIABLE_DE_LOS_ARRASTRES`].
+/// Los gestos de arrastre que la tanda de medida se hace a sí misma. Ver [`DRAGS_VARIABLE`].
 ///
 /// **Alterna el lado por el que suelta, y la razón NO es la geometría** — eso se comprobó mutándolo. Con
 /// dos consolas del mismo peso, soltar siempre por el mismo lado deja **exactamente los mismos dos
@@ -226,7 +226,7 @@ struct InjectedDrags {
     /// En qué fotograma del gesto en curso va: 0 aprieta, los siguientes arrastran, el último suelta.
     step: usize,
     /// Gestos **inyectados enteros**: los que llegaron a mandar su evento de soltar. **Cuántos quedan se
-    /// deriva de aquí** en vez de llevar su propia cuenta: la revisión pilló que un campo `quedan` valía
+    /// deriva de aquí** en vez de llevar su propia cuenta: la revisión pilló que un campo `remaining` valía
     /// siempre `pedidos − hechos` —las dos escrituras estaban pegadas— y dos fuentes del mismo dato son una
     /// invariante que alguien romperá.
     completed: usize,
@@ -321,8 +321,8 @@ impl InjectedDrags {
 
     /// Lo mismo, con un total ya contado. **Y no un bucle que llame al de arriba**: los incrementos no son
     /// sucesos distintos, son una suma que ya está hecha.
-    fn several_more_with_effect(&mut self, cuantos: usize) {
-        self.with_effect += cuantos;
+    fn several_more_with_effect(&mut self, how_many: usize) {
+        self.with_effect += how_many;
     }
 
     /// Le dice cuánto mide una celda, desde donde la métrica ya existe. Ver [`Self::cell`].
@@ -338,18 +338,18 @@ impl InjectedDrags {
     /// en vez de publicar unos tramos que nadie sabría que no llevan ningún arrastre dentro.
     fn events(
         &mut self,
-        pintado: &[(egui::Rect, Option<f32>)],
-        fotograma: u64,
+        painted: &[(egui::Rect, Option<f32>)],
+        frame_nr: u64,
     ) -> Vec<egui::Event> {
-        if self.completed == self.asked_for || self.last_frame == Some(fotograma) {
+        if self.completed == self.asked_for || self.last_frame == Some(frame_nr) {
             return Vec::new();
         }
         match self.which {
-            InjectedGesture::MovePane => self.move_a_pane(pintado, fotograma),
-            InjectedGesture::ResizePanel => self.narrow_a_panel(pintado, fotograma),
-            InjectedGesture::MoveDivider => self.move_a_divider(pintado, fotograma),
+            InjectedGesture::MovePane => self.move_a_pane(painted, frame_nr),
+            InjectedGesture::ResizePanel => self.narrow_a_panel(painted, frame_nr),
+            InjectedGesture::MoveDivider => self.move_a_divider(painted, frame_nr),
             InjectedGesture::Select | InjectedGesture::MouseToProgram => {
-                self.select_a_stretch(pintado, fotograma)
+                self.select_a_stretch(painted, frame_nr)
             }
         }
     }
@@ -369,10 +369,10 @@ impl InjectedDrags {
     /// trabajo**.
     fn select_a_stretch(
         &mut self,
-        pintado: &[(egui::Rect, Option<f32>)],
-        fotograma: u64,
+        painted: &[(egui::Rect, Option<f32>)],
+        frame_nr: u64,
     ) -> Vec<egui::Event> {
-        let Some((pane_area, _)) = pintado.first().copied() else {
+        let Some((pane_area, _)) = painted.first().copied() else {
             return Vec::new();
         };
         // Sin celda todavía no hay recorrido que calcular: es el primer fotograma, antes de que la métrica
@@ -380,43 +380,43 @@ impl InjectedDrags {
         let Some(cell) = self.cell else {
             return Vec::new();
         };
-        self.last_frame = Some(fotograma);
+        self.last_frame = Some(frame_nr);
 
         // **Se agarra dentro de la consola y lejos de sus bordes.** El de la derecha lo ocupa el asidero
         // del panel y el de más allá el divisor del árbol: apretar cerca de cualquiera de los dos mediría
         // otro gesto bajo esta etiqueta.
-        let alto = pane_area.center().y;
-        let empieza = egui::pos2(pane_area.left() + cell, alto);
-        let recorrido = CELLS_THE_GESTURE_MARKS * cell;
-        let hasta = if self.on_the_right {
-            empieza.x + recorrido
+        let mid_y = pane_area.center().y;
+        let press_at = egui::pos2(pane_area.left() + cell, mid_y);
+        let travel = CELLS_THE_GESTURE_MARKS * cell;
+        let drag_to = if self.on_the_right {
+            press_at.x + travel
         } else {
-            empieza.x + recorrido / 2.0
+            press_at.x + travel / 2.0
         };
 
         let step = self.step;
         self.step += 1;
         // El acercamiento va aparte del apretón por lo mismo que en el de la frontera: el empate.
         if step == 0 {
-            return vec![egui::Event::PointerMoved(empieza)];
+            return vec![egui::Event::PointerMoved(press_at)];
         }
         if step == 1 {
             return vec![egui::Event::PointerButton {
-                pos: empieza,
+                pos: press_at,
                 button: egui::PointerButton::Primary,
                 pressed: true,
                 modifiers: egui::Modifiers::NONE,
             }];
         }
         if step <= FRAMES_DRAGGING + 1 {
-            return vec![egui::Event::PointerMoved(egui::pos2(hasta, alto))];
+            return vec![egui::Event::PointerMoved(egui::pos2(drag_to, mid_y))];
         }
 
         self.step = 0;
         self.completed += 1;
         self.on_the_right = !self.on_the_right;
         vec![egui::Event::PointerButton {
-            pos: egui::pos2(hasta, alto),
+            pos: egui::pos2(drag_to, mid_y),
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
@@ -426,7 +426,7 @@ impl InjectedDrags {
     /// El gesto de la frontera que reparte dos consolas: agarrarla y llevarla a un lado y al otro.
     ///
     /// **La frontera se deriva de los dos rectángulos, no se vuelve a repartir.** El hueco que queda entre
-    /// el borde derecho de una consola y el izquierdo de la siguiente **es** el divisor: [`repartir`] lo
+    /// el borde derecho de una consola y el izquierdo de la siguiente **es** el divisor: [`tile`] lo
     /// construye justo ahí y con ese grosor. Repartir por segunda vez sería una copia del cálculo que
     /// decide dónde está cada consola, y las dos podrían discrepar precisamente en la tanda que mide.
     ///
@@ -449,18 +449,18 @@ impl InjectedDrags {
     /// gana siempre, y el inyectado solo ganaba el primero de la corrida.
     fn move_a_divider(
         &mut self,
-        pintado: &[(egui::Rect, Option<f32>)],
-        fotograma: u64,
+        painted: &[(egui::Rect, Option<f32>)],
+        frame_nr: u64,
     ) -> Vec<egui::Event> {
-        let (Some((izquierda, _)), Some((derecha, _))) =
-            (pintado.first().copied(), pintado.get(1).copied())
+        let (Some((left_pane, _)), Some((right_pane, _))) =
+            (painted.first().copied(), painted.get(1).copied())
         else {
             return Vec::new();
         };
         // Una al lado de otra, que es lo único que este gesto sabe agarrar. Partidas en horizontal el hueco
         // de arriba no existe y el punto caería dentro de una consola, o sea que el gesto arrastraría **la
         // consola** y la tanda mediría el gesto de al lado bajo esta etiqueta.
-        if derecha.left() < izquierda.right() {
+        if right_pane.left() < left_pane.right() {
             return Vec::new();
         }
         // Sin celda todavía no hay recorrido que calcular: es el primer fotograma, antes de que la métrica
@@ -468,31 +468,31 @@ impl InjectedDrags {
         let Some(cell) = self.cell else {
             return Vec::new();
         };
-        self.last_frame = Some(fotograma);
+        self.last_frame = Some(frame_nr);
 
         // **El centro de la línea, que es el único punto que gana el empate.** Por su borde izquierdo el
         // empate se lo lleva la consola de al lado —comprobado: el gesto no movía nada— porque ese borde
         // *es* su borde derecho y quien empata gana es el último registrado.
-        let centro = (izquierda.right() + derecha.left()) / 2.0;
+        let center_x = (left_pane.right() + right_pane.left()) / 2.0;
         // A media altura de las dos, que es donde la línea es más larga de agarrar.
-        let alto = izquierda.center().y;
+        let mid_y = left_pane.center().y;
         // **Un recorrido en celdas y no en fracción del ancho**, por lo mismo que en el gesto del panel: lo
         // que hay que cruzar son fronteras de celda, porque es ahí donde la rejilla de las dos consolas
         // cambia de verdad y donde su texto se recoloca.
-        let recorrido = CELLS_THE_DIVIDER_GESTURE_CROSSES * cell;
+        let travel = CELLS_THE_DIVIDER_GESTURE_CROSSES * cell;
 
         let step = self.step;
         self.step += 1;
         // El acercamiento, solo. El porqué de que vaya en su propio fotograma, en la cabecera.
         if step == 0 {
-            return vec![egui::Event::PointerMoved(egui::pos2(centro, alto))];
+            return vec![egui::Event::PointerMoved(egui::pos2(center_x, mid_y))];
         }
         if step == 1 {
             // De dónde sale este gesto, apuntado **antes** de que el apretón mueva nada. Ver
             // [`Self::grabbed_at`].
-            self.grabbed_at = Some(centro);
+            self.grabbed_at = Some(center_x);
             return vec![egui::Event::PointerButton {
-                pos: egui::pos2(centro, alto),
+                pos: egui::pos2(center_x, mid_y),
                 button: egui::PointerButton::Primary,
                 pressed: true,
                 modifiers: egui::Modifiers::NONE,
@@ -509,17 +509,17 @@ impl InjectedDrags {
         let grabbed_at = self
             .grabbed_at
             .expect("el arrastre solo llega aquí después del apretón, que apunta de dónde sale");
-        let cuantos = (step - 1).min(FRAMES_DRAGGING) as f32;
-        let andado = if self.on_the_right {
-            cuantos * recorrido
+        let frames_so_far = (step - 1).min(FRAMES_DRAGGING) as f32;
+        let walked = if self.on_the_right {
+            frames_so_far * travel
         } else {
-            -cuantos * recorrido
+            -frames_so_far * travel
         };
         // Y se apunta medio grosor **antes** del sitio que se quiere, porque la frontera se planta con su
         // borde izquierdo donde está el puntero: su centro acaba medio grosor más allá.
-        let hasta = grabbed_at + andado - DIVIDER_THICKNESS / 2.0;
+        let drag_to = grabbed_at + walked - DIVIDER_THICKNESS / 2.0;
         if step <= FRAMES_DRAGGING + 1 {
-            return vec![egui::Event::PointerMoved(egui::pos2(hasta, alto))];
+            return vec![egui::Event::PointerMoved(egui::pos2(drag_to, mid_y))];
         }
 
         self.step = 0;
@@ -527,7 +527,7 @@ impl InjectedDrags {
         self.grabbed_at = None;
         self.on_the_right = !self.on_the_right;
         vec![egui::Event::PointerButton {
-            pos: egui::pos2(hasta, alto),
+            pos: egui::pos2(drag_to, mid_y),
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
@@ -545,13 +545,13 @@ impl InjectedDrags {
     /// gesto siguiente no tendría dónde agarrar por este camino y la tanda se quedaría quieta a mitad.
     fn narrow_a_panel(
         &mut self,
-        pintado: &[(egui::Rect, Option<f32>)],
-        fotograma: u64,
+        painted: &[(egui::Rect, Option<f32>)],
+        frame_nr: u64,
     ) -> Vec<egui::Event> {
         // **Hace falta una división con panel a la vista.** Sin ella se devuelve la lista vacía en vez de
         // saltarse el paso, para que la tanda declare **cero gestos** y el guion la pueda invalidar — igual
         // que cuando se piden arrastres de consola con una sola división.
-        let Some((pane, divider)) = pintado.first().copied() else {
+        let Some((pane, divider)) = painted.first().copied() else {
             return Vec::new();
         };
         let Some(divider) = divider else {
@@ -567,7 +567,7 @@ impl InjectedDrags {
             self.step = 0;
             self.completed += 1;
             self.on_the_right = !self.on_the_right;
-            self.last_frame = Some(fotograma);
+            self.last_frame = Some(frame_nr);
             return vec![egui::Event::PointerButton {
                 pos: egui::pos2(pane.right(), pane.center().y),
                 button: egui::PointerButton::Primary,
@@ -580,27 +580,27 @@ impl InjectedDrags {
         let Some(cell) = self.cell else {
             return Vec::new();
         };
-        self.last_frame = Some(fotograma);
+        self.last_frame = Some(frame_nr);
 
         // A media altura, que es donde el asidero es más ancho de agarrar y donde no compite con nada.
-        let alto = pane.center().y;
+        let mid_y = pane.center().y;
         // **Un recorrido en celdas y no en fracción del ancho.** Lo que el gesto tiene que cruzar son
         // fronteras de celda, porque es ahí donde el ancho del panel cambia de verdad y donde su maqueta se
         // rehace; medido en fracción, la misma tanda en otra ventana cruzaría otro número de ellas.
-        let recorrido = CELLS_THE_PANEL_GESTURE_CROSSES * cell;
-        let hasta = if self.on_the_right {
-            divider + recorrido
+        let travel = CELLS_THE_PANEL_GESTURE_CROSSES * cell;
+        let drag_to = if self.on_the_right {
+            divider + travel
         } else {
-            divider - recorrido
+            divider - travel
         };
 
         let step = self.step;
         self.step += 1;
         if step == 0 {
             return vec![
-                egui::Event::PointerMoved(egui::pos2(divider, alto)),
+                egui::Event::PointerMoved(egui::pos2(divider, mid_y)),
                 egui::Event::PointerButton {
-                    pos: egui::pos2(divider, alto),
+                    pos: egui::pos2(divider, mid_y),
                     button: egui::PointerButton::Primary,
                     pressed: true,
                     modifiers: egui::Modifiers::NONE,
@@ -608,14 +608,14 @@ impl InjectedDrags {
             ];
         }
         if step <= FRAMES_DRAGGING {
-            return vec![egui::Event::PointerMoved(egui::pos2(hasta, alto))];
+            return vec![egui::Event::PointerMoved(egui::pos2(drag_to, mid_y))];
         }
 
         self.step = 0;
         self.completed += 1;
         self.on_the_right = !self.on_the_right;
         vec![egui::Event::PointerButton {
-            pos: egui::pos2(hasta, alto),
+            pos: egui::pos2(drag_to, mid_y),
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
@@ -624,16 +624,16 @@ impl InjectedDrags {
 
     fn move_a_pane(
         &mut self,
-        pintado: &[(egui::Rect, Option<f32>)],
-        fotograma: u64,
+        painted: &[(egui::Rect, Option<f32>)],
+        frame_nr: u64,
     ) -> Vec<egui::Event> {
         let (Some((grabbed_at, _)), Some((target, _))) =
-            (pintado.first().copied(), pintado.get(1).copied())
+            (painted.first().copied(), painted.get(1).copied())
         else {
             return Vec::new();
         };
         let (grabbed_at, target) = (&grabbed_at, &target);
-        self.last_frame = Some(fotograma);
+        self.last_frame = Some(frame_nr);
 
         // **Cerca del borde y a media altura, para que el lado que elige el gesto sea el horizontal.** La
         // elección compara la distancia a cada borde **en proporción al lado que le toca**, así que un
@@ -863,7 +863,7 @@ const MINIMUM_ROWS: f32 = 3.0;
 ///
 /// Se escribe sin eñe a propósito: es lo que un guion de shell tiene que poder teclear sin sorpresas de
 /// codificación, y sus dos hermanas ya son ASCII.
-const VARIABLE_DE_LAS_PESTAÑAS: &str = "MEDIR_PESTANAS";
+const TABS_VARIABLE: &str = "MEDIR_PESTANAS";
 
 /// La variable de entorno que dice con qué tamaño abrir la ventana, en puntos: `<ancho>x<alto>`.
 ///
@@ -878,19 +878,19 @@ const VARIABLE_DE_LAS_PESTAÑAS: &str = "MEDIR_PESTANAS";
 ///
 /// Se escribe sin eñe por lo mismo que sus tres hermanas: es lo que un guion de shell puede teclear sin
 /// sorpresas de codificación.
-const VARIABLE_DEL_TAMAÑO: &str = "MEDIR_TAMANO";
+const SIZE_VARIABLE: &str = "MEDIR_TAMANO";
 
 /// La variable de entorno que dice con qué disposición de consolas abrir cada pestaña: `<columnas>x<filas>`.
 ///
-/// **Existe por lo mismo que [`VARIABLE_DE_LAS_PESTAÑAS`]**: partir entra por eventos del framework, así
+/// **Existe por lo mismo que [`TABS_VARIABLE`]**: partir entra por eventos del framework, así
 /// que un guion no tiene forma de pulsar el acorde, y sin esta puerta la tanda de cuatro divisiones —la que
 /// el hito del árbol tiene que medir— no se puede lanzar sin nadie delante.
 ///
 /// **Abre la disposición en vez de partir cuatro veces**, que es lo que ya hacen las dos columnas de
-/// siempre: la pestaña nace con su árbol y nadie consulta el suelo de [`cabe_partir`] al arrancar. Quien
+/// siempre: la pestaña nace con su árbol y nadie consulta el suelo de [`can_split`] al arrancar. Quien
 /// pida una disposición que no cabe en su ventana verá consolas de una columna, igual que hoy con una
 /// ventana diminuta.
-const VARIABLE_DE_LAS_DIVISIONES: &str = "MEDIR_DIVISIONES";
+const PANES_VARIABLE: &str = "MEDIR_DIVISIONES";
 
 /// La variable de entorno que dice **cuántos gestos de arrastre** inyectarse durante la tanda.
 ///
@@ -909,7 +909,7 @@ const VARIABLE_DE_LAS_DIVISIONES: &str = "MEDIR_DIVISIONES";
 ///
 /// Se escribe sin eñe por lo mismo que sus tres hermanas: es lo que un guion de shell puede teclear sin
 /// sorpresas de codificación.
-const VARIABLE_DE_LOS_ARRASTRES: &str = "MEDIR_ARRASTRES";
+const DRAGS_VARIABLE: &str = "MEDIR_ARRASTRES";
 
 /// Qué gesto se inyecta cuando una tanda pide arrastres.
 ///
@@ -947,7 +947,7 @@ impl InjectedGesture {
     /// soltar, el del panel rehace la maqueta de uno al cruzar cada celda, y el de la frontera del árbol
     /// recoloca el texto de dos. Dos tandas de clases distintas no se comparan, y sin esta palabra en la
     /// cabecera nadie sabría cuál está leyendo.
-    fn como_se_publica(self) -> &'static str {
+    fn as_published(self) -> &'static str {
         match self {
             Self::MovePane => "moviendo consolas",
             Self::ResizePanel => "estrechando el panel",
@@ -962,7 +962,7 @@ impl InjectedGesture {
 ///
 /// **Por omisión el de la consola**, para que las tandas que ya existían sigan midiendo exactamente lo que
 /// median: una tanda vieja que de pronto arrastrara paneles publicaría sus números bajo la misma letra.
-const VARIABLE_DEL_GESTO: &str = "MEDIR_GESTO";
+const GESTURE_VARIABLE: &str = "MEDIR_GESTO";
 
 /// Las cinco variables que dicen que esta sesión la pidió una tanda de medida.
 ///
@@ -977,16 +977,16 @@ const VARIABLE_DEL_GESTO: &str = "MEDIR_GESTO";
 /// variables desde una prueba es comportamiento indefinido en un proceso con hilos, y esta suite corre en
 /// paralelo lanzando procesos; sin este corte, **la expresión entera se podía cambiar por `false`** —
 /// apagando los dos vetos que cuelgan de ella— con la suite en verde. Lo cazó una revisión.
-fn any_measurement_variable(hay: impl Fn(&str) -> bool) -> bool {
-    VARIABLES_DE_MEDIDA.iter().any(|which| hay(which))
+fn any_measurement_variable(is_set: impl Fn(&str) -> bool) -> bool {
+    MEASUREMENT_VARIABLES.iter().any(|which| is_set(which))
 }
 
-const VARIABLES_DE_MEDIDA: [&str; 5] = [
-    VARIABLE_DE_LAS_PESTAÑAS,
-    VARIABLE_DE_LAS_DIVISIONES,
-    VARIABLE_DEL_TAMAÑO,
-    VARIABLE_DE_LOS_ARRASTRES,
-    VARIABLE_DEL_GESTO,
+const MEASUREMENT_VARIABLES: [&str; 5] = [
+    TABS_VARIABLE,
+    PANES_VARIABLE,
+    SIZE_VARIABLE,
+    DRAGS_VARIABLE,
+    GESTURE_VARIABLE,
 ];
 
 /// Cuántas celdas empuja la frontera del panel **cada fotograma de arrastre** del gesto inyectado.
@@ -1069,14 +1069,14 @@ const FRAMES_DRAGGING: usize = 2;
 /// los intentos **antes de que llegue la primera respuesta** y la ventana no volvería a pedir nada,
 /// tirando todas las tandas de esa máquina. Treinta y dos fotogramas son un parpadeo al lado de los
 /// cientos que tiene una tanda, y siguen acotando la pelea.
-const INSISTENCIAS_CON_EL_TAMAÑO: u8 = 32;
+const FRAMES_INSISTING_ON_SIZE: u8 = 32;
 
 /// Cuánto puede desviarse el tamaño de la ventana del pedido para darlo por bueno, en puntos.
 ///
 /// **Medio punto, y no cero.** Un compositor puede entregar un tamaño con fracción —redondeos de escala—,
 /// y con la igualdad exacta la ventana se pasaría los cuatro intentos peleándose por una diferencia que no
 /// mueve ni un píxel, y menos aún una celda de la rejilla, que es lo que la medida compara.
-const MARGEN_DEL_TAMAÑO: f32 = 0.5;
+const SIZE_TOLERANCE: f32 = 0.5;
 
 /// Cuánto aire deja la barra por encima y por debajo del número de la pestaña.
 ///
@@ -1161,24 +1161,24 @@ impl Orientation {
     }
 
     /// Cuánto hay desde el principio del área hasta ese punto, en el sentido que se reparte.
-    fn offset_from_the_start(self, area: egui::Rect, punto: egui::Pos2) -> f32 {
+    fn offset_from_the_start(self, area: egui::Rect, point: egui::Pos2) -> f32 {
         match self {
-            Self::Columns => punto.x - area.left(),
-            Self::Rows => punto.y - area.top(),
+            Self::Columns => point.x - area.left(),
+            Self::Rows => point.y - area.top(),
         }
     }
 
-    /// El rectángulo que va desde `empieza` hasta `acaba` medido en el sentido que se reparte, ocupando
+    /// El rectángulo que va desde `starts_at` hasta `ends_at` medido en el sentido que se reparte, ocupando
     /// el área entera en el otro.
-    fn slice(self, area: egui::Rect, empieza: f32, acaba: f32) -> egui::Rect {
+    fn slice(self, area: egui::Rect, starts_at: f32, ends_at: f32) -> egui::Rect {
         match self {
             Self::Columns => egui::Rect::from_min_max(
-                egui::pos2(area.left() + empieza, area.top()),
-                egui::pos2(area.left() + acaba, area.bottom()),
+                egui::pos2(area.left() + starts_at, area.top()),
+                egui::pos2(area.left() + ends_at, area.bottom()),
             ),
             Self::Rows => egui::Rect::from_min_max(
-                egui::pos2(area.left(), area.top() + empieza),
-                egui::pos2(area.right(), area.top() + acaba),
+                egui::pos2(area.left(), area.top() + starts_at),
+                egui::pos2(area.right(), area.top() + ends_at),
             ),
         }
     }
@@ -1211,8 +1211,8 @@ impl Weight {
     /// leído del disco pase por aquí en vez de reimplementar la comprobación. Dos copias de esta
     /// invariante es una de más: la suma de pesos igual a cero pone un `NaN` en un rectángulo, y este tipo
     /// existe para que no se pueda construir.
-    pub(crate) fn new(valor: f32) -> Option<Self> {
-        (valor.is_finite() && valor > 0.0).then_some(Self(valor))
+    pub(crate) fn new(value: f32) -> Option<Self> {
+        (value.is_finite() && value > 0.0).then_some(Self(value))
     }
 
     /// El peso más pequeño que se deja construir al reescalar; ver [`Weight::scaled`].
@@ -1225,7 +1225,7 @@ impl Weight {
     /// El peso que sale de reescalar otro, **siempre**.
     ///
     /// **Existe porque el reparto multiplica dos pesos y el producto puede dejar de ser un peso.** Cerrar
-    /// una división sube las nietas a hermanas con el peso escalado —`w · suyo / suma`—, y ese producto
+    /// una división sube las nietas a hermanas con el peso escalado —`group_weight · (peso / total)`—, y ese producto
     /// **subdesborda a cero** con números pequeños: comprobado ejecutándolo, `1·10⁻⁴⁰ · 1·10⁻⁴⁰ / 2·10⁻⁴⁰`
     /// da **exactamente cero**. Y a esos números se llega **con gestos**, no solo con un fichero: el
     /// arrastre recorta la **fracción** al uno por ciento, no el peso, así que lo que deja es el uno por
@@ -1246,9 +1246,9 @@ impl Weight {
     /// peso del grupo entre sus nietas. Y esa es la cantidad de la que depende el reparto, que divide cada
     /// peso por la suma de su rama.
     ///
-    /// Con la suma acotada y con el reescalado de cerrar escrito como `suyo · (w / suma)` en vez de
-    /// `(suyo · w) / suma` —el factor de la izquierda no pasa de uno, así que el producto no puede pasar de
-    /// `suyo`—, **no queda ningún camino que desborde por arriba**, y un tope sería un mecanismo sin
+    /// Con la suma acotada y con el reescalado de cerrar escrito como `group_weight · (w / total)` en vez de
+    /// `(group_weight · w) / total` —el factor de la izquierda no pasa de uno, así que el producto no puede pasar de
+    /// `group_weight`—, **no queda ningún camino que desborde por arriba**, y un tope sería un mecanismo sin
     /// escenario.
     ///
     /// Y el suelo cubre de paso lo que no es un número, porque `max` con un `NaN` devuelve el otro operando.
@@ -1259,14 +1259,14 @@ impl Weight {
     /// defensiva: es que **este tipo no puede tener dos nociones de peso válido**. `new` exige finito, así
     /// que un `scaled` que dejara pasar un infinito construiría lo que el otro constructor rechaza, y la
     /// invariante pasaría a depender de por qué puerta se entró.
-    fn scaled(valor: f32) -> Self {
-        if !valor.is_finite() {
+    fn scaled(value: f32) -> Self {
+        if !value.is_finite() {
             return Self(Self::SMALLEST);
         }
-        Self(valor.max(Self::SMALLEST))
+        Self(value.max(Self::SMALLEST))
     }
 
-    fn valor(self) -> f32 {
+    fn value(self) -> f32 {
         self.0
     }
 }
@@ -1313,7 +1313,7 @@ struct Tiling {
 /// pueda ser cero ni `NaN` lo garantiza [`Weight`], así que la suma **nunca es cero** y la división de
 /// aquí no puede producir un `NaN` que se propague a los rectángulos.
 ///
-/// **Lo que compra el suelo de `minimo` por parte es modesto, y conviene no exagerarlo.** No evita ningún
+/// **Lo que compra el suelo de `minimum` por parte es modesto, y conviene no exagerarlo.** No evita ningún
 /// pánico —el de `Screen::resize` con cero columnas lo cubre el mínimo de 1×1 de [`CellMetrics::cells_in`]—
 /// y tampoco salva la rejilla: con cero píxeles esa misma función ya da una columna, exactamente la que
 /// da con el suelo puesto. Y **el asa no es la consola, es el divisor**, que sigue en pantalla y sigue
@@ -1328,73 +1328,73 @@ struct Tiling {
 /// supera al máximo**, y rebajar el suelo hace que eso no pueda ocurrir por construcción, en vez de
 /// depender de que una guarda cubra todos los casos.
 ///
-/// El `max` con cero sobre `util` mantiene los rectángulos bien formados con un área más estrecha que los
+/// El `max` con cero sobre `usable` mantiene los rectángulos bien formados con un área más estrecha que los
 /// propios divisores. Ahí las partes llegan a cero puntos: no hay reparto posible, y lo que se conserva
 /// es que ninguno salga invertido.
 ///
 /// **Con una sola parte no hay ningún divisor**, y por tanto tampoco se le descuenta grosor: se lleva el
 /// área entera. Es lo que hace que quitar la compañía de una división la deje exactamente como estaba
 /// antes de que hubiera reparto.
-fn repartir(area: egui::Rect, orientation: Orientation, weights: &[Weight], minimo: f32) -> Tiling {
-    let cuantas = weights.len();
-    if cuantas == 0 {
+fn tile(area: egui::Rect, orientation: Orientation, weights: &[Weight], minimum: f32) -> Tiling {
+    let how_many = weights.len();
+    if how_many == 0 {
         return Tiling {
             parts: Vec::new(),
             dividers: Vec::new(),
         };
     }
 
-    let largo = orientation.length_of(area);
-    let gaps = (cuantas - 1) as f32;
-    let util = (largo - gaps * DIVIDER_THICKNESS).max(0.0);
-    let suelo = minimo.min(util / cuantas as f32);
-    let total: f32 = weights.iter().map(|weight| weight.valor()).sum();
+    let length = orientation.length_of(area);
+    let gaps = (how_many - 1) as f32;
+    let usable = (length - gaps * DIVIDER_THICKNESS).max(0.0);
+    let floor = minimum.min(usable / how_many as f32);
+    let total: f32 = weights.iter().map(|weight| weight.value()).sum();
 
     // **Los largos se calculan primero y se colocan después, y no es un rodeo.** Lo que cada parte mide
     // vive en el espacio **útil** —el área menos los divisores— mientras que dónde empieza vive en el
     // espacio **real**. Mezclar los dos en un solo acumulador es lo que hace que la última parte se
     // quede corta justo el grosor de las líneas, y ese fallo no se ve con dos partes iguales.
-    let mut largos = Vec::with_capacity(cuantas);
-    let mut repartido = 0.0;
+    let mut lengths = Vec::with_capacity(how_many);
+    let mut handed_out = 0.0;
     for (which, weight) in weights.iter().enumerate() {
         // **El suelo se aplica por parte y no al final**, para que una que se lleve casi todo no pueda
         // dejar a la siguiente sin su mínimo. El techo es lo que queda tras reservar el suelo de las que
         // faltan, así que la última siempre encuentra sitio.
-        let faltan = (cuantas - which - 1) as f32;
-        let queda = (util - repartido - faltan * suelo).max(suelo);
-        let length_of_this_one = (util * weight.valor() / total).clamp(suelo, queda);
-        largos.push(length_of_this_one);
-        repartido += length_of_this_one;
+        let left_to_place = (how_many - which - 1) as f32;
+        let ceiling = (usable - handed_out - left_to_place * floor).max(floor);
+        let length_of_this_one = (usable * weight.value() / total).clamp(floor, ceiling);
+        lengths.push(length_of_this_one);
+        handed_out += length_of_this_one;
     }
 
-    let mut parts = Vec::with_capacity(cuantas);
-    let mut dividers = Vec::with_capacity(cuantas - 1);
-    let mut empieza = 0.0;
-    for (which, length_of_this_one) in largos.iter().enumerate() {
-        let ultima = which + 1 == cuantas;
+    let mut parts = Vec::with_capacity(how_many);
+    let mut dividers = Vec::with_capacity(how_many - 1);
+    let mut starts_at = 0.0;
+    for (which, length_of_this_one) in lengths.iter().enumerate() {
+        let is_last = which + 1 == how_many;
         // **La última llega hasta el borde en vez de hasta donde le tocaba.** Cuando algún suelo ha
         // actuado, la suma de los largos no da el útil exacto y quedaría una rendija contra el borde;
         // estirarla es lo que conserva que las partes y los divisores cubran el área **exactamente**,
         // que es la invariante por la que este reparto existe. Es lo mismo que hacía el reparto de dos
         // llevando la derecha hasta `area.right()`.
-        let acaba = if ultima {
-            largo.max(empieza)
+        let ends_at = if is_last {
+            length.max(starts_at)
         } else {
-            empieza + length_of_this_one
+            starts_at + length_of_this_one
         };
 
-        parts.push(orientation.slice(area, empieza, acaba));
-        if !ultima {
+        parts.push(orientation.slice(area, starts_at, ends_at));
+        if !is_last {
             // El tramo de las dos que separa va desde donde empieza ésta hasta donde acaba la siguiente,
             // y la siguiente todavía no está colocada: se calcula con su largo, que sí se sabe.
-            let hasta = acaba + DIVIDER_THICKNESS + largos[which + 1];
+            let spans_to = ends_at + DIVIDER_THICKNESS + lengths[which + 1];
             dividers.push(Divider {
-                rect: orientation.slice(area, acaba, acaba + DIVIDER_THICKNESS),
+                rect: orientation.slice(area, ends_at, ends_at + DIVIDER_THICKNESS),
                 orientation,
-                between_the_two: orientation.slice(area, empieza, hasta),
+                between_the_two: orientation.slice(area, starts_at, spans_to),
             });
         }
-        empieza = acaba + DIVIDER_THICKNESS;
+        starts_at = ends_at + DIVIDER_THICKNESS;
     }
 
     Tiling { parts, dividers }
@@ -1411,23 +1411,23 @@ fn repartir(area: egui::Rect, orientation: Orientation, weights: &[Weight], mini
 /// no existe ([`Weight`]), así que se recorta a un uno por ciento — que con el suelo de columnas puesto da
 /// el mismo ancho en cualquier ventana normal, y en una muy ancha deja crecer un poco a la colapsada en
 /// vez de dejarla clavada en el mínimo para siempre.
-fn weights_of(fraccion: f32) -> [Weight; 2] {
+fn weights_of(fraction: f32) -> [Weight; 2] {
     const SMALLEST_FRACTION: f32 = 0.01;
-    let primera = if fraccion.is_finite() {
-        fraccion.clamp(SMALLEST_FRACTION, 1.0 - SMALLEST_FRACTION)
+    let first_part = if fraction.is_finite() {
+        fraction.clamp(SMALLEST_FRACTION, 1.0 - SMALLEST_FRACTION)
     } else {
         INITIAL_FRACTION
     };
 
     [
-        // **`expect` y no un respaldo silencioso.** El recorte de arriba deja `primera` dentro de un
+        // **`expect` y no un respaldo silencioso.** El recorte de arriba deja `first_part` dentro de un
         // rango donde los dos pesos son válidos, así que estas dos llamadas no pueden fallar hoy. Un
         // `unwrap_or` diría lo contrario: convertiría un imposible en un reparto plausible a partes
         // iguales, y el día que alguien tocara el recorte el defecto se vería como «el divisor se ha
         // puesto solo en el centro» — un síntoma que no apunta a su causa. Todas las pruebas del reparto
         // pasan por aquí, así que romper la invariante cae ruidosamente y en el sitio.
-        Weight::new(primera).expect("el recorte deja la fracción en un rango con peso válido"),
-        Weight::new(1.0 - primera).expect("y su complemento también"),
+        Weight::new(first_part).expect("el recorte deja la fracción en un rango con peso válido"),
+        Weight::new(1.0 - first_part).expect("y su complemento también"),
     ]
 }
 
@@ -1438,19 +1438,19 @@ fn weights_of(fraccion: f32) -> [Weight; 2] {
 /// lo que hacen los gestores de ventanas donde soltar en un borde acopla a la pantalla — y aquí no pasa
 /// eso.
 fn half(pane_area: egui::Rect, side: Side) -> egui::Rect {
-    let centro = pane_area.center();
+    let center = pane_area.center();
     match side {
         Side::Left => {
-            egui::Rect::from_min_max(pane_area.min, egui::pos2(centro.x, pane_area.bottom()))
+            egui::Rect::from_min_max(pane_area.min, egui::pos2(center.x, pane_area.bottom()))
         }
         Side::Right => {
-            egui::Rect::from_min_max(egui::pos2(centro.x, pane_area.top()), pane_area.max)
+            egui::Rect::from_min_max(egui::pos2(center.x, pane_area.top()), pane_area.max)
         }
         Side::Top => {
-            egui::Rect::from_min_max(pane_area.min, egui::pos2(pane_area.right(), centro.y))
+            egui::Rect::from_min_max(pane_area.min, egui::pos2(pane_area.right(), center.y))
         }
         Side::Bottom => {
-            egui::Rect::from_min_max(egui::pos2(pane_area.left(), centro.y), pane_area.max)
+            egui::Rect::from_min_max(egui::pos2(pane_area.left(), center.y), pane_area.max)
         }
     }
 }
@@ -1465,20 +1465,20 @@ fn half(pane_area: egui::Rect, side: Side) -> egui::Rect {
 ///
 /// Los empates caen del lado de la izquierda y de arriba. Da igual cuál: lo que importa es que sea
 /// siempre el mismo, para que el mismo punto no dé dos respuestas en dos fotogramas seguidos.
-fn side_of(pane_area: egui::Rect, puntero: egui::Pos2) -> Side {
-    let (izquierda, derecha) = (puntero.x - pane_area.left(), pane_area.right() - puntero.x);
-    let (arriba, abajo) = (puntero.y - pane_area.top(), pane_area.bottom() - puntero.y);
+fn side_of(pane_area: egui::Rect, pointer: egui::Pos2) -> Side {
+    let (to_the_left, to_the_right) = (pointer.x - pane_area.left(), pane_area.right() - pointer.x);
+    let (to_the_top, to_the_bottom) = (pointer.y - pane_area.top(), pane_area.bottom() - pointer.y);
 
-    let horizontal = izquierda.min(derecha) * pane_area.height();
-    let vertical = arriba.min(abajo) * pane_area.width();
+    let horizontal = to_the_left.min(to_the_right) * pane_area.height();
+    let vertical = to_the_top.min(to_the_bottom) * pane_area.width();
 
     if horizontal <= vertical {
-        if izquierda <= derecha {
+        if to_the_left <= to_the_right {
             Side::Left
         } else {
             Side::Right
         }
-    } else if arriba <= abajo {
+    } else if to_the_top <= to_the_bottom {
         Side::Top
     } else {
         Side::Bottom
@@ -1499,13 +1499,13 @@ fn side_of(pane_area: egui::Rect, puntero: egui::Pos2) -> Side {
 /// una hija que conserve el mínimo de la división conserva el mínimo de consola pase lo que pase con su
 /// productor — mientras que medir sobre la consola de hoy haría que partir dependiera de si alguien ha
 /// publicado un `panel.json` en el último segundo.
-fn cabe_partir(pane_area: egui::Rect, cut_along: Orientation, metrics: &CellMetrics) -> bool {
-    let minimo = match cut_along {
+fn can_split(pane_area: egui::Rect, cut_along: Orientation, metrics: &CellMetrics) -> bool {
+    let minimum = match cut_along {
         Orientation::Columns => panel::MINIMUM_CONSOLE * metrics.width(),
         Orientation::Rows => MINIMUM_ROWS * metrics.height(),
     };
 
-    cut_along.length_of(pane_area) >= 2.0 * minimo + DIVIDER_THICKNESS
+    cut_along.length_of(pane_area) >= 2.0 * minimum + DIVIDER_THICKNESS
 }
 
 /// El árbol que una disposición produce: **las columnas por fuera y las filas por dentro**.
@@ -1523,12 +1523,12 @@ fn cabe_partir(pane_area: egui::Rect, cut_along: Orientation, metrics: &CellMetr
 fn in_layout(panes: Vec<Pane>, rows: usize) -> Node {
     // `Pane` no es `Clone` —lleva un pseudoterminal dentro—, así que las hojas se reparten consumiendo
     // el vector en vez de trocearlo.
-    let cuantas_columnas = panes.len().div_ceil(rows);
-    let mut restantes = panes.into_iter();
-    let columns: Vec<Node> = (0..cuantas_columnas)
+    let how_many_columns = panes.len().div_ceil(rows);
+    let mut remaining = panes.into_iter();
+    let columns: Vec<Node> = (0..how_many_columns)
         .map(|_| {
-            let hojas = restantes.by_ref().take(rows).map(Node::Leaf).collect();
-            in_branch(Orientation::Rows, hojas)
+            let leaves = remaining.by_ref().take(rows).map(Node::Leaf).collect();
+            in_branch(Orientation::Rows, leaves)
         })
         .collect();
 
@@ -1575,20 +1575,20 @@ fn in_branch_with_weights(orientation: Orientation, children: Vec<(Weight, Node)
     }
 }
 
-/// Los pesos con los que nace una rama de `cuantos` hijos.
+/// Los pesos con los que nace una rama de `how_many` hijos.
 ///
 /// **Con dos son los de [`INITIAL_FRACTION`], y con más, iguales.** Esa constante dice dónde nace **el**
 /// divisor, y solo hay «el» divisor cuando hay dos; repartir iguales también con dos movería el divisor de
 /// la disposición de siempre el día que alguien ajuste la constante, que es justo lo que la constante existe
 /// para poder hacer.
-fn weights_for(cuantos: usize) -> Vec<Weight> {
-    if cuantos == 2 {
+fn weights_for(how_many: usize) -> Vec<Weight> {
+    if how_many == 2 {
         return weights_of(INITIAL_FRACTION).to_vec();
     }
 
     // **`expect` y no un respaldo, por lo mismo que en [`weights_of`]**: el uno es un peso válido siempre, y
     // un `unwrap_or` convertiría un imposible en un reparto plausible.
-    vec![Weight::new(1.0).expect("el uno es un peso válido"); cuantos]
+    vec![Weight::new(1.0).expect("el uno es un peso válido"); how_many]
 }
 
 /// Con cuántas consolas abre cada pestaña, y en qué forma.
@@ -1622,9 +1622,9 @@ impl OpeningLayout {
     /// techo** de divisiones, que es una decisión ya tomada al revés: es negarse a representar lo que no
     /// cabe en un número.
     fn new(columns: usize, rows: usize) -> Option<Self> {
-        let cuantas = columns.checked_mul(rows)?;
+        let panes = columns.checked_mul(rows)?;
 
-        (cuantas > 0).then_some(Self { columns, rows })
+        (panes > 0).then_some(Self { columns, rows })
     }
 
     /// **No puede desbordar**, y lo garantiza [`OpeningLayout::new`]: es el único sitio que construye una
@@ -1640,14 +1640,14 @@ impl OpeningLayout {
 /// **Un valor que no se entiende deja la de siempre**, igual que en [`how_many_tabs`]: quien mide se
 /// entera en cuanto ve dos consolas donde pidió cuatro, y abortar el arranque por una variable mal escrita
 /// sería peor. Un cero en cualquiera de los dos ejes no es una disposición: no habría ninguna consola.
-fn opening_layout_of(valor: Option<&str>) -> OpeningLayout {
-    let pedida = valor.and_then(|valor| {
-        let (columns, rows) = valor.split_once('x')?;
+fn opening_layout_of(value: Option<&str>) -> OpeningLayout {
+    let requested = value.and_then(|value| {
+        let (columns, rows) = value.split_once('x')?;
 
         OpeningLayout::new(columns.trim().parse().ok()?, rows.trim().parse().ok()?)
     });
 
-    pedida.unwrap_or(OpeningLayout::DEFAULT)
+    requested.unwrap_or(OpeningLayout::DEFAULT)
 }
 
 /// Con qué abre la ventana: lo que la medida pide, o lo que se guardó, o lo de fábrica.
@@ -1684,7 +1684,7 @@ enum Entry {
 /// se olvida de crecer; ésta se lee de un vistazo.
 fn settings_to_use(
     entry: Entry,
-    ruta: Option<&std::path::Path>,
+    path: Option<&std::path::Path>,
 ) -> (settings::Ajustes, measure::LecturaDeAjustes) {
     if entry == Entry::Measuring {
         return (
@@ -1692,7 +1692,7 @@ fn settings_to_use(
             measure::LecturaDeAjustes::Vetada,
         );
     }
-    let Some(ruta) = ruta else {
+    let Some(path) = path else {
         // **Sin sitio de fiar tampoco se lee, y se dice.** Quien tenga el entorno sin una ruta absoluta
         // escribiría un fichero que no se aplica nunca; el módulo hermano ya tiene ese mismo verbo.
         eprintln!(
@@ -1701,35 +1701,35 @@ fn settings_to_use(
         );
         return (settings::Ajustes::default(), measure::LecturaDeAjustes::Sin);
     };
-    let empezo = Instant::now();
-    match settings::leer(ruta) {
-        Ok((settings, avisos)) => {
+    let started = Instant::now();
+    match settings::leer(path) {
+        Ok((settings, warnings)) => {
             // **Se dicen todas las que se guardaron, y cuántas quedaron fuera.** Callar las de más sin
             // decir cuántas eran haría creer que a partir del techo el fichero está bien.
-            for aviso in avisos.guardados() {
-                eprintln!("agent-terminal: {aviso}");
+            for warning in warnings.guardados() {
+                eprintln!("agent-terminal: {warning}");
             }
-            if avisos.sin_listar() > 0 {
+            if warnings.sin_listar() > 0 {
                 eprintln!(
                     "agent-terminal: y {} línea(s) más con problemas, que no se listan",
-                    avisos.sin_listar()
+                    warnings.sin_listar()
                 );
             }
             (
                 settings,
                 measure::LecturaDeAjustes::Con {
-                    cuanto: empezo.elapsed(),
-                    avisos: avisos.cuantos(),
+                    cuanto: started.elapsed(),
+                    avisos: warnings.cuantos(),
                 },
             )
         }
-        Err(problema) => {
+        Err(problem) => {
             // **Que no haya fichero es el caso normal y no se dice**; lo decide el propio tipo, para que
             // esta rama y cualquier otra que lea el fichero no dejen de coincidir.
-            if problema.merece_aviso() {
+            if problem.merece_aviso() {
                 eprintln!(
-                    "agent-terminal: no se pudo usar {}: {problema}. Se abre con lo de fábrica.",
-                    ruta.display()
+                    "agent-terminal: no se pudo usar {}: {problem}. Se abre con lo de fábrica.",
+                    path.display()
                 );
             }
             // **Se declara que SÍ se miró, aunque no se aplicara nada.** «De fábrica porque el fichero
@@ -1754,7 +1754,7 @@ fn settings_to_use(
 fn open_with(
     tabs: Option<&str>,
     panes: Option<&str>,
-    guardada: Option<session::Valido>,
+    saved: Option<session::Valido>,
 ) -> OpenWith {
     let factory = OpenWith::Factory {
         tabs: how_many_tabs(tabs),
@@ -1765,7 +1765,7 @@ fn open_with(
         return factory;
     }
 
-    match guardada {
+    match saved {
         Some(validated) => OpenWith::Restored(validated),
         None => factory,
     }
@@ -1783,10 +1783,10 @@ fn open_with(
 /// es comportamiento indefinido, no solo la de esta clave. Y en esta suite las hay a mansalva —
 /// `Pane::new` lee `SHELL`, y `portable_pty` recorre `std::env::vars_os()` al construir **cada**
 /// consola—, con las pruebas corriendo en hilos a la vez. La única línea que queda sin cubrir es la de
-/// [`arrancar`], por lo mismo que las de `on_exit`.
-fn how_many_tabs(valor: Option<&str>) -> usize {
-    valor
-        .and_then(|valor| valor.parse().ok())
+/// [`run`], por lo mismo que las de `on_exit`.
+fn how_many_tabs(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.parse().ok())
         .unwrap_or(1)
         .max(1)
 }
@@ -1801,18 +1801,18 @@ fn how_many_tabs(valor: Option<&str>) -> usize {
 /// el tamaño que pidió con el que el informe publica. Se rechaza lo que no es un número, lo no finito y
 /// lo que no es positivo — un ancho de cero deja una ventana sin nada dentro y un `NaN` se propaga a
 /// todo el pintado.
-fn window_size(valor: Option<&str>) -> Option<egui::Vec2> {
-    let (ancho, alto) = valor?.split_once('x')?;
-    let ancho: f32 = ancho.trim().parse().ok()?;
-    let alto: f32 = alto.trim().parse().ok()?;
+fn window_size(value: Option<&str>) -> Option<egui::Vec2> {
+    let (width, height) = value?.split_once('x')?;
+    let width: f32 = width.trim().parse().ok()?;
+    let height: f32 = height.trim().parse().ok()?;
 
-    (ancho.is_finite() && ancho > 0.0 && alto.is_finite() && alto > 0.0)
-        .then_some(egui::vec2(ancho, alto))
+    (width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0)
+        .then_some(egui::vec2(width, height))
 }
 
 /// Lo que la variable de entorno dice, ya resuelto.
 fn size_at_startup() -> Option<egui::Vec2> {
-    window_size(std::env::var(VARIABLE_DEL_TAMAÑO).ok().as_deref())
+    window_size(std::env::var(SIZE_VARIABLE).ok().as_deref())
 }
 
 /// Cuántos gestos de arrastre inyectarse, a partir de lo que dijera la variable.
@@ -1824,13 +1824,13 @@ fn size_at_startup() -> Option<egui::Vec2> {
 ///
 /// **Recibe el valor y no lo lee**, por lo mismo que [`how_many_tabs`]: `std::env::set_var` tiene un
 /// contrato sobre todo el entorno y esta suite lo lee a mansalva desde varios hilos.
-fn how_many_drags(valor: Option<&str>) -> usize {
-    valor.and_then(|valor| valor.parse().ok()).unwrap_or(0)
+fn how_many_drags(value: Option<&str>) -> usize {
+    value.and_then(|value| value.parse().ok()).unwrap_or(0)
 }
 
 /// Lo que la variable de entorno dice, ya resuelto.
 fn drags_at_startup() -> usize {
-    how_many_drags(std::env::var(VARIABLE_DE_LOS_ARRASTRES).ok().as_deref())
+    how_many_drags(std::env::var(DRAGS_VARIABLE).ok().as_deref())
 }
 
 /// Qué gesto pide la tanda: `panel` para la frontera del panel, `frontera` para la que reparte consolas,
@@ -1839,8 +1839,8 @@ fn drags_at_startup() -> usize {
 /// **Lo que no se entiende cae en el de la consola**, igual que las otras variables de medida: abortar el
 /// arranque por una palabra mal escrita sería peor, y el informe publica cuál se inyectó, así que quien
 /// mide se entera comparando lo que pidió con lo que sale.
-fn gesture_of(valor: Option<&str>) -> InjectedGesture {
-    match valor.map(str::trim) {
+fn gesture_of(value: Option<&str>) -> InjectedGesture {
+    match value.map(str::trim) {
         Some("panel") => InjectedGesture::ResizePanel,
         Some("frontera") => InjectedGesture::MoveDivider,
         Some("marcar") => InjectedGesture::Select,
@@ -1851,7 +1851,7 @@ fn gesture_of(valor: Option<&str>) -> InjectedGesture {
 
 /// Lo que la variable de entorno dice, ya resuelto.
 fn gesture_at_startup() -> InjectedGesture {
-    gesture_of(std::env::var(VARIABLE_DEL_GESTO).ok().as_deref())
+    gesture_of(std::env::var(GESTURE_VARIABLE).ok().as_deref())
 }
 
 /// Aparta de arriba el sitio de la barra, y devuelve lo que le queda a las consolas.
@@ -1864,19 +1864,19 @@ fn gesture_at_startup() -> InjectedGesture {
 /// **El corte se acota, porque [`egui::Rect::split_top_bottom_at_y`] no lo hace** — leído en su fuente
 /// (`emath-0.35.0/src/rect.rs:671`), donde construye los dos rectángulos con el corte tal cual. Con la
 /// ventana más baja que la barra, un corte por debajo del área dejaría el rectángulo de las consolas
-/// **invertido**, con su borde de arriba por debajo del de abajo. Es el mismo cuidado que [`repartir`]
+/// **invertido**, con su borde de arriba por debajo del de abajo. Es el mismo cuidado que [`tile`]
 /// ya tiene con el ancho, y el mismo caso borde que allí está probado.
 fn set_the_tab_bar_aside(
     area: egui::Rect,
-    cuantas: usize,
+    tabs: usize,
     metrics: &CellMetrics,
 ) -> (Option<egui::Rect>, egui::Rect) {
-    if cuantas < 2 {
+    if tabs < 2 {
         return (None, area);
     }
 
-    let alto = metrics.height() + 2.0 * TAB_BAR_MARGIN;
-    let cut_along = (area.top() + alto).min(area.bottom());
+    let height = metrics.height() + 2.0 * TAB_BAR_MARGIN;
+    let cut_along = (area.top() + height).min(area.bottom());
     let (tab_bar, consoles) = area.split_top_bottom_at_y(cut_along);
 
     (Some(tab_bar), consoles)
@@ -1889,15 +1889,15 @@ fn set_the_tab_bar_aside(
 /// pestañas. Por encima de eso se navega por atajo, que es como se navega de todas formas en cuanto hay
 /// más de tres.
 ///
-/// No hace falta guardarse de `cuantas` a cero: solo hay fichas cuando hay barra, y solo hay barra con
+/// No hace falta guardarse de `how_many` a cero: solo hay fichas cuando hay barra, y solo hay barra con
 /// dos pestañas o más.
-fn ficha(tab_bar: egui::Rect, which: usize, cuantas: usize) -> egui::Rect {
-    let ancho = tab_bar.width() / cuantas as f32;
-    let izquierda = tab_bar.left() + ancho * which as f32;
+fn tab_rect(tab_bar: egui::Rect, which: usize, how_many: usize) -> egui::Rect {
+    let width = tab_bar.width() / how_many as f32;
+    let left_x = tab_bar.left() + width * which as f32;
 
     egui::Rect::from_min_max(
-        egui::pos2(izquierda, tab_bar.top()),
-        egui::pos2(izquierda + ancho, tab_bar.bottom()),
+        egui::pos2(left_x, tab_bar.top()),
+        egui::pos2(left_x + width, tab_bar.bottom()),
     )
 }
 
@@ -1908,7 +1908,7 @@ fn ficha(tab_bar: egui::Rect, which: usize, cuantas: usize) -> egui::Rect {
 /// es que esta línea, como la de [`eframe::App::on_exit`], no la cubre ninguna prueba: cambiar el `1` de
 /// [`open_with`] por un fijo dejaría la suite entera en verde y la medida sin su puerta.
 /// Quien mide se entera en cuanto abre la ventana y ve una sola pestaña.
-pub fn arrancar() -> eframe::Result {
+pub fn run() -> eframe::Result {
     // **El fichero se lee AQUÍ y no dentro del primer fotograma**, y es una decisión: leer del disco
     // dentro del camino que se mide metería una espera de disco en el fotograma a cambio de nada. Lo que se
     // lee entra por el `move` del cierre de abajo, ya interpretado y ya validado.
@@ -1917,14 +1917,14 @@ pub fn arrancar() -> eframe::Result {
     // escrita: el veto de una versión más nueva vive en ella, así que una segunda instancia lo perdería y
     // machacaría la disposición de un binario más nuevo.
     let mut persistence = session::Persistencia::del_entorno();
-    let guardada = persistence.cargar();
+    let saved = persistence.cargar();
 
     // **Una sesión de medida no pisa la disposición de quien mide.** Las dos variables de abajo abren lo que
     // la tanda diga en vez de lo que el usuario dejó, así que guardar escribiría encima **la disposición de
     // la tanda**. El guion de medida ya aísla el directorio de configuración, pero quien lanza el binario a
     // mano con esas variables —que es como la documentación dice abrir una disposición concreta— no.
-    let tabs = std::env::var(VARIABLE_DE_LAS_PESTAÑAS).ok();
-    let panes = std::env::var(VARIABLE_DE_LAS_DIVISIONES).ok();
+    let tabs = std::env::var(TABS_VARIABLE).ok();
+    let panes = std::env::var(PANES_VARIABLE).ok();
     // **Cualquiera de las variables de la puerta de medida veta la escritura, no solo las dos que piden
     // consolas.** Con la comprobación puesta solo en esas dos, **la tanda que restaura era la única
     // sesión de medida con el guardado vivo** —no las pone a propósito, para que mande el fichero—, así
@@ -1936,7 +1936,7 @@ pub fn arrancar() -> eframe::Result {
     if measuring {
         persistence.no_pisar_porque("esta sesión la pidió una tanda de medida");
     }
-    let with_what = open_with(tabs.as_deref(), panes.as_deref(), guardada);
+    let with_what = open_with(tabs.as_deref(), panes.as_deref(), saved);
 
     // **Los ajustes se leen aquí, y NO se leen bajo medida.** Lo segundo es lo que importa: el guion de
     // medida aísla el directorio de configuración, pero quien lanza el binario a mano con esas variables
@@ -1954,10 +1954,10 @@ pub fn arrancar() -> eframe::Result {
     // **Se pide el tamaño solo si alguien lo pidió**, y por eso no hay un tamaño por defecto aquí: sin
     // la variable, `NativeOptions::default()` no lleva `inner_size` y el escritorio decide, que es el
     // comportamiento de siempre. Restaurar **no toca esto**: el tamaño de la ventana no se guarda, porque
-    // dejárselo al escritorio es lo que hace comparables las medidas. Ver [`VARIABLE_DEL_TAMAÑO`].
-    let pedido = size_at_startup();
+    // dejárselo al escritorio es lo que hace comparables las medidas. Ver [`SIZE_VARIABLE`].
+    let requested = size_at_startup();
     let injected_drags = drags_at_startup();
-    if let Some(size) = pedido {
+    if let Some(size) = requested {
         options.viewport = options.viewport.with_inner_size(size);
     }
 
@@ -1969,7 +1969,7 @@ pub fn arrancar() -> eframe::Result {
                 &cc.egui_ctx,
                 with_what,
                 &the_users_shell(),
-                pedido,
+                requested,
                 persistence,
             )?;
             // Solo una tanda de medida los pide, así que se ponen aquí y no en el constructor. La celda se
@@ -2115,8 +2115,8 @@ struct Pane {
 /// más motivo: sin panel, una consola sigue siendo un terminal completo. Está como función para poder
 /// afirmarlo — desde una prueba no se puede hacer fallar la creación de verdad sin tocar el entorno
 /// del proceso entero.
-fn panel_o_ninguno(creado: std::io::Result<PanelDir>) -> Option<PanelDir> {
-    match creado {
+fn panel_or_none(created: std::io::Result<PanelDir>) -> Option<PanelDir> {
+    match created {
         Ok(panel) => Some(panel),
         Err(failure) => {
             eprintln!("esta consola va sin panel: no se pudo crear su directorio ({failure})");
@@ -2136,7 +2136,7 @@ fn panel_o_ninguno(creado: std::io::Result<PanelDir>) -> Option<PanelDir> {
 /// Son siempre dos, con directorio o sin él: es lo que hace imposible el caso de media identidad.
 fn identity_of(panel: Option<&PanelDir>) -> [(&'static str, Option<&std::ffi::OsStr>); 2] {
     match panel {
-        Some(panel) => panel.env().map(|(name, valor)| (name, Some(valor))),
+        Some(panel) => panel.env().map(|(name, value)| (name, Some(value))),
         None => panel_contract::ENV_NAMES.map(|name| (name, None)),
     }
 }
@@ -2151,11 +2151,11 @@ impl Pane {
     ///
     /// Existe porque el programa que elige [`Pane::new`] es el del usuario, y una prueba que
     /// dependa de él no prueba este código: prueba la configuración de quien la corre.
-    fn launching(ctx: &egui::Context, programa: &str, name: usize) -> term_core::Result<Self> {
+    fn launching(ctx: &egui::Context, program: &str, name: usize) -> term_core::Result<Self> {
         // El directorio se crea **antes** de lanzar, porque el programa puede publicar en su primer
         // segundo y la variable que le decimos tiene que apuntar a algo que ya existe. Si lanzar
         // falla después, el directorio se borra solo: el valor muere por el camino de error.
-        Self::with_panel(ctx, programa, panel_o_ninguno(PanelDir::create()), name)
+        Self::with_panel(ctx, program, panel_or_none(PanelDir::create()), name)
     }
 
     /// Y lo mismo con el directorio ya resuelto, incluido el caso de que no haya podido crearse.
@@ -2165,28 +2165,28 @@ impl Pane {
     /// queda con una identidad heredada.
     fn with_panel(
         ctx: &egui::Context,
-        programa: &str,
+        program: &str,
         panel: Option<PanelDir>,
         name: usize,
     ) -> term_core::Result<Self> {
-        let identidad = identity_of(panel.as_ref());
+        let identity = identity_of(panel.as_ref());
 
         // Si lo que dice el entorno ya no existe —un perfil borrado, un shell desinstalado—, se
         // cae al de respaldo en vez de no abrir. Quedarse sin ventana teniendo `/bin/sh` a mano, y
         // con un error que nadie va a entender, es el peor de los dos resultados.
-        let (pty, salida) = match Pty::spawn_with_env(programa, &[], INITIAL_GRID, &identidad) {
-            Ok(abierto) => abierto,
+        let (pty, output) = match Pty::spawn_with_env(program, &[], INITIAL_GRID, &identity) {
+            Ok(spawned) => spawned,
             Err(failure) => {
-                eprintln!("no se pudo lanzar «{programa}» ({failure}); se abre {FALLBACK_SHELL}");
-                Pty::spawn_with_env(FALLBACK_SHELL, &[], INITIAL_GRID, &identidad)?
+                eprintln!("no se pudo lanzar «{program}» ({failure}); se abre {FALLBACK_SHELL}");
+                Pty::spawn_with_env(FALLBACK_SHELL, &[], INITIAL_GRID, &identity)?
             }
         };
 
         // Lo único que el puente necesita de la ventana es cómo despertarla. Pedir el repintado no
         // entra en pánico, que es la condición que el puente pone: si lo hiciera, su hilo moriría
         // y publicaría una muerte que no ha ocurrido.
-        let despertador = ctx.clone();
-        let pty_output = PtyOutput::new(salida, move || despertador.request_repaint());
+        let waker = ctx.clone();
+        let pty_output = PtyOutput::new(output, move || waker.request_repaint());
 
         Ok(Self {
             name,
@@ -2222,20 +2222,20 @@ impl Pane {
     fn cell_under(
         &self,
         pane_area: egui::Rect,
-        punto: egui::Pos2,
+        point: egui::Pos2,
         metrics: &CellMetrics,
     ) -> Option<Cell> {
-        let dentro = punto - pane_area.min;
-        let columna = dentro.x / metrics.width();
-        let row = dentro.y / metrics.height();
-        (columna >= 0.0
+        let offset = point - pane_area.min;
+        let column = offset.x / metrics.width();
+        let row = offset.y / metrics.height();
+        (column >= 0.0
             && row >= 0.0
-            && columna < f32::from(self.measured.cols)
+            && column < f32::from(self.measured.cols)
             && row < f32::from(self.measured.rows))
         .then(|| Cell {
             row: row as u16,
-            col: columna as u16,
-            half: Half::from_fraction(columna.fract()),
+            col: column as u16,
+            half: Half::from_fraction(column.fract()),
         })
     }
 
@@ -2256,21 +2256,21 @@ impl Pane {
     fn cell_to_extend_to(
         &self,
         pane_area: egui::Rect,
-        punto: egui::Pos2,
+        point: egui::Pos2,
         metrics: &CellMetrics,
     ) -> Cell {
-        let dentro = punto - pane_area.min;
-        let ultima_columna = f32::from(self.measured.cols.saturating_sub(1));
-        let columna = dentro.x / metrics.width();
-        let row = dentro.y / metrics.height();
-        let half = if columna >= ultima_columna {
+        let offset = point - pane_area.min;
+        let last_column = f32::from(self.measured.cols.saturating_sub(1));
+        let column = offset.x / metrics.width();
+        let row = offset.y / metrics.height();
+        let half = if column >= last_column {
             Half::Right
         } else {
-            Half::from_fraction(columna.fract())
+            Half::from_fraction(column.fract())
         };
         Cell {
             row: row as u16,
-            col: columna as u16,
+            col: column as u16,
             half,
         }
     }
@@ -2284,14 +2284,14 @@ impl Pane {
     fn clamped_cell(
         &self,
         pane_area: egui::Rect,
-        punto: egui::Pos2,
+        point: egui::Pos2,
         metrics: &CellMetrics,
     ) -> Cell {
-        let suelta = self.cell_to_extend_to(pane_area, punto, metrics);
+        let released_at = self.cell_to_extend_to(pane_area, point, metrics);
         Cell {
-            row: suelta.row.min(self.measured.rows.saturating_sub(1)),
-            col: suelta.col.min(self.measured.cols.saturating_sub(1)),
-            half: suelta.half,
+            row: released_at.row.min(self.measured.rows.saturating_sub(1)),
+            col: released_at.col.min(self.measured.cols.saturating_sub(1)),
+            half: released_at.half,
         }
     }
 
@@ -2308,12 +2308,12 @@ impl Pane {
     /// que es lo que hace la mano.
     fn handle_wheel(
         &mut self,
-        pedido: WheelInput,
+        requested: WheelInput,
         chord: egui::Modifiers,
         at: Cell,
     ) -> Option<WheelOutcome> {
-        self.pending_wheel.lines += pedido.lines;
-        self.pending_wheel.pages += pedido.pages;
+        self.pending_wheel.lines += requested.lines;
+        self.pending_wheel.pages += requested.pages;
 
         let lines = self.pending_wheel.lines.trunc();
         let pages = self.pending_wheel.pages.trunc();
@@ -2333,15 +2333,15 @@ impl Pane {
                 }
                 None
             }
-            quien => {
+            owner => {
                 // **Las páginas se convierten a líneas antes de salir, y no se mandan aparte.** Un
                 // programa no entiende «una página»: lo que espera es tantos giros como líneas, y la
                 // página la mide la rejilla que él mismo tiene delante. Sin esta cuenta, un panel táctil
                 // que manda páginas dejaría `less` quieto.
                 let rows = f32::from(self.screen.size().rows);
-                let cuantas = (lines + pages * rows) as i32;
-                (cuantas != 0)
-                    .then(|| self.send_wheel(quien, cuantas, at))
+                let how_many = (lines + pages * rows) as i32;
+                (how_many != 0)
+                    .then(|| self.send_wheel(owner, how_many, at))
                     .flatten()
             }
         }
@@ -2369,21 +2369,21 @@ impl Pane {
     ///
     /// **Un envío y no uno por línea.** Los bytes se juntan y salen de una vez: el pseudoterminal es una
     /// llamada al sistema por escritura, y con un panel táctil un solo gesto trae decenas de líneas.
-    fn send_wheel(&mut self, quien: WheelOwner, cuantas: i32, at: Cell) -> Option<WheelOutcome> {
-        let empezo = Instant::now();
-        let arriba = cuantas > 0;
+    fn send_wheel(&mut self, owner: WheelOwner, how_many: i32, at: Cell) -> Option<WheelOutcome> {
+        let started = Instant::now();
+        let to_the_top = how_many > 0;
         let mut bytes = Vec::new();
-        for _ in 0..cuantas.unsigned_abs() {
-            match quien {
+        for _ in 0..how_many.unsigned_abs() {
+            match owner {
                 WheelOwner::ArrowKeys => {
                     // **La misma tabla que las teclas, y hereda su corte declarado**: el modo de
                     // aplicación —en el que las flechas cambian de forma— queda fuera del hito, y está
                     // escrito en el módulo del teclado. Escribirla aquí de otra forma dejaría dos tablas
                     // que se contradicen.
-                    bytes.extend_from_slice(if arriba { b"\x1b[A" } else { b"\x1b[B" });
+                    bytes.extend_from_slice(if to_the_top { b"\x1b[A" } else { b"\x1b[B" });
                 }
                 _ => {
-                    let gesture = if arriba {
+                    let gesture = if to_the_top {
                         mouse::MouseReport::WheelUp
                     } else {
                         mouse::MouseReport::WheelDown
@@ -2392,13 +2392,13 @@ impl Pane {
                     // Un programa con dos zonas que se desplazan —`tmux` con dos paneles, `vim` con dos
                     // ventanas— decide **cuál** mueve por la celda que el informe trae: con la 1;1 fija,
                     // la rueda movía siempre la de arriba a la izquierda, mirase el puntero donde mirase.
-                    if let Some(informe) = mouse::encode(
+                    if let Some(report) = mouse::encode(
                         gesture,
                         mouse::CellPos::from_zero(at.row, at.col),
                         self.screen.mouse_reporting(),
                         egui::Modifiers::NONE,
                     ) {
-                        bytes.extend_from_slice(&informe);
+                        bytes.extend_from_slice(&report);
                     }
                 }
             }
@@ -2413,13 +2413,13 @@ impl Pane {
             return None;
         }
         Some(WheelOutcome {
-            cost: empezo.elapsed(),
+            cost: started.elapsed(),
             // **Las flechas no son un informe de ratón, y contarlas como tal invalidaba tandas buenas.**
             // Lo que sale por ese camino son las mismas teclas que manda el teclado; publicarlas bajo «N
             // informes de ratón» metía muestras ajenas en esa serie y hacía saltar la guarda que exige
             // cero informes en toda tanda que no sea la del ratón — con un `less` desplazándose, una
             // corrida correcta se marcaba inválida.
-            was_a_report: quien == WheelOwner::Program,
+            was_a_report: owner == WheelOwner::Program,
         })
     }
 
@@ -2433,7 +2433,7 @@ impl Pane {
         cell: Cell,
         chord: egui::Modifiers,
     ) -> Option<Duration> {
-        let empezo = Instant::now();
+        let started = Instant::now();
         let bytes = mouse::encode(
             gesture,
             mouse::CellPos::from_zero(cell.row, cell.col),
@@ -2447,7 +2447,7 @@ impl Pane {
             // Un envío que falló no es una ida rápida: no se anota, o el número mediría el fallo.
             return None;
         }
-        Some(empezo.elapsed())
+        Some(started.elapsed())
     }
 
     /// Aplica el tamaño que midió el último pase de interfaz.
@@ -2456,7 +2456,7 @@ impl Pane {
     /// programa.** En cuanto el programa sabe el tamaño nuevo empieza a mandar bytes pensados para
     /// él, y si la rejilla siguiera siendo la vieja se interpretarían contra dimensiones
     /// equivocadas.
-    fn redimensionar(&mut self) {
+    fn resize(&mut self) {
         if self.measured == self.screen.size() {
             return;
         }
@@ -2468,7 +2468,7 @@ impl Pane {
         //
         // **El tramo es el cuerpo entero**, avisar al programa incluido: es lo que cuesta atender un
         // cambio de tamaño, y partirlo dejaría media operación sin dueño.
-        let antes = Instant::now();
+        let before = Instant::now();
         self.screen.resize(self.measured);
         if let Err(failure) = self.pty.resize(self.measured) {
             // La rejilla ya cambió y el programa no se ha enterado: lo que se ve a partir de aquí
@@ -2476,7 +2476,7 @@ impl Pane {
             // aquí, pero callarlo dejaría una pantalla torcida sin ninguna explicación.
             eprintln!("no se pudo avisar al programa del tamaño nuevo: {failure}");
         }
-        self.reflowed += antes.elapsed();
+        self.reflowed += before.elapsed();
     }
 
     /// Se lleva lo que el programa ha escrito, hasta el presupuesto, y lo mete en la rejilla.
@@ -2487,13 +2487,13 @@ impl Pane {
         let pickup = self.pty_output.pick_up(&mut self.received, PUMP_BUDGET);
         let collected_at = Instant::now();
 
-        let antes = Instant::now();
+        let before = Instant::now();
         self.screen.advance(&self.received);
-        let interpretado = antes.elapsed();
+        let interpreted = before.elapsed();
 
         // El encolado del pintado se mide en la pasada de interfaz, que viene después; aquí se
         // apunta lo que ya se sabe y allí se completa.
-        self.pending_measurement = Some((pickup.waiting_since, collected_at, interpretado));
+        self.pending_measurement = Some((pickup.waiting_since, collected_at, interpreted));
         pickup.left_a_queue
     }
 
@@ -2517,8 +2517,8 @@ impl Pane {
         let without_recording = self
             .pending_measurement
             .take()
-            .map_or(std::time::Duration::ZERO, |(_, _, interpretado)| {
-                interpretado
+            .map_or(std::time::Duration::ZERO, |(_, _, interpreted)| {
+                interpreted
             });
 
         self.timings.llevarse_lo_pendiente()
@@ -2553,7 +2553,7 @@ impl Pane {
         &self,
         rect: egui::Rect,
         cell_width: f32,
-        ahora: SystemTime,
+        now: SystemTime,
     ) -> panel::PanelTiling {
         // **El ancho sale de la propia división, y eso es lo que mantiene de acuerdo a los dos
         // llamadores.** Uno mide la rejilla de las consolas que no se pintan y el otro pinta la que se
@@ -2566,7 +2566,7 @@ impl Pane {
         panel::set_aside(
             rect,
             cell_width,
-            (!self.folded && self.panel_state.is_visible(ahora)).then_some(self.panel_width),
+            (!self.folded && self.panel_state.is_visible(now)).then_some(self.panel_width),
         )
     }
 
@@ -2600,7 +2600,7 @@ impl Pane {
         pane_area: egui::Rect,
         panel: Option<egui::Rect>,
         metrics: &CellMetrics,
-        ahora: SystemTime,
+        now: SystemTime,
     ) -> bool {
         // **Plegado no hay panel, y aun así hay que dejar dónde agarrar**: si la frontera se fuera con
         // él, el gesto que lo cerró no se podría deshacer con el ratón. El asidero se queda pegado al
@@ -2618,13 +2618,13 @@ impl Pane {
             // ocho **tapando el divisor** que reparte las consolas, y como este control se registra
             // después le ganaba el empate — la consola no se podía volver a ensanchar. Lo encontró la
             // revisión, con la prueba del cero exacto en verde.
-            Some(sitio) if sitio.width() <= PANEL_GRIP => return false,
-            Some(sitio) => sitio.left(),
+            Some(panel_rect) if panel_rect.width() <= PANEL_GRIP => return false,
+            Some(panel_rect) => panel_rect.left(),
             // **Plegado hay asidero, pero solo si hay panel que desplegar.** Si el productor dejó de
             // publicar mientras estaba plegado no queda nada que enseñar, y reservar ahí una banda de ocho
             // puntos le quitaría a la consola su borde derecho —el sitio por donde se agarra para
             // llevársela— a cambio de desplegar un panel que no existe.
-            None if self.folded && self.panel_state.is_visible(ahora) => {
+            None if self.folded && self.panel_state.is_visible(now) => {
                 // **Y se retira un grosor de divisor del borde**, para que la banda no llegue al punto
                 // donde ese divisor empieza. Los rectángulos de egui contienen sus dos extremos y los
                 // empates los gana el último registrado, que es éste: sin el retiro, el punto exacto del
@@ -2638,7 +2638,7 @@ impl Pane {
             None => return false,
         };
 
-        let asidero = egui::Rect::from_min_max(
+        let grip = egui::Rect::from_min_max(
             egui::pos2(cut_along - PANEL_GRIP, pane_area.top()),
             egui::pos2(cut_along + PANEL_GRIP, pane_area.bottom()),
         );
@@ -2651,8 +2651,8 @@ impl Pane {
         // cambia a quién van las teclas. Lo que da el foco es agarrar **una consola**, porque eso sí dice
         // en cuál quieres trabajar; ajustar el ancho de un panel no lo dice.
         let id = ui.id().with(("frontera-del-panel", self.name));
-        let respuesta = ui
-            .interact(asidero, id, egui::Sense::DRAG)
+        let response = ui
+            .interact(grip, id, egui::Sense::DRAG)
             // También mientras se arrastra, y sobre todo en el fotograma en que se suelta: ahí el
             // arrastre ya terminó y el puntero puede haber quedado fuera del asidero, donde el cursor
             // parpadearía a flecha justo al acabar la maniobra.
@@ -2670,11 +2670,11 @@ impl Pane {
         //   así que un clic seco leería ese corte como intención y machacaría el ancho que el usuario
         //   había pedido cuando la ventana era más ancha. Exigir movimiento es lo que separa «he pulsado
         //   aquí» de «quiero esto de ancho».
-        if !respuesta.dragged_by(egui::PointerButton::Primary) || respuesta.drag_delta().x == 0.0 {
+        if !response.dragged_by(egui::PointerButton::Primary) || response.drag_delta().x == 0.0 {
             return false;
         }
 
-        let Some(puntero) = respuesta.interact_pointer_pos() else {
+        let Some(pointer) = response.interact_pointer_pos() else {
             return false;
         };
 
@@ -2695,8 +2695,8 @@ impl Pane {
         // pasar** un ancho que ninguna ventana real va a tener. Lo que de verdad impide que eso se
         // guarde es la guarda de abajo: un arrastre exige que el puntero se haya movido, y en esos dos
         // primeros fotogramas no hay nadie arrastrando.
-        let cabe = metrics.cells_in(pane_area.size()).cols as usize;
-        let techo = cabe
+        let fits = metrics.cells_in(pane_area.size()).cols as usize;
+        let ceiling = fits
             .saturating_sub(panel::MINIMUM_CONSOLE as usize)
             .max(panel::DRAG_FLOOR);
 
@@ -2733,20 +2733,20 @@ impl Pane {
         //
         // **Y el arreglo que la revisión propuso —anclar al ancho guardado y sumarle el desplazamiento— se
         // implementó, se mutó y NO cambiaba ningún resultado.** La razón se puede seguir con lápiz: cuando
-        // el reparto recorta, lo que pinta **es** el techo (`cabe - MINIMUM_CONSOLE`), así que la lectura
-        // directa da `techo + desplazamiento` y el ancla da `guardado + desplazamiento`, y el `min(techo)`
-        // de abajo deja las dos en `techo`. Y donde no hay recorte, las dos coinciden por construcción. Un
+        // el reparto recorta, lo que pinta **es** el techo (`fits - MINIMUM_CONSOLE`), así que la lectura
+        // directa da `ceiling + desplazamiento` y el ancla da `guardado + desplazamiento`, y el `min(ceiling)`
+        // de abajo deja las dos en `ceiling`. Y donde no hay recorte, las dos coinciden por construcción. Un
         // mecanismo que no puede cambiar un resultado es un mecanismo sin escenario, así que fuera.
         //
         // Lo que de verdad cierra el agujero es la guarda de aquí: sin media celda cruzada no se toca el
         // estado, **sea el temblor de un punto o de cuatro**.
-        let corte_pintado = panel.map_or(pane_area.right(), |sitio| sitio.left());
-        if ((corte_pintado - puntero.x) / metrics.width()).round() == 0.0 {
+        let painted_cut = panel.map_or(pane_area.right(), |panel_rect| panel_rect.left());
+        if ((painted_cut - pointer.x) / metrics.width()).round() == 0.0 {
             return false;
         }
         // Lo negativo y lo que no es número caen en cero al convertirse a entero, que es lo que hace que
         // empujar más allá del borde derecho pida cero — o sea, pedir plegar.
-        let pedido = ((pane_area.right() - puntero.x) / metrics.width()).round() as usize;
+        let requested = ((pane_area.right() - pointer.x) / metrics.width()).round() as usize;
 
         // **Plegar es arrastrar hasta el final, que es como lo define la decisión escrita del proyecto:
         // pedir menos que el suelo.** Y desplegar es lo simétrico — tirar del asidero hacia dentro.
@@ -2762,10 +2762,10 @@ impl Pane {
         // > guardado. Las dos son mitades de lo decidido —el ancho de antes, y el ratón mandando— así que
         // > no se inventa estado propio para forzar una de las dos. Queda dicho porque es la clase de
         // > diferencia entre fotogramas que este proyecto ya pagó una vez sin verla.
-        if pedido < panel::DRAG_FLOOR {
-            let cambio = !self.folded;
+        if requested < panel::DRAG_FLOOR {
+            let changed = !self.folded;
             self.folded = true;
-            return cambio;
+            return changed;
         }
         if self.folded {
             self.folded = false;
@@ -2775,10 +2775,10 @@ impl Pane {
         // `min` y no `clamp`: el suelo ya lo aplicó la rama de plegar, siete líneas arriba. Un `clamp`
         // aquí leería como si esta línea lo defendiera, y no defiende nada — de paso desaparece la forma
         // que entra en pánico cuando el mínimo supera al máximo.
-        let new = pedido.min(techo);
-        let cambio = new != self.panel_width;
+        let new = requested.min(ceiling);
+        let changed = new != self.panel_width;
         self.panel_width = new;
-        cambio
+        changed
     }
 
     /// Manda al programa lo que se ha tecleado en este pase, y mide cuánto se tarda.
@@ -2820,10 +2820,10 @@ impl Pane {
         // lo pone el programa de dentro con lo que escribe, y lo que escribe se interpreta en la otra
         // mitad del fotograma. (Preguntarlo dentro del cierre también compilaría —los dos campos son
         // préstamos disjuntos—, así que esto es una elección, no una pared.)
-        let marcado = self.screen.bracketed_paste();
-        let mut pegado = false;
+        let bracketed = self.screen.bracketed_paste();
+        let mut pasted = false;
         let mut requests = Vec::new();
-        let mut historial: Vec<Scroll> = Vec::new();
+        let mut scrolls: Vec<Scroll> = Vec::new();
         let mut to_the_clipboard: Option<String> = None;
 
         // Los eventos que van al programa **se consumen**, no se leen y se dejan. Un fotograma
@@ -2839,11 +2839,11 @@ impl Pane {
             // pegar, al revés. Reconstruirlos en orden es lo que hace el propio egui por dentro, y
             // es exacto.
             let mut chord = *modifiers;
-            let mut pego = false;
-            let mut pedidas = Vec::new();
-            let mut abiertas = open_tabs;
-            let mut subidas = Vec::new();
-            let mut copiar = None;
+            let mut paste_seen = false;
+            let mut asked = Vec::new();
+            let mut tabs_open = open_tabs;
+            let mut scrolled = Vec::new();
+            let mut to_copy = None;
             // **Un acorde sin Ctrl llega DOS veces, y consumir solo una lo deja actuar y escribir.**
             // egui emite el texto de la tecla junto a la tecla siempre que sea imprimible y no haya
             // mandato, así que un `atajo.partir-al-lado = shift+e` partía la consola **y además** le
@@ -2852,10 +2852,10 @@ impl Pane {
             // documento lo publica como válido.
             let mut swallow_the_text = false;
 
-            state.events.retain(|evento| {
+            state.events.retain(|event| {
                 // Va lo primero porque el texto llega **detrás** de su tecla: cuando se mira ya se sabe
                 // si la tecla de delante se consumió como atajo.
-                if matches!(evento, egui::Event::Text(_)) && swallow_the_text {
+                if matches!(event, egui::Event::Text(_)) && swallow_the_text {
                     swallow_the_text = false;
                     return false;
                 }
@@ -2863,8 +2863,8 @@ impl Pane {
                 // que acaba de actuar, no el primero que pase por aquí después.
                 swallow_the_text = false;
 
-                if let egui::Event::ModifiersChanged(nuevos) = evento {
-                    chord = *nuevos;
+                if let egui::Event::ModifiersChanged(new_modifiers) = event {
+                    chord = *new_modifiers;
                     // Se queda en la cola: no es nuestro, y quien lo mire después lo necesita.
                     return true;
                 }
@@ -2876,7 +2876,7 @@ impl Pane {
                 // Mayúsculas pegadas para siempre: el siguiente Ctrl+V pegaría en vez de mandar su
                 // byte, que es la confusión que este trabajo existe para evitar, y en la dirección
                 // que además vuelca el portapapeles en el programa.
-                if matches!(evento, egui::Event::WindowFocused(false)) {
+                if matches!(event, egui::Event::WindowFocused(false)) {
                     chord = egui::Modifiers::NONE;
                     return true;
                 }
@@ -2894,10 +2894,10 @@ impl Pane {
                 // **Con Mayúsculas copia; sin ellas, `Ctrl+C` sigue interrumpiendo**, que es lo que tiene
                 // que hacer. Y **apagado no se toca el evento**: cae hasta la tabla y sale por `\x03`, que
                 // es justo lo que `vim` o `tmux` esperan cuando alguien les devuelve el acorde.
-                if matches!(evento, egui::Event::Copy) && chord.shift && copy_enabled {
+                if matches!(event, egui::Event::Copy) && chord.shift && copy_enabled {
                     // Se traga el evento **haya o no algo marcado**: devolverlo lo dejaría caer en la
                     // tabla, y pedir copiar sin nada marcado interrumpiría el programa.
-                    copiar = self.screen.selected_text();
+                    to_copy = self.screen.selected_text();
                     return false;
                 }
 
@@ -2905,12 +2905,12 @@ impl Pane {
                 // decir cuál fue, y se traga la tecla. Ésta es la única puerta donde se pueden
                 // separar, y separarlas es lo que hace que Ctrl+V le siga llegando al programa de
                 // dentro: para vim es el bloque visual, y para un shell «lo siguiente, literal».
-                if let egui::Event::Paste(texto) = evento
+                if let egui::Event::Paste(text) = event
                     && chord.shift
                 {
                     self.keystrokes
-                        .extend_from_slice(&keyboard::paste(texto, marcado));
-                    pego = true;
+                        .extend_from_slice(&keyboard::paste(text, bracketed));
+                    paste_seen = true;
                     return false;
                 }
 
@@ -2927,7 +2927,7 @@ impl Pane {
                     pressed: true,
                     repeat,
                     ..
-                } = evento
+                } = event
                     && let Some(action) = keymap.action_for(keyboard::Chord {
                         ctrl: chord.ctrl,
                         shift: chord.shift,
@@ -2948,14 +2948,14 @@ impl Pane {
                     // **La cuenta se lleva evento a evento y no una vez por fotograma**, porque el propio
                     // lote la cambia: con una pestaña abierta y `[crear, ←]` en el mismo lote, mirarla al
                     // principio dejaría la flecha fuera de la guarda.
-                    let nuestra = match action {
-                        keyboard::Action::PreviousTab | keyboard::Action::NextTab => abiertas > 1,
+                    let ours = match action {
+                        keyboard::Action::PreviousTab | keyboard::Action::NextTab => tabs_open > 1,
                         _ => true,
                     };
-                    if nuestra {
+                    if ours {
                         match action {
-                            keyboard::Action::PreviousTab => pedidas.push(WindowRequest::Go(-1)),
-                            keyboard::Action::NextTab => pedidas.push(WindowRequest::Go(1)),
+                            keyboard::Action::PreviousTab => asked.push(WindowRequest::Go(-1)),
+                            keyboard::Action::NextTab => asked.push(WindowRequest::Go(1)),
                             // **La repetición se traga sin hacer nada, y la guarda es la razón de que la
                             // ventana siga viva.** egui marca las repeticiones con `repeat` pero sigue
                             // poniendo `pressed`, así que un segundo con el acorde de cerrar apretado son
@@ -2964,22 +2964,22 @@ impl Pane {
                             // igual**: devolverlo mandaría su byte de control al programa por cada
                             // repetición.
                             keyboard::Action::NewTab if !repeat => {
-                                abiertas += 1;
-                                pedidas.push(WindowRequest::NewTab);
+                                tabs_open += 1;
+                                asked.push(WindowRequest::NewTab);
                             }
                             // Cerrar la última no quita nada de la lista: pide cerrar la ventana. Por eso la
                             // cuenta no baja de uno.
                             keyboard::Action::CloseTab if !repeat => {
-                                abiertas = (abiertas - 1).max(1);
-                                pedidas.push(WindowRequest::CloseTab);
+                                tabs_open = (tabs_open - 1).max(1);
+                                asked.push(WindowRequest::CloseTab);
                             }
                             // **Partir lleva la misma guarda y por lo mismo**: cada una lanza un programa, así
                             // que un segundo apretado serían treinta shells y treinta directorios.
                             keyboard::Action::SplitRight if !repeat => {
-                                pedidas.push(WindowRequest::Split(Orientation::Columns));
+                                asked.push(WindowRequest::Split(Orientation::Columns));
                             }
                             keyboard::Action::SplitDown if !repeat => {
-                                pedidas.push(WindowRequest::Split(Orientation::Rows));
+                                asked.push(WindowRequest::Split(Orientation::Rows));
                             }
                             // **Aquí la guarda es la más necesaria de las cuatro**: un segundo apretado
                             // cerraría una consola tras otra, luego la pestaña, y luego la ventana con todo
@@ -2990,21 +2990,21 @@ impl Pane {
                             // la del foco, y bajarla siempre dejaría de consumir la flecha con dos pestañas
                             // abiertas, que es el caso normal.
                             keyboard::Action::ClosePane if !repeat => {
-                                pedidas.push(WindowRequest::ClosePane);
+                                asked.push(WindowRequest::ClosePane);
                             }
                             // **Mirar el historial es del terminal, no del programa**, así que estas cuatro se
                             // consumen aquí y no se traducen a bytes. **Y la repetición vale**: mantener
                             // pulsado para subir es el gesto normal, al revés que crear o cerrar.
                             keyboard::Action::ScrollPageUp => {
-                                subidas.push(Scroll::Pages(1));
+                                scrolled.push(Scroll::Pages(1));
                             }
                             keyboard::Action::ScrollPageDown => {
-                                subidas.push(Scroll::Pages(-1));
+                                scrolled.push(Scroll::Pages(-1));
                             }
                             keyboard::Action::ScrollToTop => {
-                                subidas.push(Scroll::ToTop);
+                                scrolled.push(Scroll::ToTop);
                             }
-                            keyboard::Action::ScrollToBottom => subidas.push(Scroll::ToBottom),
+                            keyboard::Action::ScrollToBottom => scrolled.push(Scroll::ToBottom),
                             // La repetición de crear, cerrar, partir o copiar cae aquí: se traga sin hacer
                             // nada, que es el objeto de la guarda.
                             _ => {}
@@ -3014,7 +3014,7 @@ impl Pane {
                     }
                 }
 
-                match keyboard::bytes(evento) {
+                match keyboard::bytes(event) {
                     Some(bytes) => {
                         self.keystrokes.extend_from_slice(&bytes);
                         false
@@ -3024,23 +3024,23 @@ impl Pane {
             });
 
             *modifiers = chord;
-            pegado = pego;
-            requests = pedidas;
-            historial = subidas;
-            to_the_clipboard = copiar;
+            pasted = paste_seen;
+            requests = asked;
+            scrolls = scrolled;
+            to_the_clipboard = to_copy;
         });
 
         // **Se aplican fuera del cierre de la entrada**, no dentro: ahí dentro el préstamo de la
         // pantalla convive con el de los eventos, y este módulo ya paga bastante por mantener esos dos
         // préstamos separados.
-        for how_much in historial {
+        for how_much in scrolls {
             self.screen.scroll_by(how_much);
         }
 
         // **Y el portapapeles, también fuera**, pero por otra razón: escribir en él es pedirle algo al
         // contexto, y dentro del cierre el contexto tiene su entrada prestada.
-        if let Some(texto) = to_the_clipboard {
-            ctx.copy_text(texto);
+        if let Some(text) = to_the_clipboard {
+            ctx.copy_text(text);
         }
 
         // Una orden sale igual aunque no se haya tecleado nada para el programa, que es el caso normal:
@@ -3070,7 +3070,7 @@ impl Pane {
         // movería el percentil que esa decisión usa para juzgar el framework de interfaz. Es
         // exactamente el fallo del tramo con la etiqueta cambiada que este fichero ya documenta
         // haber pagado una vez.
-        if !pegado {
+        if !pasted {
             self.timings.anotar_ida(frame_started.elapsed());
         }
 
@@ -3090,8 +3090,8 @@ impl Pane {
     /// **Se espera a que la cola esté vacía**: morir no borra lo que el programa escribió antes de
     /// hacerlo, y dar la división por terminada con cola pendiente se comería justo el final, que es
     /// la parte que se estaba mirando.
-    fn terminada(&self, queda_cola: bool) -> bool {
-        !self.pty_output.is_alive() && !queda_cola
+    fn is_finished(&self, queue_left: bool) -> bool {
+        !self.pty_output.is_alive() && !queue_left
     }
 }
 
@@ -3141,10 +3141,10 @@ impl Node {
     /// espera un iterador— o bien una pila propia, que también reserva. El vector cuesta una reserva por
     /// llamada, con dos consolas son dos punteros, y **lo que cuesta se declara**: el recorrido del
     /// pintado se cronometra y se resta, por lo mismo que se cronometran los `fork` al abrir una pestaña.
-    fn hojas(&self) -> Vec<&Pane> {
-        let mut sueltas = Vec::new();
-        self.walk(&mut |pane| sueltas.push(pane));
-        sueltas
+    fn leaves(&self) -> Vec<&Pane> {
+        let mut leaves = Vec::new();
+        self.walk(&mut |pane| leaves.push(pane));
+        leaves
     }
 
     fn walk<'a>(&'a self, visit: &mut impl FnMut(&'a Pane)) {
@@ -3158,10 +3158,10 @@ impl Node {
         }
     }
 
-    fn hojas_mut(&mut self) -> Vec<&mut Pane> {
-        let mut sueltas = Vec::new();
-        self.walk_mut(&mut |pane| sueltas.push(pane));
-        sueltas
+    fn leaves_mut(&mut self) -> Vec<&mut Pane> {
+        let mut leaves = Vec::new();
+        self.walk_mut(&mut |pane| leaves.push(pane));
+        leaves
     }
 
     fn walk_mut<'a>(&'a mut self, visit: &mut impl FnMut(&'a mut Pane)) {
@@ -3177,10 +3177,10 @@ impl Node {
 
     /// Dónde cae cada consola dentro del área, y dónde cada frontera.
     ///
-    /// **Las hojas salen en el mismo orden que [`Node::hojas`]**, y eso es lo que permite casarlas por
+    /// **Las hojas salen en el mismo orden que [`Node::leaves`]**, y eso es lo que permite casarlas por
     /// posición en vez de arrastrar la geometría dentro del árbol. Es el mismo trato que ya tenía el
     /// reparto de dos con sus dos rectángulos.
-    fn place(&self, area: egui::Rect, minimo: f32) -> Tiling {
+    fn place(&self, area: egui::Rect, minimum: f32) -> Tiling {
         match self {
             Self::Leaf(_) => Tiling {
                 parts: vec![area],
@@ -3191,14 +3191,14 @@ impl Node {
                 children,
             } => {
                 let weights: Vec<Weight> = children.iter().map(|child| child.weight).collect();
-                let mio = repartir(area, *orientation, &weights, minimo);
+                let mine = tile(area, *orientation, &weights, minimum);
 
                 let mut parts = Vec::with_capacity(children.len());
-                let mut dividers = mio.dividers;
-                for (child, suya) in children.iter().zip(mio.parts) {
-                    let dentro = child.node.place(suya, minimo);
-                    parts.extend(dentro.parts);
-                    dividers.extend(dentro.dividers);
+                let mut dividers = mine.dividers;
+                for (child, part) in children.iter().zip(mine.parts) {
+                    let inside = child.node.place(part, minimum);
+                    parts.extend(inside.parts);
+                    dividers.extend(inside.dividers);
                 }
 
                 Tiling { parts, dividers }
@@ -3224,15 +3224,15 @@ impl Node {
     /// consola no coincide con su **sitio**, que es lo único que distingue leer uno de leer el otro — el
     /// disfraz que este proyecto tiene fichado.
     #[cfg(test)]
-    fn intercambiar(&mut self, one: usize, otra: usize) -> bool {
-        if one == otra {
+    fn swap_panes(&mut self, one: usize, other: usize) -> bool {
+        if one == other {
             return false;
         }
 
-        let mut hojas = self.hojas_mut();
-        let (Some(aqui), Some(alli)) = (
-            hojas.iter().position(|hoja| hoja.name == one),
-            hojas.iter().position(|hoja| hoja.name == otra),
+        let mut leaves = self.leaves_mut();
+        let (Some(here), Some(there)) = (
+            leaves.iter().position(|leaf| leaf.name == one),
+            leaves.iter().position(|leaf| leaf.name == other),
         ) else {
             return false;
         };
@@ -3240,9 +3240,9 @@ impl Node {
         // **`split_at_mut` es lo que permite tener las dos a la vez.** Prestar dos elementos de la misma
         // lista por separado no lo deja el préstamo, y la salida fácil —clonar una para copiarla en la
         // otra— no existe: una consola lleva dentro su pseudoterminal y su programa.
-        let (antes, despues) = (aqui.min(alli), aqui.max(alli));
-        let (izquierda, derecha) = hojas.split_at_mut(despues);
-        std::mem::swap(&mut *izquierda[antes], &mut *derecha[0]);
+        let (before, after) = (here.min(there), here.max(there));
+        let (head, tail) = leaves.split_at_mut(after);
+        std::mem::swap(&mut *head[before], &mut *tail[0]);
         true
     }
 
@@ -3281,7 +3281,7 @@ impl Node {
                 // encarga el descenso de más abajo al llegar a ella. Buscarla también aquí duplicaría en
                 // dos sitios la decisión de **dónde aparece la consola nueva**, y una prueba que cubriera
                 // uno dejaría el otro sin cubrir.
-                let hermana = (*orientation == cut_along)
+                let sibling = (*orientation == cut_along)
                     .then(|| {
                         children
                             .iter()
@@ -3289,18 +3289,18 @@ impl Node {
                     })
                     .flatten();
 
-                if let Some(at) = hermana {
+                if let Some(at) = sibling {
                     // La mitad de un peso positivo y finito lo sigue siendo **mientras el peso de partida
                     // no sea diminuto**, y a los diminutos se llega arrastrando: ver [`Weight::scaled`],
-                    // que es quien pone el suelo. El suelo geométrico de [`cabe_partir`] acota lo que se
+                    // que es quien pone el suelo. El suelo geométrico de [`can_split`] acota lo que se
                     // ve, no el número.
-                    let half = Weight::scaled(children[at].weight.valor() / 2.0);
+                    let half = Weight::scaled(children[at].weight.value() / 2.0);
                     children[at].weight = half;
                     // **El lado decide de qué parte del hueco sale la nueva**, y solo eso: las hermanas de
                     // los dos extremos no se enteran, porque lo que se reparte es el peso de una sola.
-                    let sitio = if side.antes() { at } else { at + 1 };
+                    let slot = if side.before() { at } else { at + 1 };
                     children.insert(
-                        sitio,
+                        slot,
                         Child {
                             weight: half,
                             node: Self::Leaf(new),
@@ -3312,14 +3312,14 @@ impl Node {
 
                 // No estaba entre las hojas de esta rama: sigue por dentro de sus hijos, llevándose la
                 // división de rama en rama hasta que alguna la coloque.
-                let mut viajera = new;
+                let mut traveler = new;
                 for child in children {
                     // El `?` dice justo lo que hace falta: si el hijo **no** la devuelve es que la
                     // colocó, y entonces aquí no queda nada que seguir buscando.
-                    viajera = child.node.split(name, side, viajera)?;
+                    traveler = child.node.split(name, side, traveler)?;
                 }
 
-                Some(viajera)
+                Some(traveler)
             }
         }
     }
@@ -3335,7 +3335,7 @@ impl Node {
         // sacar la consola de la hoja sin clonarla, y una rama vacía es lo más barato que se puede poner.
         // Vive lo que tarda la línea siguiente en sustituirlo por la rama de verdad, así que ningún
         // recorrido llega a verla.
-        let vieja = std::mem::replace(
+        let old = std::mem::replace(
             self,
             Self::Branch {
                 orientation: cut_along,
@@ -3343,30 +3343,30 @@ impl Node {
             },
         );
 
-        let llega = Child {
+        let arriving = Child {
             weight,
             node: Self::Leaf(new),
         };
-        let estaba = Child {
+        let existing = Child {
             weight,
-            node: vieja,
+            node: old,
         };
 
         *self = Self::Branch {
             orientation: cut_along,
-            children: if side.antes() {
-                vec![llega, estaba]
+            children: if side.before() {
+                vec![arriving, existing]
             } else {
-                vec![estaba, llega]
+                vec![existing, arriving]
             },
         };
     }
 
     /// Si en algún sitio de aquí abajo hay una consola que se llame así.
     fn has_leaf(&self, name: usize) -> bool {
-        let mut hay = false;
-        self.walk(&mut |pane| hay |= pane.name == name);
-        hay
+        let mut found = false;
+        self.walk(&mut |pane| found |= pane.name == name);
+        found
     }
 
     /// Saca una consola de donde esté y la pone al lado que se pida de otra.
@@ -3383,7 +3383,7 @@ impl Node {
     ///
     /// **Después de esas tres, insertar no puede fallar, y eso se puede demostrar en vez de confiarlo**:
     /// el destino existe, es distinto del que se mueve, y quitar una hoja **nunca borra otra** — `remove`
-    /// saca una de la lista, `colapsar` sustituye una rama por su única hija y `absorb` sube nietas a
+    /// saca una de la lista, `collapse` sustituye una rama por su única hija y `absorb` sube nietas a
     /// hermanas; ninguna de las tres pierde hojas.
     ///
     /// **Devuelve siempre un árbol, y aparte si el movimiento ocurrió.** La primera versión devolvía un
@@ -3393,15 +3393,15 @@ impl Node {
     /// invita a leer «falló» como «no cambió nada».
     ///
     /// **El suelo geométrico no se comprueba aquí**, y no es un olvido: el árbol no conoce el área. Lo
-    /// mira quien tiene los rectángulos delante, igual que hace el acorde de partir con [`cabe_partir`].
-    fn move_pane(mut self, quien: usize, target: usize, side: Side) -> (Self, bool) {
-        if quien == target || !self.has_leaf(quien) || !self.has_leaf(target) {
+    /// mira quien tiene los rectángulos delante, igual que hace el acorde de partir con [`can_split`].
+    fn move_pane(mut self, moved: usize, target: usize, side: Side) -> (Self, bool) {
+        if moved == target || !self.has_leaf(moved) || !self.has_leaf(target) {
             return (self, false);
         }
 
         // Una hoja no se quita a sí misma: si la raíz es la propia consola, esta pestaña tiene una sola y
         // no hay disposición que reordenar.
-        let Some(closing) = self.close(quien) else {
+        let Some(closing) = self.close(moved) else {
             return (self, false);
         };
 
@@ -3415,7 +3415,7 @@ impl Node {
             // Así que se injerta en la raíz, que la deja a la vista aunque en un sitio que nadie pidió, y
             // se dice por la salida de errores. **`Err` significa «no se movió como se pidió», no «el
             // árbol está intacto»**: por este camino sí cambió, y por eso hay que decirlo.
-            Some(devuelta) => {
+            Some(returned) => {
                 eprintln!(
                     "no se pudo colocar la consola en su destino después de sacarla; se deja en la raíz \
                      para no perder su programa"
@@ -3424,7 +3424,7 @@ impl Node {
                 // aquí es una rama y no una hoja puede dejar dos ramas del mismo sentido anidadas si la
                 // raíz reparte en el sentido de `lado`. Se acepta porque este camino es inalcanzable y
                 // porque una forma fea es mejor que un programa muerto — pero no es «la salida segura».
-                self.make_a_branch(side, devuelta);
+                self.make_a_branch(side, returned);
                 (self, false)
             }
         }
@@ -3444,7 +3444,7 @@ impl Node {
     }
 
     /// Las hijas de este nodo, si es una rama y no una hoja.
-    fn hijas(self) -> Option<Vec<Child>> {
+    fn children(self) -> Option<Vec<Child>> {
         match self {
             Self::Branch { children, .. } => Some(children),
             Self::Leaf(_) => None,
@@ -3463,7 +3463,7 @@ impl Node {
         let closing = self.remove(name)?;
         // **El colapso va aquí y no dentro de `remove`** porque una rama no puede sustituirse a sí misma
         // mientras su lista de hijos está prestada. Con el cierre ya hecho, el préstamo ha terminado.
-        self.colapsar();
+        self.collapse();
         Some(closing)
     }
 
@@ -3489,18 +3489,18 @@ impl Node {
                 .pane()
                 .expect("la posición se acaba de buscar entre las hojas de esta rama");
 
-            let vecina = match at.checked_sub(1) {
+            let neighbor = match at.checked_sub(1) {
                 // La anterior sigue en su sitio, y de ella hereda la **última**.
-                Some(anterior) => children
-                    .get(anterior)
-                    .and_then(|child| child.node.hojas().last().copied()),
+                Some(previous) => children
+                    .get(previous)
+                    .and_then(|child| child.node.leaves().last().copied()),
                 // Sin anterior hereda la siguiente, que ha corrido a ocupar el sitio de la que se va, y
                 // de ella la **primera**, por lo mismo: es la que queda pegada al hueco.
                 None => children
                     .get(at)
-                    .and_then(|child| child.node.hojas().first().copied()),
+                    .and_then(|child| child.node.leaves().first().copied()),
             };
-            let focus = vecina
+            let focus = neighbor
                 .expect(
                     "una rama nace con dos hijas y se colapsa al quedarse con una, así que quitar \
                          una deja hermana",
@@ -3513,15 +3513,15 @@ impl Node {
         // No estaba entre las hojas de esta rama: sigue por dentro de sus hijos, y **para en cuanto uno
         // la encuentra**. Se baja por `close` y no por `remove` para que la rama de dentro que se quede
         // con una sola hija también se colapse.
-        let mut encontrada = None;
+        let mut found = None;
         for (which, child) in children.iter_mut().enumerate() {
             if let Some(closing) = child.node.close(name) {
-                encontrada = Some((which, closing));
+                found = Some((which, closing));
                 break;
             }
         }
 
-        let (which, closing) = encontrada?;
+        let (which, closing) = found?;
         // **La hija que acaba de cambiar puede haber colapsado en una rama del sentido de ésta**, y
         // entonces sus hijas tienen que subir a ser hermanas de las de aquí. Ver [`Node::absorb`].
         self.absorb(which);
@@ -3536,15 +3536,15 @@ impl Node {
     /// una rama sobrante hace que la consola nueva nazca dentro de ella y no al lado — y entonces la
     /// frontera de fuera vuelve a mover un bloque de dos consolas, que es el comportamiento de `tmux` que
     /// este árbol existe para no repetir.
-    fn colapsar(&mut self) {
+    fn collapse(&mut self) {
         if let Self::Branch { children, .. } = self
             && children.len() == 1
         {
             // **El peso de la que se queda se descarta**, y es lo correcto: el peso que la reparte entre
             // sus tías es el de la rama, y ése lo lleva la entrada que su madre tiene de ella. El de
             // dentro solo decía cómo se repartía con hermanas que ya no están.
-            let sola = children.pop().expect("una lista de uno tiene uno");
-            *self = sola.node;
+            let only_child = children.pop().expect("una lista de uno tiene uno");
+            *self = only_child.node;
         }
     }
 
@@ -3559,7 +3559,7 @@ impl Node {
     /// es justo lo que lo impide), así que es cerrar quien la habilita y quien tiene que deshacerla.
     ///
     /// **Los pesos se escalan, no se copian.** El grupo se llevaba `w` de lo que reparte esta rama y sus
-    /// hijas se lo repartían entre ellas; dándole a cada una `w · suyo / Σ` se conserva **el reparto**: ni
+    /// hijas se lo repartían entre ellas; dándole a cada una `group_weight · (peso / Σ)` se conserva **el reparto**: ni
     /// el bloque respecto a sus tías, ni las hijas entre ellas. Copiarlas tal cual sí las movería, y en una
     /// dirección que depende de cuántas hermanas hubiera.
     ///
@@ -3582,36 +3582,36 @@ impl Node {
         };
 
         let from_outside = *orientation;
-        let dentro = match children.get(which).map(|child| &child.node) {
+        let from_inside = match children.get(which).map(|child| &child.node) {
             Some(Self::Branch { orientation, .. }) => *orientation,
             _ => return,
         };
-        if dentro != from_outside {
+        if from_inside != from_outside {
             return;
         }
 
-        let grupo = children.remove(which);
-        let suyo = grupo.weight.valor();
-        let dentro = grupo
+        let group = children.remove(which);
+        let group_weight = group.weight.value();
+        let group_children = group
             .node
-            .hijas()
+            .children()
             .expect("el sentido se acaba de leer de una rama");
-        let suma: f32 = dentro.iter().map(|child| child.weight.valor()).sum();
-        let subidas: Vec<Child> = dentro
+        let total: f32 = group_children.iter().map(|child| child.weight.value()).sum();
+        let lifted: Vec<Child> = group_children
             .into_iter()
             .map(|child| Child {
-                // **Se divide antes de multiplicar, y no es cosmético.** `(suyo · w) / suma` puede
+                // **Se divide antes de multiplicar, y no es cosmético.** `(group_weight · w) / total` puede
                 // desbordar en el producto intermedio aunque el resultado sea representable; dividiendo
-                // primero, el factor no pasa de uno y el resultado no pasa de `suyo`. Y el suelo, porque
+                // primero, el factor no pasa de uno y el resultado no pasa de `group_weight`. Y el suelo, porque
                 // por abajo sí llega a cero: ver [`Weight::scaled`].
-                weight: Weight::scaled(suyo * (child.weight.valor() / suma)),
+                weight: Weight::scaled(group_weight * (child.weight.value() / total)),
                 node: child.node,
             })
             .collect();
 
         // **En el sitio que ocupaba el grupo y en su orden**, o lo pintado cambiaría de sitio: lo que
         // estaba a la derecha del bloque tiene que seguir a la derecha de sus dos consolas.
-        children.splice(which..which, subidas);
+        children.splice(which..which, lifted);
     }
 }
 
@@ -3687,8 +3687,8 @@ impl Tab {
     ) -> term_core::Result<Self> {
         // **Si alguna consola falla no se abre la pestaña**, y el `?` sobre el `collect` es lo que lo
         // consigue: el mismo criterio que ya tenían las dos de siempre.
-        let cuantas = layout.how_many_panes();
-        let panes: Vec<Pane> = (first_pane_name..first_pane_name + cuantas)
+        let how_many = layout.how_many_panes();
+        let panes: Vec<Pane> = (first_pane_name..first_pane_name + how_many)
             .map(|name| Pane::new(ctx, name))
             .collect::<term_core::Result<_>>()?;
 
@@ -3726,11 +3726,11 @@ impl Tab {
 
     /// Sus consolas, de la primera a la última en el orden en que se pintan.
     fn panes(&self) -> Vec<&Pane> {
-        self.root.hojas()
+        self.root.leaves()
     }
 
     fn panes_mut(&mut self) -> Vec<&mut Pane> {
-        self.root.hojas_mut()
+        self.root.leaves_mut()
     }
 
     /// Lo que más reclaman las consolas de esta pestaña, si alguna reclama algo.
@@ -3742,10 +3742,10 @@ impl Tab {
     /// **Se aplanan los que no reclaman antes de comparar.** Buscar el máximo sobre los `Option` tal
     /// cual devuelve «algo que no contiene nada» cuando ninguna reclama —un `Some(None)`— y quien lo
     /// leyera preguntando si hay algo marcaría la ficha de una pestaña donde nadie reclama.
-    fn attention(&self, ahora: SystemTime) -> Option<panel::AttentionState> {
+    fn attention(&self, now: SystemTime) -> Option<panel::AttentionState> {
         self.panes()
             .iter()
-            .filter_map(|pane| pane.panel_state.attention(ahora))
+            .filter_map(|pane| pane.panel_state.attention(now))
             .max()
     }
 
@@ -3765,27 +3765,27 @@ impl Tab {
     /// fronteras, y una línea del informe que solo hable de una de ellas es exactamente el número mal
     /// etiquetado que este proyecto ya ha pagado una vez.
     fn divider_fractions(&self) -> Vec<f32> {
-        let mut fracciones = Vec::new();
-        Self::fractions_in(&self.root, &mut fracciones);
-        fracciones
+        let mut fractions = Vec::new();
+        Self::fractions_in(&self.root, &mut fractions);
+        fractions
     }
 
     /// Las fracciones de un nodo, **en el orden en que [`Node::place`] entrega sus divisores**:
     /// primero los cortes de esta rama, después los de sus hijos. Es la misma numeración por la que
     /// entra [`Tab::move_divider`], y tienen que coincidir o el informe diría de una frontera
     /// lo que le pasó a otra.
-    fn fractions_in(node: &Node, fracciones: &mut Vec<f32>) {
+    fn fractions_in(node: &Node, fractions: &mut Vec<f32>) {
         let Node::Branch { children, .. } = node else {
             return;
         };
 
         for cut_along in 0..children.len().saturating_sub(1) {
             let between_the_two =
-                children[cut_along].weight.valor() + children[cut_along + 1].weight.valor();
-            fracciones.push(children[cut_along].weight.valor() / between_the_two);
+                children[cut_along].weight.value() + children[cut_along + 1].weight.value();
+            fractions.push(children[cut_along].weight.value() / between_the_two);
         }
         for child in children {
-            Self::fractions_in(&child.node, fracciones);
+            Self::fractions_in(&child.node, fractions);
         }
     }
 
@@ -3795,13 +3795,13 @@ impl Tab {
     /// del árbol: mover un divisor no toca a las hermanas que están más allá. Con dos hijos da igual;
     /// con tres es lo que separa este comportamiento del de un terminal donde arrastrar una frontera
     /// mueve todo lo que hay a su derecha.
-    fn move_divider(&mut self, which: usize, fraccion: f32) -> bool {
-        let mut van = 0;
-        Self::move_in(&mut self.root, which, fraccion, &mut van).unwrap_or(false)
+    fn move_divider(&mut self, which: usize, fraction: f32) -> bool {
+        let mut seen = 0;
+        Self::move_in(&mut self.root, which, fraction, &mut seen).unwrap_or(false)
     }
 
     /// Busca la frontera número `which` recorriendo el árbol **en el mismo orden en que se colocan**, y la
-    /// mueve. `van` es cuántas se han dejado atrás.
+    /// mueve. `seen` es cuántas se han dejado atrás.
     ///
     /// **Se numeran recorriendo en vez de guardar un camino hasta la rama**, y es la misma invariante en
     /// la que ya descansa el pintado: las hojas y sus rectángulos se casan por posición porque los dos
@@ -3815,40 +3815,40 @@ impl Tab {
     /// como la cuenta no había avanzado, la frontera del hermano casaba con el mismo número y **se movía
     /// sola**. Mientras la disposición fue una rama de dos hojas ese camino no se recorría nunca; con dos
     /// ramas hermanas —dos pulsaciones de partir— sí.
-    fn move_in(node: &mut Node, which: usize, fraccion: f32, van: &mut usize) -> Option<bool> {
+    fn move_in(node: &mut Node, which: usize, fraction: f32, seen: &mut usize) -> Option<bool> {
         let Node::Branch { children, .. } = node else {
             return None;
         };
 
         for cut_along in 0..children.len().saturating_sub(1) {
-            if *van == which {
+            if *seen == which {
                 let between_the_two =
-                    children[cut_along].weight.valor() + children[cut_along + 1].weight.valor();
-                let [primero, segundo] =
-                    weights_of(fraccion).map(|weight| weight.valor() * between_the_two);
+                    children[cut_along].weight.value() + children[cut_along + 1].weight.value();
+                let [first, second] =
+                    weights_of(fraction).map(|weight| weight.value() * between_the_two);
                 // **Se compara con lo que se va a guardar, no con lo que se acaba de calcular.** Con un
                 // peso ya en el suelo, el cálculo da un número más pequeño y el suelo lo devuelve al mismo
                 // sitio: comparando contra el cálculo, cada fotograma del arrastre diría «cambió» y
                 // rehacería el reparto para dejar todo igual.
-                let cambia = children[cut_along].weight != Weight::scaled(primero);
+                let changed = children[cut_along].weight != Weight::scaled(first);
 
                 // **La fracción está recortada; el producto no basta con eso.** `weights_of` garantiza que
                 // ninguna de las dos fracciones es cero, pero lo que se guarda es la fracción **por lo que
                 // suman los dos vecinos**, y esa suma encoge con cada arrastre: es justamente el camino
                 // que lleva a los pesos diminutos. El suelo lo pone [`Weight::scaled`].
-                children[cut_along].weight = Weight::scaled(primero);
-                children[cut_along + 1].weight = Weight::scaled(segundo);
+                children[cut_along].weight = Weight::scaled(first);
+                children[cut_along + 1].weight = Weight::scaled(second);
 
-                return Some(cambia);
+                return Some(changed);
             }
-            *van += 1;
+            *seen += 1;
         }
 
         // No estaba en esta rama: sigue por dentro de sus hijos, en el orden en que se colocan, y **para
         // en cuanto uno la encuentra** — la haya movido o no.
         for child in children {
-            if let Some(cambia) = Self::move_in(&mut child.node, which, fraccion, van) {
-                return Some(cambia);
+            if let Some(changed) = Self::move_in(&mut child.node, which, fraction, seen) {
+                return Some(changed);
             }
         }
 
@@ -3984,7 +3984,7 @@ struct Window {
     /// Los gestos de arrastre que la tanda de medida se hace a sí misma, si pidió alguno.
     ///
     /// **Nada cuando nadie los pide**, que es siempre salvo en una tanda: así el camino no llega a correr
-    /// para quien usa la aplicación. Ver [`VARIABLE_DE_LOS_ARRASTRES`].
+    /// para quien usa la aplicación. Ver [`DRAGS_VARIABLE`].
     injected_drags: Option<InjectedDrags>,
     /// Lo que gastó el enganche de la entrada cruda inyectando el gesto, esperando a declararse.
     ///
@@ -4088,7 +4088,7 @@ struct Window {
     /// publicaba sale del tamaño de la ventana **y** de la métrica de la fuente, así que leerla no dice
     /// con qué ventana se tomó; y como el tamaño lo decidía el escritorio, los anexos anteriores a esto
     /// se tomaron con ventanas cuyo tamaño nadie apuntó. Esta cifra es la que se le vuelve a pedir con
-    /// [`VARIABLE_DEL_TAMAÑO`].
+    /// [`SIZE_VARIABLE`].
     ///
     /// **Se guarda en vez de preguntarse al publicar** porque el informe se escribe en `on_exit`, que no
     /// recibe el contexto de egui: cuando hay que decirlo, ya no hay a quién preguntárselo.
@@ -4113,7 +4113,7 @@ struct Window {
 /// el tope, quien mide se entera igual, porque el informe publica el tamaño que la ventana **tuvo**.
 struct RequestedSize {
     how_much: egui::Vec2,
-    /// En cuántos fotogramas más se volverá a pedir. Por qué el número, en [`INSISTENCIAS_CON_EL_TAMAÑO`].
+    /// En cuántos fotogramas más se volverá a pedir. Por qué el número, en [`FRAMES_INSISTING_ON_SIZE`].
     attempts: u8,
 }
 
@@ -4121,7 +4121,7 @@ impl Window {
     /// Una ventana con las pestañas que se le pidan.
     ///
     /// **Cuántas son se le dice desde fuera y no se lee aquí del entorno**, aunque el único sitio que hoy
-    /// pide más de una sea [`arrancar`] leyendo [`VARIABLE_DE_LAS_PESTAÑAS`]. Leerlo dentro haría que una
+    /// pide más de una sea [`run`] leyendo [`TABS_VARIABLE`]. Leerlo dentro haría que una
     /// variable exportada en la sesión cambiara lo que abren las pruebas que llaman aquí —que corren en el
     /// mismo proceso y a la vez—, y una prueba que dice «la ventana abre con una sola pestaña» empezaría a
     /// fallar según qué otra estuviera corriendo en ese instante.
@@ -4133,15 +4133,15 @@ impl Window {
     /// cada prueba que abre una ventana.
     fn with_tabs(
         ctx: &egui::Context,
-        cuantas: usize,
+        how_many: usize,
         layout: OpeningLayout,
         size: Option<egui::Vec2>,
     ) -> term_core::Result<Self> {
         // **Si alguna falla no se abre ninguna**, y el `?` sobre el `collect` es lo que lo consigue: el
-        // mismo criterio que `panel_o_ninguno`. Media docena de pestañas de las que una está a medias es
+        // mismo criterio que `panel_or_none`. Media docena de pestañas de las que una está a medias es
         // peor que no arrancar, porque el fallo se descubre al llegar a ella.
         let per_tab = layout.how_many_panes();
-        let tabs: Vec<Tab> = (0..cuantas)
+        let tabs: Vec<Tab> = (0..how_many)
             .map(|name| Tab::new(ctx, name, name * per_tab, &layout))
             .collect::<term_core::Result<_>>()?;
 
@@ -4158,7 +4158,7 @@ impl Window {
     fn opening(
         ctx: &egui::Context,
         with_what: OpenWith,
-        programa: &str,
+        program: &str,
         size: Option<egui::Vec2>,
         persistence: session::Persistencia,
     ) -> term_core::Result<Self> {
@@ -4167,17 +4167,17 @@ impl Window {
         // sería tocar la firma de un constructor con treinta y tres llamadas para el único camino que este
         // PR no estrena. Se dice porque el comentario anterior afirmaba que **ninguna** rama leía el
         // entorno, y era falso justo para la de fábrica — lo cazaron las dos revisiones.
-        let mut no_pisar = None;
+        let mut do_not_overwrite = None;
         let opened = match with_what {
             OpenWith::Factory { tabs, layout } => Self::with_tabs(ctx, tabs, layout, size),
-            OpenWith::Restored(guardada) => {
-                let cuantas = guardada.hojas();
+            OpenWith::Restored(saved) => {
+                let panes = saved.hojas();
                 // **Se cronometra abrirlas, y no leer el fichero, y la diferencia importa.** Lo que crece
                 // con el tamaño de la disposición son los `fork` y los `exec` de aquí: leer un documento de
                 // cuatro hojas y uno de doscientas cuesta casi lo mismo. Lo que costó leer viaja con la
                 // persistencia, que ya sabe cuánto tardó su propia carga.
-                let antes = Instant::now();
-                match Self::materialize(ctx, &guardada, programa) {
+                let before = Instant::now();
+                match Self::materialize(ctx, &saved, program) {
                     Ok(tabs) => {
                         Self::with_these_tabs(ctx, tabs, size).map(|mut window| {
                             // **Solo cuando se abrieron de verdad.** Si materializar falla se abre de fábrica,
@@ -4190,16 +4190,16 @@ impl Window {
                             // el árbol entero para el primer espejo—, y pararlo antes los dejaba fuera de un
                             // número que dice medir justo eso.
                             window.restoring = Some(measure::Restauracion {
-                                consolas: cuantas,
+                                consolas: panes,
                                 leer: persistence.tardo_en_cargar(),
-                                abrirlas: antes.elapsed(),
+                                abrirlas: before.elapsed(),
                             });
                             window
                         })
                     }
                     Err(failure) => {
                         eprintln!(
-                            "no se pudo abrir la disposición guardada de {cuantas} consolas ({failure}); \
+                            "no se pudo abrir la disposición guardada de {panes} consolas ({failure}); \
                              se abre de fábrica y no se sobrescribe lo guardado"
                         );
                         // **Y esta sesión no pisa el fichero, que es lo que evita perder la disposición
@@ -4207,7 +4207,7 @@ impl Window {
                         // guardado automático encendido, el primer cambio del usuario la escribiría encima
                         // de sus veinte consolas. Antes de este hito el fichero sobrevivía a un arranque
                         // fallido y el siguiente lo recuperaba: esto conserva esa propiedad.
-                        no_pisar = Some("no se pudo abrir la disposición que había guardada");
+                        do_not_overwrite = Some("no se pudo abrir la disposición que había guardada");
                         Self::with_tabs(ctx, 1, OpeningLayout::DEFAULT, size)
                     }
                 }
@@ -4221,8 +4221,8 @@ impl Window {
         // constructores: al de fábrica lo llaman treinta y tres pruebas que no guardan nada.
         opened.map(|mut window| {
             window.persistence = persistence;
-            if let Some(razon) = no_pisar {
-                window.persistence.no_pisar_porque(razon);
+            if let Some(reason) = do_not_overwrite {
+                window.persistence.no_pisar_porque(reason);
             }
             window
         })
@@ -4240,20 +4240,20 @@ impl Window {
         if let Some(font_size) = settings.cuerpo {
             self.font_size = font_size;
         }
-        if let Some(encendido) = settings.copiar {
-            self.copy_enabled = encendido;
+        if let Some(enabled) = settings.copiar {
+            self.copy_enabled = enabled;
         }
         // **Se aplican en el orden en que se escribieron, y por eso llegan como lista.** «Gana la última»
         // solo se puede decidir así, y es lo que hace que pegar un juego de atajos encima de otro haga lo
         // que se espera.
         for (action, chord) in &settings.atajos {
-            if let Some(pisada) = self.keymap.bind(*action, *chord) {
+            if let Some(displaced) = self.keymap.bind(*action, *chord) {
                 // **El choque se dice, no se resuelve en silencio.** Sin esto, quien reasigne un acorde
                 // que ya tenía dueño pierde el otro atajo sin enterarse, y lo descubre el día que lo
                 // necesita.
                 eprintln!(
                     "agent-terminal: «{}» se queda sin atajo: su acorde se lo lleva «{}», que va después",
-                    pisada.as_written(),
+                    displaced.as_written(),
                     action.as_written()
                 );
             }
@@ -4318,7 +4318,7 @@ impl Window {
             last_frame_with_buttons: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
-            // **Del largo de la lista y no del parámetro `cuantas`, aunque aquí valgan lo mismo.** Son
+            // **Del largo de la lista y no del parámetro `panes`, aunque aquí valgan lo mismo.** Son
             // dos fuentes para el mismo dato, y con dos se puede coger la que no toca: poner un cero o
             // el parámetro equivocado hace que la siguiente pestaña que se abra **se llame igual que
             // una que ya existe**, y el informe publique dos bloques de números con la misma etiqueta.
@@ -4335,7 +4335,7 @@ impl Window {
             window_size: egui::Vec2::ZERO,
             requested_size: size.map(|how_much| RequestedSize {
                 how_much,
-                attempts: INSISTENCIAS_CON_EL_TAMAÑO,
+                attempts: FRAMES_INSISTING_ON_SIZE,
             }),
         };
 
@@ -4398,9 +4398,9 @@ impl Window {
         // Lo único que el vigilante necesita de la ventana es cómo despertarla, igual que el puente:
         // así su módulo no depende del framework de interfaz, que es lo que se va a reescribir. Pedir
         // el repintado no entra en pánico, que es la condición de quien lo llama desde otro hilo.
-        let despertador = ctx.clone();
+        let waker = ctx.clone();
 
-        Watcher::new(move || despertador.request_repaint(), &consoles)
+        Watcher::new(move || waker.request_repaint(), &consoles)
     }
 
     /// **El latido: despertar a tiempo de decir que un panel está viejo.**
@@ -4427,7 +4427,7 @@ impl Window {
     /// ver. No se pierde nada, porque si el panel se ve rancio se decide **al pintarlo**, así que al
     /// volver a esa pestaña el aviso sale en ese mismo fotograma.
     fn set_the_alarm(&self, ctx: &egui::Context) {
-        let ahora = SystemTime::now();
+        let now = SystemTime::now();
 
         // **El plazo del guardado despierta a la ventana, y las dos mitades tienen que pedirlo.** La mitad
         // lógica empieza poniendo el plazo a lo más largo posible y es la única que corre con la ventana
@@ -4437,8 +4437,8 @@ impl Window {
         // **Y esto cambia cuántos fotogramas tiene una corrida de medida**, así que va declarado en el
         // anexo: una ventana que se despierta dos veces por segundo mientras se arrastra no tiene el mismo
         // número de fotogramas que una que solo responde a la entrada.
-        if let Some(cuando) = self.save_due {
-            ctx.request_repaint_after(cuando.saturating_duration_since(Instant::now()));
+        if let Some(due) = self.save_due {
+            ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
         }
 
         if let Some(missing) = self
@@ -4450,7 +4450,7 @@ impl Window {
             // que gastar un fotograma en él es gastarlo en algo que nadie va a ver. Sin esto, plegar una
             // consola cuyo productor se calla deja la ventana despertándose cada minuto para nada.
             .filter(|pane| !pane.folded)
-            .filter_map(|pane| pane.panel_state.how_long_until_warning(ahora))
+            .filter_map(|pane| pane.panel_state.how_long_until_warning(now))
             .min()
         {
             ctx.request_repaint_after(missing);
@@ -4465,16 +4465,16 @@ impl Window {
     /// el compositor mande el suyo—, y cuando se agotan se dice y se deja de mirar.
     ///
     fn insist_on_the_size(&mut self, ctx: &egui::Context) {
-        let Some(pedido) = &mut self.requested_size else {
+        let Some(requested) = &mut self.requested_size else {
             return;
         };
 
-        let how_much = pedido.how_much;
-        if (self.window_size - how_much).abs().max_elem() <= MARGEN_DEL_TAMAÑO {
+        let how_much = requested.how_much;
+        if (self.window_size - how_much).abs().max_elem() <= SIZE_TOLERANCE {
             return;
         }
 
-        if pedido.attempts == 0 {
+        if requested.attempts == 0 {
             self.requested_size = None;
             // **Se dice, y en la salida de errores del proceso que mide.** Quien tome la tanda tiene que
             // saber que el tamaño que pidió no es el que hubo; el informe publica el que hubo, así que
@@ -4483,17 +4483,17 @@ impl Window {
             // **Y se cronometra**, aunque pase una sola vez en la sesión: escribir en la salida de errores
             // cuesta lo que tarde quien lea al otro lado del tubo, ocurre dentro de la pasada del fotograma
             // y ninguna división lo declara. Es lo mismo que ya hacen los dos avisos de partir y cerrar.
-            let antes = Instant::now();
+            let before = Instant::now();
             eprintln!(
                 "el escritorio no respeta el tamaño pedido ({}×{} puntos): la ventana se queda en {}×{} \
                  y las tandas no serán comparables con otras máquinas",
                 how_much.x, how_much.y, self.window_size.x, self.window_size.y
             );
-            self.timed_separately += antes.elapsed();
+            self.timed_separately += before.elapsed();
             return;
         }
 
-        pedido.attempts -= 1;
+        requested.attempts -= 1;
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(how_much));
     }
 
@@ -4504,12 +4504,12 @@ impl Window {
     /// sobre las constantes con las que se escribe. Comprobar la constante demuestra que está bien
     /// redactada, no que alguien la imprima — y eso, en este proyecto, ya ha dejado pasar cosas con la
     /// suite en verde.
-    fn publish_the_report(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+    fn publish_the_report(&self, to: &mut dyn std::io::Write) -> std::io::Result<()> {
         if !self.all_panes().any(|pane| pane.timings.hay_algo()) {
             return Ok(());
         }
 
-        let rejillas: Vec<_> = self
+        let grids: Vec<_> = self
             .tabs
             .iter()
             .map(|tab| {
@@ -4517,18 +4517,18 @@ impl Window {
                     tab.name,
                     tab.panes()
                         .into_iter()
-                        .map(|d| (d.name, d.screen.size()))
+                        .map(|pane| (pane.name, pane.screen.size()))
                         .collect(),
                 )
             })
             .collect();
         measure::cabecera(
-            a,
+            to,
             measure::EnPuntos {
                 ancho: self.window_size.x,
                 alto: self.window_size.y,
             },
-            &rejillas,
+            &grids,
             self.active().name,
             measure::DeLaSesion {
                 arrastres: self
@@ -4539,7 +4539,7 @@ impl Window {
                         con_efecto: injected_drags.with_effect,
                         marcados: injected_drags.selected,
                         informados: injected_drags.reported,
-                        gesto: injected_drags.which.como_se_publica(),
+                        gesto: injected_drags.which.as_published(),
                     }),
                 restauracion: self.restoring,
                 configuracion: self.reading_settings,
@@ -4568,7 +4568,7 @@ impl Window {
         if !dividers.is_empty() {
             let at: Vec<String> = dividers
                 .iter()
-                .map(|fraccion| format!("{:.0} %", fraccion * 100.0))
+                .map(|fraction| format!("{:.0} %", fraction * 100.0))
                 .collect();
             // **La línea dice de qué pestaña habla, y antes no lo decía.** Describe el árbol de la que se
             // veía al salir, mientras que las tablas de abajo son de **todas**; con una sola frontera por
@@ -4581,7 +4581,7 @@ impl Window {
             // ancho a los dos puntos de las horizontales publica una dimensión que no es la que mide. Es la
             // palabra que la constante ya usa.
             writeln!(
-                a,
+                to,
                 "divisores:    {} en la pestaña {}, al {} de su tramo repartible al salir, y son \
                  {DIVIDER_THICKNESS} puntos de grosor cada uno. Si se arrastró durante la sesión, los \
                  tramos de abajo mezclan repartos",
@@ -4598,21 +4598,21 @@ impl Window {
         // muy distintas y antes salían con el mismo texto: que haya tres divisiones y el lado ya no
         // describa nada es lo normal; que el foco no exista significa que las teclas no llegaban a ninguna
         // consola, y eso hay que poder leerlo en el informe.
-        let cuantas_visibles = visible.panes().len();
+        let how_many_visible = visible.panes().len();
         let where_it_looks = match visible.where_the_focus_is() {
-            Some(at) => measure::lado(cuantas_visibles, at).map_or_else(
+            Some(at) => measure::lado(how_many_visible, at).map_or_else(
                 // **Con la cuenta delante, en vez de «con más de dos».** Mientras una pestaña tuvo
                 // siempre dos consolas o más —nacía con dos y partir solo añadía—, «sin lado» solo podía
                 // significar que sobraban. Desde que se puede **cerrar**, la pestaña de una es alcanzable,
                 // y ese texto diría justo lo contrario de lo que pasa. La cuenta dice la verdad en los dos
                 // casos, y de paso deja de haber que contar líneas para saber cuántas eran.
-                || format!("sin lado: hay {cuantas_visibles} y el lado solo describe algo con dos"),
+                || format!("sin lado: hay {how_many_visible} y el lado solo describe algo con dos"),
                 str::to_string,
             ),
             None => "NO EXISTE: el teclado no llegaba a ninguna consola".to_string(),
         };
         writeln!(
-            a,
+            to,
             "foco al salir: división {} ({where_it_looks}) de la pestaña {}",
             visible.focus, visible.name
         )?;
@@ -4629,38 +4629,38 @@ impl Window {
         // medido en la sesión. Es el mismo caso que la cabecera ya resolvió, por la misma puerta.
         for tab in &self.tabs {
             let which_tab = tab.name;
-            let suyas = tab.panes();
-            for (which, pane) in suyas.iter().enumerate() {
-                let side = measure::lado(suyas.len(), which)
+            let its_panes = tab.panes();
+            for (which, pane) in its_panes.iter().enumerate() {
+                let side = measure::lado(its_panes.len(), which)
                     .map_or_else(String::new, |side| format!(" ({side})"));
                 writeln!(
-                    a,
+                    to,
                     "\n── pestaña {which_tab}, división {}{side} ──",
                     pane.name
                 )?;
-                pane.timings.publicar_tramos(a)?;
+                pane.timings.publicar_tramos(to)?;
             }
         }
 
-        self.rest_of_frame.publicar(a)?;
+        self.rest_of_frame.publicar(to)?;
         // **Los dos tramos de guardar van después del resto, y con su propia fila cada uno.** Están
         // descontados de ese resto —entran en el acumulador de la ventana—, así que sin estas filas el
         // número existiría y **nadie podría auditarlo**.
-        self.saving.publicar(a)?;
+        self.saving.publicar(to)?;
         // **Y el descubrimiento igual: su fila va después del resto porque también está descontado de
         // él.** Es el tramo más caro que este proyecto añade fuera de una consola, así que sin declararlo
         // el número de D3 se lo comería entero.
-        self.discovery.publicar(a)?;
+        self.discovery.publicar(to)?;
         // **Y el del color va el último, con la misma razón que los tres de arriba**: está restado del
         // tramo del pintado, así que sin esta fila el número existiría y nadie podría auditarlo.
-        self.color.publicar(a)
+        self.color.publicar(to)
     }
 
     /// Le da a las consolas de las pestañas que no se ven la rejilla que tendrían si se vieran.
     ///
     /// **Sin esto una pestaña de fondo se queda con [`INITIAL_GRID`] mientras dure**, porque
     /// `measured` solo se escribe al pintar y a ellas no se las pinta. Y eso no es un detalle interno:
-    /// es el tamaño que [`Pane::redimensionar`] le anuncia al programa de dentro, así que un
+    /// es el tamaño que [`Pane::resize`] le anuncia al programa de dentro, así que un
     /// agente que trabaja en una pestaña que no miras formatea su salida para una ventana que no
     /// existe —80 columnas de arranque cuando la suya son 57— y al volver a esa pestaña lo escrito
     /// sigue ajustado a un ancho ajeno hasta que el programa redibuje. La promesa del hito es que la
@@ -4694,7 +4694,7 @@ impl Window {
     fn measure_the_ones_out_of_sight(&mut self, area: egui::Rect, metrics: &CellMetrics) {
         // Un solo reloj para todas, y aquí sí basta con uno: de la hora solo depende si el panel de
         // una división está rancio, y no se pinta nada después que pudiera desmentirlo.
-        let ahora = SystemTime::now();
+        let now = SystemTime::now();
         let active = self.active;
 
         for (which, tab) in self.tabs.iter_mut().enumerate() {
@@ -4710,7 +4710,7 @@ impl Window {
             for (pane, rect) in tab.panes_mut().into_iter().zip(tiling.parts) {
                 let before_the_panel = Instant::now();
                 pane.refresh_its_panel();
-                let panel_split = pane.tile_with_its_panel(rect, metrics.width(), ahora);
+                let panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
                 // **La frontera del tramo es la misma que en el pintado**, que cierra su cronómetro
                 // también después de repartir: `tile_with_its_panel` pregunta si el panel se ve, y
                 // esa pregunta llega a componer el texto de un aviso cuando el productor está callado
@@ -4760,11 +4760,11 @@ impl Window {
             // llega a pasar —`pump` deja siempre algo pendiente y las dos cosas se declaran
             // juntas—, y por eso mismo conviene que quede escrito: la forma segura de añadir un tramo
             // a esta vuelta es meterlo dentro, nunca al lado.
-            if let Some((_, collected_at, interpretado)) = pane.pending_measurement.take() {
+            if let Some((_, collected_at, interpreted)) = pane.pending_measurement.take() {
                 pane.timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
                     None,
                     collected_at,
-                    interpretado,
+                    interpreted,
                     std::time::Duration::ZERO,
                     std::mem::take(&mut pane.panel_reread_unpainted),
                 ));
@@ -4779,11 +4779,11 @@ impl Window {
     /// además tiene serie propia en el informe, porque ese acumulador **resta pero no publica ninguna
     /// fila**. Son dos mecanismos y hacen falta los dos.
     fn check_whether_the_layout_moved(&mut self) {
-        let empezo = Instant::now();
+        let started = Instant::now();
 
-        let ahora = self.describe();
-        if self.last_seen.as_ref() != Some(&ahora) {
-            self.last_seen = Some(ahora);
+        let current = self.describe();
+        if self.last_seen.as_ref() != Some(&current) {
+            self.last_seen = Some(current);
             // **Solo si estaba vacío**, que es la diferencia entre un tope y un aplazamiento: durante un
             // arrastre la disposición cambia en cada fotograma, y rearmando aquí no se escribiría nunca.
             if self.save_due.is_none() {
@@ -4791,7 +4791,7 @@ impl Window {
             }
         }
 
-        self.mirror_this_frame += empezo.elapsed();
+        self.mirror_this_frame += started.elapsed();
     }
 
     /// Escribe la disposición si el plazo venció y hay algo distinto de lo último que llegó al disco.
@@ -4800,10 +4800,10 @@ impl Window {
     /// lo que la ventana cronometró aparte, así que escribir antes le cargaría su coste al fotograma
     /// anterior — que es exactamente la clase de error que este instrumento persigue.
     fn save_if_due(&mut self) {
-        let Some(cuando) = self.save_due else {
+        let Some(due) = self.save_due else {
             return;
         };
-        if Instant::now() < cuando {
+        if Instant::now() < due {
             return;
         }
         self.save_now();
@@ -4824,69 +4824,69 @@ impl Window {
         // fondo cuesta, ocurre en cada plazo vencido —dos veces por segundo mientras se arrastra— y en el
         // camino en que no hay nada que escribir **es todo el coste**: dejarlo fuera del reloj lo publicaría
         // como coste del framework, que es la fuga que la regla dura del proyecto nombra.
-        let empezo = Instant::now();
+        let started = Instant::now();
 
         // Lo que se va a escribir es lo último visto: se acaba de construir en la pasada de interfaz, así
         // que recorrer el árbol otra vez sería pagar dos veces por el mismo dato.
-        let Some(documento) = self.last_seen.clone() else {
-            self.mirror_this_frame += empezo.elapsed();
+        let Some(document) = self.last_seen.clone() else {
+            self.mirror_this_frame += started.elapsed();
             return;
         };
-        if self.last_written.as_ref() == Some(&documento) {
+        if self.last_written.as_ref() == Some(&document) {
             // **Va al tramo del espejo y no al de la escritura, porque es lo que es**: comparar dos
             // espejos. Contarlo como escritura metería en esa media unas muestras que no escribieron nada.
-            self.mirror_this_frame += empezo.elapsed();
+            self.mirror_this_frame += started.elapsed();
             return;
         }
         // **Por el tipo validado, que es lo que hace imposible escribir algo que no se sepa volver a
         // leer.** Y lo que no pasa la validación **se avisa una vez**: el caso real es tener más consolas
         // abiertas que las que el formato admite —el techo existe para acotar el `fork` del arranque, así
         // que no se puede quitar—, y sin este aviso el usuario perdería su disposición sin ninguna señal.
-        let validated = match session::validar(documento.clone()) {
+        let validated = match session::validar(document.clone()) {
             Ok(validated) => validated,
-            Err(problema) => {
+            Err(problem) => {
                 self.persistence
-                    .avisar_de_lo_que_no_se_puede_guardar(&problema);
+                    .avisar_de_lo_que_no_se_puede_guardar(&problem);
                 // **Esto no es una escritura y no se cuenta como tal, ni siquiera como intento.** No se
                 // resolvió ninguna ruta ni se tocó el disco: lo que corrió es validar, que es del mismo
                 // tipo de trabajo que comparar el espejo. Contarlo en el tramo de la escritura metería en
                 // esa media unas muestras que son **todas** validación, y el número dejaría de describir
                 // lo que cuesta escribir.
-                self.mirror_this_frame += empezo.elapsed();
+                self.mirror_this_frame += started.elapsed();
                 return;
             }
         };
 
-        let escrito = self.persistence.guardar(&validated);
-        let how_much = empezo.elapsed();
+        let written = self.persistence.guardar(&validated);
+        let how_much = started.elapsed();
         self.timed_separately += how_much;
-        self.saving.anotar_escritura(how_much, escrito);
+        self.saving.anotar_escritura(how_much, written);
 
-        if escrito {
-            self.last_written = Some(documento);
+        if written {
+            self.last_written = Some(document);
         }
     }
 
     /// Cierra el fotograma anterior: cada consola cierra sus tramos y la ventana se queda con lo que
     /// ninguna cronometró.
     fn close_the_frame(&mut self, cpu_cost: std::time::Duration) {
-        let cronometrado = self
+        let timed = self
             .all_panes_mut()
             .filter_map(|pane| pane.timings.cerrar_fotograma(cpu_cost))
-            .reduce(|one, otra| one + otra);
+            .reduce(|one, other| one + other);
 
         // **Se vacía siempre, haya resto que anotar o no.** Arrastrarlo al fotograma siguiente sería
         // restarle a un fotograma un trabajo que ocurrió en otro, que es la clase de error que este
         // instrumento persigue. Ver [`Window::timed_separately`] por qué existe.
-        let aparte = std::mem::take(&mut self.timed_separately);
+        let separately = std::mem::take(&mut self.timed_separately);
 
         // **El espejo entra en la resta Y en su serie, y hacen falta las dos.** El acumulador de arriba
         // descuenta pero no publica ninguna fila; una serie publica pero no descuenta nada. Con solo una de
         // las dos, este trabajo —recorrer el árbol de todas las pestañas, en cada fotograma— acabaría
         // dentro de la cifra con la que D3 juzga al framework, o auditable pero sin restar.
-        let espejo = std::mem::take(&mut self.mirror_this_frame);
-        if !espejo.is_zero() {
-            self.saving.anotar_espejo(espejo);
+        let mirror = std::mem::take(&mut self.mirror_this_frame);
+        if !mirror.is_zero() {
+            self.saving.anotar_espejo(mirror);
         }
 
         // **La barra se anota aquí y no donde se pinta**, por lo mismo que el espejo: lo de arriba
@@ -4905,9 +4905,9 @@ impl Window {
 
         // Sin tramos de nadie no hay resto que anotar: el fotograma entero se contaría como resto y la
         // serie acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
-        if let Some(cronometrado) = cronometrado {
+        if let Some(timed) = timed {
             self.rest_of_frame
-                .anotar(cpu_cost, cronometrado + aparte + espejo);
+                .anotar(cpu_cost, timed + separately + mirror);
         }
     }
 
@@ -4945,12 +4945,12 @@ impl Window {
         for pane in self.all_panes_mut() {
             // Primero se interpreta lo pendiente y después se cambia de tamaño: esos bytes los
             // escribió el programa para las dimensiones que todavía no sabe que han cambiado.
-            let queda_cola = pane.pump();
-            pane.redimensionar();
+            let queue_left = pane.pump();
+            pane.resize();
             reflowed += std::mem::take(&mut pane.reflowed);
 
-            pump.some_left_a_queue |= queda_cola;
-            pump.all_finished &= pane.terminada(queda_cola);
+            pump.some_left_a_queue |= queue_left;
+            pump.all_finished &= pane.is_finished(queue_left);
         }
 
         // **Solo cuando hubo recolocación de verdad.** Anotar un cero en los miles de fotogramas
@@ -4980,7 +4980,7 @@ impl Window {
     fn handle_the_mouse(
         &mut self,
         ui: &egui::Ui,
-        rectangulos: &[egui::Rect],
+        rects: &[egui::Rect],
         metrics: &CellMetrics,
     ) -> MouseOutcome {
         // **El cronómetro vive aquí y no en quien llama**, al revés que el del recorrido del reparto. La
@@ -4995,9 +4995,9 @@ impl Window {
         // llamadas a `interact`— publicaría casi todo el gesto como coste del framework **sin que ninguna
         // prueba cayera**: un contador mayor que cero lo cumple cualquier par de lecturas seguidas.
         // Partiéndolo, la región cronometrada es la llamada entera y encogerla deja de ser mover una línea.
-        let empezo = Instant::now();
-        let of_the_mouse = self.handle_the_mouse_without_claiming_it(ui, rectangulos, metrics);
-        self.timed_separately += empezo.elapsed();
+        let started = Instant::now();
+        let of_the_mouse = self.handle_the_mouse_without_claiming_it(ui, rects, metrics);
+        self.timed_separately += started.elapsed();
         of_the_mouse
     }
 
@@ -5005,14 +5005,14 @@ impl Window {
     fn handle_the_mouse_without_claiming_it(
         &mut self,
         ui: &egui::Ui,
-        rectangulos: &[egui::Rect],
+        rects: &[egui::Rect],
         metrics: &CellMetrics,
     ) -> MouseOutcome {
         // **Un solo vector, no dos.** Recorrer el árbol apuntando nombres reserva una vez; pedir
         // `panes()` y mapearlo encima reservaría otra, y este camino se recorre en **todos** los
         // fotogramas, haya gesto o no.
-        let mut nombres = Vec::new();
-        self.active().root.walk(&mut |pane| nombres.push(pane.name));
+        let mut names = Vec::new();
+        self.active().root.walk(&mut |pane| names.push(pane.name));
 
         let mut target = None;
         let mut the_tree_changed = false;
@@ -5024,7 +5024,7 @@ impl Window {
         // **Se recoge una sola vez y antes del bucle**: dentro se leería por cada división y el
         // desplazamiento se aplicaría tantas veces como consolas haya. Y se **consume**, por lo mismo que
         // el teclado: un fotograma puede correr dos pasadas sobre la misma entrada.
-        let rueda = Self::collect_the_wheel(ui, metrics);
+        let wheel = Self::collect_the_wheel(ui, metrics);
 
         // **Con qué acorde se ha apretado, del propio evento y no del estado.** Ver
         // [`DragIntent::from_chord`] y [`Self::chord_of_the_last_press`]. Se mira antes del bucle
@@ -5043,10 +5043,10 @@ impl Window {
         // **dos apretones donde el usuario dio uno**: un doble clic que nadie hizo. El teclado se defiende
         // consumiendo; aquí hay que llevar la cuenta. `cumulative_frame_nr` sube una vez por fotograma;
         // `cumulative_pass_nr` sube por pasada y no filtraría nada.
-        let fotograma = ui.ctx().cumulative_frame_nr();
-        if self.last_frame_with_buttons != Some(fotograma) {
-            self.last_frame_with_buttons = Some(fotograma);
-            self.route_the_buttons(ui, rectangulos, &nombres, metrics);
+        let frame_nr = ui.ctx().cumulative_frame_nr();
+        if self.last_frame_with_buttons != Some(frame_nr) {
+            self.last_frame_with_buttons = Some(frame_nr);
+            self.route_the_buttons(ui, rects, &names, metrics);
         }
         // **Dónde bajó el botón, que es donde empieza una selección.** egui lo conserva mientras el botón
         // siga apretado, así que se lee en el fotograma que haga falta.
@@ -5055,7 +5055,7 @@ impl Window {
         // **Los rectángulos y los nombres se recorren emparejados, no indexando uno con el otro.** Son
         // dos listas que salen del mismo árbol y siempre miden lo mismo; emparejarlas hace imposible el
         // desajuste en vez de defenderse de él con una guarda que en la aplicación no puede saltar nunca.
-        for (which_pane, (rect, &name)) in rectangulos.iter().zip(&nombres).enumerate() {
+        for (which_pane, (rect, &name)) in rects.iter().zip(&names).enumerate() {
             // El gesto se detecta con `interact` y no mirando la posición del puntero a pelo, porque así
             // respeta capas y orden de pintado.
             //
@@ -5074,13 +5074,13 @@ impl Window {
             // que es justo lo que este hito deja fuera. Con el nombre, el identificador viaja con la
             // consola: si desaparece o cambia de pestaña, no lo reclama nadie y el arrastre muere solo.
             let id = ui.id().with(("division", name));
-            let respuesta = ui.interact(*rect, id, egui::Sense::CLICK | egui::Sense::DRAG);
+            let response = ui.interact(*rect, id, egui::Sense::CLICK | egui::Sense::DRAG);
 
             // **Agarrar también da el foco.** El gesto empieza pulsando sobre la consola, y no dárselo
             // dejaría el teclado en una que ya no es la que se está tocando. `clicked()` no cubre este
             // caso: cuando el puntero se mueve lo bastante, egui decide que es un arrastre y el clic no
             // llega a existir.
-            if respuesta.clicked() || respuesta.drag_started() {
+            if response.clicked() || response.drag_started() {
                 self.active_mut().focus = name;
             }
 
@@ -5089,7 +5089,7 @@ impl Window {
             // sea el primario mueva nada—, y un clic **no es un arrastre**: puesto detrás, no se ejecuta
             // nunca. Sin esto no hay forma de dejar de tener algo marcado salvo esperar a que el programa
             // limpie la pantalla.
-            if respuesta.clicked()
+            if response.clicked()
                 && let Some(pane) = self.pane_called(name)
             {
                 pane.screen.clear_selection();
@@ -5099,7 +5099,7 @@ impl Window {
             // es —egui apunta como candidato a arrastrarse cualquier pulsación—, y en un terminal eso no es
             // teórico: el botón central es el pegado de X11 y el derecho es la selección en casi todos. Un
             // arrastre con cualquiera de los dos cambiaría dos consolas de sitio sin que nadie lo pidiera.
-            if !respuesta.dragged_by(egui::PointerButton::Primary) && !respuesta.drag_stopped() {
+            if !response.dragged_by(egui::PointerButton::Primary) && !response.drag_stopped() {
                 continue;
             }
 
@@ -5107,7 +5107,7 @@ impl Window {
             // [`DragIntent`]. Sin acorde en la cola —que es lo que pasa cuando egui da el arrastre
             // por empezado un fotograma después del apretón— se toma el de un botón pelado, que es
             // seleccionar.
-            if respuesta.drag_started() {
+            if response.drag_started() {
                 self.drag_in_progress = Some(DragIntent::from_chord(
                     self.chord_of_the_last_press,
                     self.the_press_went_to_the_program,
@@ -5115,8 +5115,8 @@ impl Window {
             }
 
             if self.drag_in_progress == Some(DragIntent::Select) {
-                self.select_while_dragging(&respuesta, name, *rect, metrics, press_origin);
-                if respuesta.drag_stopped() {
+                self.select_while_dragging(&response, name, *rect, metrics, press_origin);
+                if response.drag_stopped() {
                     self.drag_in_progress = None;
                 }
                 continue;
@@ -5127,28 +5127,28 @@ impl Window {
                 // soltado se reparte antes que este bucle, así que el programa recibía primero el
                 // `MouseReport::Release` y **después** un `MouseReport::Drag` de la misma celda: un movimiento con el botón ya
                 // subido, que para quien lleva estado del ratón es una contradicción.
-                if respuesta.drag_stopped() {
+                if response.drag_stopped() {
                     self.drag_in_progress = None;
                 } else {
-                    self.drag_for_the_program(&respuesta, name, *rect, metrics);
+                    self.drag_for_the_program(&response, name, *rect, metrics);
                 }
                 continue;
             }
 
             // Sin puntero no hay destino: el ratón se ha ido de la ventana. El gesto se queda sin efecto y
             // el árbol no se toca, que es lo que se espera de cancelar a medias.
-            let encima = respuesta.interact_pointer_pos().and_then(|puntero| {
-                let at = rectangulos
+            let over = response.interact_pointer_pos().and_then(|pointer| {
+                let at = rects
                     .iter()
-                    .position(|rect| rect.contains(puntero))
+                    .position(|rect| rect.contains(pointer))
                     .filter(|&at| at != which_pane)?;
-                let side = side_of(rectangulos[at], puntero);
+                let side = side_of(rects[at], pointer);
                 // **Un destino donde no cabría no es un destino.** El velo dice «si sueltas, va aquí», y
                 // sin esta comprobación lo diría también donde soltar se va a rechazar: el usuario ve la
                 // mitad marcada, suelta, y no pasa nada — el aviso solo sale por la salida de errores, que
                 // nadie está mirando. Es la **misma regla** que aplica soltar, preguntada antes para no
                 // prometer lo que no se va a cumplir.
-                cabe_partir(rectangulos[at], side.cut_along(), metrics).then_some((at, side))
+                can_split(rects[at], side.cut_along(), metrics).then_some((at, side))
             });
 
             // **Se exige que el botón se haya SOLTADO, y no basta con que el arrastre termine.** egui
@@ -5156,27 +5156,27 @@ impl Window {
             // todavía apretado y la posición del puntero intacta: sin esta distinción, arrepentirse a
             // media maniobra —agarrar, pasar por encima de otra, pulsar Escape— **completaba el
             // intercambio** en vez de cancelarlo.
-            if respuesta.drag_stopped_by(egui::PointerButton::Primary) {
-                if let Some((at, side)) = encima
-                    && let Some(&otra) = nombres.get(at)
+            if response.drag_stopped_by(egui::PointerButton::Primary) {
+                if let Some((at, side)) = over
+                    && let Some(&other) = names.get(at)
                 {
                     the_tree_changed |=
-                        self.drop_a_pane(name, otra, side, rectangulos[at], metrics);
+                        self.drop_a_pane(name, other, side, rects[at], metrics);
                 }
-            } else if !respuesta.drag_stopped() {
-                target = encima;
+            } else if !response.drag_stopped() {
+                target = over;
             }
 
-            if respuesta.drag_stopped() {
+            if response.drag_stopped() {
                 self.drag_in_progress = None;
             }
         }
 
         // **Después del bucle, y no dentro**: dentro, `self` está prestado por el recorrido del árbol.
-        if let Some((puntero, pedido, chord)) = rueda
-            && let Some(at) = rectangulos.iter().position(|rect| rect.contains(puntero))
-            && let Some(&name) = nombres.get(at)
-            && let Some(rect) = rectangulos.get(at).copied()
+        if let Some((pointer, requested, chord)) = wheel
+            && let Some(at) = rects.iter().position(|rect| rect.contains(pointer))
+            && let Some(&name) = names.get(at)
+            && let Some(rect) = rects.get(at).copied()
             && let Some(pane) = self
                 .active_mut()
                 .panes_mut()
@@ -5186,8 +5186,8 @@ impl Window {
             // franja del panel, y ahí lo que el programa espera saber es que la rueda giró: perderlo
             // dejaría la rueda muerta en las columnas de la derecha de la consola.
             && let Some(to_the_program) = {
-                let cell = pane.cell_to_extend_to(rect, puntero, &metrics.clone());
-                pane.handle_wheel(pedido, chord, cell)
+                let cell = pane.cell_to_extend_to(rect, pointer, &metrics.clone());
+                pane.handle_wheel(requested, chord, cell)
             }
         {
             // **La ida del ratón se anota en la medida de SU consola**, no en la de la ventana: el
@@ -5211,8 +5211,8 @@ impl Window {
     fn route_the_buttons(
         &mut self,
         ui: &egui::Ui,
-        rectangulos: &[egui::Rect],
-        nombres: &[usize],
+        rects: &[egui::Rect],
+        names: &[usize],
         metrics: &CellMetrics,
     ) {
         for button in Self::collect_the_buttons(ui) {
@@ -5230,14 +5230,14 @@ impl Window {
                 .flatten();
             if let Some(which) = of_a_live_press {
                 let (name, _) = self.presses_for_the_program.remove(which);
-                self.release_for_the_program(name, button, rectangulos, nombres, metrics);
+                self.release_for_the_program(name, button, rects, names, metrics);
                 continue;
             }
 
-            let Some(at) = rectangulos.iter().position(|rect| rect.contains(button.at)) else {
+            let Some(at) = rects.iter().position(|rect| rect.contains(button.at)) else {
                 continue;
             };
-            let (Some(&name), Some(rect)) = (nombres.get(at), rectangulos.get(at)) else {
+            let (Some(&name), Some(rect)) = (names.get(at), rects.get(at)) else {
                 continue;
             };
 
@@ -5292,15 +5292,15 @@ impl Window {
         &mut self,
         name: usize,
         button: ButtonPress,
-        rectangulos: &[egui::Rect],
-        nombres: &[usize],
+        rects: &[egui::Rect],
+        names: &[usize],
         metrics: &CellMetrics,
     ) {
-        let Some(suyo) = nombres.iter().position(|&which| which == name) else {
+        let Some(its_index) = names.iter().position(|&which| which == name) else {
             // La consola del apretón ya no está —cerrada a mitad del gesto—: no hay a quién contárselo.
             return;
         };
-        let Some(rect) = rectangulos.get(suyo).copied() else {
+        let Some(rect) = rects.get(its_index).copied() else {
             return;
         };
         let Some(cell) = self
@@ -5342,10 +5342,10 @@ impl Window {
     /// el apretón, sus movimientos y el soltado— la tanda del ratón publicaba **el triple de efectos que
     /// de gestos** y su columna dejaba de ser comparable con las demás. Cuenta el apretón, que es el que
     /// abre el gesto, y el giro de rueda, que **es** un gesto entero por sí mismo.
-    fn one_more_reported(&mut self, cuenta_como_efecto: bool) {
+    fn one_more_reported(&mut self, counts_as_effect: bool) {
         if let Some(injected_drags) = self.injected_drags.as_mut() {
             injected_drags.one_more_reported();
-            if cuenta_como_efecto {
+            if counts_as_effect {
                 injected_drags.one_more_with_effect();
             }
         }
@@ -5366,7 +5366,7 @@ impl Window {
             state
                 .events
                 .iter()
-                .filter_map(|evento| match evento {
+                .filter_map(|event| match event {
                     egui::Event::PointerButton {
                         pos,
                         button,
@@ -5391,12 +5391,12 @@ impl Window {
     /// se ha pasado a otra.
     fn drag_for_the_program(
         &mut self,
-        respuesta: &egui::Response,
+        response: &egui::Response,
         name: usize,
         pane_area: egui::Rect,
         metrics: &CellMetrics,
     ) {
-        let Some(puntero) = respuesta.interact_pointer_pos() else {
+        let Some(pointer) = response.interact_pointer_pos() else {
             return;
         };
         let button = egui::PointerButton::Primary;
@@ -5406,7 +5406,7 @@ impl Window {
         // `htop` que deja de seguir la mano— hasta volver a entrar. `xterm` acota.
         let Some(cell) = self
             .pane_called(name)
-            .map(|pane| pane.clamped_cell(pane_area, puntero, metrics))
+            .map(|pane| pane.clamped_cell(pane_area, pointer, metrics))
         else {
             return;
         };
@@ -5433,7 +5433,7 @@ impl Window {
     /// para empezar el arrastre, y quitársela dejaría el gesto sin empezar nunca. Aquí solo se mira.
     fn chord_of_the_press(ui: &egui::Ui) -> Option<egui::Modifiers> {
         ui.ctx().input(|state| {
-            state.events.iter().find_map(|evento| match evento {
+            state.events.iter().find_map(|event| match event {
                 egui::Event::PointerButton {
                     button: egui::PointerButton::Primary,
                     pressed: true,
@@ -5460,30 +5460,30 @@ impl Window {
     /// en vez de empezar una nueva desde donde se apretó.
     fn select_while_dragging(
         &mut self,
-        respuesta: &egui::Response,
+        response: &egui::Response,
         name: usize,
         pane_area: egui::Rect,
         metrics: &CellMetrics,
         press_origin: Option<egui::Pos2>,
     ) {
-        let empieza = respuesta.drag_started();
+        let just_started = response.drag_started();
         // **Al empezar vale DONDE SE APRETÓ, no dónde está el puntero.** egui da el arrastre por empezado
         // en el fotograma en que el puntero **ya se ha movido**, así que preguntar por él ahí devuelve el
         // final del primer tramo: empezar la selección con ese punto la abre y la cierra en la misma
         // celda, y no se marca nada. Comprobado por las malas — la prueba de marcar salía sin nada.
-        let punto = if empieza {
+        let point = if just_started {
             press_origin
         } else {
-            respuesta.interact_pointer_pos()
+            response.interact_pointer_pos()
         };
-        let Some(puntero) = punto else {
+        let Some(pointer) = point else {
             return;
         };
         let Some(pane) = self.pane_called(name) else {
             return;
         };
 
-        if empieza {
+        if just_started {
             // **Empezar sobre el panel no empieza nada, y con ello el gesto entero se cancela.** Las
             // columnas que sobran de la rejilla son las suyas y las de su asidero, y quien aprieta ahí no
             // está señalando texto.
@@ -5493,7 +5493,7 @@ impl Window {
             // una selección **anterior** sobrevivía y su extremo saltaba al puntero, así que apretar en el
             // panel y arrastrar cambiaba solo lo que había marcado y `Ctrl+Mayúsculas+C` copiaba un texto
             // que nadie señaló.
-            match pane.cell_under(pane_area, puntero, metrics) {
+            match pane.cell_under(pane_area, pointer, metrics) {
                 Some(cell) => pane.screen.start_selection(cell),
                 None => self.drag_in_progress = None,
             }
@@ -5501,14 +5501,14 @@ impl Window {
         }
 
         // Extender **no** rechaza: arrastrar más allá del borde y seguir marcando es el gesto de siempre.
-        let cell = pane.cell_to_extend_to(pane_area, puntero, metrics);
+        let cell = pane.cell_to_extend_to(pane_area, pointer, metrics);
         pane.screen.extend_selection(cell);
-        let marco = pane.screen.has_selection();
+        let it_selected = pane.screen.has_selection();
 
         // **Y se apunta si de verdad quedó algo marcado, para el informe de una tanda.** Ver
         // [`measure::Arrastres::marcados`]: es lo que distingue «se inyectó el gesto» de «el gesto marcó»,
         // y lo que permite a una tanda de OTRO gesto invalidarse si el suyo acabó seleccionando.
-        if marco && let Some(injected_drags) = self.injected_drags.as_mut() {
+        if it_selected && let Some(injected_drags) = self.injected_drags.as_mut() {
             injected_drags.one_more_selected();
             // **Y cuenta también como efecto, porque para el gesto de marcar ESTE es su efecto.** El
             // contador de efectos dice «el gesto cambió algo de verdad», y lo que cambia al marcar es lo
@@ -5539,20 +5539,20 @@ impl Window {
         metrics: &CellMetrics,
     ) -> Option<(egui::Pos2, WheelInput, egui::Modifiers)> {
         ui.ctx().input_mut(|state| {
-            let puntero = state.pointer.hover_pos()?;
-            let mut pedido = WheelInput::default();
-            let mut hubo = false;
+            let pointer = state.pointer.hover_pos()?;
+            let mut requested = WheelInput::default();
+            let mut there_was_one = false;
             // **El acorde sale del propio evento del giro**, por lo mismo que el del apretón: el estado
             // del fotograma describe el final del lote, y aquí decide quién se queda la rueda.
             let mut chord = egui::Modifiers::NONE;
 
-            state.events.retain(|evento| {
+            state.events.retain(|event| {
                 let egui::Event::MouseWheel {
                     unit,
                     delta,
                     modifiers,
                     ..
-                } = evento
+                } = event
                 else {
                     return true;
                 };
@@ -5562,21 +5562,21 @@ impl Window {
                 // que se giró con la tecla puesta** — y esa tecla es justo la salida que garantiza que el
                 // historial siempre se puede mirar. Es el mismo criterio que el apretón: el gesto se fija
                 // al empezar.
-                if !hubo {
+                if !there_was_one {
                     chord = *modifiers;
                 }
-                hubo = true;
+                there_was_one = true;
                 match unit {
-                    egui::MouseWheelUnit::Line => pedido.lines += delta.y,
+                    egui::MouseWheelUnit::Line => requested.lines += delta.y,
                     // El panel táctil manda puntos: se convierten con el alto de una celda, que es lo
                     // que mide una línea en pantalla.
-                    egui::MouseWheelUnit::Point => pedido.lines += delta.y / metrics.height(),
-                    egui::MouseWheelUnit::Page => pedido.pages += delta.y,
+                    egui::MouseWheelUnit::Point => requested.lines += delta.y / metrics.height(),
+                    egui::MouseWheelUnit::Page => requested.pages += delta.y,
                 }
                 false
             });
 
-            hubo.then_some((puntero, pedido, chord))
+            there_was_one.then_some((pointer, requested, chord))
         })
     }
 
@@ -5587,16 +5587,16 @@ impl Window {
     /// una consola sube en uno los hijos de la rama de destino, igual que partirla.
     fn drop_a_pane(
         &mut self,
-        quien: usize,
+        moved: usize,
         target: usize,
         side: Side,
-        suyo: egui::Rect,
+        its_area: egui::Rect,
         metrics: &CellMetrics,
     ) -> bool {
         // **La misma regla que el gesto ya usó para decidir si enseñar el velo, y no sobra.** Allí sirve
         // para no prometer; aquí para que la operación sea segura la llame quien la llame — el gesto es
         // hoy el único llamador, pero la guarda no depende de que siga siéndolo.
-        if !cabe_partir(suyo, side.cut_along(), metrics) {
+        if !can_split(its_area, side.cut_along(), metrics) {
             // Se dice por lo mismo que al partir: el gesto ha terminado y no ha pasado nada, y sin esta
             // línea se lee como que el arrastre está roto.
             eprintln!(
@@ -5611,13 +5611,13 @@ impl Window {
         // hace falta *algo* ahí para poder llevarse el árbol sin clonarlo, y vive lo que tardan estas dos
         // líneas—. Las dos ramas del `match` devuelven un árbol entero, que es lo que hace imposible
         // quedarse a medias.
-        let panel_split = Node::Branch {
+        let placeholder = Node::Branch {
             orientation: Orientation::Columns,
             children: Vec::new(),
         };
-        let arbol = std::mem::replace(&mut self.active_mut().root, panel_split);
-        let (arbol, movio) = arbol.move_pane(quien, target, side);
-        self.active_mut().root = arbol;
+        let tree = std::mem::replace(&mut self.active_mut().root, placeholder);
+        let (tree, it_moved) = tree.move_pane(moved, target, side);
+        self.active_mut().root = tree;
 
         // **La reordenación se apunta aquí, que es donde se sabe que ocurrió**, y no en quien pinta. Lo que
         // el informe de una tanda tiene que declarar no es cuántos gestos se inyectaron sino cuántos
@@ -5629,17 +5629,17 @@ impl Window {
         // atándolo donde el pintado se enteraba, la única prueba posible llamaba al contador a mano y no
         // habría cazado que producción dejara de llamarlo.
         //
-        // **El `movio` de aquí no tiene hoy ningún escenario que lo dispare, y se queda a propósito.**
+        // **El `it_moved` de aquí no tiene hoy ningún escenario que lo dispare, y se queda a propósito.**
         // Comprobado mutándolo: quitarlo deja la suite en verde, porque los dos rechazos salen antes de esta
         // línea —el del suelo geométrico con su propio `return` unas líneas arriba, y el de soltar sobre sí
         // misma filtrado por quien atiende el ratón—, así que todo lo que llega aquí ha movido. Lo que
         // protege no es un escenario: es **el número que el anexo publica**, y publicar de más es exactamente
         // el defecto que esta cuenta viene a corregir. Es el mismo trato que el proyecto ya aceptó para
         // recoger la consola si insertar fallara.
-        if movio && let Some(injected_drags) = self.injected_drags.as_mut() {
+        if it_moved && let Some(injected_drags) = self.injected_drags.as_mut() {
             injected_drags.one_more_with_effect();
         }
-        movio
+        it_moved
     }
 
     /// Señala, mientras se arrastra, sobre qué consola se soltaría.
@@ -5657,10 +5657,10 @@ impl Window {
     /// **Recibe el rectángulo y no el sitio en la lista.** Con el sitio haría falta buscarlo, y con la
     /// búsqueda una guarda por si no está — de un número que sale de recorrer esa misma lista.
     fn paint_the_drag(&mut self, ui: &egui::Ui, target: egui::Rect, side: Side) {
-        let empezo = Instant::now();
+        let started = Instant::now();
         ui.painter()
             .rect_filled(half(target, side), 0.0, self.theme.drop_target());
-        self.timed_separately += empezo.elapsed();
+        self.timed_separately += started.elapsed();
     }
 
     /// Cambia de pestaña al hacer clic en una ficha.
@@ -5673,7 +5673,7 @@ impl Window {
             let id = ui.id().with(("pestaña", which_tab));
             if ui
                 .interact(
-                    ficha(tab_bar, which_tab, self.tabs.len()),
+                    tab_rect(tab_bar, which_tab, self.tabs.len()),
                     id,
                     egui::Sense::CLICK,
                 )
@@ -5722,27 +5722,27 @@ impl Window {
         ui: &egui::Ui,
         tab_bar: egui::Rect,
         metrics: &CellMetrics,
-        ahora: SystemTime,
+        now: SystemTime,
     ) -> TabBarOutcome {
-        let empezo = Instant::now();
+        let started = Instant::now();
         let mut marked = 0;
         ui.painter_at(tab_bar)
             .rect_filled(tab_bar, 0.0, self.theme.background());
 
         for which_tab in 0..self.tabs.len() {
-            let sitio = ficha(tab_bar, which_tab, self.tabs.len());
-            let pintor = ui.painter_at(sitio);
+            let tab_area = tab_rect(tab_bar, which_tab, self.tabs.len());
+            let painter = ui.painter_at(tab_area);
             let is_the_active_one = which_tab == self.active;
 
             // La activa se rellena con el mismo color que señala la consola con el foco: las dos dicen
             // «el teclado va aquí», a dos escalas distintas, y darles dos colores diría que son dos
             // estados que no tienen nada que ver.
             if is_the_active_one {
-                pintor.rect_filled(sitio, 0.0, self.theme.focus());
+                painter.rect_filled(tab_area, 0.0, self.theme.focus());
             }
 
-            pintor.text(
-                sitio.center(),
+            painter.text(
+                tab_area.center(),
                 egui::Align2::CENTER_CENTER,
                 // El número se pasa **sin convertir a texto**: `Painter::text` recibe un `impl ToString`
                 // y llama a `to_string` por dentro, así que darle un `String` ya hecho lo clona y asigna
@@ -5758,7 +5758,7 @@ impl Window {
 
             // **También la activa se marca.** En la pestaña que miras el reclamo puede ser de la
             // división de al lado, y no marcarla sería una regla condicional más que mantener.
-            if let Some(attention) = self.tabs[which_tab].attention(ahora) {
+            if let Some(attention) = self.tabs[which_tab].attention(now) {
                 // **El símbolo se pinta sobre el fondo de la barra, también en la ficha activa.** Esa
                 // ficha está rellena con el color del foco, y encima de él estos colores **no se ven**:
                 // medido, el rojo del bloqueo da 1,01 de contraste y el amarillo atenuado 1,02 — o sea,
@@ -5766,17 +5766,17 @@ impl Window {
                 // razón, pero invertir el símbolo no valdría: **su color es la clase**, y cambiarlo
                 // diría otra cosa. Lo que se cambia es lo de detrás.
                 if is_the_active_one {
-                    pintor.rect_filled(
+                    painter.rect_filled(
                         egui::Rect::from_min_size(
-                            sitio.left_top(),
-                            egui::vec2(2.0 * TAB_BAR_MARGIN + metrics.width(), sitio.height()),
+                            tab_area.left_top(),
+                            egui::vec2(2.0 * TAB_BAR_MARGIN + metrics.width(), tab_area.height()),
                         ),
                         0.0,
                         self.theme.background(),
                     );
                 }
-                pintor.text(
-                    egui::pos2(sitio.left() + TAB_BAR_MARGIN, sitio.center().y),
+                painter.text(
+                    egui::pos2(tab_area.left() + TAB_BAR_MARGIN, tab_area.center().y),
                     egui::Align2::LEFT_CENTER,
                     panel::attention_symbol(attention.class),
                     metrics.font(),
@@ -5788,7 +5788,7 @@ impl Window {
         }
 
         TabBarOutcome {
-            cost: empezo.elapsed(),
+            cost: started.elapsed(),
             marked,
         }
     }
@@ -5819,7 +5819,7 @@ impl Window {
         // para egui, así que arrastrar una movería otra o ninguna. Es exactamente lo que `handle_the_mouse`
         // ya resolvía indexando el suyo, a una línea de distancia.
         let id = ui.id().with(("frontera", which));
-        let respuesta = ui
+        let response = ui
             .interact(divider.rect, id, egui::Sense::DRAG)
             // Se mantiene el cursor **también mientras se arrastra**. No es por que el puntero se salga de
             // la línea —egui da por «encima» al widget que se está arrastrando, esté el puntero donde
@@ -5828,28 +5828,28 @@ impl Window {
             // acabar la maniobra.
             .on_hover_and_drag_cursor(divider.orientation.cursor());
 
-        let Some(puntero) = respuesta.interact_pointer_pos() else {
+        let Some(pointer) = response.interact_pointer_pos() else {
             return false;
         };
 
         // **Medido dentro del tramo de las dos que separa**, no del área entera: mover una frontera
         // reparte el peso de sus dos vecinas conservando lo que suman, y las demás no se enteran.
         let slice = divider.between_the_two;
-        let util = divider.orientation.length_of(slice) - DIVIDER_THICKNESS;
-        // Sin nada que repartir no hay fracción que elegir, y con `util` **negativo** la división cambia de
+        let usable = divider.orientation.length_of(slice) - DIVIDER_THICKNESS;
+        // Sin nada que repartir no hay fracción que elegir, y con `usable` **negativo** la división cambia de
         // signo: la frontera iría hacia el lado contrario al ratón. Se deja el reparto como lo dejó el
         // último arrastre de verdad, que es lo que el usuario pidió la última vez que tenía sentido.
-        if util <= 0.0 {
+        if usable <= 0.0 {
             return false;
         }
 
-        // El recorte a `0..1` **no es para la geometría** —de eso se encarga [`repartir`] en cada
+        // El recorte a `0..1` **no es para la geometría** —de eso se encarga [`tile`] en cada
         // fotograma, con su propio suelo— sino para el estado: sin él, arrastrar más allá del borde
         // guardaría una fracción de 5, que el informe de salida publicaría como «al 500 %» y que obligaría
         // a recorrer el camino de vuelta antes de que la frontera se moviera.
-        let dentro = divider.orientation.offset_from_the_start(slice, puntero);
-        let new = (dentro / util).clamp(0.0, 1.0);
-        // La guarda de arriba deja pasar un `util` **sin número**, porque `NaN <= 0.0` es falso, y de ahí
+        let offset = divider.orientation.offset_from_the_start(slice, pointer);
+        let new = (offset / usable).clamp(0.0, 1.0);
+        // La guarda de arriba deja pasar un `usable` **sin número**, porque `NaN <= 0.0` es falso, y de ahí
         // sale una fracción NaN que el recorte tampoco atrapa: un `clamp` sobre un NaN devuelve NaN. Y un
         // NaN guardado aquí no se va nunca — la ventana dejaría de pintar y ni ensancharla ni volver a
         // arrastrar la recuperaría. El área sin número no es hipotética: es el caso que
@@ -5875,16 +5875,16 @@ impl Window {
     /// cerrarlo, y cerrarlo es partir esta función como está partida `handle_the_mouse`, para que la
     /// región cronometrada sea la llamada entera y encogerla deje de ser mover una línea.
     fn send_keys_to_the_focused(&mut self, ctx: &egui::Context) -> Vec<WindowRequest> {
-        let empezo = self.frame_started;
+        let started = self.frame_started;
         // La semilla se saca y se vuelve a meter porque la división y el campo son dos préstamos
         // del mismo dueño, y el compilador no deja tener los dos a la vez.
         let mut modifiers = self.modifiers;
-        let abiertas = self.tabs.len();
+        let tabs_open = self.tabs.len();
         // **La tabla se clona, y es barato: doce parejas de tres booleanos y un entero.** El préstamo es
         // el mismo problema que los modificadores de arriba —la división y el campo son dos préstamos del
         // mismo dueño— y aquí se resuelve igual, sin dejar la tabla en un sitio donde nadie la busque.
         let keymap = self.keymap.clone();
-        let copiar = self.copy_enabled;
+        let to_copy = self.copy_enabled;
         let tab = self.active_mut();
         // **La del foco se busca por su nombre**, y si no aparece no se teclea a nadie: escribir en
         // «la primera que haya» mandaría las teclas a un programa que el usuario no está mirando, que es
@@ -5894,11 +5894,11 @@ impl Window {
             .map(|at| {
                 tab.panes_mut()[at].send_keys(
                     ctx,
-                    empezo,
+                    started,
                     &mut modifiers,
-                    abiertas,
+                    tabs_open,
                     &keymap,
-                    copiar,
+                    to_copy,
                 )
             })
             .unwrap_or_default();
@@ -5931,8 +5931,8 @@ impl Window {
             // negativos**: desde la primera hacia atrás se llega a la última, sin una rama aparte para
             // ese caso.
             WindowRequest::Go(delta) => {
-                let cuantas = self.tabs.len() as isize;
-                self.active = (self.active as isize + delta).rem_euclid(cuantas) as usize;
+                let tabs = self.tabs.len() as isize;
+                self.active = (self.active as isize + delta).rem_euclid(tabs) as usize;
             }
             WindowRequest::NewTab => self.create_a_tab(ctx),
             WindowRequest::CloseTab => self.close_the_active_tab(ctx),
@@ -5966,23 +5966,23 @@ impl Window {
         whole_window: egui::Rect,
         metrics: &CellMetrics,
     ) {
-        let antes = Instant::now();
+        let before = Instant::now();
         // La barra se aparta con las pestañas que hay **ahora**: si el mismo lote acaba de crear una,
         // el alto que queda para las consolas ya es otro.
         let (_, area) = set_the_tab_bar_aside(whole_window, self.tabs.len(), metrics);
-        let sitio = self.active().where_the_focus_is().map(|at| {
+        let focused_area = self.active().where_the_focus_is().map(|at| {
             // Las hojas y sus rectángulos se casan por posición: los dos recorridos van en el mismo
             // orden, que es la invariante en la que ya descansa el pintado entero.
             self.active().root.place(area, metrics.width()).parts[at]
         });
-        self.timed_separately += antes.elapsed();
+        self.timed_separately += before.elapsed();
 
         // Sin foco vivo no hay nada que partir. No puede pasar hoy —el foco solo cambia a una división
         // que existe— y por eso no se inventa un caso: se sale como se sale de teclear sin foco.
-        let Some(suya) = sitio else {
+        let Some(its_area) = focused_area else {
             return;
         };
-        if !cabe_partir(suya, cut_along, metrics) {
+        if !can_split(its_area, cut_along, metrics) {
             // **Se dice, porque el acorde se ha tragado la tecla y no ha pasado nada.** Sin esta línea, en
             // una ventana estrecha el atajo se lee como roto: ni parte, ni llega al programa de dentro, ni
             // deja rastro de por qué. Es lo mismo que ya hace el camino hermano —la consola que no se pudo
@@ -5995,7 +5995,7 @@ impl Window {
             return;
         }
 
-        let antes = Instant::now();
+        let before = Instant::now();
         let name = self.next_pane_name;
         let opened = Pane::new(ctx, name);
         // **El nombre se gasta aunque el programa no llegue a arrancar**, igual que al abrir una pestaña:
@@ -6010,7 +6010,7 @@ impl Window {
         // caía en «el resto del fotograma», que es como este proyecto llama al coste del framework de
         // interfaz: la cifra con la que D3 decide.
         self.graft_the_new_one(opened, cut_along, ctx);
-        self.timed_separately += antes.elapsed();
+        self.timed_separately += before.elapsed();
     }
 
     /// Mete junto a la del foco la consola que se acaba de abrir, o deja la ventana como estaba si no se
@@ -6043,12 +6043,12 @@ impl Window {
         let name = new.name;
         let focus = self.active().focus;
         let tab = self.active_mut();
-        if let Some(sobrante) = tab.root.split(focus, Side::behind(cut_along), new) {
+        if let Some(leftover) = tab.root.split(focus, Side::behind(cut_along), new) {
             // **No puede ocurrir**: quien llama acaba de encontrar el foco entre las hojas de esta misma
             // pestaña, y nada ha tocado el árbol en medio. Se dice en vez de callarse porque la consola sí
             // se llegó a abrir, y al soltarla aquí muere su programa y desaparece su directorio: sin esta
             // línea, un shell abierto y cerrado en el mismo fotograma no dejaría ningún rastro.
-            drop(sobrante);
+            drop(leftover);
             eprintln!("no se encontró la división con el foco al partir; no se ha partido nada");
             return;
         }
@@ -6069,19 +6069,19 @@ impl Window {
         // interfaz —es donde se atiende el acorde— y ninguna división los va a declarar: la que los paga
         // es la pestaña que todavía no existe. Sin esto, lanzar dos procesos se publica como coste del
         // framework de interfaz.
-        let antes = Instant::now();
+        let before = Instant::now();
         // **Una pestaña abierta con el acorde nace con las dos columnas de siempre**, y no con la
         // disposición que la puerta de medida pidiera: esa variable dice cómo abre **la ventana**, y quien
         // pulsa el acorde no ha pedido cuatro consolas. Que las de una tanda y ésta puedan diferir no
         // engaña a nadie, porque el informe publica la rejilla de cada división.
-        let como = OpeningLayout::DEFAULT;
-        let opened = Tab::new(ctx, self.next_name, self.next_pane_name, &como);
+        let with_what = OpeningLayout::DEFAULT;
+        let opened = Tab::new(ctx, self.next_name, self.next_pane_name, &with_what);
         // **Los nombres se gastan aunque la apertura falle**, para que no se reutilicen nunca: si el
         // intento fallido dejó una línea en la salida de errores, lo que se abra después no debe llamarse
         // igual que lo que no llegó a existir. Vale para la pestaña y para sus dos divisiones por la
         // misma razón, así que se avanzan los dos contadores en el mismo sitio.
         self.next_name += 1;
-        self.next_pane_name += como.how_many_panes();
+        self.next_pane_name += with_what.how_many_panes();
 
         // **El cronómetro se cierra después de poner la pestaña delante, y esa raya estaba mal puesta.**
         // Poner delante **rearma el vigilante**, que reconstruye la vigilancia sobre las divisiones de
@@ -6090,12 +6090,12 @@ impl Window {
         // fotograma» — el nombre que este proyecto le da al coste del framework de interfaz, que es la
         // cifra con la que D3 decide. Es el mismo arreglo que partir ya lleva.
         self.bring_to_front(opened, ctx);
-        self.timed_separately += antes.elapsed();
+        self.timed_separately += before.elapsed();
     }
 
     /// Pone delante la pestaña que se acaba de abrir, o deja la ventana como estaba si no se pudo abrir.
     ///
-    /// **Recibe el intento ya hecho en vez de hacerlo, y es por lo mismo que [`panel_o_ninguno`]:** abrir
+    /// **Recibe el intento ya hecho en vez de hacerlo, y es por lo mismo que [`panel_or_none`]:** abrir
     /// una consola solo falla cuando el sistema no da más pseudoterminales o descriptores, y eso no se
     /// puede provocar desde una prueba sin tocar el proceso entero. Partirlo aquí es lo que permite
     /// afirmar lo que el caso promete — que un fallo no deja media pestaña, no mueve la que se estaba
@@ -6135,7 +6135,7 @@ impl Window {
             return;
         }
 
-        let which_leaves = self.active;
+        let leaving = self.active;
         self.some_closed_by_hand = true;
 
         // **Lo que sus consolas ya habían declarado de este fotograma se recoge antes de soltarlas.** Se
@@ -6151,15 +6151,15 @@ impl Window {
         // llena lo interpretado sin anotar— y atender el teclado **antes** del pintado. Así que lo que la
         // consola acababa de interpretar, y lo que costó releer su panel, se iban con ella sin declararse.
         // Ver [`Pane::take_what_this_frame_left`], que es donde cerrar una división ya lo resolvió.
-        let antes = Instant::now();
-        let suyo: std::time::Duration = self.tabs[which_leaves]
+        let before = Instant::now();
+        let its_cost: std::time::Duration = self.tabs[leaving]
             .panes_mut()
             .into_iter()
             .map(Pane::take_what_this_frame_left)
             .sum();
 
         // Aquí mueren sus dos programas y desaparecen sus dos directorios, por los `Drop` de siempre.
-        self.tabs.remove(which_leaves);
+        self.tabs.remove(leaving);
 
         // **El rearme del vigilante entra en el cronómetro**, y antes se quedaba fuera por una raya mal
         // puesta: reconstruye la vigilancia sobre las divisiones de todas las pestañas que quedan y las
@@ -6168,8 +6168,8 @@ impl Window {
         self.rearm_the_watcher(ctx);
         // Al quitar la última de la lista el índice se queda fuera; en cualquier otro caso, se queda
         // apuntando a la que ocupó su sitio, que es la de la derecha.
-        self.active = which_leaves.min(self.tabs.len() - 1);
-        self.timed_separately += suyo + antes.elapsed();
+        self.active = leaving.min(self.tabs.len() - 1);
+        self.timed_separately += its_cost + before.elapsed();
     }
 
     /// Cierra la consola que tiene el teclado, y su sitio se lo reparten las hermanas.
@@ -6189,23 +6189,23 @@ impl Window {
     /// borrar su directorio. Sin declararlas, la resta se las atribuye al framework de interfaz — la
     /// cifra con la que D3 decide.
     fn close_the_focused(&mut self, ctx: &egui::Context) {
-        let antes = Instant::now();
+        let before = Instant::now();
         // **Que la pestaña tenga una sola consola es que su raíz es una hoja**, y preguntárselo al tipo
         // cuesta lo que mirar una etiqueta. Contar las hojas recorrería el árbol entero y reservaría un
         // vector para tirarlo, y además diría por segunda vez —y más flojo— una invariante que la
         // estructura ya garantiza: una rama nace con dos hijas y se colapsa al quedarse con una.
         if matches!(self.active().root, Node::Leaf(_)) {
-            self.timed_separately += antes.elapsed();
+            self.timed_separately += before.elapsed();
             self.close_the_active_tab(ctx);
             return;
         }
 
         let focus = self.active().focus;
-        let cerrada = self.active_mut().root.close(focus);
+        let closed = self.active_mut().root.close(focus);
         let Some(Closing {
             mut leaving,
-            focus: hereda,
-        }) = cerrada
+            focus: inherited,
+        }) = closed
         else {
             // **No puede ocurrir**: el foco es el nombre de una de las hojas de esta pestaña, y con más
             // de una consola ninguna de ellas es la raíz. Se dice en vez de callarse porque el acorde se
@@ -6214,16 +6214,16 @@ impl Window {
             // **El cronómetro se cierra después de escribir**, no antes: escribir en la salida de errores
             // cuesta lo que tarde quien lea al otro lado del tubo, y lo que no se declara se publica como
             // coste del framework de interfaz.
-            self.timed_separately += antes.elapsed();
+            self.timed_separately += before.elapsed();
             return;
         };
 
         // **Lo que había hecho en este fotograma se recoge antes de soltarla.** Ver [`Closing`] y
         // [`Pane::take_what_this_frame_left`].
-        let suyo = leaving.take_what_this_frame_left();
+        let its_cost = leaving.take_what_this_frame_left();
         // Aquí muere su programa y desaparece su directorio, por los `Drop` de siempre.
         drop(leaving);
-        self.active_mut().focus = hereda;
+        self.active_mut().focus = inherited;
         // **Cerrar una consola a mano cuenta igual que cerrar una pestaña a mano**, y sin esta línea el
         // mismo gesto protegía la ventana o no según cuántas hermanas tuviera la consola: con una sola,
         // el camino de arriba delega en cerrar la pestaña, que sí la levanta. El caso real es una consola
@@ -6235,7 +6235,7 @@ impl Window {
         // lo que vigilaba, se declara ciego, y a partir de ahí la ventana relee todos los paneles en cada
         // fotograma, para siempre y sin que nada lo diga.
         self.rearm_the_watcher(ctx);
-        self.timed_separately += suyo + antes.elapsed();
+        self.timed_separately += its_cost + before.elapsed();
     }
 
     /// Vuelve a armar el vigilante sobre las divisiones de todas las pestañas que quedan.
@@ -6291,8 +6291,8 @@ impl Window {
         pane.refresh_its_panel();
         // Un solo reloj para repartir y para pintar: si el panel envejeciera entre las dos preguntas,
         // se reservaría una franja para un aviso que no llega a pintarse.
-        let ahora = SystemTime::now();
-        let mut panel_split = pane.tile_with_its_panel(rect, metrics.width(), ahora);
+        let now = SystemTime::now();
+        let mut panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
 
         // **La frontera del panel se atiende aquí, antes de medir la rejilla, y el reparto se rehace en
         // este mismo pase.** Con el gesto atendido después, el fotograma pintaría el panel en el sitio
@@ -6312,16 +6312,16 @@ impl Window {
         // «he cambiado algo», y plegar y desplegar también cambian algo — sin tocar el ancho. Como el número
         // que este dato alimenta se publica en el informe con la etiqueta «efectos» y el anexo lo interpreta
         // como repartos y maquetados, contar ahí un plegado sería publicar trabajo que no ocurrió.
-        let ancho_antes = pane.panel_width;
-        if pane.drag_its_panel_divider(ui, rect, panel_split.panel, metrics, ahora) {
-            panel_split = pane.tile_with_its_panel(rect, metrics.width(), ahora);
+        let width_before = pane.panel_width;
+        if pane.drag_its_panel_divider(ui, rect, panel_split.panel, metrics, now) {
+            panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
         }
-        let width_changed = pane.panel_width != ancho_antes;
+        let width_changed = pane.panel_width != width_before;
         let cost_of_reading = before_the_panel.elapsed();
 
         pane.measured = metrics.cells_in(panel_split.console.size());
 
-        let antes = Instant::now();
+        let before = Instant::now();
         painter::paint(
             &ui.painter_at(panel_split.console),
             &pane.screen.view(),
@@ -6335,17 +6335,17 @@ impl Window {
         // rehacen el atlas, pero subir una textura no invalida nada. Sin esta resta, «encolando el
         // pintado» mediría además lo que cuesta decodificar un PNG y reducirlo.
         let color = discoverer.color_cost();
-        let encolado = antes.elapsed().saturating_sub(color.spent);
+        let queued = before.elapsed().saturating_sub(color.spent);
 
         let before_painting_it = Instant::now();
-        if let (Some(sitio), Some(dir)) = (panel_split.panel, pane.panel.as_ref()) {
+        if let (Some(panel_rect), Some(dir)) = (panel_split.panel, pane.panel.as_ref()) {
             panel::paint(
-                &ui.painter_at(sitio),
+                &ui.painter_at(panel_rect),
                 &mut pane.panel_state,
                 dir.id(),
                 theme,
                 metrics,
-                ahora,
+                now,
                 discoverer,
             );
         }
@@ -6357,19 +6357,19 @@ impl Window {
         // panel**. El guion la invalidaba por no haber efectos, pero culpando a la ventana.
         let panel_divider = panel_split
             .panel
-            .filter(|sitio| sitio.width() > PANEL_GRIP)
-            .map(|sitio| sitio.left());
+            .filter(|panel_rect| panel_rect.width() > PANEL_GRIP)
+            .map(|panel_rect| panel_rect.left());
 
         // El cierre de la vuelta va aquí y no en el bucle de arriba porque **el encolado hay que
         // declararlo siempre**, también cuando a esta consola no le llegó salida: se pintó igual, y su
         // coste tiene que salir del «resto del fotograma» de la ventana.
-        if let Some((esperando_desde, collected_at, interpretado)) = pane.pending_measurement.take()
+        if let Some((waiting_since, collected_at, interpreted)) = pane.pending_measurement.take()
         {
             pane.timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
-                esperando_desde,
+                waiting_since,
                 collected_at,
-                interpretado,
-                encolado,
+                interpreted,
+                queued,
                 panel_cost,
             ));
         }
@@ -6399,7 +6399,7 @@ impl eframe::App for Window {
             return;
         };
 
-        let empezo = Instant::now();
+        let started = Instant::now();
         // **El fotograma y no la pasada**, que es la trampa que este proyecto ya tiene pagada: egui puede
         // repetir la pasada sobre la misma entrada, y con el número de pasada el gesto avanzaría dos veces
         // en el mismo fotograma.
@@ -6417,7 +6417,7 @@ impl eframe::App for Window {
         // El gesto avanza en los fotogramas que la tanda ya produce por su cuenta: durante un volcado hay
         // de sobra. Si la ventana se durmiera a mitad de un gesto, lo único que pasa es que ese gesto tarda
         // más — el arrastre lo sostiene egui, no esta función.
-        self.spent_injecting += empezo.elapsed();
+        self.spent_injecting += started.elapsed();
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
@@ -6449,13 +6449,13 @@ impl eframe::App for Window {
         // camino `cerrar_fotograma` no llega a llamarse nunca desde una prueba. Lo que sí está probado
         // es el contrato de egui del que depende la guarda, y el cierre en sí entra por
         // [`Window::close_the_frame`], que las pruebas llaman directamente. Es la misma frontera
-        // declarada de [`Window::on_exit`] y de las lecturas de entorno de [`arrancar`].
-        let fotograma = ctx.cumulative_frame_nr();
-        if fotograma != self.last_closed_frame
-            && let Some(segundos) = frame.info().cpu_usage
+        // declarada de [`Window::on_exit`] y de las lecturas de entorno de [`run`].
+        let frame_nr = ctx.cumulative_frame_nr();
+        if frame_nr != self.last_closed_frame
+            && let Some(seconds) = frame.info().cpu_usage
         {
-            self.last_closed_frame = fotograma;
-            self.close_the_frame(std::time::Duration::from_secs_f32(segundos));
+            self.last_closed_frame = frame_nr;
+            self.close_the_frame(std::time::Duration::from_secs_f32(seconds));
         }
 
         // **Después de cerrar, no antes**: ver [`Window::save_if_due`].
@@ -6565,19 +6565,19 @@ impl eframe::App for Window {
         //
         // Va a `timed_separately` **y** a su propio tramo del informe: sin la resta, estos milisegundos
         // se publicarían como coste del framework, que es la cifra con la que **D3** lo juzga.
-        let buscando = Instant::now();
+        let searching = Instant::now();
         let round = self.discoverer.resolve(ui.ctx());
         if round.did_work() {
-            let how_much = buscando.elapsed();
+            let how_much = searching.elapsed();
             self.timed_separately += how_much;
             self.discovery
                 .anotar(how_much, round.searched, round.registered);
         }
 
-        let recorrido = Instant::now();
+        let travel = Instant::now();
         let tiling_of = |window: &Self| window.active().root.place(area, metrics.width());
         let mut tiling = tiling_of(self);
-        self.timed_separately += recorrido.elapsed();
+        self.timed_separately += travel.elapsed();
 
         // El arrastre se atiende **antes de pintar y se vuelve a repartir en el mismo pase**: pintar con
         // el reparto de antes dejaría al divisor un fotograma por detrás del ratón, que es justo lo que se
@@ -6602,9 +6602,9 @@ impl eframe::App for Window {
         let dividers = tiling.dividers.clone();
         for (which, divider) in dividers.into_iter().enumerate() {
             if self.drag_the_divider(ui, which, divider) {
-                let rehacer = Instant::now();
+                let redoing = Instant::now();
                 tiling = tiling_of(self);
-                self.timed_separately += rehacer.elapsed();
+                self.timed_separately += redoing.elapsed();
                 // **Y aquí es donde el gesto de la frontera declara que sirvió de algo.** Es el mismo
                 // número que el del panel cuenta con `width_changed` y el de la consola con las
                 // reordenaciones que el árbol acepta: mandar los eventos no significa que nada se mueva
@@ -6638,17 +6638,17 @@ impl eframe::App for Window {
         // **Atender el ratón se declara solo**: el cronómetro va dentro, y su comentario dice por qué.
         let of_the_mouse = self.handle_the_mouse(ui, &tiling.parts, &metrics);
         if of_the_mouse.the_tree_changed {
-            let rehacer = Instant::now();
+            let redoing = Instant::now();
             tiling = tiling_of(self);
-            self.timed_separately += rehacer.elapsed();
+            self.timed_separately += redoing.elapsed();
         }
 
-        for divisor in &tiling.dividers {
+        for divider in &tiling.dividers {
             ui.painter()
-                .rect_filled(divisor.rect, 0.0, self.theme.divider());
+                .rect_filled(divider.rect, 0.0, self.theme.divider());
         }
 
-        let rectangulos = tiling.parts;
+        let rects = tiling.parts;
         // **El destino que se pinta indexa el reparto de antes**, y vale: solo hay destino cuando el
         // arrastre sigue en vuelo, y en ese fotograma nadie ha soltado, así que el árbol no cambió.
         let drag_target = of_the_mouse.target;
@@ -6662,8 +6662,8 @@ impl eframe::App for Window {
         // división— y eran dos sitios donde la condición podía separarse: dimensionada para una tanda cuyas
         // entradas nunca se meten, o al revés.
         let there_is_a_gesture = self.injected_drags.is_some();
-        let mut pintado = if there_is_a_gesture {
-            Vec::with_capacity(rectangulos.len())
+        let mut painted = if there_is_a_gesture {
+            Vec::with_capacity(rects.len())
         } else {
             Vec::new()
         };
@@ -6671,23 +6671,23 @@ impl eframe::App for Window {
         for (pane, rect) in self.tabs[self.active]
             .panes_mut()
             .into_iter()
-            .zip(rectangulos.iter().copied())
+            .zip(rects.iter().copied())
         {
-            let suyo =
+            let pane_outcome =
                 Self::paint_pane(ui, pane, rect, &self.theme, &metrics, &mut self.discoverer);
             // **Se anota por división y no una vez por fotograma**, porque es de la división de la que se
             // restó: dos consolas que rasterizan en el mismo fotograma pagan cada una lo suyo.
-            if suyo.color.rasterized + suyo.color.failed > 0 {
-                self.timed_separately += suyo.color.spent;
+            if pane_outcome.color.rasterized + pane_outcome.color.failed > 0 {
+                self.timed_separately += pane_outcome.color.spent;
                 self.color.anotar(
-                    suyo.color.spent,
-                    suyo.color.rasterized,
-                    suyo.color.failed,
+                    pane_outcome.color.spent,
+                    pane_outcome.color.rasterized,
+                    pane_outcome.color.failed,
                 );
             }
             if there_is_a_gesture {
-                pintado.push((rect, suyo.panel_divider));
-                if suyo.width_changed {
+                painted.push((rect, pane_outcome.panel_divider));
+                if pane_outcome.width_changed {
                     with_effect += 1;
                 }
             }
@@ -6701,7 +6701,7 @@ impl eframe::App for Window {
         // coincidir con las posiciones, que es todo el motivo de que el foco sea un nombre.
         if let Some(at) = self.active().where_the_focus_is() {
             ui.painter().rect_stroke(
-                rectangulos[at],
+                rects[at],
                 0.0,
                 egui::Stroke::new(1.0, self.theme.focus()),
                 egui::StrokeKind::Inside,
@@ -6714,7 +6714,7 @@ impl eframe::App for Window {
         // Se indexa directamente, como el realce del foco de justo arriba y por la misma razón: el número
         // sale de recorrer esta misma lista en este mismo fotograma.
         if let Some((target, side)) = drag_target {
-            self.paint_the_drag(ui, rectangulos[target], side);
+            self.paint_the_drag(ui, rects[target], side);
         }
 
         // **Los rectángulos con los que se acaba de pintar, para el gesto que una tanda se inyecta.** Se
@@ -6730,7 +6730,7 @@ impl eframe::App for Window {
             // **Aquí y no al arrancar**: es el primer sitio donde la métrica de la fuente existe. Ver
             // [`InjectedDrags::cell`].
             injected_drags.already_knows_the_cell(metrics.width());
-            self.last_painted = pintado;
+            self.last_painted = painted;
             injected_drags.several_more_with_effect(with_effect);
         }
 
@@ -6762,10 +6762,10 @@ impl eframe::App for Window {
             // disposición: egui repite la pasada sobre la misma entrada, así que contar aquí publicaría
             // una media **por pasada** bajo una etiqueta que dice «por fotograma». El trabajo repetido
             // sí se suma —ocurrió dos veces— pero el fotograma sigue siendo uno.
-            let suyo = self.paint_the_tab_bar(ui, tab_bar, &metrics, SystemTime::now());
-            self.tab_bar_this_frame += suyo.cost;
-            self.timed_separately += suyo.cost;
-            self.tab_bar_cost.vio_marcadas(suyo.marked);
+            let tab_bar_outcome = self.paint_the_tab_bar(ui, tab_bar, &metrics, SystemTime::now());
+            self.tab_bar_this_frame += tab_bar_outcome.cost;
+            self.timed_separately += tab_bar_outcome.cost;
+            self.tab_bar_cost.vio_marcadas(tab_bar_outcome.marked);
         }
 
         // Ya se ha pintado, así que lo que siga pendiente es de una consola que no se pintó.
@@ -6878,7 +6878,7 @@ impl Node {
                 hijos: children
                     .iter()
                     .map(|child| session::Hijo {
-                        peso: child.weight.valor(),
+                        peso: child.weight.value(),
                         nodo: child.node.describe(),
                     })
                     .collect(),
@@ -6898,12 +6898,12 @@ impl Node {
     fn materialize(
         ctx: &egui::Context,
         saving: &session::Nodo,
-        programa: &str,
+        program: &str,
         next_name: &mut usize,
     ) -> term_core::Result<Self> {
         match saving {
-            session::Nodo::Hoja(hoja) => {
-                let mut pane = Pane::launching(ctx, programa, *next_name)?;
+            session::Nodo::Hoja(leaf) => {
+                let mut pane = Pane::launching(ctx, program, *next_name)?;
                 *next_name += 1;
                 // **El ancho se sube al suelo del arrastre, y esto lo pidió una revisión.** Un fichero
                 // puede traer un cero, y **ningún gesto puede dejarlo**: pedir menos que el suelo significa
@@ -6912,8 +6912,8 @@ impl Node {
                 // ancho— y, como el único que escribe este campo es el propio arrastre, se queda así para
                 // siempre y en cada sesión. Recortando aquí, lo que vuelve del disco es siempre un estado
                 // que un gesto podría haber dejado.
-                pane.panel_width = hoja.ancho_del_panel.max(panel::DRAG_FLOOR);
-                pane.folded = hoja.plegado;
+                pane.panel_width = leaf.ancho_del_panel.max(panel::DRAG_FLOOR);
+                pane.folded = leaf.plegado;
                 Ok(Self::Leaf(pane))
             }
             session::Nodo::Rama {
@@ -6936,7 +6936,7 @@ impl Node {
                         .ok_or("la disposición trae un peso que no puede serlo")?;
                     parts.push((
                         weight,
-                        Self::materialize(ctx, &child.nodo, programa, next_name)?,
+                        Self::materialize(ctx, &child.nodo, program, next_name)?,
                     ));
                 }
                 Ok(in_branch_with_weights((*orientacion).into(), parts))
@@ -6960,17 +6960,17 @@ impl Tab {
     /// La pestaña que describe eso, con sus consolas abiertas.
     fn materialize(
         ctx: &egui::Context,
-        guardada: &session::Pestaña,
-        programa: &str,
+        saved: &session::Pestaña,
+        program: &str,
         next_name: &mut usize,
         name: usize,
     ) -> term_core::Result<Self> {
-        let root = Node::materialize(ctx, &guardada.raiz, programa, next_name)?;
+        let root = Node::materialize(ctx, &saved.raiz, program, next_name)?;
         // **El foco a la primera, igual que al abrir una pestaña nueva**, y por la misma razón: teclear
         // antes del primer clic ocurre siempre, y con un foco que no apunte a nadie esas teclas se
         // perderían. Que hay al menos una hoja lo garantiza la validación del documento.
         let focus = root
-            .hojas()
+            .leaves()
             .first()
             .ok_or("una pestaña restaurada sin ninguna consola")?
             .name;
@@ -6996,14 +6996,14 @@ impl Window {
     pub(crate) fn materialize(
         ctx: &egui::Context,
         validated: &session::Valido,
-        programa: &str,
+        program: &str,
     ) -> term_core::Result<Vec<Tab>> {
         let mut next_pane = 0;
         validated
             .pestañas()
             .iter()
             .enumerate()
-            .map(|(which, tab)| Tab::materialize(ctx, tab, programa, &mut next_pane, which))
+            .map(|(which, tab)| Tab::materialize(ctx, tab, program, &mut next_pane, which))
             .collect()
     }
 }
@@ -7021,9 +7021,9 @@ mod tests {
     /// afirmando sobre una secuencia que no es la que escribió. Un fotograma de verdad rehace la
     /// lista entera; esto hace lo mismo.
     fn enqueue(ctx: &egui::Context, events: Vec<egui::Event>) {
-        ctx.input_mut(|entrada| {
-            entrada.events.clear();
-            entrada.events.extend(events);
+        ctx.input_mut(|input| {
+            input.events.clear();
+            input.events.extend(events);
         });
     }
 
@@ -7267,7 +7267,7 @@ mod tests {
         // lista de eventos en cada uno, así que el aviso de que se pulsaron las teclas no sigue ahí
         // al siguiente. Sin este vaciado la prueba se aprobaría sola: volvería a leer el mismo aviso
         // que dejó el pase anterior, y no ejercitaría la semilla en absoluto.
-        ctx.input_mut(|entrada| entrada.events.clear());
+        ctx.input_mut(|input| input.events.clear());
 
         enqueue(&ctx, vec![egui::Event::Paste("tarde".to_owned())]);
         pane.send_keys(
@@ -7337,14 +7337,14 @@ mod tests {
     /// Las dos mitades del fotograma que aquí se prueban —bombear y redimensionar— no tocan la
     /// ventana del escritorio, así que no hace falta abrir ninguna: se arma el struct a mano con
     /// las mismas piezas que [`Pane::new`].
-    fn pane_with(programa: &str, name: usize) -> Pane {
-        let (pty, salida) = Pty::spawn("sh", &["-c", programa], INITIAL_GRID)
+    fn pane_with(program: &str, name: usize) -> Pane {
+        let (pty, output) = Pty::spawn("sh", &["-c", program], INITIAL_GRID)
             .expect("no se pudo abrir el pseudoterminal");
 
         Pane {
             name,
             pty,
-            pty_output: PtyOutput::new(salida, || {}),
+            pty_output: PtyOutput::new(output, || {}),
             panel: None,
             panel_state: panel::PanelState::default(),
             to_reread: Flag::raised(),
@@ -7367,8 +7367,8 @@ mod tests {
     ///
     /// Lo que aquí se prueba —bombear, decidir el cierre, enrutar el teclado— no toca el escritorio,
     /// así que se arma el struct a mano con las mismas piezas que [`Window::with_tabs`].
-    fn window_with(izquierda: &str, derecha: &str) -> Window {
-        window_of_tabs([[izquierda, derecha]])
+    fn window_with(left_program: &str, right_program: &str) -> Window {
+        window_of_tabs([[left_program, right_program]])
     }
 
     /// Monta una ventana con **las pestañas que se le pidan**, cada consola con su programa.
@@ -7377,19 +7377,19 @@ mod tests {
     /// de F2.1, en un paso posterior— y sin esto no habría forma de comprobar lo que este paso
     /// promete: que una consola de una pestaña que no se ve se sigue vaciando. La primera de la lista
     /// queda activa.
-    fn window_of_tabs<'a>(programas: impl IntoIterator<Item = [&'a str; 2]>) -> Window {
-        let tabs: Vec<_> = programas
+    fn window_of_tabs<'a>(programs: impl IntoIterator<Item = [&'a str; 2]>) -> Window {
+        let tabs: Vec<_> = programs
             .into_iter()
             .enumerate()
-            .map(|(name, [izquierda, derecha])| {
+            .map(|(name, [left_program, right_program])| {
                 // Con su nombre, como las abre la aplicación: si todas se llamaran igual, el informe
                 // diría «pestaña 0» dos veces y la prueba que lo lee no notaría la diferencia. Y sus
                 // divisiones **numeradas seguidas entre pestañas**, también como la aplicación: con un
                 // contador por pestaña habría dos «división 0» en el mismo informe.
                 Tab::with_panes(
                     vec![
-                        pane_with(izquierda, name * 2),
-                        pane_with(derecha, name * 2 + 1),
+                        pane_with(left_program, name * 2),
+                        pane_with(right_program, name * 2 + 1),
                     ],
                     &OpeningLayout::DEFAULT,
                     name,
@@ -7484,9 +7484,9 @@ mod tests {
     /// haber entregado el último trozo. Sin esta espera, cuánto hay recogido depende de en qué
     /// trozos parta el pseudoterminal la salida, y el test daría un número distinto cada vez.
     fn wait_for_it_to_die(pane: &Pane) {
-        let limite = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(5);
         while pane.pty_output.is_alive() {
-            assert!(Instant::now() < limite, "el programa no terminó");
+            assert!(Instant::now() < deadline, "el programa no terminó");
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -7521,11 +7521,11 @@ mod tests {
         );
         wait_for_it_to_die(&pane);
 
-        let mut queda = pane.pump();
+        let mut queue_left = pane.pump();
 
         // Este es el presupuesto haciendo su trabajo: sin él, el fotograma se traga los 400 KiB de
         // una vez y la ventana se queda quieta mientras tanto, que es justo lo que no puede pasar.
-        assert!(queda, "un volcado de {DUMP} bytes cupo en un fotograma");
+        assert!(queue_left, "un volcado de {DUMP} bytes cupo en un fotograma");
         assert!(
             pane.received.len() <= PUMP_BUDGET,
             "el búfer del fotograma creció por encima del presupuesto: {}",
@@ -7536,16 +7536,16 @@ mod tests {
         // el final, que es la parte que se estaba mirando.
         assert!(!pane.pty_output.is_alive());
 
-        let mut fotogramas = 1;
-        while queda {
-            queda = pane.pump();
-            fotogramas += 1;
-            assert!(fotogramas < 100, "el bombeo no avanza");
+        let mut frames = 1;
+        while queue_left {
+            queue_left = pane.pump();
+            frames += 1;
+            assert!(frames < 100, "el bombeo no avanza");
         }
 
         assert!(
-            fotogramas >= DUMP.div_ceil(PUMP_BUDGET),
-            "el volcado salió en {fotogramas} fotogramas, menos de los que el presupuesto obliga"
+            frames >= DUMP.div_ceil(PUMP_BUDGET),
+            "el volcado salió en {frames} fotogramas, menos de los que el presupuesto obliga"
         );
         // Lo que el programa escribió al final está en la pantalla: el volcado se tragó entero, sin
         // perder por el camino ni el último trozo ni los cortes entre fotograma y fotograma.
@@ -7561,7 +7561,7 @@ mod tests {
         let new = Size { rows: 10, cols: 40 };
 
         pane.measured = new;
-        pane.redimensionar();
+        pane.resize();
 
         assert_eq!(pane.screen.size(), new);
     }
@@ -7582,11 +7582,11 @@ mod tests {
         // Primero se comprueba que el programa informa del tamaño de arranque. Sin esto, un `stty` que no
         // existiera o que fallara daría el mismo resultado que un redimensionado que no llega: pantalla sin
         // el número esperado, y el test culparía al redimensionado.
-        let arranque = format!("{} {}", INITIAL_GRID.rows, INITIAL_GRID.cols);
-        wait_for_the_screen_to_say(&mut pane, &arranque);
+        let startup = format!("{} {}", INITIAL_GRID.rows, INITIAL_GRID.cols);
+        wait_for_the_screen_to_say(&mut pane, &startup);
 
         pane.measured = new;
-        pane.redimensionar();
+        pane.resize();
 
         wait_for_the_screen_to_say(&mut pane, &format!("{} {}", new.rows, new.cols));
     }
@@ -7606,10 +7606,10 @@ mod tests {
         // corriendo a la vez ha llegado a tardar **ocho segundos** en esta máquina. Un límite ajustado
         // convertiría esta prueba en un lanzamiento de moneda; uno generoso no cuesta nada, porque solo
         // se agota cuando el programa no arranca de verdad.
-        let limite = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while pane.screen.to_text().trim().is_empty() {
             assert!(
-                Instant::now() < limite,
+                Instant::now() < deadline,
                 "el programa de la consola no escribió nada, así que no se sabe si ya lee el teclado"
             );
             pane.pump();
@@ -7622,14 +7622,14 @@ mod tests {
     /// La rejilla se limpia antes de esperar: lo que el programa escribió **antes** del redimensionado
     /// sigue en pantalla, y sin limpiar, buscar el tamaño nuevo encontraría el viejo de la vuelta anterior
     /// y daría por bueno un redimensionado que no ocurrió.
-    fn wait_for_the_screen_to_say(pane: &mut Pane, texto: &str) {
+    fn wait_for_the_screen_to_say(pane: &mut Pane, text: &str) {
         pane.screen = Screen::new(pane.screen.size());
 
-        let limite = Instant::now() + Duration::from_secs(5);
-        while !pane.screen.to_text().contains(texto) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !pane.screen.to_text().contains(text) {
             assert!(
-                Instant::now() < limite,
-                "el programa no llegó a escribir «{texto}»; en pantalla hay: {:?}",
+                Instant::now() < deadline,
+                "el programa no llegó a escribir «{text}»; en pantalla hay: {:?}",
                 pane.screen.to_text()
             );
             pane.pump();
@@ -7645,9 +7645,9 @@ mod tests {
         let mut pane = pane_with("sleep 30", 0);
         let ctx = egui::Context::default();
         let mut modifiers = egui::Modifiers::NONE;
-        ctx.input_mut(|entrada| {
-            entrada.events.push(egui::Event::Text("a".to_owned()));
-            entrada.events.push(egui::Event::WindowFocused(true));
+        ctx.input_mut(|input| {
+            input.events.push(egui::Event::Text("a".to_owned()));
+            input.events.push(egui::Event::WindowFocused(true));
         });
 
         pane.send_keys(
@@ -7675,9 +7675,9 @@ mod tests {
 
         // Lo que no se traduce se queda donde estaba: el bucle se lleva sus teclas, no la entrada
         // entera, y hay quien mira esos eventos después.
-        ctx.input(|entrada| {
+        ctx.input(|input| {
             assert_eq!(
-                entrada.events,
+                input.events,
                 [egui::Event::WindowFocused(true)],
                 "el bucle se llevó eventos que no eran suyos"
             );
@@ -7694,14 +7694,14 @@ mod tests {
         }
         window.pump_them_all();
 
-        let (izquierda, derecha) = {
-            let suyas = window.active().panes();
-            (suyas[0], suyas[1])
+        let (left_pane, right_pane) = {
+            let its_panes = window.active().panes();
+            (its_panes[0], its_panes[1])
         };
-        assert!(izquierda.screen.to_text().contains("izquierda"));
-        assert!(derecha.screen.to_text().contains("derecha"));
+        assert!(left_pane.screen.to_text().contains("izquierda"));
+        assert!(right_pane.screen.to_text().contains("derecha"));
         assert!(
-            !izquierda.screen.to_text().contains("derecha"),
+            !left_pane.screen.to_text().contains("derecha"),
             "lo que escribió una consola apareció en la otra"
         );
     }
@@ -7731,7 +7731,7 @@ mod tests {
         // hasta que alguien mirase la ventana.
         //
         // **Con cuántas abre la aplicación cuando nadie pide nada** ya no se decide aquí sino en
-        // `arrancar`, y lo ata `la_variable_de_entorno_dice_cuantas_pestañas_se_abren`.
+        // `run`, y lo ata `la_variable_de_entorno_dice_cuantas_pestañas_se_abren`.
         let window = Window::with_tabs(&egui::Context::default(), 1, OpeningLayout::DEFAULT, None)
             .expect("no se pudo abrir la ventana con sus dos consolas");
 
@@ -7751,20 +7751,20 @@ mod tests {
         let window = Window::with_tabs(&egui::Context::default(), 1, OpeningLayout::DEFAULT, None)
             .expect("no se pudo abrir la ventana con sus dos consolas");
 
-        let [izquierda, derecha] = both(window.active(), |pane| {
+        let [left_pane, right_pane] = both(window.active(), |pane| {
             pane.panel
                 .as_ref()
                 .expect("la consola tiene que arrancar con su directorio")
         });
 
         assert_ne!(
-            izquierda.id(),
-            derecha.id(),
+            left_pane.id(),
+            right_pane.id(),
             "las dos consolas comparten identificador"
         );
         assert_ne!(
-            izquierda.path(),
-            derecha.path(),
+            left_pane.path(),
+            right_pane.path(),
             "las dos consolas comparten directorio, así que se pisarían el estado"
         );
     }
@@ -7856,8 +7856,8 @@ mod tests {
         let mut pane = Pane::launching(&egui::Context::default(), "sh", 0)
             .expect("no se pudo abrir la consola");
 
-        let publicado = {
-            let esperado = pane
+        let published = {
+            let expected = pane
                 .panel
                 .as_ref()
                 .expect("la consola tiene que arrancar con su directorio")
@@ -7868,20 +7868,20 @@ mod tests {
                 .write(b"printf '{}' > \"$PANEL_DIR/panel.json\"\n")
                 .expect("escribir al pseudoterminal");
 
-            esperado
+            expected
         };
 
         // El shell tarda lo que tarda en arrancar y leer su configuración, así que se sondea con
         // límite en vez de dormir una cifra fija.
-        let limite = Instant::now() + Duration::from_secs(10);
-        while !publicado.exists() && Instant::now() < limite {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !published.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
 
         assert!(
-            publicado.is_file(),
+            published.is_file(),
             "el programa de dentro no pudo publicar en {}",
-            publicado.display()
+            published.display()
         );
     }
 
@@ -7901,12 +7901,12 @@ mod tests {
     #[test]
     fn el_programa_no_ve_ninguna_variable_mas_que_las_cuatro() {
         let panel = PanelDir::create().expect("crear un directorio de panel");
-        let (_pty, canal) =
+        let (_pty, channel) =
             Pty::spawn_with_env("env", &[], INITIAL_GRID, &identity_of(Some(&panel)))
                 .expect("lanzar env");
 
-        let salida = drain_until_closed(&canal);
-        let of_the_child: std::collections::HashMap<&str, &str> = salida
+        let output = drain_until_closed(&channel);
+        let of_the_child: std::collections::HashMap<&str, &str> = output
             .lines()
             .filter_map(|line| line.split_once('='))
             .collect();
@@ -7922,30 +7922,30 @@ mod tests {
 
         // Y ninguna más cambia respecto a lo que este proceso ya tenía. La comparación es por par
         // completo, así que caza tanto una variable nueva como una con el valor pisado.
-        let esperadas = ["TERM", "COLORTERM", "SHELL"]
+        let expected = ["TERM", "COLORTERM", "SHELL"]
             .into_iter()
             .chain(panel_contract::ENV_NAMES);
-        let esperadas: std::collections::HashSet<&str> = esperadas.collect();
+        let expected: std::collections::HashSet<&str> = expected.collect();
         let of_the_parent: std::collections::HashMap<String, String> = std::env::vars().collect();
-        let mut inesperadas: Vec<&str> = of_the_child
+        let mut unexpected: Vec<&str> = of_the_child
             .iter()
-            .filter(|(name, valor)| of_the_parent.get(**name).map(String::as_str) != Some(**valor))
+            .filter(|(name, value)| of_the_parent.get(**name).map(String::as_str) != Some(**value))
             .map(|(name, _)| *name)
-            .filter(|name| !esperadas.contains(name))
+            .filter(|name| !expected.contains(name))
             .collect();
-        inesperadas.sort();
+        unexpected.sort();
 
         assert!(
-            inesperadas.is_empty(),
-            "la aplicación mete en el entorno del programa algo que nadie ha declarado: {inesperadas:?}"
+            unexpected.is_empty(),
+            "la aplicación mete en el entorno del programa algo que nadie ha declarado: {unexpected:?}"
         );
     }
 
     /// Recoge la salida de un programa hasta que muere y la devuelve como texto.
-    fn drain_until_closed(canal: &std::sync::mpsc::Receiver<Vec<u8>>) -> String {
+    fn drain_until_closed(channel: &std::sync::mpsc::Receiver<Vec<u8>>) -> String {
         let mut bytes = Vec::new();
-        while let Ok(trozo) = canal.recv_timeout(Duration::from_secs(10)) {
-            bytes.extend_from_slice(&trozo);
+        while let Ok(chunk) = channel.recv_timeout(Duration::from_secs(10)) {
+            bytes.extend_from_slice(&chunk);
         }
         String::from_utf8_lossy(&bytes).replace('\r', "")
     }
@@ -7955,10 +7955,10 @@ mod tests {
     /// sus propias consolas, «no ponerlas» dejaría a la consola hija con la identidad de la madre.
     #[test]
     fn una_consola_sin_directorio_manda_quitar_las_dos_variables() {
-        let identidad = identity_of(None);
+        let identity = identity_of(None);
 
         assert_eq!(
-            identidad,
+            identity,
             [("PANEL_ID", None), ("PANEL_DIR", None)],
             "sin directorio hay que quitar las dos, no dejarlas al azar de lo heredado"
         );
@@ -7966,7 +7966,7 @@ mod tests {
 
     #[test]
     fn un_directorio_que_no_se_pudo_crear_no_impide_abrir_la_consola() {
-        let without_dir = panel_o_ninguno(Err(std::io::Error::other("disco lleno")));
+        let without_dir = panel_or_none(Err(std::io::Error::other("disco lleno")));
 
         assert!(
             without_dir.is_none(),
@@ -7989,25 +7989,25 @@ mod tests {
 
         let mut received = Vec::new();
         loop {
-            let queda_cola = pane.pump();
+            let queue_left = pane.pump();
             received.extend_from_slice(&pane.received);
-            if !queda_cola {
+            if !queue_left {
                 break;
             }
         }
-        let salida = String::from_utf8_lossy(&received);
+        let output = String::from_utf8_lossy(&received);
 
         for name in panel_contract::ENV_NAMES {
             assert!(
-                !salida.contains(&format!("{name}=")),
-                "el programa vio {name} sin que su consola tenga directorio:\n{salida}"
+                !output.contains(&format!("{name}=")),
+                "el programa vio {name} sin que su consola tenga directorio:\n{output}"
             );
         }
     }
 
     #[test]
     fn al_cerrar_la_ventana_no_quedan_directorios_de_panel() {
-        let rutas = {
+        let paths = {
             let window =
                 Window::with_tabs(&egui::Context::default(), 1, OpeningLayout::DEFAULT, None)
                     .expect("no se pudo abrir la ventana con sus dos consolas");
@@ -8021,8 +8021,8 @@ mod tests {
             })
         };
 
-        for ruta in rutas {
-            assert!(!ruta.exists(), "quedó el directorio {}", ruta.display());
+        for path in paths {
+            assert!(!path.exists(), "quedó el directorio {}", path.display());
         }
     }
 
@@ -8032,22 +8032,22 @@ mod tests {
     /// número era la posición; con nombres, el 1 es una consola concreta —la segunda de la **primera**
     /// pestaña— y en cualquier otra pestaña no apunta a nadie. Traducirlo aquí es lo que evita que una
     /// prueba diga «la segunda» y esté nombrando a otra.
-    fn focus_on(tab: &mut Tab, posicion: usize) {
-        let name = tab.panes()[posicion].name;
+    fn focus_on(tab: &mut Tab, position: usize) {
+        let name = tab.panes()[position].name;
         tab.focus = name;
     }
 
     /// Las dos consolas de una pestaña, transformadas. Sustituye al `each_ref().map(...)` que el array
     /// de dos permitía: con el árbol la lista no promete su número, y las pruebas que hablan de «las
     /// dos» quieren fallar en el sitio si algún día no son dos.
-    fn both<'a, T>(tab: &'a Tab, mirar: impl Fn(&'a Pane) -> T) -> [T; 2] {
-        let suyas = tab.panes();
+    fn both<'a, T>(tab: &'a Tab, look: impl Fn(&'a Pane) -> T) -> [T; 2] {
+        let its_panes = tab.panes();
         assert_eq!(
-            suyas.len(),
+            its_panes.len(),
             2,
             "esta prueba habla de exactamente dos consolas"
         );
-        [mirar(suyas[0]), mirar(suyas[1])]
+        [look(its_panes[0]), look(its_panes[1])]
     }
 
     /// Las rutas de los directorios de panel de una pestaña, para poder mirar si siguen ahí después.
@@ -8106,9 +8106,9 @@ mod tests {
             window.active, 3,
             "la pestaña nueva no quedó al final y delante"
         );
-        let siguen: Vec<_> = window.tabs[..3].iter().map(dirs_of).collect();
+        let still_there: Vec<_> = window.tabs[..3].iter().map(dirs_of).collect();
         assert_eq!(
-            siguen, of_each_one,
+            still_there, of_each_one,
             "la pestaña nueva descolocó a las que ya estaban abiertas"
         );
     }
@@ -8159,18 +8159,18 @@ mod tests {
 
         assert_eq!(window.tabs.len(), 1, "la pestaña no se cerró");
         assert_eq!(window.active, 0, "la activa quedó fuera de la lista");
-        for ruta in &of_the_one_leaving {
+        for path in &of_the_one_leaving {
             assert!(
-                !ruta.exists(),
+                !path.exists(),
                 "quedó el directorio {} de la pestaña cerrada",
-                ruta.display()
+                path.display()
             );
         }
-        for ruta in &of_the_one_that_stays {
+        for path in &of_the_one_that_stays {
             assert!(
-                ruta.exists(),
+                path.exists(),
                 "se llevó por delante el directorio {} de la otra pestaña",
-                ruta.display()
+                path.display()
             );
         }
         assert!(
@@ -8194,14 +8194,14 @@ mod tests {
 
         one_frame_with(&mut window, &ctx, chord_with(egui::Key::W));
 
-        let quedan: Vec<_> = window.tabs.iter().map(dirs_of).collect();
-        let esperadas = vec![
+        let remaining: Vec<_> = window.tabs.iter().map(dirs_of).collect();
+        let expected = vec![
             of_each_one[0].clone(),
             of_each_one[2].clone(),
             of_each_one[3].clone(),
         ];
         assert_eq!(
-            quedan, esperadas,
+            remaining, expected,
             "cerrar la del medio descolocó a las que quedaban"
         );
         assert_eq!(
@@ -8209,11 +8209,11 @@ mod tests {
             of_each_one[2],
             "delante no quedó la pestaña que estaba a la derecha de la que se cerró"
         );
-        for ruta in &of_each_one[1] {
+        for path in &of_each_one[1] {
             assert!(
-                !ruta.exists(),
+                !path.exists(),
                 "quedó el directorio {} de la pestaña cerrada",
-                ruta.display()
+                path.display()
             );
         }
     }
@@ -8229,7 +8229,7 @@ mod tests {
         let of_the_first = dirs_of(&window.tabs[0]);
         window.active = 2;
 
-        let pidio_cerrar = one_frame_with(&mut window, &ctx, the_chord_twice(egui::Key::W));
+        let asked_to_close = one_frame_with(&mut window, &ctx, the_chord_twice(egui::Key::W));
 
         assert_eq!(
             window.tabs.len(),
@@ -8242,7 +8242,7 @@ mod tests {
             "el segundo cierre se llevó una pestaña que no era la que quedó delante"
         );
         assert!(
-            !pidio_cerrar,
+            !asked_to_close,
             "cerrar dos de tres pestañas pidió además cerrar la ventana"
         );
     }
@@ -8255,10 +8255,10 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
 
-        let pidio_cerrar = one_frame_with(&mut window, &ctx, the_chord_twice(egui::Key::W));
+        let asked_to_close = one_frame_with(&mut window, &ctx, the_chord_twice(egui::Key::W));
 
         assert!(
-            pidio_cerrar,
+            asked_to_close,
             "dos acordes de cerrar sobre la única pestaña no pidieron cerrar la ventana"
         );
         assert_eq!(
@@ -8278,12 +8278,12 @@ mod tests {
         let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
             .expect("no se pudo abrir la ventana");
 
-        let pidio_cerrar = one_frame_with(&mut window, &ctx, chord_with(egui::Key::W));
+        let asked_to_close = one_frame_with(&mut window, &ctx, chord_with(egui::Key::W));
 
         // La primera mitad del criterio, y no la daba por buena ninguna prueba: sin esto, el acorde sobre
         // la única pestaña no haría absolutamente nada y la suite seguiría en verde.
         assert!(
-            pidio_cerrar,
+            asked_to_close,
             "cerrar la única pestaña no pidió cerrar la ventana"
         );
         assert_eq!(
@@ -8366,7 +8366,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
-        let solo_mayusculas = egui::Modifiers::SHIFT;
+        let shift_only = egui::Modifiers::SHIFT;
         let mut keymap = keyboard::Keymap::default();
         keymap.bind(
             keyboard::Action::SplitRight,
@@ -8381,8 +8381,8 @@ mod tests {
         enqueue(
             &ctx,
             vec![
-                egui::Event::ModifiersChanged(solo_mayusculas),
-                tecla(egui::Key::E, solo_mayusculas),
+                egui::Event::ModifiersChanged(shift_only),
+                key_press(egui::Key::E, shift_only),
                 egui::Event::Text("E".to_owned()),
             ],
         );
@@ -8412,7 +8412,7 @@ mod tests {
             &ctx,
             vec![
                 egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
-                tecla(egui::Key::E, egui::Modifiers::SHIFT),
+                key_press(egui::Key::E, egui::Modifiers::SHIFT),
                 egui::Event::Text("E".to_owned()),
             ],
         );
@@ -8441,9 +8441,9 @@ mod tests {
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
 
-        let mut lote = chord_with(egui::Key::T);
+        let mut batch = chord_with(egui::Key::T);
         for _ in 0..5 {
-            lote.push(egui::Event::Key {
+            batch.push(egui::Event::Key {
                 key: egui::Key::T,
                 physical_key: None,
                 pressed: true,
@@ -8451,7 +8451,7 @@ mod tests {
                 modifiers: with_shift(),
             });
         }
-        enqueue(&ctx, lote);
+        enqueue(&ctx, batch);
 
         let requests = pane.send_keys(
             &ctx,
@@ -8486,9 +8486,9 @@ mod tests {
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
 
-        let mut lote = chord_with(egui::Key::W);
+        let mut batch = chord_with(egui::Key::W);
         for _ in 0..5 {
-            lote.push(egui::Event::Key {
+            batch.push(egui::Event::Key {
                 key: egui::Key::W,
                 physical_key: None,
                 pressed: true,
@@ -8496,7 +8496,7 @@ mod tests {
                 modifiers: with_shift(),
             });
         }
-        enqueue(&ctx, lote);
+        enqueue(&ctx, batch);
 
         let requests = pane.send_keys(
             &ctx,
@@ -8528,9 +8528,9 @@ mod tests {
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
 
-        let mut lote = chord_with(egui::Key::T);
-        lote.extend(chord_with(egui::Key::ArrowRight));
-        enqueue(&ctx, lote);
+        let mut batch = chord_with(egui::Key::T);
+        batch.extend(chord_with(egui::Key::ArrowRight));
+        enqueue(&ctx, batch);
 
         let requests = pane.send_keys(
             &ctx,
@@ -8562,9 +8562,9 @@ mod tests {
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
 
-        let mut lote = chord_with(egui::Key::W);
-        lote.extend(chord_with(egui::Key::ArrowRight));
-        enqueue(&ctx, lote);
+        let mut batch = chord_with(egui::Key::W);
+        batch.extend(chord_with(egui::Key::ArrowRight));
+        enqueue(&ctx, batch);
 
         let requests = pane.send_keys(
             &ctx,
@@ -8604,12 +8604,12 @@ mod tests {
 
         assert_eq!(window.tabs.len(), 1, "no se cerró la pestaña");
         let mut frame = eframe::Frame::_new_kittest();
-        let salida = ctx.run_logic(&egui::RawInput::default(), |ctx| {
+        let output = ctx.run_logic(&egui::RawInput::default(), |ctx| {
             eframe::App::logic(&mut window, ctx, &mut frame);
         });
 
         assert!(
-            !salida
+            !output
                 .viewport_commands
                 .get(&egui::ViewportId::ROOT)
                 .is_some_and(|requests| requests.contains(&egui::ViewportCommand::Close)),
@@ -8737,7 +8737,7 @@ mod tests {
         focus_on(window.active_mut(), 1);
 
         let ctx = egui::Context::default();
-        ctx.input_mut(|entrada| entrada.events.push(egui::Event::Text("a".to_owned())));
+        ctx.input_mut(|input| input.events.push(egui::Event::Text("a".to_owned())));
         window.send_keys_to_the_focused(&ctx);
 
         assert_eq!(
@@ -9008,12 +9008,12 @@ mod tests {
         // deja la medida vacía —sin nada pendiente, sin medias sucias y sin nada por recoger, o sea
         // verde— mientras el tiempo de esa consola se sigue publicando como coste del framework.
         // Comprobado mutándolo: sin esta afirmación, ese barrido pasaba.
-        let declarado = window.tabs[1].panes_mut()[0]
+        let declared = window.tabs[1].panes_mut()[0]
             .timings
             .cerrar_fotograma(std::time::Duration::from_millis(10))
             .expect("la consola de fondo no declaró nada de lo que interpretó");
         assert!(
-            !declarado.is_zero(),
+            !declared.is_zero(),
             "declaró cero: lo que interpretó se perdió por el camino"
         );
         assert!(
@@ -9054,13 +9054,13 @@ mod tests {
         wait_for_it_to_die(window.tabs[1].panes()[0]);
 
         window.pump_them_all();
-        let (_, _, interpretado) = window.tabs[1].panes()[0]
+        let (_, _, interpreted) = window.tabs[1].panes()[0]
             .pending_measurement
             .expect("el bombeo tiene que dejar pendiente lo que interpretó la consola de fondo");
         // Con un cero aquí la comparación de abajo la cumpliría también un barrido que declarase
         // ceros por todas partes, que es lo contrario de lo que esta prueba dice comprobar.
         assert!(
-            !interpretado.is_zero(),
+            !interpreted.is_zero(),
             "interpretar la salida no costó nada medible: la prueba no está midiendo lo que cree"
         );
 
@@ -9078,7 +9078,7 @@ mod tests {
             window.tabs[1].panes_mut()[0]
                 .timings
                 .cerrar_fotograma(std::time::Duration::from_millis(10)),
-            Some(interpretado),
+            Some(interpreted),
             "la consola de fondo declaró un tramo que no gastó: ese tiempo se le descuenta al \
              framework sin que nadie lo haya medido"
         );
@@ -9116,11 +9116,11 @@ mod tests {
 
     /// El informe de la sesión, tal como lo escribe la aplicación al cerrarse.
     fn report_of(window: &Window) -> String {
-        let mut salida = Vec::new();
+        let mut output = Vec::new();
         window
-            .publish_the_report(&mut salida)
+            .publish_the_report(&mut output)
             .expect("escribir a memoria no falla");
-        String::from_utf8(salida).expect("el informe es texto")
+        String::from_utf8(output).expect("el informe es texto")
     }
 
     #[test]
@@ -9147,19 +9147,19 @@ mod tests {
         );
         window.close_the_frame(std::time::Duration::from_millis(10));
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         assert!(
-            informe.contains("pestañas:     2"),
-            "el informe no dice cuántas pestañas había:\n{informe}"
+            report.contains("pestañas:     2"),
+            "el informe no dice cuántas pestañas había:\n{report}"
         );
         assert!(
-            informe.contains("pestaña 0:    se veía"),
-            "el informe no dice cuál se veía:\n{informe}"
+            report.contains("pestaña 0:    se veía"),
+            "el informe no dice cuál se veía:\n{report}"
         );
         assert!(
-            informe.contains("de fondo, se bombeaba sin pintarse"),
-            "el informe no distingue la pestaña de fondo:\n{informe}"
+            report.contains("de fondo, se bombeaba sin pintarse"),
+            "el informe no distingue la pestaña de fondo:\n{report}"
         );
     }
 
@@ -9190,11 +9190,11 @@ mod tests {
         );
         window.close_the_frame(std::time::Duration::from_millis(10));
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         assert!(
-            informe.contains("ventana:      903×701 puntos"),
-            "el informe no publica el tamaño que tuvo la ventana:\n{informe}"
+            report.contains("ventana:      903×701 puntos"),
+            "el informe no publica el tamaño que tuvo la ventana:\n{report}"
         );
     }
 
@@ -9222,7 +9222,7 @@ mod tests {
         );
         window.close_the_frame(std::time::Duration::from_millis(10));
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         // **Las divisiones se numeran seguidas entre pestañas**, así que las de la segunda son la 2 y la
         // 3, no otra vez la 0 y la 1. Escrito así, la prueba distingue un contador de toda la ventana de
@@ -9230,8 +9230,8 @@ mod tests {
         for (which_tab, panes) in [(0, [0, 1]), (1, [2, 3])] {
             for pane in panes {
                 assert!(
-                    informe.contains(&format!("── pestaña {which_tab}, división {pane} ")),
-                    "el informe no publica la división {pane} de la pestaña {which_tab}:\n{informe}"
+                    report.contains(&format!("── pestaña {which_tab}, división {pane} ")),
+                    "el informe no publica la división {pane} de la pestaña {which_tab}:\n{report}"
                 );
             }
         }
@@ -9243,8 +9243,8 @@ mod tests {
         // verde, porque las de arriba solo miran los títulos de las tablas.
         for pane in [0, 1, 2, 3] {
             assert!(
-                informe.contains(&format!("  división {pane}:")),
-                "la cabecera no declara la rejilla de la división {pane}:\n{informe}"
+                report.contains(&format!("  división {pane}:")),
+                "la cabecera no declara la rejilla de la división {pane}:\n{report}"
             );
         }
     }
@@ -9298,10 +9298,10 @@ mod tests {
         // **El cuerpo se saca al primer pase y no vuelve**, porque `run_ui` recibe un `FnMut`: egui puede
         // repetir la pasada sobre la misma entrada, y un cuerpo que se ejecutara dos veces afirmaría dos
         // veces sobre estado ya tocado. Es la misma trampa que obligó a consumir los eventos del teclado.
-        let mut pendiente = Some(visit);
+        let mut pending = Some(visit);
 
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            if let Some(visit) = pendiente.take() {
+            if let Some(visit) = pending.take() {
                 result = Some(visit(&CellMetrics::measure(
                     ui.ctx(),
                     egui::FontId::monospace(DEFAULT_FONT_SIZE),
@@ -9325,15 +9325,15 @@ mod tests {
     /// las repeticiones de crear, cerrar y partir se tragan a propósito—, así que sin soltar, el segundo
     /// acorde de una prueba de dos fotogramas no hace nada y la prueba pasaría por la razón equivocada.
     fn the_chord_again(key: egui::Key) -> Vec<egui::Event> {
-        let mut lote = vec![egui::Event::Key {
+        let mut batch = vec![egui::Event::Key {
             key,
             physical_key: None,
             pressed: false,
             repeat: false,
             modifiers: with_shift(),
         }];
-        lote.extend(chord_with(key));
-        lote
+        batch.extend(chord_with(key));
+        batch
     }
 
     /// El mismo acorde pulsado dos veces, tal y como llegan dos gestos seguidos.
@@ -9343,16 +9343,16 @@ mod tests {
     /// traiga el evento—, y las repeticiones de crear y cerrar se tragan a propósito. Sin la suelta, esto
     /// sería la tecla mantenida, que es el otro caso y ya tiene su prueba.
     fn the_chord_twice(key: egui::Key) -> Vec<egui::Event> {
-        let mut lote = chord_with(key);
-        lote.push(egui::Event::Key {
+        let mut batch = chord_with(key);
+        batch.push(egui::Event::Key {
             key,
             physical_key: None,
             pressed: false,
             repeat: false,
             modifiers: with_shift(),
         });
-        lote.extend(chord_with(key));
-        lote
+        batch.extend(chord_with(key));
+        batch
     }
 
     /// Una tecla pulsada con los modificadores que se digan, y el aviso de cambio que la precede.
@@ -9447,22 +9447,22 @@ mod tests {
     fn las_fichas_se_reparten_la_barra_sin_solaparse_ni_dejar_hueco() {
         let tab_bar = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(900.0, 20.0));
 
-        let primera = ficha(tab_bar, 0, 3);
-        let ultima = ficha(tab_bar, 2, 3);
+        let first_tab = tab_rect(tab_bar, 0, 3);
+        let last_tab = tab_rect(tab_bar, 2, 3);
 
         assert_eq!(
-            primera.left(),
+            first_tab.left(),
             tab_bar.left(),
             "la primera no empieza al borde"
         );
         assert_eq!(
-            ultima.right(),
+            last_tab.right(),
             tab_bar.right(),
             "la última no llega al borde"
         );
         assert_eq!(
-            ficha(tab_bar, 1, 3).left(),
-            primera.right(),
+            tab_rect(tab_bar, 1, 3).left(),
+            first_tab.right(),
             "entre dos fichas quedó hueco, o se solapan"
         );
     }
@@ -9506,9 +9506,9 @@ mod tests {
             ["sleep 30", "sleep 30"],
         ]);
 
-        let mut lote = chord_with(egui::Key::ArrowRight);
-        lote.extend(chord_with(egui::Key::ArrowRight));
-        enqueue(&ctx, lote);
+        let mut batch = chord_with(egui::Key::ArrowRight);
+        batch.extend(chord_with(egui::Key::ArrowRight));
+        enqueue(&ctx, batch);
 
         assert_eq!(
             window.send_keys_to_the_focused(&ctx),
@@ -9524,9 +9524,9 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
 
-        let mut lote = chord_with(egui::Key::ArrowRight);
-        lote.extend(chord_with(egui::Key::ArrowLeft));
-        enqueue(&ctx, lote);
+        let mut batch = chord_with(egui::Key::ArrowRight);
+        batch.extend(chord_with(egui::Key::ArrowLeft));
+        enqueue(&ctx, batch);
 
         assert_eq!(
             window.send_keys_to_the_focused(&ctx),
@@ -9696,18 +9696,18 @@ mod tests {
         events: Vec<egui::Event>,
     ) -> bool {
         let mut frame = eframe::Frame::_new_kittest();
-        let entrada = egui::RawInput {
+        let input = egui::RawInput {
             screen_rect: Some(area),
             events,
             ..Default::default()
         };
 
         eframe::App::logic(window, ctx, &mut frame);
-        let salida = ctx.run_ui(entrada, |ui| eframe::App::ui(window, ui, &mut frame));
-        let pidio_cerrar = salida.viewport_output[&egui::ViewportId::ROOT]
+        let output = ctx.run_ui(input, |ui| eframe::App::ui(window, ui, &mut frame));
+        let asked_to_close = output.viewport_output[&egui::ViewportId::ROOT]
             .commands
             .contains(&egui::ViewportCommand::Close);
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
 
         assert!(
             window.active < window.tabs.len(),
@@ -9716,7 +9716,7 @@ mod tests {
             window.tabs.len()
         );
 
-        pidio_cerrar
+        asked_to_close
     }
 
     #[test]
@@ -9732,32 +9732,32 @@ mod tests {
         // API ajena se lee, no se supone, y aquí además se **ata**, para que una versión nueva de egui
         // que cambie el criterio se note aquí y no en un anexo con números falsos.
         let ctx = egui::Context::default();
-        let mut fotogramas = Vec::new();
-        let mut pasadas = Vec::new();
+        let mut frames = Vec::new();
+        let mut passes = Vec::new();
 
-        let salida = ctx.run_ui(egui::RawInput::default(), |ui| {
-            fotogramas.push(ui.ctx().cumulative_frame_nr());
-            pasadas.push(ui.ctx().cumulative_pass_nr());
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            frames.push(ui.ctx().cumulative_frame_nr());
+            passes.push(ui.ctx().cumulative_pass_nr());
             // Solo en la primera: pedir descarte en todas dejaría a egui repitiendo hasta su tope.
-            if pasadas.len() == 1 {
+            if passes.len() == 1 {
                 ui.ctx()
                     .request_discard("la prueba necesita un fotograma de dos pasadas");
             }
         });
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
 
         assert_eq!(
-            pasadas.len(),
+            passes.len(),
             2,
             "egui no repitió la pasada, así que la prueba no está mirando lo que cree"
         );
         assert_eq!(
-            fotogramas[0], fotogramas[1],
+            frames[0], frames[1],
             "el contador de fotogramas cambió entre dos pasadas del mismo fotograma: ya no sirve de \
              guarda para cerrarlo una sola vez"
         );
         assert_ne!(
-            pasadas[0], pasadas[1],
+            passes[0], passes[1],
             "el contador de pasadas no cambió entre dos pasadas: entonces el defecto que la guarda \
              arregla no se puede reproducir y hay que revisar por qué"
         );
@@ -9771,33 +9771,33 @@ mod tests {
     /// bombear **y** vuelve a pintar. Un ayudante que llame a `logic` una sola vez modela un fotograma
     /// que no existe, y una prueba escrita sobre él certifica una garantía que el sistema real no da.
     ///
-    /// Con `repitiendo` en `true` pide descarte en la primera pasada, que es la forma de provocar el
+    /// Con `repeating` en `true` pide descarte en la primera pasada, que es la forma de provocar el
     /// fotograma de dos pasadas. Devuelve cuántas hubo, para que quien la use pueda afirmar que de verdad
     /// se repitió en vez de dar por hecho que egui obedeció.
-    fn un_fotograma_como_eframe(
+    fn one_frame_like_eframe(
         window: &mut Window,
         ctx: &egui::Context,
-        repitiendo: bool,
+        repeating: bool,
     ) -> usize {
         let mut frame = eframe::Frame::_new_kittest();
-        let entrada = egui::RawInput {
+        let input = egui::RawInput {
             screen_rect: Some(area_of(1200.0)),
             ..Default::default()
         };
-        let mut pasadas = 0;
+        let mut passes = 0;
 
-        let salida = ctx.run_ui(entrada, |ui| {
-            pasadas += 1;
+        let output = ctx.run_ui(input, |ui| {
+            passes += 1;
             eframe::App::logic(window, ui.ctx(), &mut frame);
             eframe::App::ui(window, ui, &mut frame);
-            if repitiendo && pasadas == 1 {
+            if repeating && passes == 1 {
                 ui.ctx()
                     .request_discard("la prueba necesita repetir la pasada");
             }
         });
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
 
-        pasadas
+        passes
     }
 
     #[test]
@@ -9832,15 +9832,15 @@ mod tests {
         apply_without_geometry(&mut window, WindowRequest::CloseTab, &ctx);
         assert_eq!(window.tabs.len(), 1, "no se cerró la primera pestaña");
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
         assert!(
-            informe.contains("── pestaña 1, división 2"),
+            report.contains("── pestaña 1, división 2"),
             "la pestaña que quedó no conserva su nombre, así que sus números se publican con la \
-             etiqueta de otra:\n{informe}"
+             etiqueta de otra:\n{report}"
         );
         assert!(
-            !informe.contains("── pestaña 0, división 0"),
-            "la pestaña que quedó se publicó como la 0, que es la que se cerró:\n{informe}"
+            !report.contains("── pestaña 0, división 0"),
+            "la pestaña que quedó se publicó como la 0, que es la que se cerró:\n{report}"
         );
     }
 
@@ -9859,14 +9859,14 @@ mod tests {
         one_frame_with(&mut window, &ctx, the_chord_twice(egui::Key::T));
         assert_eq!(window.tabs.len(), 3, "no se abrieron las dos pestañas");
 
-        let nombres: Vec<usize> = window.tabs.iter().map(|p| p.name).collect();
-        let mut without_repeating = nombres.clone();
+        let names: Vec<usize> = window.tabs.iter().map(|p| p.name).collect();
+        let mut without_repeating = names.clone();
         without_repeating.sort_unstable();
         without_repeating.dedup();
         assert_eq!(
             without_repeating.len(),
-            nombres.len(),
-            "hay pestañas que se llaman igual: {nombres:?}"
+            names.len(),
+            "hay pestañas que se llaman igual: {names:?}"
         );
     }
 
@@ -9903,19 +9903,19 @@ mod tests {
         window.create_a_tab(&ctx);
         assert_eq!(window.tabs.len(), 3, "no se abrieron las pestañas nuevas");
 
-        let vivos: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
-        let mut without_repeating = vivos.clone();
+        let alive: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
+        let mut without_repeating = alive.clone();
         without_repeating.sort_unstable();
         without_repeating.dedup();
         assert_eq!(
             without_repeating.len(),
-            vivos.len(),
-            "hay divisiones vivas que se llaman igual: {vivos:?}"
+            alive.len(),
+            "hay divisiones vivas que se llaman igual: {alive:?}"
         );
-        for gastado in [0, 1] {
+        for spent in [0, 1] {
             assert!(
-                !vivos.contains(&gastado),
-                "la división {gastado} se cerró y su nombre se le dio a otra: {vivos:?}"
+                !alive.contains(&spent),
+                "la división {spent} se cerró y su nombre se le dio a otra: {alive:?}"
             );
         }
     }
@@ -10055,10 +10055,10 @@ mod tests {
         window.timed_separately = std::time::Duration::from_secs(4);
         window.close_the_frame(FRAME);
 
-        let resto = window.rest_of_frame.media();
+        let rest = window.rest_of_frame.media();
         assert!(
-            resto < std::time::Duration::from_secs(7),
-            "el resto salió {resto:?} de 10s: los 4s declarados aparte no se descontaron"
+            rest < std::time::Duration::from_secs(7),
+            "el resto salió {rest:?} de 10s: los 4s declarados aparte no se descontaron"
         );
 
         // Y no se arrastra: un fotograma después, sin nada declarado aparte, el resto vuelve a ser el
@@ -10072,10 +10072,10 @@ mod tests {
             egui::RawInput::default(),
         );
         window.close_the_frame(FRAME);
-        let media = window.rest_of_frame.media();
+        let average = window.rest_of_frame.media();
         assert!(
-            media > std::time::Duration::from_secs(7),
-            "la media quedó en {media:?}: el descuento se aplicó dos veces, así que el campo no se vació \
+            average > std::time::Duration::from_secs(7),
+            "la media quedó en {average:?}: el descuento se aplicó dos veces, así que el campo no se vació \
              al cerrar el fotograma"
         );
     }
@@ -10094,9 +10094,9 @@ mod tests {
         let mut window = window_with("printf de-verdad", "sleep 30");
         wait_for_it_to_die(window.active().panes()[0]);
 
-        let pasadas = un_fotograma_como_eframe(&mut window, &ctx, true);
+        let passes = one_frame_like_eframe(&mut window, &ctx, true);
         assert_eq!(
-            pasadas, 2,
+            passes, 2,
             "egui no repitió la pasada, así que la prueba no está mirando lo que cree"
         );
         assert!(
@@ -10326,7 +10326,7 @@ mod tests {
         // interpretó se guarda aparte para poder afirmar sobre **el panel** y no sobre la suma: sin
         // esa resta, la prueba la cumpliría cualquier tramo que declarase algo.
         window.pump_them_all();
-        let (_, _, interpretado) = window.tabs[1].panes()[0]
+        let (_, _, interpreted) = window.tabs[1].panes()[0]
             .pending_measurement
             .expect("el bombeo tiene que dejar pendiente la vuelta de la consola de fondo");
 
@@ -10337,13 +10337,13 @@ mod tests {
             egui::RawInput::default(),
         );
 
-        let declarado = window.tabs[1].panes_mut()[0]
+        let declared = window.tabs[1].panes_mut()[0]
             .timings
             .cerrar_fotograma(std::time::Duration::from_millis(10))
             .expect("la consola de fondo no declaró nada");
         assert!(
-            declarado > interpretado,
-            "declaró {declarado:?} y solo interpretar ya costó {interpretado:?}: leer el panel se \
+            declared > interpreted,
+            "declaró {declared:?} y solo interpretar ya costó {interpreted:?}: leer el panel se \
              publicaría como coste del framework"
         );
         assert!(
@@ -10379,22 +10379,22 @@ mod tests {
             .map(|tab| [tab.panes()[0].measured, tab.panes()[1].measured])
             .collect();
 
-        for (which, medidas) in from_the_bottom.iter().enumerate() {
+        for (which, grids) in from_the_bottom.iter().enumerate() {
             assert!(
-                !medidas.contains(&INITIAL_GRID),
-                "la pestaña {} se quedó con la rejilla de arranque: midió {medidas:?}",
+                !grids.contains(&INITIAL_GRID),
+                "la pestaña {} se quedó con la rejilla de arranque: midió {grids:?}",
                 which + 1
             );
         }
 
         // Y cada una tiene que medir desde el fondo lo que mide al verse. Comparar solo contra la
         // rejilla de arranque dejaría pasar cualquier tamaño equivocado que no fuera 24×80.
-        for (which, medidas) in from_the_bottom.iter().enumerate() {
+        for (which, grids) in from_the_bottom.iter().enumerate() {
             let tab = which + 1;
             window.active = tab;
             one_frame_with(&mut window, &ctx, Vec::new());
             assert_eq!(
-                *medidas,
+                *grids,
                 [
                     window.tabs[tab].panes()[0].measured,
                     window.tabs[tab].panes()[1].measured,
@@ -10424,16 +10424,16 @@ mod tests {
         one_frame_with(&mut window, &ctx, chord_with(egui::Key::T));
 
         assert_eq!(window.tabs.len(), 2, "no se abrió la pestaña");
-        let paso_a_fondo = window.tabs[0].panes()[0].measured;
+        let sent_to_the_back = window.tabs[0].panes()[0].measured;
         assert!(
-            paso_a_fondo.rows < without_tab_bar.rows,
+            sent_to_the_back.rows < without_tab_bar.rows,
             "la que se quedó detrás midió {} filas, las mismas que cuando no había barra",
-            paso_a_fondo.rows
+            sent_to_the_back.rows
         );
         // Se comparan las filas y no la rejilla entera: lo que la barra quita es alto, y las columnas
         // de la pestaña nueva dependen además de su panel, que la de antes no tiene.
         assert_eq!(
-            paso_a_fondo.rows,
+            sent_to_the_back.rows,
             window.tabs[1].panes()[0].measured.rows,
             "la que se quedó detrás no tiene el alto de la que ahora se ve"
         );
@@ -10446,7 +10446,7 @@ mod tests {
         // aplicación contándose las cosas a sí misma.
         //
         // Lo que añade sobre `al_redimensionar_el_programa_de_dentro_se_entera_del_tamano_nuevo` es el
-        // **camino entero**: aquella llama a `redimensionar` a mano sobre una división suelta, así que
+        // **camino entero**: aquella llama a `resize` a mano sobre una división suelta, así que
         // demuestra que el `ioctl` funciona, no que alguien lo dispare por una pestaña que nunca se
         // pinta. Ésta pasa por el fotograma completo, que es donde el defecto vivía. Las dos caen si
         // se quita el `ioctl`, y eso está bien: se cubren dos tramos distintos del mismo camino.
@@ -10460,7 +10460,7 @@ mod tests {
         ]);
 
         // Dos fotogramas: el primero mide —la pasada de interfaz escribe `measured`— y el segundo
-        // aplica, porque `redimensionar` corre en la mitad lógica, antes de medir.
+        // aplica, porque `resize` corre en la mitad lógica, antes de medir.
         one_frame_with(&mut window, &ctx, Vec::new());
         one_frame_with(&mut window, &ctx, Vec::new());
 
@@ -10469,11 +10469,11 @@ mod tests {
             in_the_background.measured, INITIAL_GRID,
             "la de fondo se quedó con la rejilla de arranque y la espera de abajo no probaría nada"
         );
-        let suyo = format!(
+        let its_size = format!(
             "{} {}",
             in_the_background.measured.rows, in_the_background.measured.cols
         );
-        wait_for_the_screen_to_say(in_the_background, &suyo);
+        wait_for_the_screen_to_say(in_the_background, &its_size);
     }
 
     #[test]
@@ -10545,7 +10545,7 @@ mod tests {
         })
         .drop_without_applying_deltas();
 
-        let entrada = egui::RawInput {
+        let input = egui::RawInput {
             events: vec![
                 egui::Event::PointerMoved(inside_the_second),
                 egui::Event::PointerButton {
@@ -10563,7 +10563,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        ctx.run_ui(entrada, |ui| {
+        ctx.run_ui(input, |ui| {
             window.handle_tab_bar_clicks(
                 ui,
                 tab_bar,
@@ -10607,7 +10607,7 @@ mod tests {
         // teclas que se usan: `Ctrl+→` salta de palabra en un shell y `Mayúsculas+→` selecciona en medio
         // editor. Quitar cualquiera de las dos guardas dejaba la suite en verde —comprobado mutando las
         // dos por separado— y le habría quitado esas teclas a todo el mundo con dos pestañas abiertas.
-        for (teclas, como) in [
+        for (modifiers, with_what) in [
             (
                 egui::Modifiers {
                     ctrl: true,
@@ -10626,17 +10626,17 @@ mod tests {
             let ctx = egui::Context::default();
             let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
 
-            enqueue(&ctx, key_with(egui::Key::ArrowRight, teclas));
+            enqueue(&ctx, key_with(egui::Key::ArrowRight, modifiers));
 
             assert_eq!(
                 window.send_keys_to_the_focused(&ctx),
                 Vec::new(),
-                "{como} se pidió cambiar de pestaña"
+                "{with_what} se pidió cambiar de pestaña"
             );
             assert_eq!(
                 window.active().panes()[0].keystrokes,
                 b"\x1b[C",
-                "{como} la flecha se la tragó el acorde en vez de llegar al programa"
+                "{with_what} la flecha se la tragó el acorde en vez de llegar al programa"
             );
         }
     }
@@ -10654,15 +10654,15 @@ mod tests {
             ["sleep 30", "sleep 30"],
         ]);
 
-        let mut lote = chord_with(egui::Key::ArrowRight);
-        lote.push(egui::Event::Key {
+        let mut batch = chord_with(egui::Key::ArrowRight);
+        batch.push(egui::Event::Key {
             key: egui::Key::ArrowRight,
             physical_key: None,
             pressed: false,
             repeat: false,
             modifiers: with_shift(),
         });
-        enqueue(&ctx, lote);
+        enqueue(&ctx, batch);
 
         assert_eq!(
             window.send_keys_to_the_focused(&ctx),
@@ -10727,47 +10727,47 @@ mod tests {
         // El color entra en la afirmación porque es la mitad de que un número **se lea**: intercambiar
         // el de la activa con el de las demás pinta cada número del color de su propio fondo y deja la
         // barra en blanco sin que ninguna forma desaparezca.
-        let numeros: Vec<(egui::Rect, String, egui::Color32)> = shapes
+        let numbers: Vec<(egui::Rect, String, egui::Color32)> = shapes
             .iter()
-            .filter_map(|recortada| match &recortada.shape {
-                egui::Shape::Text(texto) if tab_bar.contains_rect(recortada.clip_rect) => Some((
-                    recortada.clip_rect,
-                    texto.galley.text().to_owned(),
-                    texto.fallback_color,
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if tab_bar.contains_rect(clipped.clip_rect) => Some((
+                    clipped.clip_rect,
+                    text.galley.text().to_owned(),
+                    text.fallback_color,
                 )),
                 _ => None,
             })
             .collect();
         assert_eq!(
-            numeros,
+            numbers,
             vec![
                 (
-                    ficha(tab_bar, 0, 2),
+                    tab_rect(tab_bar, 0, 2),
                     "1".to_owned(),
                     window.theme.foreground()
                 ),
-                (ficha(tab_bar, 1, 2), "2".to_owned(), window.theme.background()),
+                (tab_rect(tab_bar, 1, 2), "2".to_owned(), window.theme.background()),
             ],
             // Empiezan en uno: los ceros son del informe, que es un instrumento, y esto es lo que lee
             // quien tiene la ventana delante.
             "la barra no pintó un número legible por ficha, empezando en uno y en su sitio"
         );
 
-        let realzadas: Vec<egui::Rect> = shapes
+        let highlighted: Vec<egui::Rect> = shapes
             .iter()
-            .filter_map(|recortada| match &recortada.shape {
-                egui::Shape::Rect(pintada)
-                    if pintada.fill == window.theme.focus()
-                        && tab_bar.contains_rect(recortada.clip_rect) =>
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(painted)
+                    if painted.fill == window.theme.focus()
+                        && tab_bar.contains_rect(clipped.clip_rect) =>
                 {
-                    Some(recortada.clip_rect)
+                    Some(clipped.clip_rect)
                 }
                 _ => None,
             })
             .collect();
         assert_eq!(
-            realzadas,
-            vec![ficha(tab_bar, 1, 2)],
+            highlighted,
+            vec![tab_rect(tab_bar, 1, 2)],
             "el realce de la barra no señala exactamente a la pestaña activa"
         );
     }
@@ -10826,10 +10826,10 @@ mod tests {
         // El nombre **es** el contrato con `scripts/medir-fotograma.sh`, que ya exporta `MEDIR_MIB` y
         // `MEDIR_TANDA`. Cambiarlo aquí dejaría la puerta cerrada sin que nada se pusiera rojo: el guion
         // seguiría midiendo una sola pestaña creyendo que mide dos.
-        assert_eq!(VARIABLE_DE_LAS_PESTAÑAS, "MEDIR_PESTANAS");
-        assert_eq!(VARIABLE_DEL_TAMAÑO, "MEDIR_TAMANO");
-        assert_eq!(VARIABLE_DE_LAS_DIVISIONES, "MEDIR_DIVISIONES");
-        assert_eq!(VARIABLE_DE_LOS_ARRASTRES, "MEDIR_ARRASTRES");
+        assert_eq!(TABS_VARIABLE, "MEDIR_PESTANAS");
+        assert_eq!(SIZE_VARIABLE, "MEDIR_TAMANO");
+        assert_eq!(PANES_VARIABLE, "MEDIR_DIVISIONES");
+        assert_eq!(DRAGS_VARIABLE, "MEDIR_ARRASTRES");
     }
 
     #[test]
@@ -10848,7 +10848,7 @@ mod tests {
 
         // Lo que no se entiende se ignora, como en el número de pestañas. Y un cero o un negativo no son un
         // tamaño: dejarían una ventana sin nada dentro.
-        for malo in [
+        for bad in [
             "mil por ochocientos",
             "1280",
             "1280x",
@@ -10857,9 +10857,9 @@ mod tests {
             "NaNx600",
         ] {
             assert_eq!(
-                window_size(Some(malo)),
+                window_size(Some(bad)),
                 None,
-                "se aceptó «{malo}» como tamaño"
+                "se aceptó «{bad}» como tamaño"
             );
         }
     }
@@ -10885,7 +10885,7 @@ mod tests {
         // ahí sale una pestaña sin ninguna consola, o sea la aplicación cayéndose al arrancar y
         // contradiciendo lo que esta misma función promete. No es inventarse un techo de divisiones —eso está
         // decidido al revés—: es negarse a representar lo que no cabe en un número.
-        for malo in [
+        for bad in [
             "dos por dos",
             "2",
             "2x",
@@ -10893,11 +10893,11 @@ mod tests {
             "2x0",
             "4294967296x4294967296",
         ] {
-            let caida = opening_layout_of(Some(malo));
+            let fallback = opening_layout_of(Some(bad));
             assert_eq!(
-                (caida.columns, caida.rows),
+                (fallback.columns, fallback.rows),
                 (2, 1),
-                "«{malo}» no cayó en la disposición de siempre"
+                "«{bad}» no cayó en la disposición de siempre"
             );
         }
     }
@@ -10921,42 +10921,42 @@ mod tests {
         assert_eq!(tiling.dividers.len(), 3, "no salieron tres fronteras");
 
         let [
-            arriba_izquierda,
-            abajo_izquierda,
-            arriba_derecha,
-            abajo_derecha,
+            upper_left,
+            lower_left,
+            upper_right,
+            lower_right,
         ] = <[egui::Rect; 4]>::try_from(tiling.parts.clone()).expect("son cuatro");
 
         // El orden de las hojas es el orden en que se abren y el que el informe nombra: columna izquierda
         // de arriba abajo, y luego la derecha.
         assert_eq!(
-            (arriba_izquierda.left(), arriba_izquierda.top()),
+            (upper_left.left(), upper_left.top()),
             (0.0, 0.0),
             "la primera no está arriba a la izquierda"
         );
         assert_eq!(
-            abajo_izquierda.left(),
-            arriba_izquierda.left(),
+            lower_left.left(),
+            upper_left.left(),
             "las dos de la izquierda no comparten columna"
         );
         assert!(
-            abajo_izquierda.top() > arriba_izquierda.bottom(),
+            lower_left.top() > upper_left.bottom(),
             "la segunda no cae debajo de la primera"
         );
         assert!(
-            arriba_derecha.left() > arriba_izquierda.right(),
+            upper_right.left() > upper_left.right(),
             "la tercera no cae a la derecha de la primera"
         );
         assert_eq!(
-            (abajo_derecha.right(), abajo_derecha.bottom()),
+            (lower_right.right(), lower_right.bottom()),
             (802.0, 602.0),
             "la cuarta no llega a la esquina de abajo a la derecha"
         );
         // Los anchos iguales son lo que dice que las columnas son hermanas y no un anidamiento con pesos
         // heredados.
         assert_eq!(
-            arriba_izquierda.width(),
-            arriba_derecha.width(),
+            upper_left.width(),
+            upper_right.width(),
             "las dos columnas no se reparten el ancho a partes iguales"
         );
         // **Y los altos también, que es lo que faltaba.** El reparto de una rama de dos hijos usa
@@ -10966,8 +10966,8 @@ mod tests {
         // desiguales y las dos consolas de una columna tendrían rejillas distintas, mientras el anexo de
         // medida publica **una sola** rejilla como la de cada consola.
         assert_eq!(
-            arriba_izquierda.height(),
-            abajo_izquierda.height(),
+            upper_left.height(),
+            lower_left.height(),
             "las dos filas de una columna no se reparten el alto a partes iguales"
         );
     }
@@ -10987,13 +10987,13 @@ mod tests {
 
         assert_eq!(tiling.parts.len(), 4);
         assert_eq!(tiling.dividers.len(), 3, "no salieron tres fronteras");
-        for parte in &tiling.parts {
+        for part in &tiling.parts {
             assert_eq!(
-                (parte.top(), parte.bottom()),
+                (part.top(), part.bottom()),
                 (0.0, 600.0),
                 "una consola de la fila no ocupa todo el alto"
             );
-            assert_eq!(parte.width(), 200.0, "las cuatro no se reparten el ancho");
+            assert_eq!(part.width(), 200.0, "las cuatro no se reparten el ancho");
         }
     }
 
@@ -11013,13 +11013,13 @@ mod tests {
 
         assert_eq!(tiling.parts.len(), 2, "no salieron dos consolas");
         assert_eq!(tiling.dividers.len(), 1, "no salió una sola frontera");
-        for parte in &tiling.parts {
+        for part in &tiling.parts {
             assert_eq!(
-                (parte.left(), parte.right()),
+                (part.left(), part.right()),
                 (0.0, 800.0),
                 "una consola apilada no ocupa todo el ancho"
             );
-            assert_eq!(parte.height(), 300.0, "las dos no se reparten el alto");
+            assert_eq!(part.height(), 300.0, "las dos no se reparten el alto");
         }
     }
 
@@ -11027,7 +11027,7 @@ mod tests {
     fn con_menos_consolas_de_las_que_pide_la_disposicion_no_queda_ninguna_columna_vacia() {
         // **El número de columnas se cuenta de las consolas que hay, no de lo que la disposición pedía**, y
         // esto es lo que pasa si no: una columna sin ninguna hija es una rama cuya suma de pesos es cero, y
-        // el reparto `peso / suma` mete un `NaN` en un `Rect` que se propaga a todo el pintado — el fallo
+        // el reparto `peso / total` mete un `NaN` en un `Rect` que se propaga a todo el pintado — el fallo
         // que el tipo `Weight` existe para hacer imposible, colado por otra puerta.
         let tab = Tab::with_panes(
             (0..3).map(|n| pane_with("sleep 30", n)).collect(),
@@ -11038,10 +11038,10 @@ mod tests {
         let tiling = tab.root.place(area, CELL_WIDTH);
 
         assert_eq!(tiling.parts.len(), 3, "no salieron las tres consolas");
-        for parte in &tiling.parts {
+        for part in &tiling.parts {
             assert!(
-                parte.is_finite() && parte.is_positive(),
-                "una consola salió con un rectángulo imposible: {parte:?}"
+                part.is_finite() && part.is_positive(),
+                "una consola salió con un rectángulo imposible: {part:?}"
             );
         }
     }
@@ -11131,27 +11131,27 @@ mod tests {
         // publica nada—, y estas consolas corren el shell del usuario, que no escribe nada por su cuenta.
         // Cuál de las ocho la lleva da igual: las etiquetas de las tablas salen de las divisiones que hay.
         {
-            let suya = &mut window.tabs[0].panes_mut()[0].timings;
-            suya.anotar_vuelta(measure::Tramos::de_una_vuelta(
+            let its_timings = &mut window.tabs[0].panes_mut()[0].timings;
+            its_timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
                 Some(Instant::now()),
                 Instant::now(),
                 std::time::Duration::from_millis(1),
                 std::time::Duration::ZERO,
                 std::time::Duration::ZERO,
             ));
-            suya.cerrar_fotograma(std::time::Duration::from_millis(2));
+            its_timings.cerrar_fotograma(std::time::Duration::from_millis(2));
         }
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         for name in 0..8 {
             // Con el `──` del final detrás del número, «división 1» no casa con la etiqueta de la 10.
-            let etiqueta = format!(", división {name} ──");
+            let label = format!(", división {name} ──");
             assert_eq!(
-                informe.matches(&etiqueta).count(),
+                report.matches(&label).count(),
                 1,
-                "el informe publica {} tablas tituladas «{etiqueta}»:\n{informe}",
-                informe.matches(&etiqueta).count()
+                "el informe publica {} tablas tituladas «{label}»:\n{report}",
+                report.matches(&label).count()
             );
         }
     }
@@ -11166,26 +11166,26 @@ mod tests {
         ctx: &egui::Context,
         area: egui::Rect,
     ) -> Vec<egui::ViewportCommand> {
-        let entrada = egui::RawInput {
+        let input = egui::RawInput {
             screen_rect: Some(area),
             ..Default::default()
         };
         let mut frame = eframe::Frame::_new_kittest();
-        let salida = ctx.run_ui(entrada, |_| {
+        let output = ctx.run_ui(input, |_| {
             eframe::App::logic(window, ctx, &mut frame);
         });
-        let requests = salida
+        let requests = output
             .viewport_output
             .values()
-            .flat_map(|salida| salida.commands.clone())
+            .flat_map(|output| output.commands.clone())
             .collect();
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
         requests
     }
 
     fn the_size_was_asked_for(requests: &[egui::ViewportCommand], how_much: egui::Vec2) -> bool {
         requests.iter().any(
-            |request| matches!(request, egui::ViewportCommand::InnerSize(pedido) if *pedido == how_much),
+            |request| matches!(request, egui::ViewportCommand::InnerSize(requested) if *requested == how_much),
         )
     }
 
@@ -11193,7 +11193,7 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         window.requested_size = Some(RequestedSize {
             how_much,
-            attempts: INSISTENCIAS_CON_EL_TAMAÑO,
+            attempts: FRAMES_INSISTING_ON_SIZE,
         });
         window
     }
@@ -11202,18 +11202,18 @@ mod tests {
     fn con_el_tamaño_pedido_puesto_la_ventana_no_pide_nada() {
         // Sin esta mitad, la ventana estaría mandando una orden de redimensionado en cada fotograma de la
         // tanda — y cada orden pide otro fotograma, así que la medida acabaría midiéndose a sí misma.
-        let pedido = egui::vec2(800.0, 600.0);
-        let mut window = a_window_that_asks(pedido);
+        let requested = egui::vec2(800.0, 600.0);
+        let mut window = a_window_that_asks(requested);
         let ctx = egui::Context::default();
 
         let requests = requests_of_one_logical_pass(
             &mut window,
             &ctx,
-            egui::Rect::from_min_size(egui::Pos2::ZERO, pedido),
+            egui::Rect::from_min_size(egui::Pos2::ZERO, requested),
         );
 
         assert!(
-            !the_size_was_asked_for(&requests, pedido),
+            !the_size_was_asked_for(&requests, requested),
             "se pidió un tamaño que la ventana ya tenía"
         );
     }
@@ -11224,8 +11224,8 @@ mod tests {
         // tercero llega la configuración del compositor —1126×661 puntos donde se pidieron 800×600—. Sin
         // volver a pedirlo, la tanda se toma con el tamaño del escritorio y el informe publica una rejilla
         // que nadie puede reproducir.
-        let pedido = egui::vec2(800.0, 600.0);
-        let mut window = a_window_that_asks(pedido);
+        let requested = egui::vec2(800.0, 600.0);
+        let mut window = a_window_that_asks(requested);
         let ctx = egui::Context::default();
 
         let requests = requests_of_one_logical_pass(
@@ -11235,7 +11235,7 @@ mod tests {
         );
 
         assert!(
-            the_size_was_asked_for(&requests, pedido),
+            the_size_was_asked_for(&requests, requested),
             "el tamaño del compositor se aceptó sin pedir el pedido"
         );
     }
@@ -11246,13 +11246,13 @@ mod tests {
         // tamaño pedido —el compositor no ha mandado el suyo todavía—, así que gastar un intento en cada uno
         // dejaría a la ventana sin con qué responder cuando llegue. Se gastan tantos buenos como intentos
         // hay, y después uno malo tiene que seguir pidiendo.
-        let pedido = egui::vec2(800.0, 600.0);
-        let mut window = a_window_that_asks(pedido);
+        let requested = egui::vec2(800.0, 600.0);
+        let mut window = a_window_that_asks(requested);
         let ctx = egui::Context::default();
-        let bueno = egui::Rect::from_min_size(egui::Pos2::ZERO, pedido);
+        let good = egui::Rect::from_min_size(egui::Pos2::ZERO, requested);
 
-        for _ in 0..INSISTENCIAS_CON_EL_TAMAÑO {
-            requests_of_one_logical_pass(&mut window, &ctx, bueno);
+        for _ in 0..FRAMES_INSISTING_ON_SIZE {
+            requests_of_one_logical_pass(&mut window, &ctx, good);
         }
 
         let requests = requests_of_one_logical_pass(
@@ -11262,7 +11262,7 @@ mod tests {
         );
 
         assert!(
-            the_size_was_asked_for(&requests, pedido),
+            the_size_was_asked_for(&requests, requested),
             "los fotogramas buenos se comieron las insistencias"
         );
     }
@@ -11272,23 +11272,23 @@ mod tests {
         // Un compositor que no ceda —una ventana en mosaico, un escritorio con su propia política—
         // convertiría esto en una pelea por fotograma, y la medida que la puerta viene a hacer posible se
         // mediría peleándose. Quien mide se entera igual: el informe publica el tamaño que **hubo**.
-        let pedido = egui::vec2(800.0, 600.0);
-        let mut window = a_window_that_asks(pedido);
+        let requested = egui::vec2(800.0, 600.0);
+        let mut window = a_window_that_asks(requested);
         let ctx = egui::Context::default();
-        let terco = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
+        let stubborn = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
 
-        for which in 0..INSISTENCIAS_CON_EL_TAMAÑO {
-            let requests = requests_of_one_logical_pass(&mut window, &ctx, terco);
+        for which in 0..FRAMES_INSISTING_ON_SIZE {
+            let requests = requests_of_one_logical_pass(&mut window, &ctx, stubborn);
             assert!(
-                the_size_was_asked_for(&requests, pedido),
+                the_size_was_asked_for(&requests, requested),
                 "la insistencia número {which} no pidió nada"
             );
         }
 
-        let requests = requests_of_one_logical_pass(&mut window, &ctx, terco);
+        let requests = requests_of_one_logical_pass(&mut window, &ctx, stubborn);
 
         assert!(
-            !the_size_was_asked_for(&requests, pedido),
+            !the_size_was_asked_for(&requests, requested),
             "la ventana sigue peleándose con el escritorio pasados los intentos"
         );
     }
@@ -11302,7 +11302,7 @@ mod tests {
         // diferencia que no mueve ni un píxel, y menos una celda de la rejilla, que es lo que se compara.
         //
         // **El medio punto va escrito aquí y NO sale de la constante**, y ésa es la diferencia entre una
-        // prueba y un espejo: la primera versión desviaba la ventana `MARGEN_DEL_TAMAÑO` puntos, así que
+        // prueba y un espejo: la primera versión desviaba la ventana `SIZE_TOLERANCE` puntos, así que
         // recortar el margen a cero le recortaba también la desviación —pedía el tamaño exacto— y **la prueba
         // seguía en verde con el defecto puesto**. Comprobado mutándolo. Con el número escrito, un margen
         // recortado cae.
@@ -11311,18 +11311,18 @@ mod tests {
         // compara con `<=` porque aquí es `<=`, y medio punto de desviación lo aceptan los dos o ninguno.
         // Junto con la prueba de al lado —un punto de desviación **sí** se corrige—, este par deja el margen
         // encajonado entre medio punto y uno.
-        let pedido = egui::vec2(800.0, 600.0);
-        let mut window = a_window_that_asks(pedido);
+        let requested = egui::vec2(800.0, 600.0);
+        let mut window = a_window_that_asks(requested);
         let ctx = egui::Context::default();
 
         let requests = requests_of_one_logical_pass(
             &mut window,
             &ctx,
-            egui::Rect::from_min_size(egui::Pos2::ZERO, pedido + egui::Vec2::splat(0.5)),
+            egui::Rect::from_min_size(egui::Pos2::ZERO, requested + egui::Vec2::splat(0.5)),
         );
 
         assert!(
-            !the_size_was_asked_for(&requests, pedido),
+            !the_size_was_asked_for(&requests, requested),
             "la ventana se pelea por medio punto, que no mueve ni una celda de la rejilla"
         );
     }
@@ -11338,27 +11338,27 @@ mod tests {
         //
         // **Un solo punto de desviación**, que es el número que obliga a que el margen siga siendo medio:
         // con veinte, un margen de dos puntos seguiría en verde.
-        let pedido = egui::vec2(800.0, 600.0);
+        let requested = egui::vec2(800.0, 600.0);
         let ctx = egui::Context::default();
 
-        for desviacion in [
+        for deviation in [
             egui::vec2(1.0, 0.0),
             egui::vec2(-1.0, 0.0),
             egui::vec2(0.0, 1.0),
             egui::vec2(0.0, -1.0),
         ] {
-            let mut window = a_window_that_asks(pedido);
+            let mut window = a_window_that_asks(requested);
 
             let requests = requests_of_one_logical_pass(
                 &mut window,
                 &ctx,
-                egui::Rect::from_min_size(egui::Pos2::ZERO, pedido + desviacion),
+                egui::Rect::from_min_size(egui::Pos2::ZERO, requested + deviation),
             );
 
             assert!(
-                the_size_was_asked_for(&requests, pedido),
-                "con la ventana en {:?} —o sea {desviacion:?} de lo pedido— no se volvió a pedir nada",
-                pedido + desviacion
+                the_size_was_asked_for(&requests, requested),
+                "con la ventana en {:?} —o sea {deviation:?} de lo pedido— no se volvió a pedir nada",
+                requested + deviation
             );
         }
     }
@@ -11375,13 +11375,13 @@ mod tests {
         // aparte**, y por eso la primera aserción no es adorno: dice que los treinta y dos fotogramas en los
         // que se pide el tamaño no declaran nada, lo que hace que el salto de después solo pueda venir del
         // aviso. Cuánto tarda no se afirma —eso sería inventarse un umbral—, solo que no es cero.
-        let pedido = egui::vec2(800.0, 600.0);
-        let mut window = a_window_that_asks(pedido);
+        let requested = egui::vec2(800.0, 600.0);
+        let mut window = a_window_that_asks(requested);
         let ctx = egui::Context::default();
-        let terco = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
+        let stubborn = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1126.0, 661.0));
 
-        for _ in 0..INSISTENCIAS_CON_EL_TAMAÑO {
-            requests_of_one_logical_pass(&mut window, &ctx, terco);
+        for _ in 0..FRAMES_INSISTING_ON_SIZE {
+            requests_of_one_logical_pass(&mut window, &ctx, stubborn);
         }
         assert!(
             window.timed_separately.is_zero(),
@@ -11389,7 +11389,7 @@ mod tests {
             window.timed_separately
         );
 
-        requests_of_one_logical_pass(&mut window, &ctx, terco);
+        requests_of_one_logical_pass(&mut window, &ctx, stubborn);
 
         assert!(
             !window.timed_separately.is_zero(),
@@ -11412,7 +11412,7 @@ mod tests {
             "la pestaña activa apunta fuera de la lista"
         );
 
-        let directorios: std::collections::HashSet<_> = window
+        let dirs: std::collections::HashSet<_> = window
             .all_panes()
             .map(|pane| {
                 pane.panel
@@ -11423,7 +11423,7 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            directorios.len(),
+            dirs.len(),
             6,
             "dos consolas comparten directorio, así que se pisarían el estado"
         );
@@ -11461,7 +11461,7 @@ mod tests {
         // consolas son una curiosidad. Se prueba con un `Ui` de verdad porque lo que hay que comprobar
         // es la traducción de un clic del escritorio a nuestro foco, y eso solo lo sabe egui.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
+        let [left_pane, right_pane] = two_wide_panes();
         let inside_the_right_one = egui::pos2(600.0, 150.0);
 
         let ctx = egui::Context::default();
@@ -11471,13 +11471,13 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |ui| {
             window.handle_the_mouse(
                 ui,
-                &[izquierda, derecha],
+                &[left_pane, right_pane],
                 &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
             );
         })
         .drop_without_applying_deltas();
 
-        let entrada = egui::RawInput {
+        let input = egui::RawInput {
             events: vec![
                 egui::Event::PointerMoved(inside_the_right_one),
                 egui::Event::PointerButton {
@@ -11495,10 +11495,10 @@ mod tests {
             ],
             ..Default::default()
         };
-        ctx.run_ui(entrada, |ui| {
+        ctx.run_ui(input, |ui| {
             window.handle_the_mouse(
                 ui,
-                &[izquierda, derecha],
+                &[left_pane, right_pane],
                 &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
             );
         })
@@ -11539,17 +11539,17 @@ mod tests {
             &keyboard::Keymap::default(),
             true,
         );
-        let salida = ctx.run_ui(egui::RawInput::default(), |_| {});
-        let copiado = salida
+        let output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        let copied = output
             .platform_output
             .commands
             .iter()
             .find_map(|request| match request {
-                egui::OutputCommand::CopyText(texto) => Some(texto.clone()),
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
                 _ => None,
             });
-        salida.drop_without_applying_deltas();
-        copiado
+        output.drop_without_applying_deltas();
+        copied
     }
 
     #[test]
@@ -11612,15 +11612,15 @@ mod tests {
             &keyboard::Keymap::default(),
             false,
         );
-        let salida = ctx.run_ui(egui::RawInput::default(), |_| {});
-        let copio = salida
+        let output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        let copied_anything = output
             .platform_output
             .commands
             .iter()
             .any(|request| matches!(request, egui::OutputCommand::CopyText(_)));
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
 
-        assert!(!copio, "con el atajo apagado se copió igual");
+        assert!(!copied_anything, "con el atajo apagado se copió igual");
         assert_eq!(
             pane.keystrokes, b"\x03",
             "al programa no le llegó el acorde que se le acababa de devolver"
@@ -11657,7 +11657,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
-        let solo_ctrl = egui::Modifiers {
+        let ctrl_only = egui::Modifiers {
             ctrl: true,
             ..Default::default()
         };
@@ -11667,7 +11667,7 @@ mod tests {
         // separa es este bucle mirando los modificadores que sí tiene a mano.
         enqueue(
             &ctx,
-            vec![egui::Event::ModifiersChanged(solo_ctrl), egui::Event::Copy],
+            vec![egui::Event::ModifiersChanged(ctrl_only), egui::Event::Copy],
         );
         pane.send_keys(
             &ctx,
@@ -11693,16 +11693,16 @@ mod tests {
     fn drag_to_select(
         window: &mut Window,
         ctx: &egui::Context,
-        rectangulos: &[egui::Rect],
-        desde: egui::Pos2,
-        hasta: egui::Pos2,
+        rects: &[egui::Rect],
+        from: egui::Pos2,
+        to: egui::Pos2,
     ) {
         drag_with_chord(
             window,
             ctx,
-            rectangulos,
-            desde,
-            hasta,
+            rects,
+            from,
+            to,
             egui::Modifiers::NONE,
         );
     }
@@ -11711,9 +11711,9 @@ mod tests {
     ///
     /// **La rejilla hay que anunciarla**, porque de ella salen las columnas que la consola ocupa de verdad
     /// —lo que sobra es el panel— y sin eso la cuenta de dónde cae el puntero no tiene contra qué acotar.
-    fn two_panes_with_text(rectangulos: &[egui::Rect], metrics: &CellMetrics) -> Window {
+    fn two_panes_with_text(rects: &[egui::Rect], metrics: &CellMetrics) -> Window {
         let mut window = window_with("sleep 30", "sleep 30");
-        for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(rectangulos) {
+        for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(rects) {
             pane.measured = metrics.cells_in(rect.size());
             pane.screen.resize(pane.measured);
             pane.screen.advance(b"hola mundo");
@@ -11733,9 +11733,9 @@ mod tests {
         // terminal. Se afirma sobre las **dos** cosas: que marca **y** que no mueve. Con solo la primera,
         // un gesto que marcara y además reordenara el árbol pasaría.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window = two_panes_with_text(&rectangulos, &metrics);
+        let mut window = two_panes_with_text(&rects, &metrics);
         let request = window
             .active()
             .panes()
@@ -11747,9 +11747,9 @@ mod tests {
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
         );
 
         assert_eq!(
@@ -11776,22 +11776,22 @@ mod tests {
         // marcado**: un gesto que hiciera las dos cosas dejaría al usuario con la consola movida y un
         // trozo realzado que él no pidió.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window = two_panes_with_text(&rectangulos, &metrics);
-        let primera = window.active().panes()[0].name;
+        let mut window = two_panes_with_text(&rects, &metrics);
+        let first_part = window.active().panes()[0].name;
 
         drag_a_pane(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].center(),
-            rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+            &rects,
+            rects[0].center(),
+            rects[1].right_center() - egui::vec2(10.0, 0.0),
         );
 
         assert_eq!(
             window.active().panes()[1].name,
-            primera,
+            first_part,
             "con el acorde la consola no se movió de sitio"
         );
         assert!(
@@ -11808,28 +11808,28 @@ mod tests {
     fn drag_with_chord(
         window: &mut Window,
         ctx: &egui::Context,
-        rectangulos: &[egui::Rect],
-        desde: egui::Pos2,
-        hasta: egui::Pos2,
+        rects: &[egui::Rect],
+        from: egui::Pos2,
+        to: egui::Pos2,
         chord: egui::Modifiers,
     ) {
-        let mut pasada = |entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let mut pass = |input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    rectangulos,
+                    rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
 
-        pasada(egui::RawInput::default());
-        pasada(egui::RawInput {
+        pass(egui::RawInput::default());
+        pass(egui::RawInput {
             events: vec![
-                egui::Event::PointerMoved(desde),
+                egui::Event::PointerMoved(from),
                 egui::Event::PointerButton {
-                    pos: desde,
+                    pos: from,
                     button: egui::PointerButton::Primary,
                     pressed: true,
                     modifiers: chord,
@@ -11837,13 +11837,13 @@ mod tests {
             ],
             ..Default::default()
         });
-        pasada(egui::RawInput {
-            events: vec![egui::Event::PointerMoved(hasta)],
+        pass(egui::RawInput {
+            events: vec![egui::Event::PointerMoved(to)],
             ..Default::default()
         });
-        pasada(egui::RawInput {
+        pass(egui::RawInput {
             events: vec![egui::Event::PointerButton {
-                pos: hasta,
+                pos: to,
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: chord,
@@ -11860,7 +11860,7 @@ mod tests {
         // defecto que relaje la conjunción convierte `Ctrl` a secas —o `Mayúsculas` a secas, que es lo que
         // uno tiene puesto al escribir una mayúscula— en «llévate la consola de sitio».
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
 
         for (name, chord) in [
@@ -11879,7 +11879,7 @@ mod tests {
                 },
             ),
         ] {
-            let mut window = two_panes_with_text(&rectangulos, &metrics);
+            let mut window = two_panes_with_text(&rects, &metrics);
             let request: Vec<_> = window
                 .active()
                 .panes()
@@ -11890,9 +11890,9 @@ mod tests {
             drag_with_chord(
                 &mut window,
                 &ctx,
-                &rectangulos,
-                rectangulos[0].min + egui::vec2(1.0, 1.0),
-                rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+                &rects,
+                rects[0].min + egui::vec2(1.0, 1.0),
+                rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
                 chord,
             );
 
@@ -11922,42 +11922,42 @@ mod tests {
         // una selección anterior sobrevivía y su extremo saltaba al puntero, así que apretar en el panel y
         // arrastrar **cambiaba solo lo que había marcado** y copiar devolvía un texto que nadie señaló.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window = two_panes_with_text(&rectangulos, &metrics);
+        let mut window = two_panes_with_text(&rects, &metrics);
 
         // Se le deja a la consola menos rejilla que ancho tiene la división: lo que sobra por la derecha es
         // lo que en la ventana de verdad ocupan el panel y su asidero.
-        let media = Size {
-            rows: metrics.cells_in(rectangulos[0].size()).rows,
-            cols: metrics.cells_in(rectangulos[0].size()).cols / 2,
+        let half = Size {
+            rows: metrics.cells_in(rects[0].size()).rows,
+            cols: metrics.cells_in(rects[0].size()).cols / 2,
         };
-        window.active_mut().panes_mut()[0].measured = media;
+        window.active_mut().panes_mut()[0].measured = half;
 
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
         );
-        let antes = selected_at(&window, 0);
-        assert_eq!(antes.as_deref(), Some("hola"), "no se llegó a marcar nada");
+        let before = selected_at(&window, 0);
+        assert_eq!(before.as_deref(), Some("hola"), "no se llegó a marcar nada");
 
         // Y ahora un arrastre que EMPIEZA sobre las columnas del panel.
         let over_the_panel =
-            rectangulos[0].min + egui::vec2(metrics.width() * (f32::from(media.cols) + 2.0), 4.0);
+            rects[0].min + egui::vec2(metrics.width() * (f32::from(half.cols) + 2.0), 4.0);
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
+            &rects,
             over_the_panel,
-            rectangulos[0].min + egui::vec2(metrics.width() * 8.5, metrics.height() * 0.5),
+            rects[0].min + egui::vec2(metrics.width() * 8.5, metrics.height() * 0.5),
         );
 
         assert_eq!(
             selected_at(&window, 0),
-            antes,
+            before,
             "apretar sobre el panel cambió lo que había marcado: se copiaría un texto que nadie señaló"
         );
     }
@@ -11971,27 +11971,27 @@ mod tests {
         // queda a la izquierda del final. Se perdía el último carácter de la línea justo en el gesto que
         // existe para cogerla entera.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with("sleep 30", "sleep 30");
-        let rejilla = Size {
-            rows: metrics.cells_in(rectangulos[0].size()).rows,
+        let grid = Size {
+            rows: metrics.cells_in(rects[0].size()).rows,
             cols: 6,
         };
         {
             let pane = &mut window.active_mut().panes_mut()[0];
-            pane.measured = rejilla;
-            pane.screen.resize(rejilla);
+            pane.measured = grid;
+            pane.screen.resize(grid);
             pane.screen.advance(b"abcdef");
         }
 
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
             // Muy pasado el borde derecho de la rejilla.
-            rectangulos[0].min + egui::vec2(metrics.width() * 40.0, metrics.height() * 0.5),
+            rects[0].min + egui::vec2(metrics.width() * 40.0, metrics.height() * 0.5),
         );
 
         assert_eq!(
@@ -12009,17 +12009,17 @@ mod tests {
         // hizo nada— y, peor, la salvaguarda de que las **otras** tandas exigen cero dejaría de significar
         // nada.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window = two_panes_with_text(&rectangulos, &metrics);
+        let mut window = two_panes_with_text(&rects, &metrics);
         window.injected_drags = InjectedDrags::new(1, InjectedGesture::Select);
 
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
         );
 
         let injected_drags = window
@@ -12042,16 +12042,16 @@ mod tests {
         // **Sin esto no hay forma de dejar de tener algo marcado**: el realce se quedaría puesto hasta que
         // el programa limpiara la pantalla por su cuenta. Es lo que hace cualquier terminal.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window = two_panes_with_text(&rectangulos, &metrics);
+        let mut window = two_panes_with_text(&rects, &metrics);
 
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
         );
         assert!(
             selected_at(&window, 0).is_some(),
@@ -12059,8 +12059,8 @@ mod tests {
         );
 
         // Un clic seco: apretar y soltar en el mismo sitio, sin mover.
-        let at = rectangulos[0].min + egui::vec2(metrics.width() * 6.5, metrics.height() * 0.5);
-        drag_to_select(&mut window, &ctx, &rectangulos, at, at);
+        let at = rects[0].min + egui::vec2(metrics.width() * 6.5, metrics.height() * 0.5);
+        drag_to_select(&mut window, &ctx, &rects, at, at);
 
         assert_eq!(
             selected_at(&window, 0),
@@ -12090,31 +12090,31 @@ mod tests {
     fn drag_with(
         window: &mut Window,
         ctx: &egui::Context,
-        rectangulos: &[egui::Rect],
+        rects: &[egui::Rect],
         button: egui::PointerButton,
-        desde: egui::Pos2,
-        hasta: egui::Pos2,
+        from: egui::Pos2,
+        to: egui::Pos2,
         on_press: egui::Modifiers,
         mid_drag: egui::Modifiers,
     ) {
-        let mut pasada = |entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let mut pass = |input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    rectangulos,
+                    rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
 
-        pasada(egui::RawInput::default());
-        pasada(egui::RawInput {
+        pass(egui::RawInput::default());
+        pass(egui::RawInput {
             events: vec![
                 egui::Event::ModifiersChanged(on_press),
-                egui::Event::PointerMoved(desde),
+                egui::Event::PointerMoved(from),
                 egui::Event::PointerButton {
-                    pos: desde,
+                    pos: from,
                     button,
                     pressed: true,
                     modifiers: on_press,
@@ -12122,16 +12122,16 @@ mod tests {
             ],
             ..Default::default()
         });
-        pasada(egui::RawInput {
+        pass(egui::RawInput {
             events: vec![
                 egui::Event::ModifiersChanged(mid_drag),
-                egui::Event::PointerMoved(hasta),
+                egui::Event::PointerMoved(to),
             ],
             ..Default::default()
         });
-        pasada(egui::RawInput {
+        pass(egui::RawInput {
             events: vec![egui::Event::PointerButton {
-                pos: hasta,
+                pos: to,
                 button,
                 pressed: false,
                 modifiers: mid_drag,
@@ -12149,18 +12149,18 @@ mod tests {
         // en cuanto deja de necesitarla— convertiría el arrastre en marcar texto **con el botón todavía
         // apretado**, y la consola se quedaría a medio camino sin que nada explicara por qué.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window = two_panes_with_text(&rectangulos, &metrics);
-        let primera = window.active().panes()[0].name;
+        let mut window = two_panes_with_text(&rects, &metrics);
+        let first_part = window.active().panes()[0].name;
 
         drag_with(
             &mut window,
             &ctx,
-            &rectangulos,
+            &rects,
             egui::PointerButton::Primary,
-            rectangulos[0].center(),
-            rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+            rects[0].center(),
+            rects[1].right_center() - egui::vec2(10.0, 0.0),
             MOVE_CHORD,
             // Y a mitad del gesto se sueltan las dos teclas.
             egui::Modifiers::NONE,
@@ -12168,7 +12168,7 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[1].name,
-            primera,
+            first_part,
             "soltar el acorde a mitad del arrastre dejó la consola sin moverse: el gesto se releyó en \
              vuelo en vez de quedarse con lo que significaba al apretar"
         );
@@ -12190,18 +12190,18 @@ mod tests {
         // a mitad **a propósito**. Si eso cambiara el significado, el usuario acabaría con la consola
         // cambiada de sitio por intentar ampliar lo que estaba marcando.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window = two_panes_with_text(&rectangulos, &metrics);
+        let mut window = two_panes_with_text(&rects, &metrics);
         let request = names_in_order(&window);
 
         drag_with(
             &mut window,
             &ctx,
-            &rectangulos,
+            &rects,
             egui::PointerButton::Primary,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
             egui::Modifiers::NONE,
             // Y a mitad del gesto se aprietan las dos teclas del acorde de mover.
             MOVE_CHORD,
@@ -12232,23 +12232,23 @@ mod tests {
         // `arrastrar_con_un_boton_que_no_es_el_primario_no_cambia_las_consolas_de_sitio`; aquí se afirma
         // también, porque el mismo defecto puede salir por cualquiera de los dos lados.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
 
         for (name, button) in [
             ("el central", egui::PointerButton::Middle),
             ("el derecho", egui::PointerButton::Secondary),
         ] {
-            let mut window = two_panes_with_text(&rectangulos, &metrics);
+            let mut window = two_panes_with_text(&rects, &metrics);
             let request = names_in_order(&window);
 
             drag_with(
                 &mut window,
                 &ctx,
-                &rectangulos,
+                &rects,
                 button,
-                rectangulos[0].min + egui::vec2(1.0, 1.0),
-                rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+                rects[0].min + egui::vec2(1.0, 1.0),
+                rects[1].right_center() - egui::vec2(10.0, 0.0),
                 egui::Modifiers::NONE,
                 egui::Modifiers::NONE,
             );
@@ -12299,32 +12299,32 @@ mod tests {
     fn drag_a_pane(
         window: &mut Window,
         ctx: &egui::Context,
-        rectangulos: &[egui::Rect],
-        desde: egui::Pos2,
-        hasta: egui::Pos2,
+        rects: &[egui::Rect],
+        from: egui::Pos2,
+        to: egui::Pos2,
     ) -> Option<(usize, Side)> {
-        let mut pasada = |entrada: egui::RawInput| {
-            let mut visto = None;
-            ctx.run_ui(entrada, |ui| {
-                visto = window
+        let mut pass = |input: egui::RawInput| {
+            let mut seen = None;
+            ctx.run_ui(input, |ui| {
+                seen = window
                     .handle_the_mouse(
                         ui,
-                        rectangulos,
+                        rects,
                         &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                     )
                     .target;
             })
             .drop_without_applying_deltas();
-            visto
+            seen
         };
 
-        pasada(egui::RawInput::default());
+        pass(egui::RawInput::default());
 
-        pasada(egui::RawInput {
+        pass(egui::RawInput {
             events: vec![
-                egui::Event::PointerMoved(desde),
+                egui::Event::PointerMoved(from),
                 egui::Event::PointerButton {
-                    pos: desde,
+                    pos: from,
                     button: egui::PointerButton::Primary,
                     pressed: true,
                     modifiers: with_shift(),
@@ -12333,14 +12333,14 @@ mod tests {
             ..Default::default()
         });
 
-        let in_flight = pasada(egui::RawInput {
-            events: vec![egui::Event::PointerMoved(hasta)],
+        let in_flight = pass(egui::RawInput {
+            events: vec![egui::Event::PointerMoved(to)],
             ..Default::default()
         });
 
-        pasada(egui::RawInput {
+        pass(egui::RawInput {
             events: vec![egui::Event::PointerButton {
-                pos: hasta,
+                pos: to,
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: egui::Modifiers::default(),
@@ -12377,8 +12377,8 @@ mod tests {
         let mut window = Window::with_tabs(&window_ctx, 2, OpeningLayout::DEFAULT, None)
             .expect("no se pudieron abrir las dos pestañas");
 
-        let [izquierda, derecha] = two_wide_panes();
-        let rectangulos = [izquierda, derecha];
+        let [left_pane, right_pane] = two_wide_panes();
+        let rects = [left_pane, right_pane];
 
         let of_the_second: Vec<usize> = window.tabs[1]
             .panes()
@@ -12392,23 +12392,23 @@ mod tests {
         );
 
         let ctx = egui::Context::default();
-        let pasada = |window: &mut Window, entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let pass = |window: &mut Window, input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
 
-        pasada(&mut window, egui::RawInput::default());
-        pasada(&mut window, move_pane(egui::pos2(200.0, 150.0)));
-        pasada(&mut window, pulsar(egui::pos2(200.0, 150.0)));
+        pass(&mut window, egui::RawInput::default());
+        pass(&mut window, move_pane(egui::pos2(200.0, 150.0)));
+        pass(&mut window, press(egui::pos2(200.0, 150.0)));
         // Por el borde de **arriba**: soltar a la izquierda de la consola de la derecha las dejaría donde
         // ya estaban, y entonces reordenar la pestaña de destino no se vería.
-        pasada(&mut window, move_pane(egui::pos2(600.0, 20.0)));
+        pass(&mut window, move_pane(egui::pos2(600.0, 20.0)));
 
         // **La mitad de control, y sin ella esta prueba no ata nada.** Antes de cambiar de pestaña hay que
         // demostrar que este mismo gesto, sin cambiar, SÍ mueve — si no, «la pestaña de destino no cambió»
@@ -12417,19 +12417,19 @@ mod tests {
         {
             let mut control = Window::with_tabs(&window_ctx, 2, OpeningLayout::DEFAULT, None)
                 .expect("no se pudieron abrir las dos pestañas de control");
-            let ctx_control = egui::Context::default();
-            for entrada in [
+            let control_ctx = egui::Context::default();
+            for input in [
                 egui::RawInput::default(),
                 move_pane(egui::pos2(200.0, 150.0)),
-                pulsar(egui::pos2(200.0, 150.0)),
+                press(egui::pos2(200.0, 150.0)),
                 move_pane(egui::pos2(600.0, 20.0)),
-                soltar(egui::pos2(600.0, 20.0)),
+                release(egui::pos2(600.0, 20.0)),
             ] {
-                ctx_control
-                    .run_ui(entrada, |ui| {
+                control_ctx
+                    .run_ui(input, |ui| {
                         control.handle_the_mouse(
                             ui,
-                            &rectangulos,
+                            &rects,
                             &CellMetrics::measure(
                                 ui.ctx(),
                                 egui::FontId::monospace(DEFAULT_FONT_SIZE),
@@ -12441,7 +12441,7 @@ mod tests {
             let parts = control
                 .active()
                 .root
-                .place(izquierda.union(derecha), CELL_WIDTH)
+                .place(left_pane.union(right_pane), CELL_WIDTH)
                 .parts;
             assert!(
                 parts[0].bottom() <= parts[1].top(),
@@ -12457,22 +12457,22 @@ mod tests {
         // el lado izquierdo, y por ese lado el movimiento deja la pestaña con la misma forma y el mismo
         // orden — o sea que el defecto ocurriría y la prueba no lo vería. Comprobado sondeando: con el
         // identificador por sitio, el arrastre sí llega a la otra pestaña y suelta ahí.
-        pasada(&mut window, soltar(egui::pos2(600.0, 20.0)));
+        pass(&mut window, release(egui::pos2(600.0, 20.0)));
 
-        let despues: Vec<usize> = window.tabs[1]
+        let after: Vec<usize> = window.tabs[1]
             .panes()
             .iter()
             .map(|pane| pane.name)
             .collect();
         assert_eq!(
-            despues, of_the_second,
+            after, of_the_second,
             "llegar a otra pestaña con una consola agarrada le reordenó las suyas"
         );
         // Y la **forma** tampoco: apilarlas es lo que haría el movimiento por el borde de arriba, y es lo
         // que el orden de los nombres por sí solo no delata.
         let parts = window.tabs[1]
             .root
-            .place(izquierda.union(derecha), CELL_WIDTH)
+            .place(left_pane.union(right_pane), CELL_WIDTH)
             .parts;
         assert!(
             parts[0].right() <= parts[1].left(),
@@ -12487,29 +12487,29 @@ mod tests {
         // arrepentirse a media maniobra —agarrar, pasar por encima de otra, pulsar Escape— completaba el
         // intercambio en vez de cancelarlo. Es lo contrario de lo que promete cancelar.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
-        let rectangulos = [izquierda, derecha];
+        let [left_pane, right_pane] = two_wide_panes();
+        let rects = [left_pane, right_pane];
 
         let ctx = egui::Context::default();
-        let mut pasada = |entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let mut pass = |input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
 
-        pasada(egui::RawInput::default());
-        pasada(move_pane(egui::pos2(200.0, 150.0)));
-        pasada(pulsar(egui::pos2(200.0, 150.0)));
+        pass(egui::RawInput::default());
+        pass(move_pane(egui::pos2(200.0, 150.0)));
+        pass(press(egui::pos2(200.0, 150.0)));
         // **Por el borde de arriba, no por el centro.** Soltar a la izquierda de la consola de la derecha
         // deja las dos exactamente donde estaban, así que cancelar y no cancelar darían el mismo orden y
         // la prueba no distinguiría nada. Por arriba, no cancelar las apilaría.
-        pasada(move_pane(egui::pos2(600.0, 20.0)));
-        pasada(egui::RawInput {
+        pass(move_pane(egui::pos2(600.0, 20.0)));
+        pass(egui::RawInput {
             events: vec![egui::Event::Key {
                 key: egui::Key::Escape,
                 physical_key: None,
@@ -12523,7 +12523,7 @@ mod tests {
         let parts = window
             .active()
             .root
-            .place(izquierda.union(derecha), CELL_WIDTH)
+            .place(left_pane.union(right_pane), CELL_WIDTH)
             .parts;
         assert!(
             parts[0].right() <= parts[1].left(),
@@ -12539,12 +12539,12 @@ mod tests {
         // candidato a arrastrarse **cualquier** pulsación—, así que sin cualificarlos, un pegado con el
         // central que se desplace un poco cambiaría dos consolas de sitio sin que nadie lo pidiera.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
-        let rectangulos = [izquierda, derecha];
+        let [left_pane, right_pane] = two_wide_panes();
+        let rects = [left_pane, right_pane];
 
-        let button = |en: egui::Pos2, pressed: bool| egui::RawInput {
+        let button = |at: egui::Pos2, pressed: bool| egui::RawInput {
             events: vec![egui::Event::PointerButton {
-                pos: en,
+                pos: at,
                 button: egui::PointerButton::Middle,
                 pressed,
                 modifiers: egui::Modifiers::default(),
@@ -12553,26 +12553,26 @@ mod tests {
         };
 
         let ctx = egui::Context::default();
-        let mut pasada = |entrada: egui::RawInput| {
-            let mut visto = None;
-            ctx.run_ui(entrada, |ui| {
-                visto = window
+        let mut pass = |input: egui::RawInput| {
+            let mut seen = None;
+            ctx.run_ui(input, |ui| {
+                seen = window
                     .handle_the_mouse(
                         ui,
-                        &rectangulos,
+                        &rects,
                         &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                     )
                     .target;
             })
             .drop_without_applying_deltas();
-            visto
+            seen
         };
 
-        pasada(egui::RawInput::default());
-        pasada(move_pane(egui::pos2(200.0, 150.0)));
-        pasada(button(egui::pos2(200.0, 150.0), true));
-        let in_flight = pasada(move_pane(egui::pos2(600.0, 150.0)));
-        pasada(button(egui::pos2(600.0, 150.0), false));
+        pass(egui::RawInput::default());
+        pass(move_pane(egui::pos2(200.0, 150.0)));
+        pass(button(egui::pos2(200.0, 150.0), true));
+        let in_flight = pass(move_pane(egui::pos2(600.0, 150.0)));
+        pass(button(egui::pos2(600.0, 150.0), false));
 
         assert_eq!(
             names_in_order(&window),
@@ -12598,12 +12598,12 @@ mod tests {
         // dos consolas, el orden [0, 1] es el mismo antes y después de este gesto. Lo que cambia es que
         // dejan de repartirse el ancho para repartirse el alto, y eso solo se ve en los rectángulos.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
-        let area = izquierda.union(derecha);
+        let [left_pane, right_pane] = two_wide_panes();
+        let area = left_pane.union(right_pane);
 
-        let antes = window.active().root.place(area, CELL_WIDTH).parts;
+        let before = window.active().root.place(area, CELL_WIDTH).parts;
         assert!(
-            antes[0].right() <= antes[1].left(),
+            before[0].right() <= before[1].left(),
             "la ventana no abrió con las dos una al lado de la otra"
         );
 
@@ -12611,17 +12611,17 @@ mod tests {
         drag_a_pane(
             &mut window,
             &ctx,
-            &[izquierda, derecha],
+            &[left_pane, right_pane],
             egui::pos2(200.0, 150.0),
             // Por el borde de **arriba** de la derecha: es lo que pide ponerla encima.
             egui::pos2(600.0, 20.0),
         );
 
-        let despues = window.active().root.place(area, CELL_WIDTH).parts;
-        assert_eq!(despues.len(), 2, "una consola se perdió por el camino");
+        let after = window.active().root.place(area, CELL_WIDTH).parts;
+        assert_eq!(after.len(), 2, "una consola se perdió por el camino");
         assert!(
-            despues[0].bottom() <= despues[1].top(),
-            "soltar por el borde de arriba no dejó una consola encima de la otra: {despues:?}"
+            after[0].bottom() <= after[1].top(),
+            "soltar por el borde de arriba no dejó una consola encima de la otra: {after:?}"
         );
         assert_eq!(
             names_in_order(&window),
@@ -12644,16 +12644,16 @@ mod tests {
         // disfraz que este proyecto tiene fichado como «una prueba que ata al ayudante no ata el camino».
         let mut window = window_with("sleep 30", "sleep 30");
         window.injected_drags = InjectedDrags::new(5, InjectedGesture::MovePane);
-        let [izquierda, derecha] = two_wide_panes();
+        let [left_pane, right_pane] = two_wide_panes();
         let ctx = egui::Context::default();
 
         // Uno que se acepta: de la izquierda al borde derecho de la de al lado.
         drag_a_pane(
             &mut window,
             &ctx,
-            &[izquierda, derecha],
-            izquierda.center(),
-            egui::pos2(derecha.right() - derecha.width() * 0.1, derecha.center().y),
+            &[left_pane, right_pane],
+            left_pane.center(),
+            egui::pos2(right_pane.right() - right_pane.width() * 0.1, right_pane.center().y),
         );
         assert_eq!(
             window
@@ -12670,9 +12670,9 @@ mod tests {
         // `drop_a_pane` a propósito y no por el gesto entero, porque el otro rechazo —soltar sobre
         // sí misma— se filtra antes de llegar aquí y con él la prueba no distinguiría nada: comprobado
         // mutándolo, contar también los rechazados dejaba esta prueba en verde.
-        let estrecho = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 300.0));
+        let narrow = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 300.0));
         with_metrics(|metrics| {
-            window.drop_a_pane(1, 0, Side::Right, estrecho, metrics);
+            window.drop_a_pane(1, 0, Side::Right, narrow, metrics);
         });
         assert_eq!(
             window
@@ -12694,7 +12694,7 @@ mod tests {
         // Se arrastra de la derecha a la izquierda para que el foco de destino no coincida con el que la
         // ventana ya tenía: empezando por la izquierda, el defecto y el arreglo darían lo mismo.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
+        let [left_pane, right_pane] = two_wide_panes();
 
         assert_eq!(
             window.active().focus,
@@ -12706,7 +12706,7 @@ mod tests {
         drag_a_pane(
             &mut window,
             &ctx,
-            &[izquierda, derecha],
+            &[left_pane, right_pane],
             egui::pos2(600.0, 150.0),
             egui::pos2(200.0, 150.0),
         );
@@ -12735,7 +12735,7 @@ mod tests {
         // - por su sitio al agarrarla → 0, que además es donde nace el foco: también caza que no se toque
         // - por su sitio después del intercambio → 1
         // - por el nombre de la consola de destino → 1
-        let (mut window, rectangulos) = three_panes_with_the_ends_crossed();
+        let (mut window, rects) = three_panes_with_the_ends_crossed();
 
         assert_eq!(
             window.active().focus,
@@ -12747,12 +12747,12 @@ mod tests {
         drag_a_pane(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].center(),
+            &rects,
+            rects[0].center(),
             // **Por el borde derecho de la del medio, no por su centro.** Soltar en el centro deja la
             // consola justo donde ya estaba -- y una prueba cuyo movimiento no mueve nada no distingue
             // "se movió bien" de "no se movió".
-            egui::pos2(rectangulos[1].right() - 12.0, rectangulos[1].center().y),
+            egui::pos2(rects[1].right() - 12.0, rects[1].center().y),
         );
 
         assert_eq!(
@@ -12772,13 +12772,13 @@ mod tests {
         // Lo que sostiene que el usuario vea el destino **antes** de soltar. Se afirma sobre lo que la
         // función devuelve en vuelo porque es lo único que el pintado recibe.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
+        let [left_pane, right_pane] = two_wide_panes();
 
         let ctx = egui::Context::default();
         let in_flight = drag_a_pane(
             &mut window,
             &ctx,
-            &[izquierda, derecha],
+            &[left_pane, right_pane],
             egui::pos2(200.0, 150.0),
             egui::pos2(600.0, 150.0),
         );
@@ -12800,15 +12800,15 @@ mod tests {
         //
         // Se suelta sobre el sitio 2, que es el único de los tres cuyo nombre (0) no es su sitio: por sitio
         // se señala el **2** y por nombre se señalaría el 0, que es además el extremo contrario de la fila.
-        let (mut window, rectangulos) = three_panes_with_the_ends_crossed();
+        let (mut window, rects) = three_panes_with_the_ends_crossed();
 
         let ctx = egui::Context::default();
         let in_flight = drag_a_pane(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].center(),
-            rectangulos[2].center(),
+            &rects,
+            rects[0].center(),
+            rects[2].center(),
         );
 
         assert_eq!(
@@ -12830,13 +12830,13 @@ mod tests {
         // quedar igual**, y sobre todo ninguna consola puede perderse por el camino — soltarla mataría su
         // programa.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
+        let [left_pane, right_pane] = two_wide_panes();
 
         let ctx = egui::Context::default();
         let in_flight = drag_a_pane(
             &mut window,
             &ctx,
-            &[izquierda, derecha],
+            &[left_pane, right_pane],
             egui::pos2(200.0, 150.0),
             // Muy a la derecha de las dos: fuera de cualquier rectángulo.
             egui::pos2(1500.0, 150.0),
@@ -12858,13 +12858,13 @@ mod tests {
         // Un gesto de un segundo: agarrar y soltar sin llegar a otra consola. Se mueve dentro del mismo
         // rectángulo lo bastante para que egui lo dé por arrastre y no por clic.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
+        let [left_pane, right_pane] = two_wide_panes();
 
         let ctx = egui::Context::default();
         let in_flight = drag_a_pane(
             &mut window,
             &ctx,
-            &[izquierda, derecha],
+            &[left_pane, right_pane],
             egui::pos2(40.0, 150.0),
             egui::pos2(360.0, 150.0),
         );
@@ -12892,16 +12892,16 @@ mod tests {
         // lo que se señala **en vuelo** porque es la mitad que distingue: dejar de descartar el propio sitio
         // no cambia la disposición —`move_pane` rechaza el mismo nombre dos veces— pero sí le promete al
         // usuario un destino que no existe.
-        let (mut window, rectangulos) = three_panes_with_the_ends_crossed();
-        let suya = rectangulos[2];
+        let (mut window, rects) = three_panes_with_the_ends_crossed();
+        let its_area = rects[2];
 
         let ctx = egui::Context::default();
         let in_flight = drag_a_pane(
             &mut window,
             &ctx,
-            &rectangulos,
-            egui::pos2(suya.left() + 20.0, suya.center().y),
-            egui::pos2(suya.right() - 20.0, suya.center().y),
+            &rects,
+            egui::pos2(its_area.left() + 20.0, its_area.center().y),
+            egui::pos2(its_area.right() - 20.0, its_area.center().y),
         );
 
         assert_eq!(
@@ -12936,7 +12936,7 @@ mod tests {
         .expect("no se pudo abrir la ventana de tres consolas");
 
         assert!(
-            window.active_mut().root.intercambiar(0, 2),
+            window.active_mut().root.swap_panes(0, 2),
             "no se pudieron cruzar las dos de los extremos para preparar la prueba"
         );
         assert_eq!(
@@ -12948,34 +12948,34 @@ mod tests {
         // **Cuatrocientos y no doscientos**: recibir a otra consola por un lado exige que las dos quepan con
         // su suelo de columnas, y con doscientos puntos el movimiento se rechaza -- con razón, pero
         // entonces la prueba no comprueba lo que dice.
-        let ancho = 400.0;
-        let rectangulos: Vec<egui::Rect> = (0..3)
+        let width = 400.0;
+        let rects: Vec<egui::Rect> = (0..3)
             .map(|which| {
                 egui::Rect::from_min_size(
-                    egui::pos2(which as f32 * (ancho + DIVIDER_THICKNESS), 0.0),
-                    egui::vec2(ancho, 300.0),
+                    egui::pos2(which as f32 * (width + DIVIDER_THICKNESS), 0.0),
+                    egui::vec2(width, 300.0),
                 )
             })
             .collect();
 
-        (window, rectangulos)
+        (window, rects)
     }
 
     #[test]
     fn el_arrastre_va_por_el_nombre_de_la_consola_y_no_por_su_sitio() {
         // Se arrastra la del sitio 0 sobre la del sitio 1, que es el único par cuyo resultado distingue las
         // dos lecturas: por nombre queda [1, 2, 0] y por sitio quedaría [2, 0, 1].
-        let (mut window, rectangulos) = three_panes_with_the_ends_crossed();
+        let (mut window, rects) = three_panes_with_the_ends_crossed();
 
         let ctx = egui::Context::default();
         drag_a_pane(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].center(),
+            &rects,
+            rects[0].center(),
             // Por el borde derecho de la del medio: soltar en su centro dejaría la consola donde ya
             // estaba, y una prueba cuyo movimiento no mueve nada no distingue nada.
-            egui::pos2(rectangulos[1].right() - 12.0, rectangulos[1].center().y),
+            egui::pos2(rects[1].right() - 12.0, rects[1].center().y),
         );
 
         assert_eq!(
@@ -12996,7 +12996,7 @@ mod tests {
         // Lo que hace honesta a esta prueba es que aquí no hay nada más que pueda mover el contador —la
         // llamada es directa, no una pasada de interfaz entera—, así que lo que sube solo puede ser esto.
         let mut window = window_with("sleep 30", "sleep 30");
-        let [izquierda, derecha] = two_wide_panes();
+        let [left_pane, right_pane] = two_wide_panes();
 
         assert_eq!(
             window.timed_separately,
@@ -13008,7 +13008,7 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |ui| {
             window.handle_the_mouse(
                 ui,
-                &[izquierda, derecha],
+                &[left_pane, right_pane],
                 &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
             );
         })
@@ -13025,7 +13025,7 @@ mod tests {
         // Lo mismo que su hermana de atender el ratón, y por la misma razón: es un camino que se recorre
         // en cada fotograma **mientras dura el gesto**, y el fotograma se reparte por resta.
         let mut window = window_with("sleep 30", "sleep 30");
-        let derecha = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let right_pane = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
 
         assert_eq!(
             window.timed_separately,
@@ -13035,7 +13035,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            window.paint_the_drag(ui, derecha, Side::Left);
+            window.paint_the_drag(ui, right_pane, Side::Left);
         })
         .drop_without_applying_deltas();
 
@@ -13060,7 +13060,7 @@ mod tests {
             return false;
         };
         children.iter().any(|child| {
-            matches!(&child.node, Node::Branch { orientation: dentro, .. } if dentro == orientation)
+            matches!(&child.node, Node::Branch { orientation: inside, .. } if inside == orientation)
                 || has_nesting_in_the_same_direction(&child.node)
         })
     }
@@ -13070,7 +13070,7 @@ mod tests {
     /// **Es la otra mitad de la regla 4 de D14, y la que se olvida**: una rama de una hija no se distingue
     /// en pantalla —le da su área entera y no le pone divisor— pero hace que partir en ese sentido inserte
     /// *dentro* de ella en vez de al lado, y de ahí sale el anidamiento. Sin comprobarla, una operación que
-    /// se saltara `colapsar` pasaría desapercibida hasta el gesto siguiente.
+    /// se saltara `collapse` pasaría desapercibida hasta el gesto siguiente.
     fn has_a_branch_with_a_single_child(node: &Node) -> bool {
         let Node::Branch { children, .. } = node else {
             return false;
@@ -13091,7 +13091,7 @@ mod tests {
     /// `Columnas[5, Filas[6, Columnas[8, 9]]]` — la forma donde sacar una hoja obliga a **absorber**.
     ///
     /// **Es la que hacía falta y no la que había.** Con `Columnas[5, Filas[6, 7]]`, quitar la 5 deja la
-    /// raíz con una sola hija y solo corre `colapsar`; `absorb` —que es quien de verdad impide el
+    /// raíz con una sola hija y solo corre `collapse`; `absorb` —que es quien de verdad impide el
     /// anidamiento— no llega a ejecutarse nunca, así que la prueba pasaba igual con `move_pane` llamando a
     /// `remove` en vez de a `close`. Aquí, sacar la **6** deja la rama de filas con una sola hija que es
     /// a su vez una rama de columnas dentro de otra de columnas: exactamente lo que hay que deshacer.
@@ -13174,21 +13174,21 @@ mod tests {
         // sobra el movimiento sí ocurre. Sin ella, una implementación que no soltara nunca pasaría igual.
         let width_to_spare =
             egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(900.0, 300.0));
-        let estrecho = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 300.0));
+        let narrow = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 300.0));
 
-        let mut cabiendo = window_with("sleep 30", "sleep 30");
+        let mut fitting = window_with("sleep 30", "sleep 30");
         with_metrics(|metrics| {
-            cabiendo.drop_a_pane(0, 1, Side::Right, width_to_spare, metrics);
+            fitting.drop_a_pane(0, 1, Side::Right, width_to_spare, metrics);
         });
         assert_eq!(
-            names_in_order(&cabiendo),
+            names_in_order(&fitting),
             [1, 0],
             "con sitio de sobra el movimiento no ocurrió, así que la prueba de abajo no probaría nada"
         );
 
         let mut not_fitting = window_with("sleep 30", "sleep 30");
         with_metrics(|metrics| {
-            not_fitting.drop_a_pane(0, 1, Side::Right, estrecho, metrics);
+            not_fitting.drop_a_pane(0, 1, Side::Right, narrow, metrics);
         });
         assert_eq!(
             names_in_order(&not_fitting),
@@ -13213,13 +13213,13 @@ mod tests {
         // Una pasada para que existan las regiones, y de paso para saber dónde cae cada consola.
         ui_pass(&mut window, &ctx, area, egui::RawInput::default());
         let parts = with_metrics(|metrics| window.active().root.place(area, metrics.width()).parts);
-        let [izquierda, derecha] = [parts[0], parts[1]];
+        let [left_pane, right_pane] = [parts[0], parts[1]];
         assert!(
-            izquierda.right() <= derecha.left(),
+            left_pane.right() <= right_pane.left(),
             "la ventana no abrió con las dos una al lado de la otra"
         );
 
-        let anchos_antes: Vec<u16> = window
+        let widths_before: Vec<u16> = window
             .active()
             .panes()
             .iter()
@@ -13228,32 +13228,32 @@ mod tests {
 
         // Agarrar la izquierda y soltarla por el borde de **arriba** de la derecha: quedan apiladas, y
         // apiladas cada una se lleva el ancho entero.
-        let above_the_right_one = egui::pos2(derecha.center().x, derecha.top() + 10.0);
-        for entrada in [
-            move_pane(izquierda.center()),
-            pulsar(izquierda.center()),
+        let above_the_right_one = egui::pos2(right_pane.center().x, right_pane.top() + 10.0);
+        for input in [
+            move_pane(left_pane.center()),
+            press(left_pane.center()),
             move_pane(above_the_right_one),
-            soltar(above_the_right_one),
+            release(above_the_right_one),
         ] {
-            ui_pass(&mut window, &ctx, area, entrada);
+            ui_pass(&mut window, &ctx, area, input);
         }
 
-        let anchos_ahora: Vec<u16> = window
+        let widths_now: Vec<u16> = window
             .active()
             .panes()
             .iter()
             .map(|pane| pane.measured.cols)
             .collect();
 
-        assert_eq!(anchos_ahora.len(), 2, "una consola se perdió por el camino");
+        assert_eq!(widths_now.len(), 2, "una consola se perdió por el camino");
         assert_eq!(
-            anchos_ahora[0], anchos_ahora[1],
+            widths_now[0], widths_now[1],
             "tras apilarlas no se les anunció el mismo ancho: se pintó con el reparto de antes"
         );
         assert!(
-            anchos_ahora[0] > anchos_antes[0],
+            widths_now[0] > widths_before[0],
             "tras apilarlas se les siguió anunciando el ancho de cuando estaban lado a lado \
-             ({anchos_antes:?} → {anchos_ahora:?})"
+             ({widths_before:?} → {widths_now:?})"
         );
     }
 
@@ -13274,13 +13274,13 @@ mod tests {
         // prueba no probaría nada.
         let mut window = window_with("sleep 30", "sleep 30");
         let ctx = egui::Context::default();
-        let estrecha = area_of(900.0);
-        let ancha = area_of(1400.0);
+        let narrow = area_of(900.0);
+        let wide = area_of(1400.0);
 
-        ui_pass(&mut window, &ctx, estrecha, egui::RawInput::default());
+        ui_pass(&mut window, &ctx, narrow, egui::RawInput::default());
         let parts =
-            with_metrics(|metrics| window.active().root.place(estrecha, metrics.width()).parts);
-        let antes: Vec<u16> = window
+            with_metrics(|metrics| window.active().root.place(narrow, metrics.width()).parts);
+        let before: Vec<u16> = window
             .active()
             .panes()
             .iter()
@@ -13289,15 +13289,15 @@ mod tests {
 
         // El arrastre queda **en vuelo**: se pulsa y se mueve, y no se suelta. La consola de la izquierda es
         // la que lo tiene, y la pasada siguiente ocurre con el botón todavía apretado.
-        ui_pass(&mut window, &ctx, estrecha, pulsar(parts[0].center()));
+        ui_pass(&mut window, &ctx, narrow, press(parts[0].center()));
         ui_pass(
             &mut window,
             &ctx,
-            ancha,
+            wide,
             move_pane(egui::pos2(parts[1].center().x, parts[1].center().y)),
         );
 
-        let despues: Vec<u16> = window
+        let after: Vec<u16> = window
             .active()
             .panes()
             .iter()
@@ -13305,15 +13305,15 @@ mod tests {
             .collect();
 
         assert_ne!(
-            antes, despues,
+            before, after,
             "ninguna de las dos consolas se enteró de que la ventana se ensanchó, así que la pasada con el \
              arrastre en vuelo no pintó nada y esta prueba no distingue nada"
         );
         assert!(
-            despues.iter().all(|&cols| !antes.contains(&cols)),
+            after.iter().all(|&cols| !before.contains(&cols)),
             "alguna consola se quedó con la rejilla de la ventana estrecha teniendo el arrastre en vuelo: no \
              se pintó, así que su vuelta de medida la recoge la red de seguridad con el encolado en cero y \
-             ese trabajo se publica como coste del framework. antes={antes:?} después={despues:?}"
+             ese trabajo se publica como coste del framework. antes={before:?} después={after:?}"
         );
     }
 
@@ -13325,15 +13325,15 @@ mod tests {
         //
         // La mitad de control va primero: con sitio de sobra, el mismo gesto **sí** señala destino. Sin
         // ella, una implementación que no señalara nunca pasaría igual.
-        let [ancha_izquierda, ancha_derecha] = two_wide_panes();
+        let [wide_left, wide_right] = two_wide_panes();
         let mut with_room = window_with("sleep 30", "sleep 30");
-        let ctx_control = egui::Context::default();
+        let control_ctx = egui::Context::default();
         let marked = drag_a_pane(
             &mut with_room,
-            &ctx_control,
-            &[ancha_izquierda, ancha_derecha],
-            ancha_izquierda.center(),
-            ancha_derecha.center(),
+            &control_ctx,
+            &[wide_left, wide_right],
+            wide_left.center(),
+            wide_right.center(),
         );
         assert!(
             marked.is_some(),
@@ -13341,18 +13341,18 @@ mod tests {
         );
 
         // Doscientos puntos: dos consolas de veinte columnas no caben ahí.
-        let estrecha_izquierda =
+        let narrow_left =
             egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
-        let estrecha_derecha =
+        let narrow_right =
             egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
         let mut without_room = window_with("sleep 30", "sleep 30");
         let ctx = egui::Context::default();
         let in_flight = drag_a_pane(
             &mut without_room,
             &ctx,
-            &[estrecha_izquierda, estrecha_derecha],
-            estrecha_izquierda.center(),
-            estrecha_derecha.center(),
+            &[narrow_left, narrow_right],
+            narrow_left.center(),
+            narrow_right.center(),
         );
 
         assert_eq!(
@@ -13373,17 +13373,17 @@ mod tests {
         // forma de saber cuál de los dos está pidiendo.
         let mut window = window_with("sleep 30", "sleep 30");
         let target = egui::Rect::from_min_size(egui::pos2(200.0, 0.0), egui::vec2(200.0, 300.0));
-        let media_izquierda =
+        let left_half =
             egui::Rect::from_min_size(egui::pos2(200.0, 0.0), egui::vec2(100.0, 300.0));
 
         let ctx = egui::Context::default();
-        let salida = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             window.paint_the_drag(ui, target, Side::Left);
         });
-        let shapes = salida.shapes.clone();
-        salida.drop_without_applying_deltas();
+        let shapes = output.shapes.clone();
+        output.drop_without_applying_deltas();
 
-        let velados: Vec<egui::Rect> = shapes
+        let veiled: Vec<egui::Rect> = shapes
             .iter()
             .filter_map(|shape| match &shape.shape {
                 egui::epaint::Shape::Rect(rect) => Some(rect.rect),
@@ -13392,11 +13392,11 @@ mod tests {
             .collect();
 
         assert!(
-            velados.contains(&media_izquierda),
-            "el velo no cubrió la mitad izquierda de la consola de destino; se encoló {velados:?}"
+            veiled.contains(&left_half),
+            "el velo no cubrió la mitad izquierda de la consola de destino; se encoló {veiled:?}"
         );
         assert!(
-            !velados.contains(&target),
+            !veiled.contains(&target),
             "el velo cubrió la consola entera, así que no dice por qué lado se va a soltar"
         );
     }
@@ -13409,31 +13409,31 @@ mod tests {
         // entra como hermana o crea una rama nueva.
         for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
             // **Dos escenarios y no uno**, y el segundo es el que de verdad pesa: en el primero, quitar la
-            // hoja deja la raíz con una sola hija y solo corre `colapsar`, así que `absorb` —quien
+            // hoja deja la raíz con una sola hija y solo corre `collapse`, así que `absorb` —quien
             // impide el anidamiento— no llega a ejecutarse. Comprobado mutándolo: con solo ese escenario,
             // cambiar `close` por `remove` dentro de `move_pane` dejaba la prueba en verde.
-            for (name, arbol) in [
+            for (name, tree) in [
                 (7, one_column_and_one_group()),
                 (6, a_group_that_forces_absorbing()),
             ] {
                 assert!(
-                    !has_nesting_in_the_same_direction(&arbol)
-                        && !has_a_branch_with_a_single_child(&arbol),
+                    !has_nesting_in_the_same_direction(&tree)
+                        && !has_a_branch_with_a_single_child(&tree),
                     "el escenario ya nacía roto, así que no probaría nada"
                 );
 
-                let (arbol, movido) = arbol.move_pane(5, name, side);
+                let (tree, moved) = tree.move_pane(5, name, side);
                 assert!(
-                    movido,
+                    moved,
                     "no se movió la 5 junto a la {name} con el lado {side:?}"
                 );
                 assert!(
-                    !has_nesting_in_the_same_direction(&arbol),
+                    !has_nesting_in_the_same_direction(&tree),
                     "mover la 5 junto a la {name} con el lado {side:?} dejó dos ramas del mismo \
                      sentido anidadas"
                 );
                 assert!(
-                    !has_a_branch_with_a_single_child(&arbol),
+                    !has_a_branch_with_a_single_child(&tree),
                     "mover la 5 junto a la {name} con el lado {side:?} dejó una rama de una sola \
                      hija, que es por donde vuelve el anidamiento al gesto siguiente"
                 );
@@ -13446,25 +13446,25 @@ mod tests {
         // La otra mitad de la invariante: las hermanas que **no** participan no se enteran. Con pesos 1, 2
         // y 3, sacar la primera tiene que dejar a las otras dos repartiéndose el hueco como 2 a 3 — no a
         // partes iguales, que es lo que saldría si quitar tocara los pesos de las demás.
-        let arbol = three_in_a_row_with_different_weights();
+        let tree = three_in_a_row_with_different_weights();
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 300.0));
 
         // La 5 se va al otro extremo, **debajo** de la 7: así el reparto de la fila queda solo entre 6 y 7.
-        let (arbol, movido) = arbol.move_pane(5, 7, Side::Bottom);
-        assert!(movido, "no se movió");
+        let (tree, moved) = tree.move_pane(5, 7, Side::Bottom);
+        assert!(moved, "no se movió");
 
-        let Node::Branch { children, .. } = &arbol else {
+        let Node::Branch { children, .. } = &tree else {
             panic!("la raíz dejó de ser una rama");
         };
         assert_eq!(children.len(), 2, "la fila no se quedó con dos hijas");
-        let parts = arbol.place(area, 0.0).parts;
+        let parts = tree.place(area, 0.0).parts;
         assert_eq!(parts.len(), 3, "una consola se perdió por el camino");
 
         // La 6 se lleva dos quintos del ancho útil y el grupo de la derecha tres quintos: exactamente lo
         // que ya tenían entre ellas. A partes iguales darían la mitad cada una.
-        let util = 1200.0 - DIVIDER_THICKNESS;
+        let usable = 1200.0 - DIVIDER_THICKNESS;
         assert!(
-            (parts[0].width() - util * 2.0 / 5.0).abs() < 0.01,
+            (parts[0].width() - usable * 2.0 / 5.0).abs() < 0.01,
             "las que quedaron no se repartieron el hueco en proporción: {parts:?}"
         );
     }
@@ -13477,9 +13477,9 @@ mod tests {
         // de que la operación exista: solo es correcta si lo que ya estaba pintado **no se mueve**.
         //
         // Se escribe porque una mutación sobrevivió a las 383 pruebas del crate: sustituyendo
-        // `suyo * hijo.peso / suma` por el peso de dentro tal cual, la suite seguía en verde y las
+        // `group_weight * hijo.peso / total` por el peso de dentro tal cual, la suite seguía en verde y las
         // consolas de al lado se encogían un tercio en pantalla.
-        let arbol = Node::Branch {
+        let tree = Node::Branch {
             orientation: Orientation::Rows,
             children: vec![
                 Child {
@@ -13498,22 +13498,22 @@ mod tests {
         // **Por nombre y no por sitio**, que es el disfraz que este proyecto tiene fichado: tras mover, el
         // orden del recorrido no es el de antes, y comparar dos listas en orden de recorrido compararía
         // consolas distintas entre sí.
-        let franjas = |arbol: &Node| -> Vec<(usize, f32, f32)> {
-            let parts = arbol.place(area, 0.0).parts;
-            let mut suyas: Vec<(usize, f32, f32)> = arbol
-                .hojas()
+        let stripes = |tree: &Node| -> Vec<(usize, f32, f32)> {
+            let parts = tree.place(area, 0.0).parts;
+            let mut its_panes: Vec<(usize, f32, f32)> = tree
+                .leaves()
                 .iter()
                 .zip(parts)
-                .map(|(hoja, parte)| (hoja.name, parte.left(), parte.right()))
+                .map(|(leaf, part)| (leaf.name, part.left(), part.right()))
                 .filter(|(name, _, _)| ![4, 6].contains(name))
                 .collect();
-            suyas.sort_by_key(|(name, _, _)| *name);
-            suyas
+            its_panes.sort_by_key(|(name, _, _)| *name);
+            its_panes
         };
 
-        let antes = franjas(&arbol);
+        let before = stripes(&tree);
         assert_eq!(
-            antes.len(),
+            before.len(),
             3,
             "el escenario no tiene las tres consolas ajenas al gesto"
         );
@@ -13522,14 +13522,14 @@ mod tests {
         // corte en filas, o sea el mismo sentido que la raíz, así que entra como hermana y **solo reparte
         // altura**: los anchos de las demás no tienen por qué enterarse de nada. Y sacarla de donde estaba
         // deja a su rama con una sola hija, que es lo que obliga a colapsar y, con ello, a absorber.
-        let (arbol, movido) = arbol.move_pane(6, 4, Side::Top);
-        assert!(movido, "no se movió la 6");
+        let (tree, moved) = tree.move_pane(6, 4, Side::Top);
+        assert!(moved, "no se movió la 6");
 
         // **Que `absorb` haya corrido de verdad**, o esto compararía dos árboles iguales. Si solo hubiera
         // colapsado, la única hija —una rama de columnas— quedaría dentro de la rama de columnas de fuera,
         // y eso es justo lo que este ayudante detecta.
         assert!(
-            !has_nesting_in_the_same_direction(&arbol),
+            !has_nesting_in_the_same_direction(&tree),
             "no llegó a ejecutarse absorber, así que la comparación de abajo no prueba nada"
         );
 
@@ -13543,31 +13543,31 @@ mod tests {
         // Con el escalado roto, las tres se van a un tercio del ancho cada una: la razón cae de 2 a 1, o
         // sea 200 puntos en esta área. El margen de 0,05 está elegido entre las dos cosas y no al tanteo:
         // el punto del divisor desvía la razón 0,007 y el defecto la desvía 1,0.
-        let proporciones = |franjas: &[(usize, f32, f32)]| -> Vec<f32> {
-            let unidad = franjas
+        let ratios = |stripes: &[(usize, f32, f32)]| -> Vec<f32> {
+            let unit = stripes
                 .iter()
                 .find(|(name, _, _)| *name == 8)
-                .map(|(_, izquierda, derecha)| derecha - izquierda)
+                .map(|(_, left_x, right_x)| right_x - left_x)
                 .expect("la 8 está en el escenario");
-            franjas
+            stripes
                 .iter()
-                .map(|(_, izquierda, derecha)| (derecha - izquierda) / unidad)
+                .map(|(_, left_x, right_x)| (right_x - left_x) / unit)
                 .collect()
         };
 
-        let esperadas = proporciones(&antes);
+        let expected = ratios(&before);
         assert!(
-            (esperadas[0] - 2.0).abs() < 0.05,
+            (expected[0] - 2.0).abs() < 0.05,
             "el escenario no nacía con la 5 al doble que la 8, así que no probaría el escalado: \
-             {esperadas:?}"
+             {expected:?}"
         );
 
-        let quedaron = proporciones(&franjas(&arbol));
-        for ((name, _, _), (ahora, antes)) in antes.iter().zip(quedaron.iter().zip(&esperadas)) {
+        let remained = ratios(&stripes(&tree));
+        for ((name, _, _), (current, before)) in before.iter().zip(remained.iter().zip(&expected)) {
             assert!(
-                (ahora - antes).abs() < 0.05,
-                "la consola {name} cambió de tamaño al subir las nietas a hermanas: ocupaba {antes} \
-                 veces la 8 y ahora ocupa {ahora}"
+                (current - before).abs() < 0.05,
+                "la consola {name} cambió de tamaño al subir las nietas a hermanas: ocupaba {before} \
+                 veces la 8 y ahora ocupa {current}"
             );
         }
     }
@@ -13595,18 +13595,18 @@ mod tests {
     /// Los eventos de un gesto entero del panel, fotograma a fotograma.
     fn one_panel_gesture(
         gesture: &mut InjectedDrags,
-        pintado: &[(egui::Rect, Option<f32>)],
-        desde: u64,
+        painted: &[(egui::Rect, Option<f32>)],
+        from: u64,
     ) -> Vec<Vec<egui::Event>> {
         (0..=FRAMES_DRAGGING + 1)
-            .map(|step| gesture.events(pintado, desde + step as u64))
+            .map(|step| gesture.events(painted, from + step as u64))
             .collect()
     }
 
     /// Los eventos de un gesto entero, fotograma a fotograma, con un número de fotograma distinto cada vez.
-    fn one_gesture(injected_drags: &mut InjectedDrags, desde: u64) -> Vec<Vec<egui::Event>> {
+    fn one_gesture(injected_drags: &mut InjectedDrags, from: u64) -> Vec<Vec<egui::Event>> {
         (0..=FRAMES_DRAGGING + 1)
-            .map(|step| injected_drags.events(&two_side_by_side_painted(), desde + step as u64))
+            .map(|step| injected_drags.events(&two_side_by_side_painted(), from + step as u64))
             .collect()
     }
 
@@ -13618,32 +13618,32 @@ mod tests {
         // el trabajo que este hito añade no se ejercería nunca.
         let mut injected_drags =
             InjectedDrags::new(1, InjectedGesture::MovePane).expect("uno es más que ninguno");
-        let fotogramas = one_gesture(&mut injected_drags, 10);
+        let frames = one_gesture(&mut injected_drags, 10);
 
         assert!(
             matches!(
-                fotogramas[0].as_slice(),
+                frames[0].as_slice(),
                 [
                     egui::Event::PointerMoved(_),
                     egui::Event::PointerButton { pressed: true, .. }
                 ]
             ),
             "el primer fotograma no coloca el puntero y aprieta: {:?}",
-            fotogramas[0]
+            frames[0]
         );
-        for enmedio in &fotogramas[1..=FRAMES_DRAGGING] {
+        for middle in &frames[1..=FRAMES_DRAGGING] {
             assert!(
-                matches!(enmedio.as_slice(), [egui::Event::PointerMoved(_)]),
-                "un fotograma de arrastre manda algo que no es mover el puntero: {enmedio:?}"
+                matches!(middle.as_slice(), [egui::Event::PointerMoved(_)]),
+                "un fotograma de arrastre manda algo que no es mover el puntero: {middle:?}"
             );
         }
         assert!(
             matches!(
-                fotogramas[FRAMES_DRAGGING + 1].as_slice(),
+                frames[FRAMES_DRAGGING + 1].as_slice(),
                 [egui::Event::PointerButton { pressed: false, .. }]
             ),
             "el último fotograma no suelta: {:?}",
-            fotogramas[FRAMES_DRAGGING + 1]
+            frames[FRAMES_DRAGGING + 1]
         );
         assert_eq!(
             injected_drags.completed, 1,
@@ -13659,9 +13659,9 @@ mod tests {
         // pintar. Sin esta comprobación, un gesto que salte del origen al destino en un fotograma pasaría
         // las de arriba y mediría un fotograma menos de los que un arrastre tiene.
         let where_it_moves = |which: usize| -> egui::Pos2 {
-            match &fotogramas[which][0] {
+            match &frames[which][0] {
                 egui::Event::PointerMoved(at) => *at,
-                otro => panic!("el fotograma {which} no mueve el puntero: {otro:?}"),
+                other => panic!("el fotograma {which} no mueve el puntero: {other:?}"),
             }
         };
         let (grabbed_at, target) = (two_side_by_side()[0], two_side_by_side()[1]);
@@ -13687,23 +13687,23 @@ mod tests {
             InjectedDrags::new(2, InjectedGesture::MovePane).expect("dos son más que ninguno");
         let target = two_side_by_side()[1];
 
-        let primero = one_gesture(&mut injected_drags, 100);
-        let segundo = one_gesture(&mut injected_drags, 200);
+        let first = one_gesture(&mut injected_drags, 100);
+        let second = one_gesture(&mut injected_drags, 200);
 
-        let where_it_drops = |fotogramas: &[Vec<egui::Event>]| -> egui::Pos2 {
-            match &fotogramas[FRAMES_DRAGGING + 1][0] {
+        let where_it_drops = |frames: &[Vec<egui::Event>]| -> egui::Pos2 {
+            match &frames[FRAMES_DRAGGING + 1][0] {
                 egui::Event::PointerButton { pos, .. } => *pos,
-                otro => panic!("el último fotograma no suelta: {otro:?}"),
+                other => panic!("el último fotograma no suelta: {other:?}"),
             }
         };
 
         assert_eq!(
-            side_of(target, where_it_drops(&primero)),
+            side_of(target, where_it_drops(&first)),
             Side::Right,
             "el primer gesto no suelta por la derecha"
         );
         assert_eq!(
-            side_of(target, where_it_drops(&segundo)),
+            side_of(target, where_it_drops(&second)),
             Side::Left,
             "el segundo gesto no suelta por la izquierda, así que la forma no vuelve a la de partida"
         );
@@ -13718,18 +13718,18 @@ mod tests {
         let mut injected_drags =
             InjectedDrags::new(1, InjectedGesture::MovePane).expect("uno es más que ninguno");
 
-        let primera = injected_drags.events(&two_side_by_side_painted(), 7);
-        let repetida = injected_drags.events(&two_side_by_side_painted(), 7);
-        let siguiente = injected_drags.events(&two_side_by_side_painted(), 8);
+        let first_part = injected_drags.events(&two_side_by_side_painted(), 7);
+        let repeated = injected_drags.events(&two_side_by_side_painted(), 7);
+        let next = injected_drags.events(&two_side_by_side_painted(), 8);
 
-        assert!(!primera.is_empty(), "la primera pasada no mandó nada");
+        assert!(!first_part.is_empty(), "la primera pasada no mandó nada");
         assert!(
-            repetida.is_empty(),
-            "la pasada repetida del mismo fotograma volvió a mandar: {repetida:?}"
+            repeated.is_empty(),
+            "la pasada repetida del mismo fotograma volvió a mandar: {repeated:?}"
         );
         assert!(
-            matches!(siguiente.as_slice(), [egui::Event::PointerMoved(_)]),
-            "el fotograma siguiente no continuó el gesto por donde iba: {siguiente:?}"
+            matches!(next.as_slice(), [egui::Event::PointerMoved(_)]),
+            "el fotograma siguiente no continuó el gesto por donde iba: {next:?}"
         );
     }
 
@@ -13745,9 +13745,9 @@ mod tests {
             None,
         )];
 
-        for fotograma in 0..20 {
+        for frame_nr in 0..20 {
             assert!(
-                injected_drags.events(&just_one, fotograma).is_empty(),
+                injected_drags.events(&just_one, frame_nr).is_empty(),
                 "con una sola consola se mandó algún evento"
             );
         }
@@ -13761,8 +13761,8 @@ mod tests {
         // con dos consolas por fin delante, el gesto tiene que salir entero. La versión anterior afirmaba
         // `asked_for − completed == 3`, y la revisión pilló que eso no puede fallar por su cuenta —`asked_for` es 3
         // por construcción y el aserto de arriba ya fija `completed` en 0—, así que no cubría nada.
-        for fotograma in 100..(100 + FRAMES_DRAGGING as u64 + 2) {
-            injected_drags.events(&two_side_by_side_painted(), fotograma);
+        for frame_nr in 100..(100 + FRAMES_DRAGGING as u64 + 2) {
+            injected_drags.events(&two_side_by_side_painted(), frame_nr);
         }
         assert_eq!(
             injected_drags.completed, 1,
@@ -13792,9 +13792,9 @@ mod tests {
         //
         // No es un defecto del gesto: quien arrastra una consola pide **recolocar**, no conservar los
         // tamaños. Es un límite de lo que se puede medir con él.
-        let in_a_row = |cuantas: usize| Node::Branch {
+        let in_a_row = |how_many: usize| Node::Branch {
             orientation: Orientation::Columns,
-            children: (0..cuantas)
+            children: (0..how_many)
                 .map(|n| Child {
                     weight: weight(1.0),
                     node: Node::Leaf(pane_with("sleep 30", n)),
@@ -13803,28 +13803,28 @@ mod tests {
         };
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 600.0));
         // Un ciclo entero del gesto inyectado: la primera consola va a la derecha de la segunda y vuelve.
-        let round_trip = |arbol: Node| -> Vec<egui::Rect> {
-            let (arbol, fue) = arbol.move_pane(0, 1, Side::Right);
-            assert!(fue, "la ida no movió nada");
-            let (arbol, volvio) = arbol.move_pane(0, 1, Side::Left);
-            assert!(volvio, "la vuelta no movió nada");
-            arbol.place(area, 0.0).parts
+        let round_trip = |tree: Node| -> Vec<egui::Rect> {
+            let (tree, went) = tree.move_pane(0, 1, Side::Right);
+            assert!(went, "la ida no movió nada");
+            let (tree, came_back) = tree.move_pane(0, 1, Side::Left);
+            assert!(came_back, "la vuelta no movió nada");
+            tree.place(area, 0.0).parts
         };
 
-        let dos = in_a_row(2);
-        let antes = dos.place(area, 0.0).parts;
+        let two = in_a_row(2);
+        let before = two.place(area, 0.0).parts;
         assert_eq!(
-            round_trip(dos),
-            antes,
+            round_trip(two),
+            before,
             "con dos consolas el ciclo no devuelve la disposición a la de partida, así que la tanda con \
              arrastres estaría promediando fotogramas de ventanas distintas"
         );
 
-        let cuatro = in_a_row(4);
-        let antes = cuatro.place(area, 0.0).parts;
-        let despues = round_trip(cuatro);
+        let four = in_a_row(4);
+        let before = four.place(area, 0.0).parts;
+        let after = round_trip(four);
         assert!(
-            despues[0].width() < antes[0].width() / 2.0,
+            after[0].width() < before[0].width() / 2.0,
             "con cuatro consolas el ciclo ya no deforma el reparto: si esto deja de ser verdad, la tanda \
              con arrastres puede dejar de estar limitada a dos divisiones"
         );
@@ -13846,11 +13846,11 @@ mod tests {
         window.injected_drags = InjectedDrags::new(4, InjectedGesture::MovePane);
         window.last_painted = two_side_by_side_painted();
 
-        let mut lote = egui::RawInput::default();
-        eframe::App::raw_input_hook(&mut window, &ctx, &mut lote);
+        let mut batch = egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut window, &ctx, &mut batch);
 
         assert!(
-            !lote.events.is_empty(),
+            !batch.events.is_empty(),
             "el enganche no inyectó ningún evento, así que no mide el gesto"
         );
         assert!(
@@ -13885,8 +13885,8 @@ mod tests {
         // iguales, esta prueba no distinguiría publicar uno de publicar el otro — que es el disfraz que este
         // proyecto tiene fichado. Se avanza el gesto directamente porque el enganche ya tiene su prueba.
         let injected_drags = window.injected_drags.as_mut().expect("los acabo de poner");
-        for fotograma in 0..(3 * (FRAMES_DRAGGING as u64 + 2)) {
-            injected_drags.events(&two_side_by_side_painted(), fotograma);
+        for frame_nr in 0..(3 * (FRAMES_DRAGGING as u64 + 2)) {
+            injected_drags.events(&two_side_by_side_painted(), frame_nr);
         }
         injected_drags.one_more_with_effect();
         injected_drags.one_more_with_effect();
@@ -13905,25 +13905,25 @@ mod tests {
             .timings
             .anotar_ida(std::time::Duration::from_micros(10));
 
-        let mut salida = Vec::new();
+        let mut output = Vec::new();
         window
-            .publish_the_report(&mut salida)
+            .publish_the_report(&mut output)
             .expect("escribir a memoria no falla");
-        let informe = String::from_utf8(salida).expect("el informe es texto");
+        let report = String::from_utf8(output).expect("el informe es texto");
 
         assert!(
-            informe.contains(
+            report.contains(
                 "arrastres:    3 inyectados · 2 efectos · 1 fotogramas con texto marcado · \
                  4 informes al programa (moviendo consolas)"
             ),
             "el informe no declara los arrastres inyectados, los que reordenaron, los que marcaron \
-             texto y los que se le contaron al programa:\n{informe}"
+             texto y los que se le contaron al programa:\n{report}"
         );
         assert!(
-            !informe.contains("pedidos"),
+            !report.contains("pedidos"),
             "el informe sigue publicando los gestos PEDIDOS, que es un número sin señal: el guion pide \
              cien mil para que el gesto dure toda la tanda, así que la diferencia vale lo mismo en una \
-             corrida buena que en una rota\n{informe}"
+             corrida buena que en una rota\n{report}"
         );
     }
 
@@ -13938,15 +13938,15 @@ mod tests {
             .timings
             .anotar_ida(std::time::Duration::from_micros(10));
 
-        let mut salida = Vec::new();
+        let mut output = Vec::new();
         window
-            .publish_the_report(&mut salida)
+            .publish_the_report(&mut output)
             .expect("escribir a memoria no falla");
-        let informe = String::from_utf8(salida).expect("el informe es texto");
+        let report = String::from_utf8(output).expect("el informe es texto");
 
         assert!(
-            !informe.contains("arrastres:"),
-            "el informe habla de arrastres sin que nadie los pidiera:\n{informe}"
+            !report.contains("arrastres:"),
+            "el informe habla de arrastres sin que nadie los pidiera:\n{report}"
         );
     }
 
@@ -13954,7 +13954,7 @@ mod tests {
     fn mover_conserva_el_programa_y_la_identidad_de_las_consolas() {
         // AC2 para la operación de verdad: la que se mueve tiene que llegar entera al otro sitio. Una
         // implementación que rehiciera las hojas dejaría los nombres idénticos y los programas muertos.
-        let arbol = Node::Branch {
+        let tree = Node::Branch {
             orientation: Orientation::Columns,
             children: vec![
                 Child {
@@ -13971,14 +13971,14 @@ mod tests {
                 },
             ],
         };
-        let identidad = |arbol: &Node| -> Vec<(usize, String)> {
-            let mut suyas: Vec<(usize, String)> = arbol
-                .hojas()
+        let identity = |tree: &Node| -> Vec<(usize, String)> {
+            let mut its_panes: Vec<(usize, String)> = tree
+                .leaves()
                 .iter()
-                .map(|hoja| {
+                .map(|leaf| {
                     (
-                        hoja.name,
-                        hoja.panel
+                        leaf.name,
+                        leaf.panel
                             .as_ref()
                             .expect("nace con directorio")
                             .id()
@@ -13986,22 +13986,22 @@ mod tests {
                     )
                 })
                 .collect();
-            suyas.sort_by_key(|(name, _)| *name);
-            suyas
+            its_panes.sort_by_key(|(name, _)| *name);
+            its_panes
         };
 
-        let antes = identidad(&arbol);
-        let (arbol, movido) = arbol.move_pane(5, 7, Side::Bottom);
-        assert!(movido, "no se movió");
+        let before = identity(&tree);
+        let (tree, moved) = tree.move_pane(5, 7, Side::Bottom);
+        assert!(moved, "no se movió");
 
         assert_eq!(
-            identidad(&arbol),
-            antes,
+            identity(&tree),
+            before,
             "mover una consola le cambió la identidad: no se movió, se rehizo"
         );
-        for hoja in arbol.hojas() {
+        for leaf in tree.leaves() {
             assert!(
-                hoja.pty_output.is_alive(),
+                leaf.pty_output.is_alive(),
                 "el programa de una consola murió al moverla"
             );
         }
@@ -14011,36 +14011,36 @@ mod tests {
     fn mover_a_un_nombre_que_no_existe_no_toca_el_arbol_y_no_pierde_ninguna_consola() {
         // El caso que muerde: el destino se cerró entre agarrar y soltar. Lo que **no** puede pasar es
         // quedarse a medias, con la consola fuera del árbol y su programa vivo.
-        let arbol = three_in_a_row_with_different_weights();
+        let tree = three_in_a_row_with_different_weights();
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 300.0));
-        let antes = arbol.place(area, 0.0).parts;
+        let before = tree.place(area, 0.0).parts;
 
-        let (arbol, movido) = arbol.move_pane(5, 99, Side::Right);
+        let (tree, moved) = tree.move_pane(5, 99, Side::Right);
 
         assert!(
-            !movido,
+            !moved,
             "dijo que había movido algo hacia un nombre que no existe"
         );
         assert_eq!(
-            arbol.hojas().iter().map(|h| h.name).collect::<Vec<_>>(),
+            tree.leaves().iter().map(|h| h.name).collect::<Vec<_>>(),
             [5, 6, 7],
             "un destino inexistente descolocó las consolas que sí existían"
         );
         assert_eq!(
-            arbol.place(area, 0.0).parts,
-            antes,
+            tree.place(area, 0.0).parts,
+            before,
             "un destino inexistente cambió el reparto"
         );
     }
 
     #[test]
     fn mover_una_consola_sobre_si_misma_no_hace_nada() {
-        let arbol = three_in_a_row_with_different_weights();
-        let (arbol, movido) = arbol.move_pane(6, 6, Side::Top);
+        let tree = three_in_a_row_with_different_weights();
+        let (tree, moved) = tree.move_pane(6, 6, Side::Top);
 
-        assert!(!movido, "moverse sobre sí misma dijo que había hecho algo");
+        assert!(!moved, "moverse sobre sí misma dijo que había hecho algo");
         assert_eq!(
-            arbol.hojas().iter().map(|h| h.name).collect::<Vec<_>>(),
+            tree.leaves().iter().map(|h| h.name).collect::<Vec<_>>(),
             [5, 6, 7],
             "moverse sobre sí misma descolocó el árbol"
         );
@@ -14048,12 +14048,12 @@ mod tests {
 
     #[test]
     fn en_una_pestaña_de_una_sola_consola_mover_no_hace_nada() {
-        let arbol = Node::Leaf(pane_with("sleep 30", 5));
-        let (arbol, movido) = arbol.move_pane(5, 5, Side::Bottom);
+        let tree = Node::Leaf(pane_with("sleep 30", 5));
+        let (tree, moved) = tree.move_pane(5, 5, Side::Bottom);
 
-        assert!(!movido, "con una sola consola dijo que había movido algo");
+        assert!(!moved, "con una sola consola dijo que había movido algo");
         assert!(
-            matches!(arbol, Node::Leaf(_)),
+            matches!(tree, Node::Leaf(_)),
             "la única consola dejó de ser la raíz"
         );
     }
@@ -14063,25 +14063,25 @@ mod tests {
         // **Sin normalizar, una consola ancha y baja solo se dejaría soltar arriba o abajo**: en puntos sus
         // bordes horizontales están mucho más cerca de cualquier punto que los verticales. El rectángulo de
         // abajo mide 1000×100 a propósito, que es donde las dos lecturas se separan.
-        let ancha = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 100.0));
+        let wide = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 100.0));
 
         // A 40 puntos del borde izquierdo y a 50 del de arriba: en puntos gana arriba, en proporción gana
         // la izquierda (40/1000 contra 50/100).
         assert_eq!(
-            side_of(ancha, egui::pos2(40.0, 50.0)),
+            side_of(wide, egui::pos2(40.0, 50.0)),
             Side::Left,
             "el lado se eligió por la distancia en puntos y no en proporción"
         );
 
-        for (punto, espera) in [
+        for (point, expected) in [
             (egui::pos2(950.0, 50.0), Side::Right),
             (egui::pos2(500.0, 5.0), Side::Top),
             (egui::pos2(500.0, 95.0), Side::Bottom),
         ] {
             assert_eq!(
-                side_of(ancha, punto),
-                espera,
-                "el lado de {punto:?} no fue {espera:?}"
+                side_of(wide, point),
+                expected,
+                "el lado de {point:?} no fue {expected:?}"
             );
         }
     }
@@ -14121,13 +14121,13 @@ mod tests {
             None,
         )
         .expect("no se pudo abrir la ventana de una sola consola");
-        let entera = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
+        let whole = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
 
         let ctx = egui::Context::default();
         let in_flight = drag_a_pane(
             &mut window,
             &ctx,
-            &[entera],
+            &[whole],
             egui::pos2(50.0, 150.0),
             egui::pos2(350.0, 150.0),
         );
@@ -14150,21 +14150,21 @@ mod tests {
         // y eso solo lo sabe egui.
         let mut window = window_with("sleep 30", "sleep 30");
         let area = area_of(400.0 + DIVIDER_THICKNESS);
-        let tiling = repartir(
+        let tiling = tile(
             area,
             Orientation::Columns,
             &weights_of(INITIAL_FRACTION),
             CELL_WIDTH,
         );
-        let agarre = tiling.dividers[0].rect.center();
+        let grip = tiling.dividers[0].rect.center();
         // **El puntero se pasa del borde derecho y luego vuelve**, y ese ida y vuelta es lo que hace que la
         // prueba distinga entre seguir al puntero y acumular su desplazamiento. Con un solo salto las dos
         // implementaciones dan casi lo mismo y la prueba pasaría con la que el doc dice haber descartado;
         // con el exceso de por medio, la que acumula pierde para siempre lo que el recorte se comió y acaba
         // en 0,245 en vez de 0,75.
-        let fuera = egui::pos2(area.right() + 200.0, agarre.y);
+        let beyond = egui::pos2(area.right() + 200.0, grip.y);
         // Tres cuartos del ancho repartible: un sitio al que la fracción inicial no llega sola.
-        let suelta = egui::pos2(area.left() + 300.0, agarre.y);
+        let drop_at = egui::pos2(area.left() + 300.0, grip.y);
 
         let ctx = egui::Context::default();
 
@@ -14173,9 +14173,9 @@ mod tests {
         // botón tiene que bajar en una pasada distinta del movimiento: el candidato a arrastrarse sale de
         // **dónde estaba el puntero al pulsar** (`interaction.rs:169-171`), así que un pulsar y mover en la
         // misma pasada busca al candidato en el destino, donde el divisor ya no está.
-        drag_pass(&mut window, &ctx, tiling.dividers[0], move_pane(agarre));
-        drag_pass(&mut window, &ctx, tiling.dividers[0], pulsar(agarre));
-        drag_pass(&mut window, &ctx, tiling.dividers[0], move_pane(fuera));
+        drag_pass(&mut window, &ctx, tiling.dividers[0], move_pane(grip));
+        drag_pass(&mut window, &ctx, tiling.dividers[0], press(grip));
+        drag_pass(&mut window, &ctx, tiling.dividers[0], move_pane(beyond));
         // **El tope es el 99 % y no el 100 %, y el cambio es a propósito.** Con el árbol, lo que la
         // pestaña guarda son los pesos de sus hijos, y un peso cero no existe — la parte que se colapsa
         // conserva un uno por ciento. Antes se guardaba la fracción cruda (`1.0`) y el suelo de ancho
@@ -14191,9 +14191,9 @@ mod tests {
             "pasarse del borde derecho no dejó la frontera pegada a su tope"
         );
 
-        let movio = drag_pass(&mut window, &ctx, tiling.dividers[0], move_pane(suelta));
+        let it_moved = drag_pass(&mut window, &ctx, tiling.dividers[0], move_pane(drop_at));
 
-        assert!(movio, "el arrastre no movió la fracción");
+        assert!(it_moved, "el arrastre no movió la fracción");
         // Exacto y no aproximado: 300 de 400 repartibles es 0,75 sin resto, así que una tolerancia solo
         // serviría para dejar pasar una implementación que casi acierta.
         assert_eq!(
@@ -14206,30 +14206,30 @@ mod tests {
     #[test]
     fn un_arrastre_donde_no_hay_nada_que_repartir_deja_la_fraccion_como_estaba() {
         // Los dos bordes de `drag_the_divider`, que existen porque la fracción es **estado**: una vez
-        // guardada, una fracción absurda no se corrige sola. Con el área más estrecha que el divisor, `util`
+        // guardada, una fracción absurda no se corrige sola. Con el área más estrecha que el divisor, `usable`
         // es negativo y la división cambiaría de signo; con el área sin número —el caso que la métrica ya
         // documenta mientras el escritorio no ha dicho cuánto mide la ventana— saldría un no-número, y ese sí
         // no se va nunca: la ventana dejaría de pintar y ni ensancharla la recuperaría.
         for area in [area_of(1.0), area_of(f32::NAN)] {
             let mut window = window_with("sleep 30", "sleep 30");
             let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2.0, 300.0));
-            let divisor = Divider {
+            let divider = Divider {
                 rect,
                 orientation: Orientation::Columns,
                 between_the_two: area,
             };
-            let agarre = rect.center();
+            let grip = rect.center();
             let ctx = egui::Context::default();
 
-            drag_pass(&mut window, &ctx, divisor, move_pane(agarre));
-            drag_pass(&mut window, &ctx, divisor, pulsar(agarre));
+            drag_pass(&mut window, &ctx, divider, move_pane(grip));
+            drag_pass(&mut window, &ctx, divider, press(grip));
             // Al borde izquierdo, que es donde el numerador también se hace cero: es la única posición que
             // produce el cero partido por cero del que sale el no-número.
             drag_pass(
                 &mut window,
                 &ctx,
-                divisor,
-                move_pane(egui::pos2(area.left(), agarre.y)),
+                divider,
+                move_pane(egui::pos2(area.left(), grip.y)),
             );
 
             assert_eq!(
@@ -14278,10 +14278,10 @@ mod tests {
             color,
             ..
         } = &mut window;
-        let salida = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            let suyo = Window::paint_pane(
+            let outcome = Window::paint_pane(
                 ui,
                 tabs[0].panes_mut()[0],
                 area_of(802.0),
@@ -14289,15 +14289,15 @@ mod tests {
                 &metrics,
                 discoverer,
             );
-            if suyo.color.rasterized + suyo.color.failed > 0 {
+            if outcome.color.rasterized + outcome.color.failed > 0 {
                 color.anotar(
-                    suyo.color.spent,
-                    suyo.color.rasterized,
-                    suyo.color.failed,
+                    outcome.color.spent,
+                    outcome.color.rasterized,
+                    outcome.color.failed,
                 );
             }
         });
-        salida.drop_without_applying_deltas();
+        output.drop_without_applying_deltas();
 
         assert_eq!(
             window.discoverer.color_cost(),
@@ -14306,17 +14306,17 @@ mod tests {
              restaría de su pintado un trabajo que no ha hecho"
         );
 
-        let mut informe = Vec::new();
+        let mut report = Vec::new();
         window
             .color
-            .publicar(&mut informe)
+            .publicar(&mut report)
             .expect("no se pudo publicar el tramo");
-        let informe = String::from_utf8(informe).expect("el informe no es texto");
+        let report = String::from_utf8(report).expect("el informe no es texto");
         // **Los dos escenarios, y por eso no se salta sola.** Donde la máquina tiene fuente de emoji, el
         // tramo tiene que aparecer con su número; donde no la tiene, el intento fallido tiene que
         // aparecer igual — porque también se pagó.
         assert!(
-            informe.contains("rasterizar un glifo de color"),
+            report.contains("rasterizar un glifo de color"),
             "se pintaron dos emojis y el informe no declara el tramo: sus microsegundos se publicarían \
              como coste del framework"
         );
@@ -14333,21 +14333,21 @@ mod tests {
         //
         // Sacando el número no hay literal del que depender más que el nombre del tramo: si el
         // recuento es cero, el trabajo que se pagó no se anotó, y eso es lo que hay que cazar.
-        let glyphs: usize = informe
+        let glyphs: usize = report
             .split_whitespace()
-            .zip(informe.split_whitespace().skip(1))
-            .find(|(_, siguiente)| *siguiente == "glifos")
-            .and_then(|(numero, _)| numero.parse().ok())
+            .zip(report.split_whitespace().skip(1))
+            .find(|(_, next)| *next == "glifos")
+            .and_then(|(number, _)| number.parse().ok())
             .unwrap_or_else(|| {
                 panic!(
                     "el tramo no publica un recuento de glifos que se pueda leer, y es lo que el \
-                     guion de medida busca para invalidar una tanda: {informe}"
+                     guion de medida busca para invalidar una tanda: {report}"
                 )
             });
         assert!(
             glyphs > 0,
             "el tramo dice haber rasterizado {glyphs} glifos con dos emojis en pantalla, así que no \
-             se anotó nada de lo que se pagó: {informe}"
+             se anotó nada de lo que se pagó: {report}"
         );
     }
 
@@ -14374,17 +14374,17 @@ mod tests {
             egui::RawInput::default(),
         );
 
-        let mut informe = Vec::new();
+        let mut report = Vec::new();
         window
             .color
-            .publicar(&mut informe)
+            .publicar(&mut report)
             .expect("no se pudo publicar el tramo");
-        let informe = String::from_utf8(informe).expect("el informe no es texto");
+        let report = String::from_utf8(report).expect("el informe no es texto");
         // **Los dos escenarios, y por eso no se salta sola.** Donde la máquina tiene fuente de emoji el
         // tramo sale con sus glifos rasterizados; donde no la tiene sale con los intentos fallidos, que
         // también se pagaron.
         assert!(
-            informe.contains("rasterizar un glifo de color"),
+            report.contains("rasterizar un glifo de color"),
             "la ventana pintó dos emojis en su pasada y su informe no declara el tramo: lo que costaron \
              se publica como coste del framework"
         );
@@ -14401,21 +14401,21 @@ mod tests {
         //
         // Sacando el número no hay literal del que depender más que el nombre del tramo: si el
         // recuento es cero, el trabajo que se pagó no se anotó, y eso es lo que hay que cazar.
-        let glyphs: usize = informe
+        let glyphs: usize = report
             .split_whitespace()
-            .zip(informe.split_whitespace().skip(1))
-            .find(|(_, siguiente)| *siguiente == "glifos")
-            .and_then(|(numero, _)| numero.parse().ok())
+            .zip(report.split_whitespace().skip(1))
+            .find(|(_, next)| *next == "glifos")
+            .and_then(|(number, _)| number.parse().ok())
             .unwrap_or_else(|| {
                 panic!(
                     "el tramo no publica un recuento de glifos que se pueda leer, y es lo que el \
-                     guion de medida busca para invalidar una tanda: {informe}"
+                     guion de medida busca para invalidar una tanda: {report}"
                 )
             });
         assert!(
             glyphs > 0,
             "el tramo dice haber rasterizado {glyphs} glifos y la ventana pintó dos emojis en su \
-             pasada, así que no anotó nada de lo que pagó: {informe}"
+             pasada, así que no anotó nada de lo que pagó: {report}"
         );
     }
 
@@ -14428,9 +14428,9 @@ mod tests {
             !any_measurement_variable(|_| false),
             "sin ninguna variable puesta, la puerta de medida se cerró igualmente"
         );
-        for which in VARIABLES_DE_MEDIDA {
+        for which in MEASUREMENT_VARIABLES {
             assert!(
-                any_measurement_variable(|puesta| puesta == which),
+                any_measurement_variable(|set| set == which),
                 "«{which}» sola no cierra la puerta de medida, así que una tanda que solo la ponga leería \
                  la configuración de quien mide"
             );
@@ -14448,7 +14448,7 @@ mod tests {
         // **Se afirma contra los nombres literales**, que son los que el guion exporta. Compararlos con
         // las constantes de al lado mediría que el código es consistente consigo mismo.
         assert_eq!(
-            VARIABLES_DE_MEDIDA,
+            MEASUREMENT_VARIABLES,
             [
                 "MEDIR_PESTANAS",
                 "MEDIR_DIVISIONES",
@@ -14500,24 +14500,24 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("agent-terminal-veto-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("crear el directorio de la prueba");
-        let fichero = dir.join("config");
-        std::fs::write(&fichero, "tamaño = 42\ncolor.1 = #ff0000\nfondo = #010203")
+        let file = dir.join("config");
+        std::fs::write(&file, "tamaño = 42\ncolor.1 = #ff0000\nfondo = #010203")
             .expect("escribir la configuración de la prueba");
 
         // Sin medida se lee entero: si esto fallara, la prueba de abajo pasaría por no haber fichero.
-        let (leidos, cost) = settings_to_use(Entry::Normal, Some(&fichero));
+        let (loaded, cost) = settings_to_use(Entry::Normal, Some(&file));
         assert_eq!(
-            leidos.cuerpo,
+            loaded.cuerpo,
             Some(42.0),
             "sin medida no se leyó la configuración"
         );
-        assert!(leidos.colores.fondo.is_some());
+        assert!(loaded.colores.fondo.is_some());
         assert!(
             matches!(cost, measure::LecturaDeAjustes::Con { .. }),
             "se aplicó la configuración y el informe no lo declararía: {cost:?}"
         );
 
-        let (under_measurement, cost) = settings_to_use(Entry::Measuring, Some(&fichero));
+        let (under_measurement, cost) = settings_to_use(Entry::Measuring, Some(&file));
         assert_eq!(
             cost,
             measure::LecturaDeAjustes::Vetada,
@@ -14654,15 +14654,15 @@ mod tests {
         };
 
         let factory = grid_with(None);
-        let grande = grid_with(Some(28.0));
+        let big = grid_with(Some(28.0));
 
         assert!(
             factory.cols > 0 && factory.rows > 0,
             "la rejilla de fábrica salió vacía: la prueba no está midiendo nada"
         );
         assert!(
-            grande.cols < factory.cols && grande.rows < factory.rows,
-            "con el doble de cuerpo la consola tiene la misma rejilla ({grande:?} contra {factory:?}): \
+            big.cols < factory.cols && big.rows < factory.rows,
+            "con el doble de cuerpo la consola tiene la misma rejilla ({big:?} contra {factory:?}): \
              el tamaño configurado no llega hasta la medida de la celda"
         );
     }
@@ -14677,16 +14677,16 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         // Un cuarto y tres cuartos: con mitades, una consola midiendo el rectángulo de la otra daría el mismo
         // número y la prueba no vería nada.
-        let tiling = repartir(
+        let tiling = tile(
             area_of(802.0),
             Orientation::Columns,
             &weights_of(0.25),
             CELL_WIDTH,
         );
-        let rectangulos = [tiling.parts[0], tiling.parts[1]];
+        let rects = [tiling.parts[0], tiling.parts[1]];
 
         let ctx = egui::Context::default();
-        let mut esperado = [INITIAL_GRID; 2];
+        let mut expected = [INITIAL_GRID; 2];
         ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
@@ -14694,7 +14694,7 @@ mod tests {
                 .active_mut()
                 .panes_mut()
                 .into_iter()
-                .zip(rectangulos)
+                .zip(rects)
                 .enumerate()
             {
                 Window::paint_pane(
@@ -14705,19 +14705,19 @@ mod tests {
                     &metrics,
                     &mut fonts::Discoverer::default(),
                 );
-                esperado[which] = metrics.cells_in(rect.size());
+                expected[which] = metrics.cells_in(rect.size());
             }
         })
         .drop_without_applying_deltas();
 
         assert_eq!(
             window.active().panes()[0].measured,
-            esperado[0],
+            expected[0],
             "la consola izquierda no midió su propio rectángulo"
         );
         assert_eq!(
             window.active().panes()[1].measured,
-            esperado[1],
+            expected[1],
             "la consola derecha no midió su propio rectángulo"
         );
         // Y la comprobación que hace que las dos de arriba no puedan ser ciertas por casualidad: con este
@@ -14738,9 +14738,9 @@ mod tests {
         window: &mut Window,
         ctx: &egui::Context,
         divider: Divider,
-        entrada: egui::RawInput,
+        input: egui::RawInput,
     ) -> bool {
-        pass_over_dividers(window, ctx, &[divider], entrada)[0]
+        pass_over_dividers(window, ctx, &[divider], input)[0]
     }
 
     /// Una pasada que atiende **varias** fronteras, como hace el pintado de verdad. Dice cuáles se
@@ -14752,16 +14752,16 @@ mod tests {
         window: &mut Window,
         ctx: &egui::Context,
         dividers: &[Divider],
-        entrada: egui::RawInput,
+        input: egui::RawInput,
     ) -> Vec<bool> {
-        let mut movio = vec![false; dividers.len()];
-        ctx.run_ui(entrada, |ui| {
+        let mut it_moved = vec![false; dividers.len()];
+        ctx.run_ui(input, |ui| {
             for (which, divider) in dividers.iter().enumerate() {
-                movio[which] = window.drag_the_divider(ui, which, *divider);
+                it_moved[which] = window.drag_the_divider(ui, which, *divider);
             }
         })
         .drop_without_applying_deltas();
-        movio
+        it_moved
     }
 
     /// Una pasada de interfaz **entera**: la del rasgo de `eframe`, con la ventana del tamaño pedido.
@@ -14790,13 +14790,13 @@ mod tests {
         window: &mut Window,
         ctx: &egui::Context,
         area: egui::Rect,
-        mut entrada: egui::RawInput,
+        mut input: egui::RawInput,
     ) -> Vec<egui::epaint::ClippedShape> {
-        entrada.screen_rect = Some(area);
+        input.screen_rect = Some(area);
         let mut frame = eframe::Frame::_new_kittest();
-        let mut salida = ctx.run_ui(entrada, |ui| eframe::App::ui(window, ui, &mut frame));
-        let shapes = std::mem::take(&mut salida.shapes);
-        salida.drop_without_applying_deltas();
+        let mut output = ctx.run_ui(input, |ui| eframe::App::ui(window, ui, &mut frame));
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
         shapes
     }
 
@@ -14805,16 +14805,16 @@ mod tests {
     /// **Se mira lo encolado y no el estado del panel**, porque lo que se promete es que el aviso *se
     /// ve*: un estado impecable que nadie llega a pintar se lee igual de bien desde el test y no se ve
     /// en la pantalla.
-    fn the_text_queued_up(shapes: &[egui::epaint::ClippedShape], dice: &str) -> bool {
-        shapes.iter().any(|recortada| {
-            matches!(&recortada.shape, egui::Shape::Text(texto) if texto.galley.text().contains(dice))
+    fn the_text_queued_up(shapes: &[egui::epaint::ClippedShape], says: &str) -> bool {
+        shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text().contains(says))
         })
     }
 
     /// La entrada de un puntero que se mueve a un sitio.
-    fn move_pane(a: egui::Pos2) -> egui::RawInput {
+    fn move_pane(to: egui::Pos2) -> egui::RawInput {
         egui::RawInput {
-            events: vec![egui::Event::PointerMoved(a)],
+            events: vec![egui::Event::PointerMoved(to)],
             ..Default::default()
         }
     }
@@ -14823,10 +14823,10 @@ mod tests {
     ///
     /// Lleva `Ctrl+Mayúsculas` porque desde **D20** es lo que distingue mover la división de marcar
     /// texto: los dos gestos entran por el mismo botón.
-    fn pulsar(en: egui::Pos2) -> egui::RawInput {
+    fn press(at: egui::Pos2) -> egui::RawInput {
         egui::RawInput {
             events: vec![egui::Event::PointerButton {
-                pos: en,
+                pos: at,
                 button: egui::PointerButton::Primary,
                 pressed: true,
                 modifiers: with_shift(),
@@ -14836,10 +14836,10 @@ mod tests {
     }
 
     /// La entrada de un botón que se suelta.
-    fn soltar(en: egui::Pos2) -> egui::RawInput {
+    fn release(at: egui::Pos2) -> egui::RawInput {
         egui::RawInput {
             events: vec![egui::Event::PointerButton {
-                pos: en,
+                pos: at,
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: egui::Modifiers::default(),
@@ -14862,36 +14862,36 @@ mod tests {
         // la misma pasada y en el mismo orden que la aplicación.
         let mut window = window_with("sleep 30", "sleep 30");
         let area = area_of(400.0 + DIVIDER_THICKNESS);
-        let tiling = repartir(
+        let tiling = tile(
             area,
             Orientation::Columns,
             &weights_of(INITIAL_FRACTION),
             CELL_WIDTH,
         );
         let divider = tiling.dividers[0];
-        let agarre = divider.rect.center();
-        let suelta = egui::pos2(area.left() + 300.0, agarre.y);
-        let rectangulos = tiling.parts.clone();
+        let grip = divider.rect.center();
+        let drop_at = egui::pos2(area.left() + 300.0, grip.y);
+        let rects = tiling.parts.clone();
 
         let ctx = egui::Context::default();
-        let mut pasada = |entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let mut pass = |input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 // El mismo orden que la pasada de verdad: primero las fronteras, después el ratón sobre
                 // las consolas.
                 window.drag_the_divider(ui, 0, divider);
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
 
-        pasada(move_pane(agarre));
-        pasada(pulsar(agarre));
-        pasada(move_pane(suelta));
-        pasada(soltar(suelta));
+        pass(move_pane(grip));
+        pass(press(grip));
+        pass(move_pane(drop_at));
+        pass(release(drop_at));
 
         assert_eq!(
             window.active().divider_fractions()[0],
@@ -14912,8 +14912,8 @@ mod tests {
     const CELL_WIDTH: f32 = 8.0;
 
     /// Un área de la anchura pedida, con la altura que haga falta para que sea un rectángulo válido.
-    fn area_of(ancho: f32) -> egui::Rect {
-        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(ancho, 300.0))
+    fn area_of(width: f32) -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 300.0))
     }
 
     /// Monta una división con su directorio de verdad y un `panel.json` ya publicado.
@@ -14921,23 +14921,23 @@ mod tests {
     /// Hace falta el directorio real y no un doble: lo que estas pruebas comprueban es la cadena
     /// entera —el fichero en disco, la lectura del contrato y el reparto que sale de ella— y con un
     /// panel puesto a mano se probaría el reparto contra un estado que nadie ha leído nunca.
-    fn pane_with_panel(contenido: &str) -> Pane {
+    fn pane_with_panel(contents: &str) -> Pane {
         let mut pane = pane_with("sleep 30", 0);
         pane.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
-        publish_at(&pane, contenido);
+        publish_at(&pane, contents);
         pane.refresh_its_panel();
         pane
     }
 
     /// Publica un contenido en el `panel.json` de una división que ya tiene directorio.
-    fn publish_at(pane: &Pane, contenido: &str) {
+    fn publish_at(pane: &Pane, contents: &str) {
         std::fs::write(
             pane.panel
                 .as_ref()
                 .expect("la división tiene directorio")
                 .path()
                 .join(panel_contract::PANEL_FILE),
-            contenido,
+            contents,
         )
         .expect("publicar el panel");
     }
@@ -14974,10 +14974,10 @@ mod tests {
     ///
     /// El límite es generoso —cinco segundos— porque lo que mide no es cuánto tarda el núcleo sino si
     /// llega: en la práctica llega en milisegundos.
-    fn wait_for_the_flag(bandera: &Flag, si_no_llega: &str) {
-        let limite = Instant::now() + Duration::from_secs(5);
-        while !bandera.take() {
-            assert!(Instant::now() < limite, "{si_no_llega}");
+    fn wait_for_the_flag(flag: &Flag, if_it_never_comes: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !flag.take() {
+            assert!(Instant::now() < deadline, "{if_it_never_comes}");
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -15002,10 +15002,10 @@ mod tests {
 
         publish_at(&panes[0], r#"{"lines":["despierta"]}"#);
 
-        let limite = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(5);
         while !ctx.has_requested_repaint() {
             assert!(
-                Instant::now() < limite,
+                Instant::now() < deadline,
                 "se publicó y nadie pidió fotograma: con la ventana en reposo el panel no se movería"
             );
             std::thread::sleep(Duration::from_millis(10));
@@ -15059,17 +15059,17 @@ mod tests {
         // `logic` se mide el despertador contra el estado de *antes* de releer los paneles, y ese es
         // justo el fallo que esta prueba existe para cazar.
         let mut frame = eframe::Frame::_new_kittest();
-        let entrada = egui::RawInput {
+        let input = egui::RawInput {
             screen_rect: Some(area_of(800.0)),
             ..Default::default()
         };
 
         eframe::App::logic(window, ctx, &mut frame);
-        let salida = ctx.run_ui(entrada, |ui| eframe::App::ui(window, ui, &mut frame));
-        let espera = salida.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
-        salida.drop_without_applying_deltas();
+        let output = ctx.run_ui(input, |ui| eframe::App::ui(window, ui, &mut frame));
+        let delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        output.drop_without_applying_deltas();
 
-        espera
+        delay
     }
 
     /// **El latido, desde el camino real y con la pasada entera.** El vigilante ve lo que cambia; esto
@@ -15280,8 +15280,8 @@ mod tests {
         let mut pane = pane_with_panel(r#"{"lines":["algo publicado"]}"#);
         // Con salida en este fotograma, que es cuando las series se anotan: sin ella hay pintado que
         // declarar pero no hay *vuelta* que medir, y eso ya tiene su propia prueba en la medida.
-        let ahora = Instant::now();
-        pane.pending_measurement = Some((Some(ahora), ahora, Duration::from_millis(1)));
+        let now = Instant::now();
+        pane.pending_measurement = Some((Some(now), now, Duration::from_millis(1)));
 
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -15299,12 +15299,12 @@ mod tests {
         .drop_without_applying_deltas();
         pane.timings.cerrar_fotograma(Duration::from_millis(10));
 
-        let anotado = pane
+        let noted = pane
             .timings
             .panel_anotado()
             .expect("el tramo del panel tiene que llegar a la serie");
         assert!(
-            anotado > Duration::ZERO,
+            noted > Duration::ZERO,
             "se declaró un cero: el coste del panel se lo queda el framework por resta"
         );
     }
@@ -15314,12 +15314,12 @@ mod tests {
     #[test]
     fn una_consola_sin_panel_publicado_se_queda_con_todo_su_rectangulo() {
         let pane = pane_with("sleep 30", 0);
-        let entera = area_of(800.0);
+        let whole = area_of(800.0);
 
-        let panel_split = pane.tile_with_its_panel(entera, CELL_WIDTH, SystemTime::now());
+        let panel_split = pane.tile_with_its_panel(whole, CELL_WIDTH, SystemTime::now());
 
         assert_eq!(
-            panel_split.console, entera,
+            panel_split.console, whole,
             "sin panel no se descuenta nada"
         );
         assert!(panel_split.panel.is_none());
@@ -15331,7 +15331,7 @@ mod tests {
     #[test]
     fn la_rejilla_de_una_consola_con_panel_mide_solo_el_hueco_que_le_queda() {
         let mut pane = pane_with_panel(r#"{"lines":["algo publicado"]}"#);
-        let entera = area_of(800.0);
+        let whole = area_of(800.0);
 
         let ctx = egui::Context::default();
         let (mut with_panel, mut without_discounting) = (INITIAL_GRID, INITIAL_GRID);
@@ -15341,13 +15341,13 @@ mod tests {
             Window::paint_pane(
                 ui,
                 &mut pane,
-                entera,
+                whole,
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
             );
             with_panel = pane.measured;
-            without_discounting = metrics.cells_in(entera.size());
+            without_discounting = metrics.cells_in(whole.size());
         })
         .drop_without_applying_deltas();
 
@@ -15369,34 +15369,34 @@ mod tests {
     #[test]
     fn el_panel_se_pinta_en_su_franja_y_no_encima_de_la_consola() {
         let mut pane = pane_with_panel(r#"{"header":false,"lines":["algo publicado"]}"#);
-        let entera = area_of(800.0);
+        let whole = area_of(800.0);
 
         let ctx = egui::Context::default();
         let mut cut_along = 0.0;
-        let mut salida = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
             Window::paint_pane(
                 ui,
                 &mut pane,
-                entera,
+                whole,
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
             );
             cut_along = pane
-                .tile_with_its_panel(entera, metrics.width(), SystemTime::now())
+                .tile_with_its_panel(whole, metrics.width(), SystemTime::now())
                 .console
                 .right();
         });
-        let shapes = std::mem::take(&mut salida.shapes);
-        salida.drop_without_applying_deltas();
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
 
         let at = shapes
             .iter()
-            .find_map(|recortada| match &recortada.shape {
-                egui::Shape::Text(texto) if texto.galley.text().contains("algo publicado") => {
-                    Some(texto.pos)
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text().contains("algo publicado") => {
+                    Some(text.pos)
                 }
                 _ => None,
             })
@@ -15421,14 +15421,14 @@ mod tests {
         let area = area_of(1200.0);
 
         // La referencia es la ventana de antes de este hito: ninguna consola con nada.
-        let mut ninguna = window_with("sleep 30", "sleep 30");
+        let mut nobody_published = window_with("sleep 30", "sleep 30");
         ui_pass(
-            &mut ninguna,
+            &mut nobody_published,
             &egui::Context::default(),
             area,
             egui::RawInput::default(),
         );
-        let como_antes = ninguna.active().panes()[1].measured;
+        let as_before = nobody_published.active().panes()[1].measured;
 
         let mut window = window_with("sleep 30", "sleep 30");
         *window.active_mut().panes_mut()[0] = pane_with_panel(r#"{"lines":["algo publicado"]}"#);
@@ -15442,27 +15442,27 @@ mod tests {
         );
 
         assert!(
-            window.active().panes()[0].measured.cols < como_antes.cols,
+            window.active().panes()[0].measured.cols < as_before.cols,
             "la consola cuyo productor publicó no cedió ancho: midió {} columnas",
             window.active().panes()[0].measured.cols
         );
         assert_eq!(
             window.active().panes()[1].measured,
-            como_antes,
+            as_before,
             "la consola con el directorio vacío se estrechó sin que nadie hubiera publicado"
         );
     }
 
     /// Los pesos de un reparto escrito a mano en la prueba. Entra por el mismo constructor que
     /// producción, así que un número que `Weight` rechazaría hace caer la prueba en vez de colarse.
-    fn weights(valores: [f32; 2]) -> [Weight; 2] {
-        valores.map(weight)
+    fn weights(values: [f32; 2]) -> [Weight; 2] {
+        values.map(weight)
     }
 
     /// Un peso escrito a mano en la prueba, por el mismo constructor que producción: un número que
     /// `Weight` rechazaría hace caer la prueba en vez de colarse como un valor de repuesto.
-    fn weight(valor: f32) -> Weight {
-        Weight::new(valor).expect("la prueba pide un peso válido")
+    fn weight(value: f32) -> Weight {
+        Weight::new(value).expect("la prueba pide un peso válido")
     }
 
     #[test]
@@ -15473,26 +15473,26 @@ mod tests {
         //
         // **Se prueba con un cuarto y no con la mitad**: con la mitad, un reparto que ignorase los
         // pesos por completo daría exactamente el mismo resultado y el test pasaría igual.
-        let un_cuarto = weights([1.0, 3.0]);
-        let estrecha = repartir(
+        let a_quarter = weights([1.0, 3.0]);
+        let narrow = tile(
             area_of(400.0 + DIVIDER_THICKNESS),
             Orientation::Columns,
-            &un_cuarto,
+            &a_quarter,
             CELL_WIDTH,
         );
-        let ancha = repartir(
+        let wide = tile(
             area_of(800.0 + DIVIDER_THICKNESS),
             Orientation::Columns,
-            &un_cuarto,
+            &a_quarter,
             CELL_WIDTH,
         );
 
-        assert_eq!(estrecha.parts[0].width(), 100.0);
-        assert_eq!(estrecha.parts[1].width(), 300.0);
+        assert_eq!(narrow.parts[0].width(), 100.0);
+        assert_eq!(narrow.parts[1].width(), 300.0);
         // Al doblar el ancho de la ventana, los dos anchos se doblan: la diferencia se reparte, no cae
         // entera en un lado.
-        assert_eq!(ancha.parts[0].width(), 200.0);
-        assert_eq!(ancha.parts[1].width(), 600.0);
+        assert_eq!(wide.parts[0].width(), 200.0);
+        assert_eq!(wide.parts[1].width(), 600.0);
     }
 
     #[test]
@@ -15507,19 +15507,19 @@ mod tests {
             egui::pos2(10.0, 5.0),
             egui::vec2(500.0, 400.0 + DIVIDER_THICKNESS),
         );
-        let tiling = repartir(area, Orientation::Rows, &weights([1.0, 3.0]), 0.0);
+        let tiling = tile(area, Orientation::Rows, &weights([1.0, 3.0]), 0.0);
 
         assert_eq!(tiling.parts[0].height(), 100.0);
         assert_eq!(tiling.parts[1].height(), 300.0);
         // Y el ancho no se toca: repartir en filas parte el alto y deja a cada una el área entera de
         // lado a lado. Si el eje estuviera cambiado, esto valdría 100 y 300.
-        for parte in &tiling.parts {
+        for part in &tiling.parts {
             assert_eq!(
-                parte.width(),
+                part.width(),
                 area.width(),
                 "una fila no ocupa el ancho entero"
             );
-            assert_eq!(parte.left(), area.left());
+            assert_eq!(part.left(), area.left());
         }
         // El divisor de un reparto en filas es una línea horizontal: ancho entero y alto de grosor.
         assert_eq!(tiling.dividers[0].rect.height(), DIVIDER_THICKNESS);
@@ -15532,8 +15532,8 @@ mod tests {
         // pinta cubre el área **exactamente**, sin huecos ni solapes. Con dos partes se cumplía casi por
         // casualidad —hay un solo corte—; con tres es donde un acumulador mal llevado deja una rendija.
         let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
-        let tres = [weight(1.0), weight(2.0), weight(1.0)];
-        let tiling = repartir(area, Orientation::Columns, &tres, CELL_WIDTH);
+        let three = [weight(1.0), weight(2.0), weight(1.0)];
+        let tiling = tile(area, Orientation::Columns, &three, CELL_WIDTH);
 
         assert_eq!(tiling.parts.len(), 3);
         assert_eq!(
@@ -15544,18 +15544,18 @@ mod tests {
 
         // Recorrido de izquierda a derecha: parte, divisor, parte, divisor, parte, sin saltos.
         assert_eq!(tiling.parts[0].left(), area.left());
-        for (parte, divisor) in tiling.parts.iter().zip(&tiling.dividers) {
+        for (part, divider) in tiling.parts.iter().zip(&tiling.dividers) {
             assert_eq!(
-                parte.right(),
-                divisor.rect.left(),
+                part.right(),
+                divider.rect.left(),
                 "hay un hueco antes de un divisor"
             );
-            assert_eq!(divisor.rect.width(), DIVIDER_THICKNESS);
+            assert_eq!(divider.rect.width(), DIVIDER_THICKNESS);
         }
-        for (divisor, siguiente) in tiling.dividers.iter().zip(&tiling.parts[1..]) {
+        for (divider, next) in tiling.dividers.iter().zip(&tiling.parts[1..]) {
             assert_eq!(
-                divisor.rect.right(),
-                siguiente.left(),
+                divider.rect.right(),
+                next.left(),
                 "hay un hueco después de un divisor"
             );
         }
@@ -15582,8 +15582,8 @@ mod tests {
         //   última tome exactamente lo que resta, así que el reparto cuadra por construcción y la
         //   rendija tampoco aparece. Solo asoma cuando nadie se recorta y la proporción manda sola.
         let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
-        let torcidos = [weight(98.0), weight(1.0), weight(1.0)];
-        let tiling = repartir(area, Orientation::Columns, &torcidos, 0.0);
+        let lopsided = [weight(98.0), weight(1.0), weight(1.0)];
+        let tiling = tile(area, Orientation::Columns, &lopsided, 0.0);
 
         assert_eq!(
             tiling.parts.last().unwrap().right(),
@@ -15596,13 +15596,13 @@ mod tests {
     fn un_arbol_anidado_coloca_sus_hojas_en_el_orden_en_que_se_pintan() {
         // **Lo que hace que el árbol y la geometría se puedan casar por posición.** Las consolas viajan
         // en una lista y sus rectángulos en otra, y todo el pintado depende de que las dos listas vayan
-        // en el mismo orden. Si `place` recorriera los hijos en un orden y `hojas` en otro, cada
+        // en el mismo orden. Si `place` recorriera los hijos en un orden y `leaves` en otro, cada
         // consola se pintaría en el sitio de otra — y con dos columnas simétricas eso ni se notaría.
         //
         // El árbol de la prueba: una columna izquierda, y a la derecha dos filas. Tres consolas, dos
         // fronteras, y **una de ellas horizontal**, que es lo que distingue un recorrido de verdad de
         // uno que solo sabe de columnas.
-        let arbol = Node::Branch {
+        let tree = Node::Branch {
             orientation: Orientation::Columns,
             children: vec![
                 Child {
@@ -15628,15 +15628,15 @@ mod tests {
             ],
         };
 
-        let nombres: Vec<usize> = arbol.hojas().iter().map(|hoja| hoja.name).collect();
+        let names: Vec<usize> = tree.leaves().iter().map(|leaf| leaf.name).collect();
         assert_eq!(
-            nombres,
+            names,
             [7, 8, 9],
             "las hojas no salen en el orden del árbol"
         );
 
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
-        let tiling = arbol.place(area, 0.0);
+        let tiling = tree.place(area, 0.0);
 
         assert_eq!(tiling.parts.len(), 3, "una consola se quedó sin sitio");
         assert_eq!(
@@ -15647,29 +15647,29 @@ mod tests {
 
         // La primera se lleva media anchura y todo el alto; las otras dos se reparten el alto de la
         // mitad derecha. Escrito así, un recorrido que colocara las hojas en otro orden caería.
-        let [izquierda, arriba, abajo] = [tiling.parts[0], tiling.parts[1], tiling.parts[2]];
+        let [left_pane, to_the_top, to_the_bottom] = [tiling.parts[0], tiling.parts[1], tiling.parts[2]];
         assert_eq!(
-            izquierda.height(),
+            left_pane.height(),
             area.height(),
             "la columna no ocupa el alto entero"
         );
-        assert_eq!(arriba.top(), area.top(), "la de arriba no empieza arriba");
+        assert_eq!(to_the_top.top(), area.top(), "la de arriba no empieza arriba");
         assert_eq!(
-            abajo.bottom(),
+            to_the_bottom.bottom(),
             area.bottom(),
             "la de abajo no llega al fondo"
         );
         assert!(
-            arriba.bottom() < abajo.top(),
-            "las dos filas no están una encima de otra: {arriba:?} y {abajo:?}"
+            to_the_top.bottom() < to_the_bottom.top(),
+            "las dos filas no están una encima de otra: {to_the_top:?} y {to_the_bottom:?}"
         );
         assert_eq!(
-            arriba.left(),
-            abajo.left(),
+            to_the_top.left(),
+            to_the_bottom.left(),
             "las dos filas no comparten columna"
         );
         assert!(
-            izquierda.right() < arriba.left(),
+            left_pane.right() < to_the_top.left(),
             "la columna izquierda no está a la izquierda de las filas"
         );
     }
@@ -15696,7 +15696,7 @@ mod tests {
             node: Node::Leaf(pane_with("sleep 30", 42)),
         });
 
-        let primera = Divider {
+        let first_part = Divider {
             rect: egui::Rect::from_min_size(egui::pos2(100.0, 0.0), egui::vec2(2.0, 300.0)),
             orientation: Orientation::Columns,
             between_the_two: egui::Rect::from_min_size(
@@ -15704,7 +15704,7 @@ mod tests {
                 egui::vec2(202.0, 300.0),
             ),
         };
-        let segunda = Divider {
+        let second = Divider {
             rect: egui::Rect::from_min_size(egui::pos2(400.0, 0.0), egui::vec2(2.0, 300.0)),
             orientation: Orientation::Columns,
             between_the_two: egui::Rect::from_min_size(
@@ -15712,26 +15712,26 @@ mod tests {
                 egui::vec2(area.right() - 202.0, 300.0),
             ),
         };
-        let dos = [primera, segunda];
+        let two = [first_part, second];
 
         // El puntero se lleva a la **segunda** y se arrastra ahí.
-        let agarre = segunda.rect.center();
-        pass_over_dividers(&mut window, &ctx, &dos, move_pane(agarre));
-        pass_over_dividers(&mut window, &ctx, &dos, pulsar(agarre));
-        let movio = pass_over_dividers(
+        let grip = second.rect.center();
+        pass_over_dividers(&mut window, &ctx, &two, move_pane(grip));
+        pass_over_dividers(&mut window, &ctx, &two, press(grip));
+        let it_moved = pass_over_dividers(
             &mut window,
             &ctx,
-            &dos,
-            move_pane(egui::pos2(agarre.x - 80.0, agarre.y)),
+            &two,
+            move_pane(egui::pos2(grip.x - 80.0, grip.y)),
         );
 
         assert!(
-            !movio[0],
+            !it_moved[0],
             "la primera frontera respondió a un arrastre que ocurrió sobre la segunda: comparten \
              identidad de control"
         );
         assert!(
-            movio[1],
+            it_moved[1],
             "la segunda frontera no respondió a su propio arrastre"
         );
     }
@@ -15753,19 +15753,19 @@ mod tests {
             between_the_two: slice,
         };
 
-        let agarre = divider.rect.center();
-        drag_pass(&mut window, &ctx, divider, move_pane(agarre));
-        drag_pass(&mut window, &ctx, divider, pulsar(agarre));
+        let grip = divider.rect.center();
+        drag_pass(&mut window, &ctx, divider, move_pane(grip));
+        drag_pass(&mut window, &ctx, divider, press(grip));
         // Un cuarto de la altura útil: 100 de 400.
-        let movio = drag_pass(
+        let it_moved = drag_pass(
             &mut window,
             &ctx,
             divider,
-            move_pane(egui::pos2(agarre.x, slice.top() + 100.0)),
+            move_pane(egui::pos2(grip.x, slice.top() + 100.0)),
         );
 
         assert!(
-            movio,
+            it_moved,
             "arrastrar en vertical no movió la frontera horizontal"
         );
         assert_eq!(
@@ -15829,20 +15829,20 @@ mod tests {
             .position(|divider| divider.orientation == Orientation::Rows)
             .expect("la rama de dentro reparte en filas, así que su frontera es horizontal");
 
-        let agarre = dividers[horizontal].rect.center();
-        pass_over_dividers(&mut window, &ctx, &dividers, move_pane(agarre));
-        pass_over_dividers(&mut window, &ctx, &dividers, pulsar(agarre));
+        let grip = dividers[horizontal].rect.center();
+        pass_over_dividers(&mut window, &ctx, &dividers, move_pane(grip));
+        pass_over_dividers(&mut window, &ctx, &dividers, press(grip));
         pass_over_dividers(
             &mut window,
             &ctx,
             &dividers,
-            move_pane(egui::pos2(agarre.x, 50.0)),
+            move_pane(egui::pos2(grip.x, 50.0)),
         );
 
         let Node::Branch { children, .. } = &window.active().root else {
             unreachable!()
         };
-        let weights: Vec<f32> = children.iter().map(|child| child.weight.valor()).collect();
+        let weights: Vec<f32> = children.iter().map(|child| child.weight.value()).collect();
         assert_eq!(
             weights,
             vec![1.0, 1.0],
@@ -15850,12 +15850,12 @@ mod tests {
              van en el mismo orden"
         );
         let Node::Branch {
-            children: dentro, ..
+            children: inside, ..
         } = &children[1].node
         else {
             unreachable!()
         };
-        let weights: Vec<f32> = dentro.iter().map(|child| child.weight.valor()).collect();
+        let weights: Vec<f32> = inside.iter().map(|child| child.weight.value()).collect();
         assert_eq!(
             weights,
             vec![0.5, 1.5],
@@ -15901,19 +15901,19 @@ mod tests {
             .dividers;
         assert_eq!(dividers.len(), 2, "tres hermanas tienen dos fronteras");
 
-        let agarre = dividers[0].rect.center();
-        pass_over_dividers(&mut window, &ctx, &dividers, move_pane(agarre));
-        pass_over_dividers(&mut window, &ctx, &dividers, pulsar(agarre));
+        let grip = dividers[0].rect.center();
+        pass_over_dividers(&mut window, &ctx, &dividers, move_pane(grip));
+        pass_over_dividers(&mut window, &ctx, &dividers, press(grip));
         // Cien de los cuatrocientos útiles del tramo: un cuarto. Medido contra la rama entera saldría un
         // sexto, que es un sitio bien distinto.
-        let movio = pass_over_dividers(
+        let it_moved = pass_over_dividers(
             &mut window,
             &ctx,
             &dividers,
-            move_pane(egui::pos2(100.0, agarre.y)),
+            move_pane(egui::pos2(100.0, grip.y)),
         );
 
-        assert!(movio[0], "la primera frontera no respondió a su arrastre");
+        assert!(it_moved[0], "la primera frontera no respondió a su arrastre");
         assert_eq!(
             weights_of_the_root(&window),
             vec![0.5, 1.5, 1.0],
@@ -15953,7 +15953,7 @@ mod tests {
         let Node::Branch { children, .. } = &tab.root else {
             unreachable!()
         };
-        let weights: Vec<f32> = children.iter().map(|child| child.weight.valor()).collect();
+        let weights: Vec<f32> = children.iter().map(|child| child.weight.value()).collect();
         assert_eq!(
             weights[0], 1.0,
             "mover la segunda frontera cambió el peso de la primera consola, que no toca"
@@ -15975,7 +15975,7 @@ mod tests {
             panic!("la pestaña nace con una rama");
         };
 
-        children.iter().map(|child| child.weight.valor()).collect()
+        children.iter().map(|child| child.weight.value()).collect()
     }
 
     /// Un área tan ancha como quepan esas celdas, con el alto de siempre.
@@ -15993,8 +15993,8 @@ mod tests {
         // a la que nace un peso propio en vez de la mitad del que se partió, también.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-        let derecha = window.active().panes()[1].name;
-        window.active_mut().focus = derecha;
+        let right_pane_name = window.active().panes()[1].name;
+        window.active_mut().focus = right_pane_name;
 
         one_frame_in(
             &mut window,
@@ -16042,19 +16042,19 @@ mod tests {
             3,
             "el acorde no partió la división con el foco"
         );
-        let [arriba, abajo, derecha] = [parts[0], parts[1], parts[2]];
+        let [to_the_top, to_the_bottom, right_pane] = [parts[0], parts[1], parts[2]];
         assert_eq!(
-            derecha, of_the_right_one,
+            right_pane, of_the_right_one,
             "cortar en filas le cambió el sitio a la consola de al lado"
         );
         assert_eq!(
-            [arriba.left(), arriba.right()],
-            [abajo.left(), abajo.right()],
+            [to_the_top.left(), to_the_top.right()],
+            [to_the_bottom.left(), to_the_bottom.right()],
             "las dos que salen de la partida no comparten columna: el corte no fue horizontal"
         );
         assert!(
-            arriba.bottom() < abajo.top(),
-            "la que nace no quedó debajo de la que se partió: {arriba:?} y {abajo:?}"
+            to_the_top.bottom() < to_the_bottom.top(),
+            "la que nace no quedó debajo de la que se partió: {to_the_top:?} y {to_the_bottom:?}"
         );
     }
 
@@ -16091,17 +16091,17 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let area = area_of_cells(100.0);
-        let partida = window.active().focus;
+        let split_pane_name = window.active().focus;
 
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::D));
 
-        let nacida = window.active().focus;
+        let newborn = window.active().focus;
         assert_ne!(
-            nacida, partida,
+            newborn, split_pane_name,
             "no se partió: el foco sigue en la consola de antes"
         );
-        let of_the_split_one = rect_of(&window, partida, area);
-        let of_the_newborn = rect_of(&window, nacida, area);
+        let of_the_split_one = rect_of(&window, split_pane_name, area);
+        let of_the_newborn = rect_of(&window, newborn, area);
         assert!(
             of_the_newborn.left() >= of_the_split_one.right(),
             "la consola que nace con el acorde de la derecha apareció a la izquierda de la que se \
@@ -16119,17 +16119,17 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let area = area_of_cells(100.0);
-        let partida = window.active().focus;
+        let split_pane_name = window.active().focus;
 
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::B));
 
-        let nacida = window.active().focus;
+        let newborn = window.active().focus;
         assert_ne!(
-            nacida, partida,
+            newborn, split_pane_name,
             "no se partió: el foco sigue en la consola de antes"
         );
-        let of_the_split_one = rect_of(&window, partida, area);
-        let of_the_newborn = rect_of(&window, nacida, area);
+        let of_the_split_one = rect_of(&window, split_pane_name, area);
+        let of_the_newborn = rect_of(&window, newborn, area);
         assert!(
             of_the_newborn.top() >= of_the_split_one.bottom(),
             "la consola que nace con el acorde de abajo apareció encima de la que se partió: la \
@@ -16202,7 +16202,7 @@ mod tests {
         };
         let Node::Branch {
             orientation,
-            children: dentro,
+            children: inside,
         } = &children[0].node
         else {
             panic!("la hoja partida en filas tenía que convertirse en una rama");
@@ -16212,7 +16212,7 @@ mod tests {
             Orientation::Rows,
             "la rama que nació al partir por abajo reparte en el sentido equivocado"
         );
-        assert_eq!(dentro.len(), 2, "la rama nueva no tiene dos hijos");
+        assert_eq!(inside.len(), 2, "la rama nueva no tiene dos hijos");
     }
 
     #[test]
@@ -16233,16 +16233,16 @@ mod tests {
             &OpeningLayout::DEFAULT,
             0,
         );
-        let two_rows = |primera, segunda| Node::Branch {
+        let two_rows = |first_part, second| Node::Branch {
             orientation: Orientation::Rows,
             children: vec![
                 Child {
                     weight: weight(1.0),
-                    node: Node::Leaf(pane_with("sleep 30", primera)),
+                    node: Node::Leaf(pane_with("sleep 30", first_part)),
                 },
                 Child {
                     weight: weight(1.0),
-                    node: Node::Leaf(pane_with("sleep 30", segunda)),
+                    node: Node::Leaf(pane_with("sleep 30", second)),
                 },
             ],
         };
@@ -16270,7 +16270,7 @@ mod tests {
             };
             children
                 .iter()
-                .map(|child| child.weight.valor())
+                .map(|child| child.weight.value())
                 .collect::<Vec<_>>()
         };
         assert_eq!(
@@ -16297,7 +16297,7 @@ mod tests {
         // teclado apuntando a una división que no existe, y con él se pierde lo que se escriba.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-        let foco_antes = window.active().focus;
+        let focus_before = window.active().focus;
         // Las banderas se recogen para que lo único que pueda levantarlas después sea un rearme.
         for pane in window.all_panes() {
             pane.to_reread.take();
@@ -16316,7 +16316,7 @@ mod tests {
         );
         assert_eq!(
             window.active().focus,
-            foco_antes,
+            focus_before,
             "el foco se fue a una división que no llegó a existir"
         );
         for (which, pane) in window.all_panes().enumerate() {
@@ -16368,13 +16368,13 @@ mod tests {
             "la consola de dentro se partió hacia fuera: sus hermanas nuevas colgaron de la raíz"
         );
         let Node::Branch {
-            children: dentro, ..
+            children: inside, ..
         } = &children[0].node
         else {
             panic!("la primera partición por abajo tenía que dejar una rama");
         };
         assert_eq!(
-            dentro.len(),
+            inside.len(),
             3,
             "la rama de dentro no acabó con tres consolas: la segunda partición fue a otro sitio"
         );
@@ -16392,27 +16392,27 @@ mod tests {
         // prohibiría una partición que cabe exacta.
         with_metrics(|metrics| {
             // Cuarenta columnas: las veinte que hacen usable una consola, por cada hija.
-            let justo = 40.0 * metrics.width() + DIVIDER_THICKNESS;
+            let exact = 40.0 * metrics.width() + DIVIDER_THICKNESS;
             assert!(
-                cabe_partir(area_of(justo), Orientation::Columns, metrics),
+                can_split(area_of(exact), Orientation::Columns, metrics),
                 "no se parte una división donde las dos hijas y su divisor caben exactos"
             );
             assert!(
-                !cabe_partir(area_of(justo - 1.0), Orientation::Columns, metrics),
+                !can_split(area_of(exact - 1.0), Orientation::Columns, metrics),
                 "se parte una división donde las dos hijas y su divisor no caben por un punto: el \
                  grosor del divisor no se está contando"
             );
 
             // Y el mismo borde en el otro eje: seis filas, tres por hija.
             let height_of =
-                |alto| egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, alto));
-            let justo = 6.0 * metrics.height() + DIVIDER_THICKNESS;
+                |height| egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, height));
+            let exact = 6.0 * metrics.height() + DIVIDER_THICKNESS;
             assert!(
-                cabe_partir(height_of(justo), Orientation::Rows, metrics),
+                can_split(height_of(exact), Orientation::Rows, metrics),
                 "no se parte por abajo una división donde las dos hijas y su divisor caben exactos"
             );
             assert!(
-                !cabe_partir(height_of(justo - 1.0), Orientation::Rows, metrics),
+                !can_split(height_of(exact - 1.0), Orientation::Rows, metrics),
                 "se parte por abajo una división que no llega por un punto"
             );
         });
@@ -16436,8 +16436,8 @@ mod tests {
             window.active_mut().move_divider(0, 0.9),
             "el divisor no se movió, así que las dos divisiones siguen midiendo lo mismo"
         );
-        let derecha = window.active().panes()[1].name;
-        window.active_mut().focus = derecha;
+        let right_pane_name = window.active().panes()[1].name;
+        window.active_mut().focus = right_pane_name;
 
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::D));
 
@@ -16449,8 +16449,8 @@ mod tests {
 
         // Y el control, en la **misma** ventana y con el mismo reparto: la ancha sí se parte. Sin esto,
         // la negativa de arriba no distinguiría «se midió la que toca» de «aquí ya no se parte nada».
-        let izquierda = window.active().panes()[0].name;
-        window.active_mut().focus = izquierda;
+        let left_pane_name = window.active().panes()[0].name;
+        window.active_mut().focus = left_pane_name;
 
         one_frame_in(&mut window, &ctx, area, the_chord_again(egui::Key::D));
 
@@ -16477,8 +16477,8 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let area = area_of_cells(100.0);
         {
-            let mut suyas = window.active_mut().panes_mut();
-            let pane = &mut suyas[0];
+            let mut its_panes = window.active_mut().panes_mut();
+            let pane = &mut its_panes[0];
             pane.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
             publish_at(pane, r#"{"lines":["trabajando"]}"#);
             pane.to_reread.raise();
@@ -16488,9 +16488,9 @@ mod tests {
         // **Que el panel esté puesto de verdad y le quite el sitio, o esto no prueba nada**: sin panel
         // publicado las dos formas de medir dan el mismo número y la prueba pasaría con el defecto dentro.
         let cell_width = with_metrics(CellMetrics::width);
-        let entera = window.active().root.place(area, cell_width).parts[0];
+        let whole = window.active().root.place(area, cell_width).parts[0];
         let panel_split =
-            window.active().panes()[0].tile_with_its_panel(entera, cell_width, SystemTime::now());
+            window.active().panes()[0].tile_with_its_panel(whole, cell_width, SystemTime::now());
         assert!(
             panel_split.panel.is_some(),
             "el panel no se llegó a leer, así que la consola conserva la división entera"
@@ -16524,17 +16524,17 @@ mod tests {
         // **El mismo alto, dos ventanas**, que es lo único que demuestra que la diferencia es la barra:
         // se elige justo entre los dos suelos —da para dos hijas de tres filas sin barra y no da con
         // ella— y sobra media barra por cada lado, así que no es un margen de redondeo.
-        let (ancho, alto) = with_metrics(|metrics| (metrics.width(), metrics.height()));
-        let tab_bar = alto + 2.0 * TAB_BAR_MARGIN;
-        let justo = 6.0 * alto + DIVIDER_THICKNESS + tab_bar / 2.0;
+        let (width, height) = with_metrics(|metrics| (metrics.width(), metrics.height()));
+        let tab_bar = height + 2.0 * TAB_BAR_MARGIN;
+        let exact = 6.0 * height + DIVIDER_THICKNESS + tab_bar / 2.0;
         let area =
-            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0 * ancho, justo));
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0 * width, exact));
 
         let ctx = egui::Context::default();
-        let mut sola = window_of_tabs([["sleep 30", "sleep 30"]]);
-        one_frame_in(&mut sola, &ctx, area, chord_with(egui::Key::B));
+        let mut one_tab = window_of_tabs([["sleep 30", "sleep 30"]]);
+        one_frame_in(&mut one_tab, &ctx, area, chord_with(egui::Key::B));
         assert_eq!(
-            sola.active().panes().len(),
+            one_tab.active().panes().len(),
             3,
             "sin barra tampoco se partió, así que la negativa de abajo no probaría que la barra sea la \
              diferencia"
@@ -16596,7 +16596,7 @@ mod tests {
         // Con cien columnas de ventana, cada división tiene cincuenta y sobra; con setenta, veinticinco.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-        let nombre_antes = window.next_pane_name;
+        let name_before = window.next_pane_name;
 
         one_frame_in(
             &mut window,
@@ -16611,7 +16611,7 @@ mod tests {
             "se partió una división que no puede darle a sus dos hijas ni el mínimo de columnas"
         );
         assert_eq!(
-            window.next_pane_name, nombre_antes,
+            window.next_pane_name, name_before,
             "una partición que no llegó a ocurrir gastó el nombre de una división"
         );
 
@@ -16636,12 +16636,12 @@ mod tests {
         // los dos ejes, o se prohibirían particiones legítimas o se permitirían consolas de una línea.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-        let (ancho, alto) = with_metrics(|metrics| (metrics.width(), metrics.height()));
+        let (width, height) = with_metrics(|metrics| (metrics.width(), metrics.height()));
         // Alto para cinco filas: dos hijas necesitarían tres cada una.
-        let baja =
-            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0 * ancho, 5.0 * alto));
+        let short =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0 * width, 5.0 * height));
 
-        one_frame_in(&mut window, &ctx, baja, chord_with(egui::Key::B));
+        one_frame_in(&mut window, &ctx, short, chord_with(egui::Key::B));
 
         assert_eq!(
             window.active().panes().len(),
@@ -16651,7 +16651,7 @@ mod tests {
 
         // Otra tecla, así que no hay repetición de la que guardarse: la de arriba sigue pulsada y esta
         // llega por primera vez.
-        one_frame_in(&mut window, &ctx, baja, chord_with(egui::Key::D));
+        one_frame_in(&mut window, &ctx, short, chord_with(egui::Key::D));
 
         assert_eq!(
             window.active().panes().len(),
@@ -16670,7 +16670,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
             .expect("no se pudo abrir la ventana");
-        let antes: Vec<_> = window
+        let before: Vec<_> = window
             .all_panes()
             .map(|pane| pane.panel.as_ref().map(|panel| panel.id().to_owned()))
             .collect();
@@ -16682,7 +16682,7 @@ mod tests {
             chord_with(egui::Key::D),
         );
 
-        let ahora: Vec<_> = window
+        let current: Vec<_> = window
             .all_panes()
             .map(|pane| {
                 pane.panel
@@ -16692,18 +16692,18 @@ mod tests {
                     .to_owned()
             })
             .collect();
-        assert_eq!(ahora.len(), 3, "no se partió la división");
-        let mut without_repeating = ahora.clone();
+        assert_eq!(current.len(), 3, "no se partió la división");
+        let mut without_repeating = current.clone();
         without_repeating.sort();
         without_repeating.dedup();
         assert_eq!(
             without_repeating.len(),
             3,
-            "dos divisiones comparten identidad tras partir: {ahora:?}"
+            "dos divisiones comparten identidad tras partir: {current:?}"
         );
-        for viejo in antes.iter().flatten() {
+        for old in before.iter().flatten() {
             assert!(
-                ahora.contains(viejo),
+                current.contains(old),
                 "partir se llevó por delante la identidad de una consola que ya estaba"
             );
         }
@@ -16731,7 +16731,7 @@ mod tests {
             "no se partió, así que la prueba no está mirando lo que cree"
         );
         // Dos fotogramas más: el primero mide —la pasada de interfaz escribe `measured`— y el segundo
-        // aplica, porque `redimensionar` corre en la mitad lógica, antes de medir.
+        // aplica, porque `resize` corre en la mitad lógica, antes de medir.
         one_frame_in(&mut window, &ctx, area, Vec::new());
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
@@ -16757,13 +16757,13 @@ mod tests {
             .active()
             .where_the_focus_is()
             .expect("el foco vive en la que nació");
-        let nacida = window.active_mut().panes_mut().swap_remove(at);
+        let newborn = window.active_mut().panes_mut().swap_remove(at);
         assert_ne!(
-            nacida.measured, INITIAL_GRID,
+            newborn.measured, INITIAL_GRID,
             "la que nació se quedó con la rejilla de arranque y la espera de abajo no probaría nada"
         );
-        let suyo = format!("{} {}", nacida.measured.rows, nacida.measured.cols);
-        wait_for_the_screen_to_say(nacida, &suyo);
+        let its_size = format!("{} {}", newborn.measured.rows, newborn.measured.cols);
+        wait_for_the_screen_to_say(newborn, &its_size);
     }
 
     #[test]
@@ -16838,13 +16838,13 @@ mod tests {
         // llevan cada una su `repeat` en su brazo, y con una sola probada la otra se puede borrar entera
         // con la suite en verde.
         let ctx = egui::Context::default();
-        for tecla in [egui::Key::D, egui::Key::B] {
+        for key in [egui::Key::D, egui::Key::B] {
             let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
             let area = area_of_cells(200.0);
-            let mut mantenido = chord_with(tecla);
+            let mut held = chord_with(key);
             for _ in 0..3 {
-                mantenido.push(egui::Event::Key {
-                    key: tecla,
+                held.push(egui::Event::Key {
+                    key,
                     physical_key: None,
                     pressed: true,
                     repeat: true,
@@ -16852,22 +16852,22 @@ mod tests {
                 });
             }
 
-            one_frame_in(&mut window, &ctx, area, mantenido);
+            one_frame_in(&mut window, &ctx, area, held);
 
             assert_eq!(
                 window.active().panes().len(),
                 3,
-                "las repeticiones de {tecla:?} abrieron consolas de más"
+                "las repeticiones de {key:?} abrieron consolas de más"
             );
 
             // Y que lo que las frenó fue la repetición y no la geometría: el mismo acorde soltado y vuelto
             // a pulsar sí parte, en la misma ventana y con el mismo foco.
-            one_frame_in(&mut window, &ctx, area, the_chord_again(tecla));
+            one_frame_in(&mut window, &ctx, area, the_chord_again(key));
 
             assert_eq!(
                 window.active().panes().len(),
                 4,
-                "en esta ventana no cabía otra partición con {tecla:?}, así que la de arriba no demuestra \
+                "en esta ventana no cabía otra partición con {key:?}, así que la de arriba no demuestra \
                  que la guarda de repetición haga nada"
             );
         }
@@ -16880,7 +16880,7 @@ mod tests {
         // de pedir.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
-        let antes: Vec<usize> = window
+        let before: Vec<usize> = window
             .active()
             .panes()
             .iter()
@@ -16896,7 +16896,7 @@ mod tests {
 
         let focus = window.active().focus;
         assert!(
-            !antes.contains(&focus),
+            !before.contains(&focus),
             "el foco se quedó en una consola que ya estaba abierta: {focus}"
         );
         assert!(
@@ -16927,11 +16927,11 @@ mod tests {
         for pane in window.all_panes() {
             pane.to_reread.take();
         }
-        let nacida = window.active().where_the_focus_is().expect("el foco vive");
-        publish_at(window.active().panes()[nacida], r#"{"lines":["ya estoy"]}"#);
+        let newborn = window.active().where_the_focus_is().expect("el foco vive");
+        publish_at(window.active().panes()[newborn], r#"{"lines":["ya estoy"]}"#);
 
         wait_for_the_flag(
-            &window.active().panes()[nacida].to_reread,
+            &window.active().panes()[newborn].to_reread,
             "la ventana no vigila el directorio de la división que acaba de partir",
         );
     }
@@ -16946,8 +16946,8 @@ mod tests {
         let children = weights
             .iter()
             .enumerate()
-            .map(|(which, valor)| Child {
-                weight: weight(*valor),
+            .map(|(which, value)| Child {
+                weight: weight(*value),
                 node: Node::Leaf(pane_with("sleep 30", which)),
             })
             .collect();
@@ -16992,31 +16992,31 @@ mod tests {
              colapsar",
             tiling.dividers.len()
         );
-        let [izquierda, derecha] = [tiling.parts[0], tiling.parts[1]];
-        let repartible = area.width() - DIVIDER_THICKNESS;
-        for (which, ancho, toca) in [
-            ("izquierda", izquierda.width(), repartible * 3.0 / 5.0),
-            ("derecha", derecha.width(), repartible * 2.0 / 5.0),
+        let [left_pane, right_pane] = [tiling.parts[0], tiling.parts[1]];
+        let to_share = area.width() - DIVIDER_THICKNESS;
+        for (which, width, expected) in [
+            ("izquierda", left_pane.width(), to_share * 3.0 / 5.0),
+            ("derecha", right_pane.width(), to_share * 2.0 / 5.0),
         ] {
             assert!(
-                (ancho - toca).abs() < 0.01,
-                "la consola de la {which} se quedó con {ancho} y en proporción a su peso le tocaban {toca}"
+                (width - expected).abs() < 0.01,
+                "la consola de la {which} se quedó con {width} y en proporción a su peso le tocaban {expected}"
             );
         }
         // Ni huecos ni solapes: la unión de las dos y del divisor es el área entera.
         assert_eq!(
-            izquierda.left(),
+            left_pane.left(),
             area.left(),
             "la primera dejó un hueco a la izquierda"
         );
         assert_eq!(
-            derecha.right(),
+            right_pane.right(),
             area.right(),
             "la última no llega al borde: el sitio de la que se cerró se quedó sin repartir"
         );
         assert_eq!(
-            izquierda.right() + DIVIDER_THICKNESS,
-            derecha.left(),
+            left_pane.right() + DIVIDER_THICKNESS,
+            right_pane.left(),
             "entre las dos que quedan hay un hueco o un solape"
         );
         assert!(
@@ -17075,22 +17075,22 @@ mod tests {
             3,
             "no se partió la consola que quedó"
         );
-        let nacida = window.active().focus;
-        let antes = rect_of(&window, nacida, area);
+        let newborn = window.active().focus;
+        let before = rect_of(&window, newborn, area);
 
         assert!(
             window.active_mut().move_divider(0, 0.25),
             "la primera frontera no se movió, así que la prueba no está mirando lo que cree"
         );
 
-        let despues = rect_of(&window, nacida, area);
+        let after = rect_of(&window, newborn, area);
         assert!(
-            (despues.width() - antes.width()).abs() < 0.5,
+            (after.width() - before.width()).abs() < 0.5,
             "arrastrar la primera frontera cambió el ancho de una consola que no separa —de {} a {}—: \
              quedó una rama de una sola hija, la consola nueva nació dentro de ella, y esa frontera \
              mueve ahora un bloque de dos",
-            antes.width(),
-            despues.width()
+            before.width(),
+            after.width()
         );
     }
 
@@ -17100,7 +17100,7 @@ mod tests {
         // mirando la de al lado, y un teclado que salta al otro extremo de la pestaña no se descubre hasta
         // que se escribe. Las dos mitades hacen falta: la primera es la que cae si el heredero es siempre
         // el siguiente, y la segunda es el único caso en que no hay anterior a la que pasarle nada.
-        for (which, hereda, queja) in [
+        for (which, inherited, complaint) in [
             (
                 1,
                 0,
@@ -17118,7 +17118,7 @@ mod tests {
             // el caso no se ejercitaría.
             let ctx = egui::Context::default();
             let mut window = window_of_siblings(Orientation::Columns, &[1.0, 1.0, 1.0]);
-            let nombres: Vec<usize> = window
+            let names: Vec<usize> = window
                 .active()
                 .panes()
                 .iter()
@@ -17138,7 +17138,7 @@ mod tests {
                 2,
                 "el acorde no cerró la consola con el foco"
             );
-            assert_eq!(window.active().focus, nombres[hereda], "{queja}");
+            assert_eq!(window.active().focus, names[inherited], "{complaint}");
         }
     }
 
@@ -17299,9 +17299,9 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_of_siblings(Orientation::Columns, &[1.0, 1.0, 1.0]);
         let area = area_of_cells(120.0);
-        let mut mantenido = chord_with(egui::Key::X);
+        let mut held = chord_with(egui::Key::X);
         for _ in 0..3 {
-            mantenido.push(egui::Event::Key {
+            held.push(egui::Event::Key {
                 key: egui::Key::X,
                 physical_key: None,
                 pressed: true,
@@ -17310,7 +17310,7 @@ mod tests {
             });
         }
 
-        one_frame_in(&mut window, &ctx, area, mantenido);
+        one_frame_in(&mut window, &ctx, area, held);
 
         assert_eq!(
             window.active().panes().len(),
@@ -17364,11 +17364,11 @@ mod tests {
             "cerrar la última consola de la pestaña no cerró la pestaña"
         );
         assert_eq!(window.active, 0, "la activa quedó fuera de la lista");
-        for ruta in &of_the_one_leaving {
+        for path in &of_the_one_leaving {
             assert!(
-                !ruta.exists(),
+                !path.exists(),
                 "quedó el directorio {} de la pestaña que se cerró",
-                ruta.display()
+                path.display()
             );
         }
     }
@@ -17387,10 +17387,10 @@ mod tests {
             "cerrar una de las dos consolas pidió cerrar la ventana"
         );
 
-        let pidio_cerrar = one_frame_in(&mut window, &ctx, area, the_chord_again(egui::Key::X));
+        let asked_to_close = one_frame_in(&mut window, &ctx, area, the_chord_again(egui::Key::X));
 
         assert!(
-            pidio_cerrar,
+            asked_to_close,
             "cerrar la última consola de la única pestaña no pidió cerrar la ventana"
         );
         assert_eq!(
@@ -17427,16 +17427,16 @@ mod tests {
 
         const PARSED: std::time::Duration = std::time::Duration::from_secs(5);
         const ANNOTATED: std::time::Duration = std::time::Duration::from_secs(3);
-        let ahora = Instant::now();
+        let now = Instant::now();
         {
-            let mut suyas = window.active_mut().panes_mut();
-            let pane = &mut suyas[1];
+            let mut its_panes = window.active_mut().panes_mut();
+            let pane = &mut its_panes[1];
             // Donde lo deja `pump`, que es lo que la consola tiene sin declarar cuando llega el acorde.
-            pane.pending_measurement = Some((Some(ahora), ahora, PARSED));
+            pane.pending_measurement = Some((Some(now), now, PARSED));
             // Y donde queda si egui repitió la pasada y el pintado alcanzó a anotar la vuelta.
             pane.timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
                 None,
-                ahora,
+                now,
                 ANNOTATED,
                 std::time::Duration::ZERO,
                 std::time::Duration::ZERO,
@@ -17487,12 +17487,12 @@ mod tests {
         );
 
         let mut frame = eframe::Frame::_new_kittest();
-        let salida = ctx.run_logic(&egui::RawInput::default(), |ctx| {
+        let output = ctx.run_logic(&egui::RawInput::default(), |ctx| {
             eframe::App::logic(&mut window, ctx, &mut frame);
         });
 
         assert!(
-            !salida
+            !output
                 .viewport_commands
                 .get(&egui::ViewportId::ROOT)
                 .is_some_and(|requests| requests.contains(&egui::ViewportCommand::Close)),
@@ -17511,17 +17511,17 @@ mod tests {
         let ctx = egui::Context::default();
         let mut window = window_of_siblings(Orientation::Columns, &[1.0, 1.0, 1.0]);
         focus_on(window.active_mut(), 1);
-        let cerrada = window.active().panes()[1].name;
+        let closed_name = window.active().panes()[1].name;
         let area = area_of_cells(120.0);
 
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::X));
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::D));
 
-        let vivos: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
-        assert_eq!(vivos.len(), 3, "no se partió después de cerrar");
+        let alive: Vec<usize> = window.all_panes().map(|pane| pane.name).collect();
+        assert_eq!(alive.len(), 3, "no se partió después de cerrar");
         assert!(
-            !vivos.contains(&cerrada),
-            "la consola {cerrada} se cerró y su nombre se le dio a la que nació después: {vivos:?}"
+            !alive.contains(&closed_name),
+            "la consola {closed_name} se cerró y su nombre se le dio a la que nació después: {alive:?}"
         );
     }
 
@@ -17556,8 +17556,8 @@ mod tests {
         );
         window.close_the_frame(std::time::Duration::from_millis(10));
 
-        let informe = report_of(&window);
-        let line = informe
+        let report = report_of(&window);
+        let line = report
             .lines()
             .find(|line| line.starts_with("foco al salir"))
             .expect("el informe siempre publica dónde estaba el foco al salir");
@@ -17605,20 +17605,20 @@ mod tests {
             "no se cerró la consola de arriba"
         );
 
-        let ultima = window.active().panes()[2].name;
-        let antes = rect_of(&window, ultima, area);
+        let is_last = window.active().panes()[2].name;
+        let before = rect_of(&window, is_last, area);
         assert!(
             window.active_mut().move_divider(0, 0.25),
             "la primera frontera no se movió, así que la prueba no está mirando lo que cree"
         );
-        let despues = rect_of(&window, ultima, area);
+        let after = rect_of(&window, is_last, area);
 
         assert!(
-            (despues.width() - antes.width()).abs() < 0.5,
+            (after.width() - before.width()).abs() < 0.5,
             "arrastrar la primera frontera le cambió el ancho a la última consola —de {} a {}—, que no \
              separa: quedaron dos ramas del mismo sentido anidadas y esa frontera mueve un bloque de dos",
-            antes.width(),
-            despues.width()
+            before.width(),
+            after.width()
         );
     }
 
@@ -17683,9 +17683,9 @@ mod tests {
             .expect("la consola de arriba está en el árbol");
         drop(closing);
 
-        let nombres: Vec<usize> = tab.panes().iter().map(|pane| pane.name).collect();
+        let names: Vec<usize> = tab.panes().iter().map(|pane| pane.name).collect();
         assert_eq!(
-            nombres,
+            names,
             vec![0, 11, 12, 13],
             "las hijas del grupo no subieron al sitio que el grupo ocupaba, así que la disposición \
              cambió de orden"
@@ -17699,19 +17699,19 @@ mod tests {
             "las cuatro consolas que quedan tienen que ser hermanas, con tres fronteras entre ellas"
         );
         // Cuatro partes y tres divisores: lo repartible es el área menos las tres líneas.
-        let repartible = area.width() - 3.0 * DIVIDER_THICKNESS;
-        for (which, toca) in [
+        let to_share = area.width() - 3.0 * DIVIDER_THICKNESS;
+        for (which, share) in [
             (0, 1.0 / 5.0),
             (1, 2.25 / 5.0),
             (2, 0.75 / 5.0),
             (3, 1.0 / 5.0),
         ] {
-            let ancho = tiling.parts[which].width();
+            let width = tiling.parts[which].width();
             assert!(
-                (ancho - repartible * toca).abs() < 0.01,
-                "la consola {which} se quedó con {ancho} y le tocaban {}: al subir, las hijas del grupo \
+                (width - to_share * share).abs() < 0.01,
+                "la consola {which} se quedó con {width} y le tocaban {}: al subir, las hijas del grupo \
                  se llevaron su peso sin escalar y se movió lo que ya se estaba viendo",
-                repartible * toca
+                to_share * share
             );
         }
     }
@@ -17753,27 +17753,27 @@ mod tests {
             3,
             "no se cerró la consola con el foco"
         );
-        let izquierda = rect_of(&window, 0, area);
-        let arriba = rect_of(&window, 11, area);
-        let abajo = rect_of(&window, 12, area);
+        let left_pane = rect_of(&window, 0, area);
+        let to_the_top = rect_of(&window, 11, area);
+        let to_the_bottom = rect_of(&window, 12, area);
         assert!(
-            arriba.bottom() < abajo.top(),
-            "las dos que quedaban dentro del grupo dejaron de estar una sobre otra —{arriba:?} y \
-             {abajo:?}—: subieron a hermanas de la raíz, que reparte en el otro sentido"
+            to_the_top.bottom() < to_the_bottom.top(),
+            "las dos que quedaban dentro del grupo dejaron de estar una sobre otra —{to_the_top:?} y \
+             {to_the_bottom:?}—: subieron a hermanas de la raíz, que reparte en el otro sentido"
         );
         assert_eq!(
-            [arriba.left(), arriba.right()],
-            [abajo.left(), abajo.right()],
+            [to_the_top.left(), to_the_top.right()],
+            [to_the_bottom.left(), to_the_bottom.right()],
             "las dos que quedaban dentro del grupo dejaron de compartir columna"
         );
         // Y la que ni siquiera estaba en el grupo conserva su mitad: con las hijas subidas serían tres
         // columnas y le tocaría un tercio.
         let half = (area.width() - DIVIDER_THICKNESS) / 2.0;
         assert!(
-            (izquierda.width() - half).abs() < 0.01,
+            (left_pane.width() - half).abs() < 0.01,
             "la consola de fuera del grupo se quedó con {} y le tocaba {half}: cerrar dentro del grupo \
              le cambió el ancho a una consola que no tenía nada que ver",
-            izquierda.width()
+            left_pane.width()
         );
     }
 
@@ -17840,8 +17840,8 @@ mod tests {
 
         const OF_THE_PANEL: std::time::Duration = std::time::Duration::from_secs(4);
         {
-            let mut suyas = window.active_mut().panes_mut();
-            suyas[1].panel_reread_unpainted = OF_THE_PANEL;
+            let mut its_panes = window.active_mut().panes_mut();
+            its_panes[1].panel_reread_unpainted = OF_THE_PANEL;
         }
 
         apply_without_geometry(&mut window, WindowRequest::ClosePane, &ctx);
@@ -17880,23 +17880,23 @@ mod tests {
         const PARSED: std::time::Duration = std::time::Duration::from_secs(5);
         const ANNOTATED: std::time::Duration = std::time::Duration::from_secs(3);
         const OF_THE_PANEL: std::time::Duration = std::time::Duration::from_secs(2);
-        let ahora = Instant::now();
+        let now = Instant::now();
         {
-            let mut suyas = window.tabs[1].panes_mut();
+            let mut its_panes = window.tabs[1].panes_mut();
             // Donde lo deja `pump`: lo que la consola interpretó y todavía no ha declarado nadie.
-            suyas[0].pending_measurement = Some((Some(ahora), ahora, PARSED));
+            its_panes[0].pending_measurement = Some((Some(now), now, PARSED));
             // Donde queda si el pintado alcanzó a anotar la vuelta.
-            suyas[0]
+            its_panes[0]
                 .timings
                 .anotar_vuelta(measure::Tramos::de_una_vuelta(
                     None,
-                    ahora,
+                    now,
                     ANNOTATED,
                     std::time::Duration::ZERO,
                     std::time::Duration::ZERO,
                 ));
             // Y lo que costó releer su panel estando la pestaña de fondo, que no vive en ninguno de los dos.
-            suyas[1].panel_reread_unpainted = OF_THE_PANEL;
+            its_panes[1].panel_reread_unpainted = OF_THE_PANEL;
         }
 
         apply_without_geometry(&mut window, WindowRequest::CloseTab, &ctx);
@@ -17944,11 +17944,11 @@ mod tests {
         );
         window.close_the_frame(std::time::Duration::from_millis(10));
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         assert!(
-            informe.contains("NO EXISTE"),
-            "el informe no dice que el foco no apuntaba a ninguna consola:\n{informe}"
+            report.contains("NO EXISTE"),
+            "el informe no dice que el foco no apuntaba a ninguna consola:\n{report}"
         );
     }
 
@@ -17968,14 +17968,14 @@ mod tests {
             panic!("la pestaña nace con una rama");
         };
         // La primera columna pasa a ser dos filas; la segunda sigue siendo una consola.
-        let dentro =
+        let inside =
             std::mem::replace(&mut children[0].node, Node::Leaf(pane_with("sleep 30", 90)));
         children[0].node = Node::Branch {
             orientation: Orientation::Rows,
             children: vec![
                 Child {
                     weight: weight(1.0),
-                    node: dentro,
+                    node: inside,
                 },
                 Child {
                     weight: weight(1.0),
@@ -18002,11 +18002,11 @@ mod tests {
         );
         window.close_the_frame(std::time::Duration::from_millis(10));
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         assert!(
-            informe.contains("divisores:    2 en la pestaña 0, al 50 % · 30 %"),
-            "el informe no publica las fronteras en el orden en que se numeran al arrastrarlas:\n{informe}"
+            report.contains("divisores:    2 en la pestaña 0, al 50 % · 30 %"),
+            "el informe no publica las fronteras en el orden en que se numeran al arrastrarlas:\n{report}"
         );
     }
 
@@ -18037,21 +18037,21 @@ mod tests {
         );
         window.close_the_frame(std::time::Duration::from_millis(10));
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         assert!(
-            !informe.contains("izquierda") && !informe.contains("derecha"),
-            "el informe le pone lado a tres divisiones, y con tres el lado no describe nada:\n{informe}"
+            !report.contains("izquierda") && !report.contains("derecha"),
+            "el informe le pone lado a tres divisiones, y con tres el lado no describe nada:\n{report}"
         );
         assert!(
-            informe.contains("divisores:    2"),
+            report.contains("divisores:    2"),
             "el informe no dice cuántas fronteras había, así que publica la de una y calla la otra:\n\
-             {informe}"
+             {report}"
         );
         for pane in 0..3 {
             assert!(
-                informe.contains(&format!("división {pane} ──")),
-                "el informe no tituló la tabla de la división {pane}:\n{informe}"
+                report.contains(&format!("división {pane} ──")),
+                "el informe no tituló la tabla de la división {pane}:\n{report}"
             );
         }
     }
@@ -18076,16 +18076,16 @@ mod tests {
         one_frame_with(&mut window, &ctx, Vec::new());
         one_frame_with(&mut window, &ctx, Vec::new());
 
-        let anchos: Vec<u16> = window.tabs[1]
+        let widths: Vec<u16> = window.tabs[1]
             .panes()
             .iter()
             .map(|pane| pane.measured.cols)
             .collect();
 
-        assert_eq!(anchos.len(), 3, "la pestaña de fondo perdió una consola");
-        for (which, ancho) in anchos.iter().enumerate() {
+        assert_eq!(widths.len(), 3, "la pestaña de fondo perdió una consola");
+        for (which, width) in widths.iter().enumerate() {
             assert_ne!(
-                *ancho, INITIAL_GRID.cols,
+                *width, INITIAL_GRID.cols,
                 "la consola {which} de la pestaña de fondo se quedó con la rejilla de arranque"
             );
         }
@@ -18093,9 +18093,9 @@ mod tests {
         // comparación, una medida que ignorase el árbol y repartiera entre dos pasaría igual.
         let in_front = window.tabs[0].panes()[0].measured.cols;
         assert!(
-            anchos[0] < in_front,
+            widths[0] < in_front,
             "la de fondo, con tres consolas, no salió más estrecha que la de delante con dos: \
-             {anchos:?} frente a {in_front}"
+             {widths:?} frente a {in_front}"
         );
     }
 
@@ -18136,7 +18136,7 @@ mod tests {
         // Lo que hace que quitarle la compañía a una división la deje como si el reparto no existiera:
         // sin frontera, tampoco se le descuenta el grosor de ninguna.
         let area = area_of(500.0);
-        let tiling = repartir(area, Orientation::Columns, &[weight(1.0)], CELL_WIDTH);
+        let tiling = tile(area, Orientation::Columns, &[weight(1.0)], CELL_WIDTH);
 
         assert_eq!(tiling.parts.len(), 1);
         assert!(
@@ -18155,13 +18155,13 @@ mod tests {
         // `NaN` en cada coordenada, y un `NaN` dentro de un rectángulo no falla donde se genera: se
         // propaga a todo lo que se pinte a partir de él. Prohibirlo en el constructor es lo que hace que
         // ese estado no exista, en vez de repartir guardas por los sitios que crean pesos.
-        for imposible in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        for impossible in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             assert!(
-                Weight::new(imposible).is_none(),
-                "{imposible} se aceptó como peso"
+                Weight::new(impossible).is_none(),
+                "{impossible} se aceptó como peso"
             );
         }
-        assert_eq!(Weight::new(0.5).map(Weight::valor), Some(0.5));
+        assert_eq!(Weight::new(0.5).map(Weight::value), Some(0.5));
     }
 
     #[test]
@@ -18170,18 +18170,18 @@ mod tests {
         // arrastrando hasta el borde— y los pesos, que no lo admiten. Sin el recorte, arrastrar al
         // extremo daría un peso cero, y con los dos al extremo una suma cero: el `NaN` de la prueba de
         // arriba, pero llegando por el camino que un usuario recorre de verdad.
-        for fraccion in [0.0_f32, 1.0, -5.0, 12.0, f32::NAN, f32::INFINITY] {
-            let tiling = repartir(
+        for fraction in [0.0_f32, 1.0, -5.0, 12.0, f32::NAN, f32::INFINITY] {
+            let tiling = tile(
                 area_of(500.0),
                 Orientation::Columns,
-                &weights_of(fraccion),
+                &weights_of(fraction),
                 CELL_WIDTH,
             );
 
-            for (which, parte) in tiling.parts.iter().enumerate() {
+            for (which, part) in tiling.parts.iter().enumerate() {
                 assert!(
-                    parte.width().is_finite() && parte.width() >= 0.0,
-                    "con la fracción a {fraccion} la parte {which} salió {parte:?}"
+                    part.width().is_finite() && part.width() >= 0.0,
+                    "con la fracción a {fraction} la parte {which} salió {part:?}"
                 );
             }
         }
@@ -18198,26 +18198,26 @@ mod tests {
         const USABLE: f32 = 500.0 - DIVIDER_THICKNESS;
         // **Los dos anchos exactos y ninguna desigualdad.** Un `>=` contra el suelo lo cumple también el
         // lado ancho, que mide sesenta veces más, así que la aserción pasaría sin que el suelo existiera.
-        for (fraccion, izquierda, derecha) in [
+        for (fraction, left_width, right_width) in [
             (0.0_f32, CELL_WIDTH, USABLE - CELL_WIDTH),
             (1.0_f32, USABLE - CELL_WIDTH, CELL_WIDTH),
         ] {
-            let tiling = repartir(
+            let tiling = tile(
                 area_of(500.0),
                 Orientation::Columns,
-                &weights_of(fraccion),
+                &weights_of(fraction),
                 CELL_WIDTH,
             );
 
             assert_eq!(
                 tiling.parts[0].width(),
-                izquierda,
-                "con la fracción a {fraccion} la consola izquierda no respetó el suelo"
+                left_width,
+                "con la fracción a {fraction} la consola izquierda no respetó el suelo"
             );
             assert_eq!(
                 tiling.parts[1].width(),
-                derecha,
-                "con la fracción a {fraccion} la consola derecha no respetó el suelo"
+                right_width,
+                "con la fracción a {fraction} la consola derecha no respetó el suelo"
             );
         }
     }
@@ -18227,9 +18227,9 @@ mod tests {
         // El caso en que el suelo no se puede respetar, porque no hay sitio para dos. Recortar contra un
         // mínimo que no cabe daría un mínimo mayor que el máximo, o sea un rectángulo invertido. Lo que se
         // conserva es lo único que se puede: que ninguna de las dos desaparezca.
-        let util = CELL_WIDTH * 2.0 - 1.0;
-        let tiling = repartir(
-            area_of(util + DIVIDER_THICKNESS),
+        let usable = CELL_WIDTH * 2.0 - 1.0;
+        let tiling = tile(
+            area_of(usable + DIVIDER_THICKNESS),
             Orientation::Columns,
             &weights_of(0.0),
             CELL_WIDTH,
@@ -18245,7 +18245,7 @@ mod tests {
         // Las tres piezas tienen que cubrir el área exactamente: si el divisor se restara después de
         // repartir, una consola perdería ancho sin que nadie hubiera movido nada.
         let area = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(500.0, 300.0));
-        let tiling = repartir(area, Orientation::Columns, &weights_of(0.4), CELL_WIDTH);
+        let tiling = tile(area, Orientation::Columns, &weights_of(0.4), CELL_WIDTH);
 
         assert_eq!(tiling.dividers[0].rect.width(), DIVIDER_THICKNESS);
         assert_eq!(tiling.parts[0].right(), tiling.dividers[0].rect.left());
@@ -18262,23 +18262,23 @@ mod tests {
         // lo produzca a mano, pero eframe no fija ancho mínimo, así que no depende de nosotros.
         // Y se prueba con las fracciones de los dos extremos además de una del medio: el recorte contra el
         // suelo es justo donde un mínimo mayor que el máximo aparecería.
-        for ancho in [0.0_f32, 1.0, 2.0, 3.0, 20.0] {
-            for fraccion in [0.0_f32, 0.5, 1.0] {
-                let tiling = repartir(
-                    area_of(ancho),
+        for width in [0.0_f32, 1.0, 2.0, 3.0, 20.0] {
+            for fraction in [0.0_f32, 0.5, 1.0] {
+                let tiling = tile(
+                    area_of(width),
                     Orientation::Columns,
-                    &weights_of(fraccion),
+                    &weights_of(fraction),
                     CELL_WIDTH,
                 );
-                let suyos = tiling
+                let its_rects = tiling
                     .parts
                     .iter()
                     .copied()
                     .chain(tiling.dividers.iter().map(|divider| divider.rect));
-                for (which, rect) in suyos.enumerate() {
+                for (which, rect) in its_rects.enumerate() {
                     assert!(
                         rect.width() >= 0.0,
-                        "con {ancho} puntos de ancho y la fracción a {fraccion}, \
+                        "con {width} puntos de ancho y la fracción a {fraction}, \
                          el rectángulo {which} salió invertido"
                     );
                 }
@@ -18293,7 +18293,7 @@ mod tests {
         // arrastre sin ningún efecto visible— dejaba la suite entera en verde. Cada pieza estaba probada
         // por separado; lo que faltaba era la línea que las junta.
         //
-        // **Y con esto AC6 se recorre entero.** La prueba de `repartir` con dos anchos comprueba el
+        // **Y con esto AC6 se recorre entero.** La prueba de `tile` con dos anchos comprueba el
         // mecanismo, pero no quién le pasa el área ni con qué fracción; aquí la ventana se ensancha al
         // doble entre dos pasadas de la aplicación de verdad y lo que se mira es la rejilla con la que
         // acabó cada consola, que es lo que el programa de dentro va a recibir.
@@ -18302,14 +18302,14 @@ mod tests {
         window.active_mut().move_divider(0, A_QUARTER);
         let ctx = egui::Context::default();
 
-        for ancho in [400.0 + DIVIDER_THICKNESS, 800.0 + DIVIDER_THICKNESS] {
-            let area = area_of(ancho);
+        for width in [400.0 + DIVIDER_THICKNESS, 800.0 + DIVIDER_THICKNESS] {
+            let area = area_of(width);
             ui_pass(&mut window, &ctx, area, egui::RawInput::default());
 
             // La métrica se le pregunta a la misma fuente que usó la pasada, y se puede preguntar desde
             // fuera de ella porque las fuentes existen desde la primera (`context.rs:1120`).
             let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            let tiling = repartir(
+            let tiling = tile(
                 area,
                 Orientation::Columns,
                 &weights_of(A_QUARTER),
@@ -18319,14 +18319,14 @@ mod tests {
             assert_eq!(
                 window.active().panes()[0].measured,
                 metrics.cells_in(tiling.parts[0].size()),
-                "con la ventana a {ancho} puntos, la consola izquierda no midió su cuarto"
+                "con la ventana a {width} puntos, la consola izquierda no midió su cuarto"
             );
             assert_eq!(
                 window.active().panes()[1].measured,
                 metrics.cells_in(tiling.parts[1].size()),
-                "con la ventana a {ancho} puntos, la consola derecha no midió sus tres cuartos"
+                "con la ventana a {width} puntos, la consola derecha no midió sus tres cuartos"
             );
-            // Un cuarto y no la mitad, por lo mismo que en la prueba de `repartir`: con la mitad, una
+            // Un cuarto y no la mitad, por lo mismo que en la prueba de `tile`: con la mitad, una
             // pasada que ignorase la fracción daría estos mismos dos números.
             assert_ne!(
                 window.active().panes()[0].measured.cols,
@@ -18352,7 +18352,7 @@ mod tests {
         // y es `logic` quien lo aplica en el fotograma siguiente. Esa unión no la miraba nada — las dos
         // mitades del redimensionado se prueban poniendo `measured` a mano, y las pruebas de `pump_them_all`
         // corren con la rejilla de arranque, donde redimensionar es un no-op—, así que borrar
-        // `division.redimensionar()` del bucle, o el bucle entero de `logic`, dejaba la suite en verde con
+        // `pane.resize()` del bucle, o el bucle entero de `logic`, dejaba la suite en verde con
         // las dos consolas clavadas en 24×80 por grande que fuera la ventana.
         const A_QUARTER: f32 = 0.25;
         let area = area_of(800.0 + DIVIDER_THICKNESS);
@@ -18367,30 +18367,30 @@ mod tests {
         eframe::App::logic(&mut window, &ctx, &mut frame);
 
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
-        let tiling = repartir(
+        let tiling = tile(
             area,
             Orientation::Columns,
             &weights_of(A_QUARTER),
             metrics.width(),
         );
-        let rectangulos = [tiling.parts[0], tiling.parts[1]];
+        let rects = [tiling.parts[0], tiling.parts[1]];
         for (which, (pane, rect)) in window
             .active()
             .panes()
             .into_iter()
-            .zip(rectangulos)
+            .zip(rects)
             .enumerate()
         {
-            let esperado = metrics.cells_in(rect.size());
+            let expected = metrics.cells_in(rect.size());
             // Que el tamaño esperado **no** sea el de arranque es lo que hace que la aserción de abajo
             // signifique algo: si coincidieran, pasaría igual con un redimensionado que no ocurrió.
             assert_ne!(
-                esperado, INITIAL_GRID,
+                expected, INITIAL_GRID,
                 "el trozo de ventana de la consola {which} mide justo la rejilla de arranque"
             );
             assert_eq!(
                 pane.screen.size(),
-                esperado,
+                expected,
                 "la consola {which} interpreta contra una rejilla que no es la de su trozo de ventana"
             );
         }
@@ -18477,7 +18477,7 @@ mod tests {
         // **El único sitio donde el foco decide algo y no se ve en lo que recibe una consola.** Las
         // otras rutas del foco —el teclado, el clic— se comprueban mirando el destino: la consola que
         // no tenía que recibir nada sigue vacía. Ésta solo existe en lo que se encola para pintar, así
-        // que un `rectangulos[0]` fijo, o un foco leído de otro sitio que el de la pestaña, deja la
+        // que un `rects[0]` fijo, o un foco leído de otro sitio que el de la pestaña, deja la
         // suite entera en verde y el realce clavado en la izquierda para siempre: la ventana enseñaría
         // que se teclea en una consola mientras las teclas van a la otra.
         let area = area_of(800.0 + DIVIDER_THICKNESS);
@@ -18487,18 +18487,18 @@ mod tests {
 
         // Como en la prueba del panel: la pasada de interfaz de arriba tira lo encolado, y aquí lo
         // encolado **es** lo que se afirma.
-        let entrada = egui::RawInput {
+        let input = egui::RawInput {
             screen_rect: Some(area),
             ..Default::default()
         };
         let mut frame = eframe::Frame::_new_kittest();
-        let mut salida = ctx.run_ui(entrada, |ui| eframe::App::ui(&mut window, ui, &mut frame));
-        let shapes = std::mem::take(&mut salida.shapes);
-        salida.drop_without_applying_deltas();
+        let mut output = ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame));
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
 
-        let realce = shapes
+        let highlight = shapes
             .iter()
-            .find_map(|recortada| match &recortada.shape {
+            .find_map(|clipped| match &clipped.shape {
                 egui::Shape::Rect(shape) if shape.stroke.color == Theme::default().focus() => {
                     Some(shape.rect)
                 }
@@ -18507,14 +18507,14 @@ mod tests {
             .expect("el realce del foco tenía que quedar encolado");
 
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
-        let tiling = repartir(
+        let tiling = tile(
             area,
             Orientation::Columns,
             &weights_of(INITIAL_FRACTION),
             metrics.width(),
         );
         assert_eq!(
-            realce, tiling.parts[1],
+            highlight, tiling.parts[1],
             "el realce no rodeó a la consola con el foco"
         );
         // Y la comprobación que impide que la de arriba sea cierta por casualidad: las dos mitades del
@@ -18535,21 +18535,21 @@ mod tests {
         let area = area_of(800.0 + DIVIDER_THICKNESS);
         // El centro del divisor con la fracción inicial: la mitad de lo repartible, donde el suelo por
         // consola no llega a morder, así que el agarre no depende del ancho de la fuente.
-        let agarre = egui::pos2(
+        let grip = egui::pos2(
             area.left() + 400.0 + DIVIDER_THICKNESS / 2.0,
             area.center().y,
         );
         // Tres cuartos de lo repartible: un sitio al que la fracción inicial no llega sola.
-        let suelta = egui::pos2(area.left() + 600.0, agarre.y);
+        let drop_at = egui::pos2(area.left() + 600.0, grip.y);
         let mut window = window_with("sleep 30", "sleep 30");
         let ctx = egui::Context::default();
 
         // Las tres pasadas del arrastre, por lo mismo que en la prueba de `drag_the_divider`: egui
         // resuelve la interacción contra las regiones de la pasada anterior, y el candidato a arrastrarse
         // sale de dónde estaba el puntero **al pulsar**.
-        ui_pass(&mut window, &ctx, area, move_pane(agarre));
-        ui_pass(&mut window, &ctx, area, pulsar(agarre));
-        ui_pass(&mut window, &ctx, area, move_pane(suelta));
+        ui_pass(&mut window, &ctx, area, move_pane(grip));
+        ui_pass(&mut window, &ctx, area, press(grip));
+        ui_pass(&mut window, &ctx, area, move_pane(drop_at));
 
         // 600 de 800 repartibles es 0,75 sin resto, así que aquí tampoco hace falta tolerancia.
         assert_eq!(
@@ -18559,7 +18559,7 @@ mod tests {
         );
 
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
-        let tiling = repartir(
+        let tiling = tile(
             area,
             Orientation::Columns,
             &weights_of(0.75),
@@ -18582,11 +18582,11 @@ mod tests {
     /// **Que el panel esté de verdad puesto es la condición de todas las pruebas del gesto**: sin él no
     /// hay frontera que atender, así que un gesto sobre nada pasaría por «el arrastre no movió el ancho»
     /// y la prueba diría que el suelo funciona cuando lo que ocurre es que no hay panel.
-    fn with_the_panel_in_place(window: &mut Window, which: usize, contenido: &str) {
-        let mut suyas = window.active_mut().panes_mut();
-        let pane = &mut suyas[which];
+    fn with_the_panel_in_place(window: &mut Window, which: usize, contents: &str) {
+        let mut its_panes = window.active_mut().panes_mut();
+        let pane = &mut its_panes[which];
         pane.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
-        publish_at(pane, contenido);
+        publish_at(pane, contents);
         pane.to_reread.raise();
         pane.refresh_its_panel();
     }
@@ -18598,18 +18598,18 @@ mod tests {
     /// hay nada y caerían — que es lo que se quiere de un ayudante que replica una posición.
     fn panel_cut(window: &Window, which: usize, area: egui::Rect) -> f32 {
         let cell_width = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell_width).parts[which];
+        let its_area = window.active().root.place(area, cell_width).parts[which];
         match window.active().panes()[which]
-            .tile_with_its_panel(suya, cell_width, SystemTime::now())
+            .tile_with_its_panel(its_area, cell_width, SystemTime::now())
             .panel
         {
-            Some(sitio) => sitio.left(),
-            None => suya.right() - PANEL_GRIP,
+            Some(panel_rect) => panel_rect.left(),
+            None => its_area.right() - PANEL_GRIP,
         }
     }
 
     /// El puntero, moviéndose a un punto.
-    fn en(x: f32, y: f32) -> Vec<egui::Event> {
+    fn pointer_at(x: f32, y: f32) -> Vec<egui::Event> {
         vec![egui::Event::PointerMoved(egui::pos2(x, y))]
     }
 
@@ -18629,20 +18629,20 @@ mod tests {
     }
 
     /// Un gesto entero sobre la frontera del panel de una división: agarrar donde está y soltar en
-    /// `hasta`, pasando por el camino de verdad — la pasada de interfaz completa, no el método a pelo.
+    /// `drag_to`, pasando por el camino de verdad — la pasada de interfaz completa, no el método a pelo.
     fn drag_the_panel(
         window: &mut Window,
         ctx: &egui::Context,
         area: egui::Rect,
         which: usize,
-        hasta: f32,
+        drag_to: f32,
     ) {
         let cut_along = panel_cut(window, which, area);
-        let alto = area.center().y;
-        one_frame_in(window, ctx, area, en(cut_along, alto));
-        one_frame_in(window, ctx, area, button(cut_along, alto, true));
-        one_frame_in(window, ctx, area, en(hasta, alto));
-        one_frame_in(window, ctx, area, button(hasta, alto, false));
+        let mid_y = area.center().y;
+        one_frame_in(window, ctx, area, pointer_at(cut_along, mid_y));
+        one_frame_in(window, ctx, area, button(cut_along, mid_y, true));
+        one_frame_in(window, ctx, area, pointer_at(drag_to, mid_y));
+        one_frame_in(window, ctx, area, button(drag_to, mid_y, false));
     }
 
     #[test]
@@ -18658,7 +18658,7 @@ mod tests {
 
         // Un fotograma antes del gesto, para que la consola haya medido con el panel ya puesto.
         one_frame_in(&mut window, &ctx, area, Vec::new());
-        let antes = window.active().panes()[0].measured.cols;
+        let before = window.active().panes()[0].measured.cols;
         let cell = with_metrics(CellMetrics::width);
         let cut_along = panel_cut(&window, 0, area);
 
@@ -18672,7 +18672,7 @@ mod tests {
         );
         assert_eq!(
             window.active().panes()[0].measured.cols,
-            antes + 10,
+            before + 10,
             "el ancho bajó pero a la consola se le siguió anunciando la rejilla de antes del gesto"
         );
     }
@@ -18717,28 +18717,28 @@ mod tests {
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
-        let pedido = window.active().panes()[0].panel_width;
+        let requested = window.active().panes()[0].panel_width;
         drag_the_panel(&mut window, &ctx, area, 0, area.right() + 500.0);
 
         // **Plegado, a la consola le queda el rectángulo entero** — igual que a una cuyo productor no ha
         // publicado nada, que es lo que hace que no haya dos formas distintas de no tener panel.
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
+        let its_area = window.active().root.place(area, cell).parts[0];
         assert!(window.active().panes()[0].folded, "no se plegó");
         let panel_split =
-            window.active().panes()[0].tile_with_its_panel(suya, cell, SystemTime::now());
+            window.active().panes()[0].tile_with_its_panel(its_area, cell, SystemTime::now());
         assert!(
             panel_split.panel.is_none(),
             "plegado sigue reservándose sitio para el panel"
         );
         assert_eq!(
-            panel_split.console, suya,
+            panel_split.console, its_area,
             "plegado, la consola no se quedó con el rectángulo entero de su división"
         );
 
         // **Y el viaje de vuelta, tirando del asidero que queda pegado al borde.** Sin él, el gesto que
         // plegó no se podría deshacer con el ratón: un viaje sin billete de vuelta.
-        drag_the_panel(&mut window, &ctx, area, 0, suya.right() - 20.0 * cell);
+        drag_the_panel(&mut window, &ctx, area, 0, its_area.right() - 20.0 * cell);
 
         assert!(
             !window.active().panes()[0].folded,
@@ -18748,7 +18748,7 @@ mod tests {
         // un campo aparte y no un «ancho cero»: un cero que además significara plegado habría perdido esto.
         assert_eq!(
             window.active().panes()[0].panel_width,
-            pedido,
+            requested,
             "desplegar devolvió un ancho que el usuario no había pedido"
         );
     }
@@ -18766,9 +18766,9 @@ mod tests {
         let cell = with_metrics(CellMetrics::width);
         let cut_along = panel_cut(&window, 0, area);
         drag_the_panel(&mut window, &ctx, area, 0, cut_along + 6.0 * cell);
-        let pedido = window.active().panes()[0].panel_width;
+        let requested = window.active().panes()[0].panel_width;
         assert_ne!(
-            pedido,
+            requested,
             panel::DEFAULT_WIDTH,
             "el gesto no cambió el ancho, así que partir no tiene nada que conservar"
         );
@@ -18777,7 +18777,7 @@ mod tests {
 
         assert_eq!(
             window.active().panes()[0].panel_width,
-            pedido,
+            requested,
             "partir la ventana le devolvió al panel el ancho de fábrica"
         );
     }
@@ -18801,14 +18801,14 @@ mod tests {
 
         let cell = with_metrics(CellMetrics::width);
         let cut_along = panel_cut(&window, 0, area);
-        let alto = area.center().y;
+        let mid_y = area.center().y;
 
         // Se agarra la frontera de la pestaña de delante…
-        one_frame_in(&mut window, &ctx, area, en(cut_along, alto));
-        one_frame_in(&mut window, &ctx, area, button(cut_along, alto, true));
+        one_frame_in(&mut window, &ctx, area, pointer_at(cut_along, mid_y));
+        one_frame_in(&mut window, &ctx, area, button(cut_along, mid_y, true));
         // …y sin soltar se cambia de pestaña y se mueve el puntero bien lejos.
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::ArrowRight));
-        one_frame_in(&mut window, &ctx, area, en(cut_along + 15.0 * cell, alto));
+        one_frame_in(&mut window, &ctx, area, pointer_at(cut_along + 15.0 * cell, mid_y));
 
         assert_eq!(
             window.active, 1,
@@ -18831,16 +18831,16 @@ mod tests {
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
 
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
+        let its_area = window.active().root.place(area, cell).parts[0];
         let factory = window.active().panes()[0]
-            .tile_with_its_panel(suya, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, cell, SystemTime::now())
             .panel
             .expect("hay panel")
             .width();
 
         window.active_mut().panes_mut()[0].panel_width = 12;
         let custom = window.active().panes()[0]
-            .tile_with_its_panel(suya, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, cell, SystemTime::now())
             .panel
             .expect("hay panel")
             .width();
@@ -18869,20 +18869,20 @@ mod tests {
 
             let cell = with_metrics(CellMetrics::width);
             let cut_along = panel_cut(&window, 0, area);
-            let alto = area.center().y;
-            one_frame_in(&mut window, &ctx, area, en(cut_along, alto));
+            let mid_y = area.center().y;
+            one_frame_in(&mut window, &ctx, area, pointer_at(cut_along, mid_y));
             one_frame_in(
                 &mut window,
                 &ctx,
                 area,
-                with_button(which, cut_along, alto, true),
+                with_button(which, cut_along, mid_y, true),
             );
-            one_frame_in(&mut window, &ctx, area, en(cut_along + 12.0 * cell, alto));
+            one_frame_in(&mut window, &ctx, area, pointer_at(cut_along + 12.0 * cell, mid_y));
             one_frame_in(
                 &mut window,
                 &ctx,
                 area,
-                with_button(which, cut_along + 12.0 * cell, alto, false),
+                with_button(which, cut_along + 12.0 * cell, mid_y, false),
             );
 
             assert_eq!(
@@ -18909,20 +18909,20 @@ mod tests {
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
+        let its_area = window.active().root.place(area, cell).parts[0];
         let panel_split =
-            window.active().panes()[0].tile_with_its_panel(suya, cell, SystemTime::now());
-        let pintado = panel_split.panel.expect("hay panel").width() / cell;
+            window.active().panes()[0].tile_with_its_panel(its_area, cell, SystemTime::now());
+        let painted = panel_split.panel.expect("hay panel").width() / cell;
         assert!(
-            pintado < panel::DEFAULT_WIDTH as f32,
-            "el panel no está recortado ({pintado} celdas), así que la prueba no plantea el caso"
+            painted < panel::DEFAULT_WIDTH as f32,
+            "el panel no está recortado ({painted} celdas), así que la prueba no plantea el caso"
         );
 
         let cut_along = panel_cut(&window, 0, area);
-        let alto = area.center().y;
-        one_frame_in(&mut window, &ctx, area, en(cut_along, alto));
-        one_frame_in(&mut window, &ctx, area, button(cut_along, alto, true));
-        one_frame_in(&mut window, &ctx, area, button(cut_along, alto, false));
+        let mid_y = area.center().y;
+        one_frame_in(&mut window, &ctx, area, pointer_at(cut_along, mid_y));
+        one_frame_in(&mut window, &ctx, area, button(cut_along, mid_y, true));
+        one_frame_in(&mut window, &ctx, area, button(cut_along, mid_y, false));
 
         assert_eq!(
             window.active().panes()[0].panel_width,
@@ -18946,13 +18946,13 @@ mod tests {
         drag_the_panel(&mut window, &ctx, area, 0, area.left() - 5000.0);
 
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
-        let of_the_pane = with_metrics(|m| m.cells_in(suya.size()).cols) as usize;
-        let cabe = of_the_pane - panel::MINIMUM_CONSOLE as usize;
+        let its_area = window.active().root.place(area, cell).parts[0];
+        let of_the_pane = with_metrics(|m| m.cells_in(its_area.size()).cols) as usize;
+        let fits = of_the_pane - panel::MINIMUM_CONSOLE as usize;
         assert_eq!(
             window.active().panes()[0].panel_width,
-            cabe,
-            "se guardaron {} celdas cuando el reparto solo puede dar {cabe} de las {of_the_pane} de \
+            fits,
+            "se guardaron {} celdas cuando el reparto solo puede dar {fits} de las {of_the_pane} de \
              la división",
             window.active().panes()[0].panel_width
         );
@@ -18975,9 +18975,9 @@ mod tests {
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
+        let its_area = window.active().root.place(area, cell).parts[0];
         let panel_split =
-            window.active().panes()[0].tile_with_its_panel(suya, cell, SystemTime::now());
+            window.active().panes()[0].tile_with_its_panel(its_area, cell, SystemTime::now());
         assert_eq!(
             panel_split
                 .panel
@@ -18987,23 +18987,23 @@ mod tests {
             "el panel tiene ancho, así que su asidero no cae sobre el divisor y la prueba no plantea el caso"
         );
 
-        let antes = window.active().divider_fractions()[0];
-        let divisor = window.active().root.place(area, cell).dividers[0];
-        let agarre = divisor.rect.center();
-        let alto = agarre.y;
-        one_frame_in(&mut window, &ctx, area, en(agarre.x, alto));
-        one_frame_in(&mut window, &ctx, area, button(agarre.x, alto, true));
-        one_frame_in(&mut window, &ctx, area, en(agarre.x - 6.0 * cell, alto));
+        let before = window.active().divider_fractions()[0];
+        let divider = window.active().root.place(area, cell).dividers[0];
+        let grip = divider.rect.center();
+        let mid_y = grip.y;
+        one_frame_in(&mut window, &ctx, area, pointer_at(grip.x, mid_y));
+        one_frame_in(&mut window, &ctx, area, button(grip.x, mid_y, true));
+        one_frame_in(&mut window, &ctx, area, pointer_at(grip.x - 6.0 * cell, mid_y));
         one_frame_in(
             &mut window,
             &ctx,
             area,
-            button(agarre.x - 6.0 * cell, alto, false),
+            button(grip.x - 6.0 * cell, mid_y, false),
         );
 
         assert_ne!(
             window.active().divider_fractions()[0],
-            antes,
+            before,
             "el divisor del árbol dejó de moverse: el asidero del panel le ganó el punto"
         );
     }
@@ -19023,13 +19023,13 @@ mod tests {
         let cell = with_metrics(CellMetrics::width);
         let cut_along = panel_cut(&window, 0, area);
         drag_the_panel(&mut window, &ctx, area, 0, cut_along + 7.0 * cell);
-        let pedido = window.active().panes()[0].panel_width;
+        let requested = window.active().panes()[0].panel_width;
         assert_ne!(
-            pedido,
+            requested,
             panel::DEFAULT_WIDTH,
             "el gesto no cambió el ancho, así que no hay nada que conservar"
         );
-        let quien = window.active().panes()[0].name;
+        let moved = window.active().panes()[0].name;
 
         // Ida y vuelta a la otra pestaña: la consola pasa un rato de fondo.
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::ArrowRight));
@@ -19048,34 +19048,34 @@ mod tests {
                 .panes()
                 .into_iter()
                 .enumerate()
-                .find(|(_, pane)| pane.name == quien)
+                .find(|(_, pane)| pane.name == moved)
                 .expect("la consola sigue viva");
-            let ancho = pane
+            let width = pane
                 .tile_with_its_panel(tiling.parts[which], cell, SystemTime::now())
                 .panel
                 .expect("su panel sigue teniendo sitio")
                 .width();
-            (pane.panel_width, (ancho / cell).round() as usize)
+            (pane.panel_width, (width / cell).round() as usize)
         };
         assert_eq!(
             of_that_pane(&window),
-            (pedido, pedido),
+            (requested, requested),
             "cambiar de pestaña y volver le devolvió al panel el ancho de fábrica"
         );
 
         // Y ahora se la lleva de sitio: se suelta sobre su hermana, que reordena el árbol.
-        let otra = window.active().panes()[1].name;
-        let suyo = window.active().root.place(area, cell).parts[1];
-        let movio =
-            with_metrics(|metrics| window.drop_a_pane(quien, otra, Side::Bottom, suyo, metrics));
+        let other = window.active().panes()[1].name;
+        let its_area = window.active().root.place(area, cell).parts[1];
+        let it_moved =
+            with_metrics(|metrics| window.drop_a_pane(moved, other, Side::Bottom, its_area, metrics));
         assert!(
-            movio,
+            it_moved,
             "la consola no se pudo mover, así que la prueba no plantea el caso"
         );
 
         assert_eq!(
             of_that_pane(&window),
-            (pedido, pedido),
+            (requested, requested),
             "mover la consola de sitio le devolvió al panel el ancho de fábrica"
         );
     }
@@ -19092,7 +19092,7 @@ mod tests {
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
-        let antes: Vec<usize> = window
+        let before: Vec<usize> = window
             .active()
             .panes()
             .iter()
@@ -19106,14 +19106,14 @@ mod tests {
         // bien: el gesto llega hasta el final y hay efecto que comprobar.
         drag_the_panel(&mut window, &ctx, area, 0, cut_along + 60.0 * cell);
 
-        let despues: Vec<usize> = window
+        let after: Vec<usize> = window
             .active()
             .panes()
             .iter()
             .map(|pane| pane.name)
             .collect();
         assert_eq!(
-            antes, despues,
+            before, after,
             "arrastrar la frontera del panel reordenó las consolas"
         );
         assert!(
@@ -19156,15 +19156,15 @@ mod tests {
         let cell = with_metrics(CellMetrics::width);
         let cut_along = panel_cut(&window, 0, area);
         drag_the_panel(&mut window, &ctx, area, 0, cut_along + 9.0 * cell);
-        let pedido = window.active().panes()[0].panel_width;
-        assert_eq!(pedido, panel::DEFAULT_WIDTH - 9);
+        let requested = window.active().panes()[0].panel_width;
+        assert_eq!(requested, panel::DEFAULT_WIDTH - 9);
 
         drag_the_panel(&mut window, &ctx, area, 0, area.right() + 500.0);
 
         assert!(window.active().panes()[0].folded, "no se plegó");
         assert_eq!(
             window.active().panes()[0].panel_width,
-            pedido,
+            requested,
             "plegar machacó el ancho de trabajo, así que desplegar ya no puede devolverlo"
         );
     }
@@ -19180,15 +19180,15 @@ mod tests {
 
         drag_the_panel(&mut window, &ctx, area, 0, area.right() + 500.0);
         assert!(window.active().panes()[0].folded, "no se plegó");
-        let quien = window.active().panes()[0].name;
-        let otra = window.active().panes()[1].name;
+        let moved = window.active().panes()[0].name;
+        let other = window.active().panes()[1].name;
 
         let cell = with_metrics(CellMetrics::width);
-        let suyo = window.active().root.place(area, cell).parts[1];
-        let movio =
-            with_metrics(|metrics| window.drop_a_pane(quien, otra, Side::Bottom, suyo, metrics));
+        let its_area = window.active().root.place(area, cell).parts[1];
+        let it_moved =
+            with_metrics(|metrics| window.drop_a_pane(moved, other, Side::Bottom, its_area, metrics));
         assert!(
-            movio,
+            it_moved,
             "la consola no se movió, así que la prueba no plantea el caso"
         );
 
@@ -19197,7 +19197,7 @@ mod tests {
                 .active()
                 .panes()
                 .into_iter()
-                .find(|pane| pane.name == quien)
+                .find(|pane| pane.name == moved)
                 .expect("la consola sigue viva")
                 .folded,
             "mover la consola de sitio le desplegó el panel"
@@ -19223,18 +19223,18 @@ mod tests {
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
+        let its_area = window.active().root.place(area, cell).parts[0];
         // Justo donde estaría el asidero si esta consola tuviera panel, y arrastrando de verdad.
-        let borde = suya.right() - PANEL_GRIP;
-        let alto = suya.center().y;
-        one_frame_in(&mut window, &ctx, area, en(borde, alto));
-        one_frame_in(&mut window, &ctx, area, button(borde, alto, true));
-        one_frame_in(&mut window, &ctx, area, en(borde - 30.0 * cell, alto));
+        let edge = its_area.right() - PANEL_GRIP;
+        let mid_y = its_area.center().y;
+        one_frame_in(&mut window, &ctx, area, pointer_at(edge, mid_y));
+        one_frame_in(&mut window, &ctx, area, button(edge, mid_y, true));
+        one_frame_in(&mut window, &ctx, area, pointer_at(edge - 30.0 * cell, mid_y));
         one_frame_in(
             &mut window,
             &ctx,
             area,
-            button(borde - 30.0 * cell, alto, false),
+            button(edge - 30.0 * cell, mid_y, false),
         );
 
         assert_eq!(
@@ -19263,9 +19263,9 @@ mod tests {
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
-        let suya = window.active().root.place(area, cell).parts[0];
+        let its_area = window.active().root.place(area, cell).parts[0];
         let panel_width = window.active().panes()[0]
-            .tile_with_its_panel(suya, cell, SystemTime::now())
+            .tile_with_its_panel(its_area, cell, SystemTime::now())
             .panel
             .expect("el rectángulo del panel existe")
             .width();
@@ -19275,22 +19275,22 @@ mod tests {
              la prueba no plantea el caso que la revisión encontró"
         );
 
-        let antes = window.active().divider_fractions()[0];
-        let divisor = window.active().root.place(area, cell).dividers[0];
-        let agarre = divisor.rect.center();
-        one_frame_in(&mut window, &ctx, area, en(agarre.x, agarre.y));
-        one_frame_in(&mut window, &ctx, area, button(agarre.x, agarre.y, true));
-        one_frame_in(&mut window, &ctx, area, en(agarre.x + 6.0 * cell, agarre.y));
+        let before = window.active().divider_fractions()[0];
+        let divider = window.active().root.place(area, cell).dividers[0];
+        let grip = divider.rect.center();
+        one_frame_in(&mut window, &ctx, area, pointer_at(grip.x, grip.y));
+        one_frame_in(&mut window, &ctx, area, button(grip.x, grip.y, true));
+        one_frame_in(&mut window, &ctx, area, pointer_at(grip.x + 6.0 * cell, grip.y));
         one_frame_in(
             &mut window,
             &ctx,
             area,
-            button(agarre.x + 6.0 * cell, agarre.y, false),
+            button(grip.x + 6.0 * cell, grip.y, false),
         );
 
         assert_ne!(
             window.active().divider_fractions()[0],
-            antes,
+            before,
             "el divisor del árbol dejó de moverse: la banda de agarre del panel le ganó el punto"
         );
     }
@@ -19309,44 +19309,44 @@ mod tests {
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
-        let pintado = window.active().panes()[0]
-            .tile_with_its_panel(suya, cell, SystemTime::now())
+        let its_area = window.active().root.place(area, cell).parts[0];
+        let painted = window.active().panes()[0]
+            .tile_with_its_panel(its_area, cell, SystemTime::now())
             .panel
             .expect("hay panel")
             .width()
             / cell;
         assert!(
-            pintado < panel::DEFAULT_WIDTH as f32,
-            "el panel no está recortado ({pintado} celdas), así que la prueba no plantea el caso"
+            painted < panel::DEFAULT_WIDTH as f32,
+            "el panel no está recortado ({painted} celdas), así que la prueba no plantea el caso"
         );
 
         let cut_along = panel_cut(&window, 0, area);
-        let alto = area.center().y;
-        one_frame_in(&mut window, &ctx, area, en(cut_along, alto));
-        one_frame_in(&mut window, &ctx, area, button(cut_along, alto, true));
+        let mid_y = area.center().y;
+        one_frame_in(&mut window, &ctx, area, pointer_at(cut_along, mid_y));
+        one_frame_in(&mut window, &ctx, area, button(cut_along, mid_y, true));
         // **El temblor va justo por debajo de media celda, que es donde el umbral anterior dejaba pasar.**
         // La primera versión de esta prueba usaba un punto, y con un punto pasaba **también** con el
         // agujero dentro: lo que discriminaba era «el ancho pedido difiere del pintado», y cualquier
         // movimiento de media celda ya los hace distintos. Con el ancla al ancho guardado, ningún temblor
         // por debajo de media celda escribe nada, sea de uno o de cuatro puntos.
-        let temblor = with_metrics(CellMetrics::width) / 2.0 - 0.5;
+        let tremor = with_metrics(CellMetrics::width) / 2.0 - 0.5;
         assert!(
-            temblor > 1.0,
-            "el temblor de esta prueba mide {temblor} puntos: con uno solo, pasaría igual con el defecto"
+            tremor > 1.0,
+            "el temblor de esta prueba mide {tremor} puntos: con uno solo, pasaría igual con el defecto"
         );
-        one_frame_in(&mut window, &ctx, area, en(cut_along + temblor, alto));
+        one_frame_in(&mut window, &ctx, area, pointer_at(cut_along + tremor, mid_y));
         one_frame_in(
             &mut window,
             &ctx,
             area,
-            button(cut_along + temblor, alto, false),
+            button(cut_along + tremor, mid_y, false),
         );
 
         assert_eq!(
             window.active().panes()[0].panel_width,
             panel::DEFAULT_WIDTH,
-            "un temblor de {temblor} puntos se leyó como «quiero este ancho» y borró el que había pedido"
+            "un temblor de {tremor} puntos se leyó como «quiero este ancho» y borró el que había pedido"
         );
     }
 
@@ -19391,22 +19391,22 @@ mod tests {
         window.save_due = None;
 
         // Se deja el contexto en reposo y se corre solo la mitad que arma el despertador.
-        let limpio = egui::Context::default();
+        let clean = egui::Context::default();
         for _ in 0..4 {
-            let _ = limpio.run_logic(&egui::RawInput::default(), |_| {});
+            let _ = clean.run_logic(&egui::RawInput::default(), |_| {});
         }
         assert!(
-            !limpio.has_requested_repaint(),
+            !clean.has_requested_repaint(),
             "el contexto no llega a estar en reposo, causas: {:?}",
-            limpio.repaint_causes()
+            clean.repaint_causes()
         );
-        window.set_the_alarm(&limpio);
+        window.set_the_alarm(&clean);
 
         assert!(
-            !limpio.has_requested_repaint(),
+            !clean.has_requested_repaint(),
             "plegado, la ventana sigue programando un despertar para un aviso que no se pinta, \
              causas: {:?}",
-            limpio.repaint_causes()
+            clean.repaint_causes()
         );
     }
 
@@ -19429,37 +19429,37 @@ mod tests {
         // **Sin esto no manda nada, y es el contrato**: al arrancar no se puede medir la fuente, así que la
         // celda la pone el pintado en el primer fotograma. Ver `InjectedDrags::cell`.
         gesture.already_knows_the_cell(8.0);
-        let pintado = two_with_panel();
-        let divider = pintado[0].1.expect("la primera tiene panel");
-        let recorrido = CELLS_THE_PANEL_GESTURE_CROSSES * 8.0;
+        let painted = two_with_panel();
+        let divider = painted[0].1.expect("la primera tiene panel");
+        let travel = CELLS_THE_PANEL_GESTURE_CROSSES * 8.0;
 
-        let primero = one_panel_gesture(&mut gesture, &pintado, 0);
+        let first = one_panel_gesture(&mut gesture, &painted, 0);
 
         // El apretón cae **en la frontera**, no en el centro de la consola.
         assert!(
-            primero[0].iter().any(|evento| matches!(
-                evento,
+            first[0].iter().any(|event| matches!(
+                event,
                 egui::Event::PointerButton { pos, pressed: true, .. } if pos.x == divider
             )),
             "el gesto no agarró la frontera del panel: {:?}",
-            primero[0]
+            first[0]
         );
         // Y el movimiento se va **hacia dentro del panel**, cruzando celdas.
         assert!(
-            primero.iter().flatten().any(|evento| matches!(
-                evento,
-                egui::Event::PointerMoved(pos) if pos.x == divider + recorrido
+            first.iter().flatten().any(|event| matches!(
+                event,
+                egui::Event::PointerMoved(pos) if pos.x == divider + travel
             )),
             "el gesto no llevó la frontera las celdas que dice recorrer"
         );
 
         // **Y el segundo gesto va al otro lado**, que es lo que devuelve el ancho a donde estaba y evita
         // que la tanda acabe midiendo un panel pegado a su mínimo durante casi toda la corrida.
-        let segundo = one_panel_gesture(&mut gesture, &pintado, 100);
+        let second = one_panel_gesture(&mut gesture, &painted, 100);
         assert!(
-            segundo.iter().flatten().any(|evento| matches!(
-                evento,
-                egui::Event::PointerMoved(pos) if pos.x == divider - recorrido
+            second.iter().flatten().any(|event| matches!(
+                event,
+                egui::Event::PointerMoved(pos) if pos.x == divider - travel
             )),
             "el segundo gesto no fue hacia el otro lado: la tanda acabaría con el panel en un extremo"
         );
@@ -19478,9 +19478,9 @@ mod tests {
         gesture.already_knows_the_cell(8.0);
         let without_panel = two_side_by_side_painted();
 
-        for fotograma in 0..20 {
+        for frame_nr in 0..20 {
             assert!(
-                gesture.events(&without_panel, fotograma).is_empty(),
+                gesture.events(&without_panel, frame_nr).is_empty(),
                 "sin panel a la vista se mandó algún evento"
             );
         }
@@ -19508,13 +19508,13 @@ mod tests {
         // El gesto entero, por el camino real: el enganche de la entrada cruda lo inyecta en cada fotograma.
         let mut frame = eframe::Frame::_new_kittest();
         for _ in 0..=FRAMES_DRAGGING + 1 {
-            let mut entrada = egui::RawInput {
+            let mut input = egui::RawInput {
                 screen_rect: Some(area),
                 ..Default::default()
             };
-            eframe::App::raw_input_hook(&mut window, &ctx, &mut entrada);
+            eframe::App::raw_input_hook(&mut window, &ctx, &mut input);
             eframe::App::logic(&mut window, &ctx, &mut frame);
-            ctx.run_ui(entrada, |ui| eframe::App::ui(&mut window, ui, &mut frame))
+            ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame))
                 .drop_without_applying_deltas();
         }
 
@@ -19561,7 +19561,7 @@ mod tests {
         with_the_panel_in_place(&mut window, 0, r#"{"lines":["trabajando"]}"#);
         window.injected_drags = InjectedDrags::new(1, InjectedGesture::ResizePanel);
         one_frame_in(&mut window, &ctx, area, Vec::new());
-        let antes = window
+        let before = window
             .injected_drags
             .as_ref()
             .expect("hay gestos")
@@ -19577,7 +19577,7 @@ mod tests {
                 .as_ref()
                 .expect("hay gestos")
                 .with_effect,
-            antes,
+            before,
             "plegar se contó como un cambio de ancho: el informe publicaría repartos y maquetados que no \
              ocurrieron"
         );
@@ -19597,8 +19597,8 @@ mod tests {
         let without_panel = two_side_by_side_painted();
 
         // Se empieza el gesto con panel a la vista…
-        let primero = gesture.events(&with_panel, 0);
-        assert!(!primero.is_empty(), "el gesto no llegó a empezar");
+        let first = gesture.events(&with_panel, 0);
+        assert!(!first.is_empty(), "el gesto no llegó a empezar");
         assert_eq!(gesture.completed, 0, "el gesto se contó antes de acabar");
 
         // …y a mitad desaparece la frontera.
@@ -19607,7 +19607,7 @@ mod tests {
         assert!(
             closing
                 .iter()
-                .any(|evento| matches!(evento, egui::Event::PointerButton { pressed: false, .. })),
+                .any(|event| matches!(event, egui::Event::PointerButton { pressed: false, .. })),
             "el gesto no soltó el botón al perder su frontera: la tanda se queda colgada"
         );
         assert_eq!(
@@ -19623,11 +19623,11 @@ mod tests {
     /// Los eventos de un gesto entero de la frontera del árbol, fotograma a fotograma.
     fn one_divider_gesture(
         gesture: &mut InjectedDrags,
-        pintado: &[(egui::Rect, Option<f32>)],
-        desde: u64,
+        painted: &[(egui::Rect, Option<f32>)],
+        from: u64,
     ) -> Vec<Vec<egui::Event>> {
         (0..FRAMES_OF_A_DIVIDER_GESTURE)
-            .map(|step| gesture.events(pintado, desde + step as u64))
+            .map(|step| gesture.events(painted, from + step as u64))
             .collect()
     }
 
@@ -19642,37 +19642,37 @@ mod tests {
         // Sin esto no manda nada: la celda la pone el pintado en el primer fotograma. Ver
         // `InjectedDrags::cell`.
         gesture.already_knows_the_cell(8.0);
-        let pintado = two_side_by_side_painted();
-        let divider = (pintado[0].0.right() + pintado[1].0.left()) / 2.0;
-        let recorrido = CELLS_THE_DIVIDER_GESTURE_CROSSES * 8.0;
+        let painted = two_side_by_side_painted();
+        let divider = (painted[0].0.right() + painted[1].0.left()) / 2.0;
+        let travel = CELLS_THE_DIVIDER_GESTURE_CROSSES * 8.0;
 
-        let primero = one_divider_gesture(&mut gesture, &pintado, 0);
+        let first = one_divider_gesture(&mut gesture, &painted, 0);
 
         // **El acercamiento va SOLO en el primer fotograma**, sin el apretón: es lo que hace que el
         // divisor gane el empate contra las consolas. Ver `move_a_divider`.
         assert!(
             matches!(
-                primero[0].as_slice(),
+                first[0].as_slice(),
                 [egui::Event::PointerMoved(pos)] if pos.x == divider
             ),
             "el primer fotograma no fue solo el acercamiento a la frontera: {:?}",
-            primero[0]
+            first[0]
         );
         assert!(
             matches!(
-                primero[1].as_slice(),
+                first[1].as_slice(),
                 [egui::Event::PointerButton { pos, pressed: true, .. }] if pos.x == divider
             ),
             "el gesto no agarró la frontera del árbol en el fotograma siguiente: {:?}",
-            primero[1]
+            first[1]
         );
         // **Y no en el centro de ninguna consola**, que es donde agarra el gesto de moverlas: si cayera
         // ahí, la tanda mediría el gesto de F2.3 bajo la etiqueta de ésta y el anexo publicaría el coste
         // de reordenar el árbol como si fuera el de recolocar el texto.
-        for (pane, _) in &pintado {
+        for (pane, _) in &painted {
             assert!(
-                !primero.iter().flatten().any(|evento| matches!(
-                    evento,
+                !first.iter().flatten().any(|event| matches!(
+                    event,
                     egui::Event::PointerButton { pos, pressed: true, .. }
                         if pos.x == pane.center().x
                 )),
@@ -19682,23 +19682,23 @@ mod tests {
         // **El recorrido entero, y contado desde donde el gesto agarró.** Son las celdas de cada
         // fotograma de arrastre por los fotogramas que dura, menos el medio grosor con el que la frontera
         // se planta: ahí es donde acaba su centro.
-        let entero = FRAMES_DRAGGING as f32 * recorrido - DIVIDER_THICKNESS / 2.0;
+        let whole_travel = FRAMES_DRAGGING as f32 * travel - DIVIDER_THICKNESS / 2.0;
         assert!(
-            primero.iter().flatten().any(|evento| matches!(
-                evento,
-                egui::Event::PointerMoved(pos) if pos.x == divider + entero
+            first.iter().flatten().any(|event| matches!(
+                event,
+                egui::Event::PointerMoved(pos) if pos.x == divider + whole_travel
             )),
-            "el gesto no llevó la frontera las celdas que dice recorrer: {primero:?}"
+            "el gesto no llevó la frontera las celdas que dice recorrer: {first:?}"
         );
 
         // **Y el segundo va al otro lado**, que es lo que devuelve el reparto a donde estaba y evita que
         // la tanda acabe midiendo una consola pegada a su mínimo durante casi toda la corrida.
-        let segundo = one_divider_gesture(&mut gesture, &pintado, 100);
+        let second = one_divider_gesture(&mut gesture, &painted, 100);
         assert!(
-            segundo.iter().flatten().any(|evento| matches!(
-                evento,
+            second.iter().flatten().any(|event| matches!(
+                event,
                 egui::Event::PointerMoved(pos)
-                    if pos.x == divider - FRAMES_DRAGGING as f32 * recorrido
+                    if pos.x == divider - FRAMES_DRAGGING as f32 * travel
                         - DIVIDER_THICKNESS / 2.0
             )),
             "el segundo gesto no fue hacia el otro lado: la tanda acabaría con el reparto en un extremo"
@@ -19723,22 +19723,22 @@ mod tests {
             ),
         ];
 
-        for (como, pintado) in [("una sola", just_one), ("una encima", one_above_another)] {
+        for (with_what, painted) in [("una sola", just_one), ("una encima", one_above_another)] {
             let mut gesture = InjectedDrags::new(3, InjectedGesture::MoveDivider)
                 .expect("tres son más que ninguno");
             // Se le da la celda **a propósito**: sin ella tampoco mandaría nada, y la prueba pasaría por la
             // razón equivocada.
             gesture.already_knows_the_cell(8.0);
 
-            for fotograma in 0..20 {
+            for frame_nr in 0..20 {
                 assert!(
-                    gesture.events(&pintado, fotograma).is_empty(),
-                    "con {como} se mandó algún evento"
+                    gesture.events(&painted, frame_nr).is_empty(),
+                    "con {with_what} se mandó algún evento"
                 );
             }
             assert_eq!(
                 gesture.completed, 0,
-                "con {como} se contó un gesto sin mandarlo"
+                "con {with_what} se contó un gesto sin mandarlo"
             );
         }
     }
@@ -19763,25 +19763,25 @@ mod tests {
         window.injected_drags = InjectedDrags::new(1, InjectedGesture::MoveDivider);
         // Y uno más con el gesto ya puesto, para que el pintado le diga la celda y guarde los rectángulos.
         one_frame_in(&mut window, &ctx, area, Vec::new());
-        let antes: Vec<_> = window
+        let before: Vec<_> = window
             .active()
             .panes()
             .iter()
             .map(|pane| pane.screen.size())
             .collect();
         let tiling_before = window.active().divider_fractions();
-        let recolocadas_antes = window.reflow.fotogramas;
+        let reflows_before = window.reflow.fotogramas;
 
         // El gesto entero, por el camino real: el enganche de la entrada cruda lo inyecta en cada fotograma.
         let mut frame = eframe::Frame::_new_kittest();
         for _ in 0..FRAMES_OF_A_DIVIDER_GESTURE {
-            let mut entrada = egui::RawInput {
+            let mut input = egui::RawInput {
                 screen_rect: Some(area),
                 ..Default::default()
             };
-            eframe::App::raw_input_hook(&mut window, &ctx, &mut entrada);
+            eframe::App::raw_input_hook(&mut window, &ctx, &mut input);
             eframe::App::logic(&mut window, &ctx, &mut frame);
-            ctx.run_ui(entrada, |ui| eframe::App::ui(&mut window, ui, &mut frame))
+            ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame))
                 .drop_without_applying_deltas();
         }
         // Un fotograma más: el tamaño que mide la pasada de interfaz se le aplica a la consola en la mitad
@@ -19806,7 +19806,7 @@ mod tests {
             "la frontera no se movió, así que el gesto entró por otro sitio"
         );
 
-        let despues: Vec<_> = window
+        let after: Vec<_> = window
             .active()
             .panes()
             .iter()
@@ -19816,29 +19816,29 @@ mod tests {
         // se lo quita a la otra. Comprobar solo que «las dos cambiaron» dejaría pasar un cambio de tamaño
         // de la ventana, que las mueve a las dos en el mismo sentido y no es este gesto.
         let [
-            (izquierda_antes, izquierda_despues),
-            (derecha_antes, derecha_despues),
-        ] = <[_; 2]>::try_from(antes.into_iter().zip(despues).collect::<Vec<_>>())
+            (left_before, left_after),
+            (right_before, right_after),
+        ] = <[_; 2]>::try_from(before.into_iter().zip(after).collect::<Vec<_>>())
             .expect("la pestaña de la tanda abre con dos consolas");
         assert!(
-            (izquierda_despues.cols > izquierda_antes.cols)
-                != (derecha_despues.cols > derecha_antes.cols),
-            "las dos consolas fueron en el mismo sentido —de {izquierda_antes:?} y {derecha_antes:?} a \
-             {izquierda_despues:?} y {derecha_despues:?}—: eso es un cambio de tamaño de la ventana, no \
+            (left_after.cols > left_before.cols)
+                != (right_after.cols > right_before.cols),
+            "las dos consolas fueron en el mismo sentido —de {left_before:?} y {right_before:?} a \
+             {left_after:?} y {right_after:?}—: eso es un cambio de tamaño de la ventana, no \
              una frontera que se mueve"
         );
         assert_ne!(
-            izquierda_antes.cols, izquierda_despues.cols,
+            left_before.cols, left_after.cols,
             "la consola izquierda conservó sus columnas: este gesto tiene que cambiar el ancho de las DOS, \
              que es lo único que lo distingue del de estrechar el panel"
         );
         assert_ne!(
-            derecha_antes.cols, derecha_despues.cols,
+            right_before.cols, right_after.cols,
             "la consola derecha conservó sus columnas: este gesto tiene que cambiar el ancho de las DOS, \
              que es lo único que lo distingue del de estrechar el panel"
         );
         assert!(
-            window.reflow.fotogramas > recolocadas_antes,
+            window.reflow.fotogramas > reflows_before,
             "no se declaró ninguna recolocación: el trabajo que el historial encareció se publicaría como              coste del framework"
         );
     }
@@ -19870,13 +19870,13 @@ mod tests {
         let mut frame = eframe::Frame::_new_kittest();
         let mut the_least = u16::MAX;
         for _ in 0..2 * FRAMES_OF_A_DIVIDER_GESTURE {
-            let mut entrada = egui::RawInput {
+            let mut input = egui::RawInput {
                 screen_rect: Some(area),
                 ..Default::default()
             };
-            eframe::App::raw_input_hook(&mut window, &ctx, &mut entrada);
+            eframe::App::raw_input_hook(&mut window, &ctx, &mut input);
             eframe::App::logic(&mut window, &ctx, &mut frame);
-            ctx.run_ui(entrada, |ui| eframe::App::ui(&mut window, ui, &mut frame))
+            ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame))
                 .drop_without_applying_deltas();
             the_least = the_least.min(
                 window
@@ -19920,46 +19920,46 @@ mod tests {
         // atar es que no se **acumule** nada. Una diezmilésima son menos de dos décimas de punto en la
         // ventana de esta prueba —la línea que se arrastra mide diez veces más— y el defecto que esto
         // persigue movía cuarenta y siete veces eso en un solo ciclo.
-        let vuelve = |ahora: &[f32], at_the_start: &[f32]| {
-            ahora.len() == at_the_start.len()
-                && std::iter::zip(ahora, at_the_start).all(|(a, b)| (a - b).abs() < 1e-4)
+        let is_back = |current: &[f32], at_the_start: &[f32]| {
+            current.len() == at_the_start.len()
+                && std::iter::zip(current, at_the_start).all(|(a, b)| (a - b).abs() < 1e-4)
         };
         let mut frame = eframe::Frame::_new_kittest();
-        let mut idas = Vec::new();
+        let mut outbound = Vec::new();
         for gesture in 0..4 {
             for _ in 0..FRAMES_OF_A_DIVIDER_GESTURE {
-                let mut entrada = egui::RawInput {
+                let mut input = egui::RawInput {
                     screen_rect: Some(area),
                     ..Default::default()
                 };
-                eframe::App::raw_input_hook(&mut window, &ctx, &mut entrada);
+                eframe::App::raw_input_hook(&mut window, &ctx, &mut input);
                 eframe::App::logic(&mut window, &ctx, &mut frame);
-                ctx.run_ui(entrada, |ui| eframe::App::ui(&mut window, ui, &mut frame))
+                ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame))
                     .drop_without_applying_deltas();
             }
-            let ahora = window.active().divider_fractions();
+            let current = window.active().divider_fractions();
             if gesture % 2 == 0 {
                 // El de ida tiene que haber movido algo, o la vuelta de abajo se cumpliría sin gesto.
                 assert!(
-                    !vuelve(&ahora, &at_the_start),
+                    !is_back(&current, &at_the_start),
                     "el gesto {gesture} no movió la frontera, así que la vuelta no prueba nada"
                 );
-                idas.push(ahora);
+                outbound.push(current);
             } else {
                 assert!(
-                    vuelve(&ahora, &at_the_start),
-                    "tras el ciclo {} la frontera quedó en {ahora:?} y salió de {at_the_start:?}: la tanda \
+                    is_back(&current, &at_the_start),
+                    "tras el ciclo {} la frontera quedó en {current:?} y salió de {at_the_start:?}: la tanda \
                      acabaría con una consola pegada a su mínimo y mediría dos regímenes",
                     gesture / 2
                 );
             }
         }
         assert!(
-            vuelve(&idas[0], &idas[1]),
+            is_back(&outbound[0], &outbound[1]),
             "los dos ciclos no llegaron al mismo sitio —{:?} y {:?}—: el gesto arrastra el reparto poco a \
              poco y la tanda acabaría en otro régimen del que empezó",
-            idas[0],
-            idas[1]
+            outbound[0],
+            outbound[1]
         );
     }
 
@@ -19981,15 +19981,15 @@ mod tests {
         window.injected_drags = InjectedDrags::new(1, InjectedGesture::ResizePanel);
         one_frame_in(&mut window, &ctx, area, Vec::new());
 
-        let suya = window.active().root.place(area, cell).parts[0];
-        let ancho = window.active().panes()[0]
-            .tile_with_its_panel(suya, cell, SystemTime::now())
+        let its_area = window.active().root.place(area, cell).parts[0];
+        let width = window.active().panes()[0]
+            .tile_with_its_panel(its_area, cell, SystemTime::now())
             .panel
             .expect("el rectángulo del panel existe")
             .width();
         assert!(
-            ancho > 0.0 && ancho <= PANEL_GRIP,
-            "el panel mide {ancho} puntos: fuera del hueco entre el cero y el asidero, así que la prueba no \
+            width > 0.0 && width <= PANEL_GRIP,
+            "el panel mide {width} puntos: fuera del hueco entre el cero y el asidero, así que la prueba no \
              plantea el caso"
         );
 
@@ -20023,17 +20023,17 @@ mod tests {
         window.active_mut().panes_mut()[0].panel_state = panel::PanelState::default();
 
         let cell = with_metrics(CellMetrics::width);
-        let suya = window.active().root.place(area, cell).parts[0];
-        let borde = suya.right() - PANEL_GRIP;
-        let alto = suya.center().y;
-        one_frame_in(&mut window, &ctx, area, en(borde, alto));
-        one_frame_in(&mut window, &ctx, area, button(borde, alto, true));
-        one_frame_in(&mut window, &ctx, area, en(borde - 30.0 * cell, alto));
+        let its_area = window.active().root.place(area, cell).parts[0];
+        let edge = its_area.right() - PANEL_GRIP;
+        let mid_y = its_area.center().y;
+        one_frame_in(&mut window, &ctx, area, pointer_at(edge, mid_y));
+        one_frame_in(&mut window, &ctx, area, button(edge, mid_y, true));
+        one_frame_in(&mut window, &ctx, area, pointer_at(edge - 30.0 * cell, mid_y));
         one_frame_in(
             &mut window,
             &ctx,
             area,
-            button(borde - 30.0 * cell, alto, false),
+            button(edge - 30.0 * cell, mid_y, false),
         );
 
         assert!(
@@ -20048,7 +20048,7 @@ mod tests {
         // bajo cabecera de K.** El guion pone `MEDIR_GESTO=panel` y luego **parsea la palabra** que el
         // informe publica para decirla por pantalla y para invalidar la corrida; el anexo la cita. Son tres
         // sitios que tienen que decir lo mismo y ninguna prueba los sujetaba.
-        assert_eq!(VARIABLE_DEL_GESTO, "MEDIR_GESTO");
+        assert_eq!(GESTURE_VARIABLE, "MEDIR_GESTO");
         assert_eq!(gesture_of(Some("panel")), InjectedGesture::ResizePanel);
         assert_eq!(gesture_of(Some("frontera")), InjectedGesture::MoveDivider);
         assert_eq!(gesture_of(Some("marcar")), InjectedGesture::Select);
@@ -20066,18 +20066,18 @@ mod tests {
 
         // Las tres palabras del informe, tal como el guion las espera.
         assert_eq!(
-            InjectedGesture::ResizePanel.como_se_publica(),
+            InjectedGesture::ResizePanel.as_published(),
             "estrechando el panel"
         );
         assert_eq!(
-            InjectedGesture::MovePane.como_se_publica(),
+            InjectedGesture::MovePane.as_published(),
             "moviendo consolas"
         );
         assert_eq!(
-            InjectedGesture::MoveDivider.como_se_publica(),
+            InjectedGesture::MoveDivider.as_published(),
             "moviendo la frontera del árbol"
         );
-        assert_eq!(InjectedGesture::Select.como_se_publica(), "marcando texto");
+        assert_eq!(InjectedGesture::Select.as_published(), "marcando texto");
     }
 
     /// La disposición de esta ventana, escrita y vuelta a leer **pasando por el texto**.
@@ -20086,10 +20086,10 @@ mod tests {
     /// —describir y validar— a propósito: el texto es lo que de verdad viaja, y una ida y vuelta que se
     /// salte el JSON no ataría ni la etiqueta ni los nombres de las claves.
     fn wrap_around(window: &Window, ctx: &egui::Context) -> Vec<Tab> {
-        let escrito =
+        let written_text =
             session::escribir(&window.describe()).expect("una ventana viva se puede describir");
-        let leido =
-            session::interpretar(&escrito).expect("lo que la ventana describe se vuelve a leer");
+        let read_back =
+            session::interpretar(&written_text).expect("lo que la ventana describe se vuelve a leer");
         // **Un programa de prueba y no el del usuario.** Con `Pane::new` estas pruebas abrirían un
         // shell interactivo de quien las corre por cada hoja —veintitantos por corrida de la suite—, con
         // sus ficheros de arranque y sus enganches. Eso no prueba este código.
@@ -20099,7 +20099,7 @@ mod tests {
         // encontraba nada, cada hoja **caía al shell de respaldo** —lo contrario de lo que dice el párrafo
         // de arriba— y cada corrida escupía una línea de aviso por consola. Lo destaparon dos revisiones
         // del hito, y se arregla aquí porque es el fichero que este cambio ya toca.
-        Window::materialize(ctx, &leido, "cat").expect("las consolas de vuelta se abren")
+        Window::materialize(ctx, &read_back, "cat").expect("las consolas de vuelta se abren")
     }
 
     /// Arrastra cada frontera de la raíz a su tope, tantas pasadas como se le diga.
@@ -20107,10 +20107,10 @@ mod tests {
     /// **Es el gesto que produce los pesos diminutos, y no hay otro más corto**: el arrastre recorta la
     /// *fracción*, así que lo que deja es una parte de lo que suman los dos vecinos — y esa suma encoge
     /// pasada a pasada. Con una sola pasada no se llega; el número de pasadas **es** el mecanismo.
-    fn drag_every_divider_to_the_stop(window: &mut Window, pasadas: usize) {
-        let cuantas = weights_of_the_root(window).len() - 1;
-        for _ in 0..pasadas {
-            for divider in 0..cuantas {
+    fn drag_every_divider_to_the_stop(window: &mut Window, passes: usize) {
+        let how_many = weights_of_the_root(window).len() - 1;
+        for _ in 0..passes {
+            for divider in 0..how_many {
                 window.active_mut().move_divider(divider, 0.0);
             }
         }
@@ -20142,14 +20142,14 @@ mod tests {
             "los arrastres no llegaron a pesos diminutos, así que esta prueba no prueba nada: {weights:?}"
         );
 
-        let escrito =
+        let written_text =
             session::escribir(&window.describe()).expect("una ventana viva se puede describir");
-        let leido = session::interpretar(&escrito)
+        let read_back = session::interpretar(&written_text)
             .expect("lo que la ventana describe se tiene que poder volver a leer");
-        assert_eq!(leido.hojas(), 5);
+        assert_eq!(read_back.hojas(), 5);
         // Y de vuelta a consolas, que es el camino entero.
         let rounds =
-            Window::materialize(&ctx, &leido, "cat").expect("las consolas de vuelta se abren");
+            Window::materialize(&ctx, &read_back, "cat").expect("las consolas de vuelta se abren");
         assert_eq!(rounds.len(), 1);
     }
 
@@ -20169,9 +20169,9 @@ mod tests {
             weights.iter().any(|weight| *weight > 1.0e6),
             "el arrastre no hizo crecer ningún peso, así que esta prueba no prueba nada: {weights:?}"
         );
-        let escrito =
+        let written_text =
             session::escribir(&window.describe()).expect("una ventana viva se puede describir");
-        session::interpretar(&escrito)
+        session::interpretar(&written_text)
             .expect("lo que la ventana describe se tiene que poder volver a leer");
     }
 
@@ -20208,17 +20208,17 @@ mod tests {
             .root
             .split(0, Side::Right, pane_with("cat", 100));
 
-        let despues = weights_of_the_root(&window);
-        assert_eq!(despues.len(), 23, "la consola nueva no entró como hermana");
+        let after = weights_of_the_root(&window);
+        assert_eq!(after.len(), 23, "la consola nueva no entró como hermana");
         assert!(
-            despues.iter().all(|weight| weight.is_normal()),
-            "partir la consola del suelo dejó pesos que el reparto puede llevar a cero: {despues:?}"
+            after.iter().all(|weight| weight.is_normal()),
+            "partir la consola del suelo dejó pesos que el reparto puede llevar a cero: {after:?}"
         );
     }
 
     #[test]
     fn cerrar_una_division_de_pesos_diminutos_no_deja_a_ninguna_hermana_sin_peso() {
-        // **AC12.** Cerrar sube las nietas a hermanas con el peso escalado —`w · suyo / suma`—, y ese
+        // **AC12.** Cerrar sube las nietas a hermanas con el peso escalado —`group_weight · (peso / total)`—, y ese
         // producto **subdesborda a cero** con números pequeños. Un peso cero es lo que el tipo del peso
         // existe para hacer imposible: metido en el reparto, pone un valor que no es número en un
         // rectángulo y la ventana deja de pintar. Antes esto era un `expect`, y el comentario que lo
@@ -20228,14 +20228,14 @@ mod tests {
         // por ella, y entonces la de dentro **es del mismo sentido que la raíz** y sus hijas suben a
         // hermanas con el peso escalado. Ese es el producto que subdesborda.
         // **Los dos extremos del producto, y los dos vienen de un fichero que el formato acepta.** Por
-        // abajo el producto llega a cero; por arriba, `suyo · w` desborda a infinito **aunque el resultado
+        // abajo el producto llega a cero; por arriba, `group_weight · w` desborda a infinito **aunque el resultado
         // sea representable** —10²⁰ · 10²⁰ no cabe en un `f32`, y el reparto correcto es 5·10¹⁹—, que es por
         // lo que se divide antes de multiplicar. El mínimo que se espera de vuelta distingue las dos cosas:
         // un peso recortado al suelo es tan inservible como un cero, solo que sin pánico.
-        for (suyo, dentro, minimo_esperado) in
+        for (group_weight, inner_weight, expected_minimum) in
             [(1.0e-40_f32, 1.0e-40_f32, 0.0_f32), (1.0e20, 1.0e20, 1.0)]
         {
-            let mut window = window_of_siblings(Orientation::Columns, &[1.0, suyo]);
+            let mut window = window_of_siblings(Orientation::Columns, &[1.0, group_weight]);
             let Node::Branch { children, .. } = &mut window.active_mut().root else {
                 panic!("la ventana de hermanas nace con una rama");
             };
@@ -20248,11 +20248,11 @@ mod tests {
                             orientation: Orientation::Columns,
                             children: vec![
                                 Child {
-                                    weight: weight(dentro),
+                                    weight: weight(inner_weight),
                                     node: Node::Leaf(pane_with("cat", 10)),
                                 },
                                 Child {
-                                    weight: weight(dentro),
+                                    weight: weight(inner_weight),
                                     node: Node::Leaf(pane_with("cat", 11)),
                                 },
                             ],
@@ -20277,12 +20277,12 @@ mod tests {
                 weights
                     .iter()
                     .all(|weight| weight.is_normal() && *weight > 0.0),
-                "reescalar {suyo:e} sobre {dentro:e} dejó un peso que no puede serlo: {weights:?}"
+                "reescalar {group_weight:e} sobre {inner_weight:e} dejó un peso que no puede serlo: {weights:?}"
             );
             // Las dos que subieron son las dos últimas; la primera es la hermana que no se toca.
             assert!(
-                weights[1] > minimo_esperado && weights[2] > minimo_esperado,
-                "reescalar {suyo:e} sobre {dentro:e} recortó donde no hacía falta: {weights:?}"
+                weights[1] > expected_minimum && weights[2] > expected_minimum,
+                "reescalar {group_weight:e} sobre {inner_weight:e} recortó donde no hacía falta: {weights:?}"
             );
         }
     }
@@ -20328,7 +20328,7 @@ mod tests {
         assert_eq!(
             children
                 .iter()
-                .map(|h| h.weight.valor())
+                .map(|h| h.weight.value())
                 .collect::<Vec<_>>(),
             vec![3.0, 1.0],
             "los pesos de la raíz tienen que volver como estaban"
@@ -20346,7 +20346,7 @@ mod tests {
         assert_eq!(
             children
                 .iter()
-                .map(|h| h.weight.valor())
+                .map(|h| h.weight.value())
                 .collect::<Vec<_>>(),
             vec![2.0, 1.0],
             "y los de dentro también"
@@ -20362,11 +20362,11 @@ mod tests {
         // de «salió el de fábrica».
         let ctx = egui::Context::default();
         let mut window = window_of_siblings(Orientation::Columns, &[1.0, 1.0, 1.0, 1.0]);
-        let anchos = [52, panel::DEFAULT_WIDTH, 24, 40];
-        let plegados = [false, false, true, false];
+        let widths = [52, panel::DEFAULT_WIDTH, 24, 40];
+        let folded = [false, false, true, false];
         for (which, pane) in window.active_mut().panes_mut().into_iter().enumerate() {
-            pane.panel_width = anchos[which];
-            pane.folded = plegados[which];
+            pane.panel_width = widths[which];
+            pane.folded = folded[which];
         }
 
         let rounds = wrap_around(&window, &ctx);
@@ -20374,12 +20374,12 @@ mod tests {
         let back = rounds[0].panes();
         assert_eq!(
             back.iter().map(|pane| pane.panel_width).collect::<Vec<_>>(),
-            anchos.to_vec(),
+            widths.to_vec(),
             "cada consola tiene que volver con SU ancho, no con uno para todas"
         );
         assert_eq!(
             back.iter().map(|pane| pane.folded).collect::<Vec<_>>(),
-            plegados.to_vec(),
+            folded.to_vec(),
             "y con su plegado, que va aparte del ancho"
         );
     }
@@ -20398,33 +20398,33 @@ mod tests {
             ["sleep 30", "sleep 30"],
             ["sleep 30", "sleep 30"],
         ]);
-        let marcas = [21, 22, 23];
+        let marks = [21, 22, 23];
         for (which, tab) in window.tabs.iter_mut().enumerate() {
             for pane in tab.panes_mut() {
-                pane.panel_width = marcas[which];
+                pane.panel_width = marks[which];
             }
         }
 
         let rounds = wrap_around(&window, &ctx);
 
         assert_eq!(rounds.len(), 3);
-        let como_volvieron: Vec<usize> = rounds
+        let as_they_came_back: Vec<usize> = rounds
             .iter()
             .map(|tab| tab.panes()[0].panel_width)
             .collect();
         assert_eq!(
-            como_volvieron,
-            marcas.to_vec(),
+            as_they_came_back,
+            marks.to_vec(),
             "las pestañas tienen que volver en su orden"
         );
         // Y los nombres los reparte la ventana, no el fichero: lo que importa es que **no se repite
         // ninguno**, porque un nombre repetido hace que el informe publique dos bloques de números con la
         // misma etiqueta.
-        let mut nombres: Vec<usize> = rounds.iter().map(|tab| tab.name).collect();
-        let cuantas = nombres.len();
-        nombres.sort_unstable();
-        nombres.dedup();
-        assert_eq!(nombres.len(), cuantas, "hay pestañas que se llaman igual");
+        let mut names: Vec<usize> = rounds.iter().map(|tab| tab.name).collect();
+        let tabs = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), tabs, "hay pestañas que se llaman igual");
     }
 
     /// Un documento válido de dos pestañas: la primera con dos consolas de anchos distintos y una plegada,
@@ -20473,12 +20473,12 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
-        let ruta = session::ruta_de(Some(base.join("config").as_os_str()), None)
+        let path = session::ruta_de(Some(base.join("config").as_os_str()), None)
             .expect("la ruta de la prueba es absoluta");
 
         let mut window = window_with("sleep 30", "sleep 30");
-        window.persistence = session::Persistencia::en(Some(ruta.clone()));
-        (window, base, ruta)
+        window.persistence = session::Persistencia::en(Some(path.clone()));
+        (window, base, path)
     }
 
     #[test]
@@ -20491,14 +20491,14 @@ mod tests {
 
         window.active_mut().move_divider(0, 0.3);
         window.check_whether_the_layout_moved();
-        let primero = window.save_due.expect("el primer cambio arma el plazo");
+        let first = window.save_due.expect("el primer cambio arma el plazo");
 
         window.active_mut().move_divider(0, 0.6);
         window.check_whether_the_layout_moved();
 
         assert_eq!(
             window.save_due,
-            Some(primero),
+            Some(first),
             "el segundo cambio aplazó el plazo en vez de dejarlo"
         );
     }
@@ -20516,7 +20516,7 @@ mod tests {
 
     #[test]
     fn al_vencer_el_plazo_la_disposicion_acaba_en_el_disco() {
-        let (mut window, base, ruta) = a_window_that_saves("vence");
+        let (mut window, base, path) = a_window_that_saves("vence");
 
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
@@ -20525,9 +20525,9 @@ mod tests {
         window.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
-        let leido = session::leer(&ruta).expect("lo que se guardó se vuelve a leer");
+        let read_back = session::leer(&path).expect("lo que se guardó se vuelve a leer");
         assert_eq!(
-            leido.pestañas(),
+            read_back.pestañas(),
             window.describe().pestañas.as_slice(),
             "en el disco no está la disposición que hay en pantalla"
         );
@@ -20577,12 +20577,12 @@ mod tests {
         std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
         // Un fichero donde tendría que ir el directorio: crear el directorio falla y no hay forma de
         // escribir.
-        let estorbo = base.join("config");
-        std::fs::write(&estorbo, "no soy un directorio").expect("plantar el estorbo");
-        let ruta = session::ruta_de(Some(estorbo.as_os_str()), None).expect("es absoluta");
+        let in_the_way = base.join("config");
+        std::fs::write(&in_the_way, "no soy un directorio").expect("plantar el estorbo");
+        let path = session::ruta_de(Some(in_the_way.as_os_str()), None).expect("es absoluta");
 
         let mut window = window_with("sleep 30", "sleep 30");
-        window.persistence = session::Persistencia::en(Some(ruta));
+        window.persistence = session::Persistencia::en(Some(path));
 
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
@@ -20621,11 +20621,11 @@ mod tests {
         // sistema no concede—, en pantalla queda una ventana de fábrica. Con el guardado automático, el
         // primer cambio del usuario la escribiría **encima de sus veinte consolas**, y no habría vuelta:
         // antes de este hito el fichero sobrevivía a un arranque fallido y el siguiente lo recuperaba.
-        let (mut window, base, ruta) = a_window_that_saves("no-se-pudo-restaurar");
+        let (mut window, base, path) = a_window_that_saves("no-se-pudo-restaurar");
         // Lo que había guardado, escrito antes: es lo que no se puede perder.
-        let antes = session::escribir(&window.describe()).expect("se describe");
-        std::fs::create_dir_all(ruta.parent().expect("el directorio propio")).expect("crearlo");
-        std::fs::write(&ruta, &antes).expect("escribir lo que había");
+        let before = session::escribir(&window.describe()).expect("se describe");
+        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::write(&path, &before).expect("escribir lo que había");
 
         window
             .persistence
@@ -20636,8 +20636,8 @@ mod tests {
         window.save_if_due();
 
         assert_eq!(
-            std::fs::read_to_string(&ruta).expect("sigue estando"),
-            antes,
+            std::fs::read_to_string(&path).expect("sigue estando"),
+            before,
             "una sesión que no pudo restaurar pisó la disposición que no supo abrir"
         );
         assert_eq!(window.saving.escrituras(), 0);
@@ -20650,16 +20650,16 @@ mod tests {
         // **Cerrar la ventana a mano no es morir**, y es el único final en el que el medio segundo que el
         // retardo acepta perder se puede no perder. Sin esto, colocar algo y cerrar en el acto tira el
         // cambio, que es justo el gesto de quien acaba de dejar la ventana como la quiere.
-        let (mut window, base, ruta) = a_window_that_saves("al-cerrar");
+        let (mut window, base, path) = a_window_that_saves("al-cerrar");
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
-        assert!(!ruta.exists(), "se escribió antes de tiempo");
+        assert!(!path.exists(), "se escribió antes de tiempo");
 
         // El plazo NO ha vencido: es lo que hace que esta prueba distinga vaciar de esperar.
         window.save_now();
 
-        let leido = session::leer(&ruta).expect("al cerrar se escribió lo pendiente");
-        assert_eq!(leido.pestañas(), window.describe().pestañas.as_slice());
+        let read_back = session::leer(&path).expect("al cerrar se escribió lo pendiente");
+        assert_eq!(read_back.pestañas(), window.describe().pestañas.as_slice());
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -20669,7 +20669,7 @@ mod tests {
         // **El plazo en sí no lo ataba ninguna prueba, y lo destapó una revisión.** Las otras lo ponen en el
         // pasado para probar qué pasa al vencer; borrando la comprobación del reloj, la ventana escribiría
         // **sesenta veces por segundo** durante un arrastre y la suite seguía en verde.
-        let (mut window, base, ruta) = a_window_that_saves("aun-no");
+        let (mut window, base, path) = a_window_that_saves("aun-no");
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
 
@@ -20680,7 +20680,7 @@ mod tests {
             0,
             "se escribió antes de que venciera el plazo"
         );
-        assert!(!ruta.exists(), "el fichero apareció antes de tiempo");
+        assert!(!path.exists(), "el fichero apareció antes de tiempo");
         assert!(
             window.save_due.is_some(),
             "el plazo se consumió sin haber vencido, así que no volverá a intentarlo"
@@ -20696,30 +20696,30 @@ mod tests {
         // de repintado, la suite seguía verde y el guardado se quedaría esperando a que alguien moviera el
         // ratón.
         let mut window = window_with("sleep 30", "sleep 30");
-        let limpio = egui::Context::default();
+        let clean = egui::Context::default();
         for _ in 0..4 {
-            let _ = limpio.run_logic(&egui::RawInput::default(), |_| {});
+            let _ = clean.run_logic(&egui::RawInput::default(), |_| {});
         }
         assert!(
-            !limpio.has_requested_repaint(),
+            !clean.has_requested_repaint(),
             "el contexto no llega a estar en reposo, causas: {:?}",
-            limpio.repaint_causes()
+            clean.repaint_causes()
         );
 
         // Sin plazo puesto, la ventana no tiene por qué despertarse.
-        window.set_the_alarm(&limpio);
+        window.set_the_alarm(&clean);
         assert!(
-            !limpio.has_requested_repaint(),
+            !clean.has_requested_repaint(),
             "la ventana se despierta sin tener nada que guardar, causas: {:?}",
-            limpio.repaint_causes()
+            clean.repaint_causes()
         );
 
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
-        window.set_the_alarm(&limpio);
+        window.set_the_alarm(&clean);
 
         assert!(
-            limpio.has_requested_repaint(),
+            clean.has_requested_repaint(),
             "con un cambio sin guardar, la ventana no programa despertarse"
         );
     }
@@ -20765,13 +20765,13 @@ mod tests {
 
         window.save_if_due();
 
-        let apartado = window.timed_separately;
+        let set_aside = window.timed_separately;
         assert!(
-            !apartado.is_zero(),
+            !set_aside.is_zero(),
             "escribir no dejó nada apartado, así que no hay nada que restar"
         );
         // Y ahora que el fotograma se cierre y lo descuente de verdad.
-        let coste = std::time::Duration::from_millis(50);
+        let cost = std::time::Duration::from_millis(50);
         window.active_mut().panes_mut()[0]
             .timings
             .anotar_vuelta(measure::Tramos::de_una_vuelta(
@@ -20781,13 +20781,13 @@ mod tests {
                 std::time::Duration::ZERO,
                 std::time::Duration::ZERO,
             ));
-        let espejo = window.mirror_this_frame;
+        let mirror = window.mirror_this_frame;
 
-        window.close_the_frame(coste);
+        window.close_the_frame(cost);
 
         assert_eq!(
             window.rest_of_frame.media(),
-            coste - apartado - espejo,
+            cost - set_aside - mirror,
             "lo que costó escribir no se descontó del resto"
         );
         assert!(
@@ -20833,9 +20833,9 @@ mod tests {
         // la cifra con la que se juzga a egui. Comparar el espejo se paga en **todos** los fotogramas, así
         // que sin descontarlo el residuo lo absorbería entero.
         let mut window = window_with("sleep 30", "sleep 30");
-        let espejo = std::time::Duration::from_millis(3);
-        let coste = std::time::Duration::from_millis(10);
-        window.mirror_this_frame = espejo;
+        let mirror = std::time::Duration::from_millis(3);
+        let cost = std::time::Duration::from_millis(10);
+        window.mirror_this_frame = mirror;
         // Un tramo cualquiera de una consola, o el cierre no anota ningún resto.
         window.active_mut().panes_mut()[0]
             .timings
@@ -20847,11 +20847,11 @@ mod tests {
                 std::time::Duration::ZERO,
             ));
 
-        window.close_the_frame(coste);
+        window.close_the_frame(cost);
 
         assert_eq!(
             window.rest_of_frame.media(),
-            coste - espejo,
+            cost - mirror,
             "el tramo del espejo no se descontó del resto"
         );
         assert!(
@@ -20879,18 +20879,18 @@ mod tests {
 
         assert_eq!(window.tabs.len(), 2, "no volvieron las dos pestañas");
         assert_eq!(window.active, 0, "no abre en la primera pestaña");
-        let primera: Vec<(usize, bool)> = window.tabs[0]
+        let first_part: Vec<(usize, bool)> = window.tabs[0]
             .panes()
             .into_iter()
             .map(|pane| (pane.panel_width, pane.folded))
             .collect();
-        assert_eq!(primera, vec![(52, false), (24, true)]);
-        let segunda: Vec<(usize, bool)> = window.tabs[1]
+        assert_eq!(first_part, vec![(52, false), (24, true)]);
+        let second: Vec<(usize, bool)> = window.tabs[1]
             .panes()
             .into_iter()
             .map(|pane| (pane.panel_width, pane.folded))
             .collect();
-        assert_eq!(segunda, vec![(36, false)]);
+        assert_eq!(second, vec![(36, false)]);
         // Y las proporciones del árbol de la primera, que es lo que decide los anchos de las consolas.
         assert_eq!(weights_of_the_root(&window), vec![3.0, 1.0]);
     }
@@ -20903,7 +20903,7 @@ mod tests {
         // rellenara publicaría un arranque restaurado que no ocurrió. Las dos ramas, en la misma prueba.
         let ctx = egui::Context::default();
 
-        let restaurada = Window::opening(
+        let restored = Window::opening(
             &ctx,
             OpenWith::Restored(saving_two_tabs()),
             "cat",
@@ -20911,25 +20911,25 @@ mod tests {
             session::Persistencia::en(None),
         )
         .expect("la disposición guardada se abre");
-        let declarada = restaurada
+        let declared = restored
             .restoring
             .expect("una ventana restaurada no dijo de dónde salieron sus consolas");
         assert_eq!(
-            declarada.consolas, 3,
+            declared.consolas, 3,
             "la cuenta que se publica no es la del documento que se abrió"
         );
         // **Y el tiempo, que es la mitad que se escapaba.** Sin esto, cablear el cronómetro a cero o
         // arrancarlo después de abrir las consolas deja la prueba en verde mientras el informe publica
         // `0ns en abrirlas` de una sesión que bifurcó tres procesos. Esta rama lanza `cat` de verdad.
         assert!(
-            declarada.abrirlas > std::time::Duration::ZERO,
+            declared.abrirlas > std::time::Duration::ZERO,
             "abrió tres consolas y dice haber tardado cero en hacerlo"
         );
         // **Y lo que no se midió no se publica.** Esta persistencia nunca leyó el disco —la prueba la
         // construye vacía—, así que el informe tiene que decir «sin medir» en vez de un cero que se lee
         // como una lectura instantánea.
         assert!(
-            declarada.leer.is_none(),
+            declared.leer.is_none(),
             "publica un tiempo de lectura de un fichero que nadie llegó a leer"
         );
 
@@ -20969,41 +20969,41 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
-        let ruta = session::ruta_de(Some(base.join("config").as_os_str()), None)
+        let path = session::ruta_de(Some(base.join("config").as_os_str()), None)
             .expect("la ruta de la prueba es absoluta");
 
-        let mut persistence = session::Persistencia::en(Some(ruta));
+        let mut persistence = session::Persistencia::en(Some(path));
         assert!(
             persistence.guardar(&saving_two_tabs()),
             "no se guardó lo que la prueba iba a restaurar"
         );
-        let guardada = persistence
+        let saved = persistence
             .cargar()
             .expect("no se leyó lo que se acababa de guardar");
-        let costo_leer = persistence.tardo_en_cargar();
+        let read_cost = persistence.tardo_en_cargar();
 
-        let window = Window::opening(&ctx, OpenWith::Restored(guardada), "cat", None, persistence)
+        let window = Window::opening(&ctx, OpenWith::Restored(saved), "cat", None, persistence)
             .expect("la disposición guardada se abre");
 
-        let declarada = window
+        let declared = window
             .restoring
             .expect("una ventana restaurada no dijo de dónde salieron sus consolas");
         assert_eq!(
-            declarada.leer, costo_leer,
+            declared.leer, read_cost,
             "el informe no publica el tiempo que la carga apuntó"
         );
         assert!(
-            declarada
+            declared
                 .leer
                 .is_some_and(|how_much| how_much > Duration::ZERO),
             "leyó un fichero del disco y lo publica como «sin medir» o como instantáneo: {:?}",
-            declarada.leer
+            declared.leer
         );
         // **Las consolas que se declaran son las que la ventana abrió**, y no un número copiado del
         // documento: el guion compara esta cifra con las que sembró para decidir si la tanda vale.
-        let abiertas: usize = window.tabs.iter().map(|tab| tab.panes().len()).sum();
+        let tabs_open: usize = window.tabs.iter().map(|tab| tab.panes().len()).sum();
         assert_eq!(
-            declarada.consolas, abiertas,
+            declared.consolas, tabs_open,
             "declara un número de consolas que no es el de la ventana que abrió"
         );
 
@@ -21037,13 +21037,13 @@ mod tests {
         )
         .expect("la disposición guardada se abre");
 
-        let restaurada = window.tabs[0].panes();
+        let restored = window.tabs[0].panes();
         assert_eq!(
-            restaurada[0].panel_width,
+            restored[0].panel_width,
             panel::DRAG_FLOOR,
             "el panel volvió con un ancho que no se puede agarrar"
         );
-        assert!(!restaurada[0].folded, "el plegado no era lo que se guardó");
+        assert!(!restored[0].folded, "el plegado no era lo que se guardó");
     }
 
     #[test]
@@ -21091,23 +21091,23 @@ mod tests {
         // **Sin esta precedencia, una corrida mide una disposición que nadie le pidió.** Y lo que decide es
         // que la variable ESTÉ: una tanda que la escribe mal ha pedido algo, y su guion ya invalida la
         // corrida comparando lo pedido con lo que el informe declara.
-        let restaurable = || Some(saving_two_tabs());
+        let restorable = || Some(saving_two_tabs());
 
         assert!(matches!(
-            open_with(Some("4"), None, restaurable()),
+            open_with(Some("4"), None, restorable()),
             OpenWith::Factory { tabs: 4, .. }
         ));
         assert!(matches!(
-            open_with(None, Some("2x2"), restaurable()),
+            open_with(None, Some("2x2"), restorable()),
             OpenWith::Factory { .. }
         ));
         assert!(matches!(
-            open_with(Some("no es un número"), None, restaurable()),
+            open_with(Some("no es un número"), None, restorable()),
             OpenWith::Factory { tabs: 1, .. }
         ));
         // Y sin ninguna de las dos, manda el fichero.
         assert!(matches!(
-            open_with(None, None, restaurable()),
+            open_with(None, None, restorable()),
             OpenWith::Restored(_)
         ));
         // Sin fichero y sin variables, lo de siempre.
@@ -21124,16 +21124,16 @@ mod tests {
 
         let rounds = wrap_around(&window, &ctx);
 
-        let mut nombres: Vec<usize> = rounds
+        let mut names: Vec<usize> = rounds
             .iter()
-            .flat_map(|tab| tab.panes().into_iter().map(|d| d.name))
+            .flat_map(|tab| tab.panes().into_iter().map(|pane| pane.name))
             .collect();
-        let cuantas = nombres.len();
-        nombres.sort_unstable();
-        nombres.dedup();
+        let panes = names.len();
+        names.sort_unstable();
+        names.dedup();
         assert_eq!(
-            nombres.len(),
-            cuantas,
+            names.len(),
+            panes,
             "hay nombres repetidos entre consolas"
         );
     }
@@ -21149,17 +21149,17 @@ mod tests {
         let rounds = wrap_around(&window, &ctx);
 
         for tab in &rounds {
-            let suyas: Vec<usize> = tab.panes().iter().map(|d| d.name).collect();
+            let its_panes: Vec<usize> = tab.panes().iter().map(|pane| pane.name).collect();
             assert!(
-                suyas.contains(&tab.focus),
-                "el foco {} no es de ninguna consola de esta pestaña ({suyas:?})",
+                its_panes.contains(&tab.focus),
+                "el foco {} no es de ninguna consola de esta pestaña ({its_panes:?})",
                 tab.focus
             );
             // **Y es LA PRIMERA, no una cualquiera de las suyas.** Con la comprobación de pertenencia
             // sola, poner el foco en la última pasaba — y la promesa es la misma que al abrir una pestaña
             // nueva: teclear antes del primer clic tiene que llegar a la de la izquierda.
             assert_eq!(
-                tab.focus, suyas[0],
+                tab.focus, its_panes[0],
                 "el foco tiene que quedar en la primera consola de la pestaña"
             );
         }
@@ -21172,18 +21172,18 @@ mod tests {
         // escribe «filas» donde hay columnas, materializar lo lee al revés, y la vuelta da el árbol
         // correcto. Todo verde — y el fichero **incompatible con cualquier otro binario**, que es lo peor
         // que le puede pasar a un formato. Lo único que lo caza es afirmar sobre el **texto**.
-        for (orientation, esperado) in [
+        for (orientation, expected) in [
             (Orientation::Columns, "\"orientacion\":\"columnas\""),
             (Orientation::Rows, "\"orientacion\":\"filas\""),
         ] {
             let window = window_of_siblings(orientation, &[1.0, 1.0]);
 
-            let escrito =
+            let written_text =
                 session::escribir(&window.describe()).expect("una ventana viva se puede describir");
 
             assert!(
-                escrito.contains(esperado),
-                "un árbol de {orientation:?} tiene que escribir {esperado} y escribió {escrito}"
+                written_text.contains(expected),
+                "un árbol de {orientation:?} tiene que escribir {expected} y escribió {written_text}"
             );
         }
     }
@@ -21198,9 +21198,9 @@ mod tests {
         // rompe esa compatibilidad sin que nada se queje.
         let with_one_more = r#"{"v":1,"pestañas":[{"raiz":{"hoja":{"ancho_del_panel":36,"plegado":false,"lo_que_venga_manana":7}}}]}"#;
 
-        let leido =
+        let read_back =
             session::interpretar(with_one_more).expect("una clave de más no invalida el documento");
-        assert_eq!(leido.hojas(), 1);
+        assert_eq!(read_back.hojas(), 1);
     }
 
     #[test]
@@ -21216,10 +21216,10 @@ mod tests {
         // lista blanca, cualquier campo nuevo rompe esta prueba, que es exactamente para lo que está.
         let window = window_of_siblings(Orientation::Columns, &[1.0, 1.0]);
 
-        let escrito =
+        let written_text =
             session::escribir(&window.describe()).expect("una ventana viva se puede describir");
 
-        let previstas = [
+        let expected = [
             "v",
             "pestañas",
             "raiz",
@@ -21233,32 +21233,32 @@ mod tests {
             "plegado",
         ];
         // Las claves de un JSON sin espacios son lo que va entre comillas y antes de dos puntos.
-        let claves: Vec<&str> = escrito
+        let keys: Vec<&str> = written_text
             .match_indices("\":")
-            .filter_map(|(fin, _)| escrito[..fin].rfind('"').map(|ini| &escrito[ini + 1..fin]))
+            .filter_map(|(end, _)| written_text[..end].rfind('"').map(|start| &written_text[start + 1..end]))
             .collect();
 
-        for clave in &claves {
+        for key in &keys {
             assert!(
-                previstas.contains(clave),
-                "el documento trae una clave que nadie declaró: «{clave}» en {escrito}"
+                expected.contains(key),
+                "el documento trae una clave que nadie declaró: «{key}» en {written_text}"
             );
         }
         // Y la lista blanca no puede ser una lista vacía disfrazada: el documento tiene que traer claves.
         assert!(
-            claves.len() > previstas.len(),
-            "no se leyó ninguna clave: {escrito}"
+            keys.len() > expected.len(),
+            "no se leyó ninguna clave: {written_text}"
         );
     }
 
     /// Le da a una división de una pestaña dónde publicar, publica ahí, y **deja la bandera levantada
     /// como la deja el vigilante**: la lectura ocurre entonces dentro del fotograma, que es lo que estas
     /// pruebas necesitan mirar.
-    fn publish_in_the_tab(window: &mut Window, tab: usize, which: usize, contenido: &str) {
+    fn publish_in_the_tab(window: &mut Window, tab: usize, which: usize, contents: &str) {
         let mut panes = window.tabs[tab].panes_mut();
         let pane = &mut panes[which];
         pane.panel = Some(PanelDir::create().expect("crear el directorio de la división"));
-        publish_at(pane, contenido);
+        publish_at(pane, contents);
         pane.to_reread.raise();
     }
 
@@ -21271,13 +21271,13 @@ mod tests {
     /// contra el plazo de serie no depende de nada.
     fn age_the_panel(window: &mut Window, tab: usize, which: usize) {
         let panes = window.tabs[tab].panes_mut();
-        let ruta = panes[which]
+        let path = panes[which]
             .panel
             .as_ref()
             .expect("la división tiene directorio")
             .path()
             .join(panel_contract::PANEL_FILE);
-        std::fs::File::open(&ruta)
+        std::fs::File::open(&path)
             .expect("abrir el panel")
             .set_modified(SystemTime::now() - std::time::Duration::from_secs(60 * 60))
             .expect("mover la fecha hacia atrás");
@@ -21292,15 +21292,15 @@ mod tests {
     ) -> Vec<(egui::Rect, String, egui::Color32)> {
         shapes
             .iter()
-            .filter_map(|recortada| match &recortada.shape {
-                egui::Shape::Text(texto)
-                    if tab_bar.contains_rect(recortada.clip_rect)
-                        && !texto.galley.text().chars().all(|c| c.is_ascii_digit()) =>
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text)
+                    if tab_bar.contains_rect(clipped.clip_rect)
+                        && !text.galley.text().chars().all(|c| c.is_ascii_digit()) =>
                 {
                     Some((
-                        recortada.clip_rect,
-                        texto.galley.text().to_owned(),
-                        texto.fallback_color,
+                        clipped.clip_rect,
+                        text.galley.text().to_owned(),
+                        text.fallback_color,
                     ))
                 }
                 _ => None,
@@ -21309,9 +21309,9 @@ mod tests {
     }
 
     /// La barra de una ventana de tantas pestañas, en el área de estas pruebas.
-    fn tab_bar_of(cuantas: usize, area: egui::Rect) -> egui::Rect {
+    fn tab_bar_of(tabs: usize, area: egui::Rect) -> egui::Rect {
         with_metrics(|metrics| {
-            set_the_tab_bar_aside(area, cuantas, metrics)
+            set_the_tab_bar_aside(area, tabs, metrics)
                 .0
                 .expect("con dos pestañas o más tiene que haber barra")
         })
@@ -21346,7 +21346,7 @@ mod tests {
         assert_eq!(
             attention_marks_on_the_tab_bar(&shapes, tab_bar),
             vec![(
-                ficha(tab_bar, 1, 2),
+                tab_rect(tab_bar, 1, 2),
                 "?".to_owned(),
                 window
                     .theme
@@ -21385,7 +21385,7 @@ mod tests {
             assert_eq!(
                 attention_marks_on_the_tab_bar(&shapes, tab_bar),
                 vec![(
-                    ficha(tab_bar, 0, 2),
+                    tab_rect(tab_bar, 0, 2),
                     symbol.to_owned(),
                     window.theme.attention_color(wins, true)
                 )],
@@ -21403,21 +21403,21 @@ mod tests {
         // **último** de los empatados, así que con el vivo siempre en la segunda división la prueba
         // pasaba **por la posición** y no por la regla: quitando el desempate del orden del tipo seguía
         // en verde. Comprobado.
-        for muerto in [0, 1] {
+        for dead in [0, 1] {
             let ctx = egui::Context::default();
             let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
             let area = area_of(800.0);
             publish_in_the_tab(
                 &mut window,
                 0,
-                muerto,
+                dead,
                 r#"{"attention":"wait","lines":["x"]}"#,
             );
-            age_the_panel(&mut window, 0, muerto);
+            age_the_panel(&mut window, 0, dead);
             publish_in_the_tab(
                 &mut window,
                 0,
-                1 - muerto,
+                1 - dead,
                 r#"{"attention":"wait","lines":["y"]}"#,
             );
 
@@ -21433,7 +21433,7 @@ mod tests {
                 window
                     .theme
                     .attention_color(panel_contract::Attention::Wait, true),
-                "con el muerto en la división {muerto}, ganó el reclamo que nadie sostiene y la ficha \
+                "con el muerto en la división {dead}, ganó el reclamo que nadie sostiene y la ficha \
                  manda a la consola que ya no contesta"
             );
         }
@@ -21456,7 +21456,7 @@ mod tests {
         assert_eq!(
             attention_marks_on_the_tab_bar(&shapes, tab_bar),
             vec![(
-                ficha(tab_bar, 0, 2),
+                tab_rect(tab_bar, 0, 2),
                 "⊘".to_owned(),
                 window
                     .theme
@@ -21504,10 +21504,10 @@ mod tests {
 
         let tab_bar = tab_bar_of(2, area);
         let on_the_tab_bar = attention_marks_on_the_tab_bar(&shapes, tab_bar);
-        let [(_, simbolo, color)] = on_the_tab_bar.as_slice() else {
+        let [(_, painted_symbol, color)] = on_the_tab_bar.as_slice() else {
             panic!("tenía que haber exactamente un reclamo en la barra");
         };
-        assert_eq!(simbolo, "?");
+        assert_eq!(painted_symbol, "?");
         assert_eq!(
             *color,
             window
@@ -21529,25 +21529,25 @@ mod tests {
         let ctx = egui::Context::default();
         let area = area_of(800.0);
 
-        let mut sola = window_of_tabs([["sleep 30", "sleep 30"]]);
-        ui_pass(&mut sola, &ctx, area, egui::RawInput::default());
+        let mut one_tab = window_of_tabs([["sleep 30", "sleep 30"]]);
+        ui_pass(&mut one_tab, &ctx, area, egui::RawInput::default());
         assert!(
-            sola.tab_bar_this_frame.is_zero() && sola.tab_bar_cost.fotogramas == 0,
+            one_tab.tab_bar_this_frame.is_zero() && one_tab.tab_bar_cost.fotogramas == 0,
             "con una sola pestaña no hay barra que pintar, así que no hay nada que declarar"
         );
 
-        let mut dos = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
-        ui_pass(&mut dos, &ctx, area, egui::RawInput::default());
+        let mut two = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        ui_pass(&mut two, &ctx, area, egui::RawInput::default());
 
         // Lo pintado en esta pasada está **o pendiente de anotar, o ya anotado** según haya llegado a
         // cerrarse el fotograma; lo que la prueba afirma es que se midió, no en cuál de los dos sitios
         // cayó.
         assert!(
-            dos.tab_bar_this_frame + dos.tab_bar_cost.total > std::time::Duration::ZERO,
+            two.tab_bar_this_frame + two.tab_bar_cost.total > std::time::Duration::ZERO,
             "la barra se pintó en cero tiempo, que es lo que publica un tramo que no se llegó a medir"
         );
         assert!(
-            dos.timed_separately >= dos.tab_bar_this_frame,
+            two.timed_separately >= two.tab_bar_this_frame,
             "lo que costó la barra no está dentro de lo que se resta del fotograma: se publicaría como \
              coste del framework"
         );
@@ -21570,15 +21570,15 @@ mod tests {
             .timings
             .anotar_ida(std::time::Duration::from_micros(10));
 
-        let informe = report_of(&window);
+        let report = report_of(&window);
 
         assert!(
-            informe.contains("barra:        1 fotogramas · 7ms en total"),
-            "el informe no publicó la cuenta que llevaba la ventana:\n{informe}"
+            report.contains("barra:        1 fotogramas · 7ms en total"),
+            "el informe no publicó la cuenta que llevaba la ventana:\n{report}"
         );
         assert!(
-            informe.contains("2 fichas marcadas"),
-            "el informe no dijo si la barra llegó a marcar alguna ficha:\n{informe}"
+            report.contains("2 fichas marcadas"),
+            "el informe no dijo si la barra llegó a marcar alguna ficha:\n{report}"
         );
     }
 
@@ -21600,32 +21600,32 @@ mod tests {
         let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
 
         let tab_bar = tab_bar_of(2, area);
-        let suya = ficha(tab_bar, 0, 2);
-        let fondos: Vec<egui::Rect> = shapes
+        let its_area = tab_rect(tab_bar, 0, 2);
+        let backgrounds: Vec<egui::Rect> = shapes
             .iter()
-            .filter_map(|recortada| match &recortada.shape {
-                egui::Shape::Rect(pintada)
-                    if pintada.fill == window.theme.background() && suya.contains_rect(pintada.rect) =>
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(painted)
+                    if painted.fill == window.theme.background() && its_area.contains_rect(painted.rect) =>
                 {
-                    Some(pintada.rect)
+                    Some(painted.rect)
                 }
                 _ => None,
             })
             .collect();
 
-        let [chip] = fondos.as_slice() else {
-            panic!("detrás del símbolo de la ficha activa no se pintó el fondo: {fondos:?}");
+        let [chip] = backgrounds.as_slice() else {
+            panic!("detrás del símbolo de la ficha activa no se pintó el fondo: {backgrounds:?}");
         };
-        assert_eq!(chip.left(), suya.left(), "el chip no arranca en su ficha");
+        assert_eq!(chip.left(), its_area.left(), "el chip no arranca en su ficha");
         assert!(
             chip.contains(egui::pos2(
-                suya.left() + TAB_BAR_MARGIN + 1.0,
-                suya.center().y
+                its_area.left() + TAB_BAR_MARGIN + 1.0,
+                its_area.center().y
             )),
             "el chip no cubre donde cae el símbolo: {chip:?}"
         );
         assert!(
-            chip.width() < suya.width() / 2.0,
+            chip.width() < its_area.width() / 2.0,
             "el chip se comió la ficha entera y tapó el realce de la activa: {chip:?}"
         );
     }
@@ -21672,7 +21672,7 @@ mod tests {
             assert_eq!(
                 attention_marks_on_the_tab_bar(&shapes, tab_bar),
                 vec![(
-                    ficha(tab_bar, 0, 2),
+                    tab_rect(tab_bar, 0, 2),
                     "?".to_owned(),
                     window
                         .theme
@@ -21697,15 +21697,15 @@ mod tests {
     fn la_barra_cuenta_las_fichas_que_llego_a_marcar() {
         let area = area_of(800.0);
 
-        let mut callada = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        let mut quiet = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         ui_pass(
-            &mut callada,
+            &mut quiet,
             &egui::Context::default(),
             area,
             egui::RawInput::default(),
         );
         assert_eq!(
-            callada.tab_bar_cost.fichas_marcadas, 0,
+            quiet.tab_bar_cost.fichas_marcadas, 0,
             "sin nadie que reclame, la barra dijo haber marcado fichas"
         );
 
@@ -21813,7 +21813,7 @@ mod tests {
     /// sobre el contador donde se apunta que se le mandó algo: comprobado mutando, una prueba que mirara
     /// la serie de la medida sigue verde con los bytes yendo a la consola equivocada.
     fn a_pane_that_asks_for_the_mouse(
-        rectangulos: &[egui::Rect],
+        rects: &[egui::Rect],
         metrics: &CellMetrics,
         case: &str,
     ) -> Window {
@@ -21821,7 +21821,7 @@ mod tests {
             "stty -echo -icanon; printf '\\033[?1000h\\033[?1002h\\033[?1006h'; echo listo; cat -v",
             "sleep 30",
         );
-        for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(rectangulos) {
+        for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(rects) {
             // **El panel se hace visible PUBLICANDO uno de verdad, y la rejilla se DERIVA del reparto.**
             // Las dos cosas van juntas: un panel que nadie publicó no ocupa columnas, así que sin
             // publicarlo la consola se queda con la división entera y **la franja del panel no existe**
@@ -21855,23 +21855,23 @@ mod tests {
             pane.measured = metrics.cells_in(panel_split.console.size());
             pane.screen.resize(pane.measured);
         }
-        let izquierda = &mut window.active_mut().panes_mut()[0];
-        wait_for_the_screen_to_say(izquierda, "listo");
+        let left_pane = &mut window.active_mut().panes_mut()[0];
+        wait_for_the_screen_to_say(left_pane, "listo");
         assert!(
-            izquierda.screen.mouse_reporting().wants_mouse(),
+            left_pane.screen.mouse_reporting().wants_mouse(),
             "el programa de la prueba no llegó a pedir el ratón"
         );
         window
     }
 
     /// Bombea la consola hasta que enseñe eso, o se rinde diciendo lo que hay.
-    fn wait_for_the_pane_to_say(window: &mut Window, which: usize, texto: &str) {
+    fn wait_for_the_pane_to_say(window: &mut Window, which: usize, text: &str) {
         let pane = &mut window.active_mut().panes_mut()[which];
-        let limite = Instant::now() + Duration::from_secs(5);
-        while !pane.screen.to_text().contains(texto) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !pane.screen.to_text().contains(text) {
             assert!(
-                Instant::now() < limite,
-                "el programa no recibió «{texto}»; en pantalla hay: {:?}",
+                Instant::now() < deadline,
+                "el programa no recibió «{text}»; en pantalla hay: {:?}",
                 pane.screen.to_text()
             );
             pane.pump();
@@ -21886,27 +21886,27 @@ mod tests {
     fn turn_the_wheel(
         window: &mut Window,
         ctx: &egui::Context,
-        rectangulos: &[egui::Rect],
+        rects: &[egui::Rect],
         at: egui::Pos2,
         lines: f32,
         chord: egui::Modifiers,
     ) {
-        let mut pasada = |entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let mut pass = |input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    rectangulos,
+                    rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
 
-        pasada(egui::RawInput {
+        pass(egui::RawInput {
             events: vec![egui::Event::PointerMoved(at)],
             ..Default::default()
         });
-        pasada(egui::RawInput {
+        pass(egui::RawInput {
             events: vec![egui::Event::MouseWheel {
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, lines),
@@ -21923,10 +21923,10 @@ mod tests {
         // y baje con la rueda; y el historial **no** se mueve, porque las dos cosas a la vez dejarían la
         // pantalla desplazándose mientras el programa cree que su lista es lo que se ve.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "la_rueda_le_llega_al_programa_que_la_pidio_y_no_mueve_el_historial",
         );
@@ -21945,8 +21945,8 @@ mod tests {
         turn_the_wheel(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5),
+            &rects,
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5),
             3.0,
             egui::Modifiers::NONE,
         );
@@ -21966,34 +21966,34 @@ mod tests {
         // cualquier ratón cuyo escritorio las emita— dejaría `htop` quieto mientras el gesto ocurre.
         // Comprobado mutando: ignorando las páginas, ninguna prueba caía.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "una_pagina_de_rueda_le_llega_al_programa_como_tantos_giros_como_filas",
         );
         let rows = usize::from(window.active().panes()[0].screen.size().rows);
 
-        let pasada = |window: &mut Window, entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let pass = |window: &mut Window, input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
-        let sobre = rectangulos[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5);
-        pasada(
+        let over = rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5);
+        pass(
             &mut window,
             egui::RawInput {
-                events: vec![egui::Event::PointerMoved(sobre)],
+                events: vec![egui::Event::PointerMoved(over)],
                 ..Default::default()
             },
         );
-        pasada(
+        pass(
             &mut window,
             egui::RawInput {
                 events: vec![egui::Event::MouseWheel {
@@ -22008,21 +22008,21 @@ mod tests {
 
         // **Los saltos de línea se quitan antes de contar**: la pantalla envuelve, así que un informe
         // partido entre dos filas no casaría y el recuento saldría corto sin que nada esté mal.
-        let limite = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let pane = &mut window.active_mut().panes_mut()[0];
-            let seguido = pane.screen.to_text().replace('\n', "");
-            let cuantos = seguido.matches("^[[<64;1;1M").count();
-            if cuantos >= rows {
+            let joined = pane.screen.to_text().replace('\n', "");
+            let how_many = joined.matches("^[[<64;1;1M").count();
+            if how_many >= rows {
                 assert_eq!(
-                    cuantos, rows,
+                    how_many, rows,
                     "una página mandó más giros que filas tiene la consola"
                 );
                 return;
             }
             assert!(
-                Instant::now() < limite,
-                "una página tenía que valer {rows} giros y llegaron {cuantos}"
+                Instant::now() < deadline,
+                "una página tenía que valer {rows} giros y llegaron {how_many}"
             );
             pane.pump();
             std::thread::sleep(Duration::from_millis(10));
@@ -22036,10 +22036,10 @@ mod tests {
         // sesiones enteras —un agente dentro de una interfaz de pantalla completa— donde no habría forma
         // de ver lo anterior.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "con_mayusculas_la_rueda_es_del_historial_aunque_el_programa_la_pida",
         );
@@ -22052,8 +22052,8 @@ mod tests {
         turn_the_wheel(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].center(),
+            &rects,
+            rects[0].center(),
             3.0,
             egui::Modifiers::SHIFT,
         );
@@ -22071,7 +22071,7 @@ mod tests {
         // única de las cuatro donde lo que sale no es un informe sino teclas, y por eso hay que verlo:
         // mandar el informe a un programa que no lo pidió le mete basura en la pantalla.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with(
             "stty -echo -icanon; printf '\\033[?1049h'; echo listo; cat -v",
@@ -22083,7 +22083,7 @@ mod tests {
             .active_mut()
             .panes_mut()
             .into_iter()
-            .zip(&rectangulos)
+            .zip(&rects)
         {
             pane.measured = metrics.cells_in(rect.size());
             pane.screen.resize(pane.measured);
@@ -22097,8 +22097,8 @@ mod tests {
         turn_the_wheel(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].center(),
+            &rects,
+            rects[0].center(),
             -2.0,
             egui::Modifiers::NONE,
         );
@@ -22125,16 +22125,16 @@ mod tests {
         // Se pincha en la **cuarta columna de la tercera fila**, que en el informe son la 4 y la 3
         // porque allí se cuenta desde uno.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "un_clic_le_llega_al_programa_que_lo_pidio_y_con_su_celda",
         );
 
-        let at = rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5);
-        drag_to_select(&mut window, &ctx, &rectangulos, at, at);
+        let at = rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5);
+        drag_to_select(&mut window, &ctx, &rects, at, at);
 
         wait_for_the_pane_to_say(&mut window, 0, "^[[<0;4;3M");
     }
@@ -22145,10 +22145,10 @@ mod tests {
         // dejaría al programa pintando su propia selección con la nuestra realzada encima, dos capas
         // diciendo cosas distintas sobre las mismas celdas.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "arrastrar_dentro_de_un_programa_que_pide_el_raton_no_marca_texto",
         );
@@ -22156,9 +22156,9 @@ mod tests {
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
         );
 
         assert_eq!(
@@ -22176,21 +22176,21 @@ mod tests {
         // dio uno** — un doble clic que nadie hizo, que dentro de un editor selecciona una palabra o abre
         // lo que haya bajo el puntero.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "una_pasada_repetida_no_le_manda_el_clic_dos_veces_al_programa",
         );
-        let cell = |columna: f32| {
-            rectangulos[0].min + egui::vec2(metrics.width() * columna, metrics.height() * 0.5)
+        let cell = |column: f32| {
+            rects[0].min + egui::vec2(metrics.width() * column, metrics.height() * 0.5)
         };
 
         // **La misma entrada, dos veces, dentro del MISMO fotograma**: es lo que egui hace cuando algo
         // pide recomponerse. Y después un clic en otra celda que hace de centinela, para que contar
         // ocurra cuando lo del primero ya llegó.
-        let entrada = |at: egui::Pos2| egui::RawInput {
+        let input = |at: egui::Pos2| egui::RawInput {
             events: vec![
                 egui::Event::PointerMoved(at),
                 egui::Event::PointerButton {
@@ -22203,16 +22203,16 @@ mod tests {
             ..Default::default()
         };
         for at in [cell(0.5), cell(0.5), cell(2.5)] {
-            ctx.run_ui(entrada(at), |ui| {
+            ctx.run_ui(input(at), |ui| {
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
                 // La segunda pasada del mismo fotograma, que es lo que esta prueba persigue.
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
@@ -22238,10 +22238,10 @@ mod tests {
         // mandaba a `vim` o a `htop` un gesto que **empezó fuera de él**. Es la versión de ratón del mismo
         // defecto que la selección ya pagó una entrega antes.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "apretar_sobre_el_panel_no_le_entrega_el_arrastre_al_programa",
         );
@@ -22249,21 +22249,21 @@ mod tests {
         // está la frontera arrastrable, y un apretón ahí se lo queda ella: el gesto no llegaría nunca al
         // camino que esta prueba persigue, y la prueba pasaría por no ejercitarlo.
         let on_the_panel = egui::pos2(
-            rectangulos[0].right() - metrics.width() * 5.0,
-            rectangulos[0].min.y + metrics.height() * 0.5,
+            rects[0].right() - metrics.width() * 5.0,
+            rects[0].min.y + metrics.height() * 0.5,
         );
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
+            &rects,
             on_the_panel,
-            rectangulos[0].min + egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
+            rects[0].min + egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
         );
 
         // El centinela: un clic limpio DENTRO de la consola, que sí tiene que llegar. Con él en pantalla,
         // lo que hubiera mandado el gesto anterior ya habría llegado también.
-        let dentro = rectangulos[0].min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
-        drag_to_select(&mut window, &ctx, &rectangulos, dentro, dentro);
+        let inside_the_console = rects[0].min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
+        drag_to_select(&mut window, &ctx, &rects, inside_the_console, inside_the_console);
 
         wait_for_the_pane_to_say(&mut window, 0, "^[[<0;6;1M");
         let on_screen = window.active().panes()[0]
@@ -22294,25 +22294,25 @@ mod tests {
         // apretón y **nunca su soltado**: el programa se queda con el menú abierto creyendo el botón
         // bajado.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window =
-            a_pane_that_asks_for_the_mouse(&rectangulos, &metrics, "boton_no_primario");
-        let at = rectangulos[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5);
+            a_pane_that_asks_for_the_mouse(&rects, &metrics, "boton_no_primario");
+        let at = rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5);
 
-        let pasada = |window: &mut Window, entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let pass = |window: &mut Window, input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
-        pasada(&mut window, egui::RawInput::default());
+        pass(&mut window, egui::RawInput::default());
         for pressed in [true, false] {
-            pasada(
+            pass(
                 &mut window,
                 egui::RawInput {
                     events: vec![egui::Event::PointerButton {
@@ -22336,17 +22336,17 @@ mod tests {
         // ninguno de en medio: para un programa que distingue el arrastre con acorde —selección por
         // bloques en un editor— se soltaba y se volvía a pulsar sola a mitad del gesto.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window =
-            a_pane_that_asks_for_the_mouse(&rectangulos, &metrics, "el_acorde_no_desaparece");
+            a_pane_that_asks_for_the_mouse(&rects, &metrics, "el_acorde_no_desaparece");
 
         drag_with_chord(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
-            rectangulos[0].min + egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
+            &rects,
+            rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
+            rects[0].min + egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
             egui::Modifiers::CTRL,
         );
 
@@ -22361,17 +22361,17 @@ mod tests {
         // dónde cae el puntero, la consola del apretón no se entera nunca —`htop` sigue estirando su
         // columna, `vim` extendiendo su selección— y la vecina recibe un soltar de un apretar que no vio.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window =
-            a_pane_that_asks_for_the_mouse(&rectangulos, &metrics, "soltar_sobre_otra");
+            a_pane_that_asks_for_the_mouse(&rects, &metrics, "soltar_sobre_otra");
 
         drag_to_select(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
-            rectangulos[1].center(),
+            &rects,
+            rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
+            rects[1].center(),
         );
 
         // La `m` final es el soltado, y tiene que llegarle a la consola de la IZQUIERDA aunque el puntero
@@ -22384,10 +22384,10 @@ mod tests {
         // **La celda del soltado va acotada a SU rejilla.** El puntero estaba sobre la consola de al
         // lado, que empieza mucho más a la derecha: sin acotar, al programa se le contaba un soltado en
         // una columna que su pantalla no tiene.
-        let ultima = window.active().panes()[0].measured;
+        let is_last = window.active().panes()[0].measured;
         assert_eq!(
             on_screen
-                .matches(&format!("^[[<0;{};", ultima.cols))
+                .matches(&format!("^[[<0;{};", is_last.cols))
                 .count(),
             1,
             "el soltado no llegó acotado a la última columna de su consola; en pantalla hay: {on_screen:?}"
@@ -22396,7 +22396,7 @@ mod tests {
         assert_eq!(
             on_screen.matches("^[[<32;").count(),
             on_screen
-                .matches(&format!("^[[<32;{};", ultima.cols))
+                .matches(&format!("^[[<32;{};", is_last.cols))
                 .count(),
             "algún informe de arrastre salió con una columna que la consola no tiene; en pantalla hay: {on_screen:?}"
         );
@@ -22415,34 +22415,34 @@ mod tests {
         //    gestos inyectados cambiaron algo» y en las demás tandas nunca pasa de los gestos; contando
         //    cada informe, la tanda del ratón publicaba el triple y su columna dejaba de comparar.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window =
-            a_pane_that_asks_for_the_mouse(&rectangulos, &metrics, "un_gesto_tres_informes");
+            a_pane_that_asks_for_the_mouse(&rects, &metrics, "un_gesto_tres_informes");
         window.injected_drags = InjectedDrags::new(2, InjectedGesture::MouseToProgram);
-        let cell = |columna: f32| {
-            rectangulos[0].min + egui::vec2(metrics.width() * columna, metrics.height() * 0.5)
+        let cell = |column: f32| {
+            rects[0].min + egui::vec2(metrics.width() * column, metrics.height() * 0.5)
         };
 
-        let pasada = |window: &mut Window, entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let pass = |window: &mut Window, input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
-        let gesture = |window: &mut Window, desde: egui::Pos2, hasta: egui::Pos2| {
-            pasada(window, egui::RawInput::default());
-            pasada(
+        let gesture = |window: &mut Window, from: egui::Pos2, to: egui::Pos2| {
+            pass(window, egui::RawInput::default());
+            pass(
                 window,
                 egui::RawInput {
                     events: vec![
-                        egui::Event::PointerMoved(desde),
+                        egui::Event::PointerMoved(from),
                         egui::Event::PointerButton {
-                            pos: desde,
+                            pos: from,
                             button: egui::PointerButton::Primary,
                             pressed: true,
                             modifiers: egui::Modifiers::NONE,
@@ -22457,9 +22457,9 @@ mod tests {
             // llega al camino que se quiere ejercitar y la prueba pasa sin probarlo: comprobado, con un
             // punto de movimiento la mutación de la siembra no la tumbaba.
             let inside_the_same_one =
-                desde + egui::vec2(metrics.width() * 0.3, metrics.height() * 0.4);
-            for at in [inside_the_same_one, hasta] {
-                pasada(
+                from + egui::vec2(metrics.width() * 0.3, metrics.height() * 0.4);
+            for at in [inside_the_same_one, to] {
+                pass(
                     window,
                     egui::RawInput {
                         events: vec![egui::Event::PointerMoved(at)],
@@ -22467,11 +22467,11 @@ mod tests {
                     },
                 );
             }
-            pasada(
+            pass(
                 window,
                 egui::RawInput {
                     events: vec![egui::Event::PointerButton {
-                        pos: hasta,
+                        pos: to,
                         button: egui::PointerButton::Primary,
                         pressed: false,
                         modifiers: egui::Modifiers::NONE,
@@ -22505,29 +22505,29 @@ mod tests {
         // después del primero pasaría igual con el defecto puesto, porque el segundo estaría aún de
         // camino. Con el informe de la tercera celda en pantalla, lo de las dos anteriores ya llegó.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "el_arrastre_no_repite_el_informe_de_la_celda_en_la_que_ya_esta",
         );
-        let cell = |columna: f32| {
-            rectangulos[0].min + egui::vec2(metrics.width() * columna, metrics.height() * 0.5)
+        let cell = |column: f32| {
+            rects[0].min + egui::vec2(metrics.width() * column, metrics.height() * 0.5)
         };
 
-        let pasada = |window: &mut Window, entrada: egui::RawInput| {
-            ctx.run_ui(entrada, |ui| {
+        let pass = |window: &mut Window, input: egui::RawInput| {
+            ctx.run_ui(input, |ui| {
                 window.handle_the_mouse(
                     ui,
-                    &rectangulos,
+                    &rects,
                     &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
                 );
             })
             .drop_without_applying_deltas();
         };
-        pasada(&mut window, egui::RawInput::default());
-        pasada(
+        pass(&mut window, egui::RawInput::default());
+        pass(
             &mut window,
             egui::RawInput {
                 events: vec![
@@ -22544,7 +22544,7 @@ mod tests {
         );
         // Dos fotogramas dentro de la MISMA celda, y uno más en la siguiente que hace de centinela.
         for at in [cell(1.3), cell(1.7), cell(2.5)] {
-            pasada(
+            pass(
                 &mut window,
                 egui::RawInput {
                     events: vec![egui::Event::PointerMoved(at)],
@@ -22574,10 +22574,10 @@ mod tests {
         // pantalla.** Sin esta salida, dentro de `htop` o de `vim` no habría NINGUNA forma de copiar lo
         // que se está viendo — y es lo que hace cualquier terminal con esa misma tecla.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "con_mayusculas_se_marca_texto_aunque_el_programa_pida_el_raton",
         );
@@ -22588,9 +22588,9 @@ mod tests {
         drag_with_chord(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].min + egui::vec2(1.0, 1.0),
-            rectangulos[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
             egui::Modifiers::SHIFT,
         );
 
@@ -22606,26 +22606,26 @@ mod tests {
         // **El acorde de la ventana no se lo puede quedar un programa.** Si pudiera, abrir `vim` en una
         // consola dejaría esa consola clavada donde está: no habría forma de recolocarla sin cerrarlo.
         let ctx = egui::Context::default();
-        let rectangulos = two_wide_panes();
+        let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(
-            &rectangulos,
+            &rects,
             &metrics,
             "mover_la_division_gana_al_programa_que_pide_el_raton",
         );
-        let primera = window.active().panes()[0].name;
+        let first_part = window.active().panes()[0].name;
 
         drag_a_pane(
             &mut window,
             &ctx,
-            &rectangulos,
-            rectangulos[0].center(),
-            rectangulos[1].right_center() - egui::vec2(10.0, 0.0),
+            &rects,
+            rects[0].center(),
+            rects[1].right_center() - egui::vec2(10.0, 0.0),
         );
 
         assert_eq!(
             window.active().panes()[1].name,
-            primera,
+            first_part,
             "el programa se quedó el acorde de mover y la consola no se movió de sitio"
         );
     }
@@ -22649,7 +22649,7 @@ mod tests {
     }
 
     /// Un evento de rueda de la unidad y el desplazamiento que se pidan.
-    fn rueda(unit: egui::MouseWheelUnit, y: f32) -> egui::Event {
+    fn wheel_event(unit: egui::MouseWheelUnit, y: f32) -> egui::Event {
         egui::Event::MouseWheel {
             unit,
             delta: egui::vec2(0.0, y),
@@ -22659,7 +22659,7 @@ mod tests {
     }
 
     /// Una pulsación de tecla con los modificadores dados.
-    fn tecla(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    fn key_press(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: None,
@@ -22687,22 +22687,22 @@ mod tests {
                 pane.screen.advance(format!("linea {n}\r\n").as_bytes());
             }
         }
-        let alto = with_metrics(CellMetrics::height);
-        let encima = egui::pos2(area.left() + area.width() / 4.0, area.center().y);
+        let height = with_metrics(CellMetrics::height);
+        let over_the_left_one = egui::pos2(area.left() + area.width() / 4.0, area.center().y);
         // Un tercio de línea por fotograma, **un fotograma cada uno**: es lo que hace un dedo que
         // arrastra despacio, y es lo que el defecto tiraba entero.
-        let un_tercio = alto / 3.0;
+        let a_third = height / 3.0;
 
         for _ in 0..3 {
-            let entrada = egui::RawInput {
+            let input = egui::RawInput {
                 screen_rect: Some(area),
                 events: vec![
-                    egui::Event::PointerMoved(encima),
-                    rueda(egui::MouseWheelUnit::Point, un_tercio),
+                    egui::Event::PointerMoved(over_the_left_one),
+                    wheel_event(egui::MouseWheelUnit::Point, a_third),
                 ],
                 ..Default::default()
             };
-            ui_pass(&mut window, &ctx, area, entrada);
+            ui_pass(&mut window, &ctx, area, input);
         }
 
         assert_eq!(
@@ -22717,31 +22717,31 @@ mod tests {
         // **El resto acumulado es estado, y guardarlo en la ventana lo movería de consola con el ratón.**
         // Quien pasa el puntero por encima de otra consola no espera que ésta salte media línea por lo
         // que él hizo en la primera.
-        let mut izquierda = pane_with_scrollback();
-        let mut derecha = pane_with_scrollback();
-        let medio = WheelInput {
+        let mut left_pane = pane_with_scrollback();
+        let mut right_pane = pane_with_scrollback();
+        let half = WheelInput {
             lines: 0.5,
             pages: 0.0,
         };
 
-        izquierda.handle_wheel(medio, egui::Modifiers::NONE, top_left());
-        derecha.handle_wheel(medio, egui::Modifiers::NONE, top_left());
+        left_pane.handle_wheel(half, egui::Modifiers::NONE, top_left());
+        right_pane.handle_wheel(half, egui::Modifiers::NONE, top_left());
 
         assert_eq!(
             (
-                izquierda.screen.view().scroll(),
-                derecha.screen.view().scroll()
+                left_pane.screen.view().scroll(),
+                right_pane.screen.view().scroll()
             ),
             (0, 0),
             "media línea movió algo: se está redondeando en vez de guardar el resto"
         );
 
-        izquierda.handle_wheel(medio, egui::Modifiers::NONE, top_left());
+        left_pane.handle_wheel(half, egui::Modifiers::NONE, top_left());
 
         assert_eq!(
             (
-                izquierda.screen.view().scroll(),
-                derecha.screen.view().scroll()
+                left_pane.screen.view().scroll(),
+                right_pane.screen.view().scroll()
             ),
             (1, 0),
             "el resto de una consola se le contó a la otra"
@@ -22758,26 +22758,26 @@ mod tests {
         // al desplazamiento directo, ignorar la unidad de páginas no rompía nada.
         let ctx = egui::Context::default();
         let area = area_of(1200.0);
-        let encima = egui::pos2(area.left() + area.width() / 4.0, area.center().y);
-        let girar = |unidad, how_much| {
+        let over_the_left_one = egui::pos2(area.left() + area.width() / 4.0, area.center().y);
+        let turn = |unit, how_much| {
             let mut window = window_with("sleep 30", "sleep 30");
             for pane in window.active_mut().panes_mut() {
                 for n in 0..80 {
                     pane.screen.advance(format!("linea {n}\r\n").as_bytes());
                 }
             }
-            let entrada = egui::RawInput {
+            let input = egui::RawInput {
                 screen_rect: Some(area),
-                events: vec![egui::Event::PointerMoved(encima), rueda(unidad, how_much)],
+                events: vec![egui::Event::PointerMoved(over_the_left_one), wheel_event(unit, how_much)],
                 ..Default::default()
             };
-            ui_pass(&mut window, &ctx, area, entrada);
+            ui_pass(&mut window, &ctx, area, input);
             let pane = &window.active().panes()[0];
             (pane.screen.view().scroll(), pane.screen.size().rows)
         };
 
-        let (one_line, _) = girar(egui::MouseWheelUnit::Line, 1.0);
-        let (one_page, rows) = girar(egui::MouseWheelUnit::Page, 1.0);
+        let (one_line, _) = turn(egui::MouseWheelUnit::Line, 1.0);
+        let (one_page, rows) = turn(egui::MouseWheelUnit::Page, 1.0);
         assert_eq!(one_line, 1, "una muesca de rueda no subió una línea");
         assert!(
             one_page > one_line,
@@ -22797,34 +22797,34 @@ mod tests {
         // **Solo `RePág` estaba ejercitada, y las otras tres se podían cruzar sin que nada cayera.**
         // Comprobado mutando: con `Inicio` llevando al final y `Fin` al principio, la suite seguía verde.
         let ctx = egui::Context::default();
-        let arriba = {
+        let to_the_top = {
             let mut pane = pane_with_scrollback();
             pane.screen.scroll_by(term_core::Scroll::ToTop);
             pane.screen.view().scroll()
         };
-        assert!(arriba > 0, "la consola de prueba no tiene historial detrás");
+        assert!(to_the_top > 0, "la consola de prueba no tiene historial detrás");
 
         // Cada tecla, desde el estado en el que significa algo, y lo que tiene que dejar.
-        let casos: [(egui::Key, usize, usize); 4] = [
+        let cases: [(egui::Key, usize, usize); 4] = [
             // Desde abajo, `RePág` sube una página; `AvPág` desde abajo no puede bajar más.
             (egui::Key::PageUp, 0, usize::MAX),
-            (egui::Key::PageDown, arriba, usize::MAX),
-            (egui::Key::Home, 0, arriba),
-            (egui::Key::End, arriba, 0),
+            (egui::Key::PageDown, to_the_top, usize::MAX),
+            (egui::Key::Home, 0, to_the_top),
+            (egui::Key::End, to_the_top, 0),
         ];
 
-        for (key, desde, esperado) in casos {
+        for (key, from, expected) in cases {
             let mut pane = pane_with_scrollback();
             let mut modifiers = egui::Modifiers::NONE;
             pane.screen
-                .scroll_by(term_core::Scroll::Lines(desde as i32));
-            let antes = pane.screen.view().scroll();
+                .scroll_by(term_core::Scroll::Lines(from as i32));
+            let before = pane.screen.view().scroll();
 
             enqueue(
                 &ctx,
                 vec![
                     egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
-                    tecla(key, egui::Modifiers::SHIFT),
+                    key_press(key, egui::Modifiers::SHIFT),
                 ],
             );
             pane.send_keys(
@@ -22835,26 +22835,26 @@ mod tests {
                 &keyboard::Keymap::default(),
                 true,
             );
-            let despues = pane.screen.view().scroll();
+            let after = pane.screen.view().scroll();
 
-            if esperado == usize::MAX {
+            if expected == usize::MAX {
                 // Las dos de página no van a un sitio fijo: lo que se ata es el SENTIDO. **Y que se
                 // MOVIÓ**, que es la mitad que faltaba: afirmar solo «no fue hacia arriba» dejaba a
                 // `AvPág` quedarse quieta —sin acorde, sin hacer nada— con el mismo resultado que
                 // bajando. Comprobado quitándole el acorde: era la única de las once que se podía
                 // desatar entera con la suite en verde.
-                let sube = key == egui::Key::PageUp;
+                let goes_up = key == egui::Key::PageUp;
                 assert_ne!(
-                    despues, antes,
-                    "{key:?} no movió la vista: se quedó en {antes}"
+                    after, before,
+                    "{key:?} no movió la vista: se quedó en {before}"
                 );
                 assert_eq!(
-                    despues > antes,
-                    sube,
-                    "{key:?} fue en el sentido contrario: de {antes} a {despues}"
+                    after > before,
+                    goes_up,
+                    "{key:?} fue en el sentido contrario: de {before} a {after}"
                 );
             } else {
-                assert_eq!(despues, esperado, "{key:?} no dejó la vista donde le toca");
+                assert_eq!(after, expected, "{key:?} no dejó la vista donde le toca");
             }
         }
     }
@@ -22875,9 +22875,9 @@ mod tests {
             let mut pane = pane_with_scrollback();
             let mut modifiers = egui::Modifiers::NONE;
             pane.screen.scroll_by(term_core::Scroll::Lines(3));
-            let antes = pane.screen.view().scroll();
+            let before = pane.screen.view().scroll();
 
-            enqueue(&ctx, vec![tecla(key, egui::Modifiers::NONE)]);
+            enqueue(&ctx, vec![key_press(key, egui::Modifiers::NONE)]);
             pane.send_keys(
                 &ctx,
                 Instant::now(),
@@ -22889,7 +22889,7 @@ mod tests {
 
             assert_eq!(
                 pane.screen.view().scroll(),
-                antes,
+                before,
                 "{key:?} sin Mayúsculas movió el historial: se la hemos quitado al programa de dentro"
             );
         }
@@ -22910,7 +22910,7 @@ mod tests {
             &ctx,
             vec![
                 egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
-                tecla(egui::Key::PageUp, egui::Modifiers::SHIFT),
+                key_press(egui::Key::PageUp, egui::Modifiers::SHIFT),
             ],
         );
         pane.send_keys(
@@ -22922,10 +22922,10 @@ mod tests {
             true,
         );
 
-        let quedan = ctx.input(|entrada| entrada.events.clone());
+        let remaining = ctx.input(|input| input.events.clone());
         assert!(
-            !quedan.iter().any(
-                |evento| matches!(evento, egui::Event::Key { key, .. } if *key == egui::Key::PageUp)
+            !remaining.iter().any(
+                |event| matches!(event, egui::Event::Key { key, .. } if *key == egui::Key::PageUp)
             ),
             "la tecla del historial se quedó en la cola: quien la mire después se la manda al programa"
         );
@@ -22949,11 +22949,11 @@ mod tests {
         }
 
         // El puntero, sobre la mitad derecha.
-        let derecha = egui::pos2(area.right() - area.width() / 4.0, area.center().y);
-        let entrada = egui::RawInput {
+        let over_the_right_one = egui::pos2(area.right() - area.width() / 4.0, area.center().y);
+        let input = egui::RawInput {
             screen_rect: Some(area),
             events: vec![
-                egui::Event::PointerMoved(derecha),
+                egui::Event::PointerMoved(over_the_right_one),
                 egui::Event::MouseWheel {
                     unit: egui::MouseWheelUnit::Line,
                     delta: egui::vec2(0.0, 3.0),
@@ -22963,7 +22963,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        ui_pass(&mut window, &ctx, area, entrada);
+        ui_pass(&mut window, &ctx, area, input);
 
         let panes = window.active().panes();
         assert_eq!(
@@ -22997,7 +22997,7 @@ mod tests {
         );
 
         // Y ahora uno que sí: la ventana cambia de tamaño, así que las dos consolas se recolocan.
-        let antes = window.timed_separately;
+        let before = window.timed_separately;
         one_frame_in(&mut window, &ctx, area_of(700.0), Vec::new());
 
         assert_eq!(
@@ -23013,10 +23013,10 @@ mod tests {
         // fotograma suman también el espejo de la disposición y el ratón. Un tramo que se declara y no se
         // resta es exactamente el número mal etiquetado que este proyecto persigue.
         assert!(
-            window.timed_separately >= antes + window.reflow.total,
+            window.timed_separately >= before + window.reflow.total,
             "lo que se resta del fotograma subió {:?} y recolocar costó {:?}: no entró, así que se \
              publicaría como coste del framework",
-            window.timed_separately - antes,
+            window.timed_separately - before,
             window.reflow.total
         );
     }
@@ -23033,38 +23033,38 @@ mod tests {
         // envuelve y otra recién abierta. Si el reloj cubriera lo mismo en las dos, las dos medirían lo
         // mismo.
         let mut with_text = pane_with("sleep 30", 0);
-        let ancha = with_text.screen.size();
+        let wide = with_text.screen.size();
         // Líneas más largas que la rejilla, que son las que de verdad se recolocan al estrechar: una que
         // cabe entera se empuja de un tirón y sale por la puerta barata.
-        let larga = "x".repeat(usize::from(ancha.cols) * 3);
+        let long = "x".repeat(usize::from(wide.cols) * 3);
         for _ in 0..term_core::SCROLLBACK {
-            with_text.screen.advance(larga.as_bytes());
+            with_text.screen.advance(long.as_bytes());
             with_text.screen.advance(b"\r\n");
         }
 
-        let mut vacia = pane_with("sleep 30", 1);
+        let mut empty = pane_with("sleep 30", 1);
         assert_eq!(
-            vacia.screen.size(),
-            ancha,
+            empty.screen.size(),
+            wide,
             "las dos consolas tienen que partir de la misma rejilla o no se comparan"
         );
 
-        let estrecha = term_core::Size {
-            rows: ancha.rows,
-            cols: ancha.cols / 2,
+        let narrow = term_core::Size {
+            rows: wide.rows,
+            cols: wide.cols / 2,
         };
-        for pane in [&mut with_text, &mut vacia] {
-            pane.measured = estrecha;
-            pane.redimensionar();
+        for pane in [&mut with_text, &mut empty] {
+            pane.measured = narrow;
+            pane.resize();
         }
 
         assert!(
-            with_text.reflowed > vacia.reflowed * 5,
+            with_text.reflowed > empty.reflowed * 5,
             "recolocar {} líneas que envuelven costó {:?} y hacerlo sin nada que recolocar {:?}: el \
              cronómetro no está cubriendo el recorrido del historial",
             term_core::SCROLLBACK,
             with_text.reflowed,
-            vacia.reflowed
+            empty.reflowed
         );
     }
 
@@ -23073,10 +23073,10 @@ mod tests {
     /// Va por la foto y no por `to_text`, que devuelve siempre el área activa: con el historial subido
     /// las dos cosas son distintas, y la que hay que mirar es la que se ve.
     fn visible_text(pane: &Pane) -> String {
-        let vista = pane.screen.view();
-        (0..vista.size().rows)
+        let view = pane.screen.view();
+        (0..view.size().rows)
             .map(|row| {
-                vista
+                view
                     .row(row)
                     .expect("la fila está dentro de la foto")
                     .iter()
@@ -23109,19 +23109,19 @@ mod tests {
             pane.screen.advance(format!("linea {n}\r\n").as_bytes());
         }
         pane.screen.scroll_by(term_core::Scroll::ToTop);
-        let mirando = visible_text(&pane);
+        let looking_at = visible_text(&pane);
         assert!(
-            mirando.contains("linea 0"),
-            "la prueba no llegó a subir hasta lo viejo, así que no compara nada: {mirando:?}"
+            looking_at.contains("linea 0"),
+            "la prueba no llegó a subir hasta lo viejo, así que no compara nada: {looking_at:?}"
         );
 
         // Bombear hasta que lo que el programa escribió esté **dentro** de la consola: es el momento en
         // el que un bombeo que arrastrara la vista ya lo habría hecho. `to_text` da el área activa, así
         // que ve llegar la línea sin depender de dónde esté la vista.
-        let limite = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !pane.screen.to_text().contains("RECIEN ESCRITO") {
             assert!(
-                Instant::now() < limite,
+                Instant::now() < deadline,
                 "el programa de la consola no llegó a escribir nada, así que el bombeo no metió nada"
             );
             pane.pump();
@@ -23130,7 +23130,7 @@ mod tests {
 
         assert_eq!(
             visible_text(&pane),
-            mirando,
+            looking_at,
             "entró salida por el bombeo y lo que se ve cambió: quien se pare a leer algo mientras un \
              programa escribe se queda sin poder leerlo"
         );

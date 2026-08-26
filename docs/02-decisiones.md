@@ -3926,3 +3926,152 @@ y la guarda reportó **101 identificadores** en las tres cajas de fuera, todos e
 **reescribiendo la frase y no debilitando el extractor**: esa sensibilidad *es* el mecanismo, y aflojarla
 para que la prosa quepa es exactamente cómo un glosario derivado deja de derivar. La regla de uso queda
 dicha: **en este documento, una flecha entre dos nombres es vocabulario, no puntuación.**
+
+**Y pasó dos veces.** La segunda fue escribiendo, dos secciones más abajo, la explicación de por qué la
+guarda no protege los 317 renombrados: la frase usaba dos nombres de ejemplo con una flecha en medio
+para *enseñar la forma*, y el extractor la leyó como vocabulario igual que la primera. O sea que **ni
+conocer la trampa evita caer en ella**, porque la forma que hay que citar es exactamente la que dispara.
+La conclusión práctica, y es la única que sirve: **en este anexo la forma de una flecha no se cita nunca
+con nombres; se describe con palabras.**
+
+#### La entrega del fichero grande: 317 nombres en 23.143 líneas, y lo que se aprendió midiendo
+
+`crates/app/src/lib.rs` es un fichero de **23.143 líneas** con **1.599 identificadores distintos** y
+**356 funciones de prueba**, y el que más pruebas tiene del repositorio. Va solo en su entrega, y el
+corte no fue por tamaño sino porque *«todo `app` menos el fichero grande»* y *«el fichero grande»* son
+dos productos distintos.
+
+**Se partió en cinco áreas por primera aparición del nombre** —constantes y geometría, la consola, el
+árbol y las pestañas, la ventana, y las 16.000 líneas de pruebas— y cada área tuvo su propia propuesta
+de mapa. **Las cinco salieron mutuamente consistentes: 317 nombres y cero conflictos**, ni uno con dos
+destinos incompatibles. Eso no estaba garantizado con cinco revisiones ciegas unas de otras, y la razón
+es la que este anexo lleva repitiendo: reutilizaron el glosario y los precedentes de los ocho módulos
+ya hechos en vez de acuñar de nuevo.
+
+**Veintitrés nombres significan dos o tres cosas distintas según dónde estén**, y ése es el trabajo de
+verdad de esta entrega. `alto` es una coordenada `y` en los tres ayudantes de gesto y una altura en los
+demás. `cuantas` son pesos en el reparto, consolas al abrir y pestañas en la barra. `suyo` tiene **seis**
+destinos: un índice, un área, un coste, un tamaño, un resultado y el peso de un grupo. Un solo destino
+haría que el nombre **mintiera** en todos los sitios menos uno, que es exactamente lo que la entrega
+anterior tuvo que arreglar cuatro veces.
+
+**Así que la herramienta cambió y el método con ella.** El renombrador acepta ahora **un rango de líneas
+por entrada**, y los rangos **no se escriben**: se derivan de las cabeceras `fn`, que son la unidad real
+de ámbito de un local. Escribirlos a mano desde un informe ya salió mal —los números envejecen en cuanto
+alguien edita el fichero— y entra un comprobador cuya única pregunta es la que importa: **¿queda alguna
+aparición sin destino?** Un nombre que se queda en español porque su rango no lo cubría **compila igual
+de bien**, y ni el compilador ni la guarda lo ven.
+
+**Y la herramienta que mide este hito tenía un defecto, encontrado por una revisión adversaria y no por
+mí.** El saneo que separa código de prosa **se comía los saltos de línea** de los comentarios y las
+cadenas, así que **todas las líneas posteriores quedaban desplazadas**: 120 posiciones en este fichero.
+Un rango calculado sobre eso renombra la cosa equivocada **en silencio**. Arreglado y comprobado en los
+31 ficheros del árbol: los saltos que entran son los que salen. Y con él, un segundo punto ciego del
+mismo escáner: su patrón de identificador era **ASCII**, así que partía en dos los cuatro nombres con
+eñe y no los contaba. Comprobado después: los únicos identificadores no ASCII del árbol están en este
+fichero, la medida y la sesión, así que **no escondió nada en los ocho módulos ya mezclados**.
+
+**Del compilador salieron trece errores de 2.561 sustituciones, y los trece de la misma clase:** un
+campo o un método que declara la medida, la sesión o los ajustes, renombrado en su sitio de llamada
+aquí. Devueltos al nombre que su módulo aún les da. **La guarda cazó otras 22 citas muertas** que la
+herramienta no mueve, porque viven en comentarios de línea y no en enlaces de documentación.
+
+**Dos nombres nuevos mentían y se cambiaron a mano**, y los dos son la clase que ninguna guarda ve:
+`absorb` tenía **dos `dentro` distintos en doce líneas** —el sentido de la rama y la lista de hijos—, que
+un solo destino habría convertido en dos cosas con un nombre a la vista; y `subidas` era una lista de
+desplazamientos en una función y las nietas que se suben en otra, donde `scrolled` era falso.
+
+##### Lo que meter el fichero grande en la lista NO compra, medido
+
+**Y aquí va la corrección más importante de esta entrega, porque la encontró una revisión y no yo.**
+Meter `app/src/lib.rs` en la lista de ficheros «sin nombre que el glosario retirase» **no protege
+ninguno de los 317 renombrados**. La razón está en el mecanismo: el vocabulario español lo **deriva** la
+guarda de **las flechas de este anexo**, y **ninguno de los 317 nombres viejos es una flecha** —
+son locales, campos y parámetros, y el glosario decide **tipos**. Probado mutando: devolver `mid_y` a
+`alto` en los cuatro sitios de una función deja la guarda en **9 de 9, verde**.
+
+Así que la afirmación honesta es exactamente ésta y ni una palabra más: **el fichero no conserva ningún
+nombre que el glosario retirase**, y las 28 exenciones hacían falta porque esos 28 **sí** están en las
+tablas del anexo. Un regreso a cualquiera de los 317 es **invisible** para la guarda, y decir lo
+contrario sería la lista que parece vigilada y no lo está — el disfraz que este documento lleva
+fichado desde la cuarta entrega.
+
+**Lo que sí protegió esta entrega, y con números:** el oráculo posicional. 1.855 hunks sin uno
+desequilibrado, 2.617 líneas emparejadas una a una, **3.208 sustituciones de identificador en 368 pares
+distintos, el 99,5 % coincidiendo exactamente con los mapas**, cero cambios de operador o de
+puntuación, cero literales numéricos y **76 cadenas que cambian, todas y solo en capturas de formato**
+—sustituido cada `{nombre}` por un hueco, las 76 parejas salen byte a byte idénticas—. Eso es lo que hay
+que repetir en las entregas que quedan, y no una lista.
+
+**Y el lector de citas no aprende dos formas más, también medido.** Se le escaparon
+`` `division.redimensionar()` `` y `` `rectangulos[0]` ``, y aceptar el acceso con punto y el índice con
+corchetes da **45 avisos, de los que 26 son `panel.json`** y el resto `lib.rs`, `.ttc` y
+`fs.inotify.max_user_instances`. Dos o tres reales contra cuarenta de ruido: **no entra**. Es la tercera
+vez que se mide una ampliación de ese lector y la segunda que se rechaza, y las tres cifras quedan
+escritas —4 contra 309, y ahora 45— porque el criterio es la proporción y no la ocurrencia.
+
+##### La lista de exenciones, y el disfraz que se repitió por tercera vez
+
+Meter el fichero grande en esa lista costó **28 exenciones**. Son campos y métodos que declaran la
+medida, la sesión y los ajustes y que este fichero **solo usa**: la guarda juzga un fichero por los
+identificadores que **aparecen** en él, no por los que declara. Y el número que importa es otro, medido
+por una revisión con su propio analizador: **el fichero nombra 55 identificadores españoles ajenos**, y
+solo 28 necesitan exención — a los otros 27 no los caza ninguna regla, porque el glosario decide tipos. Están verificadas una a
+una contra el fichero que las declara, agrupadas por dueño, y **cada línea la borra la entrega de su
+módulo** — la lista es el marcador de progreso que su propio comentario dice que es. Y **las 28 son
+portantes, medido de una en una**: quitar cualquiera deja la suite en rojo, siempre por la misma prueba
+y siempre señalando este fichero. Cero exenciones decorativas, que son las cuatro que este hito ya
+borró.
+
+##### Una clase nueva: el renombrado a mano que se come la prosa
+
+**Y el defecto de verdad de esta entrega fue mío y no del mapa.** Renombrar un parámetro llamado `a` a
+`to` sobre un rango de líneas alcanzó **la preposición española «a»** dentro de un literal de cadena y en
+once comentarios. El literal es el que el informe imprime cuando la pestaña visible no tiene foco, así que
+**salía en cada tanda de medida**: «el teclado no llegaba a ninguna consola» se había convertido en «no
+llegaba **to** ninguna consola».
+
+**No lo vio nada.** El guion del banco no tiene patrón para esa línea, y la única prueba que la toca
+afirma sobre el prefijo «NO EXISTE», así que la cola corrupta pasaba. Lo encontró una revisión leyendo el
+diff.
+
+La clase es nueva y conviene nombrarla, porque la herramienta de este hito existe justamente para
+evitarla: **la herramienta distingue código de prosa; un `re.sub` sobre un rango de líneas no.** Todos los
+arreglos a mano de esta entrega —y son unos treinta— se hicieron así, y el único que tenía un nombre de
+una letra es el único que se comió una palabra. La regla que queda: **un nombre de una o dos letras no se
+renombra por rango de líneas**; o va por la herramienta que conoce las regiones, o se mira línea a línea.
+
+**Y mi propia comprobación de eso no valía nada**, que es la mitad más útil del hallazgo: miré el diff
+**después** de commitear, así que salió vacío. Dos veces seguidas. Un barrido que se hace sobre el estado
+equivocado del árbol es peor que no hacerlo, porque publica un cero. El barrido va contra la rama entera
+—`main...HEAD`— y **por el proxy de la herramienta que envuelve `git`**, porque esa envoltura **resume** la
+salida del diff y eso es lo que devolvía cero comentarios cambiados cuando había sesenta y cuatro.
+
+**Y una cosa que la entrega NO consiguió, dicha porque el borrador afirmaba lo contrario.** Al fichero
+le quedaba **un identificador propio en español**: `en`, la preposición, en cuatro sitios que él mismo
+declara —un ayudante de prueba con quince llamadas y tres parámetros de `Pos2`—, más un parámetro `a` en
+otros dos. La guarda **no** los ve **por diseño**: el suelo de dos caracteres los tira antes de llegar a
+ninguna regla, y eso está escrito en su cabecera desde la primera entrega. Ya estaban así en `main`, así
+que no los introdujo este renombrado; los encontró una revisión a la que se le pidió **refutar** la
+afirmación, y se arreglan aquí. La lección es la de siempre y van tres: **una afirmación se le da a
+alguien para que la rompa, no para que la confirme.**
+
+**Y añadirlas rompió dos casos de la prueba de reglas, que es el hallazgo de esta entrega.** La exención
+de `pestañas` —que hace falta, porque la sesión declara ese campo— exentaba de paso el caso `pestanas`,
+que es **el único sujeto posible** de la regla del plural con tilde. Y la exención de `gesto` apagaba el
+caso que demuestra que la lista no puede exentar el local propio de un fichero. Las dos veces: **verde,
+sin comprobar nada**.
+
+Van tres —`color_del_reclamo` en una entrega, `pestanas` y `gesto` en ésta—, así que deja de ser un
+arreglo y pasa a ser mecanismo:
+
+1. **La exención compara el nombre entero y tal cual: ni la caja ni las tildes se doblan.** Y la
+   distinción no es un parche: **un nombre con tilde y el mismo sin ella son dos identificadores**, y
+   este repositorio escribe unos con y otros sin a propósito.
+2. **Los pares tipo/local se derivan de la lista** en vez de escribirse, filtrados por lo que el glosario
+   retiró de verdad, así que el conjunto se ajusta solo a medida que la lista crece.
+3. **Cada caso positivo de esa prueba se comprueba contra la lista, y lo primero**, para que el mensaje
+   diga la causa —«alguien exentó este caso»— y no el síntoma, que estaba treinta líneas más abajo.
+
+Tres mutaciones lo atan: exentar un caso positivo, volver a doblar las tildes y volver a doblar la caja.
+Las tres caen, y cada una nombra su propia causa.

@@ -842,7 +842,7 @@ impl Barra {
 ///
 /// **Se publica fuera de la tabla de tramos y no se resta de ningún fotograma**, y eso es lo que hay que
 /// entender antes de leer sus números: restaurar ocurre **entero antes del primer fotograma** —el fichero
-/// se lee en `arrancar` y las consolas se abren en el constructor—, así que no contamina el reparto por
+/// se lee en `run` y las consolas se abren en el constructor—, así que no contamina el reparto por
 /// resta con el que este proyecto juzga a su framework. Es coste de **arranque**, que es otro camino y
 /// hasta este hito no lo declaraba nadie.
 #[derive(Clone, Copy)]

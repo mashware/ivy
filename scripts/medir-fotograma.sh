@@ -158,7 +158,7 @@ CARGA="$RAIZ/target/release/host-load"
 TAMANO=${TAMANO:-1280x800}
 
 # **Cuánto puede desviarse un tamaño del otro para ser el mismo, en puntos, y hay un solo sitio con este
-# número en el guion.** Es el mismo que usa la aplicación —`MARGEN_DEL_TAMAÑO` en `crates/app/src/lib.rs`—
+# número en el guion.** Es el mismo que usa la aplicación —`SIZE_TOLERANCE` en `crates/app/src/lib.rs`—
 # y tiene que seguir siéndolo: si el guion fuera más estricto, tiraría corridas que la aplicación da por
 # buenas, con un mensaje que además culparía al escritorio.
 MARGEN_DEL_TAMANO=0.5
