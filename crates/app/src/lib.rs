@@ -1,3 +1,19 @@
+#![deny(rustdoc::broken_intra_doc_links)]
+// **Un enlace de rustdoc roto no lo ve el compilador, y medio repositorio es rustdoc.** Cuando esto
+// se puso, el árbol tenía **tres** apuntando a nombres que renombrados anteriores habían dejado
+// atrás: nadie lo notó porque `cargo doc` avisa y no falla. Con el `deny` falla, y el hito que
+// renombra 46.458 líneas lo va a agradecer.
+//
+// **La orden que lo hace efectivo es `cargo doc-check`**, que es el alias de `.cargo/config.toml`
+// para `doc --workspace --no-deps --document-private-items`. Y tiene nombre por una razón: sin esa
+// bandera el `deny` casi no toca nada —rustdoc no resuelve los enlaces de los ítems privados, y esta
+// caja es casi toda privada—, así que su única puerta era **acordarse de una bandera escrita en un
+// comentario dentro del fichero que protege**. Los dos enlaces de `app` que seguían roto solo salían
+// con ella. Los módulos de prueba no se documentan nunca, así que su rustdoc queda fuera pase lo que
+// pase.
+//
+// Salta en `cargo doc`, **no** en `cargo test` — este repositorio no tiene integración continua, así
+// que sigue habiendo que invocarlo. Lo que cambia es que ahora se rompe en vez de avisar.
 //! Ventana, divisiones y pintado.
 //!
 //! La única caja atada al framework de interfaz. Si se cambia de framework, se reescribe esta y
@@ -799,7 +815,7 @@ struct DeLaBarra {
 
 /// Lo que la ventana se lleva de haber pintado una división.
 ///
-/// **Tiene nombre y no es una pareja suelta**, por lo mismo que [`Reparto`] y [`Hueco`]: dos valores que se
+/// **Tiene nombre y no es una pareja suelta**, por lo mismo que [`Reparto`] y [`crate::panel::Hueco`]: dos valores que se
 /// devuelven juntos y significan cosas distintas se intercambian en la llamada sin que el compilador diga
 /// nada, y aquí uno de los dos alimenta el informe de una tanda de medida.
 struct DeLaDivision {
@@ -3603,7 +3619,7 @@ struct Cierre {
 /// la da el propio tipo: cuando las divisiones dejen de ser dos y pasen a ser un árbol, lo que cambia
 /// es el interior de esto, y la lista de pestañas no se entera. Esconderlo además detrás de métodos
 /// obligaría a meter dentro del pintado a [`Ventana::atender_el_raton`] y
-/// [`Ventana::arrastrar_el_divisor`], que se sacaron justamente para poder comprobarse sin abrir
+/// [`Ventana::arrastrar_la_frontera`], que se sacaron justamente para poder comprobarse sin abrir
 /// ninguna ventana.
 struct Pestaña {
     /// Cómo están repartidas sus consolas. Ver [`Nodo`].
@@ -14382,10 +14398,34 @@ mod tests {
             "se pintaron dos emojis y el informe no declara el tramo: sus microsegundos se publicarían \
              como coste del framework"
         );
+        // **Y esta afirmación existe para que la de abajo no pueda pasar por vacío.** La siguiente
+        // niega un literal, así que en cuanto ese literal cambie de texto se cumpliría **sola** y
+        // dejaría de cubrir nada: la negación de algo que ya no existe siempre se cumple. Afirmando
+        // primero que la línea está, traducirla sin mirar cae aquí en vez de quedar en verde.
+        //
+        // **Se afirma sobre el VALOR y no sobre la ausencia de un texto.** Este sitio pasó por dos
+        // versiones malas antes de esta, y las dos las cazó una revisión midiéndolas: primero solo
+        // había una negación —que se cumple sola en cuanto el literal cambie de nombre—, y después
+        // una afirmación que anclaba una de las **cuatro** piezas móviles de ese literal, con lo que
+        // bastaba mover el separador y la cola para que volviera a pasar con el defecto dentro.
+        //
+        // Sacando el número no hay literal del que depender más que el nombre del tramo: si el
+        // recuento es cero, el trabajo que se pagó no se anotó, y eso es lo que hay que cazar.
+        let glifos: usize = informe
+            .split_whitespace()
+            .zip(informe.split_whitespace().skip(1))
+            .find(|(_, siguiente)| *siguiente == "glifos")
+            .and_then(|(numero, _)| numero.parse().ok())
+            .unwrap_or_else(|| {
+                panic!(
+                    "el tramo no publica un recuento de glifos que se pueda leer, y es lo que el \
+                     guion de medida busca para invalidar una tanda: {informe}"
+                )
+            });
         assert!(
-            !informe.contains("0 glifos rasterizados · 0 sin fuente"),
-            "el tramo salió con los dos contadores a cero, así que no se anotó nada de lo que se pagó: \
-             {informe}"
+            glifos > 0,
+            "el tramo dice haber rasterizado {glifos} glifos con dos emojis en pantalla, así que no \
+             se anotó nada de lo que se pagó: {informe}"
         );
     }
 
@@ -14426,10 +14466,34 @@ mod tests {
             "la ventana pintó dos emojis en su pasada y su informe no declara el tramo: lo que costaron \
              se publica como coste del framework"
         );
+        // **Y esta afirmación existe para que la de abajo no pueda pasar por vacío.** La siguiente
+        // niega un literal, así que en cuanto ese literal cambie de texto se cumpliría **sola** y
+        // dejaría de cubrir nada: la negación de algo que ya no existe siempre se cumple. Afirmando
+        // primero que la línea está, traducirla sin mirar cae aquí en vez de quedar en verde.
+        //
+        // **Se afirma sobre el VALOR y no sobre la ausencia de un texto.** Este sitio pasó por dos
+        // versiones malas antes de esta, y las dos las cazó una revisión midiéndolas: primero solo
+        // había una negación —que se cumple sola en cuanto el literal cambie de nombre—, y después
+        // una afirmación que anclaba una de las **cuatro** piezas móviles de ese literal, con lo que
+        // bastaba mover el separador y la cola para que volviera a pasar con el defecto dentro.
+        //
+        // Sacando el número no hay literal del que depender más que el nombre del tramo: si el
+        // recuento es cero, el trabajo que se pagó no se anotó, y eso es lo que hay que cazar.
+        let glifos: usize = informe
+            .split_whitespace()
+            .zip(informe.split_whitespace().skip(1))
+            .find(|(_, siguiente)| *siguiente == "glifos")
+            .and_then(|(numero, _)| numero.parse().ok())
+            .unwrap_or_else(|| {
+                panic!(
+                    "el tramo no publica un recuento de glifos que se pueda leer, y es lo que el \
+                     guion de medida busca para invalidar una tanda: {informe}"
+                )
+            });
         assert!(
-            !informe.contains("0 glifos rasterizados · 0 sin fuente"),
-            "el tramo salió con los dos contadores a cero, así que la ventana no anotó nada de lo que su \
-             pasada pagó: {informe}"
+            glifos > 0,
+            "el tramo dice haber rasterizado {glifos} glifos y la ventana pintó dos emojis en su \
+             pasada, así que no anotó nada de lo que pagó: {informe}"
         );
     }
 

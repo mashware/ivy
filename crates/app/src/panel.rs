@@ -2896,4 +2896,53 @@ mod tests {
             );
         }
     }
+
+    /// **Las tres frases viven dos veces**: en el código que las pinta y en el documento del
+    /// contrato, palabra por palabra en los dos sitios. Su propio comentario dice que son «las del
+    /// contrato, palabra por palabra» — y nada lo comprobaba.
+    ///
+    /// Es la misma clase de acoplamiento que el del guion de medida con el informe: dos ficheros que
+    /// tienen que decir lo mismo y ningún sitio donde eso se afirme.
+    #[test]
+    fn las_tres_frases_del_reclamo_son_las_que_el_contrato_publica() {
+        const CONTRATO: &str = include_str!("../../../docs/04-contrato-panel.md");
+
+        // **Se busca en la fila de SU clave, no en el fichero.** Un `contains` sobre el documento
+        // entero pasa con las tres frases **rotadas entre clases** —comprobado midiéndolo— y con
+        // cualquier trozo suelto: «a ti» está dentro de «te espera a ti». Eso es exactamente lo que
+        // el mensaje de abajo dice impedir, así que el `contains` suelto no cubría su propia
+        // promesa. La fila la identifica la clave del contrato, que va en la primera columna.
+        for (clase, clave) in [
+            (Attention::Wait, "wait"),
+            (Attention::Block, "block"),
+            (Attention::Done, "done"),
+        ] {
+            let frase = texto_del_reclamo(clase);
+            let fila = CONTRATO
+                .lines()
+                .find(|linea| linea.starts_with(&format!("| `{clave}`")))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "el documento del contrato no tiene fila para «{clave}»: o cambió de forma, \
+                         o dejó de publicar un valor que la aplicación sí pinta"
+                    )
+                });
+            // **Y se compara la frase ENTERA, no si está dentro.** Un `contains` sobre la fila pasa
+            // con la frase truncada —«te espera» está dentro de «te espera a ti»—, y la frase larga
+            // es justo lo que su comentario defiende: el «a ti» es lo que la separa de la segunda.
+            // Así que se saca lo que la fila publica como frase y se comparan por igualdad.
+            let publicada = fila
+                .split('|')
+                .nth(2)
+                .expect("la fila del contrato tiene tres columnas")
+                .trim()
+                .replace("**", "");
+            let publicada = publicada.split(':').next().unwrap_or(&publicada).trim();
+            assert_eq!(
+                publicada, frase,
+                "el panel pinta «{frase}» para {clase:?} y la fila de «{clave}» del contrato publica \
+                 «{publicada}»: el productor que lea el contrato espera un texto y ve otro"
+            );
+        }
+    }
 }

@@ -1,3 +1,11 @@
+#![deny(rustdoc::broken_intra_doc_links)]
+// **Un enlace de rustdoc roto no lo ve el compilador, y medio repositorio es rustdoc.** Cuando esto
+// se puso, el árbol ya tenía uno apuntando a una constante que un renombrado anterior había dejado
+// atrás: nadie lo notó porque `cargo doc` avisa y no falla. Con el `deny` falla, y el hito que
+// renombra 46.458 líneas lo va a agradecer.
+//
+// Salta en `cargo doc`, **no** en `cargo test` — este repositorio no tiene integración continua, así
+// que sigue habiendo que invocarlo. Lo que cambia es que ahora se rompe en vez de avisar.
 //! Una división: el PTY y la rejilla del terminal.
 //!
 //! No depende de nada visual: si la capa de pintado se reescribe, esta caja sigue sirviendo.
@@ -97,7 +105,7 @@ impl Pty {
     /// hacerlo desde otro hilo — y un `Receiver` prestado no cruza de hilo, aunque movido sí. Que
     /// salga por el constructor evita además que existan dos formas de llegar a él.
     ///
-    /// Al hijo se le fija lo que dice [`ENTORNO_FIJADO`].
+    /// Al hijo se le fija lo que dice [`FIXED_ENV`].
     ///
     /// **El canal tiene techo, y eso es lo que frena al programa de dentro.** Ver
     /// [`LECTURAS_EN_VUELO`]. Quien recoja del canal sin parar nunca —un `for` sobre él, sin

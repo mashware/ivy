@@ -1235,4 +1235,35 @@ mod pruebas_de_atajos {
         );
         assert_eq!(Accion::de_como_se_escribe("inventada"), None);
     }
+
+    /// **Los once nombres viven dos veces**: aquí y en el documento de configuración, escritos a mano
+    /// en los dos sitios. Nada los comparaba, así que renombrar uno dejaba publicado un fichero de
+    /// configuración con una clave que la aplicación rechaza — y ninguna prueba se enteraba.
+    ///
+    /// Se lee el documento en tiempo de compilación en vez de repetir la lista: una prueba que
+    /// copiase los once nombres se arregla sola cuando alguien los traduce en los dos lados y se
+    /// olvida del documento, que es exactamente el fallo que viene a cazar.
+    ///
+    /// **Y es la otra dirección de [`el_documento_publica_exactamente_los_atajos_que_el_codigo_tiene`],
+    /// no un duplicado suyo.** Aquélla copia la tabla del documento a mano **a propósito** —lo dice su
+    /// comentario— y con eso caza que **el código** se desvíe de lo publicado. Pero al ser una copia,
+    /// un cambio en el documento sin tocar el código la deja verde: medido. Ésta lee el documento de
+    /// verdad, así que caza esa mitad. Hacen falta las dos, y por eso ninguna sobra.
+    #[test]
+    fn cada_accion_esta_publicada_en_el_documento_de_configuracion() {
+        const DOCUMENTO: &str = include_str!("../../../docs/08-configuracion.md");
+
+        let sin_publicar: Vec<&str> = TODAS
+            .iter()
+            .map(|accion| accion.como_se_escribe())
+            .filter(|nombre| !DOCUMENTO.contains(&format!("`{nombre}`")))
+            .collect();
+
+        assert!(
+            sin_publicar.is_empty(),
+            "estas acciones se pueden configurar y el documento no las publica: {sin_publicar:?}. \
+             Quien lea el documento no sabría que existen, y quien lo siga escribiría una clave que \
+             la aplicación rechaza"
+        );
+    }
 }

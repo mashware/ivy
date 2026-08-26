@@ -721,7 +721,7 @@ impl Rasterizado {
         }
         writeln!(
             a,
-            "\nrasterizar un glifo de color — de la ventana   ({} fotogramas con trabajo · {} glifos rasterizados · {} sin fuente que los pinte a color)",
+            "\nrasterizar un glifo de color — de la ventana   ({} fotogramas con trabajo · {} glifos rasterizados | {} sin cara de color)",
             self.rasterizado.total, self.rasterizados, self.fallidos
         )?;
         writeln!(a, "  {}", self.rasterizado)?;
@@ -2047,6 +2047,436 @@ mod tests {
         assert!(
             !sin.contains("recolocar:"),
             "sin recolocar nada, la cabecera publicó un tramo que nadie midió:\n{sin}"
+        );
+    }
+
+    // ── El acoplamiento con el guion de medida, atado ───────────────────────────────────────────
+    //
+    // **El guion invalida corridas por lo que este informe DICE**, y hasta aquí ese acoplamiento
+    // vivía en un comentario. Cuatro de sus patrones no los cubría ninguna prueba y uno estaba
+    // atado con una negación, que se cumple por vacío en cuanto el literal cambie de nombre.
+    //
+    // **Lo que hace fuerte a lo que sigue es que no copia los patrones: los saca del guion y los
+    // ejecuta.** Una prueba que repitiera el literal a mano se arregla sola cuando alguien traduce
+    // el guion —cambia el `sed`, cambia la prueba, verde— y no habría atado nada.
+
+    /// El guion de medida, leído en tiempo de compilación para que no se pueda desincronizar.
+    const GUION: &str = include_str!("../../../scripts/medir-fotograma.sh");
+
+    /// Un patrón que el guion aplica al informe, con la línea donde está para poder señalarlo.
+    struct DelGuion {
+        linea: usize,
+        orden: &'static str,
+        patron: String,
+    }
+
+    /// Los patrones que el guion busca **en el informe**, sacados de sus `sed` y `grep`.
+    ///
+    /// Se queda solo con los que llevan un literal del informe: los anclados (`^`…`$`) y los dos
+    /// recuentos que el guion busca sin anclar. Un `grep` sobre otra cosa —el estado de salida, un
+    /// fichero testigo— no describe el informe y no tiene nada que atar aquí.
+    ///
+    /// **Y queda uno fuera que sí describe el informe**, dicho para no describir mal lo excluido: el
+    /// `grep -m1 '  división 0:'` con el que el guion compone su línea de rejilla al terminar. No
+    /// lleva ancla ni palabra clave, así que este criterio no lo ve. **No invalida ninguna corrida**
+    /// —solo alimenta un mensaje— y por eso se deja fuera en vez de ensanchar el criterio hasta que
+    /// empiece a recoger ruido; si algún día pasa a decidir algo, entra.
+    fn patrones_del_guion() -> Vec<DelGuion> {
+        let mut encontrados = Vec::new();
+        // **La orden se arrastra entre líneas a propósito.** El guion parte sus `sed` largos con
+        // barra al final y pone cada `-e` en su propia línea, así que la línea que lleva el patrón
+        // muchas veces **no** contiene la palabra `sed`. La primera versión de este extractor no lo
+        // tuvo en cuenta y encontró 2 de 20 — lo cazó la guarda del recuento, que está justo debajo
+        // para esto.
+        let mut orden_en_curso = "";
+        let mut continuacion = false;
+        for (numero, linea) in GUION.lines().enumerate() {
+            if !continuacion {
+                orden_en_curso = "";
+            }
+            // **Un comentario no es una orden, y contarlo infló el recuento de 21 a 24.** El guion
+            // explica sus propias guardas citando los patrones que aplica, así que su prosa está
+            // llena de `grep` y de literales entrecomillados. Con los comentarios dentro, la guarda
+            // que existe para que esta prueba no pase por vacío **se satisfacía con prosa**.
+            if linea.trim_start().starts_with('#') {
+                continue;
+            }
+            if linea.contains("sed ") {
+                orden_en_curso = "sed";
+            } else if linea.contains("grep ") {
+                orden_en_curso = "grep";
+            }
+            continuacion = linea.trim_end().ends_with('\\');
+            if orden_en_curso.is_empty() {
+                continue;
+            }
+            // Los patrones del guion van entre comillas, y usa **las dos**: simples para los `sed`
+            // y dobles para los dos recuentos que busca sin anclar.
+            for comilla in ['\'', '"'] {
+                let mut resto = linea;
+                while let Some(abre) = resto.find(comilla) {
+                    let tras = &resto[abre + 1..];
+                    let Some(cierra) = tras.find(comilla) else {
+                        break;
+                    };
+                    let dentro = &tras[..cierra];
+                    resto = &tras[cierra + 1..];
+                    // **Se busca el ancla en cualquier sitio, no al principio.** Los patrones de
+                    // `sed` vienen envueltos en `s/…/…/p`, así que el `^` va dentro y no delante:
+                    // pedirlo al principio encontraba 8 de 20.
+                    //
+                    // **Y tiene que llevar alguna letra.** Un patrón hecho solo de anclas y clases
+                    // de caracteres —`^[0-9]+`, el segundo `grep` de una tubería— no lee el informe
+                    // sino la salida del anterior, y sobre todo **no tiene texto que pueda cambiar
+                    // de idioma**: no hay acoplamiento que atar ahí. Es un criterio y no una lista
+                    // de excepciones, así que sigue valiendo cuando el guion crezca.
+                    let describe_el_informe = (dentro.contains('^')
+                        || dentro.contains("caracteres buscados")
+                        || dentro.contains("glifos rasterizados"))
+                        && dentro.chars().any(|c| c.is_alphabetic());
+                    if describe_el_informe {
+                        encontrados.push(DelGuion {
+                            linea: numero + 1,
+                            orden: orden_en_curso,
+                            patron: dentro.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        encontrados
+    }
+
+    /// Lo que sale de aplicarle un patrón del guion a un texto.
+    ///
+    /// **Vacío y roto no son lo mismo, y por eso son dos variantes.** Los dos dan salida vacía, y
+    /// confundirlos hace que la prueba culpe al sitio equivocado: «el informe cambió de texto»
+    /// cuando lo que pasa es que el extractor de patrones cortó mal el que iba a aplicar. Uno señala
+    /// un defecto del proyecto, el otro un defecto de esta prueba.
+    ///
+    /// **Y el punto ciego que esto NO cubre, dicho en vez de tapado.** La distinción se hace con el
+    /// estado de salida, así que solo separa los patrones que la orden **rechaza**. Un corte que deja
+    /// un patrón todavía válido pero que no imprime —quitarle la `p` final a un `sed`, por ejemplo—
+    /// sale con 0 y es **indistinguible** de «el informe cambió». Contra eso lo único que hay es la
+    /// guarda del recuento mínimo de ahí abajo: si el extractor se rompe de verdad, encuentra menos
+    /// patrones y la prueba lo dice. Comprobado con las dos mutaciones.
+    enum Salida {
+        /// El patrón se aplicó y extrajo algo.
+        Extrajo,
+        /// El patrón se aplicó bien y no casó con nada.
+        NoCaso,
+        /// La orden no pudo con el patrón: no es un fallo del informe, es de esta prueba.
+        PatronInvalido(i32),
+    }
+
+    /// Aplica un patrón del guion a un texto **con la orden de verdad**, no con una imitación.
+    ///
+    /// Reimplementar `sed` en Rust sería meter una segunda fuente de divergencia justo donde se
+    /// quiere quitar la primera.
+    ///
+    /// **El precio, declarado: esto hace que `cargo test` dependa de `sed` y `grep`.** Aquí se acepta
+    /// porque lo que esta prueba protege es un guion de shell, así que donde no haya `sed` tampoco hay
+    /// nada que proteger. Si no están, revienta con su mensaje en vez de saltarse sola — un
+    /// `#[cfg(unix)]` la haría desaparecer en silencio, que es peor. **F2.7 lleva Windows**, y ahí
+    /// habrá que decidir: acotarla al sistema o dar por bueno que el banco no corre en esa
+    /// plataforma.
+    fn extrae(p: &DelGuion, informe: &str) -> Salida {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        let mut orden = Command::new(p.orden);
+        match p.orden {
+            "sed" => {
+                orden.arg("-n").arg(&p.patron);
+            }
+            _ => {
+                orden.arg("-E").arg(&p.patron);
+            }
+        }
+        let mut hijo = orden
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "no se pudo lanzar «{}»: {e}. El banco tampoco funcionaría sin él",
+                    p.orden
+                )
+            });
+        hijo.stdin
+            .as_mut()
+            .expect("la entrada está abierta")
+            .write_all(informe.as_bytes())
+            .expect("escribir a una tubería de memoria no falla");
+        let salida = hijo.wait_with_output().expect("recoger la salida");
+        let codigo = salida.status.code().unwrap_or(-1);
+        // **Cada orden dice «no he encontrado nada» de una forma distinta.** `grep` sale con 1
+        // cuando no casa y con 2 o más cuando el patrón no le sirve; `sed` sale con 0 aunque no
+        // sustituya nada, y solo se queja si el patrón está mal escrito. Sin esta distinción, un
+        // patrón mal extraído por esta prueba se publicaría como un acoplamiento roto del proyecto.
+        let patron_invalido = match p.orden {
+            "grep" => codigo >= 2,
+            _ => codigo != 0,
+        };
+        if patron_invalido {
+            return Salida::PatronInvalido(codigo);
+        }
+        if String::from_utf8_lossy(&salida.stdout).trim().is_empty() {
+            Salida::NoCaso
+        } else {
+            Salida::Extrajo
+        }
+    }
+
+    /// Los informes que el productor sabe escribir, uno por cada variante que el guion distingue.
+    ///
+    /// **Son varios y no uno porque los tres estados de la configuración son excluyentes**: un
+    /// informe no puede decir a la vez que la configuración está vetada y que se leyó la del
+    /// usuario. Cada patrón tiene que extraer de **alguno**; ninguno tiene que extraer de todos.
+    fn informes_de_referencia() -> Vec<(&'static str, String)> {
+        let rejillas = vec![
+            (0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 21))]),
+            (1, vec![(0, rejilla(49, 39))]),
+        ];
+        let ventana = EnPuntos {
+            ancho: 1280.0,
+            alto: 800.0,
+        };
+
+        let mut barra = Barra::default();
+        barra.anotar(ms(7));
+        barra.vio_marcadas(3);
+
+        let mut reflujo = Reflujo::default();
+        reflujo.anotar(ms(2));
+
+        let arrastres = Arrastres {
+            inyectados: 12,
+            con_efecto: 6,
+            marcados: 4,
+            informados: 2,
+            gesto: "moviendo consolas",
+        };
+
+        let restauracion = Restauracion {
+            consolas: 4,
+            leer: Some(ms(1)),
+            abrirlas: ms(5),
+        };
+
+        let cabecera_con_todo = |configuracion| {
+            let mut salida = Vec::new();
+            cabecera(
+                &mut salida,
+                EnPuntos {
+                    ancho: ventana.ancho,
+                    alto: ventana.alto,
+                },
+                &rejillas,
+                0,
+                DeLaSesion {
+                    arrastres: Some(arrastres),
+                    restauracion: Some(restauracion),
+                    configuracion,
+                    barra,
+                    reflujo,
+                },
+            )
+            .expect("escribir a memoria no falla");
+            String::from_utf8(salida).expect("el informe es texto")
+        };
+
+        // Los tramos de la ventana que el guion también lee, cada uno poblado.
+        let mut guardado = Guardado::default();
+        guardado.anotar_espejo(ms(1));
+        guardado.anotar_escritura(ms(3), true);
+        guardado.anotar_escritura(ms(3), false);
+
+        let mut descubrimiento = Descubrimiento::default();
+        descubrimiento.anotar(ms(4), 9, 2);
+
+        let mut rasterizado = Rasterizado::default();
+        rasterizado.anotar(ms(1), 15, 1);
+
+        let mut tramos_de_la_ventana = Vec::new();
+        guardado
+            .publicar(&mut tramos_de_la_ventana)
+            .expect("escribir a memoria no falla");
+        descubrimiento
+            .publicar(&mut tramos_de_la_ventana)
+            .expect("escribir a memoria no falla");
+        rasterizado
+            .publicar(&mut tramos_de_la_ventana)
+            .expect("escribir a memoria no falla");
+
+        vec![
+            (
+                "cabecera con la configuración vetada",
+                cabecera_con_todo(LecturaDeAjustes::Vetada),
+            ),
+            (
+                "cabecera sin configuración que aplicar",
+                cabecera_con_todo(LecturaDeAjustes::Sin),
+            ),
+            (
+                "cabecera con la configuración del usuario",
+                cabecera_con_todo(LecturaDeAjustes::Con {
+                    cuanto: ms(1),
+                    avisos: 2,
+                }),
+            ),
+            (
+                "los tramos de la ventana",
+                String::from_utf8(tramos_de_la_ventana).expect("el informe es texto"),
+            ),
+        ]
+    }
+
+    #[test]
+    fn cada_patron_que_el_guion_busca_en_el_informe_sigue_extrayendo_algo() {
+        let patrones = patrones_del_guion();
+
+        // **La guarda cuenta POR FORMA y no un total, y la diferencia la encontró una revisión
+        // mutándola.** Con un total —«al menos 20», habiendo 21— la guarda toleraba perder
+        // exactamente uno, y los dos que se reconocen por palabra clave son justo los que pueden
+        // caerse de uno en uno: traduciendo **solo** el de las fuentes, el conjunto bajaba a 20, la
+        // guarda pasaba, y su tanda quedaba invalidada para siempre sin que nada lo dijera. Era el
+        // segundo disfraz que este proyecto tiene fichado: un número con el que el defecto y el
+        // arreglo dan el mismo resultado.
+        //
+        // Contando las dos familias por separado, perder **uno solo** de los dos por palabra clave ya
+        // cae. Y sigue siendo un criterio y no una lista, así que aguanta que el guion crezca.
+        let anclados = patrones.iter().filter(|p| p.patron.contains('^')).count();
+        let por_palabra_clave = patrones.len() - anclados;
+        assert!(
+            anclados >= 19 && por_palabra_clave >= 2,
+            "el extractor ha encontrado {anclados} patrones anclados y {por_palabra_clave} por \
+             palabra clave, y hay al menos 19 y 2: ha dejado de reconocer la forma de alguno, así \
+             que esta prueba estaría pasando por vacío justo donde menos se nota"
+        );
+
+        // **Y la guarda que de verdad sobrevive a que el guion crezca: cobertura POR USO.** Las dos
+        // de arriba son de forma —cuántos patrones y de qué tipo— y las dos se pueden satisfacer
+        // mientras se pierde una guarda real: basta con que el guion gane una línea que lea el
+        // informe con una forma que este extractor no reconozca. Se midió, y se perdía una guarda
+        // entera con las 23 pruebas en verde.
+        //
+        // Así que se cuenta al revés: **cada línea del guion que le aplique `grep` o `sed` al
+        // informe tiene que haber aportado al menos un patrón**. Lo que quede exento se nombra aquí
+        // una por una, con su razón — una lista corta y explícita envejece mejor que un criterio que
+        // se ensancha hasta dejar de fallar.
+        let mut sin_aportar = Vec::new();
+        for (numero, linea) in GUION.lines().enumerate() {
+            let numero = numero + 1;
+            if linea.trim_start().starts_with('#') || !linea.contains("$INFORME") {
+                continue;
+            }
+            let aplica_un_patron = linea.contains("grep") || linea.contains("sed");
+            if !aplica_un_patron {
+                continue;
+            }
+            // **Y su patrón tiene que llevar texto, por lo mismo que arriba.** El guion tiene una
+            // línea que cuenta las del fichero de errores con un patrón vacío: aplica un `grep` al
+            // informe y **no lee de él ninguna palabra**, así que no hay nada que se pueda quedar
+            // atrás al traducir. Es el mismo criterio que decide qué patrón se extrae, aplicado a
+            // qué línea tiene que aportar uno — y por ser el mismo, las dos mitades no se pueden
+            // desincronizar.
+            let algun_patron_con_texto =
+                linea
+                    .split(['\'', '"'])
+                    .skip(1)
+                    .step_by(2)
+                    .any(|entre_comillas| {
+                        !entre_comillas.starts_with('$')
+                            && entre_comillas.chars().any(|c| c.is_alphabetic())
+                    });
+            if !algun_patron_con_texto {
+                continue;
+            }
+            // La única exenta, y por eso va con su número: compone el mensaje de la rejilla al
+            // terminar y **no invalida ninguna corrida**. Su literal lo cubre de rebote el recuento
+            // de divisiones. Si algún día decide algo, se quita de aquí y tiene que aportar.
+            const SOLO_COMPONE_UN_MENSAJE: usize = 933;
+            if numero == SOLO_COMPONE_UN_MENSAJE {
+                continue;
+            }
+            if !patrones.iter().any(|p| p.linea == numero) {
+                sin_aportar.push(format!("  medir-fotograma.sh:{numero}: {}", linea.trim()));
+            }
+        }
+        assert!(
+            sin_aportar.is_empty(),
+            "{} línea(s) del guion leen el informe con `grep` o `sed` y esta prueba no ha sacado \
+             ningún patrón de ellas, así que **no las está atando**. O el extractor no reconoce su \
+             forma, o son guardas nuevas que hay que cubrir — y mientras tanto pueden romperse en \
+             silencio:\n{}",
+            sin_aportar.len(),
+            sin_aportar.join("\n")
+        );
+
+        let informes = informes_de_referencia();
+        let mut huerfanos = Vec::new();
+        let mut invalidos = Vec::new();
+        for p in &patrones {
+            let mut extrajo_de_alguno = false;
+            for (_, informe) in &informes {
+                match extrae(p, informe) {
+                    Salida::Extrajo => extrajo_de_alguno = true,
+                    Salida::NoCaso => {}
+                    // Una entrada por patrón y no por informe: el mismo corte mal hecho se veía
+                    // cuatro veces, una por informe de referencia.
+                    Salida::PatronInvalido(codigo) => {
+                        let entrada = format!(
+                            "  medir-fotograma.sh:{} ({}) {:?} → salió con {codigo}",
+                            p.linea, p.orden, p.patron
+                        );
+                        if !invalidos.contains(&entrada) {
+                            invalidos.push(entrada);
+                        }
+                    }
+                }
+            }
+            if !extrajo_de_alguno {
+                huerfanos.push(format!(
+                    "  medir-fotograma.sh:{} ({}) {:?}",
+                    p.linea, p.orden, p.patron
+                ));
+            }
+        }
+        // **Esto se comprueba antes, y culpando a esta prueba y no al proyecto.** Un patrón que la
+        // orden rechaza no dice nada del informe: dice que el extractor de arriba lo cortó mal.
+        assert!(
+            invalidos.is_empty(),
+            "el extractor de esta prueba ha sacado {} patrones que su propia orden rechaza, así que \
+             los ha cortado mal. **No es un fallo del informe ni del guion, es de esta prueba** — \
+             arréglala antes de creerte lo que dice del resto:\n{}",
+            invalidos.len(),
+            invalidos.join("\n")
+        );
+        assert!(
+            huerfanos.is_empty(),
+            "{} de {} patrones del guion no extraen nada de ningún informe que el productor sepa \
+             escribir. O el informe cambió de texto sin el guion, o al revés — y en cuanto eso \
+             pasa el guion deja de invalidar corridas malas en vez de fallar:\n{}",
+            huerfanos.len(),
+            patrones.len(),
+            huerfanos.join("\n")
+        );
+    }
+
+    #[test]
+    fn el_guion_siembra_el_mismo_fichero_de_disposicion_que_la_aplicacion_escribe() {
+        // **La otra mitad del acoplamiento, y la que no se ve.** El guion escribe una disposición a
+        // mano para la tanda que restaura, con la ruta y las claves puestas en su propio texto. La
+        // prueba que había afirmaba que la constante del nombre valía un literal escrito **al
+        // lado**: se renombran las dos mitades a la vez, queda verde, y el guion sigue sembrando el
+        // nombre viejo.
+        assert!(
+            GUION.contains(crate::sesion::FICHERO),
+            "el guion de medida no siembra «{}», que es el fichero que la aplicación lee: la tanda \
+             que restaura abriría de fábrica y su corrida se publicaría como buena",
+            crate::sesion::FICHERO
         );
     }
 }

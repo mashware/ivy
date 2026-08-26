@@ -1,0 +1,14 @@
+# **La orden que hace efectivo el `deny` de enlaces roto, con un nombre para que exista.**
+#
+# Los cuatro `lib.rs` deniegan `rustdoc::broken_intra_doc_links`, y eso solo muerde de verdad con
+# `--document-private-items`: sin esa bandera, rustdoc no resuelve los enlaces de los ítems privados
+# y `app` es casi toda privada. La orden que se teclea por costumbre es `cargo doc`, y ésa pasa por
+# encima de un enlace roto **en silencio**.
+#
+# Sin este alias, la única puerta de esa guarda era acordarse de una bandera escrita en un comentario
+# **dentro del fichero que la guarda protege**. Con él, la puerta tiene nombre: `cargo doc-check`.
+# No es una prueba —este repositorio no tiene integración continua y `cargo doc` dentro de un `#[test]`
+# se bloquea contra su propio directorio de compilación—, pero convierte «hay que acordarse de una
+# bandera» en «hay una orden que se llama así».
+[alias]
+doc-check = "doc --workspace --no-deps --document-private-items"
