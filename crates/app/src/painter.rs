@@ -336,7 +336,8 @@ fn paint_in_color(
     let per_point = painter.ctx().pixels_per_point();
     let height = (slot.height() * per_point).round() as u32;
     let width = (slot.width() * per_point).round() as u32;
-    let Some((atlas, uv, measurements)) = discoverer.color_glyph(painter.ctx(), character, height, width)
+    let Some((atlas, uv, measurements)) =
+        discoverer.color_glyph(painter.ctx(), character, height, width)
     else {
         return false;
     };
@@ -983,12 +984,19 @@ mod tests {
         let order = order_of(&of_text("a\u{1F600}b\u{1F600}c"));
 
         assert_eq!(
-            order.iter().filter(|character| **character == "imagen").count(),
+            order
+                .iter()
+                .filter(|character| **character == "imagen")
+                .count(),
             2,
             "no salieron los dos emojis como imagen ({order:?}): la prueba no está mirando lo que dice"
         );
         assert!(
-            order.iter().filter(|character| **character == "texto").count() >= 3,
+            order
+                .iter()
+                .filter(|character| **character == "texto")
+                .count()
+                >= 3,
             "no salieron las tres letras ({order:?}): la prueba no está mirando lo que dice"
         );
         let first_image = order.iter().position(|what| *what == "imagen");

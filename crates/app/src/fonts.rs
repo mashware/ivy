@@ -321,8 +321,7 @@ impl Discoverer {
         // describir lo que cuesta rasterizar — que es lo que el informe tiene que declarar.
         let was_already_there = glyphs.remembers(which_char, height);
         let started = (!was_already_there).then(std::time::Instant::now);
-        let measurements =
-            glyphs.texture(ctx, collection, sources, which_char, height, max_width);
+        let measurements = glyphs.texture(ctx, collection, sources, which_char, height, max_width);
         if let Some(started) = started {
             color.spent += started.elapsed();
             if measurements.is_some() {
@@ -717,7 +716,11 @@ fn first_that_covers(
             let covers = face
                 .charmap_index()
                 .charmap(blob.data())
-                .is_some_and(|charmap| charmap.map(which_char as u32).is_some_and(|glyph| glyph != 0));
+                .is_some_and(|charmap| {
+                    charmap
+                        .map(which_char as u32)
+                        .is_some_and(|glyph| glyph != 0)
+                });
             if covers {
                 // **Y se comprueba que el motor de texto va a poder abrirla, ANTES de dársela.** El
                 // único modo de fallo que epaint tiene para unos bytes que no entiende es
@@ -1099,14 +1102,20 @@ mod tests {
     #[test]
     fn el_selector_de_emoji_lleva_a_color_un_simbolo_que_por_defecto_es_texto() {
         // Es `☁️` — la razón de ser de toda esta entrega.
-        assert_eq!(presentation_of('☁', &[EMOJI_PRESENTATION_SELECTOR]), Presentation::Color);
+        assert_eq!(
+            presentation_of('☁', &[EMOJI_PRESENTATION_SELECTOR]),
+            Presentation::Color
+        );
     }
 
     #[test]
     fn el_selector_de_texto_devuelve_a_monocromo_un_emoji_que_por_defecto_va_a_color() {
         // La mitad que se olvida: la regla tiene que funcionar **en los dos sentidos**. Con solo la
         // mitad de arriba, este caso pasaría igual y la prueba no ataría nada.
-        assert_eq!(presentation_of('😀', &[TEXT_PRESENTATION_SELECTOR]), Presentation::Text);
+        assert_eq!(
+            presentation_of('😀', &[TEXT_PRESENTATION_SELECTOR]),
+            Presentation::Text
+        );
     }
 
     #[test]
@@ -1131,13 +1140,19 @@ mod tests {
         // **El caso donde un orden de ramas equivocado se cae.** El resultado coincide con el que daría
         // ignorar el selector, así que sin este caso la tabla del contrato queda con un hueco justo donde
         // las dos condiciones se solapan.
-        assert_eq!(presentation_of('😀', &[EMOJI_PRESENTATION_SELECTOR]), Presentation::Color);
+        assert_eq!(
+            presentation_of('😀', &[EMOJI_PRESENTATION_SELECTOR]),
+            Presentation::Color
+        );
     }
 
     #[test]
     fn el_selector_de_texto_sobre_un_simbolo_de_texto_lo_deja_en_texto() {
         // La otra esquina del solape, por la misma razón: las dos condiciones apuntan al mismo lado.
-        assert_eq!(presentation_of('☁', &[TEXT_PRESENTATION_SELECTOR]), Presentation::Text);
+        assert_eq!(
+            presentation_of('☁', &[TEXT_PRESENTATION_SELECTOR]),
+            Presentation::Text
+        );
     }
     #[test]
     fn un_caracter_que_no_es_emoji_no_se_va_a_color_por_llevar_el_selector_detras() {
@@ -1147,8 +1162,14 @@ mod tests {
         // programa que corte una cadena por la mitad de un emoji, y hasta de un salto de línea —el
         // motor pega un selector suelto a la celda VACÍA que tenga delante—, así que sin esta regla
         // un espacio en blanco se manda a la fuente de color.
-        assert_eq!(presentation_of('a', &[EMOJI_PRESENTATION_SELECTOR]), Presentation::Text);
-        assert_eq!(presentation_of(' ', &[EMOJI_PRESENTATION_SELECTOR]), Presentation::Text);
+        assert_eq!(
+            presentation_of('a', &[EMOJI_PRESENTATION_SELECTOR]),
+            Presentation::Text
+        );
+        assert_eq!(
+            presentation_of(' ', &[EMOJI_PRESENTATION_SELECTOR]),
+            Presentation::Text
+        );
     }
     // ── El descubrimiento ────────────────────────────────────────────────────────────────────────
 
@@ -1716,16 +1737,12 @@ mod tests {
         let ctx = context();
         let mut glyphs = Glyphs::default();
         let side = ATLAS_SIDE / 8;
-        let square =
-            || egui::ColorImage::filled([side, side], egui::Color32::from_rgb(10, 20, 30));
+        let square = || egui::ColorImage::filled([side, side], egui::Color32::from_rgb(10, 20, 30));
 
         let mut pasted = 0;
         while glyphs.blit(&ctx, square()).is_some() {
             pasted += 1;
-            assert!(
-                pasted <= 8 * 8,
-                "el atlas aceptó más de lo que cabe en él"
-            );
+            assert!(pasted <= 8 * 8, "el atlas aceptó más de lo que cabe en él");
         }
         assert_eq!(
             pasted,

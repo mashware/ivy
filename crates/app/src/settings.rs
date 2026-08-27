@@ -33,7 +33,7 @@ pub const FICHERO: &str = "config";
 /// **Es literalmente el de la disposición, no una copia con el mismo número.** Un comentario que diga «el
 /// mismo que aquél» junto a una constante propia es una promesa que nada obliga a cumplir: el día que una
 /// de las dos cambie, el comentario miente y nadie se entera.
-use crate::session::BYTES_MAXIMOS;
+use crate::session::MAX_BYTES;
 
 /// Cuántas líneas malas se dicen antes de callar.
 ///
@@ -82,7 +82,7 @@ impl Problema {
     /// **Que no haya fichero es el caso normal, no un problema**, y decirlo en cada arranque de quien no
     /// configura nada sería ruido puro. La regla vive **en el tipo** y no en quien llama, igual que en el
     /// módulo hermano: es la única forma de que dos sitios que lo usen no dejen de coincidir.
-    pub fn merece_aviso(&self) -> bool {
+    pub fn warrants_warning(&self) -> bool {
         !matches!(self, Self::Ausente)
     }
 }
@@ -95,7 +95,7 @@ impl std::fmt::Display for Problema {
             Self::NoEsFichero => write!(f, "eso no es un fichero"),
             Self::Ilegible(porque) => write!(f, "no se pudo leer: {porque}"),
             Self::DemasiadoGrande => {
-                write!(f, "se pasa de los {} KiB que se leen", BYTES_MAXIMOS / 1024)
+                write!(f, "se pasa de los {} KiB que se leen", MAX_BYTES / 1024)
             }
             Self::NoEsTexto => write!(f, "no es texto"),
             Self::Version(cual) => write!(
@@ -112,7 +112,7 @@ impl std::fmt::Display for Problema {
 /// cuarenta líneas obliga a repasarlas todas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Aviso {
-    pub linea: usize,
+    pub line: usize,
     pub falta: Falta,
 }
 
@@ -135,7 +135,7 @@ pub enum Falta {
 
 impl std::fmt::Display for Aviso {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "línea {}: ", self.linea)?;
+        write!(f, "línea {}: ", self.line)?;
         match &self.falta {
             Falta::SinIgual => write!(f, "no tiene la forma «clave = valor»"),
             Falta::ADmedias => write!(f, "le falta la clave o el valor"),
@@ -278,7 +278,7 @@ pub fn ruta_de(
     config: Option<&std::ffi::OsStr>,
     casa: Option<&std::ffi::OsStr>,
 ) -> Option<PathBuf> {
-    crate::session::directorio_de(config, casa).map(|directorio| directorio.join(FICHERO))
+    crate::session::directory_from(config, casa).map(|directorio| directorio.join(FICHERO))
 }
 
 /// Lee el fichero de esa ruta. Devuelve lo que se entendió **y** lo que no.
@@ -302,14 +302,14 @@ pub fn leer(ruta: &Path) -> Result<(Ajustes, Avisos), Problema> {
         return Err(Problema::NoEsFichero);
     }
     let fichero = std::fs::File::open(ruta).map_err(|f| Problema::Ilegible(f.to_string()))?;
-    let crudo = crate::session::leer_acotado(fichero, datos.len())
+    let crudo = crate::session::read_capped(fichero, datos.len())
         .map_err(|fallo| Problema::Ilegible(fallo.to_string()))?;
     // **El techo va sobre los bytes LEÍDOS, no sobre los que los datos del fichero declaran.** No son lo
     // mismo: un fichero de `/proc` declara cero y entrega ciento setenta y cinco bytes, comprobado
     // ejecutándolo. Una versión anterior leía entero con `fs::read` y comparaba después, con un comentario
     // que decía «abrir» donde no se abría nada — el techo existía y **no acotaba la reserva**, que es
     // exactamente lo que su propia razón dice evitar. Lo cazó una revisión.
-    if crudo.len() > BYTES_MAXIMOS {
+    if crudo.len() > MAX_BYTES {
         return Err(Problema::DemasiadoGrande);
     }
     let texto = String::from_utf8(crudo).map_err(|_| Problema::NoEsTexto)?;
@@ -344,11 +344,11 @@ pub fn interpretar(texto: &str) -> Result<(Ajustes, Avisos), Problema> {
     let texto = texto.strip_prefix('\u{FEFF}').unwrap_or(texto);
 
     for (indice, texto_de_la_linea) in texto.lines().enumerate() {
-        let linea = indice + 1;
+        let line = indice + 1;
         let (clave, valor) = match clasificar(texto_de_la_linea) {
             Linea::Nada => continue,
             Linea::Mal(falta) => {
-                avisos.empujar(Aviso { linea, falta });
+                avisos.empujar(Aviso { line, falta });
                 continue;
             }
             Linea::Par(clave, valor) => (clave, valor),
@@ -365,7 +365,7 @@ pub fn interpretar(texto: &str) -> Result<(Ajustes, Avisos), Problema> {
                 Ok(cual) if cual > VERSION => return Err(Problema::Version(cual)),
                 Ok(_) => {}
                 Err(_) => avisos.empujar(Aviso {
-                    linea,
+                    line,
                     falta: Falta::ValorInvalido {
                         clave: clave.to_owned(),
                         valor: valor.to_owned(),
@@ -375,7 +375,7 @@ pub fn interpretar(texto: &str) -> Result<(Ajustes, Avisos), Problema> {
             continue;
         }
         if let Err(falta) = aplicar(&mut ajustes, clave, valor) {
-            avisos.empujar(Aviso { linea, falta });
+            avisos.empujar(Aviso { line, falta });
             // **Una línea que no se aplica no cuenta como puesta**, así que no se avisa de repetida por
             // ella: decir «gana ésta» de una línea que no gana nada es un aviso que miente, y encima
             // contradice al de al lado. Comprobado ejecutándolo antes de arreglarlo.
@@ -386,7 +386,7 @@ pub fn interpretar(texto: &str) -> Result<(Ajustes, Avisos), Problema> {
         // esta línea de verdad se ha quedado con el valor.
         if puestas.iter().any(|ya| ya == clave) {
             avisos.empujar(Aviso {
-                linea,
+                line,
                 falta: Falta::Repetida(clave.to_owned()),
             });
         } else {
@@ -494,8 +494,8 @@ fn color_de(valor: &str) -> Option<Color32> {
 /// Comprobado escribiéndolo: la primera versión de este intérprete se comía todos los colores.
 ///
 /// Es exactamente lo que hacen Kitty y Ghostty, que usan este mismo formato, y por la misma razón.
-fn clasificar(linea: &str) -> Linea<'_> {
-    let limpia = linea.trim();
+fn clasificar(line: &str) -> Linea<'_> {
+    let limpia = line.trim();
     if limpia.is_empty() || limpia.starts_with('#') {
         return Linea::Nada;
     }
@@ -552,7 +552,7 @@ mod tests {
 
         assert_eq!(avisos.guardados().len(), 1, "no se avisó de la línea mala");
         assert_eq!(
-            avisos.guardados()[0].linea,
+            avisos.guardados()[0].line,
             3,
             "el aviso señala la línea equivocada: se cuentan también las vacías y los comentarios, \
              porque el número tiene que coincidir con lo que se ve en el editor"
@@ -581,7 +581,8 @@ mod tests {
             "una línea vacía o de comentario se contó como problema"
         );
         assert_eq!(
-            crate::theme::Theme::from_colors(&ajustes.colores).color(term_core::TermColor::Indexed(1)),
+            crate::theme::Theme::from_colors(&ajustes.colores)
+                .color(term_core::TermColor::Indexed(1)),
             crate::theme::Theme::default().color(term_core::TermColor::Indexed(1)),
             "sin nada configurado el tema dejó de ser el de fábrica"
         );
@@ -1034,7 +1035,7 @@ mod tests {
     #[test]
     fn un_atajo_mal_escrito_avisa_y_no_se_lleva_a_los_demas() {
         // La misma regla que el resto del fichero, en la superficie que más se teclea a mano.
-        for (linea, que) in [
+        for (line, que) in [
             ("atajo.inventada = ctrl+shift+e", "una acción que no existe"),
             (
                 "atajo.cerrar-division = ctrl+shift+noexiste",
@@ -1043,12 +1044,12 @@ mod tests {
             ("atajo.cerrar-division = e", "un acorde sin tecla de mando"),
             ("atajo.cerrar-division = ", "sin valor"),
         ] {
-            let (ajustes, avisos) = de(&format!("color.1 = #ff0000\n{linea}\ncolor.2 = #00ff00"));
+            let (ajustes, avisos) = de(&format!("color.1 = #ff0000\n{line}\ncolor.2 = #00ff00"));
             assert!(
                 ajustes.atajos.is_empty(),
-                "{que} se aplicó igualmente: «{linea}»"
+                "{que} se aplicó igualmente: «{line}»"
             );
-            assert_eq!(avisos.cuantos(), 1, "{que} no dio aviso: «{linea}»");
+            assert_eq!(avisos.cuantos(), 1, "{que} no dio aviso: «{line}»");
             assert!(
                 ajustes.colores.paleta[1].is_some() && ajustes.colores.paleta[2].is_some(),
                 "{que} se llevó por delante las líneas buenas de al lado"
@@ -1172,13 +1173,13 @@ mod tests {
         // tope en el arranque. Sin esta prueba, el techo se podía bajar a un byte con la suite entera en
         // verde — comprobado por una revisión con siete mutaciones vivas en este camino.
         let dir = Directorio::nueva("techo");
-        let justo = dir.con(&vec![b'#'; BYTES_MAXIMOS]);
+        let justo = dir.con(&vec![b'#'; MAX_BYTES]);
         assert!(
             leer(&justo).is_ok(),
             "un fichero de exactamente el techo tiene que leerse"
         );
 
-        let pasado = dir.con(&vec![b'#'; BYTES_MAXIMOS + 1]);
+        let pasado = dir.con(&vec![b'#'; MAX_BYTES + 1]);
         assert_eq!(
             leer(&pasado),
             Err(Problema::DemasiadoGrande),
@@ -1192,7 +1193,7 @@ mod tests {
         // se parametrizan **con ellas mismas**: mover el número no tumbaba nada mientras el documento
         // seguía prometiendo el viejo. Es el disfraz que este proyecto tiene fichado —elegir un número con
         // el que el defecto y el arreglo dan lo mismo— y hace falta escribirlos literales una vez.
-        assert_eq!(BYTES_MAXIMOS, 64 * 1024, "el documento promete 64 KiB");
+        assert_eq!(MAX_BYTES, 64 * 1024, "el documento promete 64 KiB");
         assert_eq!(
             AVISOS_MAXIMOS, 20,
             "el documento promete hasta veinte avisos"
@@ -1235,7 +1236,7 @@ mod tests {
         let nunca = dir.0.join(FICHERO);
         assert_eq!(leer(&nunca), Err(Problema::Ausente));
         assert!(
-            !Problema::Ausente.merece_aviso(),
+            !Problema::Ausente.warrants_warning(),
             "se avisaría en cada arranque a quien no ha configurado nada"
         );
 
@@ -1249,7 +1250,7 @@ mod tests {
                 "un enlace roto se confundió con «no hay fichero»"
             );
             assert!(
-                Problema::EnlaceRoto.merece_aviso(),
+                Problema::EnlaceRoto.warrants_warning(),
                 "un enlace roto se calla, y quien lo creó no se entera de que su configuración no se aplica"
             );
         }

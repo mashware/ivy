@@ -59,7 +59,7 @@ use fontique::{Collection, CollectionOptions, GenericFamily, Script, SourceCache
 /// **Cinco muestras dan una mediana caliente de cuatro y un frío de uno.** Subir esta constante no mejora
 /// el frío: sigue habiendo una sola muestra fría por corrida, porque la segunda ya encuentra las cachés
 /// llenas. Lo que mejora el frío es **repetir la corrida**.
-const MUESTRAS: usize = 5;
+const SAMPLES: usize = 5;
 
 /// El cuerpo de la fuente con la que este terminal pinta hoy, copiado de la aplicación.
 ///
@@ -68,18 +68,18 @@ const MUESTRAS: usize = 5;
 /// banco puso un 17 a ojo, y encima lo trataba como píxeles cuando es **puntos**: con el escritorio al
 /// 200 % la celda son el doble de píxeles y la caché **cuatro veces** más grande, que es justo el número
 /// del que saldría su techo. Lo destapó la revisión.
-const CUERPO: f32 = 14.0;
+const BODY: f32 = 14.0;
 
 /// Los aumentos de escritorio con los que se publica el tamaño de la caché.
 ///
 /// **Dos y no uno**, porque el techo se dimensiona en píxeles y el escritorio decide cuántos hay por
 /// punto. **D10** ya estableció que el zoom no puede cambiar estas cifras en silencio.
-const AUMENTOS: [f32; 2] = [1.0, 2.0];
+const SCALES: [f32; 2] = [1.0, 2.0];
 
 /// Los caracteres con los que se pregunta cobertura, y por qué cada uno.
 ///
 /// **Ninguno es decorativo:** cada uno representa una de las cosas que hoy salen como cuadro.
-const MUESTRA: [(char, &str); 5] = [
+const SAMPLE: [(char, &str); 5] = [
     ('日', "CJK — el caso de D3"),
     ('한', "hangul — otra cobertura, otra fuente"),
     (
@@ -94,7 +94,7 @@ fn main() {
     println!("── qué cuesta darle al terminal las fuentes de la máquina ──");
     println!(
         "en frío: LA muestra 1, una sola — en caliente: la mediana de las {} restantes",
-        MUESTRAS - 1
+        SAMPLES - 1
     );
     println!(
         "el frío ocurre una vez por corrida: para saber cuánto se mueve, repite esta corrida\n"
@@ -104,59 +104,59 @@ fn main() {
     //
     // **Se cronometra la construcción entera**, que es lo que un arranque haría: medir por dentro daría
     // un número que nadie paga.
-    let mut tiempos = Vec::new();
-    let mut cuantas = 0;
-    for _ in 0..MUESTRAS {
-        let empezo = Instant::now();
-        let mut coleccion = Collection::new(CollectionOptions {
+    let mut times = Vec::new();
+    let mut count = 0;
+    for _ in 0..SAMPLES {
+        let started = Instant::now();
+        let mut collection = Collection::new(CollectionOptions {
             system_fonts: true,
             ..Default::default()
         });
-        cuantas = coleccion.family_names().count();
-        tiempos.push(empezo.elapsed());
+        count = collection.family_names().count();
+        times.push(started.elapsed());
     }
     println!("1. enumerar las fuentes del sistema");
-    println!("   {}  ·  {cuantas} familias", resumen(&tiempos));
-    if cuantas == 0 {
+    println!("   {}  ·  {count} familias", summary(&times));
+    if count == 0 {
         println!("   ⚠ NINGUNA familia: o no hay fontconfig en ejecución, o no hay fuentes.");
         println!("     Es el caso que AC9 obliga a aguantar, y este banco acaba de reproducirlo.");
         return;
     }
 
-    let mut coleccion = Collection::new(CollectionOptions {
+    let mut collection = Collection::new(CollectionOptions {
         system_fonts: true,
         ..Default::default()
     });
     // **Ordenadas por nombre**, que es lo que hace la respuesta reproducible entre corridas.
-    let mut familias: Vec<String> = coleccion.family_names().map(str::to_owned).collect();
-    familias.sort();
-    let mut fuentes = SourceCache::default();
+    let mut families: Vec<String> = collection.family_names().map(str::to_owned).collect();
+    families.sort();
+    let mut cache = SourceCache::default();
 
     // ── 2. Quién cubre qué, recorriéndolo todo ─────────────────────────────────────────────────
-    println!("\n2. quién cubre qué, abriendo las {cuantas} familias en orden (el peor caso)");
-    for (que, porque) in MUESTRA {
-        let mut tiempos = Vec::new();
-        let mut quien = None;
-        for _ in 0..MUESTRAS {
-            let empezo = Instant::now();
-            quien = quien_cubre(&mut coleccion, &mut fuentes, &familias, que);
-            tiempos.push(empezo.elapsed());
+    println!("\n2. quién cubre qué, abriendo las {count} familias en orden (el peor caso)");
+    for (which, reason) in SAMPLE {
+        let mut times = Vec::new();
+        let mut found = None;
+        for _ in 0..SAMPLES {
+            let started = Instant::now();
+            found = who_covers(&mut collection, &mut cache, &families, which);
+            times.push(started.elapsed());
         }
         // **Y si la ganadora lo pinta a color, porque ahí estaba el hallazgo.** Sin esta columna, el
         // banco decía «cubierto» y callaba que quien gana el emoji en esta máquina lo pinta en blanco y
         // negro teniendo una fuente de color instalada.
-        let cual = quien.as_ref().map_or_else(
+        let winner = found.as_ref().map_or_else(
             || "(nadie lo cubre)".to_owned(),
             |q| {
-                let color = if q.pinta_a_color(que) {
+                let color = if q.renders_color(which) {
                     " [a color]"
                 } else {
                     " [monocromo]"
                 };
-                format!("{}{color}", q.familia)
+                format!("{}{color}", q.family)
             },
         );
-        println!("   {que}  {}  {cual}   ({porque})", resumen(&tiempos));
+        println!("   {which}  {}  {winner}   ({reason})", summary(&times));
     }
 
     // ── 3. Las dos vías rápidas ────────────────────────────────────────────────────────────────
@@ -164,52 +164,52 @@ fn main() {
     // **Recorrerlo todo es el peor caso a propósito; esto es lo que la aplicación usaría.** La
     // diferencia entre los dos números decide cómo se escribe la entrega que hace que CJK se vea.
     println!("\n3. las vías rápidas: candidatas por script y por familia genérica");
-    for (que, script) in [('日', "Hani"), ('한', "Hang")] {
-        let mut tiempos = Vec::new();
-        let mut candidatas = 0;
-        let mut quien = None;
-        for _ in 0..MUESTRAS {
-            let empezo = Instant::now();
-            let ids: Vec<_> = coleccion
+    for (which, script) in [('日', "Hani"), ('한', "Hang")] {
+        let mut times = Vec::new();
+        let mut candidates = 0;
+        let mut found = None;
+        for _ in 0..SAMPLES {
+            let started = Instant::now();
+            let ids: Vec<_> = collection
                 .fallback_families(Script::parse(script).expect("código de script válido"))
                 .collect();
-            candidatas = ids.len();
-            quien = primera_que_cubre(&mut coleccion, &mut fuentes, &ids, que);
-            tiempos.push(empezo.elapsed());
+            candidates = ids.len();
+            found = first_that_covers(&mut collection, &mut cache, &ids, which);
+            times.push(started.elapsed());
         }
-        let cual = quien.as_ref().map_or_else(
+        let winner = found.as_ref().map_or_else(
             || "(ninguna candidata lo cubre)".to_owned(),
-            |q| q.familia.clone(),
+            |q| q.family.clone(),
         );
         println!(
-            "   {que}  {}  {cual}   ({candidatas} candidatas por script)",
-            resumen(&tiempos)
+            "   {which}  {}  {winner}   ({candidates} candidatas por script)",
+            summary(&times)
         );
     }
     // **El emoji NO sale por script**: `Zsym` no lo cubre en esta máquina. La vía que sí es la familia
     // genérica que el sistema declara para eso.
-    let mut tiempos = Vec::new();
-    let mut candidatas = 0;
-    let mut quien = None;
-    for _ in 0..MUESTRAS {
-        let empezo = Instant::now();
-        let ids: Vec<_> = coleccion.generic_families(GenericFamily::Emoji).collect();
-        candidatas = ids.len();
+    let mut times = Vec::new();
+    let mut candidates = 0;
+    let mut found = None;
+    for _ in 0..SAMPLES {
+        let started = Instant::now();
+        let ids: Vec<_> = collection.generic_families(GenericFamily::Emoji).collect();
+        candidates = ids.len();
         // **Con la regla que la decisión concluye, no con «la primera que cubra».** Y eso fue una
         // corrección de revisión: midiendo solo la cobertura, el número no incluía seguir buscando
         // cuando la primera candidata resulta ser monocroma — que es exactamente el caso que este banco
         // descubrió recorriendo en orden. Aquí funcionaba por suerte, porque en esta máquina la de color
         // está la primera; en otra no lo estaría, y el número publicado sería el de un camino más corto
         // que el real.
-        quien = primera_a_color(&mut coleccion, &mut fuentes, &ids, '😀');
-        tiempos.push(empezo.elapsed());
+        found = first_in_color(&mut collection, &mut cache, &ids, '😀');
+        times.push(started.elapsed());
     }
-    let cual = quien
+    let winner = found
         .as_ref()
-        .map_or_else(|| "(ninguna lo cubre)".to_owned(), |q| q.familia.clone());
+        .map_or_else(|| "(ninguna lo cubre)".to_owned(), |q| q.family.clone());
     println!(
-        "   😀  {}  {cual}   ({candidatas} candidatas por familia genérica)",
-        resumen(&tiempos)
+        "   😀  {}  {winner}   ({candidates} candidatas por familia genérica)",
+        summary(&times)
     );
 
     // ── 4. Registrar las caras en el motor de texto ────────────────────────────────────────────
@@ -217,7 +217,7 @@ fn main() {
     // **Es lo que se pagaría al abrir la ventana**, y va aparte de enumerar porque son dos costes
     // distintos: uno lo cobra el sistema y el otro el framework.
     println!("\n4. registrar las caras en el motor de texto");
-    registrar(&mut coleccion, &mut fuentes, &familias);
+    register(&mut collection, &mut cache, &families);
 
     // ── 4bis. Registrar una cara EN CALIENTE ───────────────────────────────────────────────────
     //
@@ -226,12 +226,12 @@ fn main() {
     // de texto se rehace y ese coste **cae dentro de un fotograma**, no antes del primero. Un fotograma
     // son 16,7 ms a 60 Hz, así que lo que salga aquí dice si se nota como un tirón o no.
     println!("\n4bis. registrar UNA cara más con la ventana ya abierta (la vía perezosa)");
-    en_caliente(&mut coleccion, &mut fuentes);
+    register_hot(&mut collection, &mut cache);
 
     // ── 5. El glifo de color ───────────────────────────────────────────────────────────────────
     println!("\n5. de qué forma viene un glifo de color, y cuánto ocupa");
-    match quien {
-        Some(cara) => medir_el_color(&cara),
+    match found {
+        Some(face) => measure_color(&face),
         None => println!("   ninguna familia de emoji cubre 😀 en esta máquina"),
     }
 
@@ -248,44 +248,44 @@ fn main() {
 /// y no la búsqueda. Con `Noto Sans CJK HK` —19,5 MiB— la copia costaba 5 ms y el número publicado
 /// seguía el **tamaño del fichero**, no cuántas familias se habían recorrido. Un `Blob` es un puntero
 /// contado, que es lo que la aplicación tendría.
-struct Cara {
-    familia: String,
+struct Face {
+    family: String,
     blob: fontique::Blob<u8>,
-    indice: u32,
+    index: u32,
 }
 
-impl Cara {
+impl Face {
     /// Si esa cara trae el glifo de ese carácter **a color**.
     ///
     /// **Se pregunta FUERA del cronómetro**, por lo mismo que la copia: sondear las tablas de color es
     /// abrir la fuente entera con `skrifa`, y dentro del reloj inflaba todas las medidas de búsqueda.
-    fn pinta_a_color(&self, que: char) -> bool {
+    fn renders_color(&self, which: char) -> bool {
         use skrifa::MetadataProvider as _;
-        skrifa::FontRef::from_index(self.blob.data(), self.indice).is_ok_and(|fuente| {
-            let Some(glifo) = fuente.charmap().map(que) else {
+        skrifa::FontRef::from_index(self.blob.data(), self.index).is_ok_and(|font| {
+            let Some(glyph) = font.charmap().map(which) else {
                 return false;
             };
-            let hay_bitmap = fuente
+            let hay_bitmap = font
                 .bitmap_strikes()
-                .glyph_for_size(skrifa::instance::Size::unscaled(), glifo)
+                .glyph_for_size(skrifa::instance::Size::unscaled(), glyph)
                 .is_some();
-            hay_bitmap || fuente.color_glyphs().get(glifo).is_some()
+            hay_bitmap || font.color_glyphs().get(glyph).is_some()
         })
     }
 }
 
 /// La primera familia, en orden, cuya cara cubre ese carácter.
-fn quien_cubre(
-    coleccion: &mut Collection,
-    fuentes: &mut SourceCache,
-    familias: &[String],
-    que: char,
-) -> Option<Cara> {
-    let ids: Vec<_> = familias
+fn who_covers(
+    collection: &mut Collection,
+    cache: &mut SourceCache,
+    families: &[String],
+    which: char,
+) -> Option<Face> {
+    let ids: Vec<_> = families
         .iter()
-        .filter_map(|nombre| coleccion.family_id(nombre))
+        .filter_map(|name| collection.family_id(name))
         .collect();
-    primera_que_cubre(coleccion, fuentes, &ids, que)
+    first_that_covers(collection, cache, &ids, which)
 }
 
 /// La primera de esas familias cuya cara cubre el carácter **y lo pinta a color**.
@@ -294,30 +294,30 @@ fn quien_cubre(
 /// glifo aunque sea monocroma, que es el defecto que este banco encontró y que Alacritty tiene
 /// documentado. Sondear el color cuesta abrir la fuente con `skrifa`, así que este camino es **más caro**
 /// que el de solo cobertura — y ése es justo el número que hace falta.
-fn primera_a_color(
-    coleccion: &mut Collection,
-    fuentes: &mut SourceCache,
+fn first_in_color(
+    collection: &mut Collection,
+    cache: &mut SourceCache,
     ids: &[fontique::FamilyId],
-    que: char,
-) -> Option<Cara> {
+    which: char,
+) -> Option<Face> {
     for &id in ids {
-        let Some((nombre, caras)) = coleccion
+        let Some((name, faces)) = collection
             .family(id)
-            .map(|familia| (familia.name().to_owned(), familia.fonts().to_vec()))
+            .map(|family| (family.name().to_owned(), family.fonts().to_vec()))
         else {
             continue;
         };
-        for cara in caras {
-            let Some(blob) = fuentes.get(cara.source()) else {
+        for face in faces {
+            let Some(blob) = cache.get(face.source()) else {
                 continue;
             };
-            let candidata = Cara {
-                familia: nombre.clone(),
+            let candidate = Face {
+                family: name.clone(),
                 blob,
-                indice: cara.index(),
+                index: face.index(),
             };
-            if candidata.pinta_a_color(que) {
-                return Some(candidata);
+            if candidate.renders_color(which) {
+                return Some(candidate);
             }
         }
     }
@@ -325,34 +325,34 @@ fn primera_a_color(
 }
 
 /// La primera de esas familias cuya cara cubre el carácter.
-fn primera_que_cubre(
-    coleccion: &mut Collection,
-    fuentes: &mut SourceCache,
+fn first_that_covers(
+    collection: &mut Collection,
+    cache: &mut SourceCache,
     ids: &[fontique::FamilyId],
-    que: char,
-) -> Option<Cara> {
+    which: char,
+) -> Option<Face> {
     for &id in ids {
         // **Se clonan las caras antes de seguir**: la familia presta de la colección, y la colección
         // hace falta en la vuelta siguiente.
-        let Some((nombre, caras)) = coleccion
+        let Some((name, faces)) = collection
             .family(id)
-            .map(|familia| (familia.name().to_owned(), familia.fonts().to_vec()))
+            .map(|family| (family.name().to_owned(), family.fonts().to_vec()))
         else {
             continue;
         };
-        for cara in caras {
-            let Some(blob) = fuentes.get(cara.source()) else {
+        for face in faces {
+            let Some(blob) = cache.get(face.source()) else {
                 continue;
             };
-            let cubre = cara
+            let covers = face
                 .charmap_index()
                 .charmap(blob.data())
-                .is_some_and(|mapa| mapa.map(que as u32).is_some_and(|glifo| glifo != 0));
-            if cubre {
-                return Some(Cara {
-                    familia: nombre,
+                .is_some_and(|strike| strike.map(which as u32).is_some_and(|glyph| glyph != 0));
+            if covers {
+                return Some(Face {
+                    family: name,
                     blob,
-                    indice: cara.index(),
+                    index: face.index(),
                 });
             }
         }
@@ -361,52 +361,52 @@ fn primera_que_cubre(
 }
 
 /// Qué cuesta registrar en el motor de texto las caras que hacen falta, y cuánto pesan.
-fn registrar(coleccion: &mut Collection, fuentes: &mut SourceCache, familias: &[String]) {
-    let necesarias: Vec<Cara> = MUESTRA
+fn register(collection: &mut Collection, cache: &mut SourceCache, families: &[String]) {
+    let needed: Vec<Face> = SAMPLE
         .iter()
-        .filter_map(|(que, _)| quien_cubre(coleccion, fuentes, familias, *que))
+        .filter_map(|(which, _)| who_covers(collection, cache, families, *which))
         .collect();
 
-    let mut definiciones = egui::FontDefinitions::default();
-    let mut bytes_totales = 0usize;
-    let mut registradas = 0usize;
-    for cara in &necesarias {
-        if definiciones.font_data.contains_key(&cara.familia) {
+    let mut definitions = egui::FontDefinitions::default();
+    let mut total_bytes = 0usize;
+    let mut registered = 0usize;
+    for face in &needed {
+        if definitions.font_data.contains_key(&face.family) {
             continue;
         }
-        bytes_totales += cara.blob.data().len();
-        definiciones.font_data.insert(
-            cara.familia.clone(),
-            std::sync::Arc::new(egui::FontData::from_owned(cara.blob.data().to_vec())),
+        total_bytes += face.blob.data().len();
+        definitions.font_data.insert(
+            face.family.clone(),
+            std::sync::Arc::new(egui::FontData::from_owned(face.blob.data().to_vec())),
         );
-        definiciones
+        definitions
             .families
             .entry(egui::FontFamily::Monospace)
             .or_default()
-            .push(cara.familia.clone());
-        registradas += 1;
+            .push(face.family.clone());
+        registered += 1;
     }
 
     // **Varias muestras, como todo lo demás.** La primera versión publicaba una sola bajo el cartel de
     // «mediana de cinco», que es la misma regla que este módulo prohíbe en su punto 2 — y se movía un
     // 16 % entre corridas.
-    let mut tiempos = Vec::new();
-    for _ in 0..MUESTRAS {
+    let mut times = Vec::new();
+    for _ in 0..SAMPLES {
         let ctx = egui::Context::default();
-        let empezo = Instant::now();
-        ctx.set_fonts(definiciones.clone());
+        let started = Instant::now();
+        ctx.set_fonts(definitions.clone());
         // **Se fuerza una pasada**: `set_fonts` guarda la configuración y el motor de texto se rehace en
         // el fotograma siguiente. Cronometrar solo la llamada publicaría un cero que no paga nadie.
         ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.label("日本語 ☁ 😀");
         })
         .drop_without_applying_deltas();
-        tiempos.push(empezo.elapsed());
+        times.push(started.elapsed());
     }
     println!(
-        "   {}  ·  {registradas} caras  ·  {:.1} MiB de fuente en memoria",
-        resumen(&tiempos),
-        bytes_totales as f64 / (1024.0 * 1024.0)
+        "   {}  ·  {registered} caras  ·  {:.1} MiB de fuente en memoria",
+        summary(&times),
+        total_bytes as f64 / (1024.0 * 1024.0)
     );
     println!(
         "   y esa memoria es el fichero de fuente ENTERO por cara, no solo los glifos que se usan"
@@ -414,126 +414,126 @@ fn registrar(coleccion: &mut Collection, fuentes: &mut SourceCache, familias: &[
 }
 
 /// Qué cuesta añadir una cara al motor de texto **con la ventana ya andando**.
-fn en_caliente(coleccion: &mut Collection, fuentes: &mut SourceCache) {
+fn register_hot(collection: &mut Collection, cache: &mut SourceCache) {
     // **La cara que devuelve LA VÍA ELEGIDA, no la del recorrido alfabético**, y ésa fue una corrección
     // de revisión. Las dos vías dan fuentes distintas —`Droid Sans Fallback` de 3,8 MiB contra
     // `Noto Sans CJK JP` de 19,5 MiB— así que sumar «buscar por script» con «registrar lo que encontró
     // el recorrido» era sumar dos mitades de gestos distintos, y la segunda con una fuente cinco veces
     // más pequeña.
-    let ids: Vec<_> = coleccion
+    let ids: Vec<_> = collection
         .fallback_families(Script::parse("Hani").expect("código de script válido"))
         .collect();
-    let Some(cara) = primera_que_cubre(coleccion, fuentes, &ids, '日') else {
+    let Some(face) = first_that_covers(collection, cache, &ids, '日') else {
         println!("   no hay ninguna cara que cubra 日 por la vía elegida en esta máquina");
         return;
     };
 
-    let mut definiciones = egui::FontDefinitions::default();
-    definiciones.font_data.insert(
-        cara.familia.clone(),
-        std::sync::Arc::new(egui::FontData::from_owned(cara.blob.data().to_vec())),
+    let mut definitions = egui::FontDefinitions::default();
+    definitions.font_data.insert(
+        face.family.clone(),
+        std::sync::Arc::new(egui::FontData::from_owned(face.blob.data().to_vec())),
     );
-    definiciones
+    definitions
         .families
         .entry(egui::FontFamily::Monospace)
         .or_default()
-        .push(cara.familia.clone());
+        .push(face.family.clone());
 
-    let mut tiempos = Vec::new();
-    for _ in 0..MUESTRAS {
+    let mut times = Vec::new();
+    for _ in 0..SAMPLES {
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.label("hola");
         })
         .drop_without_applying_deltas();
-        let empezo = Instant::now();
-        ctx.set_fonts(definiciones.clone());
+        let started = Instant::now();
+        ctx.set_fonts(definitions.clone());
         // El fotograma en el que el motor de texto se rehace **y** se pinta algo que usa la cara nueva:
         // eso es lo que el usuario vería como un tirón, si lo hubiera.
         ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.label("日本語");
         })
         .drop_without_applying_deltas();
-        tiempos.push(empezo.elapsed());
+        times.push(started.elapsed());
     }
-    let cuanto = *tiempos.iter().max().expect("hay muestras");
+    let how_long = *times.iter().max().expect("hay muestras");
 
     println!(
         "   {}  ·  {} ({:.1} MiB)",
-        resumen(&tiempos),
-        cara.familia,
-        cara.blob.data().len() as f64 / (1024.0 * 1024.0)
+        summary(&times),
+        face.family,
+        face.blob.data().len() as f64 / (1024.0 * 1024.0)
     );
     // **Se juzga contra el PEOR de los tiempos, no contra el mejor.** Lo que decide si se ve como un
     // tirón es el fotograma malo, no el bueno.
-    let presupuesto = Duration::from_micros(16_667);
-    if cuanto > presupuesto {
+    let budget = Duration::from_micros(16_667);
+    if how_long > budget {
         println!(
             "   ⚠ pasa del presupuesto de un fotograma a 60 Hz ({:.1}×): se vería como un tirón",
-            cuanto.as_secs_f64() / presupuesto.as_secs_f64()
+            how_long.as_secs_f64() / budget.as_secs_f64()
         );
     } else {
         println!(
             "   cabe en un fotograma a 60 Hz ({:.0} % de los 16,7 ms)",
-            100.0 * cuanto.as_secs_f64() / presupuesto.as_secs_f64()
+            100.0 * how_long.as_secs_f64() / budget.as_secs_f64()
         );
     }
 }
 
 /// La altura de una celda, preguntada al motor de texto como hace el pintor.
-fn alto_de_celda() -> f32 {
+fn cell_height() -> f32 {
     let ctx = egui::Context::default();
     ctx.run_ui(egui::RawInput::default(), |ui| {
         ui.label("M");
     })
     .drop_without_applying_deltas();
-    ctx.fonts_mut(|fuentes| fuentes.row_height(&egui::FontId::monospace(CUERPO)))
+    ctx.fonts_mut(|cache| cache.row_height(&egui::FontId::monospace(BODY)))
 }
 
 /// De qué forma viene el glifo de color y cuánto ocupa.
-fn medir_el_color(cara: &Cara) {
+fn measure_color(face: &Face) {
     use skrifa::MetadataProvider as _;
     use skrifa::instance::Size;
 
     println!(
         "   {} · ¿trae color? {}",
-        cara.familia,
-        si_o_no(cara.pinta_a_color('😀'))
+        face.family,
+        yes_no(face.renders_color('😀'))
     );
-    let Ok(fuente) = skrifa::FontRef::from_index(cara.blob.data(), cara.indice) else {
+    let Ok(font) = skrifa::FontRef::from_index(face.blob.data(), face.index) else {
         println!("   no se pudo leer la fuente");
         return;
     };
-    let Some(glifo) = fuente.charmap().map('😀') else {
+    let Some(glyph) = font.charmap().map('😀') else {
         return;
     };
 
-    let alto = alto_de_celda();
-    let bitmaps = fuente.bitmap_strikes();
-    let encontrado = bitmaps
-        .glyph_for_size(Size::new(alto), glifo)
-        .or_else(|| bitmaps.glyph_for_size(Size::unscaled(), glifo));
-    match encontrado {
-        Some(mapa) => {
-            let pixeles = mapa.width as usize * mapa.height as usize;
+    let height = cell_height();
+    let bitmaps = font.bitmap_strikes();
+    let hit = bitmaps
+        .glyph_for_size(Size::new(height), glyph)
+        .or_else(|| bitmaps.glyph_for_size(Size::unscaled(), glyph));
+    match hit {
+        Some(strike) => {
+            let pixels = strike.width as usize * strike.height as usize;
             println!(
                 "   mapa de bits {}×{} px  ·  {} KiB una vez DESCODIFICADO a RGBA",
-                mapa.width,
-                mapa.height,
-                pixeles * 4 / 1024
+                strike.width,
+                strike.height,
+                pixels * 4 / 1024
             );
             println!(
                 "   (la fuente lo guarda comprimido: {:.1} MiB el fichero entero con todos sus glifos)",
-                cara.blob.data().len() as f64 / (1024.0 * 1024.0)
+                face.blob.data().len() as f64 / (1024.0 * 1024.0)
             );
-            println!("   celda de {alto:.1} pt de alto, preguntada al motor de texto:");
-            for aumento in AUMENTOS {
-                let lado = (alto * aumento) as usize;
-                let uno = lado * lado * 4;
+            println!("   celda de {height:.1} pt de alto, preguntada al motor de texto:");
+            for scale in SCALES {
+                let side = (height * scale) as usize;
+                let bytes = side * side * 4;
                 println!(
-                    "     al {:>4.0} %: {lado}×{lado} px · {uno} B por glifo · {} KiB mil glifos",
-                    aumento * 100.0,
-                    uno * 1000 / 1024
+                    "     al {:>4.0} %: {side}×{side} px · {bytes} B por glifo · {} KiB mil glifos",
+                    scale * 100.0,
+                    bytes * 1000 / 1024
                 );
             }
         }
@@ -543,8 +543,8 @@ fn medir_el_color(cara: &Cara) {
     }
 }
 
-fn si_o_no(que: bool) -> &'static str {
-    if que { "sí" } else { "no" }
+fn yes_no(which: bool) -> &'static str {
+    if which { "sí" } else { "no" }
 }
 
 /// **La primera muestra aparte de la mediana de las demás**, y ésa fue una corrección de revisión.
@@ -555,20 +555,20 @@ fn si_o_no(que: bool) -> &'static str {
 /// escritura nueva, que es exactamente lo que ocurre en producción. Medido: 875 µs en caliente contra
 /// 5,2 ms en frío para el mismo carácter. Publicar solo el primero subestimaba el número que sostiene la
 /// decisión **por cuatro**.
-fn resumen(tiempos: &[Duration]) -> String {
-    let fria = tiempos[0];
-    let mut calientes: Vec<Duration> = tiempos[1..].to_vec();
-    calientes.sort_unstable();
-    let mediana = calientes[calientes.len() / 2];
-    format!("{fria:>11.3?} en frío · {mediana:>11.3?} en caliente")
+fn summary(times: &[Duration]) -> String {
+    let cold = times[0];
+    let mut warms: Vec<Duration> = times[1..].to_vec();
+    warms.sort_unstable();
+    let median = warms[warms.len() / 2];
+    format!("{cold:>11.3?} en frío · {median:>11.3?} en caliente")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn ms(cuanto: u64) -> Duration {
-        Duration::from_millis(cuanto)
+    fn ms(how_long: u64) -> Duration {
+        Duration::from_millis(how_long)
     }
 
     /// Cinco muestras como salen de una máquina cargada: **la fría no es la más lenta** —hay una
@@ -582,9 +582,9 @@ mod tests {
     }
 
     /// Los dos números que el banco publica, ya separados y sin el relleno del formato.
-    fn publicado(tiempos: &[Duration]) -> (String, String) {
-        let linea = resumen(tiempos);
-        let (frio, caliente) = linea
+    fn publicado(times: &[Duration]) -> (String, String) {
+        let line = summary(times);
+        let (frio, caliente) = line
             .split_once(" · ")
             .expect("el resumen publica los DOS números, el frío y el caliente");
         (frio.trim().to_owned(), caliente.trim().to_owned())

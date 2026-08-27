@@ -165,7 +165,7 @@ MARGEN_DEL_TAMANO=0.5
 
 # El tamaño que un informe dice que tuvo la ventana, escrito como lo escribe la variable: con «x».
 tamano_de() {
-    sed -n 's/^ventana: *\(.*\) puntos$/\1/p' "$1" | sed 's/×/x/' | head -1
+    sed -n 's/^window: *\(.*\) points$/\1/p' "$1" | sed 's/×/x/' | head -1
 }
 
 # Si dos tamaños «<ancho>x<alto>» son el mismo dentro del margen. Vacío o ilegible nunca es parecido.
@@ -184,7 +184,7 @@ parecido() {
 # **La guarda que este guion decía tener desde F2.1 y no tenía.** El anexo publica la media de dos
 # corridas, y promediar dos corridas con rejillas distintas da un número que no describe ninguna de las
 # dos — y sale plausible. No mide nada: solo lee las dos cabeceras.
-if [ "${MEDIR_COMO_CONSOLA:-}" != "1" ] && [ "${1:-}" = comparar ]; then
+if [ "${MEASURE_AS_CONSOLE:-}" != "1" ] && [ "${1:-}" = comparar ]; then
     [ $# -eq 3 ] || { echo "uso: $0 comparar <informe> <informe>" >&2; exit 2; }
     for informe in "$2" "$3"; do
         [ -f "$informe" ] || { echo "no existe $informe" >&2; exit 2; }
@@ -192,7 +192,7 @@ if [ "${MEDIR_COMO_CONSOLA:-}" != "1" ] && [ "${1:-}" = comparar ]; then
         # de los resultados: dos informes viejos —tomados antes de que la cabecera dijera con qué ventana se
         # midió— tienen la misma geometría *ausente*, así que saldrían «comparables» sin que ninguno declare
         # en qué ventana se tomó. Es exactamente la clase de número plausible que esta guarda viene a evitar.
-        grep -q '^ventana: ' "$informe" || {
+        grep -q '^window: ' "$informe" || {
             echo "$informe no dice con qué ventana se midió: es de antes de que la cabecera lo publicara," >&2
             echo "así que no se puede saber si es comparable con nada. Vuelve a tomar la tanda." >&2
             exit 1
@@ -221,9 +221,9 @@ if [ "${MEDIR_COMO_CONSOLA:-}" != "1" ] && [ "${1:-}" = comparar ]; then
     # `restauradas:` del informe existe para quitar. Se compara su presencia **y** su número.
     geometria() {
         sed -n \
-            -e 's/^pestañas: */pestañas /p' \
-            -e 's/^  división [0-9]*: */división /p' \
-            -e 's/^restauradas: *\([0-9]*\) consolas .*$/restauradas \1/p' \
+            -e 's/^tabs: */tabs /p' \
+            -e 's/^  pane [0-9]*: */pane /p' \
+            -e 's/^restored: *\([0-9]*\) consoles .*$/restored \1/p' \
             "$1"
     }
     primera=$(geometria "$2")
@@ -243,7 +243,7 @@ fi
 # ── Modo consola ────────────────────────────────────────────────────────────────
 # La aplicación invoca este mismo guion como si fuera el shell del usuario. Vuelca la carga y
 # termina; al terminar todas, la ventana se cierra.
-if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
+if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
     # **Qué número de consola soy, sin carreras.** En la tanda F las dos consolas de la pestaña de
     # fondo tienen que terminar SIN volcar, y una consola no puede saberlo por sí misma: su `PANEL_ID`
     # es un sorteo de ocho dígitos, no dice a qué pestaña pertenece. Lo que sí sabemos es el orden en
@@ -253,7 +253,7 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
     turno=0
     while :; do
         turno=$((turno + 1))
-        mkdir "$MEDIR_TURNOS/$turno" 2>/dev/null && break
+        mkdir "$MEASURE_RUNS/$turno" 2>/dev/null && break
         if [ "$turno" -gt 32 ]; then
             echo "no quedan turnos: ¿se lanzaron más consolas de las previstas?" >&2
             exit 1
@@ -263,7 +263,7 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
     # Las que pasan del cupo terminan enseguida y sin escribir nada. **Terminar y no dormir**: una
     # consola dormida sigue viva, y la ventana solo se cierra cuando han terminado todas — la tanda no
     # acabaría nunca. Muerta y callada es exactamente lo que «la pestaña de fondo quieta» significa.
-    if [ "$turno" -gt "${MEDIR_VUELCAN:-2}" ]; then
+    if [ "$turno" -gt "${MEASURE_TRIES:-2}" ]; then
         exit 0
     fi
 
@@ -271,21 +271,21 @@ if [ "${MEDIR_COMO_CONSOLA:-}" = "1" ]; then
     # recorrido en informes al programa en vez de en una selección, y lo que deja a la segunda de control
     # dentro de la misma corrida — igual que la K con el panel y la N con el texto marcado. Se pide antes
     # de arrancar la carga para que la ventana lo haya leído cuando empiecen a llegar los gestos.
-    if [ "${MEDIR_GESTO:-}" = raton ] && [ "$turno" = 1 ]; then
+    if [ "${MEASURE_GESTURE:-}" = mouse ] && [ "$turno" = 1 ]; then
         printf '\033[?1000h\033[?1002h\033[?1006h'
     fi
 
     # **La carga en CJK solo la pide la tanda P.** La de siempre es bit a bit la misma que en todos los
     # anexos publicados: cambiarla haría que una tanda nueva no se pudiera comparar con ninguno de ellos.
-    if [ "${MEDIR_CJK:-}" = 1 ]; then
-        exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}" --cjk
+    if [ "${MEASURE_CJK:-}" = 1 ]; then
+        exec "$CARGA" run --mib "${MEASURE_MIB:-44}" --at 30 --tag "${MEASURE_BATCH:-x}" --cjk
     fi
     # **Y la carga con emojis solo la pide la tanda Q**, por lo mismo: es la única que recorre el camino
     # de rasterizar un glifo de color.
-    if [ "${MEDIR_EMOJI:-}" = 1 ]; then
-        exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}" --emoji
+    if [ "${MEASURE_EMOJI:-}" = 1 ]; then
+        exec "$CARGA" run --mib "${MEASURE_MIB:-44}" --at 30 --tag "${MEASURE_BATCH:-x}" --emoji
     fi
-    exec "$CARGA" run --mib "${MEDIR_MIB:-44}" --at 30 --tag "${MEDIR_TANDA:-x}"
+    exec "$CARGA" run --mib "${MEASURE_MIB:-44}" --at 30 --tag "${MEASURE_BATCH:-x}"
 fi
 
 # ── Modo tanda ──────────────────────────────────────────────────────────────────
@@ -316,19 +316,19 @@ rm -f "$TESTIGO"
 # siembran en el fichero y contra las que se comprueba el informe.
 RESTAURA=0
 case "$TANDA" in
-    A|B|C|D) PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola ;;
-    F)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola ;;   # la de fondo, quieta: no vuelca ninguna
-    G)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=4; ARRASTRES=0; GESTO=consola ;;   # la de fondo, volcando como la de delante
-    H)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=consola ;;   # cuatro en fila: el peor caso del panel (#33)
-    I)       PESTANAS=1; DIVISIONES=2x2; VUELCAN=4; ARRASTRES=0; GESTO=consola ;;   # cuatro en cuadro
-    J)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=consola ;;   # dos, y arrastrándose: el gesto de F2.3
+    A|B|C|D) PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=console ;;
+    F)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=console ;;   # la de fondo, quieta: no vuelca ninguna
+    G)       PESTANAS=2; DIVISIONES=2x1; VUELCAN=4; ARRASTRES=0; GESTO=console ;;   # la de fondo, volcando como la de delante
+    H)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=console ;;   # cuatro en fila: el peor caso del panel (#33)
+    I)       PESTANAS=1; DIVISIONES=2x2; VUELCAN=4; ARRASTRES=0; GESTO=console ;;   # cuatro en cuadro
+    J)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=console ;;   # dos, y arrastrándose: el gesto de F2.3
     K)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=panel ;;     # dos, y estrechando el panel sin parar: el gesto de F2.4
-    L)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=consola; RESTAURA=1 ;;  # cuatro en fila, pero salidas del fichero: el arranque de F2.5
-    M)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=frontera ;;       # dos, y moviendo la frontera del árbol: el peor caso de recolocar
-    N)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=marcar ;;         # dos, y marcando texto en la izquierda: la derecha es el control
-    O)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=raton ;;           # dos, y el MISMO recorrido, pero el programa de la izquierda pidió el ratón
-    P)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola; CJK=1 ;;       # dos, y las dos volcando en JAPONÉS: la única que descubre fuentes
-    Q)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=consola; EMOJI=1 ;;     # dos, y las dos volcando EMOJIS: la única que rasteriza glifos de color
+    L)       PESTANAS=1; DIVISIONES=4x1; VUELCAN=4; ARRASTRES=0; GESTO=console; RESTAURA=1 ;;  # cuatro en fila, pero salidas del fichero: el arranque de F2.5
+    M)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=divider ;;       # dos, y moviendo la frontera del árbol: el peor caso de recolocar
+    N)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=mark ;;         # dos, y marcando texto en la izquierda: la derecha es el control
+    O)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=100000; GESTO=mouse ;;           # dos, y el MISMO recorrido, pero el programa de la izquierda pidió el ratón
+    P)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=console; CJK=1 ;;       # dos, y las dos volcando en JAPONÉS: la única que descubre fuentes
+    Q)       PESTANAS=1; DIVISIONES=2x1; VUELCAN=2; ARRASTRES=0; GESTO=console; EMOJI=1 ;;     # dos, y las dos volcando EMOJIS: la única que rasteriza glifos de color
     *) echo "tanda desconocida «$TANDA»: usa A, B, C, D, F, G, H, I, J, K, L, M, N, O, P o Q" >&2; exit 2 ;;
 esac
 # **Por qué la tanda que arrastra pide cien mil gestos**: el número está deliberadamente por encima de los
@@ -410,7 +410,7 @@ mkdir -p "$CONFIG"
 sembrar_disposicion() {
     columnas=${DIVISIONES%x*}
     filas=${DIVISIONES#*x}
-    hoja='{"hoja":{"ancho_del_panel":36,"plegado":false}}'
+    hoja='{"leaf":{"panel_width":36,"folded":false}}'
 
     if [ "$filas" = 1 ]; then
         rama_de_columna="$hoja"
@@ -419,14 +419,14 @@ sembrar_disposicion() {
         n=0
         while [ "$n" -lt "$filas" ]; do
             [ -z "$hijos" ] || hijos="$hijos,"
-            hijos="$hijos{\"peso\":1.0,\"nodo\":$hoja}"
+            hijos="$hijos{\"weight\":1.0,\"node\":$hoja}"
             n=$((n + 1))
         done
-        rama_de_columna="{\"rama\":{\"orientacion\":\"filas\",\"hijos\":[$hijos]}}"
+        rama_de_columna="{\"branch\":{\"orientation\":\"rows\",\"children\":[$hijos]}}"
     fi
 
     # **Con una sola columna, la raíz ES esa columna: no se envuelve.** Una rama de un solo hijo es un
-    # documento que el validador **rechaza** —`RamaDeUnHijo`—, así que `1x2` sembraría un fichero que no se
+    # documento que el validador **rechaza** —`SingleChildBranch`—, así que `1x2` sembraría un fichero que no se
     # entiende, la ventana abriría de fábrica y la tanda mediría otra cosa. Lo caza la guarda del final,
     # pero quince minutos después. Comprobado generando el documento y pasándolo por el intérprete.
     if [ "$columnas" = 1 ]; then
@@ -436,10 +436,10 @@ sembrar_disposicion() {
         n=0
         while [ "$n" -lt "$columnas" ]; do
             [ -z "$hijos" ] || hijos="$hijos,"
-            hijos="$hijos{\"peso\":1.0,\"nodo\":$rama_de_columna}"
+            hijos="$hijos{\"weight\":1.0,\"node\":$rama_de_columna}"
             n=$((n + 1))
         done
-        raiz="{\"rama\":{\"orientacion\":\"columnas\",\"hijos\":[$hijos]}}"
+        raiz="{\"branch\":{\"orientation\":\"columns\",\"children\":[$hijos]}}"
     fi
 
     # **Sin eñe en el nombre de la variable, y no es cosmética.** `sh` solo admite letras ASCII, dígitos y
@@ -450,12 +450,12 @@ sembrar_disposicion() {
     n=0
     while [ "$n" -lt "$PESTANAS" ]; do
         [ -z "$lista" ] || lista="$lista,"
-        lista="$lista{\"raiz\":$raiz}"
+        lista="$lista{\"root\":$raiz}"
         n=$((n + 1))
     done
 
     mkdir -p "$CONFIG/agent-terminal"
-    printf '{"v":1,"pestañas":[%s]}\n' "$lista" > "$CONFIG/agent-terminal/disposicion.json"
+    printf '{"v":2,"tabs":[%s]}\n' "$lista" > "$CONFIG/agent-terminal/layout.json"
 }
 
 if [ "$RESTAURA" = 1 ]; then
@@ -553,10 +553,10 @@ INFORME="$SALIDA/tanda-$TANDA-$(date +%H%M%S).txt"
 # abajo ni la invalidación llegaban a correr, y el pánico —que antes se leía en el terminal— se quedaba en
 # un fichero que nadie nombraba.
 ESTADO=0
-export MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
-    MEDIR_TURNOS="$TURNOS" MEDIR_VUELCAN="$VUELCAN" \
-    MEDIR_TAMANO="$TAMANO" MEDIR_ARRASTRES="$ARRASTRES" MEDIR_GESTO="$GESTO" MEDIR_CJK="${CJK:-}" \
-    MEDIR_EMOJI="${EMOJI:-}" \
+export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$TANDA" \
+    MEASURE_RUNS="$TURNOS" MEASURE_TRIES="$VUELCAN" \
+    MEASURE_SIZE="$TAMANO" MEASURE_DRAGS="$ARRASTRES" MEASURE_GESTURE="$GESTO" MEASURE_CJK="${CJK:-}" \
+    MEASURE_EMOJI="${EMOJI:-}" \
     XDG_CONFIG_HOME="$CONFIG" \
     SHELL="$RAIZ/scripts/medir-fotograma.sh"
 # **Las dos que piden disposición no se exportan cuando la tanda restaura, y en eso consiste la tanda L.**
@@ -566,14 +566,14 @@ export MEDIR_COMO_CONSOLA=1 MEDIR_MIB="$MIB" MEDIR_TANDA="$TANDA" \
 # saltando. La línea `restauradas:` del informe es lo que distingue las dos cosas, y por eso se comprueba
 # abajo.
 if [ "$RESTAURA" = 0 ]; then
-    export MEDIR_PESTANAS="$PESTANAS" MEDIR_DIVISIONES="$DIVISIONES"
+    export MEASURE_TABS="$PESTANAS" MEASURE_PANES="$DIVISIONES"
 else
     # **Y se quitan del entorno, no basta con no ponerlas.** Antes iban delante de la orden, así que
     # fijaban su valor para el hijo **viniera lo que viniera** de fuera; con `export` condicional, una que
     # el usuario tuviera exportada de antes —que es como la documentación dice abrir una disposición
     # concreta a mano— llegaría a la aplicación y la haría abrir de fábrica, con el fichero sembrado sin
     # leer siquiera.
-    unset MEDIR_PESTANAS MEDIR_DIVISIONES
+    unset MEASURE_TABS MEASURE_PANES
 fi
 "$APP" > "$INFORME" 2> "$INFORME.err" || ESTADO=$?
 
@@ -628,7 +628,7 @@ invalidar() {
 #
 # Y al revés: si una tanda que NO es la P busca fuentes, es que algo distinto de la carga las está
 # disparando, y sus tramos mezclan un trabajo que no le corresponde a lo que dice medir.
-BUSCADOS=$(grep -oE "[0-9]+ caracteres buscados" "$INFORME" | grep -oE "^[0-9]+" | head -1)
+BUSCADOS=$(grep -oE "[0-9]+ characters searched" "$INFORME" | grep -oE "^[0-9]+" | head -1)
 BUSCADOS=${BUSCADOS:-0}
 if [ "${CJK:-}" = 1 ] && [ "$BUSCADOS" = 0 ]; then
     invalidar "esta tanda vuelca en japonés para medir lo que cuesta buscar fuentes en la máquina y \
@@ -651,7 +651,7 @@ fi
 # Y al revés: si una tanda que NO es la Q rasteriza glifos de color, es que algo distinto de la carga lo
 # está disparando, y sus tramos mezclan un trabajo que no le corresponde a lo que dice medir. La de siempre
 # es ASCII puro: ahí no hay ni un emoji.
-RASTERIZADOS=$(grep -oE "[0-9]+ glifos rasterizados" "$INFORME" | grep -oE "^[0-9]+" | head -1)
+RASTERIZADOS=$(grep -oE "[0-9]+ glyphs rasterized" "$INFORME" | grep -oE "^[0-9]+" | head -1)
 RASTERIZADOS=${RASTERIZADOS:-0}
 if [ "${EMOJI:-}" = 1 ] && [ "$RASTERIZADOS" = 0 ]; then
     invalidar "esta tanda vuelca emojis para medir lo que cuesta rasterizar un glifo de color y no \
@@ -691,8 +691,8 @@ fi
 #
 # **Y va DEBAJO del control de estado a propósito**: un informe truncado por un pánico tampoco tiene línea
 # de configuración, y diagnosticarlo como «no declara la configuración» taparía el fallo de verdad.
-if ! grep -q "^configuración: vetada" "$INFORME"; then
-    if grep -q "^configuración:" "$INFORME"; then
+if ! grep -q "^settings: *vetoed" "$INFORME"; then
+    if grep -q "^settings:" "$INFORME"; then
         invalidar "esta corrida MIRÓ la configuración del usuario en vez de tener el fichero vetado: bajo \
 la puerta de medida no se puede ni mirar, porque el tamaño de letra decide la rejilla y de ella dependen \
 todas las cifras publicadas. El veto se ha roto"
@@ -710,7 +710,7 @@ fi
 # **Que la ventana abriera las pestañas que se le pidieron.** Si la variable no llegó —un cambio en el
 # nombre, un binario viejo— la aplicación abre una sola y el informe sale con forma de tanda de una
 # pestaña bajo etiqueta de dos: exactamente el mismo engaño que el testigo evita con los paneles.
-DECLARADAS=$(sed -n 's/^pestañas: *\([0-9]*\)$/\1/p' "$INFORME" | head -1)
+DECLARADAS=$(sed -n 's/^tabs: *\([0-9]*\)$/\1/p' "$INFORME" | head -1)
 if [ "$DECLARADAS" != "$PESTANAS" ]; then
     invalidar "el informe dice «$DECLARADAS» pestañas y se pidieron $PESTANAS"
 fi
@@ -721,11 +721,11 @@ fi
 # —un cambio de nombre, un binario viejo—, si la disposición tiene una sola consola, o si la ventana se
 # cierra antes de completar el primero.
 if [ "$ARRASTRES" != 0 ]; then
-    INYECTADOS=$(sed -n 's/^arrastres: *\([0-9]*\) inyectados · .*$/\1/p' "$INFORME" | head -1)
-    CON_EFECTO=$(sed -n 's/^arrastres: *[0-9]* inyectados · \([0-9]*\) efectos · .*$/\1/p' "$INFORME" | head -1)
-    MARCADOS=$(sed -n 's/^arrastres: *[0-9]* inyectados · [0-9]* efectos · \([0-9]*\) fotogramas con texto marcado .*$/\1/p' "$INFORME" | head -1)
-    INFORMADOS=$(sed -n 's/^arrastres: .* texto marcado · \([0-9]*\) informes al programa .*$/\1/p' "$INFORME" | head -1)
-    QUE_GESTO=$(sed -n 's/^arrastres: .* informes al programa (\(.*\))$/\1/p' "$INFORME" | head -1)
+    INYECTADOS=$(sed -n 's/^drags: *\([0-9]*\) injected · .*$/\1/p' "$INFORME" | head -1)
+    CON_EFECTO=$(sed -n 's/^drags: *[0-9]* injected · \([0-9]*\) effective · .*$/\1/p' "$INFORME" | head -1)
+    MARCADOS=$(sed -n 's/^drags: *[0-9]* injected · [0-9]* effective · \([0-9]*\) frames with marked text .*$/\1/p' "$INFORME" | head -1)
+    INFORMADOS=$(sed -n 's/^drags: .* marked text · \([0-9]*\) reports to the program .*$/\1/p' "$INFORME" | head -1)
+    QUE_GESTO=$(sed -n 's/^drags: .* reports to the program (\(.*\))$/\1/p' "$INFORME" | head -1)
     if [ -z "$INYECTADOS" ]; then
         invalidar "se pidieron arrastres y el informe no declara ninguna línea de arrastres"
     fi
@@ -753,12 +753,12 @@ demasiado estrecha para que la operación se acepte, así que esta tanda no mide
     # vez por fotograma de arrastre, así que un gesto sano deja del orden de dos: pedir «al menos uno en
     # toda la corrida» dejaría pasar una tanda en la que solo el primero marcara y los demás cayeran en
     # otro camino. Es la misma cuenta que la guarda de recolocaciones de la tanda de la frontera.
-    if [ "$GESTO" = marcar ] && [ "$MARCADOS" -le "$INYECTADOS" ]; then
+    if [ "$GESTO" = mark ] && [ "$MARCADOS" -le "$INYECTADOS" ]; then
         invalidar "se inyectaron $INYECTADOS gestos de marcar y solo $MARCADOS fotogramas dejaron texto \
 marcado: no llegan ni a uno por gesto, así que la mayoría entró por otro sitio y la corrida publica el \
 coste de otra cosa bajo su etiqueta"
     fi
-    if [ "$GESTO" != marcar ] && [ "$MARCADOS" != 0 ]; then
+    if [ "$GESTO" != mark ] && [ "$MARCADOS" != 0 ]; then
         invalidar "esta tanda mide «$QUE_GESTO» y sin embargo dejó texto marcado en $MARCADOS fotogramas: \
 su gesto está cayendo en el camino de la selección, así que mide otra cosa"
     fi
@@ -772,16 +772,16 @@ su gesto está cayendo en el camino de la selección, así que mide otra cosa"
     if [ -z "$INFORMADOS" ]; then
         invalidar "se pidieron arrastres y el informe no declara cuántos informes de ratón salieron"
     fi
-    if [ "$GESTO" = raton ] && [ "$INFORMADOS" -le "$INYECTADOS" ]; then
+    if [ "$GESTO" = mouse ] && [ "$INFORMADOS" -le "$INYECTADOS" ]; then
         invalidar "se inyectaron $INYECTADOS gestos de ratón y solo salieron $INFORMADOS informes: no \
 llegan ni a uno por gesto, así que el programa no llegó a pedir el ratón y la corrida publica el coste de \
 una selección bajo la etiqueta del ratón"
     fi
-    if [ "$GESTO" = raton ] && [ "$MARCADOS" != 0 ]; then
+    if [ "$GESTO" = mouse ] && [ "$MARCADOS" != 0 ]; then
         invalidar "esta tanda manda el ratón al programa y además dejó texto marcado en $MARCADOS \
 fotogramas: los dos caminos se están recorriendo a la vez, así que sus tramos mezclan las dos cosas"
     fi
-    if [ "$GESTO" != raton ] && [ "$INFORMADOS" != 0 ]; then
+    if [ "$GESTO" != mouse ] && [ "$INFORMADOS" != 0 ]; then
         invalidar "esta tanda mide «$QUE_GESTO» y sin embargo mandó $INFORMADOS informes de ratón al \
 programa: su gesto está cayendo en el camino del ratón, así que mide otra cosa"
     fi
@@ -798,8 +798,8 @@ fi
 #
 # **Solo donde el gesto cambia el ancho de una consola.** El de mover consolas reordena el árbol sin
 # tocar el reparto, y exigirle la línea invalidaría corridas correctas.
-if [ "$GESTO" = frontera ]; then
-    RECOLOCACIONES=$(sed -n 's/^recolocar: *\([0-9]*\) veces .*$/\1/p' "$INFORME" | head -1)
+if [ "$GESTO" = divider ]; then
+    RECOLOCACIONES=$(sed -n 's/^reflow: *\([0-9]*\) times .*$/\1/p' "$INFORME" | head -1)
     if [ -z "$RECOLOCACIONES" ]; then
         invalidar "esta tanda mueve la frontera del árbol y el informe no declara ninguna recolocación: \
 el trabajo que el historial encareció se publicaría como coste del framework"
@@ -837,8 +837,8 @@ fi
 # teniendo razón por el motivo equivocado. Que la lista de gestos exentos crezca no es un descuido: es que
 # «inyecta gestos» y «mueve la disposición» dejaron de ser lo mismo en cuanto hubo un gesto que no la
 # mueve, y desde entonces cada gesto nuevo que no la mueva entra aquí.
-if [ "$ARRASTRES" != 0 ] && [ "$GESTO" != marcar ] && [ "$GESTO" != raton ]; then
-    INTENTOS=$(sed -n 's/^escribir la disposición en disco *([0-9]* escrituras de \([0-9]*\) intentos)$/\1/p' "$INFORME" | head -1)
+if [ "$ARRASTRES" != 0 ] && [ "$GESTO" != mark ] && [ "$GESTO" != mouse ]; then
+    INTENTOS=$(sed -n 's/^writing the layout to disk *([0-9]* writes of \([0-9]*\) attempts)$/\1/p' "$INFORME" | head -1)
     if [ -z "$INTENTOS" ]; then
         invalidar "se pidieron arrastres y el informe no declara ningún intento de guardar la disposición"
     fi
@@ -858,7 +858,7 @@ fi
 # justo dos ya no lo cazaría nadie. Lo que se comprueba es lo que el informe declara, no lo que se dedujo
 # de una cuenta.
 if [ "$RESTAURA" = 1 ]; then
-    RESTAURADAS=$(sed -n 's/^restauradas: *\([0-9]*\) consolas .*$/\1/p' "$INFORME" | head -1)
+    RESTAURADAS=$(sed -n 's/^restored: *\([0-9]*\) consoles .*$/\1/p' "$INFORME" | head -1)
     if [ -z "$RESTAURADAS" ]; then
         invalidar "esta tanda siembra una disposición y el informe no declara ninguna consola restaurada: \
 la ventana abrió de fábrica, así que esto es una tanda H con otro nombre"
@@ -878,7 +878,7 @@ fi
 # **Solo donde hay barra**: con una sola pestaña no se pinta, y exigir la línea invalidaría corridas
 # correctas. Es la misma regla que la guarda de los arrastres.
 if [ "$PESTANAS" -gt 1 ]; then
-    FOTOGRAMAS_CON_BARRA=$(sed -n 's/^barra: *\([0-9]*\) fotogramas .*$/\1/p' "$INFORME" | head -1)
+    FOTOGRAMAS_CON_BARRA=$(sed -n 's/^tab bar: *\([0-9]*\) frames .*$/\1/p' "$INFORME" | head -1)
     if [ -z "$FOTOGRAMAS_CON_BARRA" ]; then
         invalidar "esta tanda tiene $PESTANAS pestañas y el informe no declara lo que costó la barra: su \
 trabajo se publicaría como coste del framework"
@@ -888,7 +888,7 @@ trabajo se publicaría como coste del framework"
     # campo mal escrito, la siembra a destiempo— mediría la barra **sin la mitad que este hito le
     # añadió** y se leería exactamente igual que una buena. Es el mismo engaño que el testigo evita con
     # los paneles y la cuenta de efectos con los gestos.
-    MARCADAS=$(sed -n 's/^barra: .* · \([0-9]*\) fichas marcadas a la vez como mucho .*$/\1/p' "$INFORME" | head -1)
+    MARCADAS=$(sed -n 's/^tab bar: .* · \([0-9]*\) tabs marked at once at most .*$/\1/p' "$INFORME" | head -1)
     if [ "${MARCADAS:-0}" = 0 ]; then
         invalidar "la barra se pintó $FOTOGRAMAS_CON_BARRA veces y no marcó ni una ficha: esta tanda \
 mide el recorrido sin lo que se recorre"
@@ -899,7 +899,7 @@ fi
 # **Que las consolas fueran las que se pidieron.** Con la variable de la disposición sin llegar, la
 # aplicación abre dos columnas y el informe sale con forma de tanda de dos divisiones bajo etiqueta de
 # cuatro. Se cuentan las líneas de división, que es lo que el informe publica de verdad.
-CONSOLAS=$(grep -c '^  división ' "$INFORME" || true)
+CONSOLAS=$(grep -c '^  pane ' "$INFORME" || true)
 if [ "$CONSOLAS" != "$DIRECTORIOS" ]; then
     invalidar "el informe publica $CONSOLAS consolas y se pidieron $DIRECTORIOS ($PESTANAS × $DIVISIONES)"
 fi
@@ -930,4 +930,4 @@ echo "hecho: $(basename "$INFORME")" >&2
 # **La primera división, por su nombre y no por su posición.** El informe las nombra con un número que
 # no se reutiliza al cerrar, así que «división 0» es siempre la primera consola que abrió la ventana —
 # que es la que estas tandas comparan entre corridas.
-echo "rejilla: $(grep -m1 '  división 0:' "$INFORME" | tr -s ' ')" >&2
+echo "rejilla: $(grep -m1 '  pane 0:' "$INFORME" | tr -s ' ')" >&2

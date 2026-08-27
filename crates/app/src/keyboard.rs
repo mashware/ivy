@@ -568,7 +568,9 @@ mod tests {
             // Y sin marcar tampoco: el modo se consulta al componer y puede cambiar justo después.
             let stripped = String::from_utf8(paste(poison, false)).expect("es texto");
             assert!(
-                !stripped.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\r'),
+                !stripped
+                    .bytes()
+                    .any(|b| b < 0x20 && b != b'\t' && b != b'\r'),
                 "pasó un carácter de control sin marcar: {stripped:?}"
             );
         }

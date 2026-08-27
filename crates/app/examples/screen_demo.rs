@@ -24,7 +24,7 @@ use eframe::egui;
 use term_core::{Screen, Size};
 
 /// Lo que se escribe en la rejilla. Fijo: dos ejecuciones tienen que dar la misma pantalla.
-const GUION: &str = concat!(
+const SCRIPT: &str = concat!(
     "\x1b[1;33magent-terminal\x1b[0m — pantalla de prueba del pintor\r\n",
     "\r\n",
     "Colores con nombre:  ",
@@ -68,49 +68,49 @@ const GUION: &str = concat!(
 /// Treinta y dos filas y no veinticuatro: con las veinticuatro de un terminal clásico el guion se
 /// sale por abajo, la rejilla desplaza y **la primera fila deja de verse**. Que una pantalla de
 /// prueba esconda parte de lo que hay que mirar es peor que ser poco realista.
-const REJILLA: Size = Size { rows: 32, cols: 80 };
+const GRID: Size = Size { rows: 32, cols: 80 };
 
 fn main() -> eframe::Result {
-    let mut pantalla = Screen::new(REJILLA);
-    pantalla.advance(GUION.as_bytes());
+    let mut screen = Screen::new(GRID);
+    screen.advance(SCRIPT.as_bytes());
 
     eframe::run_native(
         "agent-terminal — pantalla de prueba",
         eframe::NativeOptions::default(),
         Box::new(|_cc| {
-            Ok(Box::new(Prueba {
-                pantalla,
-                tema: Theme::default(),
+            Ok(Box::new(Demo {
+                screen,
+                theme: Theme::default(),
             }))
         }),
     )
 }
 
-struct Prueba {
-    pantalla: Screen,
-    tema: Theme,
+struct Demo {
+    screen: Screen,
+    theme: Theme,
 }
 
-impl eframe::App for Prueba {
+impl eframe::App for Demo {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let metrica = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(14.0));
+        let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(14.0));
 
-        let vista = self.pantalla.view();
-        let origen = ui.max_rect().left_top();
+        let view = self.screen.view();
+        let origin = ui.max_rect().left_top();
         // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
         // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
         // `resolve`, uno persistente solo acumularía apuntes que nadie mira.
         paint(
             ui.painter(),
-            &vista,
-            &self.tema,
-            &metrica,
-            origen,
+            &view,
+            &self.theme,
+            &metrics,
+            origin,
             &mut Default::default(),
         );
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.tema.background().to_normalized_gamma_f32()
+        self.theme.background().to_normalized_gamma_f32()
     }
 }

@@ -47,7 +47,7 @@ pub mod theme;
 pub mod watcher;
 
 use eframe::egui;
-use measure::{Medida, RestoDelFotograma};
+use measure::{RestOfFrame, Timings};
 use painter::CellMetrics;
 use panel_contract::PanelDir;
 use pty_output::PtyOutput;
@@ -251,9 +251,9 @@ struct InjectedDrags {
     /// reconstruye igual —quitar, insertar y rehacer el reparto— y ese es el trabajo que la tanda mide. Lo
     /// que no cuenta es el que **no ocurre**.
     with_effect: usize,
-    /// En cuántos **fotogramas** el gesto dejó texto marcado. Ver [`measure::Arrastres::marcados`].
+    /// En cuántos **fotogramas** el gesto dejó texto marcado. Ver [`measure::Drags::marked`].
     selected: usize,
-    /// Cuántos informes de ratón salieron hacia el programa. Ver [`measure::Arrastres::informados`].
+    /// Cuántos informes de ratón salieron hacia el programa. Ver [`measure::Drags::reported`].
     reported: usize,
     /// Qué gesto se inyecta. Ver [`InjectedGesture`].
     which: InjectedGesture,
@@ -336,11 +336,7 @@ impl InjectedDrags {
     /// destino. Se devuelve la lista vacía en vez de saltarse el paso para que una tanda mal pedida
     /// —arrastres con una sola división— declare **cero gestos hechos** y el guion la pueda invalidar,
     /// en vez de publicar unos tramos que nadie sabría que no llevan ningún arrastre dentro.
-    fn events(
-        &mut self,
-        painted: &[(egui::Rect, Option<f32>)],
-        frame_nr: u64,
-    ) -> Vec<egui::Event> {
+    fn events(&mut self, painted: &[(egui::Rect, Option<f32>)], frame_nr: u64) -> Vec<egui::Event> {
         if self.completed == self.asked_for || self.last_frame == Some(frame_nr) {
             return Vec::new();
         }
@@ -665,7 +661,7 @@ impl InjectedDrags {
                     // **Con el acorde de mover, y sin él esta tanda mediría otra cosa.** Desde **D20**
                     // el botón primario a secas dentro de una consola **marca texto**: un gesto inyectado
                     // sin acorde recorrería el camino de la selección y publicaría su coste bajo la
-                    // etiqueta «moviendo consolas», con el informe declarando gestos igual.
+                    // etiqueta «moving consoles», con el informe declarando gestos igual.
                     modifiers: MOVE_CHORD,
                 },
             ];
@@ -857,13 +853,13 @@ const MINIMUM_ROWS: f32 = 3.0;
 /// La variable de entorno que dice con cuántas pestañas abrir.
 ///
 /// **Existe para poder medir sin nadie delante, y por eso lleva el prefijo del guion de medida** —
-/// `MEDIR_MIB` y `MEDIR_TANDA` ya viven en `scripts/medir-fotograma.sh`. Los atajos que crean pestañas
+/// `MEASURE_MIB` y `MEASURE_BATCH` ya viven en `scripts/medir-fotograma.sh`. Los atajos que crean pestañas
 /// entran por eventos del framework, así que un guion no tiene forma de abrir la segunda; sin esta
 /// puerta, la tanda de dos pestañas del anexo de D3 no se puede lanzar.
 ///
 /// Se escribe sin eñe a propósito: es lo que un guion de shell tiene que poder teclear sin sorpresas de
 /// codificación, y sus dos hermanas ya son ASCII.
-const TABS_VARIABLE: &str = "MEDIR_PESTANAS";
+const TABS_VARIABLE: &str = "MEASURE_TABS";
 
 /// La variable de entorno que dice con qué tamaño abrir la ventana, en puntos: `<ancho>x<alto>`.
 ///
@@ -878,7 +874,7 @@ const TABS_VARIABLE: &str = "MEDIR_PESTANAS";
 ///
 /// Se escribe sin eñe por lo mismo que sus tres hermanas: es lo que un guion de shell puede teclear sin
 /// sorpresas de codificación.
-const SIZE_VARIABLE: &str = "MEDIR_TAMANO";
+const SIZE_VARIABLE: &str = "MEASURE_SIZE";
 
 /// La variable de entorno que dice con qué disposición de consolas abrir cada pestaña: `<columnas>x<filas>`.
 ///
@@ -890,7 +886,7 @@ const SIZE_VARIABLE: &str = "MEDIR_TAMANO";
 /// siempre: la pestaña nace con su árbol y nadie consulta el suelo de [`can_split`] al arrancar. Quien
 /// pida una disposición que no cabe en su ventana verá consolas de una columna, igual que hoy con una
 /// ventana diminuta.
-const PANES_VARIABLE: &str = "MEDIR_DIVISIONES";
+const PANES_VARIABLE: &str = "MEASURE_PANES";
 
 /// La variable de entorno que dice **cuántos gestos de arrastre** inyectarse durante la tanda.
 ///
@@ -909,7 +905,7 @@ const PANES_VARIABLE: &str = "MEDIR_DIVISIONES";
 ///
 /// Se escribe sin eñe por lo mismo que sus tres hermanas: es lo que un guion de shell puede teclear sin
 /// sorpresas de codificación.
-const DRAGS_VARIABLE: &str = "MEDIR_ARRASTRES";
+const DRAGS_VARIABLE: &str = "MEASURE_DRAGS";
 
 /// Qué gesto se inyecta cuando una tanda pide arrastres.
 ///
@@ -949,20 +945,20 @@ impl InjectedGesture {
     /// cabecera nadie sabría cuál está leyendo.
     fn as_published(self) -> &'static str {
         match self {
-            Self::MovePane => "moviendo consolas",
-            Self::ResizePanel => "estrechando el panel",
-            Self::MoveDivider => "moviendo la frontera del árbol",
-            Self::Select => "marcando texto",
-            Self::MouseToProgram => "mandando el ratón al programa",
+            Self::MovePane => "moving consoles",
+            Self::ResizePanel => "narrowing the panel",
+            Self::MoveDivider => "moving the tree divider",
+            Self::Select => "marking text",
+            Self::MouseToProgram => "handing the mouse to the program",
         }
     }
 }
 
-/// Cuál de los tres gestos pide la tanda, y `consola` cuando no se dice nada.
+/// Cuál de los tres gestos pide la tanda, y `console` cuando no se dice nada.
 ///
 /// **Por omisión el de la consola**, para que las tandas que ya existían sigan midiendo exactamente lo que
 /// median: una tanda vieja que de pronto arrastrara paneles publicaría sus números bajo la misma letra.
-const GESTURE_VARIABLE: &str = "MEDIR_GESTO";
+const GESTURE_VARIABLE: &str = "MEASURE_GESTURE";
 
 /// Las cinco variables que dicen que esta sesión la pidió una tanda de medida.
 ///
@@ -1655,7 +1651,7 @@ enum OpenWith {
     /// Tantas pestañas de tantas consolas, que es lo que hace la aplicación desde F1.
     Factory { tabs: usize, layout: OpeningLayout },
     /// La disposición que quedó guardada la última vez.
-    Restored(session::Valido),
+    Restored(session::Validated),
 }
 
 /// Por qué puerta entra esta sesión.
@@ -1685,11 +1681,11 @@ enum Entry {
 fn settings_to_use(
     entry: Entry,
     path: Option<&std::path::Path>,
-) -> (settings::Ajustes, measure::LecturaDeAjustes) {
+) -> (settings::Ajustes, measure::ReadingSettings) {
     if entry == Entry::Measuring {
         return (
             settings::Ajustes::default(),
-            measure::LecturaDeAjustes::Vetada,
+            measure::ReadingSettings::Vetoed,
         );
     }
     let Some(path) = path else {
@@ -1699,7 +1695,10 @@ fn settings_to_use(
             "agent-terminal: no hay dónde buscar la configuración (ni $XDG_CONFIG_HOME ni $HOME dan una \
              ruta absoluta). Se abre con lo de fábrica."
         );
-        return (settings::Ajustes::default(), measure::LecturaDeAjustes::Sin);
+        return (
+            settings::Ajustes::default(),
+            measure::ReadingSettings::Missing,
+        );
     };
     let started = Instant::now();
     match settings::leer(path) {
@@ -1717,16 +1716,16 @@ fn settings_to_use(
             }
             (
                 settings,
-                measure::LecturaDeAjustes::Con {
-                    cuanto: started.elapsed(),
-                    avisos: warnings.cuantos(),
+                measure::ReadingSettings::Applied {
+                    how_long: started.elapsed(),
+                    warnings: warnings.cuantos(),
                 },
             )
         }
         Err(problem) => {
             // **Que no haya fichero es el caso normal y no se dice**; lo decide el propio tipo, para que
             // esta rama y cualquier otra que lea el fichero no dejen de coincidir.
-            if problem.merece_aviso() {
+            if problem.warrants_warning() {
                 eprintln!(
                     "agent-terminal: no se pudo usar {}: {problem}. Se abre con lo de fábrica.",
                     path.display()
@@ -1735,7 +1734,10 @@ fn settings_to_use(
             // **Se declara que SÍ se miró, aunque no se aplicara nada.** «De fábrica porque el fichero
             // estaba roto» y «de fábrica porque una tanda lo vetó» son dos cosas distintas, y el informe
             // solo distingue tandas si esta línea no las confunde.
-            (settings::Ajustes::default(), measure::LecturaDeAjustes::Sin)
+            (
+                settings::Ajustes::default(),
+                measure::ReadingSettings::Missing,
+            )
         }
     }
 }
@@ -1754,7 +1756,7 @@ fn settings_to_use(
 fn open_with(
     tabs: Option<&str>,
     panes: Option<&str>,
-    saved: Option<session::Valido>,
+    saved: Option<session::Validated>,
 ) -> OpenWith {
     let factory = OpenWith::Factory {
         tabs: how_many_tabs(tabs),
@@ -1833,7 +1835,7 @@ fn drags_at_startup() -> usize {
     how_many_drags(std::env::var(DRAGS_VARIABLE).ok().as_deref())
 }
 
-/// Qué gesto pide la tanda: `panel` para la frontera del panel, `frontera` para la que reparte consolas,
+/// Qué gesto pide la tanda: `panel` para la frontera del panel, `divider` para la que reparte consolas,
 /// cualquier otra cosa el de la consola.
 ///
 /// **Lo que no se entiende cae en el de la consola**, igual que las otras variables de medida: abortar el
@@ -1842,9 +1844,9 @@ fn drags_at_startup() -> usize {
 fn gesture_of(value: Option<&str>) -> InjectedGesture {
     match value.map(str::trim) {
         Some("panel") => InjectedGesture::ResizePanel,
-        Some("frontera") => InjectedGesture::MoveDivider,
-        Some("marcar") => InjectedGesture::Select,
-        Some("raton") => InjectedGesture::MouseToProgram,
+        Some("divider") => InjectedGesture::MoveDivider,
+        Some("mark") => InjectedGesture::Select,
+        Some("mouse") => InjectedGesture::MouseToProgram,
         _ => InjectedGesture::MovePane,
     }
 }
@@ -1916,8 +1918,8 @@ pub fn run() -> eframe::Result {
     // **Y la que carga es la que se queda con la ventana**, que era la deuda que el PR anterior dejó
     // escrita: el veto de una versión más nueva vive en ella, así que una segunda instancia lo perdería y
     // machacaría la disposición de un binario más nuevo.
-    let mut persistence = session::Persistencia::del_entorno();
-    let saved = persistence.cargar();
+    let mut persistence = session::Persistence::from_env();
+    let saved = persistence.load();
 
     // **Una sesión de medida no pisa la disposición de quien mide.** Las dos variables de abajo abren lo que
     // la tanda diga en vez de lo que el usuario dejó, así que guardar escribiría encima **la disposición de
@@ -1934,7 +1936,7 @@ pub fn run() -> eframe::Result {
     // cazado nadie.
     let measuring = any_measurement_variable(|which| std::env::var_os(which).is_some());
     if measuring {
-        persistence.no_pisar_porque("esta sesión la pidió una tanda de medida");
+        persistence.forbid_overwrite("esta sesión la pidió una tanda de medida");
     }
     let with_what = open_with(tabs.as_deref(), panes.as_deref(), saved);
 
@@ -2055,7 +2057,7 @@ struct Pane {
     measured: Size,
     /// Los cronómetros de esta consola, y no de la ventana: así sus tramos siguen comparando con las
     /// tablas de D3 haya una división o cuatro.
-    timings: Medida,
+    timings: Timings,
     /// Lo que la primera mitad del fotograma ya sabe de la vuelta —desde cuándo esperaba lo
     /// recogido, cuándo se recogió y lo que costó interpretarlo—, a la espera de que la pasada de
     /// interfaz añada lo que cuesta encolar el pintado.
@@ -2199,7 +2201,7 @@ impl Pane {
             received: Vec::new(),
             keystrokes: Vec::new(),
             measured: INITIAL_GRID,
-            timings: Medida::default(),
+            timings: Timings::default(),
             pending_measurement: None,
             panel_reread_unpainted: std::time::Duration::ZERO,
             reflowed: std::time::Duration::ZERO,
@@ -2501,7 +2503,7 @@ impl Pane {
     /// para la que se va y no va a publicar ninguna media.
     ///
     /// **Son dos sitios, y con uno solo no basta.** El orden real del fotograma lo decide: `logic` cierra
-    /// primero el fotograma anterior —que vacía lo pendiente de [`measure::Medida`]— y **después** bombea,
+    /// primero el fotograma anterior —que vacía lo pendiente de [`measure::Timings`]— y **después** bombea,
     /// que es lo que deja en `pending_measurement` lo que esta consola acaba de interpretar. El teclado se
     /// atiende al principio de la pasada de interfaz, **antes del pintado**, así que cuando el acorde de
     /// cerrar llega, lo pendiente de la medida está vacío y lo interpretado de este fotograma está
@@ -2510,18 +2512,16 @@ impl Pane {
     /// sea el coste que se le atribuye al framework de interfaz. El otro sí puede tener algo cuando egui
     /// repite la pasada, así que se recogen los dos.
     ///
-    /// **No anota ninguna media**, por lo mismo que [`measure::Medida::llevarse_lo_pendiente`]: esta
+    /// **No anota ninguna media**, por lo mismo que [`measure::Timings::take_pending`]: esta
     /// consola ya no va a publicar tramos, y cerrarla por el camino normal obligaría a inventarse un
     /// coste de fotograma que no va a terminar.
     fn take_what_this_frame_left(&mut self) -> std::time::Duration {
         let without_recording = self
             .pending_measurement
             .take()
-            .map_or(std::time::Duration::ZERO, |(_, _, interpreted)| {
-                interpreted
-            });
+            .map_or(std::time::Duration::ZERO, |(_, _, interpreted)| interpreted);
 
-        self.timings.llevarse_lo_pendiente()
+        self.timings.take_pending()
             + without_recording
             + std::mem::take(&mut self.panel_reread_unpainted)
     }
@@ -3071,7 +3071,7 @@ impl Pane {
         // exactamente el fallo del tramo con la etiqueta cambiada que este fichero ya documenta
         // haber pagado una vez.
         if !pasted {
-            self.timings.anotar_ida(frame_started.elapsed());
+            self.timings.record_outbound(frame_started.elapsed());
         }
 
         // **La memoria de un pegado grande no se queda para siempre.** Este vector se reutiliza entre
@@ -3347,10 +3347,7 @@ impl Node {
             weight,
             node: Self::Leaf(new),
         };
-        let existing = Child {
-            weight,
-            node: old,
-        };
+        let existing = Child { weight, node: old };
 
         *self = Self::Branch {
             orientation: cut_along,
@@ -3422,7 +3419,7 @@ impl Node {
                 );
                 // **Y este injerto tampoco es limpio, conviene decirlo:** `make_a_branch` sobre lo que
                 // aquí es una rama y no una hoja puede dejar dos ramas del mismo sentido anidadas si la
-                // raíz reparte en el sentido de `lado`. Se acepta porque este camino es inalcanzable y
+                // raíz reparte en el sentido de `side`. Se acepta porque este camino es inalcanzable y
                 // porque una forma fea es mejor que un programa muerto — pero no es «la salida segura».
                 self.make_a_branch(side, returned);
                 (self, false)
@@ -3596,7 +3593,10 @@ impl Node {
             .node
             .children()
             .expect("el sentido se acaba de leer de una rama");
-        let total: f32 = group_children.iter().map(|child| child.weight.value()).sum();
+        let total: f32 = group_children
+            .iter()
+            .map(|child| child.weight.value())
+            .sum();
         let lifted: Vec<Child> = group_children
             .into_iter()
             .map(|child| Child {
@@ -3619,7 +3619,7 @@ impl Node {
 ///
 /// **La consola sale del árbol sin soltarse todavía**, y eso es deliberado: al soltarla muere su
 /// programa y desaparece su directorio, y antes hay que llevarse lo que tenía medido de este fotograma.
-/// Si se fuera con su [`measure::Medida`] dentro, la resta le regalaría su trabajo al framework de
+/// Si se fuera con su [`measure::Timings`] dentro, la resta le regalaría su trabajo al framework de
 /// interfaz — la cifra con la que D3 decide. Es lo mismo que ya hace cerrar una pestaña, y no se puede
 /// hacer desde dentro del árbol porque el cronómetro es de la ventana.
 struct Closing {
@@ -3884,9 +3884,9 @@ struct Window {
     discoverer: fonts::Discoverer,
     /// Lo que cuesta buscar esas fuentes, para que el informe lo declare y no acabe publicado como coste
     /// del framework.
-    discovery: measure::Descubrimiento,
+    discovery: measure::Discovery,
     /// Lo que cuesta rasterizar los glifos de color, para que no acabe dentro del tramo del pintado.
-    color: measure::Rasterizado,
+    color: measure::Rasterizing,
     theme: Theme,
     /// Qué acorde hace cada cosa.
     ///
@@ -3904,8 +3904,8 @@ struct Window {
     /// cambia la rejilla —cuántas filas y columnas caben— y por tanto lo que cuesta interpretar y pintar.
     /// No es un ajuste estético: es el parámetro del que depende el histórico de medida entero.
     font_size: f32,
-    /// El coste de la pasada que nadie cronometró; ver [`RestoDelFotograma`] por qué es de la ventana.
-    rest_of_frame: RestoDelFotograma,
+    /// El coste de la pasada que nadie cronometró; ver [`RestOfFrame`] por qué es de la ventana.
+    rest_of_frame: RestOfFrame,
     /// Cuándo empezó el fotograma en curso, que es donde arranca el cronómetro de la ida.
     frame_started: Instant,
     /// El último fotograma cuyo coste ya se anotó, para no contarlo dos veces si egui repite la
@@ -3919,7 +3919,7 @@ struct Window {
     ///
     /// 1. **Abrir una pestaña son dos `fork`/`exec`**, y ocurren dentro de la pasada de interfaz porque es
     ///    ahí donde se atiende el acorde. Nadie los cronometraba.
-    /// 2. **Cerrar una pestaña se lleva sus divisiones, y con ellas su [`measure::Medida`]** — incluida la
+    /// 2. **Cerrar una pestaña se lleva sus divisiones, y con ellas su [`measure::Timings`]** — incluida la
     ///    vuelta que ya tenían anotada de este mismo fotograma. Ese trabajo ocurrió, así que si se va sin
     ///    declararse, el resto se queda con él.
     ///
@@ -3939,35 +3939,35 @@ struct Window {
     /// **Va aparte del cajón de arriba aunque también se sume a él.** El cajón es lo que se resta del
     /// fotograma —ahí dentro no se distingue quién puso qué—, y esto es lo que el informe **nombra**: sin
     /// nombrarlo, la única forma de saber lo que cuesta la barra sería restar dos tandas distintas.
-    tab_bar_cost: measure::Barra,
+    tab_bar_cost: measure::TabBar,
     /// Lo que ha costado recolocar el texto de las consolas al cambiar su ancho.
     ///
     /// **Vive en la ventana y no en cada división aunque el trabajo sea de la consola**, porque lo que
     /// hay que poder leer es cuántas veces se recolocó **en la sesión** y cuánto costó cada vez: una
     /// media por consola repartida entre sus miles de fotogramas quietos diría que no cuesta nada.
-    reflow: measure::Reflujo,
+    reflow: measure::Reflow,
     /// Dónde va la disposición, y lo que esta sesión ya sabe de ese fichero.
     ///
     /// **Es la misma que cargó al arrancar, y eso es una regla y no una casualidad**: el veto de una
     /// versión más nueva vive aquí, así que una segunda instancia lo perdería y machacaría la disposición
     /// de un binario más nuevo. Lo dice el doc del tipo, y era la deuda con nombre que dejó el PR que
     /// aprendió a restaurar.
-    persistence: session::Persistencia,
+    persistence: session::Persistence,
     /// De dónde salieron las consolas, cuando salieron del fichero: cuántas eran y lo que costó abrirlas.
     ///
     /// **Solo lo rellena la rama que restaura**, así que `None` significa «esta ventana la abrió una
     /// petición, no un fichero» — que es justo lo que el informe necesita distinguir y la cuenta de
     /// consolas no distingue.
-    restoring: Option<measure::Restauracion>,
+    restoring: Option<measure::Restoring>,
     /// Lo que costó leer la configuración de quien usa el terminal, y si se llegó a leer.
-    reading_settings: measure::LecturaDeAjustes,
+    reading_settings: measure::ReadingSettings,
     /// El espejo del fotograma anterior. **Contra él se arma el plazo**, así que el plazo se rearma
     /// **cuando algo cambia** y no cuando algo está sin escribir: sin esto, un directorio no escribible
     /// dejaría la diferencia puesta y **la ventana no se dormiría nunca**.
-    last_seen: Option<session::Documento>,
+    last_seen: Option<session::StoredDocument>,
     /// Lo último que llegó al disco **de verdad**. Contra él se decide si hay que escribir, así que un
     /// fallo **se reintenta con el cambio siguiente** sin guardar el error ni inventar ninguna espera.
-    last_written: Option<session::Documento>,
+    last_written: Option<session::StoredDocument>,
     /// Cuándo vence el plazo, contado desde el **primer** cambio sin escribir.
     ///
     /// **Un tope y no un aplazamiento**, y la diferencia es la que hace que el hito funcione: rearmando en
@@ -3980,7 +3980,7 @@ struct Window {
     /// pasada» en vez de «por fotograma». Se acumula aquí y se anota **una vez al cerrar**.
     mirror_this_frame: std::time::Duration,
     /// Los dos tramos que cuesta guardar, con sus dos filas en el informe.
-    saving: measure::Guardado,
+    saving: measure::Saving,
     /// Los gestos de arrastre que la tanda de medida se hace a sí misma, si pidió alguno.
     ///
     /// **Nada cuando nadie los pide**, que es siempre salvo en una tanda: así el camino no llega a correr
@@ -4160,7 +4160,7 @@ impl Window {
         with_what: OpenWith,
         program: &str,
         size: Option<egui::Vec2>,
-        persistence: session::Persistencia,
+        persistence: session::Persistence,
     ) -> term_core::Result<Self> {
         // **El programa se recibe, y lo usa la rama que restaura.** La de fábrica abre el shell del usuario
         // como lo ha hecho siempre, igual que las tres decenas de pruebas que la llaman: pasarlo hasta ahí
@@ -4171,7 +4171,7 @@ impl Window {
         let opened = match with_what {
             OpenWith::Factory { tabs, layout } => Self::with_tabs(ctx, tabs, layout, size),
             OpenWith::Restored(saved) => {
-                let panes = saved.hojas();
+                let panes = saved.leaves();
                 // **Se cronometra abrirlas, y no leer el fichero, y la diferencia importa.** Lo que crece
                 // con el tamaño de la disposición son los `fork` y los `exec` de aquí: leer un documento de
                 // cuatro hojas y uno de doscientas cuesta casi lo mismo. Lo que costó leer viaja con la
@@ -4189,10 +4189,10 @@ impl Window {
                             // con el número de consolas** —armar el vigilante de cada directorio y describir
                             // el árbol entero para el primer espejo—, y pararlo antes los dejaba fuera de un
                             // número que dice medir justo eso.
-                            window.restoring = Some(measure::Restauracion {
-                                consolas: panes,
-                                leer: persistence.tardo_en_cargar(),
-                                abrirlas: before.elapsed(),
+                            window.restoring = Some(measure::Restoring {
+                                consoles: panes,
+                                read: persistence.load_time(),
+                                opening: before.elapsed(),
                             });
                             window
                         })
@@ -4207,7 +4207,8 @@ impl Window {
                         // guardado automático encendido, el primer cambio del usuario la escribiría encima
                         // de sus veinte consolas. Antes de este hito el fichero sobrevivía a un arranque
                         // fallido y el siguiente lo recuperaba: esto conserva esa propiedad.
-                        do_not_overwrite = Some("no se pudo abrir la disposición que había guardada");
+                        do_not_overwrite =
+                            Some("no se pudo abrir la disposición que había guardada");
                         Self::with_tabs(ctx, 1, OpeningLayout::DEFAULT, size)
                     }
                 }
@@ -4222,7 +4223,7 @@ impl Window {
         opened.map(|mut window| {
             window.persistence = persistence;
             if let Some(reason) = do_not_overwrite {
-                window.persistence.no_pisar_porque(reason);
+                window.persistence.forbid_overwrite(reason);
             }
             window
         })
@@ -4284,27 +4285,27 @@ impl Window {
             active: 0,
             modifiers: egui::Modifiers::NONE,
             discoverer: fonts::Discoverer::default(),
-            discovery: measure::Descubrimiento::default(),
-            color: measure::Rasterizado::default(),
+            discovery: measure::Discovery::default(),
+            color: measure::Rasterizing::default(),
             theme: Theme::default(),
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
             font_size: DEFAULT_FONT_SIZE,
-            rest_of_frame: RestoDelFotograma::default(),
+            rest_of_frame: RestOfFrame::default(),
             frame_started: Instant::now(),
             last_closed_frame: 0,
             timed_separately: std::time::Duration::ZERO,
             tab_bar_this_frame: std::time::Duration::ZERO,
-            tab_bar_cost: measure::Barra::default(),
-            reflow: measure::Reflujo::default(),
-            persistence: session::Persistencia::en(None),
+            tab_bar_cost: measure::TabBar::default(),
+            reflow: measure::Reflow::default(),
+            persistence: session::Persistence::at(None),
             restoring: None,
-            reading_settings: measure::LecturaDeAjustes::default(),
+            reading_settings: measure::ReadingSettings::default(),
             last_seen: None,
             last_written: None,
             save_due: None,
             mirror_this_frame: std::time::Duration::ZERO,
-            saving: measure::Guardado::default(),
+            saving: measure::Saving::default(),
             // **Nada de entrada, y lo pone quien mide.** Era un parámetro más de este constructor, y la
             // revisión lo tiró con un argumento que las propias pruebas ya demostraban: nadie salvo una
             // tanda lo pone, y a cambio la firma acababa en dos `Option` seguidos que se rellenaban con dos
@@ -4505,7 +4506,7 @@ impl Window {
     /// redactada, no que alguien la imprima — y eso, en este proyecto, ya ha dejado pasar cosas con la
     /// suite en verde.
     fn publish_the_report(&self, to: &mut dyn std::io::Write) -> std::io::Result<()> {
-        if !self.all_panes().any(|pane| pane.timings.hay_algo()) {
+        if !self.all_panes().any(|pane| pane.timings.has_any()) {
             return Ok(());
         }
 
@@ -4522,29 +4523,29 @@ impl Window {
                 )
             })
             .collect();
-        measure::cabecera(
+        measure::header(
             to,
-            measure::EnPuntos {
-                ancho: self.window_size.x,
-                alto: self.window_size.y,
+            measure::SizeInPoints {
+                width: self.window_size.x,
+                height: self.window_size.y,
             },
             &grids,
             self.active().name,
-            measure::DeLaSesion {
-                arrastres: self
+            measure::SessionHeader {
+                drags: self
                     .injected_drags
                     .as_ref()
-                    .map(|injected_drags| measure::Arrastres {
-                        inyectados: injected_drags.completed,
-                        con_efecto: injected_drags.with_effect,
-                        marcados: injected_drags.selected,
-                        informados: injected_drags.reported,
-                        gesto: injected_drags.which.as_published(),
+                    .map(|injected_drags| measure::Drags {
+                        injected: injected_drags.completed,
+                        effective: injected_drags.with_effect,
+                        marked: injected_drags.selected,
+                        reported: injected_drags.reported,
+                        gesture: injected_drags.which.as_published(),
                     }),
-                restauracion: self.restoring,
-                configuracion: self.reading_settings,
-                barra: self.tab_bar_cost,
-                reflujo: self.reflow,
+                restoring: self.restoring,
+                settings: self.reading_settings,
+                tab_bar: self.tab_bar_cost,
+                reflow: self.reflow,
             },
         )?;
 
@@ -4582,9 +4583,9 @@ impl Window {
             // palabra que la constante ya usa.
             writeln!(
                 to,
-                "divisores:    {} en la pestaña {}, al {} de su tramo repartible al salir, y son \
-                 {DIVIDER_THICKNESS} puntos de grosor cada uno. Si se arrastró durante la sesión, los \
-                 tramos de abajo mezclan repartos",
+                "dividers:     {} in tab {}, at {} of their shareable span at exit, and they are \
+                 {DIVIDER_THICKNESS} points thick each. If it was dragged during the session, the \
+                 spans below mix splits",
                 dividers.len(),
                 visible.name,
                 at.join(" · ")
@@ -4600,20 +4601,20 @@ impl Window {
         // consola, y eso hay que poder leerlo en el informe.
         let how_many_visible = visible.panes().len();
         let where_it_looks = match visible.where_the_focus_is() {
-            Some(at) => measure::lado(how_many_visible, at).map_or_else(
+            Some(at) => measure::side(how_many_visible, at).map_or_else(
                 // **Con la cuenta delante, en vez de «con más de dos».** Mientras una pestaña tuvo
                 // siempre dos consolas o más —nacía con dos y partir solo añadía—, «sin lado» solo podía
                 // significar que sobraban. Desde que se puede **cerrar**, la pestaña de una es alcanzable,
                 // y ese texto diría justo lo contrario de lo que pasa. La cuenta dice la verdad en los dos
                 // casos, y de paso deja de haber que contar líneas para saber cuántas eran.
-                || format!("sin lado: hay {how_many_visible} y el lado solo describe algo con dos"),
+                || format!("no side: there are {how_many_visible} and a side only describes something with two"),
                 str::to_string,
             ),
-            None => "NO EXISTE: el teclado no llegaba a ninguna consola".to_string(),
+            None => "DOES NOT EXIST: the keyboard reached no console".to_string(),
         };
         writeln!(
             to,
-            "foco al salir: división {} ({where_it_looks}) de la pestaña {}",
+            "focus at exit: pane {} ({where_it_looks}) of tab {}",
             visible.focus, visible.name
         )?;
 
@@ -4631,29 +4632,25 @@ impl Window {
             let which_tab = tab.name;
             let its_panes = tab.panes();
             for (which, pane) in its_panes.iter().enumerate() {
-                let side = measure::lado(its_panes.len(), which)
+                let side = measure::side(its_panes.len(), which)
                     .map_or_else(String::new, |side| format!(" ({side})"));
-                writeln!(
-                    to,
-                    "\n── pestaña {which_tab}, división {}{side} ──",
-                    pane.name
-                )?;
-                pane.timings.publicar_tramos(to)?;
+                writeln!(to, "\n── tab {which_tab}, pane {}{side} ──", pane.name)?;
+                pane.timings.publish_spans(to)?;
             }
         }
 
-        self.rest_of_frame.publicar(to)?;
+        self.rest_of_frame.publish(to)?;
         // **Los dos tramos de guardar van después del resto, y con su propia fila cada uno.** Están
         // descontados de ese resto —entran en el acumulador de la ventana—, así que sin estas filas el
         // número existiría y **nadie podría auditarlo**.
-        self.saving.publicar(to)?;
+        self.saving.publish(to)?;
         // **Y el descubrimiento igual: su fila va después del resto porque también está descontado de
         // él.** Es el tramo más caro que este proyecto añade fuera de una consola, así que sin declararlo
         // el número de D3 se lo comería entero.
-        self.discovery.publicar(to)?;
+        self.discovery.publish(to)?;
         // **Y el del color va el último, con la misma razón que los tres de arriba**: está restado del
         // tramo del pintado, así que sin esta fila el número existiría y nadie podría auditarlo.
-        self.color.publicar(to)
+        self.color.publish(to)
     }
 
     /// Le da a las consolas de las pestañas que no se ven la rejilla que tendrían si se vieran.
@@ -4741,7 +4738,7 @@ impl Window {
     /// una consola de fondo **sí** relee su `panel.json` —de que haya panel depende cuánto ancho le
     /// queda—, y esa lectura la cronometra [`Window::measure_the_ones_out_of_sight`] y la entrega aquí. Y
     /// **la espera se declara a `None` a propósito**, que es lo que hace que las cuatro medias no se
-    /// toquen —ver [`measure::Medida::cerrar_fotograma`]—; lo que se conserva es lo interpretado y lo
+    /// toquen —ver [`measure::Timings::close_frame`]—; lo que se conserva es lo interpretado y lo
     /// que costó el panel, que es justo lo que la resta necesita. Por eso esto **no lleva ninguna serie
     /// nueva**.
     ///
@@ -4755,13 +4752,13 @@ impl Window {
     fn close_the_unpainted_rounds(&mut self) {
         for pane in self.all_panes_mut() {
             // **El tramo del panel viaja con la vuelta, y no en una anotación propia.** No es una
-            // preferencia: [`measure::Medida::anotar_vuelta`] **sobrescribe** lo pendiente, así que una
+            // preferencia: [`measure::Timings::record_round`] **sobrescribe** lo pendiente, así que una
             // segunda anotación en el mismo fotograma se llevaría por delante la vuelta buena. Aquí no
             // llega a pasar —`pump` deja siempre algo pendiente y las dos cosas se declaran
             // juntas—, y por eso mismo conviene que quede escrito: la forma segura de añadir un tramo
             // a esta vuelta es meterlo dentro, nunca al lado.
             if let Some((_, collected_at, interpreted)) = pane.pending_measurement.take() {
-                pane.timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
+                pane.timings.record_round(measure::Spans::of_a_round(
                     None,
                     collected_at,
                     interpreted,
@@ -4842,11 +4839,10 @@ impl Window {
         // leer.** Y lo que no pasa la validación **se avisa una vez**: el caso real es tener más consolas
         // abiertas que las que el formato admite —el techo existe para acotar el `fork` del arranque, así
         // que no se puede quitar—, y sin este aviso el usuario perdería su disposición sin ninguna señal.
-        let validated = match session::validar(document.clone()) {
+        let validated = match session::validate(document.clone()) {
             Ok(validated) => validated,
             Err(problem) => {
-                self.persistence
-                    .avisar_de_lo_que_no_se_puede_guardar(&problem);
+                self.persistence.warn_cannot_save(&problem);
                 // **Esto no es una escritura y no se cuenta como tal, ni siquiera como intento.** No se
                 // resolvió ninguna ruta ni se tocó el disco: lo que corrió es validar, que es del mismo
                 // tipo de trabajo que comparar el espejo. Contarlo en el tramo de la escritura metería en
@@ -4857,10 +4853,10 @@ impl Window {
             }
         };
 
-        let written = self.persistence.guardar(&validated);
+        let written = self.persistence.save(&validated);
         let how_much = started.elapsed();
         self.timed_separately += how_much;
-        self.saving.anotar_escritura(how_much, written);
+        self.saving.record_write(how_much, written);
 
         if written {
             self.last_written = Some(document);
@@ -4872,7 +4868,7 @@ impl Window {
     fn close_the_frame(&mut self, cpu_cost: std::time::Duration) {
         let timed = self
             .all_panes_mut()
-            .filter_map(|pane| pane.timings.cerrar_fotograma(cpu_cost))
+            .filter_map(|pane| pane.timings.close_frame(cpu_cost))
             .reduce(|one, other| one + other);
 
         // **Se vacía siempre, haya resto que anotar o no.** Arrastrarlo al fotograma siguiente sería
@@ -4886,7 +4882,7 @@ impl Window {
         // dentro de la cifra con la que D3 juzga al framework, o auditable pero sin restar.
         let mirror = std::mem::take(&mut self.mirror_this_frame);
         if !mirror.is_zero() {
-            self.saving.anotar_espejo(mirror);
+            self.saving.record_mirror(mirror);
         }
 
         // **La barra se anota aquí y no donde se pinta**, por lo mismo que el espejo: lo de arriba
@@ -4895,7 +4891,7 @@ impl Window {
         // pasadas, que ocurrió entero.
         let tab_bar = std::mem::take(&mut self.tab_bar_this_frame);
         if !tab_bar.is_zero() {
-            self.tab_bar_cost.anotar(tab_bar);
+            self.tab_bar_cost.record(tab_bar);
         }
 
         // **Y lo del enganche de la entrada cruda se declara aquí, DESPUÉS de vaciar.** Ver
@@ -4907,7 +4903,7 @@ impl Window {
         // serie acabaría midiendo sobre todo los fotogramas en los que no pasaba nada.
         if let Some(timed) = timed {
             self.rest_of_frame
-                .anotar(cpu_cost, timed + separately + mirror);
+                .record(cpu_cost, timed + separately + mirror);
         }
     }
 
@@ -4956,7 +4952,7 @@ impl Window {
         // **Solo cuando hubo recolocación de verdad.** Anotar un cero en los miles de fotogramas
         // quietos hundiría la media y haría decir a este tramo lo contrario de lo que vale.
         if !reflowed.is_zero() {
-            self.reflow.anotar(reflowed);
+            self.reflow.record(reflowed);
             self.timed_separately += reflowed;
         }
 
@@ -5160,8 +5156,7 @@ impl Window {
                 if let Some((at, side)) = over
                     && let Some(&other) = names.get(at)
                 {
-                    the_tree_changed |=
-                        self.drop_a_pane(name, other, side, rects[at], metrics);
+                    the_tree_changed |= self.drop_a_pane(name, other, side, rects[at], metrics);
                 }
             } else if !response.drag_stopped() {
                 target = over;
@@ -5192,7 +5187,7 @@ impl Window {
         {
             // **La ida del ratón se anota en la medida de SU consola**, no en la de la ventana: el
             // informe se publica por división y una serie común no diría en cuál ocurrió el gesto.
-            pane.timings.anotar_ida_del_raton(to_the_program.cost);
+            pane.timings.record_mouse_outbound(to_the_program.cost);
             if to_the_program.was_a_report {
                 self.one_more_reported(true);
             }
@@ -5329,7 +5324,7 @@ impl Window {
         if let Some(pane) = self.pane_called(name)
             && let Some(cost) = pane.send_mouse_to_the_program(gesture, cell, chord)
         {
-            pane.timings.anotar_ida_del_raton(cost);
+            pane.timings.record_mouse_outbound(cost);
             self.one_more_reported(matches!(gesture, mouse::MouseReport::Press(_)));
         }
     }
@@ -5506,7 +5501,7 @@ impl Window {
         let it_selected = pane.screen.has_selection();
 
         // **Y se apunta si de verdad quedó algo marcado, para el informe de una tanda.** Ver
-        // [`measure::Arrastres::marcados`]: es lo que distingue «se inyectó el gesto» de «el gesto marcó»,
+        // [`measure::Drags::marked`]: es lo que distingue «se inyectó el gesto» de «el gesto marcó»,
         // y lo que permite a una tanda de OTRO gesto invalidarse si el suyo acabó seleccionando.
         if it_selected && let Some(injected_drags) = self.injected_drags.as_mut() {
             injected_drags.one_more_selected();
@@ -5670,7 +5665,7 @@ impl Window {
     /// de egui** y competiría con el enrutado de la aplicación, que es geográfico.
     fn handle_tab_bar_clicks(&mut self, ui: &egui::Ui, tab_bar: egui::Rect, metrics: &CellMetrics) {
         for which_tab in 0..self.tabs.len() {
-            let id = ui.id().with(("pestaña", which_tab));
+            let id = ui.id().with(("tab", which_tab));
             if ui
                 .interact(
                     tab_rect(tab_bar, which_tab, self.tabs.len()),
@@ -6139,7 +6134,7 @@ impl Window {
         self.some_closed_by_hand = true;
 
         // **Lo que sus consolas ya habían declarado de este fotograma se recoge antes de soltarlas.** Se
-        // van con su `Medida` dentro, y ahí puede haber una vuelta anotada de este mismo fotograma: bytes
+        // van con su `Timings` dentro, y ahí puede haber una vuelta anotada de este mismo fotograma: bytes
         // que se interpretaron de verdad hace un instante. Si se marcha sin declararse, la resta se lo
         // atribuye al framework de interfaz y el «resto» sale inflado justo en el fotograma en que se
         // cierra una pestaña. El coste del cierre en sí —matar los programas y borrar sus directorios,
@@ -6363,9 +6358,8 @@ impl Window {
         // El cierre de la vuelta va aquí y no en el bucle de arriba porque **el encolado hay que
         // declararlo siempre**, también cuando a esta consola no le llegó salida: se pintó igual, y su
         // coste tiene que salir del «resto del fotograma» de la ventana.
-        if let Some((waiting_since, collected_at, interpreted)) = pane.pending_measurement.take()
-        {
-            pane.timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
+        if let Some((waiting_since, collected_at, interpreted)) = pane.pending_measurement.take() {
+            pane.timings.record_round(measure::Spans::of_a_round(
                 waiting_since,
                 collected_at,
                 interpreted,
@@ -6446,7 +6440,7 @@ impl eframe::App for Window {
         //
         // **Estas cuatro líneas no las cubre ninguna prueba de la ventana, y conviene saberlo**:
         // `eframe::Frame::_new_kittest()` entrega `cpu_usage: None` —comprobado—, así que por este
-        // camino `cerrar_fotograma` no llega a llamarse nunca desde una prueba. Lo que sí está probado
+        // camino `close_frame` no llega a llamarse nunca desde una prueba. Lo que sí está probado
         // es el contrato de egui del que depende la guarda, y el cierre en sí entra por
         // [`Window::close_the_frame`], que las pruebas llaman directamente. Es la misma frontera
         // declarada de [`Window::on_exit`] y de las lecturas de entorno de [`run`].
@@ -6571,7 +6565,7 @@ impl eframe::App for Window {
             let how_much = searching.elapsed();
             self.timed_separately += how_much;
             self.discovery
-                .anotar(how_much, round.searched, round.registered);
+                .record(how_much, round.searched, round.registered);
         }
 
         let travel = Instant::now();
@@ -6679,7 +6673,7 @@ impl eframe::App for Window {
             // restó: dos consolas que rasterizan en el mismo fotograma pagan cada una lo suyo.
             if pane_outcome.color.rasterized + pane_outcome.color.failed > 0 {
                 self.timed_separately += pane_outcome.color.spent;
-                self.color.anotar(
+                self.color.record(
                     pane_outcome.color.spent,
                     pane_outcome.color.rasterized,
                     pane_outcome.color.failed,
@@ -6765,7 +6759,7 @@ impl eframe::App for Window {
             let tab_bar_outcome = self.paint_the_tab_bar(ui, tab_bar, &metrics, SystemTime::now());
             self.tab_bar_this_frame += tab_bar_outcome.cost;
             self.timed_separately += tab_bar_outcome.cost;
-            self.tab_bar_cost.vio_marcadas(tab_bar_outcome.marked);
+            self.tab_bar_cost.saw_marked(tab_bar_outcome.marked);
         }
 
         // Ya se ha pintado, así que lo que siga pendiente es de una consola que no se pintó.
@@ -6843,20 +6837,20 @@ impl eframe::App for Window {
 // el disparo que guarda. Ninguna conversión se queda sin consumidor, que es lo que hacía falta para que
 // esto no fuera una superficie pública sin razón.
 
-impl From<Orientation> for session::Orientacion {
+impl From<Orientation> for session::StoredOrientation {
     fn from(orientation: Orientation) -> Self {
         match orientation {
-            Orientation::Columns => Self::Columnas,
-            Orientation::Rows => Self::Filas,
+            Orientation::Columns => Self::Columns,
+            Orientation::Rows => Self::Rows,
         }
     }
 }
 
-impl From<session::Orientacion> for Orientation {
-    fn from(orientation: session::Orientacion) -> Self {
+impl From<session::StoredOrientation> for Orientation {
+    fn from(orientation: session::StoredOrientation) -> Self {
         match orientation {
-            session::Orientacion::Columnas => Self::Columns,
-            session::Orientacion::Filas => Self::Rows,
+            session::StoredOrientation::Columns => Self::Columns,
+            session::StoredOrientation::Rows => Self::Rows,
         }
     }
 }
@@ -6864,22 +6858,22 @@ impl From<session::Orientacion> for Orientation {
 impl Node {
     /// Cómo se describe este nodo para poder volver a construirlo.
     ///
-    fn describe(&self) -> session::Nodo {
+    fn describe(&self) -> session::StoredNode {
         match self {
-            Self::Leaf(pane) => session::Nodo::Hoja(session::Hoja {
-                ancho_del_panel: pane.panel_width,
-                plegado: pane.folded,
+            Self::Leaf(pane) => session::StoredNode::Leaf(session::StoredLeaf {
+                panel_width: pane.panel_width,
+                folded: pane.folded,
             }),
             Self::Branch {
                 orientation,
                 children,
-            } => session::Nodo::Rama {
-                orientacion: (*orientation).into(),
-                hijos: children
+            } => session::StoredNode::Branch {
+                orientation: (*orientation).into(),
+                children: children
                     .iter()
-                    .map(|child| session::Hijo {
-                        peso: child.weight.value(),
-                        nodo: child.node.describe(),
+                    .map(|child| session::StoredChild {
+                        weight: child.weight.value(),
+                        node: child.node.describe(),
                     })
                     .collect(),
             },
@@ -6889,7 +6883,7 @@ impl Node {
     /// El árbol que describe eso, **abriendo una consola por hoja**.
     ///
     /// **Es el único sitio del programa donde una descripción se convierte en procesos**, y por eso recibe
-    /// un [`session::Valido`] por la raíz y no un nodo cualquiera: la forma ya está comprobada antes de
+    /// un [`session::Validated`] por la raíz y no un nodo cualquiera: la forma ya está comprobada antes de
     /// llegar aquí, así que este camino no puede construir una rama de un hijo ni un peso imposible.
     ///
     /// **Si una hoja no se puede abrir, no se instala ninguna.** El error sube y quien llamó no se queda
@@ -6897,28 +6891,28 @@ impl Node {
     /// para mover una división.
     fn materialize(
         ctx: &egui::Context,
-        saving: &session::Nodo,
+        saving: &session::StoredNode,
         program: &str,
         next_name: &mut usize,
     ) -> term_core::Result<Self> {
         match saving {
-            session::Nodo::Hoja(leaf) => {
+            session::StoredNode::Leaf(leaf) => {
                 let mut pane = Pane::launching(ctx, program, *next_name)?;
                 *next_name += 1;
                 // **El ancho se sube al suelo del arrastre, y esto lo pidió una revisión.** Un fichero
                 // puede traer un cero, y **ningún gesto puede dejarlo**: pedir menos que el suelo significa
-                // plegar, así que el arrastre nunca guarda un ancho por debajo. Un cero con `plegado` en
+                // plegar, así que el arrastre nunca guarda un ancho por debajo. Un cero con `folded` en
                 // falso deja un panel de cero puntos que **no se puede volver a agarrar** —el agarre exige
                 // ancho— y, como el único que escribe este campo es el propio arrastre, se queda así para
                 // siempre y en cada sesión. Recortando aquí, lo que vuelve del disco es siempre un estado
                 // que un gesto podría haber dejado.
-                pane.panel_width = leaf.ancho_del_panel.max(panel::DRAG_FLOOR);
-                pane.folded = leaf.plegado;
+                pane.panel_width = leaf.panel_width.max(panel::DRAG_FLOOR);
+                pane.folded = leaf.folded;
                 Ok(Self::Leaf(pane))
             }
-            session::Nodo::Rama {
-                orientacion,
-                hijos: children,
+            session::StoredNode::Branch {
+                orientation,
+                children,
             } => {
                 let mut parts = Vec::with_capacity(children.len());
                 for child in children {
@@ -6929,17 +6923,17 @@ impl Node {
                     // que el peso llega validado porque la raíz recibe un documento válido, y **es
                     // verdad solo para la raíz**: estas dos funciones recursivas reciben nodos pelados,
                     // así que el día que otro camino de la caja llame aquí con algo que no pasó por la
-                    // validación, un fichero con `"peso": 0` **tiraba la aplicación**. Es la invariante
+                    // validación, un fichero con `"weight": 0` **tiraba la aplicación**. Es la invariante
                     // que depende de la memoria de quien escribe, que es justo lo que este módulo
                     // rechaza por doctrina.
-                    let weight = Weight::new(child.peso)
+                    let weight = Weight::new(child.weight)
                         .ok_or("la disposición trae un peso que no puede serlo")?;
                     parts.push((
                         weight,
-                        Self::materialize(ctx, &child.nodo, program, next_name)?,
+                        Self::materialize(ctx, &child.node, program, next_name)?,
                     ));
                 }
-                Ok(in_branch_with_weights((*orientacion).into(), parts))
+                Ok(in_branch_with_weights((*orientation).into(), parts))
             }
         }
     }
@@ -6951,21 +6945,21 @@ impl Tab {
     /// **Ni el foco ni el nombre**: la ventana abre en la primera pestaña, y los nombres los reparte un
     /// contador de la ventana que no reutiliza ninguno — restaurar uno viejo haría que el informe le
     /// pusiera a una tabla de números el nombre de otra consola.
-    fn describe(&self) -> session::Pestaña {
-        session::Pestaña {
-            raiz: self.root.describe(),
+    fn describe(&self) -> session::StoredTab {
+        session::StoredTab {
+            root: self.root.describe(),
         }
     }
 
     /// La pestaña que describe eso, con sus consolas abiertas.
     fn materialize(
         ctx: &egui::Context,
-        saved: &session::Pestaña,
+        saved: &session::StoredTab,
         program: &str,
         next_name: &mut usize,
         name: usize,
     ) -> term_core::Result<Self> {
-        let root = Node::materialize(ctx, &saved.raiz, program, next_name)?;
+        let root = Node::materialize(ctx, &saved.root, program, next_name)?;
         // **El foco a la primera, igual que al abrir una pestaña nueva**, y por la misma razón: teclear
         // antes del primer clic ocurre siempre, y con un foco que no apunte a nadie esas teclas se
         // perderían. Que hay al menos una hoja lo garantiza la validación del documento.
@@ -6981,10 +6975,10 @@ impl Tab {
 
 impl Window {
     /// Cómo se describe la disposición de esta ventana, para poder volver a encontrarla.
-    pub(crate) fn describe(&self) -> session::Documento {
-        session::Documento {
+    pub(crate) fn describe(&self) -> session::StoredDocument {
+        session::StoredDocument {
             v: session::VERSION,
-            pestañas: self.tabs.iter().map(Tab::describe).collect(),
+            tabs: self.tabs.iter().map(Tab::describe).collect(),
         }
     }
 
@@ -6995,12 +6989,12 @@ impl Window {
     /// construida, no de lo que el fichero dijera.
     pub(crate) fn materialize(
         ctx: &egui::Context,
-        validated: &session::Valido,
+        validated: &session::Validated,
         program: &str,
     ) -> term_core::Result<Vec<Tab>> {
         let mut next_pane = 0;
         validated
-            .pestañas()
+            .tabs()
             .iter()
             .enumerate()
             .map(|(which, tab)| Tab::materialize(ctx, tab, program, &mut next_pane, which))
@@ -7349,7 +7343,7 @@ mod tests {
             panel_state: panel::PanelState::default(),
             to_reread: Flag::raised(),
             screen: Screen::new(INITIAL_GRID),
-            timings: Medida::default(),
+            timings: Timings::default(),
             pending_measurement: None,
             panel_reread_unpainted: std::time::Duration::ZERO,
             reflowed: std::time::Duration::ZERO,
@@ -7409,8 +7403,8 @@ mod tests {
 
         let mut window = Window {
             discoverer: fonts::Discoverer::default(),
-            discovery: measure::Descubrimiento::default(),
-            color: measure::Rasterizado::default(),
+            discovery: measure::Discovery::default(),
+            color: measure::Rasterizing::default(),
             // Estas consolas no tienen directorio, así que no hay nada que vigilar; el vigilante se
             // arma igual —sobre una lista vacía— para que la ventana de las pruebas no se declare
             // ciega y active el respaldo, que es un camino con su propia prueba.
@@ -7428,21 +7422,21 @@ mod tests {
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
             font_size: DEFAULT_FONT_SIZE,
-            rest_of_frame: RestoDelFotograma::default(),
+            rest_of_frame: RestOfFrame::default(),
             frame_started: Instant::now(),
             last_closed_frame: 0,
             timed_separately: std::time::Duration::ZERO,
             tab_bar_this_frame: std::time::Duration::ZERO,
-            tab_bar_cost: measure::Barra::default(),
-            reflow: measure::Reflujo::default(),
-            persistence: session::Persistencia::en(None),
+            tab_bar_cost: measure::TabBar::default(),
+            reflow: measure::Reflow::default(),
+            persistence: session::Persistence::at(None),
             restoring: None,
-            reading_settings: measure::LecturaDeAjustes::default(),
+            reading_settings: measure::ReadingSettings::default(),
             last_seen: None,
             last_written: None,
             save_due: None,
             mirror_this_frame: std::time::Duration::ZERO,
-            saving: measure::Guardado::default(),
+            saving: measure::Saving::default(),
             // Una ventana de prueba no inyecta gestos: los suyos los manda la prueba por el `Ui` de
             // pruebas, que es la única forma de comprobar el gesto sin abrir ventana.
             injected_drags: None,
@@ -7525,7 +7519,10 @@ mod tests {
 
         // Este es el presupuesto haciendo su trabajo: sin él, el fotograma se traga los 400 KiB de
         // una vez y la ventana se queda quieta mientras tanto, que es justo lo que no puede pasar.
-        assert!(queue_left, "un volcado de {DUMP} bytes cupo en un fotograma");
+        assert!(
+            queue_left,
+            "un volcado de {DUMP} bytes cupo en un fotograma"
+        );
         assert!(
             pane.received.len() <= PUMP_BUDGET,
             "el búfer del fotograma creció por encima del presupuesto: {}",
@@ -8970,7 +8967,7 @@ mod tests {
 
     #[test]
     fn lo_que_interpreta_una_consola_que_no_se_pinta_se_declara_igual() {
-        // **El camino real, no el ayudante.** Que `Medida` sepa cerrar una vuelta sin pintado ya lo ata
+        // **El camino real, no el ayudante.** Que `Timings` sepa cerrar una vuelta sin pintado ya lo ata
         // una prueba unitaria; lo que aquí se comprueba es que **alguien la llama** para las consolas
         // que se quedan fuera del pintado, y que la ventana recoge lo declarado. Por qué importa, en
         // el doc de `Window::close_the_unpainted_rounds`.
@@ -9010,14 +9007,14 @@ mod tests {
         // Comprobado mutándolo: sin esta afirmación, ese barrido pasaba.
         let declared = window.tabs[1].panes_mut()[0]
             .timings
-            .cerrar_fotograma(std::time::Duration::from_millis(10))
+            .close_frame(std::time::Duration::from_millis(10))
             .expect("la consola de fondo no declaró nada de lo que interpretó");
         assert!(
             !declared.is_zero(),
             "declaró cero: lo que interpretó se perdió por el camino"
         );
         assert!(
-            !window.tabs[1].panes()[0].timings.hay_medias(),
+            !window.tabs[1].panes()[0].timings.has_means(),
             "la consola de fondo ensució alguna media: no hubo vuelta que medir, solo algo que restar"
         );
 
@@ -9035,7 +9032,7 @@ mod tests {
         assert!(
             window.tabs[1].panes_mut()[0]
                 .timings
-                .cerrar_fotograma(std::time::Duration::from_millis(10))
+                .close_frame(std::time::Duration::from_millis(10))
                 .is_none(),
             "lo que declaró la consola de fondo seguía ahí sin recoger"
         );
@@ -9077,7 +9074,7 @@ mod tests {
         assert_eq!(
             window.tabs[1].panes_mut()[0]
                 .timings
-                .cerrar_fotograma(std::time::Duration::from_millis(10)),
+                .close_frame(std::time::Duration::from_millis(10)),
             Some(interpreted),
             "la consola de fondo declaró un tramo que no gastó: ese tiempo se le descuenta al \
              framework sin que nadie lo haya medido"
@@ -9108,7 +9105,7 @@ mod tests {
         window.close_the_frame(std::time::Duration::from_millis(10));
 
         assert!(
-            window.tabs[0].panes()[0].timings.hay_medias(),
+            window.tabs[0].panes()[0].timings.has_means(),
             "la consola que se ve se quedó sin una sola muestra: su vuelta se cerró antes de \
              pintarla, así que se declaró como si no le hubiera llegado nada"
         );
@@ -9150,15 +9147,15 @@ mod tests {
         let report = report_of(&window);
 
         assert!(
-            report.contains("pestañas:     2"),
+            report.contains("tabs:         2"),
             "el informe no dice cuántas pestañas había:\n{report}"
         );
         assert!(
-            report.contains("pestaña 0:    se veía"),
+            report.contains("tab 0:        was visible"),
             "el informe no dice cuál se veía:\n{report}"
         );
         assert!(
-            report.contains("de fondo, se bombeaba sin pintarse"),
+            report.contains("in the background, pumped without being painted"),
             "el informe no distingue la pestaña de fondo:\n{report}"
         );
     }
@@ -9193,7 +9190,7 @@ mod tests {
         let report = report_of(&window);
 
         assert!(
-            report.contains("ventana:      903×701 puntos"),
+            report.contains("window:       903×701 points"),
             "el informe no publica el tamaño que tuvo la ventana:\n{report}"
         );
     }
@@ -9230,7 +9227,7 @@ mod tests {
         for (which_tab, panes) in [(0, [0, 1]), (1, [2, 3])] {
             for pane in panes {
                 assert!(
-                    report.contains(&format!("── pestaña {which_tab}, división {pane} ")),
+                    report.contains(&format!("── tab {which_tab}, pane {pane} ")),
                     "el informe no publica la división {pane} de la pestaña {which_tab}:\n{report}"
                 );
             }
@@ -9243,7 +9240,7 @@ mod tests {
         // verde, porque las de arriba solo miran los títulos de las tablas.
         for pane in [0, 1, 2, 3] {
             assert!(
-                report.contains(&format!("  división {pane}:")),
+                report.contains(&format!("  pane {pane}:")),
                 "la cabecera no declara la rejilla de la división {pane}:\n{report}"
             );
         }
@@ -9774,11 +9771,7 @@ mod tests {
     /// Con `repeating` en `true` pide descarte en la primera pasada, que es la forma de provocar el
     /// fotograma de dos pasadas. Devuelve cuántas hubo, para que quien la use pueda afirmar que de verdad
     /// se repitió en vez de dar por hecho que egui obedeció.
-    fn one_frame_like_eframe(
-        window: &mut Window,
-        ctx: &egui::Context,
-        repeating: bool,
-    ) -> usize {
+    fn one_frame_like_eframe(window: &mut Window, ctx: &egui::Context, repeating: bool) -> usize {
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput {
             screen_rect: Some(area_of(1200.0)),
@@ -9834,12 +9827,12 @@ mod tests {
 
         let report = report_of(&window);
         assert!(
-            report.contains("── pestaña 1, división 2"),
+            report.contains("── tab 1, pane 2"),
             "la pestaña que quedó no conserva su nombre, así que sus números se publican con la \
              etiqueta de otra:\n{report}"
         );
         assert!(
-            !report.contains("── pestaña 0, división 0"),
+            !report.contains("── tab 0, pane 0"),
             "la pestaña que quedó se publicó como la 0, que es la que se cerró:\n{report}"
         );
     }
@@ -9971,7 +9964,7 @@ mod tests {
 
     #[test]
     fn cerrar_una_pestaña_no_se_lleva_lo_que_sus_consolas_ya_habian_declarado() {
-        // Al cerrar una pestaña se sueltan sus divisiones **con su `Medida` dentro**, y ahí puede haber
+        // Al cerrar una pestaña se sueltan sus divisiones **con su `Timings` dentro**, y ahí puede haber
         // una vuelta anotada de este mismo fotograma: bytes interpretados hace un instante. Si se va sin
         // declararse, la resta se la atribuye al framework y el «resto» sale inflado justo en el
         // fotograma del cierre.
@@ -10007,7 +10000,7 @@ mod tests {
         const ITS_OWN: std::time::Duration = std::time::Duration::from_secs(5);
         window.tabs[0].panes_mut()[0]
             .timings
-            .anotar_vuelta(measure::Tramos::de_una_vuelta(
+            .record_round(measure::Spans::of_a_round(
                 None,
                 Instant::now(),
                 ITS_OWN,
@@ -10055,7 +10048,7 @@ mod tests {
         window.timed_separately = std::time::Duration::from_secs(4);
         window.close_the_frame(FRAME);
 
-        let rest = window.rest_of_frame.media();
+        let rest = window.rest_of_frame.mean();
         assert!(
             rest < std::time::Duration::from_secs(7),
             "el resto salió {rest:?} de 10s: los 4s declarados aparte no se descontaron"
@@ -10072,7 +10065,7 @@ mod tests {
             egui::RawInput::default(),
         );
         window.close_the_frame(FRAME);
-        let average = window.rest_of_frame.media();
+        let average = window.rest_of_frame.mean();
         assert!(
             average > std::time::Duration::from_secs(7),
             "la media quedó en {average:?}: el descuento se aplicó dos veces, así que el campo no se vació \
@@ -10111,7 +10104,7 @@ mod tests {
         // que por el camino de la aplicación no llega a ocurrir dentro de una prueba.
         window.active_mut().panes_mut()[0]
             .timings
-            .cerrar_fotograma(std::time::Duration::from_millis(50))
+            .close_frame(std::time::Duration::from_millis(50))
             .expect("la consola no declaró nada de lo que hizo");
 
         // **La afirmación es binaria a propósito, y no una comparación de duraciones.** Solo se anotan
@@ -10122,7 +10115,7 @@ mod tests {
         // pasada declara por encolar el pintado ya supera cualquier umbral pequeño, así que la prueba
         // pasaba igual. Comprobado mutándolo.
         assert!(
-            window.active().panes()[0].timings.hay_medias(),
+            window.active().panes()[0].timings.has_means(),
             "la vuelta buena se perdió: la que quedó no traía espera, así que las series del informe se \
              quedan sin una sola muestra de esta consola"
         );
@@ -10339,7 +10332,7 @@ mod tests {
 
         let declared = window.tabs[1].panes_mut()[0]
             .timings
-            .cerrar_fotograma(std::time::Duration::from_millis(10))
+            .close_frame(std::time::Duration::from_millis(10))
             .expect("la consola de fondo no declaró nada");
         assert!(
             declared > interpreted,
@@ -10347,7 +10340,7 @@ mod tests {
              publicaría como coste del framework"
         );
         assert!(
-            !window.tabs[1].panes()[0].timings.hay_medias(),
+            !window.tabs[1].panes()[0].timings.has_means(),
             "leer el panel de una consola que no se pinta ensució una media: no hubo vuelta que \
              medir, solo algo que restar"
         );
@@ -10746,7 +10739,11 @@ mod tests {
                     "1".to_owned(),
                     window.theme.foreground()
                 ),
-                (tab_rect(tab_bar, 1, 2), "2".to_owned(), window.theme.background()),
+                (
+                    tab_rect(tab_bar, 1, 2),
+                    "2".to_owned(),
+                    window.theme.background()
+                ),
             ],
             // Empiezan en uno: los ceros son del informe, que es un instrumento, y esto es lo que lee
             // quien tiene la ventana delante.
@@ -10823,13 +10820,13 @@ mod tests {
 
     #[test]
     fn la_variable_que_se_lee_es_la_del_guion_de_medida() {
-        // El nombre **es** el contrato con `scripts/medir-fotograma.sh`, que ya exporta `MEDIR_MIB` y
-        // `MEDIR_TANDA`. Cambiarlo aquí dejaría la puerta cerrada sin que nada se pusiera rojo: el guion
+        // El nombre **es** el contrato con `scripts/medir-fotograma.sh`, que ya exporta `MEASURE_MIB` y
+        // `MEASURE_BATCH`. Cambiarlo aquí dejaría la puerta cerrada sin que nada se pusiera rojo: el guion
         // seguiría midiendo una sola pestaña creyendo que mide dos.
-        assert_eq!(TABS_VARIABLE, "MEDIR_PESTANAS");
-        assert_eq!(SIZE_VARIABLE, "MEDIR_TAMANO");
-        assert_eq!(PANES_VARIABLE, "MEDIR_DIVISIONES");
-        assert_eq!(DRAGS_VARIABLE, "MEDIR_ARRASTRES");
+        assert_eq!(TABS_VARIABLE, "MEASURE_TABS");
+        assert_eq!(SIZE_VARIABLE, "MEASURE_SIZE");
+        assert_eq!(PANES_VARIABLE, "MEASURE_PANES");
+        assert_eq!(DRAGS_VARIABLE, "MEASURE_DRAGS");
     }
 
     #[test]
@@ -10920,12 +10917,8 @@ mod tests {
         // anidado saldrían las mismas tres, así que lo que las distingue es de dónde a dónde llegan.
         assert_eq!(tiling.dividers.len(), 3, "no salieron tres fronteras");
 
-        let [
-            upper_left,
-            lower_left,
-            upper_right,
-            lower_right,
-        ] = <[egui::Rect; 4]>::try_from(tiling.parts.clone()).expect("son cuatro");
+        let [upper_left, lower_left, upper_right, lower_right] =
+            <[egui::Rect; 4]>::try_from(tiling.parts.clone()).expect("son cuatro");
 
         // El orden de las hojas es el orden en que se abren y el que el informe nombra: columna izquierda
         // de arriba abajo, y luego la derecha.
@@ -10999,7 +10992,7 @@ mod tests {
 
     #[test]
     fn una_sola_columna_con_dos_filas_deja_las_consolas_una_encima_de_otra() {
-        // **La forma que no cubrían las otras dos, y no es rebuscada**: `MEDIR_DIVISIONES=1x2` es una tanda
+        // **La forma que no cubrían las otras dos, y no es rebuscada**: `MEASURE_PANES=1x2` es una tanda
         // legítima —dos consolas apiladas, que es lo que da partir por abajo—. Lo que fija es el **sentido**:
         // con las columnas y las filas intercambiadas saldrían dos consolas lado a lado, que es exactamente
         // la disposición de siempre y por tanto un defecto que no se ve en ninguna otra prueba.
@@ -11132,21 +11125,21 @@ mod tests {
         // Cuál de las ocho la lleva da igual: las etiquetas de las tablas salen de las divisiones que hay.
         {
             let its_timings = &mut window.tabs[0].panes_mut()[0].timings;
-            its_timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
+            its_timings.record_round(measure::Spans::of_a_round(
                 Some(Instant::now()),
                 Instant::now(),
                 std::time::Duration::from_millis(1),
                 std::time::Duration::ZERO,
                 std::time::Duration::ZERO,
             ));
-            its_timings.cerrar_fotograma(std::time::Duration::from_millis(2));
+            its_timings.close_frame(std::time::Duration::from_millis(2));
         }
 
         let report = report_of(&window);
 
         for name in 0..8 {
             // Con el `──` del final detrás del número, «división 1» no casa con la etiqueta de la 10.
-            let label = format!(", división {name} ──");
+            let label = format!(", pane {name} ──");
             assert_eq!(
                 report.matches(&label).count(),
                 1,
@@ -11697,14 +11690,7 @@ mod tests {
         from: egui::Pos2,
         to: egui::Pos2,
     ) {
-        drag_with_chord(
-            window,
-            ctx,
-            rects,
-            from,
-            to,
-            egui::Modifiers::NONE,
-        );
+        drag_with_chord(window, ctx, rects, from, to, egui::Modifiers::NONE);
     }
 
     /// Dos consolas con texto dentro y la rejilla ya anunciada, listas para marcar sobre ellas.
@@ -12653,7 +12639,10 @@ mod tests {
             &ctx,
             &[left_pane, right_pane],
             left_pane.center(),
-            egui::pos2(right_pane.right() - right_pane.width() * 0.1, right_pane.center().y),
+            egui::pos2(
+                right_pane.right() - right_pane.width() * 0.1,
+                right_pane.center().y,
+            ),
         );
         assert_eq!(
             window
@@ -13025,7 +13014,8 @@ mod tests {
         // Lo mismo que su hermana de atender el ratón, y por la misma razón: es un camino que se recorre
         // en cada fotograma **mientras dura el gesto**, y el fotograma se reparte por resta.
         let mut window = window_with("sleep 30", "sleep 30");
-        let right_pane = egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
+        let right_pane =
+            egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
 
         assert_eq!(
             window.timed_separately,
@@ -13341,8 +13331,7 @@ mod tests {
         );
 
         // Doscientos puntos: dos consolas de veinte columnas no caben ahí.
-        let narrow_left =
-            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
+        let narrow_left = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 300.0));
         let narrow_right =
             egui::Rect::from_min_size(egui::pos2(202.0, 0.0), egui::vec2(200.0, 300.0));
         let mut without_room = window_with("sleep 30", "sleep 30");
@@ -13373,8 +13362,7 @@ mod tests {
         // forma de saber cuál de los dos está pidiendo.
         let mut window = window_with("sleep 30", "sleep 30");
         let target = egui::Rect::from_min_size(egui::pos2(200.0, 0.0), egui::vec2(200.0, 300.0));
-        let left_half =
-            egui::Rect::from_min_size(egui::pos2(200.0, 0.0), egui::vec2(100.0, 300.0));
+        let left_half = egui::Rect::from_min_size(egui::pos2(200.0, 0.0), egui::vec2(100.0, 300.0));
 
         let ctx = egui::Context::default();
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -13903,7 +13891,7 @@ mod tests {
         // un texto vacío.
         window.tabs[0].panes_mut()[0]
             .timings
-            .anotar_ida(std::time::Duration::from_micros(10));
+            .record_outbound(std::time::Duration::from_micros(10));
 
         let mut output = Vec::new();
         window
@@ -13913,14 +13901,14 @@ mod tests {
 
         assert!(
             report.contains(
-                "arrastres:    3 inyectados · 2 efectos · 1 fotogramas con texto marcado · \
-                 4 informes al programa (moviendo consolas)"
+                "drags:        3 injected · 2 effective · 1 frames with marked text · \
+                 4 reports to the program (moving consoles)"
             ),
             "el informe no declara los arrastres inyectados, los que reordenaron, los que marcaron \
              texto y los que se le contaron al programa:\n{report}"
         );
         assert!(
-            !report.contains("pedidos"),
+            !report.contains("requested"),
             "el informe sigue publicando los gestos PEDIDOS, que es un número sin señal: el guion pide \
              cien mil para que el gesto dure toda la tanda, así que la diferencia vale lo mismo en una \
              corrida buena que en una rota\n{report}"
@@ -13936,7 +13924,7 @@ mod tests {
             .expect("no se pudo abrir la ventana");
         window.tabs[0].panes_mut()[0]
             .timings
-            .anotar_ida(std::time::Duration::from_micros(10));
+            .record_outbound(std::time::Duration::from_micros(10));
 
         let mut output = Vec::new();
         window
@@ -13945,7 +13933,7 @@ mod tests {
         let report = String::from_utf8(output).expect("el informe es texto");
 
         assert!(
-            !report.contains("arrastres:"),
+            !report.contains("drags:"),
             "el informe habla de arrastres sin que nadie los pidiera:\n{report}"
         );
     }
@@ -14290,7 +14278,7 @@ mod tests {
                 discoverer,
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
-                color.anotar(
+                color.record(
                     outcome.color.spent,
                     outcome.color.rasterized,
                     outcome.color.failed,
@@ -14309,14 +14297,14 @@ mod tests {
         let mut report = Vec::new();
         window
             .color
-            .publicar(&mut report)
+            .publish(&mut report)
             .expect("no se pudo publicar el tramo");
         let report = String::from_utf8(report).expect("el informe no es texto");
         // **Los dos escenarios, y por eso no se salta sola.** Donde la máquina tiene fuente de emoji, el
         // tramo tiene que aparecer con su número; donde no la tiene, el intento fallido tiene que
         // aparecer igual — porque también se pagó.
         assert!(
-            report.contains("rasterizar un glifo de color"),
+            report.contains("rasterizing a color glyph"),
             "se pintaron dos emojis y el informe no declara el tramo: sus microsegundos se publicarían \
              como coste del framework"
         );
@@ -14336,7 +14324,7 @@ mod tests {
         let glyphs: usize = report
             .split_whitespace()
             .zip(report.split_whitespace().skip(1))
-            .find(|(_, next)| *next == "glifos")
+            .find(|(_, next)| *next == "glyphs")
             .and_then(|(number, _)| number.parse().ok())
             .unwrap_or_else(|| {
                 panic!(
@@ -14377,14 +14365,14 @@ mod tests {
         let mut report = Vec::new();
         window
             .color
-            .publicar(&mut report)
+            .publish(&mut report)
             .expect("no se pudo publicar el tramo");
         let report = String::from_utf8(report).expect("el informe no es texto");
         // **Los dos escenarios, y por eso no se salta sola.** Donde la máquina tiene fuente de emoji el
         // tramo sale con sus glifos rasterizados; donde no la tiene sale con los intentos fallidos, que
         // también se pagaron.
         assert!(
-            report.contains("rasterizar un glifo de color"),
+            report.contains("rasterizing a color glyph"),
             "la ventana pintó dos emojis en su pasada y su informe no declara el tramo: lo que costaron \
              se publica como coste del framework"
         );
@@ -14404,7 +14392,7 @@ mod tests {
         let glyphs: usize = report
             .split_whitespace()
             .zip(report.split_whitespace().skip(1))
-            .find(|(_, next)| *next == "glifos")
+            .find(|(_, next)| *next == "glyphs")
             .and_then(|(number, _)| number.parse().ok())
             .unwrap_or_else(|| {
                 panic!(
@@ -14450,11 +14438,11 @@ mod tests {
         assert_eq!(
             MEASUREMENT_VARIABLES,
             [
-                "MEDIR_PESTANAS",
-                "MEDIR_DIVISIONES",
-                "MEDIR_TAMANO",
-                "MEDIR_ARRASTRES",
-                "MEDIR_GESTO"
+                "MEASURE_TABS",
+                "MEASURE_PANES",
+                "MEASURE_SIZE",
+                "MEASURE_DRAGS",
+                "MEASURE_GESTURE"
             ],
             "la lista de la que cuelgan los vetos de una tanda de medida ya no es la que el guion exporta"
         );
@@ -14476,7 +14464,7 @@ mod tests {
         let (_, cost) = settings_to_use(Entry::Normal, Some(&dir.join("config")));
         assert_eq!(
             cost,
-            measure::LecturaDeAjustes::Sin,
+            measure::ReadingSettings::Missing,
             "una lectura sin fichero se declara como vetada, así que un veto roto en el banco —donde nunca \
              hay fichero— pasaría por una corrida buena"
         );
@@ -14513,14 +14501,14 @@ mod tests {
         );
         assert!(loaded.colores.fondo.is_some());
         assert!(
-            matches!(cost, measure::LecturaDeAjustes::Con { .. }),
+            matches!(cost, measure::ReadingSettings::Applied { .. }),
             "se aplicó la configuración y el informe no lo declararía: {cost:?}"
         );
 
         let (under_measurement, cost) = settings_to_use(Entry::Measuring, Some(&file));
         assert_eq!(
             cost,
-            measure::LecturaDeAjustes::Vetada,
+            measure::ReadingSettings::Vetoed,
             "el informe declararía otra cosa que «vetada», y entonces esta corrida no se distingue de una \
              que sí leyó la configuración de quien mide"
         );
@@ -14537,7 +14525,7 @@ mod tests {
         let (_, without_file) = settings_to_use(Entry::Normal, Some(&dir.join("no-existe")));
         assert_eq!(
             without_file,
-            measure::LecturaDeAjustes::Sin,
+            measure::ReadingSettings::Missing,
             "una máquina sin fichero publica el mismo informe que una que sí configuró algo"
         );
 
@@ -15218,8 +15206,7 @@ mod tests {
         let mut window = window_with("sleep 30", "sleep 30");
         let dir = PanelDir::create().expect("crear el directorio");
         let without_arming = dir.path().join("no-existe");
-        window.watcher =
-            Watcher::new(|| {}, &[(without_arming.as_path(), Flag::raised())]);
+        window.watcher = Watcher::new(|| {}, &[(without_arming.as_path(), Flag::raised())]);
         assert!(window.watcher.is_blind(), "el respaldo no está activo");
         for pane in window.active().panes() {
             pane.to_reread.take();
@@ -15253,8 +15240,7 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         let dir = PanelDir::create().expect("crear el directorio");
         let without_arming = dir.path().join("no-existe");
-        window.watcher =
-            Watcher::new(|| {}, &[(without_arming.as_path(), Flag::raised())]);
+        window.watcher = Watcher::new(|| {}, &[(without_arming.as_path(), Flag::raised())]);
         assert!(window.watcher.is_blind(), "el respaldo no está activo");
         for pane in window.all_panes() {
             pane.to_reread.take();
@@ -15297,11 +15283,11 @@ mod tests {
             );
         })
         .drop_without_applying_deltas();
-        pane.timings.cerrar_fotograma(Duration::from_millis(10));
+        pane.timings.close_frame(Duration::from_millis(10));
 
         let noted = pane
             .timings
-            .panel_anotado()
+            .recorded_panel()
             .expect("el tramo del panel tiene que llegar a la serie");
         assert!(
             noted > Duration::ZERO,
@@ -15318,10 +15304,7 @@ mod tests {
 
         let panel_split = pane.tile_with_its_panel(whole, CELL_WIDTH, SystemTime::now());
 
-        assert_eq!(
-            panel_split.console, whole,
-            "sin panel no se descuenta nada"
-        );
+        assert_eq!(panel_split.console, whole, "sin panel no se descuenta nada");
         assert!(panel_split.panel.is_none());
     }
 
@@ -15629,11 +15612,7 @@ mod tests {
         };
 
         let names: Vec<usize> = tree.leaves().iter().map(|leaf| leaf.name).collect();
-        assert_eq!(
-            names,
-            [7, 8, 9],
-            "las hojas no salen en el orden del árbol"
-        );
+        assert_eq!(names, [7, 8, 9], "las hojas no salen en el orden del árbol");
 
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 300.0));
         let tiling = tree.place(area, 0.0);
@@ -15647,13 +15626,18 @@ mod tests {
 
         // La primera se lleva media anchura y todo el alto; las otras dos se reparten el alto de la
         // mitad derecha. Escrito así, un recorrido que colocara las hojas en otro orden caería.
-        let [left_pane, to_the_top, to_the_bottom] = [tiling.parts[0], tiling.parts[1], tiling.parts[2]];
+        let [left_pane, to_the_top, to_the_bottom] =
+            [tiling.parts[0], tiling.parts[1], tiling.parts[2]];
         assert_eq!(
             left_pane.height(),
             area.height(),
             "la columna no ocupa el alto entero"
         );
-        assert_eq!(to_the_top.top(), area.top(), "la de arriba no empieza arriba");
+        assert_eq!(
+            to_the_top.top(),
+            area.top(),
+            "la de arriba no empieza arriba"
+        );
         assert_eq!(
             to_the_bottom.bottom(),
             area.bottom(),
@@ -15913,7 +15897,10 @@ mod tests {
             move_pane(egui::pos2(100.0, grip.y)),
         );
 
-        assert!(it_moved[0], "la primera frontera no respondió a su arrastre");
+        assert!(
+            it_moved[0],
+            "la primera frontera no respondió a su arrastre"
+        );
         assert_eq!(
             weights_of_the_root(&window),
             vec![0.5, 1.5, 1.0],
@@ -16404,8 +16391,9 @@ mod tests {
             );
 
             // Y el mismo borde en el otro eje: seis filas, tres por hija.
-            let height_of =
-                |height| egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, height));
+            let height_of = |height| {
+                egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, height))
+            };
             let exact = 6.0 * metrics.height() + DIVIDER_THICKNESS;
             assert!(
                 can_split(height_of(exact), Orientation::Rows, metrics),
@@ -16638,8 +16626,10 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
         let (width, height) = with_metrics(|metrics| (metrics.width(), metrics.height()));
         // Alto para cinco filas: dos hijas necesitarían tres cada una.
-        let short =
-            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0 * width, 5.0 * height));
+        let short = egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(100.0 * width, 5.0 * height),
+        );
 
         one_frame_in(&mut window, &ctx, short, chord_with(egui::Key::B));
 
@@ -16928,7 +16918,10 @@ mod tests {
             pane.to_reread.take();
         }
         let newborn = window.active().where_the_focus_is().expect("el foco vive");
-        publish_at(window.active().panes()[newborn], r#"{"lines":["ya estoy"]}"#);
+        publish_at(
+            window.active().panes()[newborn],
+            r#"{"lines":["ya estoy"]}"#,
+        );
 
         wait_for_the_flag(
             &window.active().panes()[newborn].to_reread,
@@ -17434,7 +17427,7 @@ mod tests {
             // Donde lo deja `pump`, que es lo que la consola tiene sin declarar cuando llega el acorde.
             pane.pending_measurement = Some((Some(now), now, PARSED));
             // Y donde queda si egui repitió la pasada y el pintado alcanzó a anotar la vuelta.
-            pane.timings.anotar_vuelta(measure::Tramos::de_una_vuelta(
+            pane.timings.record_round(measure::Spans::of_a_round(
                 None,
                 now,
                 ANNOTATED,
@@ -17559,10 +17552,10 @@ mod tests {
         let report = report_of(&window);
         let line = report
             .lines()
-            .find(|line| line.starts_with("foco al salir"))
+            .find(|line| line.starts_with("focus at exit"))
             .expect("el informe siempre publica dónde estaba el foco al salir");
         assert!(
-            line.contains("hay 1"),
+            line.contains("there are 1"),
             "el informe no dice cuántas consolas quedaban, así que su explicación de por qué no hay lado \
              no se puede comprobar: {line}"
         );
@@ -17888,7 +17881,7 @@ mod tests {
             // Donde queda si el pintado alcanzó a anotar la vuelta.
             its_panes[0]
                 .timings
-                .anotar_vuelta(measure::Tramos::de_una_vuelta(
+                .record_round(measure::Spans::of_a_round(
                     None,
                     now,
                     ANNOTATED,
@@ -17947,7 +17940,7 @@ mod tests {
         let report = report_of(&window);
 
         assert!(
-            report.contains("NO EXISTE"),
+            report.contains("DOES NOT EXIST"),
             "el informe no dice que el foco no apuntaba a ninguna consola:\n{report}"
         );
     }
@@ -18005,7 +17998,7 @@ mod tests {
         let report = report_of(&window);
 
         assert!(
-            report.contains("divisores:    2 en la pestaña 0, al 50 % · 30 %"),
+            report.contains("dividers:     2 in tab 0, at 50 % · 30 %"),
             "el informe no publica las fronteras en el orden en que se numeran al arrastrarlas:\n{report}"
         );
     }
@@ -18040,17 +18033,17 @@ mod tests {
         let report = report_of(&window);
 
         assert!(
-            !report.contains("izquierda") && !report.contains("derecha"),
+            !report.contains("(left)") && !report.contains("(right)"),
             "el informe le pone lado a tres divisiones, y con tres el lado no describe nada:\n{report}"
         );
         assert!(
-            report.contains("divisores:    2"),
+            report.contains("dividers:     2"),
             "el informe no dice cuántas fronteras había, así que publica la de una y calla la otra:\n\
              {report}"
         );
         for pane in 0..3 {
             assert!(
-                report.contains(&format!("división {pane} ──")),
+                report.contains(&format!("pane {pane} ──")),
                 "el informe no tituló la tabla de la división {pane}:\n{report}"
             );
         }
@@ -18374,13 +18367,7 @@ mod tests {
             metrics.width(),
         );
         let rects = [tiling.parts[0], tiling.parts[1]];
-        for (which, (pane, rect)) in window
-            .active()
-            .panes()
-            .into_iter()
-            .zip(rects)
-            .enumerate()
-        {
+        for (which, (pane, rect)) in window.active().panes().into_iter().zip(rects).enumerate() {
             let expected = metrics.cells_in(rect.size());
             // Que el tamaño esperado **no** sea el de arranque es lo que hace que la aserción de abajo
             // signifique algo: si coincidieran, pasaría igual con un redimensionado que no ocurrió.
@@ -18808,7 +18795,12 @@ mod tests {
         one_frame_in(&mut window, &ctx, area, button(cut_along, mid_y, true));
         // …y sin soltar se cambia de pestaña y se mueve el puntero bien lejos.
         one_frame_in(&mut window, &ctx, area, chord_with(egui::Key::ArrowRight));
-        one_frame_in(&mut window, &ctx, area, pointer_at(cut_along + 15.0 * cell, mid_y));
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            pointer_at(cut_along + 15.0 * cell, mid_y),
+        );
 
         assert_eq!(
             window.active, 1,
@@ -18877,7 +18869,12 @@ mod tests {
                 area,
                 with_button(which, cut_along, mid_y, true),
             );
-            one_frame_in(&mut window, &ctx, area, pointer_at(cut_along + 12.0 * cell, mid_y));
+            one_frame_in(
+                &mut window,
+                &ctx,
+                area,
+                pointer_at(cut_along + 12.0 * cell, mid_y),
+            );
             one_frame_in(
                 &mut window,
                 &ctx,
@@ -18993,7 +18990,12 @@ mod tests {
         let mid_y = grip.y;
         one_frame_in(&mut window, &ctx, area, pointer_at(grip.x, mid_y));
         one_frame_in(&mut window, &ctx, area, button(grip.x, mid_y, true));
-        one_frame_in(&mut window, &ctx, area, pointer_at(grip.x - 6.0 * cell, mid_y));
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            pointer_at(grip.x - 6.0 * cell, mid_y),
+        );
         one_frame_in(
             &mut window,
             &ctx,
@@ -19066,8 +19068,9 @@ mod tests {
         // Y ahora se la lleva de sitio: se suelta sobre su hermana, que reordena el árbol.
         let other = window.active().panes()[1].name;
         let its_area = window.active().root.place(area, cell).parts[1];
-        let it_moved =
-            with_metrics(|metrics| window.drop_a_pane(moved, other, Side::Bottom, its_area, metrics));
+        let it_moved = with_metrics(|metrics| {
+            window.drop_a_pane(moved, other, Side::Bottom, its_area, metrics)
+        });
         assert!(
             it_moved,
             "la consola no se pudo mover, así que la prueba no plantea el caso"
@@ -19185,8 +19188,9 @@ mod tests {
 
         let cell = with_metrics(CellMetrics::width);
         let its_area = window.active().root.place(area, cell).parts[1];
-        let it_moved =
-            with_metrics(|metrics| window.drop_a_pane(moved, other, Side::Bottom, its_area, metrics));
+        let it_moved = with_metrics(|metrics| {
+            window.drop_a_pane(moved, other, Side::Bottom, its_area, metrics)
+        });
         assert!(
             it_moved,
             "la consola no se movió, así que la prueba no plantea el caso"
@@ -19229,7 +19233,12 @@ mod tests {
         let mid_y = its_area.center().y;
         one_frame_in(&mut window, &ctx, area, pointer_at(edge, mid_y));
         one_frame_in(&mut window, &ctx, area, button(edge, mid_y, true));
-        one_frame_in(&mut window, &ctx, area, pointer_at(edge - 30.0 * cell, mid_y));
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            pointer_at(edge - 30.0 * cell, mid_y),
+        );
         one_frame_in(
             &mut window,
             &ctx,
@@ -19280,7 +19289,12 @@ mod tests {
         let grip = divider.rect.center();
         one_frame_in(&mut window, &ctx, area, pointer_at(grip.x, grip.y));
         one_frame_in(&mut window, &ctx, area, button(grip.x, grip.y, true));
-        one_frame_in(&mut window, &ctx, area, pointer_at(grip.x + 6.0 * cell, grip.y));
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            pointer_at(grip.x + 6.0 * cell, grip.y),
+        );
         one_frame_in(
             &mut window,
             &ctx,
@@ -19335,7 +19349,12 @@ mod tests {
             tremor > 1.0,
             "el temblor de esta prueba mide {tremor} puntos: con uno solo, pasaría igual con el defecto"
         );
-        one_frame_in(&mut window, &ctx, area, pointer_at(cut_along + tremor, mid_y));
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            pointer_at(cut_along + tremor, mid_y),
+        );
         one_frame_in(
             &mut window,
             &ctx,
@@ -19770,7 +19789,7 @@ mod tests {
             .map(|pane| pane.screen.size())
             .collect();
         let tiling_before = window.active().divider_fractions();
-        let reflows_before = window.reflow.fotogramas;
+        let reflows_before = window.reflow.frames;
 
         // El gesto entero, por el camino real: el enganche de la entrada cruda lo inyecta en cada fotograma.
         let mut frame = eframe::Frame::_new_kittest();
@@ -19815,14 +19834,11 @@ mod tests {
         // **Una ensancha y la otra estrecha, que es lo que mover una frontera significa**: lo que una gana
         // se lo quita a la otra. Comprobar solo que «las dos cambiaron» dejaría pasar un cambio de tamaño
         // de la ventana, que las mueve a las dos en el mismo sentido y no es este gesto.
-        let [
-            (left_before, left_after),
-            (right_before, right_after),
-        ] = <[_; 2]>::try_from(before.into_iter().zip(after).collect::<Vec<_>>())
-            .expect("la pestaña de la tanda abre con dos consolas");
+        let [(left_before, left_after), (right_before, right_after)] =
+            <[_; 2]>::try_from(before.into_iter().zip(after).collect::<Vec<_>>())
+                .expect("la pestaña de la tanda abre con dos consolas");
         assert!(
-            (left_after.cols > left_before.cols)
-                != (right_after.cols > right_before.cols),
+            (left_after.cols > left_before.cols) != (right_after.cols > right_before.cols),
             "las dos consolas fueron en el mismo sentido —de {left_before:?} y {right_before:?} a \
              {left_after:?} y {right_after:?}—: eso es un cambio de tamaño de la ventana, no \
              una frontera que se mueve"
@@ -19838,7 +19854,7 @@ mod tests {
              que es lo único que lo distingue del de estrechar el panel"
         );
         assert!(
-            window.reflow.fotogramas > reflows_before,
+            window.reflow.frames > reflows_before,
             "no se declaró ninguna recolocación: el trabajo que el historial encareció se publicaría como              coste del framework"
         );
     }
@@ -20028,7 +20044,12 @@ mod tests {
         let mid_y = its_area.center().y;
         one_frame_in(&mut window, &ctx, area, pointer_at(edge, mid_y));
         one_frame_in(&mut window, &ctx, area, button(edge, mid_y, true));
-        one_frame_in(&mut window, &ctx, area, pointer_at(edge - 30.0 * cell, mid_y));
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            pointer_at(edge - 30.0 * cell, mid_y),
+        );
         one_frame_in(
             &mut window,
             &ctx,
@@ -20045,17 +20066,17 @@ mod tests {
     #[test]
     fn la_variable_del_gesto_y_las_palabras_que_publica_son_el_contrato_con_el_guion() {
         // **Nada ataba esto, y el agujero es silencioso: un cambio de nombre deja cada tanda K midiendo la J
-        // bajo cabecera de K.** El guion pone `MEDIR_GESTO=panel` y luego **parsea la palabra** que el
+        // bajo cabecera de K.** El guion pone `MEASURE_GESTURE=panel` y luego **parsea la palabra** que el
         // informe publica para decirla por pantalla y para invalidar la corrida; el anexo la cita. Son tres
         // sitios que tienen que decir lo mismo y ninguna prueba los sujetaba.
-        assert_eq!(GESTURE_VARIABLE, "MEDIR_GESTO");
+        assert_eq!(GESTURE_VARIABLE, "MEASURE_GESTURE");
         assert_eq!(gesture_of(Some("panel")), InjectedGesture::ResizePanel);
-        assert_eq!(gesture_of(Some("frontera")), InjectedGesture::MoveDivider);
-        assert_eq!(gesture_of(Some("marcar")), InjectedGesture::Select);
+        assert_eq!(gesture_of(Some("divider")), InjectedGesture::MoveDivider);
+        assert_eq!(gesture_of(Some("mark")), InjectedGesture::Select);
         // Con espacios alrededor, que es lo que deja un guion de shell al componer la variable.
         assert_eq!(gesture_of(Some("  panel  ")), InjectedGesture::ResizePanel);
         assert_eq!(
-            gesture_of(Some("  frontera  ")),
+            gesture_of(Some("  divider  ")),
             InjectedGesture::MoveDivider
         );
         // **Y lo que no se entiende cae en el de la consola**, que es lo documentado: es lo que hace que un
@@ -20067,17 +20088,14 @@ mod tests {
         // Las tres palabras del informe, tal como el guion las espera.
         assert_eq!(
             InjectedGesture::ResizePanel.as_published(),
-            "estrechando el panel"
+            "narrowing the panel"
         );
-        assert_eq!(
-            InjectedGesture::MovePane.as_published(),
-            "moviendo consolas"
-        );
+        assert_eq!(InjectedGesture::MovePane.as_published(), "moving consoles");
         assert_eq!(
             InjectedGesture::MoveDivider.as_published(),
-            "moviendo la frontera del árbol"
+            "moving the tree divider"
         );
-        assert_eq!(InjectedGesture::Select.as_published(), "marcando texto");
+        assert_eq!(InjectedGesture::Select.as_published(), "marking text");
     }
 
     /// La disposición de esta ventana, escrita y vuelta a leer **pasando por el texto**.
@@ -20087,9 +20105,9 @@ mod tests {
     /// salte el JSON no ataría ni la etiqueta ni los nombres de las claves.
     fn wrap_around(window: &Window, ctx: &egui::Context) -> Vec<Tab> {
         let written_text =
-            session::escribir(&window.describe()).expect("una ventana viva se puede describir");
+            session::serialize(&window.describe()).expect("una ventana viva se puede describir");
         let read_back =
-            session::interpretar(&written_text).expect("lo que la ventana describe se vuelve a leer");
+            session::interpret(&written_text).expect("lo que la ventana describe se vuelve a leer");
         // **Un programa de prueba y no el del usuario.** Con `Pane::new` estas pruebas abrirían un
         // shell interactivo de quien las corre por cada hoja —veintitantos por corrida de la suite—, con
         // sus ficheros de arranque y sus enganches. Eso no prueba este código.
@@ -20143,10 +20161,10 @@ mod tests {
         );
 
         let written_text =
-            session::escribir(&window.describe()).expect("una ventana viva se puede describir");
-        let read_back = session::interpretar(&written_text)
+            session::serialize(&window.describe()).expect("una ventana viva se puede describir");
+        let read_back = session::interpret(&written_text)
             .expect("lo que la ventana describe se tiene que poder volver a leer");
-        assert_eq!(read_back.hojas(), 5);
+        assert_eq!(read_back.leaves(), 5);
         // Y de vuelta a consolas, que es el camino entero.
         let rounds =
             Window::materialize(&ctx, &read_back, "cat").expect("las consolas de vuelta se abren");
@@ -20170,8 +20188,8 @@ mod tests {
             "el arrastre no hizo crecer ningún peso, así que esta prueba no prueba nada: {weights:?}"
         );
         let written_text =
-            session::escribir(&window.describe()).expect("una ventana viva se puede describir");
-        session::interpretar(&written_text)
+            session::serialize(&window.describe()).expect("una ventana viva se puede describir");
+        session::interpret(&written_text)
             .expect("lo que la ventana describe se tiene que poder volver a leer");
     }
 
@@ -20429,35 +20447,35 @@ mod tests {
 
     /// Un documento válido de dos pestañas: la primera con dos consolas de anchos distintos y una plegada,
     /// la segunda con una sola.
-    fn saving_two_tabs() -> session::Valido {
-        session::validar(session::Documento {
+    fn saving_two_tabs() -> session::Validated {
+        session::validate(session::StoredDocument {
             v: session::VERSION,
-            pestañas: vec![
-                session::Pestaña {
-                    raiz: session::Nodo::Rama {
-                        orientacion: session::Orientacion::Columnas,
-                        hijos: vec![
-                            session::Hijo {
-                                peso: 3.0,
-                                nodo: session::Nodo::Hoja(session::Hoja {
-                                    ancho_del_panel: 52,
-                                    plegado: false,
+            tabs: vec![
+                session::StoredTab {
+                    root: session::StoredNode::Branch {
+                        orientation: session::StoredOrientation::Columns,
+                        children: vec![
+                            session::StoredChild {
+                                weight: 3.0,
+                                node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    panel_width: 52,
+                                    folded: false,
                                 }),
                             },
-                            session::Hijo {
-                                peso: 1.0,
-                                nodo: session::Nodo::Hoja(session::Hoja {
-                                    ancho_del_panel: 24,
-                                    plegado: true,
+                            session::StoredChild {
+                                weight: 1.0,
+                                node: session::StoredNode::Leaf(session::StoredLeaf {
+                                    panel_width: 24,
+                                    folded: true,
                                 }),
                             },
                         ],
                     },
                 },
-                session::Pestaña {
-                    raiz: session::Nodo::Hoja(session::Hoja {
-                        ancho_del_panel: 36,
-                        plegado: false,
+                session::StoredTab {
+                    root: session::StoredNode::Leaf(session::StoredLeaf {
+                        panel_width: 36,
+                        folded: false,
                     }),
                 },
             ],
@@ -20473,11 +20491,11 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
-        let path = session::ruta_de(Some(base.join("config").as_os_str()), None)
+        let path = session::path_from(Some(base.join("config").as_os_str()), None)
             .expect("la ruta de la prueba es absoluta");
 
         let mut window = window_with("sleep 30", "sleep 30");
-        window.persistence = session::Persistencia::en(Some(path.clone()));
+        window.persistence = session::Persistence::at(Some(path.clone()));
         (window, base, path)
     }
 
@@ -20525,13 +20543,13 @@ mod tests {
         window.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
 
-        let read_back = session::leer(&path).expect("lo que se guardó se vuelve a leer");
+        let read_back = session::read(&path).expect("lo que se guardó se vuelve a leer");
         assert_eq!(
-            read_back.pestañas(),
-            window.describe().pestañas.as_slice(),
+            read_back.tabs(),
+            window.describe().tabs.as_slice(),
             "en el disco no está la disposición que hay en pantalla"
         );
-        assert_eq!(window.saving.escrituras(), 1);
+        assert_eq!(window.saving.writes(), 1);
         // Y el plazo se consume: si se quedara puesto, escribiría en cada fotograma.
         assert_eq!(window.save_due, None);
 
@@ -20555,7 +20573,7 @@ mod tests {
         window.save_if_due();
 
         assert_eq!(
-            window.saving.escrituras(),
+            window.saving.writes(),
             1,
             "se reescribió lo mismo que ya estaba en disco"
         );
@@ -20579,10 +20597,10 @@ mod tests {
         // escribir.
         let in_the_way = base.join("config");
         std::fs::write(&in_the_way, "no soy un directorio").expect("plantar el estorbo");
-        let path = session::ruta_de(Some(in_the_way.as_os_str()), None).expect("es absoluta");
+        let path = session::path_from(Some(in_the_way.as_os_str()), None).expect("es absoluta");
 
         let mut window = window_with("sleep 30", "sleep 30");
-        window.persistence = session::Persistencia::en(Some(path));
+        window.persistence = session::Persistence::at(Some(path));
 
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
@@ -20590,7 +20608,7 @@ mod tests {
         window.save_if_due();
 
         assert_eq!(
-            window.saving.escrituras(),
+            window.saving.writes(),
             0,
             "se contó como escritura algo que no llegó al disco"
         );
@@ -20605,7 +20623,7 @@ mod tests {
         window.save_due = Some(Instant::now() - SAVE_DELAY);
         window.save_if_due();
         assert_eq!(
-            window.saving.intentos(),
+            window.saving.attempts(),
             2,
             "el cambio siguiente no volvió a intentarlo: sin esto, el fallo de las diez se quedaría sin \
              reintentar para siempre"
@@ -20623,13 +20641,13 @@ mod tests {
         // antes de este hito el fichero sobrevivía a un arranque fallido y el siguiente lo recuperaba.
         let (mut window, base, path) = a_window_that_saves("no-se-pudo-restaurar");
         // Lo que había guardado, escrito antes: es lo que no se puede perder.
-        let before = session::escribir(&window.describe()).expect("se describe");
+        let before = session::serialize(&window.describe()).expect("se describe");
         std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
         std::fs::write(&path, &before).expect("escribir lo que había");
 
         window
             .persistence
-            .no_pisar_porque("no se pudo abrir la disposición que había guardada");
+            .forbid_overwrite("no se pudo abrir la disposición que había guardada");
         window.active_mut().move_divider(0, 0.25);
         window.check_whether_the_layout_moved();
         window.save_due = Some(Instant::now() - SAVE_DELAY);
@@ -20640,7 +20658,7 @@ mod tests {
             before,
             "una sesión que no pudo restaurar pisó la disposición que no supo abrir"
         );
-        assert_eq!(window.saving.escrituras(), 0);
+        assert_eq!(window.saving.writes(), 0);
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -20658,8 +20676,8 @@ mod tests {
         // El plazo NO ha vencido: es lo que hace que esta prueba distinga vaciar de esperar.
         window.save_now();
 
-        let read_back = session::leer(&path).expect("al cerrar se escribió lo pendiente");
-        assert_eq!(read_back.pestañas(), window.describe().pestañas.as_slice());
+        let read_back = session::read(&path).expect("al cerrar se escribió lo pendiente");
+        assert_eq!(read_back.tabs(), window.describe().tabs.as_slice());
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -20676,7 +20694,7 @@ mod tests {
         window.save_if_due();
 
         assert_eq!(
-            window.saving.escrituras(),
+            window.saving.writes(),
             0,
             "se escribió antes de que venciera el plazo"
         );
@@ -20739,7 +20757,7 @@ mod tests {
             },
             "cat",
             None,
-            session::Persistencia::en(None),
+            session::Persistence::at(None),
         )
         .expect("de fábrica se abre");
 
@@ -20774,7 +20792,7 @@ mod tests {
         let cost = std::time::Duration::from_millis(50);
         window.active_mut().panes_mut()[0]
             .timings
-            .anotar_vuelta(measure::Tramos::de_una_vuelta(
+            .record_round(measure::Spans::of_a_round(
                 Some(Instant::now()),
                 Instant::now(),
                 std::time::Duration::ZERO,
@@ -20786,12 +20804,12 @@ mod tests {
         window.close_the_frame(cost);
 
         assert_eq!(
-            window.rest_of_frame.media(),
+            window.rest_of_frame.mean(),
             cost - set_aside - mirror,
             "lo que costó escribir no se descontó del resto"
         );
         assert!(
-            window.saving.escrituras() == 1,
+            window.saving.writes() == 1,
             "la fila del informe no publica la escritura que se acaba de hacer"
         );
 
@@ -20819,7 +20837,7 @@ mod tests {
             "comparar para decidir que no hay nada que guardar se quedó sin declarar"
         );
         assert_eq!(
-            window.saving.escrituras(),
+            window.saving.writes(),
             1,
             "se contó como escritura un plazo en el que no se escribió nada"
         );
@@ -20839,7 +20857,7 @@ mod tests {
         // Un tramo cualquiera de una consola, o el cierre no anota ningún resto.
         window.active_mut().panes_mut()[0]
             .timings
-            .anotar_vuelta(measure::Tramos::de_una_vuelta(
+            .record_round(measure::Spans::of_a_round(
                 Some(Instant::now()),
                 Instant::now(),
                 std::time::Duration::ZERO,
@@ -20850,12 +20868,12 @@ mod tests {
         window.close_the_frame(cost);
 
         assert_eq!(
-            window.rest_of_frame.media(),
+            window.rest_of_frame.mean(),
             cost - mirror,
             "el tramo del espejo no se descontó del resto"
         );
         assert!(
-            window.saving.hay_algo(),
+            window.saving.has_any(),
             "el tramo del espejo no tiene fila en el informe"
         );
     }
@@ -20873,7 +20891,7 @@ mod tests {
             OpenWith::Restored(saving_two_tabs()),
             "cat",
             None,
-            session::Persistencia::en(None),
+            session::Persistence::at(None),
         )
         .expect("la disposición guardada se abre");
 
@@ -20908,28 +20926,28 @@ mod tests {
             OpenWith::Restored(saving_two_tabs()),
             "cat",
             None,
-            session::Persistencia::en(None),
+            session::Persistence::at(None),
         )
         .expect("la disposición guardada se abre");
         let declared = restored
             .restoring
             .expect("una ventana restaurada no dijo de dónde salieron sus consolas");
         assert_eq!(
-            declared.consolas, 3,
+            declared.consoles, 3,
             "la cuenta que se publica no es la del documento que se abrió"
         );
         // **Y el tiempo, que es la mitad que se escapaba.** Sin esto, cablear el cronómetro a cero o
         // arrancarlo después de abrir las consolas deja la prueba en verde mientras el informe publica
         // `0ns en abrirlas` de una sesión que bifurcó tres procesos. Esta rama lanza `cat` de verdad.
         assert!(
-            declared.abrirlas > std::time::Duration::ZERO,
+            declared.opening > std::time::Duration::ZERO,
             "abrió tres consolas y dice haber tardado cero en hacerlo"
         );
         // **Y lo que no se midió no se publica.** Esta persistencia nunca leyó el disco —la prueba la
         // construye vacía—, así que el informe tiene que decir «sin medir» en vez de un cero que se lee
         // como una lectura instantánea.
         assert!(
-            declared.leer.is_none(),
+            declared.read.is_none(),
             "publica un tiempo de lectura de un fichero que nadie llegó a leer"
         );
 
@@ -20941,7 +20959,7 @@ mod tests {
             },
             "cat",
             None,
-            session::Persistencia::en(None),
+            session::Persistence::at(None),
         )
         .expect("la ventana de siempre abre");
         assert!(
@@ -20969,18 +20987,18 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("crear el directorio de la prueba");
-        let path = session::ruta_de(Some(base.join("config").as_os_str()), None)
+        let path = session::path_from(Some(base.join("config").as_os_str()), None)
             .expect("la ruta de la prueba es absoluta");
 
-        let mut persistence = session::Persistencia::en(Some(path));
+        let mut persistence = session::Persistence::at(Some(path));
         assert!(
-            persistence.guardar(&saving_two_tabs()),
+            persistence.save(&saving_two_tabs()),
             "no se guardó lo que la prueba iba a restaurar"
         );
         let saved = persistence
-            .cargar()
+            .load()
             .expect("no se leyó lo que se acababa de guardar");
-        let read_cost = persistence.tardo_en_cargar();
+        let read_cost = persistence.load_time();
 
         let window = Window::opening(&ctx, OpenWith::Restored(saved), "cat", None, persistence)
             .expect("la disposición guardada se abre");
@@ -20989,21 +21007,21 @@ mod tests {
             .restoring
             .expect("una ventana restaurada no dijo de dónde salieron sus consolas");
         assert_eq!(
-            declared.leer, read_cost,
+            declared.read, read_cost,
             "el informe no publica el tiempo que la carga apuntó"
         );
         assert!(
             declared
-                .leer
+                .read
                 .is_some_and(|how_much| how_much > Duration::ZERO),
             "leyó un fichero del disco y lo publica como «sin medir» o como instantáneo: {:?}",
-            declared.leer
+            declared.read
         );
         // **Las consolas que se declaran son las que la ventana abrió**, y no un número copiado del
         // documento: el guion compara esta cifra con las que sembró para decidir si la tanda vale.
         let tabs_open: usize = window.tabs.iter().map(|tab| tab.panes().len()).sum();
         assert_eq!(
-            declared.consolas, tabs_open,
+            declared.consoles, tabs_open,
             "declara un número de consolas que no es el de la ventana que abrió"
         );
 
@@ -21017,12 +21035,12 @@ mod tests {
         // el plegado en falso, deja un panel de cero puntos que no se puede volver a agarrar —el agarre
         // exige ancho— y el único que escribe ese campo es el propio arrastre: se queda así para siempre.
         let ctx = egui::Context::default();
-        let saving = session::validar(session::Documento {
+        let saving = session::validate(session::StoredDocument {
             v: session::VERSION,
-            pestañas: vec![session::Pestaña {
-                raiz: session::Nodo::Hoja(session::Hoja {
-                    ancho_del_panel: 0,
-                    plegado: false,
+            tabs: vec![session::StoredTab {
+                root: session::StoredNode::Leaf(session::StoredLeaf {
+                    panel_width: 0,
+                    folded: false,
                 }),
             }],
         })
@@ -21033,7 +21051,7 @@ mod tests {
             OpenWith::Restored(saving),
             "cat",
             None,
-            session::Persistencia::en(None),
+            session::Persistence::at(None),
         )
         .expect("la disposición guardada se abre");
 
@@ -21058,7 +21076,7 @@ mod tests {
             OpenWith::Restored(saving_two_tabs()),
             "cat",
             None,
-            session::Persistencia::en(None),
+            session::Persistence::at(None),
         )
         .expect("la disposición guardada se abre");
 
@@ -21078,7 +21096,7 @@ mod tests {
             },
             "cat",
             None,
-            session::Persistencia::en(None),
+            session::Persistence::at(None),
         )
         .expect("de fábrica se abre");
 
@@ -21131,11 +21149,7 @@ mod tests {
         let panes = names.len();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(
-            names.len(),
-            panes,
-            "hay nombres repetidos entre consolas"
-        );
+        assert_eq!(names.len(), panes, "hay nombres repetidos entre consolas");
     }
 
     #[test]
@@ -21173,13 +21187,13 @@ mod tests {
         // correcto. Todo verde — y el fichero **incompatible con cualquier otro binario**, que es lo peor
         // que le puede pasar a un formato. Lo único que lo caza es afirmar sobre el **texto**.
         for (orientation, expected) in [
-            (Orientation::Columns, "\"orientacion\":\"columnas\""),
-            (Orientation::Rows, "\"orientacion\":\"filas\""),
+            (Orientation::Columns, "\"orientation\":\"columns\""),
+            (Orientation::Rows, "\"orientation\":\"rows\""),
         ] {
             let window = window_of_siblings(orientation, &[1.0, 1.0]);
 
-            let written_text =
-                session::escribir(&window.describe()).expect("una ventana viva se puede describir");
+            let written_text = session::serialize(&window.describe())
+                .expect("una ventana viva se puede describir");
 
             assert!(
                 written_text.contains(expected),
@@ -21196,11 +21210,11 @@ mod tests {
         //
         // Sin esta prueba, alguien «arregla» el formato poniéndole el rechazo de claves desconocidas y
         // rompe esa compatibilidad sin que nada se queje.
-        let with_one_more = r#"{"v":1,"pestañas":[{"raiz":{"hoja":{"ancho_del_panel":36,"plegado":false,"lo_que_venga_manana":7}}}]}"#;
+        let with_one_more = r#"{"v":2,"tabs":[{"root":{"leaf":{"panel_width":36,"folded":false,"lo_que_venga_manana":7}}}]}"#;
 
         let read_back =
-            session::interpretar(with_one_more).expect("una clave de más no invalida el documento");
-        assert_eq!(read_back.hojas(), 1);
+            session::interpret(with_one_more).expect("una clave de más no invalida el documento");
+        assert_eq!(read_back.leaves(), 1);
     }
 
     #[test]
@@ -21212,30 +21226,34 @@ mod tests {
         // **Se afirma sobre el CONJUNTO de claves y no sobre lo que el texto no contiene**, y eso lo
         // decidió una revisión. La primera versión comprobaba que no apareciera ninguna barra ni la
         // palabra del programa de prueba, y eso **no habría cazado el caso que dice cazar**: un campo
-        // `programa` con «bash» dentro no tiene barras ni se llama como el programa de la prueba. Con la
+        // `program` con «bash» dentro no tiene barras ni se llama como el programa de la prueba. Con la
         // lista blanca, cualquier campo nuevo rompe esta prueba, que es exactamente para lo que está.
         let window = window_of_siblings(Orientation::Columns, &[1.0, 1.0]);
 
         let written_text =
-            session::escribir(&window.describe()).expect("una ventana viva se puede describir");
+            session::serialize(&window.describe()).expect("una ventana viva se puede describir");
 
         let expected = [
             "v",
-            "pestañas",
-            "raiz",
-            "rama",
-            "hoja",
-            "orientacion",
-            "hijos",
-            "peso",
-            "nodo",
-            "ancho_del_panel",
-            "plegado",
+            "tabs",
+            "root",
+            "branch",
+            "leaf",
+            "orientation",
+            "children",
+            "weight",
+            "node",
+            "panel_width",
+            "folded",
         ];
         // Las claves de un JSON sin espacios son lo que va entre comillas y antes de dos puntos.
         let keys: Vec<&str> = written_text
             .match_indices("\":")
-            .filter_map(|(end, _)| written_text[..end].rfind('"').map(|start| &written_text[start + 1..end]))
+            .filter_map(|(end, _)| {
+                written_text[..end]
+                    .rfind('"')
+                    .map(|start| &written_text[start + 1..end])
+            })
             .collect();
 
         for key in &keys {
@@ -21532,7 +21550,7 @@ mod tests {
         let mut one_tab = window_of_tabs([["sleep 30", "sleep 30"]]);
         ui_pass(&mut one_tab, &ctx, area, egui::RawInput::default());
         assert!(
-            one_tab.tab_bar_this_frame.is_zero() && one_tab.tab_bar_cost.fotogramas == 0,
+            one_tab.tab_bar_this_frame.is_zero() && one_tab.tab_bar_cost.frames == 0,
             "con una sola pestaña no hay barra que pintar, así que no hay nada que declarar"
         );
 
@@ -21562,22 +21580,22 @@ mod tests {
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
         window
             .tab_bar_cost
-            .anotar(std::time::Duration::from_millis(7));
-        window.tab_bar_cost.vio_marcadas(2);
+            .record(std::time::Duration::from_millis(7));
+        window.tab_bar_cost.saw_marked(2);
         // Sin nada medido el informe no se publica, y entonces esto pasaría por no encontrar una línea
         // en un texto vacío.
         window.tabs[0].panes_mut()[0]
             .timings
-            .anotar_ida(std::time::Duration::from_micros(10));
+            .record_outbound(std::time::Duration::from_micros(10));
 
         let report = report_of(&window);
 
         assert!(
-            report.contains("barra:        1 fotogramas · 7ms en total"),
+            report.contains("tab bar:      1 frames · 7ms in total"),
             "el informe no publicó la cuenta que llevaba la ventana:\n{report}"
         );
         assert!(
-            report.contains("2 fichas marcadas"),
+            report.contains("2 tabs marked"),
             "el informe no dijo si la barra llegó a marcar alguna ficha:\n{report}"
         );
     }
@@ -21605,7 +21623,8 @@ mod tests {
             .iter()
             .filter_map(|clipped| match &clipped.shape {
                 egui::Shape::Rect(painted)
-                    if painted.fill == window.theme.background() && its_area.contains_rect(painted.rect) =>
+                    if painted.fill == window.theme.background()
+                        && its_area.contains_rect(painted.rect) =>
                 {
                     Some(painted.rect)
                 }
@@ -21616,7 +21635,11 @@ mod tests {
         let [chip] = backgrounds.as_slice() else {
             panic!("detrás del símbolo de la ficha activa no se pintó el fondo: {backgrounds:?}");
         };
-        assert_eq!(chip.left(), its_area.left(), "el chip no arranca en su ficha");
+        assert_eq!(
+            chip.left(),
+            its_area.left(),
+            "el chip no arranca en su ficha"
+        );
         assert!(
             chip.contains(egui::pos2(
                 its_area.left() + TAB_BAR_MARGIN + 1.0,
@@ -21705,7 +21728,7 @@ mod tests {
             egui::RawInput::default(),
         );
         assert_eq!(
-            quiet.tab_bar_cost.fichas_marcadas, 0,
+            quiet.tab_bar_cost.marked_tabs, 0,
             "sin nadie que reclame, la barra dijo haber marcado fichas"
         );
 
@@ -21721,7 +21744,7 @@ mod tests {
         );
 
         assert_eq!(
-            window.tab_bar_cost.fichas_marcadas, 2,
+            window.tab_bar_cost.marked_tabs, 2,
             "la barra marcó las dos fichas y no lo declaró: el informe publica su coste como si no \
              hubiera habido ningún reclamo que acumular ni ningún símbolo que pintar"
         );
@@ -22079,12 +22102,7 @@ mod tests {
         );
         // Sin gesto pedido no hay contador que mirar, y la afirmación de abajo pasaría por vacía.
         window.injected_drags = InjectedDrags::new(1, InjectedGesture::MouseToProgram);
-        for (pane, rect) in window
-            .active_mut()
-            .panes_mut()
-            .into_iter()
-            .zip(&rects)
-        {
+        for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(&rects) {
             pane.measured = metrics.cells_in(rect.size());
             pane.screen.resize(pane.measured);
         }
@@ -22262,8 +22280,15 @@ mod tests {
 
         // El centinela: un clic limpio DENTRO de la consola, que sí tiene que llegar. Con él en pantalla,
         // lo que hubiera mandado el gesto anterior ya habría llegado también.
-        let inside_the_console = rects[0].min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
-        drag_to_select(&mut window, &ctx, &rects, inside_the_console, inside_the_console);
+        let inside_the_console =
+            rects[0].min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
+        drag_to_select(
+            &mut window,
+            &ctx,
+            &rects,
+            inside_the_console,
+            inside_the_console,
+        );
 
         wait_for_the_pane_to_say(&mut window, 0, "^[[<0;6;1M");
         let on_screen = window.active().panes()[0]
@@ -22296,8 +22321,7 @@ mod tests {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window =
-            a_pane_that_asks_for_the_mouse(&rects, &metrics, "boton_no_primario");
+        let mut window = a_pane_that_asks_for_the_mouse(&rects, &metrics, "boton_no_primario");
         let at = rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5);
 
         let pass = |window: &mut Window, input: egui::RawInput| {
@@ -22363,8 +22387,7 @@ mod tests {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window =
-            a_pane_that_asks_for_the_mouse(&rects, &metrics, "soltar_sobre_otra");
+        let mut window = a_pane_that_asks_for_the_mouse(&rects, &metrics, "soltar_sobre_otra");
 
         drag_to_select(
             &mut window,
@@ -22417,8 +22440,7 @@ mod tests {
         let ctx = egui::Context::default();
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
-        let mut window =
-            a_pane_that_asks_for_the_mouse(&rects, &metrics, "un_gesto_tres_informes");
+        let mut window = a_pane_that_asks_for_the_mouse(&rects, &metrics, "un_gesto_tres_informes");
         window.injected_drags = InjectedDrags::new(2, InjectedGesture::MouseToProgram);
         let cell = |column: f32| {
             rects[0].min + egui::vec2(metrics.width() * column, metrics.height() * 0.5)
@@ -22768,7 +22790,10 @@ mod tests {
             }
             let input = egui::RawInput {
                 screen_rect: Some(area),
-                events: vec![egui::Event::PointerMoved(over_the_left_one), wheel_event(unit, how_much)],
+                events: vec![
+                    egui::Event::PointerMoved(over_the_left_one),
+                    wheel_event(unit, how_much),
+                ],
                 ..Default::default()
             };
             ui_pass(&mut window, &ctx, area, input);
@@ -22802,7 +22827,10 @@ mod tests {
             pane.screen.scroll_by(term_core::Scroll::ToTop);
             pane.screen.view().scroll()
         };
-        assert!(to_the_top > 0, "la consola de prueba no tiene historial detrás");
+        assert!(
+            to_the_top > 0,
+            "la consola de prueba no tiene historial detrás"
+        );
 
         // Cada tecla, desde el estado en el que significa algo, y lo que tiene que dejar.
         let cases: [(egui::Key, usize, usize); 4] = [
@@ -22816,8 +22844,7 @@ mod tests {
         for (key, from, expected) in cases {
             let mut pane = pane_with_scrollback();
             let mut modifiers = egui::Modifiers::NONE;
-            pane.screen
-                .scroll_by(term_core::Scroll::Lines(from as i32));
+            pane.screen.scroll_by(term_core::Scroll::Lines(from as i32));
             let before = pane.screen.view().scroll();
 
             enqueue(
@@ -22992,7 +23019,7 @@ mod tests {
         // Un fotograma quieto: nadie cambia de tamaño, así que no hay nada que anotar.
         one_frame_with(&mut window, &ctx, Vec::new());
         assert_eq!(
-            window.reflow.fotogramas, 0,
+            window.reflow.frames, 0,
             "sin cambiar de ancho no se recoloca nada, y anotarlo hundiría la media"
         );
 
@@ -23001,7 +23028,7 @@ mod tests {
         one_frame_in(&mut window, &ctx, area_of(700.0), Vec::new());
 
         assert_eq!(
-            window.reflow.fotogramas, 1,
+            window.reflow.frames, 1,
             "cambió el ancho de las consolas y no se anotó"
         );
         assert!(
@@ -23076,8 +23103,7 @@ mod tests {
         let view = pane.screen.view();
         (0..view.size().rows)
             .map(|row| {
-                view
-                    .row(row)
+                view.row(row)
                     .expect("la fila está dentro de la foto")
                     .iter()
                     .map(|cell| cell.c)

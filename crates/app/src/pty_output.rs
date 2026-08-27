@@ -274,7 +274,10 @@ mod tests {
             received.windows(4).any(|v| v == b"hola")
         });
 
-        assert!(arrived, "no llegó lo que el programa escribió: {received:?}");
+        assert!(
+            arrived,
+            "no llegó lo que el programa escribió: {received:?}"
+        );
     }
 
     #[test]
@@ -449,10 +452,14 @@ mod tests {
     fn pty_output_with_queue(bytes: VecDeque<u8>) -> (std::sync::mpsc::Sender<Vec<u8>>, PtyOutput) {
         let (sender, output) = channel();
         let pty_output = PtyOutput::new(output, || {});
-        let mut queue = pty_output.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut queue = pty_output
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         // Una sola llegada que cubre todo lo puesto a mano: sin ella, recoger no sabría desde
         // cuándo esperaba y devolvería que no hay nada que esperar, que es distinto de cero.
-        queue.arrivals
+        queue
+            .arrivals
             .push_back((bytes.len() as u64, Instant::now()));
         queue.bytes = bytes;
         drop(queue);
@@ -571,7 +578,10 @@ mod tests {
             destination.len() == 200
         }));
 
-        let queue = pty_output.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        let queue = pty_output
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         assert!(
             queue.arrivals.is_empty(),
             "quedaron {} marcas de tandas ya servidas",
@@ -592,7 +602,10 @@ mod tests {
             pty_output.pick_up(&mut destination, usize::MAX);
             destination.len() > b"antes".len()
         }));
-        assert!(destination.starts_with(b"antes"), "se perdió lo que ya había");
+        assert!(
+            destination.starts_with(b"antes"),
+            "se perdió lo que ya había"
+        );
     }
 
     #[test]

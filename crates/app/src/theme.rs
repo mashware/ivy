@@ -208,7 +208,11 @@ impl Theme {
             Attention::Block => self.palette[1],
             Attention::Done => self.palette[2],
         };
-        if backed { color } else { self.toward_background(color) }
+        if backed {
+            color
+        } else {
+            self.toward_background(color)
+        }
     }
 }
 
@@ -410,7 +414,11 @@ mod tests {
         let from_styles: std::collections::HashSet<_> =
             styles.iter().map(|e| t.by_style(*e)).collect();
 
-        assert_eq!(from_marks.len(), 6, "las seis marcas son distintas entre sí");
+        assert_eq!(
+            from_marks.len(),
+            6,
+            "las seis marcas son distintas entre sí"
+        );
         assert_eq!(from_styles.len(), 7, "los siete estilos son distintos");
         assert_ne!(
             t.by_mark(Mark::Current),
@@ -672,7 +680,10 @@ mod tests {
             Color32::from_rgb(0x1E, 0x1E, 0x1E),
             DIM_FACTOR,
         );
-        assert_eq!(t.with_attributes(TermColor::Indexed(1), true, true), expected);
+        assert_eq!(
+            t.with_attributes(TermColor::Indexed(1), true, true),
+            expected
+        );
     }
 
     #[test]

@@ -66,6 +66,12 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/watcher.rs",
     "app/src/pty_output.rs",
     "app/src/lib.rs",
+    "app/src/measure.rs",
+    "app/src/session.rs",
+    "app/examples/sweep.rs",
+    "app/examples/leak.rs",
+    "app/examples/fonts.rs",
+    "app/examples/screen_demo.rs",
 ];
 
 /// Files whose **citations** are checked, though their identifiers are not yet.
@@ -161,22 +167,14 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
 /// the file that declares it. Saying so here is the point — a list that quietly exempted nothing
 /// would read, to the next person, as a list that was doing work.
 const STILL_SPANISH: &[&str] = &[
-    // The seven whose field and variant names **are** the layout file on disk.
-    "Hoja",
-    "Orientacion",
-    "Nodo",
-    "Hijo",
-    "Pestaña",
-    "Documento",
-    "Sonda",
     // Types a finished file legitimately names because they are declared in a file that is not
     // finished. **Every one of these is a line a later delivery deletes**, which is why they are
     // written out one by one: the list shrinking is how the milestone shows its progress.
     "Ajustes",
     "Colores",
-    // **Los veintiocho que el fichero grande NOMBRA sin declararlos**, y entran aquí porque esta
+    // **Los que el fichero grande NOMBRA sin declararlos**, y entran aquí porque esta
     // guarda juzga a un fichero por los identificadores que **aparecen** en él, no por los que
-    // declara. Los veintiocho están verificados contra el fichero que los declara, agrupados por
+    // declara. Están verificados contra el fichero que los declara, agrupados por
     // dueño, y **cada línea la borra la entrega de su módulo**: la lista es el marcador de progreso
     // que su propio comentario dice que es. Sin ellos, el fichero grande no puede entrar en la lista
     // de arriba aunque no le quede ni un nombre propio en español, que es justo lo que esa entrega
@@ -188,53 +186,10 @@ const STILL_SPANISH: &[&str] = &[
     // tipos. Medido por una revisión: devolver uno de los 317 a su nombre español deja estas nueve
     // pruebas en verde. Lo que protegió esa entrega fue el oráculo posicional del diff, no esta lista.
     //
-    // Del módulo de medida (14), que se traduce con el banco y el formato en disco:
-    "anotar_ida_del_raton",
-    "anotar_vuelta",
-    "arrastres",
-    "avisos",
-    "barra",
-    "con_efecto",
-    "consolas",
-    "de_una_vuelta",
-    "gesto",
-    "lado",
-    "llevarse_lo_pendiente",
-    "publicar_tramos",
-    "reflujo",
-    "restauracion",
-    // De la sesión (11), que se traduce con el formato en disco:
-    "Filas",
-    "ancho_del_panel",
-    "avisar_de_lo_que_no_se_puede_guardar",
-    "del_entorno",
-    "hijos",
-    "merece_aviso",
-    "nodo",
-    "orientacion",
-    "peso",
-    "pestañas",
-    "ruta_de",
     // De los ajustes (3), que se traducen con las claves de configuración:
     "atajos",
     "colores",
     "guardados",
-    "Arrastres",
-    "Avisos",
-    "Barra",
-    "DeLaSesion",
-    "Descubrimiento",
-    "EnPuntos",
-    "Guardado",
-    "LecturaDeAjustes",
-    "Medida",
-    "Persistencia",
-    "Rasterizado",
-    "Reflujo",
-    "Restauracion",
-    "RestoDelFotograma",
-    "Tramos",
-    "Valido",
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
@@ -1005,7 +960,12 @@ fn the_three_rules_answer_what_they_promise() {
     // English identifier this repository uses everywhere.
     // The other side of the rule: an English constant stays English. Without these, «a piece with no
     // lowercase letter is one word» could be satisfied by never splitting a constant at all.
-    for shouting in ["DEFAULT_WIDTH", "MAX_CHARACTERS", "ATLAS_SIDE", "SIZE_TO_ASK_WITH"] {
+    for shouting in [
+        "DEFAULT_WIDTH",
+        "MAX_CHARACTERS",
+        "ATLAS_SIDE",
+        "SIZE_TO_ASK_WITH",
+    ] {
         assert_eq!(
             verdict(shouting),
             None,
@@ -1071,7 +1031,6 @@ fn the_three_rules_answer_what_they_promise() {
              type of the same word: lowercasing the comparison would let this one through"
         );
     }
-
 }
 
 /// Los nombres que [`the_three_rules_answer_what_they_promise`] usa como casos **positivos**.
@@ -1207,8 +1166,8 @@ const NOT_OURS: &[&str] = &[
     "xterm",
     // Environment variables — ours and other people's. A variable is not an identifier of this tree,
     // and the ones the measurement script exports leave with the script, in a later delivery.
-    "MEDIR_MIB",
-    "MEDIR_TANDA",
+    "MEASURE_MIB",
+    "MEASURE_BATCH",
     "PANEL_DIR",
     "PANEL_ID",
     "PWD",
@@ -1613,7 +1572,10 @@ fn no_retired_file_name_is_still_cited() {
             .iter()
             .any(|path| path.file_name().is_some_and(|name| name == what))
     };
-    assert!(named("Cargo.toml"), "the walk did not reach a manifest at all");
+    assert!(
+        named("Cargo.toml"),
+        "the walk did not reach a manifest at all"
+    );
     assert!(
         targets.iter().any(|path| {
             path.file_name().is_some_and(|name| name == "Cargo.toml")
@@ -1647,7 +1609,10 @@ fn no_retired_file_name_is_still_cited() {
             for piece in line.split('`').skip(1).step_by(2) {
                 for stem in &stems {
                     if cites_the_file(piece, stem) {
-                        stale.push(format!("  {shown}:{}: `{piece}` → `{stem}` is gone", number + 1));
+                        stale.push(format!(
+                            "  {shown}:{}: `{piece}` → `{stem}` is gone",
+                            number + 1
+                        ));
                     }
                 }
             }
@@ -1674,7 +1639,13 @@ fn no_retired_file_name_is_still_cited() {
 /// greener, not redder**. A finder needs its own oracle; the absence of what it finds cannot be one.
 #[test]
 fn the_reader_of_file_citations_knows_the_four_shapes() {
-    for shape in ["pantalla", "pantalla.rs", "examples/pantalla.rs", "pantalla::draw", "pantalla()"] {
+    for shape in [
+        "pantalla",
+        "pantalla.rs",
+        "examples/pantalla.rs",
+        "pantalla::draw",
+        "pantalla()",
+    ] {
         assert!(
             cites_the_file(shape, "pantalla"),
             "«{shape}» is one of the four shapes this reader promises to know"

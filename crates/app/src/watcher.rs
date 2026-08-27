@@ -264,10 +264,9 @@ fn lost_a_watched_dir(event: &notify::Event, watchlist: &[Watched]) -> bool {
         EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(RenameMode::From))
     );
 
-    lost
-        && watchlist
-            .iter()
-            .any(|watched| event.paths.contains(&watched.dir))
+    lost && watchlist
+        .iter()
+        .any(|watched| event.paths.contains(&watched.dir))
 }
 
 /// Los dos avisos que **no** cuentan como una publicación nueva.
@@ -702,10 +701,7 @@ mod tests {
     fn sin_consolas_no_se_arma_nada_y_no_se_esta_ciego() {
         let watcher = Watcher::new(|| {}, &[]);
 
-        assert!(
-            watcher._backend.is_none(),
-            "se armó para no mirar nada"
-        );
+        assert!(watcher._backend.is_none(), "se armó para no mirar nada");
         assert!(
             !watcher.is_blind(),
             "no hay ningún panel que se quede viejo"

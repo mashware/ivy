@@ -211,10 +211,7 @@ impl PanelState {
     pub fn refresh(&mut self, dir: &std::path::Path) {
         // La fecha con la que se compara es la de la última lectura buena, que es la que el propio
         // contrato devuelve. Guardarla aparte sería tener dos copias del mismo dato.
-        let seen = self
-            .last_good
-            .as_ref()
-            .and_then(|panel| panel.written_at);
+        let seen = self.last_good.as_ref().and_then(|panel| panel.written_at);
 
         match panel_contract::read_if_newer(dir, seen) {
             Ok(Some(panel)) => {
@@ -687,7 +684,12 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
     // La sangría se acota contra lo mismo: un `indent` de 40 celdas es forma legal —el contrato admite
     // hasta 64— y en un panel de 36 dejaría la continuación fuera del rectángulo, invisible y contada
     // como fila visible, comiéndose renglones y falseando el aviso de cuántas faltan.
-    head.push_str(&" ".repeat(line.indent.min(head_cap.saturating_sub(head.chars().count()))));
+    head.push_str(
+        &" ".repeat(
+            line.indent
+                .min(head_cap.saturating_sub(head.chars().count())),
+        ),
+    );
 
     let indent = head.chars().count().min(head_cap);
     let mut rows = Vec::new();
@@ -740,10 +742,7 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
                 if line.is_empty() {
                     // Una palabra sola más larga que el hueco: se parte por caracteres, porque
                     // dejarla entera desbordaría el panel y saltar de línea no la haría caber nunca.
-                    let cut = word
-                        .char_indices()
-                        .nth(room)
-                        .map_or(word.len(), |(i, _)| i);
+                    let cut = word.char_indices().nth(room).map_or(word.len(), |(i, _)| i);
                     line.push_str(&word[..cut]);
                     pending.push(&word[cut..]);
                 }
@@ -1024,10 +1023,7 @@ mod tests {
         let shapes = std::mem::take(&mut output.shapes);
         output.drop_without_applying_deltas();
 
-        shapes
-            .into_iter()
-            .map(|clipped| clipped.shape)
-            .collect()
+        shapes.into_iter().map(|clipped| clipped.shape).collect()
     }
 
     /// Un estado con un panel publicado hace lo que se diga.
@@ -1531,10 +1527,7 @@ mod tests {
                         Some(panel_contract::Style::Ok)
                     )
                 ),
-                (
-                    "  sin adjetivos".to_owned(),
-                    theme.panel_color(None, None)
-                ),
+                ("  sin adjetivos".to_owned(), theme.panel_color(None, None)),
             ]
         );
     }
@@ -1934,10 +1927,7 @@ mod tests {
             .lay_out_if_needed("a1b2", 12, &theme, None, None)
             .expect("hay panel")
             .to_vec();
-        assert_ne!(
-            first, narrow,
-            "con otro ancho hay que volver a envolver"
-        );
+        assert_ne!(first, narrow, "con otro ancho hay que volver a envolver");
     }
 
     /// Y se tira al publicar: una maqueta que sobrevive a su fichero enseña lo de antes para siempre.
@@ -2359,7 +2349,11 @@ mod tests {
         state.refresh(dir.path());
 
         assert_eq!(
-            state.last_understood().expect("el último bueno sigue ahí").lines[0].text,
+            state
+                .last_understood()
+                .expect("el último bueno sigue ahí")
+                .lines[0]
+                .text,
             "lo bueno"
         );
     }

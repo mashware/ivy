@@ -52,33 +52,33 @@ use std::time::{Duration, Instant};
 /// Un tope, y no todas: una sesión larga acumularía millones de muestras y el informe mediría sobre
 /// todo el rato en que no pasaba nada. Con las últimas, lo que se publica describe cómo iba la cosa
 /// **mientras se usaba**, que es lo que interesa.
-const MUESTRAS: usize = 4096;
+const SAMPLES: usize = 4096;
 
 /// Una serie de tiempos, con lo que hace falta para resumirla.
 #[derive(Default)]
-struct Serie {
-    muestras: VecDeque<Duration>,
+struct Series {
+    samples: VecDeque<Duration>,
     /// Cuántas se han tomado en total, incluidas las que ya no se guardan. Sin esto, un informe de
     /// 4 096 muestras sobre una sesión de un millón parecería la sesión entera.
     total: usize,
 }
 
-impl Serie {
-    fn anotar(&mut self, cuanto: Duration) {
+impl Series {
+    fn record(&mut self, how_long: Duration) {
         self.total += 1;
         // Una cola por los dos extremos, y no un vector: sacar la muestra más vieja del principio de
         // un vector desplaza las otras cuatro mil, **dentro del fotograma que el instrumento está
         // midiendo**. El coste del instrumento acabaría dentro del tramo que el instrumento publica
         // como «el resto», que es justo el que hay que poder explicar.
-        if self.muestras.len() == MUESTRAS {
-            self.muestras.pop_front();
+        if self.samples.len() == SAMPLES {
+            self.samples.pop_front();
         }
-        self.muestras.push_back(cuanto);
+        self.samples.push_back(how_long);
     }
 
-    fn media(&self) -> Duration {
-        let suma: Duration = self.muestras.iter().sum();
-        suma / self.muestras.len().max(1) as u32
+    fn mean(&self) -> Duration {
+        let sum: Duration = self.samples.iter().sum();
+        sum / self.samples.len().max(1) as u32
     }
 
     /// El valor por debajo del cual queda el 95 % de las muestras.
@@ -87,28 +87,23 @@ impl Serie {
     /// pausa del recolector del escritorio o un cambio de contexto lo dispara y tapa la forma de la
     /// distribución. El 95 es el que se nota al usar.
     fn p95(&self) -> Duration {
-        if self.muestras.is_empty() {
+        if self.samples.is_empty() {
             return Duration::ZERO;
         }
-        let mut ordenadas: Vec<Duration> = self.muestras.iter().copied().collect();
-        ordenadas.sort_unstable();
-        let indice = (ordenadas.len() * 95 / 100).min(ordenadas.len() - 1);
-        ordenadas[indice]
+        let mut sorted: Vec<Duration> = self.samples.iter().copied().collect();
+        sorted.sort_unstable();
+        let index = (sorted.len() * 95 / 100).min(sorted.len() - 1);
+        sorted[index]
     }
 
-    fn hay(&self) -> bool {
-        !self.muestras.is_empty()
+    fn has_samples(&self) -> bool {
+        !self.samples.is_empty()
     }
 }
 
-impl fmt::Display for Serie {
+impl fmt::Display for Series {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:.3?} de media, {:.3?} el 95 %",
-            self.media(),
-            self.p95()
-        )
+        write!(f, "{:.3?} mean, {:.3?} p95", self.mean(), self.p95())
     }
 }
 
@@ -119,7 +114,7 @@ impl fmt::Display for Serie {
 /// justo el fallo que la separación de tramos existe para impedir. Un tramo que se puede confundir con
 /// otro en la llamada no está separado de nada.
 #[derive(Clone, Copy)]
-pub struct Tramos {
+pub struct Spans {
     /// Cuánto esperó en la cola el byte más antiguo, o `None` si a esta consola no le llegó nada en
     /// este fotograma.
     ///
@@ -128,9 +123,9 @@ pub struct Tramos {
     /// pintó**, y ese trabajo hay que devolverlo para que la ventana lo descuente del total. Cuando esto
     /// era un `Duration` a secas, el fotograma sin salida se descartaba entero y su pintado acababa
     /// publicado como «el resto del fotograma».
-    esperado: Option<Duration>,
-    interpretado: Duration,
-    encolado: Duration,
+    waited: Option<Duration>,
+    interpreted: Duration,
+    enqueued: Duration,
     /// Lo que costó mirar si el `panel.json` de esta consola cambió, leerlo e interpretarlo si
     /// cambió, repartir el ancho, **atender la frontera del panel** y **pintarlo**.
     ///
@@ -143,7 +138,7 @@ pub struct Tramos {
     /// el que se calcula restando — que aquí es el framework de interfaz, o sea justo la cifra sobre
     /// la que D3 tiene que decidir.
     ///
-    /// **Va aparte y no sumado a `encolado`, y esa separación es el motivo de que exista el campo.**
+    /// **Va aparte y no sumado a `enqueued`, y esa separación es el motivo de que exista el campo.**
     /// Los dos ocurren dentro del fotograma y los dos hay que devolverlos, así que para la resta daría
     /// igual. Pero un tramo llamado «encolando el pintado» que además incluyera leer un fichero de
     /// disco sería un número con la etiqueta cambiada, y aquí eso ya costó una medida entera: el coste
@@ -151,23 +146,23 @@ pub struct Tramos {
     panel: Duration,
 }
 
-impl Tramos {
+impl Spans {
     /// Los tramos de una vuelta, con cada duración puesta por su nombre.
     ///
-    /// `esperando_desde` es cuándo llegó el byte más antiguo de los recogidos; sin bytes en este
+    /// `waiting_since` es cuándo llegó el byte más antiguo de los recogidos; sin bytes en este
     /// fotograma no hay nada que medir de la vuelta — un fotograma en reposo no es una vuelta
     /// rapidísima, es una vuelta que no ocurrió.
-    pub fn de_una_vuelta(
-        esperando_desde: Option<Instant>,
-        recogido_en: Instant,
-        interpretado: Duration,
-        encolado: Duration,
+    pub fn of_a_round(
+        waiting_since: Option<Instant>,
+        collected_at: Instant,
+        interpreted: Duration,
+        enqueued: Duration,
         panel: Duration,
     ) -> Self {
         Self {
-            esperado: esperando_desde.map(|desde| recogido_en.saturating_duration_since(desde)),
-            interpretado,
-            encolado,
+            waited: waiting_since.map(|since| collected_at.saturating_duration_since(since)),
+            interpreted,
+            enqueued,
             panel,
         }
     }
@@ -187,15 +182,15 @@ impl Tramos {
     ///
     /// La espera no entra, y no es un olvido: **no es trabajo**, es cuánto llevaba el byte en la cola.
     fn declarable(&self) -> Duration {
-        self.interpretado + self.encolado + self.panel
+        self.interpreted + self.enqueued + self.panel
     }
 
-    fn y_ademas(self, otra: Self) -> Self {
+    fn and_also(self, other: Self) -> Self {
         Self {
-            esperado: self.esperado.or(otra.esperado),
-            interpretado: self.interpretado + otra.interpretado,
-            encolado: self.encolado + otra.encolado,
-            panel: self.panel + otra.panel,
+            waited: self.waited.or(other.waited),
+            interpreted: self.interpreted + other.interpreted,
+            enqueued: self.enqueued + other.enqueued,
+            panel: self.panel + other.panel,
         }
     }
 }
@@ -203,17 +198,17 @@ impl Tramos {
 /// Los cronómetros **de una división** y lo que llevan medido.
 ///
 /// Todo lo de aquí se cronometra alrededor de una consola concreta. El cuarto tramo no cabe aquí: ver
-/// [`RestoDelFotograma`].
+/// [`RestOfFrame`].
 ///
 /// **Comparar estos números con los de una medida anterior exige mirar la rejilla, no solo el tramo.**
-/// `encolar` es proporcional al número de celdas y `interpretar` depende de la anchura sobre la que
+/// `enqueue` es proporcional al número de celdas y `interpret` depende de la anchura sobre la que
 /// envuelve el texto, así que una consola que ocupa media ventana los da más bajos que una a pantalla
 /// completa **sin que nada haya mejorado**. Por eso la cabecera del informe publica la rejilla de cada
-/// consola: leer «encolar bajó» como «el framework aguanta mejor» es el error que este aviso existe
-/// para evitar. El único tramo cuya definición no cambia con el reparto es `esperar`.
+/// consola: leer «enqueueing the paint went down» como «el framework aguanta mejor» es el error que este aviso existe
+/// para evitar. El único tramo cuya definición no cambia con el reparto es `wait`.
 #[derive(Default)]
-pub struct Medida {
-    ida: Serie,
+pub struct Timings {
+    outbound: Series,
     /// **Codificar** un gesto de ratón y escribirlo en el programa.
     ///
     /// **La etiqueta dice exactamente lo que el reloj abarca, y eso costó una corrección.** La primera
@@ -226,27 +221,27 @@ pub struct Medida {
     /// **Serie propia y no la de la tecla** también por lo que mide: un arrastre mete **decenas de
     /// muestras por gesto** —una por celda recorrida— contra la única que mete una tecla, así que
     /// promediarlas juntas dejaría la cifra que D3 publica describiendo sobre todo al ratón.
-    raton: Serie,
-    esperar: Serie,
-    interpretar: Serie,
-    encolar: Serie,
+    mouse: Series,
+    wait: Series,
+    interpret: Series,
+    enqueue: Series,
     /// Mirar la fecha del `panel.json`, leerlo e interpretarlo cuando ha cambiado, repartir el ancho,
     /// **atender el arrastre de su frontera** y **pintarlo**.
-    panel: Serie,
-    vuelta: Serie,
+    panel: Series,
+    round: Series,
     /// Los tramos del fotograma anterior, esperando a que `eframe` publique lo que costó.
-    pendiente: Option<Tramos>,
+    pending: Option<Spans>,
 }
 
-impl Medida {
+impl Timings {
     /// Anota lo que ha tardado la ida: de empezar la pasada de interfaz a escribir en el programa.
-    pub fn anotar_ida(&mut self, cuanto: Duration) {
-        self.ida.anotar(cuanto);
+    pub fn record_outbound(&mut self, how_long: Duration) {
+        self.outbound.record(how_long);
     }
 
     /// Anota lo que ha tardado codificar un gesto de ratón y escribirlo en el programa.
-    pub fn anotar_ida_del_raton(&mut self, cuanto: Duration) {
-        self.raton.anotar(cuanto);
+    pub fn record_mouse_outbound(&mut self, how_long: Duration) {
+        self.mouse.record(how_long);
     }
 
     /// Anota los tramos de este fotograma. Quedan pendientes hasta que se sepa lo que costó entero.
@@ -259,7 +254,7 @@ impl Medida {
     /// llegaba aquí dos veces: la segunda anotación, con lo interpretado a casi cero porque la cola ya
     /// estaba vacía, **machacaba la buena**. Lo que la consola había interpretado de verdad se publicaba
     /// como coste del framework de interfaz, que es la cifra con la que D3 decide. Medido antes del
-    /// arreglo: **50 ns declarados donde interpretar había costado 20,158 µs**. Ver [`Tramos::y_ademas`]
+    /// arreglo: **50 ns declarados donde interpretar había costado 20,158 µs**. Ver [`Spans::and_also`]
     /// por qué la espera no se suma.
     ///
     /// **Sumar solo es correcto porque el fotograma se cierra una vez, y las dos cosas van juntas.** Si
@@ -269,10 +264,10 @@ impl Medida {
     /// **N-1** y el coste del **N-1** —`eframe` publica el total con un fotograma de retraso—, así que lo
     /// que aquí se suma son siempre las pasadas **de un mismo fotograma**. Quien toque una de las dos
     /// piezas tiene que mirar la otra.
-    pub fn anotar_vuelta(&mut self, tramos: Tramos) {
-        self.pendiente = Some(match self.pendiente.take() {
-            Some(ya_habia) => ya_habia.y_ademas(tramos),
-            None => tramos,
+    pub fn record_round(&mut self, spans: Spans) {
+        self.pending = Some(match self.pending.take() {
+            Some(already_there) => already_there.and_also(spans),
+            None => spans,
         });
     }
 
@@ -287,18 +282,18 @@ impl Medida {
     /// **Las cuatro series, en cambio, solo cuentan cuando llegó salida**: un fotograma en reposo no es
     /// una vuelta rapidísima, es una vuelta que no ocurrió, y meterlo en la media diría que la
     /// aplicación responde al instante justamente por no haber hecho nada.
-    pub fn cerrar_fotograma(&mut self, coste_cpu: Duration) -> Option<Duration> {
-        let tramos = self.pendiente.take()?;
+    pub fn close_frame(&mut self, cpu_cost: Duration) -> Option<Duration> {
+        let spans = self.pending.take()?;
 
-        if let Some(esperado) = tramos.esperado {
-            self.esperar.anotar(esperado);
-            self.interpretar.anotar(tramos.interpretado);
-            self.encolar.anotar(tramos.encolado);
-            self.panel.anotar(tramos.panel);
-            self.vuelta.anotar(esperado + coste_cpu);
+        if let Some(waited) = spans.waited {
+            self.wait.record(waited);
+            self.interpret.record(spans.interpreted);
+            self.enqueue.record(spans.enqueued);
+            self.panel.record(spans.panel);
+            self.round.record(waited + cpu_cost);
         }
 
-        Some(tramos.declarable())
+        Some(spans.declarable())
     }
 
     /// Se lleva lo que quedaba pendiente **sin anotar ninguna media**, y devuelve lo que hay que restar.
@@ -309,10 +304,10 @@ impl Medida {
     /// fotograma para la serie de la vuelta: con un cero, una vuelta artificialmente corta; con el de
     /// verdad, una muestra de un fotograma que esta consola ya no va a terminar. Lo honesto es no anotar
     /// nada y quedarse solo con lo que la resta necesita.
-    pub fn llevarse_lo_pendiente(&mut self) -> Duration {
-        self.pendiente
+    pub fn take_pending(&mut self) -> Duration {
+        self.pending
             .take()
-            .map_or(Duration::ZERO, |tramos| tramos.declarable())
+            .map_or(Duration::ZERO, |spans| spans.declarable())
     }
 
     /// Lo que esta división lleva anotado del tramo del panel.
@@ -321,18 +316,21 @@ impl Medida {
     /// que la anotación funciona cuando se la llama a mano. Sin esto, dejar el coste del panel en cero
     /// dentro de la pasada de interfaz no rompía nada.
     #[cfg(test)]
-    pub fn panel_anotado(&self) -> Option<Duration> {
-        self.panel.hay().then(|| self.panel.media())
+    pub fn recorded_panel(&self) -> Option<Duration> {
+        self.panel.has_samples().then(|| self.panel.mean())
     }
 
     /// Si alguna de las cuatro medias tiene muestras.
     ///
-    /// Existe por lo mismo que [`Medida::panel_anotado`]: una prueba puede afirmar sobre el camino
+    /// Existe por lo mismo que [`Timings::recorded_panel`]: una prueba puede afirmar sobre el camino
     /// real que una consola **que no se pintó** no ensucia ninguna media. Comprobarlo llamando a mano
     /// a la anotación demuestra que la anotación funciona, no que quien la llama le pase lo correcto.
     #[cfg(test)]
-    pub fn hay_medias(&self) -> bool {
-        self.esperar.hay() || self.interpretar.hay() || self.encolar.hay() || self.panel.hay()
+    pub fn has_means(&self) -> bool {
+        self.wait.has_samples()
+            || self.interpret.has_samples()
+            || self.enqueue.has_samples()
+            || self.panel.has_samples()
     }
 
     /// Si esta división llegó a medir algo, para no publicar el informe de una consola en blanco.
@@ -340,8 +338,8 @@ impl Medida {
     /// **El ratón cuenta.** Una tanda que solo inyecta gestos y no teclea ni recibe salida tiene sus
     /// muestras aquí y en ningún otro sitio; sin esta condición su informe saldría en blanco y la
     /// corrida se leería como que el gesto no costó nada.
-    pub fn hay_algo(&self) -> bool {
-        self.ida.hay() || self.raton.hay() || self.vuelta.hay()
+    pub fn has_any(&self) -> bool {
+        self.outbound.has_samples() || self.mouse.has_samples() || self.round.has_samples()
     }
 
     /// Publica los números **de esta división** al destino que se le dé.
@@ -355,58 +353,58 @@ impl Medida {
     /// `println!` dentro no hay forma de leer lo que sale, y la alternativa —afirmar sobre la constante—
     /// demostraría que la constante está bien redactada, no que alguien la imprima.
     ///
-    /// **Y por eso esto no tiene envoltorio.** La primera versión dejaba un `publicar_tramos()` sin
+    /// **Y por eso esto no tiene envoltorio.** La primera versión dejaba un `publish_spans()` sin
     /// argumentos que llamaba a esta función con la salida estándar, y la prueba entraba por aquí:
     /// vaciar el envoltorio dejaba la suite **verde**, que es la novena vez que este proyecto ata al
     /// ayudante en vez de al camino real. Ahora la puerta de producción y la que se prueba son la
     /// misma, y lo único que aporta quien llama es a dónde escribir.
-    pub fn publicar_tramos(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
-        if self.ida.hay() {
+    pub fn publish_spans(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if self.outbound.has_samples() {
             writeln!(
                 a,
-                "\ntecla en el fotograma → byte en el programa   ({} pulsaciones)",
-                self.ida.total
+                "\nkey in the frame → byte in the program   ({} keystrokes)",
+                self.outbound.total
             )?;
-            writeln!(a, "  {}", self.ida)?;
+            writeln!(a, "  {}", self.outbound)?;
             writeln!(
                 a,
-                "  no incluye el trecho de la pulsación al fotograma: no es medible desde aquí"
+                "  does not include the stretch from the keystroke to the frame: not measurable from here"
             )?;
         }
 
-        if self.raton.hay() {
+        if self.mouse.has_samples() {
             writeln!(
                 a,
-                "\ncodificar el gesto de ratón → byte en el programa   ({} informes de ratón)",
-                self.raton.total
+                "\nencoding the mouse gesture → byte in the program   ({} mouse reports)",
+                self.mouse.total
             )?;
-            writeln!(a, "  {}", self.raton)?;
+            writeln!(a, "  {}", self.mouse)?;
             writeln!(
                 a,
-                "  un arrastre mete una muestra por celda recorrida, no una por gesto"
-            )?;
-            writeln!(
-                a,
-                "  NO abarca la pasada entera como el tramo de la tecla: repartir el puntero y"
+                "  a drag drops one sample per cell crossed, not one per gesture"
             )?;
             writeln!(
                 a,
-                "  resolver la celda quedan fuera, dentro del reloj de atender el ratón; los dos"
+                "  does NOT cover the whole pass the way the key span does: placing the pointer and"
             )?;
-            writeln!(a, "  números no se comparan")?;
+            writeln!(
+                a,
+                "  resolving the cell stay outside, inside the clock that serves the mouse; the two"
+            )?;
+            writeln!(a, "  numbers are not comparable")?;
         }
 
-        if self.vuelta.hay() {
+        if self.round.has_samples() {
             writeln!(
                 a,
-                "\nbyte disponible → fotograma pagado   ({} fotogramas con salida)",
-                self.vuelta.total
+                "\nbyte available → frame paid for   ({} frames with output)",
+                self.round.total
             )?;
-            writeln!(a, "  {}", self.vuelta)?;
-            writeln!(a, "  esperando en la cola:   {}", self.esperar)?;
-            writeln!(a, "  interpretando:          {}", self.interpretar)?;
-            writeln!(a, "  encolando el pintado:   {}", self.encolar)?;
-            writeln!(a, "  el panel de estado:     {}", self.panel)?;
+            writeln!(a, "  {}", self.round)?;
+            writeln!(a, "  waiting in the queue:   {}", self.wait)?;
+            writeln!(a, "  interpreting:           {}", self.interpret)?;
+            writeln!(a, "  enqueueing the paint:   {}", self.enqueue)?;
+            writeln!(a, "  the status panel:       {}", self.panel)?;
             // **La media de este tramo mezcla dos poblaciones y hay que decirlo.** Casi todos los
             // fotogramas solo miran la fecha del fichero y pintan lo ya maquetado; los pocos en que el
             // productor ha publicado cuestan además leer, interpretar y rehacer la maqueta, que es
@@ -416,11 +414,11 @@ impl Medida {
             // **Y el tramo incluye pintar**, no solo leer: el reloj va desde antes de mirar la fecha
             // hasta después de pintar la última fila. Decirlo aquí es lo que impide que quien copie
             // este número a un documento se lo atribuya a otro.
-            writeln!(a, "{EXPLICACION_DEL_PANEL}")?;
+            writeln!(a, "{PANEL_EXPLANATION}")?;
             writeln!(
                 a,
-                "  incluye el fotograma entero, también el pintado de las otras consolas: un\n  \
-                 fotograma se presenta indivisible. Por eso dos de estos números NO se suman"
+                "  it includes the whole frame, the other consoles' painting too: a frame\n  \
+                 presents itself as indivisible. That is why two of these numbers do NOT add up"
             )?;
         }
 
@@ -436,14 +434,15 @@ impl Medida {
 /// todo el hito F1.6 este número se describió como «leer el panel» cuando el reloj incluye pintarlo:
 /// un tramo mal nombrado acaba atribuido a quien no lo hizo, y aquí el que se lleva lo que nadie
 /// declara es el framework de interfaz, que es justo la cifra que decide D3.
-const EXPLICACION_DEL_PANEL: &str = "\
-    \x20   mezcla mirar la fecha y pintar lo ya maquetado (casi todos los fotogramas) con\n\
-    \x20   leer, interpretar y rehacer la maqueta (los de publicación): la media describe\n\
-    \x20   el primero, el 95 % el segundo\n\
-    \x20   son dos relojes, uno antes y otro después del pintado de la consola —que queda\n\
-    \x20   fuera—: este tramo INCLUYE pintar el panel, no solo leerlo\n\
-    \x20   y también atender el arrastre de su frontera y repartir el ancho otra vez si\n\
-    \x20   cambió: el gesto de estrechar el panel se paga aquí, no en el resto del fotograma";
+const PANEL_EXPLANATION: &str = "\
+    \x20   mixes checking the timestamp and painting the already laid-out text (almost\n\
+    \x20   every frame) with reading, interpreting and laying the text out again (the\n\
+    \x20   publishing ones): the mean describes the former, the 95th the latter\n\
+    \x20   it is two clocks, one before and one after painting the console —which stays\n\
+    \x20   outside—: this span INCLUDES painting the panel, not only reading it\n\
+    \x20   and also serving the drag of its border and splitting the width again if it\n\
+    \x20   changed: the gesture that narrows the panel is paid here, not in the rest of\n\
+    \x20   the frame";
 
 /// El resto del fotograma: lo que costó la pasada y nadie cronometró.
 ///
@@ -452,18 +451,18 @@ const EXPLICACION_DEL_PANEL: &str = "\
 /// sería inventarse un reparto que nadie ha medido, y anotarlo una vez por división contaría el mismo
 /// coste tantas veces como consolas haya abiertas.
 #[derive(Default)]
-pub struct RestoDelFotograma {
-    serie: Serie,
+pub struct RestOfFrame {
+    series: Series,
 }
 
-impl RestoDelFotograma {
+impl RestOfFrame {
     /// Anota el resto de este fotograma: lo que costó entero menos lo que cronometraron **todas** las
     /// divisiones.
-    pub fn anotar(&mut self, coste_cpu: Duration, cronometrado: Duration) {
+    pub fn record(&mut self, cpu_cost: Duration, timed: Duration) {
         // El total puede salir por debajo de los tramos medidos: son de fotogramas contiguos pero no
         // idénticos, y el reloj de `eframe` no es el mismo que el de aquí. Cuando pasa, el resto es
         // cero en vez de un número negativo con pinta de dato.
-        self.serie.anotar(coste_cpu.saturating_sub(cronometrado));
+        self.series.record(cpu_cost.saturating_sub(timed));
     }
 
     /// Lo que se ha publicado como resto, de media.
@@ -473,8 +472,8 @@ impl RestoDelFotograma {
     /// alguien apuntó el número en un campo, que es atar al ayudante y no al camino — y ese hueco ya dejó
     /// pasar una mutación en este mismo trabajo.
     #[cfg(test)]
-    pub fn media(&self) -> Duration {
-        self.serie.media()
+    pub fn mean(&self) -> Duration {
+        self.series.mean()
     }
 
     /// Cuántas veces se ha anotado un resto, o sea **cuántos fotogramas se han cerrado**.
@@ -484,30 +483,30 @@ impl RestoDelFotograma {
     /// del mismo fotograma anotan un valor parecido— y el informe tampoco. Es lo que hace falta para
     /// atar la guarda que evita el doble cierre.
     #[cfg(test)]
-    pub fn fotogramas_cerrados(&self) -> usize {
-        self.serie.total
+    pub fn closed_frames(&self) -> usize {
+        self.series.total
     }
 
-    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
-        if !self.serie.hay() {
+    pub fn publish(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if !self.series.has_samples() {
             return Ok(());
         }
         writeln!(
             a,
-            "\nel resto del fotograma — de la ventana, común a todas las consolas   ({} fotogramas)",
-            self.serie.total
+            "\nthe rest of the frame — the window's, shared by every console   ({} frames)",
+            self.series.total
         )?;
-        writeln!(a, "  {}", self.serie)?;
+        writeln!(a, "  {}", self.series)?;
         writeln!(
             a,
-            "  es teselar, dibujar y el armazón de egui: desde dentro no se pueden separar, y\n  \
-             llamarlo «teselado» sería publicar como medido algo que no lo está"
+            "  it is tessellating, painting and egui's scaffolding: from inside they cannot be\n  \
+             separated, and calling it \"tessellation\" would publish what is not measured as measured"
         )?;
         writeln!(
             a,
-            "  ya tiene descontado lo que cronometraron todas las consolas de todas las pestañas:\n  \
-             también el pintado de una que no recibiera salida, y lo que interpretó una que no se\n  \
-             llegó a pintar por estar en una pestaña de fondo"
+            "  every console of every tab already has its timing subtracted from it:\n  \
+             also the painting of one that received no output, and the interpreting of one\n  \
+             that never got painted for being in a background tab"
         )
     }
 }
@@ -522,26 +521,26 @@ impl RestoDelFotograma {
 /// coste todo lo que se cronometró, y a ese saco hay que entrar aparte. Con serie y sin resta, estos dos
 /// tramos se publicarían con su fila **y a la vez** dentro de la cifra que D3 usa para juzgar al framework.
 #[derive(Default)]
-pub struct Guardado {
-    espejo: Serie,
-    escritura: Serie,
+pub struct Saving {
+    mirror: Series,
+    write: Series,
     /// Cuántas veces se ha escrito el fichero de disposición.
     ///
     /// **Lo publica el informe y no lo puede saber el guion**, que es la misma partición que el proyecto ya
     /// usa con los gestos inyectados: este número vive dentro del proceso. El guion invalida la corrida si es
     /// cero, porque una tanda que dice medir el guardado y no guarda nada publicaría el coste de un camino
     /// que no se recorrió.
-    escrituras: usize,
+    writes: usize,
 }
 
-impl Guardado {
+impl Saving {
     /// Anota lo que costó comparar el espejo en **un fotograma entero**.
     ///
     /// Quien llama acumula por pasada y anota **una vez al cerrar**: egui repite la pasada de interfaz, y
     /// anotar por pasada haría que la media describiera «por pasada» en vez de «por fotograma» — el inverso
     /// exacto del sesgo que este instrumento ya se comió una vez.
-    pub fn anotar_espejo(&mut self, cuanto: Duration) {
-        self.espejo.anotar(cuanto);
+    pub fn record_mirror(&mut self, how_long: Duration) {
+        self.mirror.record(how_long);
     }
 
     /// Anota lo que costó **un intento** de escritura: desde resolver la ruta hasta que el renombrado
@@ -551,17 +550,17 @@ impl Guardado {
     /// quisquillosa: el trabajo ocurrió dentro del fotograma en los dos casos y hay que descontarlo, pero
     /// publicar los intentos fallidos como escrituras diría que la disposición está guardada cuando no lo
     /// está. Un disco lleno publicaría «mil escrituras» sin haber escrito ninguna.
-    pub fn anotar_escritura(&mut self, cuanto: Duration, llego_al_disco: bool) {
-        self.escritura.anotar(cuanto);
-        if llego_al_disco {
-            self.escrituras += 1;
+    pub fn record_write(&mut self, how_long: Duration, reached_disk: bool) {
+        self.write.record(how_long);
+        if reached_disk {
+            self.writes += 1;
         }
     }
 
     /// Cuántas veces se escribió **de verdad**, para que el informe lo declare y el guion pueda invalidar
     /// una corrida que dice medir el guardado y no guardó nada.
-    pub fn escrituras(&self) -> usize {
-        self.escrituras
+    pub fn writes(&self) -> usize {
+        self.writes
     }
 
     /// Cuántas veces se **intentó** escribir en el disco, para pruebas.
@@ -570,41 +569,41 @@ impl Guardado {
     /// puede distinguir «se reintentó y volvió a fallar» de «no se reintentó» — que es exactamente el hueco
     /// que una revisión encontró en la prueba del reintento.
     #[cfg(test)]
-    pub fn intentos(&self) -> usize {
-        self.escritura.total
+    pub fn attempts(&self) -> usize {
+        self.write.total
     }
 
     /// Lo que llevan anotado los dos tramos, **solo para pruebas**: es lo que permite afirmar que el camino
     /// real los declara, y no solo que la anotación funciona cuando se la llama a mano.
     #[cfg(test)]
-    pub fn hay_algo(&self) -> bool {
-        self.espejo.hay() || self.escritura.hay()
+    pub fn has_any(&self) -> bool {
+        self.mirror.has_samples() || self.write.has_samples()
     }
 
-    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
-        if self.espejo.hay() {
+    pub fn publish(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if self.mirror.has_samples() {
             writeln!(
                 a,
-                "\nmirar si la disposición cambió — de la ventana   ({} fotogramas con pasada)",
-                self.espejo.total
+                "\nchecking whether the layout changed — the window's, shared by every console   ({} frames with a pass)",
+                self.mirror.total
             )?;
-            writeln!(a, "  {}", self.espejo)?;
+            writeln!(a, "  {}", self.mirror)?;
             writeln!(
                 a,
-                "  recorre el árbol de todas las pestañas y construye su espejo para compararlo: se paga en\n                   todos los fotogramas que pintan, y por eso está descontado del resto. Incluye\n                   también comparar contra lo último escrito al vencer el plazo cuando no hay nada\n                   nuevo que guardar: es el mismo trabajo"
+                "  walks the tree of every tab and builds its mirror to compare it against: paid in\n                   every frame that paints, which is why it is subtracted from the rest. Also\n                   includes comparing against what was last written when the deadline expires\n                   with nothing new to save: it is the same work"
             )?;
         }
 
-        if self.escritura.hay() {
+        if self.write.has_samples() {
             writeln!(
                 a,
-                "\nescribir la disposición en disco   ({} escrituras de {} intentos)",
-                self.escrituras, self.escritura.total
+                "\nwriting the layout to disk   ({} writes of {} attempts)",
+                self.writes, self.write.total
             )?;
-            writeln!(a, "  {}", self.escritura)?;
+            writeln!(a, "  {}", self.write)?;
             writeln!(
                 a,
-                "  abarca copiar la disposición, VALIDARLA, serializarla, resolver la ruta, crear el directorio\n                   la primera vez, escribir el temporal y renombrarlo encima; y si algo falla, borrar el\n                   temporal y decir la línea del fallo. Solo ocurre cuando vence el plazo, no en cada\n                   fotograma: un intento que no llega al disco es casi todo validación"
+                "  covers copying the layout, VALIDATING it, serializing it, resolving the path, creating\n                   the directory the first time, writing the temporary and renaming it over; and\n                   if something fails, deleting the temporary and stating the failing line. It only\n                   happens when the deadline expires, not every frame: an attempt that never\n                   reaches the disk is almost all validation"
             )?;
         }
 
@@ -622,29 +621,29 @@ impl Guardado {
 /// cifra con la que **D3** juzga al framework. Es el hallazgo que costó una revisión entera en el tramo
 /// del guardado, y aquí muerde igual — este trabajo son **milisegundos**, no microsegundos.
 #[derive(Default)]
-pub struct Descubrimiento {
-    busqueda: Serie,
+pub struct Discovery {
+    search: Series,
     /// Cuántos caracteres se han buscado en la máquina, en total.
     ///
     /// **Lo publica el informe y no lo puede saber el guion**, igual que las escrituras de la disposición:
     /// este número vive dentro del proceso. Una tanda que diga medir el descubrimiento y no busque nada
     /// publicaría el coste de un camino que no se recorrió.
-    buscados: usize,
+    searched: usize,
     /// Cuántas caras del sistema se le han dado al motor de texto.
     ///
     /// **Va aparte de los buscados y no es redundante**: un carácter que ninguna fuente cubre se busca —y
     /// se paga entero— **sin registrar nada**. Con un solo número, una máquina sin fuentes y una con todo
     /// instalado publicarían informes indistinguibles.
-    registradas: usize,
+    registered: usize,
 }
 
-impl Descubrimiento {
+impl Discovery {
     /// Anota lo que costó **una vuelta** de descubrimiento: buscar las caras de lo apuntado y
     /// registrarlas.
-    pub fn anotar(&mut self, cuanto: Duration, buscados: usize, registradas: usize) {
-        self.busqueda.anotar(cuanto);
-        self.buscados += buscados;
-        self.registradas += registradas;
+    pub fn record(&mut self, how_long: Duration, searched: usize, registered: usize) {
+        self.search.record(how_long);
+        self.searched += searched;
+        self.registered += registered;
     }
 
     /// Si se llegó a buscar algo, **para que una prueba pueda afirmar que el camino real lo anota** y no
@@ -652,27 +651,27 @@ impl Descubrimiento {
     ///
     /// Los dos contadores los lee el informe directamente; esto es lo único que hacía falta de fuera.
     #[cfg(test)]
-    pub fn hay_algo(&self) -> bool {
-        self.busqueda.hay()
+    pub fn has_any(&self) -> bool {
+        self.search.has_samples()
     }
 
-    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
-        if !self.busqueda.hay() {
+    pub fn publish(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if !self.search.has_samples() {
             return Ok(());
         }
         writeln!(
             a,
-            "\nbuscar en la máquina una fuente que falta — de la ventana   ({} vueltas · {} caracteres buscados · {} caras registradas)",
-            self.busqueda.total, self.buscados, self.registradas
+            "\nsearching the machine for a missing font — the window's, ({} rounds · {} characters searched · {} faces registered)",
+            self.search.total, self.searched, self.registered
         )?;
-        writeln!(a, "  {}", self.busqueda)?;
+        writeln!(a, "  {}", self.search)?;
         writeln!(
             a,
-            "  NO ocurre en cada fotograma: solo cuando aparece un carácter que ni las caras registradas ni\n                   las de fábrica cubren, y por eso la media de aquí no describe un fotograma corriente.\n                   Abarca preguntarle al motor si el carácter ya se ve —maquetarlo y comparar su dibujo con\n                   el del cuadro—, enumerar las fuentes del sistema la primera vez, abrir las candidatas\n                   hasta dar con la que lo trae, y decirle al motor que se quede con ella. Un carácter que\n                   NADIE cubre se paga igual y no registra nada: por eso los dos contadores van separados"
+            "  does NOT happen every frame: only when a character appears that neither the registered\n                   faces nor the factory ones cover, so this mean does not describe an ordinary\n                   frame. It covers asking the engine whether the character already shows —laying it\n                   out and comparing its drawing with the frame's—, listing the system fonts the\n                   first time, opening the candidates until one carries it, and telling the engine\n                   to keep it. A character NOBODY covers is paid all the same and registers\n                   nothing: that is why the two counters are separate"
         )?;
         writeln!(
             a,
-            "  LO QUE ESTE TRAMO NO MIDE, dicho aquí porque callarlo sería peor: rehacer el ATLAS de glifos.\n                   Entregarle la configuración al motor solo la guarda; el atlas se reconstruye al empezar\n                   la pasada SIGUIENTE, antes de que ninguna línea de este proyecto tome control, así que no\n                   hay dónde poner el cronómetro. Medido aparte: unos 4,5 ms por registro con una cara CJK\n                   de 20 MB, y caen en «el resto del fotograma». Ocurre tantas veces como diga la columna\n                   de caras registradas, no una por fotograma"
+            "  WHAT THIS SPAN DOES NOT MEASURE, stated here because hiding it would be worse: rebuilding\n                   the glyph ATLAS. Handing the configuration to the engine only stores it; the atlas\n                   is rebuilt when the NEXT pass starts, before any line of this project takes\n                   control, so there is nowhere to start the clock. Measured separately: about\n                   4.5 ms per registration with a 20 MB CJK face, and it lands in \"the rest of the\n                   frame\". It happens as many times as the registered faces column says, not once\n                   per frame"
         )?;
         Ok(())
     }
@@ -691,47 +690,47 @@ impl Descubrimiento {
 /// «encolando el pintado». Sin restarlo de ahí, ese tramo dejaría de significar lo que su nombre dice, y
 /// este proyecto ya tiene escrito que un número mal etiquetado es peor que ningún número.
 #[derive(Default)]
-pub struct Rasterizado {
-    rasterizado: Serie,
+pub struct Rasterizing {
+    rasterizing: Series,
     /// Cuántos glifos de color se han rasterizado de verdad.
     ///
     /// **Lo publica el informe y no lo puede saber el guion**, igual que los caracteres buscados: una
     /// tanda que diga medir el color y no rasterice ninguno estaría publicando el coste de un camino que
     /// no se recorrió.
-    rasterizados: usize,
+    rasterized: usize,
     /// Cuántas veces se pidió un glifo de color que la máquina no pinta así.
     ///
     /// **Va aparte y no es redundante**: un carácter cuya presentación pide color pero que ninguna fuente
     /// instalada trae a color **se paga entero** y no devuelve nada. Con un solo número, una máquina con
     /// fuente de emoji y otra sin ella publicarían informes indistinguibles.
-    fallidos: usize,
+    failed: usize,
 }
 
-impl Rasterizado {
+impl Rasterizing {
     /// Anota lo que costó el camino del color **en el pintado de una división**.
-    pub fn anotar(&mut self, cuanto: Duration, rasterizados: usize, fallidos: usize) {
-        self.rasterizado.anotar(cuanto);
-        self.rasterizados += rasterizados;
-        self.fallidos += fallidos;
+    pub fn record(&mut self, how_long: Duration, rasterized: usize, failed: usize) {
+        self.rasterizing.record(how_long);
+        self.rasterized += rasterized;
+        self.failed += failed;
     }
 
-    pub fn publicar(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
-        if !self.rasterizado.hay() {
+    pub fn publish(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
+        if !self.rasterizing.has_samples() {
             return Ok(());
         }
         writeln!(
             a,
-            "\nrasterizar un glifo de color — de la ventana   ({} fotogramas con trabajo · {} glifos rasterizados | {} sin cara de color)",
-            self.rasterizado.total, self.rasterizados, self.fallidos
+            "\nrasterizing a color glyph — the window's   ({} frames with work · {} glyphs rasterized | {} without a color face)",
+            self.rasterizing.total, self.rasterized, self.failed
         )?;
-        writeln!(a, "  {}", self.rasterizado)?;
+        writeln!(a, "  {}", self.rasterizing)?;
         writeln!(
             a,
-            "  NO ocurre en cada fotograma: solo la primera vez que un emoji aparece a una altura de celda\n                   dada, así que la media de aquí no describe un fotograma corriente. Abarca buscar en las\n                   familias de emoji del sistema la que lo trae a color, decodificar su mapa de bits —que en\n                   Noto Color Emoji es un PNG indexado de 136x128— reducirlo al tamaño de la celda y subir la\n                   textura. Un carácter que NINGUNA fuente pinta a color se paga igual y no devuelve nada:\n                   por eso los dos contadores van separados"
+            "  does NOT happen every frame: only the first time an emoji appears at a given cell\n                   height, so this mean does not describe an ordinary frame. It covers searching the\n                   system's emoji families for the one that carries it in color, decoding its bitmap\n                   —in Noto Color Emoji an indexed 136x128 PNG—, scaling it down to the cell and\n                   uploading the texture. A character NO font paints in color is paid all the same\n                   and returns nothing: that is why the two counters are separate"
         )?;
         writeln!(
             a,
-            "  ESTÁ RESTADO de «encolando el pintado» de la consola que lo pagó, no sumado encima: corre\n                   DENTRO de ese tramo, al revés que buscar una fuente. Sin la resta, el tramo que dice medir\n                   lo que cuesta encolar mediría además esto"
+            "  IT IS SUBTRACTED from the paying console's \"enqueueing the paint\", not added on top: it\n                   runs WITHIN that span, the opposite of searching a font. Without the subtraction,\n                   the span that claims to measure the cost of enqueueing would also measure this"
         )?;
         Ok(())
     }
@@ -742,9 +741,9 @@ impl Rasterizado {
 /// **Dos campos con nombre y no una pareja de números**, por lo mismo que los tramos de la tabla llevan
 /// el suyo: dos `f32` seguidos se pueden intercambiar sin que el compilador diga nada, y el informe
 /// publicaría una ventana con el ancho y el alto cambiados sin que quien lo lea pueda notarlo.
-pub struct EnPuntos {
-    pub ancho: f32,
-    pub alto: f32,
+pub struct SizeInPoints {
+    pub width: f32,
+    pub height: f32,
 }
 
 /// Lo que ha costado **recolocar el texto** de las consolas a lo largo de la sesión.
@@ -758,29 +757,29 @@ pub struct EnPuntos {
 /// Sin esto, ese trabajo se publicaría como coste del framework — la cifra con la que **D3** juzga a
 /// egui.
 #[derive(Clone, Copy, Default)]
-pub struct Reflujo {
+pub struct Reflow {
     /// En cuántos fotogramas **se llegó a recolocar de verdad**.
     ///
     /// **Casi todos los fotogramas no recolocan nada**: solo los que cruzan un borde de celda mientras
     /// se arrastra una frontera, o los que siguen a un cambio de tamaño de la ventana. Sin este número,
     /// una media repartida entre miles de fotogramas quietos publica «recolocar no cuesta nada», que es
     /// exactamente el disfraz que el resto del informe evita.
-    pub fotogramas: usize,
+    pub frames: usize,
     /// Lo que costaron todos ellos juntos.
     pub total: Duration,
 }
 
-impl Reflujo {
+impl Reflow {
     /// Anota lo que costó recolocar en un fotograma. **Solo se llama cuando hubo recolocación**: un
     /// cero apuntado como muestra hunde la media y hace decir a este tramo lo contrario de lo que vale.
-    pub fn anotar(&mut self, cuanto: Duration) {
-        self.fotogramas += 1;
-        self.total += cuanto;
+    pub fn record(&mut self, how_long: Duration) {
+        self.frames += 1;
+        self.total += how_long;
     }
 
     /// Lo que costó de media cada recolocación, o nada si no hubo ninguna.
-    fn por_vez(&self) -> Option<Duration> {
-        self.total.checked_div(self.fotogramas as u32)
+    fn per_reflow(&self) -> Option<Duration> {
+        self.total.checked_div(self.frames as u32)
     }
 }
 
@@ -795,14 +794,14 @@ impl Reflujo {
 /// recorrido dejaría el pintado de las fichas sin dueño, que es la misma frontera a medias que este
 /// proyecto ya pagó una vez.
 #[derive(Clone, Copy, Default)]
-pub struct Barra {
+pub struct TabBar {
     /// En cuántos fotogramas se llegó a pintar.
     ///
     /// **Cero no es «no costó nada», es «no hubo barra»** —con una sola pestaña no se pinta—, y son dos
     /// cosas que un total a cero no distingue. Es también lo que hace comparable la tanda: sin este
     /// número, una corrida de una sola pestaña publicaría «la barra no cuesta nada» con el código
     /// quitado.
-    pub fotogramas: usize,
+    pub frames: usize,
     /// Lo que costaron todos ellos juntos.
     pub total: Duration,
     /// Lo más que llegaron a marcarse fichas a la vez.
@@ -810,31 +809,31 @@ pub struct Barra {
     /// **Cero significa que la barra recorrió y no marcó nada.** El recorrido ocurre haya reclamo o no,
     /// así que sin este número una tanda cuyos productores no publicaran el campo publicaría el coste de
     /// la barra **sin la mitad que hay que medir**, y se leería igual que una buena.
-    pub fichas_marcadas: usize,
+    pub marked_tabs: usize,
 }
 
-impl Barra {
+impl TabBar {
     /// Anota lo que costó pintarla **en un fotograma**, ya sumadas sus pasadas.
     ///
     /// Quien llama es el cierre del fotograma, no el pintado: egui repite la pasada sobre la misma
     /// entrada y las dos pintan de verdad, así que anotar por pasada daría una media por pasada bajo
     /// una etiqueta que dice «por fotograma».
-    pub fn anotar(&mut self, cuanto: Duration) {
-        self.fotogramas += 1;
-        self.total += cuanto;
+    pub fn record(&mut self, how_long: Duration) {
+        self.frames += 1;
+        self.total += how_long;
     }
 
     /// Se queda con lo más que llegaron a marcarse fichas a la vez.
     ///
     /// **El máximo y no lo último**: en el último fotograma pueden haber caducado todas, y lo que hay
     /// que poder decir es si llegó a marcarse alguna en toda la corrida.
-    pub fn vio_marcadas(&mut self, cuantas: usize) {
-        self.fichas_marcadas = self.fichas_marcadas.max(cuantas);
+    pub fn saw_marked(&mut self, how_many: usize) {
+        self.marked_tabs = self.marked_tabs.max(how_many);
     }
 
     /// Lo que costó de media, o nada si no llegó a pintarse.
-    fn por_fotograma(&self) -> Option<Duration> {
-        self.total.checked_div(self.fotogramas as u32)
+    fn per_frame(&self) -> Option<Duration> {
+        self.total.checked_div(self.frames as u32)
     }
 }
 
@@ -846,18 +845,18 @@ impl Barra {
 /// resta con el que este proyecto juzga a su framework. Es coste de **arranque**, que es otro camino y
 /// hasta este hito no lo declaraba nadie.
 #[derive(Clone, Copy)]
-pub struct Restauracion {
+pub struct Restoring {
     /// Cuántas consolas salieron del fichero. **Es el número que hace comparable la tanda**: sin él, una
     /// corrida en la que el fichero no llegó a mandar publica la ventana de fábrica bajo etiqueta de
     /// restaurada, que es el mismo disfraz que el informe ya evita con los paneles y con los gestos.
-    pub consolas: usize,
+    pub consoles: usize,
     /// Leer el fichero del disco, interpretarlo y validarlo.
     ///
     /// **Es opcional, y eso impide publicar un número que nadie tomó.** Con un `Duration` a secas, una
     /// ventana construida con una persistencia que nunca leyó el disco publicaría `0ns en leer y
     /// validar` — indistinguible de una lectura instantánea de verdad, y exactamente la clase de cifra
     /// que este proyecto prohíbe. Sin medida, el informe lo dice con esas palabras.
-    pub leer: Option<Duration>,
+    pub read: Option<Duration>,
     /// Abrir la ventana con lo que el fichero pedía: un `fork` y un `exec` por hoja, **y todo lo que
     /// viene detrás por cada consola** — armar el vigilante de su directorio y describir el árbol
     /// entero para el primer espejo.
@@ -868,39 +867,39 @@ pub struct Restauracion {
     ///
     /// **Es el que crece con N** y por eso va aparte del de arriba: leer un documento de cuatro hojas y
     /// uno de doscientas cuesta casi lo mismo, y abrirlas no.
-    pub abrirlas: Duration,
+    pub opening: Duration,
 }
 
 /// Lo que costó mirar la configuración de quien usa el terminal, **y si se llegó a mirar**.
 ///
-/// **Se llama por el acto y no por la cosa**, como sus hermanos: `Restauracion`, `Descubrimiento`,
-/// `Rasterizado` nombran el trabajo. Un tipo llamado `Configuracion` dentro del módulo de medida se lee
+/// **Se llama por el acto y no por la cosa**, como sus hermanos: `Restoring`, `Discovery`,
+/// `Rasterizing` nombran el trabajo. Un tipo llamado `Configuracion` dentro del módulo de medida se lee
 /// como «la configuración de la medida», que es justo lo que no es.
 ///
 /// **Un tramo de una sola vez, como el de restaurar**: ocurre entero antes del primer fotograma, así que no
 /// tiene serie ni media. Lo que hace falta es que **esté declarado**, o sus microsegundos caen dentro del
 /// arranque sin nombre.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum LecturaDeAjustes {
+pub enum ReadingSettings {
     /// No se miró: es una tanda de medida y el fichero está vetado.
     #[default]
-    Vetada,
+    Vetoed,
     /// Se miró y no había nada que aplicar — no hay fichero, o no se pudo usar.
-    Sin,
+    Missing,
     /// Se aplicó lo que el fichero pedía.
-    Con {
+    Applied {
         /// Lo que costó leerlo e interpretarlo.
-        cuanto: Duration,
+        how_long: Duration,
         /// Cuántas líneas no se pudieron aplicar.
-        avisos: usize,
+        warnings: usize,
     },
 }
 
 /// Los gestos de arrastre que una tanda de medida se inyectó a sí misma, tal como se declaran.
 #[derive(Clone, Copy)]
-pub struct Arrastres {
+pub struct Drags {
     /// Gestos enteros que se inyectaron: los que llegaron a mandar su evento de soltar.
-    pub inyectados: usize,
+    pub injected: usize,
     /// Cuántas veces el gesto **cambió algo de verdad**: soltados que el árbol aceptó, o fotogramas en que
     /// un arrastre le movió el ancho a un panel.
     ///
@@ -910,7 +909,7 @@ pub struct Arrastres {
     /// **una al lado de la otra y no como una fracción**: la primera dice cuántos gestos ocurrieron, la
     /// segunda cuánto trabajo provocaron. La primera versión las imprimía como «N de M» y publicó
     /// «423 de 211», que es un número imposible de leer bien.
-    pub con_efecto: usize,
+    pub effective: usize,
     /// En cuántos **fotogramas** el gesto dejó texto marcado en alguna consola.
     ///
     /// **Fotogramas y no gestos, y decirlo importa**: un gesto extiende la selección una vez por cada
@@ -928,7 +927,7 @@ pub struct Arrastres {
     /// **En la tanda que marca coincide con los efectos, y es correcto**: el efecto de marcar **es** dejar
     /// algo marcado. Los dos se publican igual porque en las demás tandas no coinciden — allí los efectos
     /// son repartos y maquetados, y éste tiene que salir cero.
-    pub marcados: usize,
+    pub marked: usize,
     /// Cuántos **informes de ratón** salieron hacia el programa de dentro durante la corrida.
     ///
     /// **Se lee en los dos sentidos, igual que los marcados.** La tanda que mide el ratón exige que sea
@@ -936,10 +935,10 @@ pub struct Arrastres {
     /// ratón publicaría los tramos de un gesto que se resolvió como selección, bajo la etiqueta del
     /// ratón. Y las demás exigen que sea **cero**: un informe que se escapara metería una ida al
     /// pseudoterminal dentro de la media de otra tanda.
-    pub informados: usize,
+    pub reported: usize,
     /// Qué gesto se inyectó, tal como se publica. **Va en el informe** porque los tres gestos no cuestan lo
     /// mismo y una tanda no se compara con otra de la otra clase.
-    pub gesto: &'static str,
+    pub gesture: &'static str,
 }
 
 /// La cabecera del informe: dónde y cómo se midió — cuántas pestañas había, cuál se veía y con qué
@@ -952,7 +951,7 @@ pub struct Arrastres {
 /// Las rejillas van una por consola **y con su nombre**, porque el reparto del ancho las deja
 /// distintas y ningún tramo se entiende sin saber sobre cuántas celdas se tomó. Es el dato que hace
 /// falta para comparar con una medida antigua de una sola consola a pantalla completa: sin él, un
-/// «encolar» más bajo se lee como que el framework va más rápido, cuando lo que pasa es que hay la
+/// «enqueueing the paint» más bajo se lee como que el framework va más rápido, cuando lo que pasa es que hay la
 /// mitad de columnas.
 ///
 /// **Cada pestaña llega con su nombre, no con su posición en la lista.** Al cerrar una, las de su
@@ -969,70 +968,70 @@ pub struct Arrastres {
 /// justo aquí, que es donde el informe se convierte en el dato que alguien va a creerse.
 /// Lo que la sesión entera tiene que contar de sí misma, además de sus tramos por consola.
 ///
-/// **Es un struct con nombres y no cuatro parámetros seguidos**, por lo mismo que [`Tramos`]: cuando
+/// **Es un struct con nombres y no cuatro parámetros seguidos**, por lo mismo que [`Spans`]: cuando
 /// esto eran argumentos posicionales, intercambiar dos compilaba sin una queja y publicaba un informe
 /// mentiroso. Y son cuatro cosas que crecen —cada hito que declara un tramo nuevo añade el suyo—, así
 /// que la firma tenía los días contados.
 #[derive(Clone, Copy, Default)]
-pub struct DeLaSesion {
+pub struct SessionHeader {
     /// Los gestos que una tanda se inyectó, si es que se inyectó alguno.
-    pub arrastres: Option<Arrastres>,
+    pub drags: Option<Drags>,
     /// De dónde salieron las consolas, si salieron de un fichero.
-    pub restauracion: Option<Restauracion>,
+    pub restoring: Option<Restoring>,
     /// Lo que costó leer la configuración, y si se leyó.
-    pub configuracion: LecturaDeAjustes,
+    pub settings: ReadingSettings,
     /// Lo que costó pintar la barra de pestañas.
-    pub barra: Barra,
+    pub tab_bar: TabBar,
     /// Lo que costó recolocar el texto al cambiar el ancho de una consola.
-    pub reflujo: Reflujo,
+    pub reflow: Reflow,
 }
 
-pub fn cabecera(
+pub fn header(
     a: &mut dyn std::io::Write,
-    ventana: EnPuntos,
-    rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+    window: SizeInPoints,
+    grids: &[(usize, Vec<(usize, term_core::Size)>)],
     visible: usize,
-    sesion: DeLaSesion,
+    session: SessionHeader,
 ) -> std::io::Result<()> {
-    let DeLaSesion {
-        arrastres,
-        restauracion,
-        configuracion,
-        barra,
-        reflujo,
-    } = sesion;
-    let perfil = if cfg!(debug_assertions) {
-        "depuración — el número que vale es el de --release"
+    let SessionHeader {
+        drags,
+        restoring,
+        settings,
+        tab_bar,
+        reflow,
+    } = session;
+    let profile = if cfg!(debug_assertions) {
+        "debug — the number that counts is the one from --release"
     } else {
         "release"
     };
-    writeln!(a, "\n── latencia ──")?;
+    writeln!(a, "\n── latency ──")?;
     // **Lo grande que era la ventana, y es lo único de la cabecera que se puede volver a pedir.** La
     // rejilla en celdas de cada consola sale de este tamaño y de la métrica de la fuente, así que leerla
     // no dice con qué ventana se tomó la tanda: los anexos anteriores a esta línea se midieron con
     // ventanas cuyo tamaño nadie apuntó, y por eso no se pueden reproducir. Se publica en puntos porque
     // es la unidad en la que se pide.
-    writeln!(a, "ventana:      {}×{} puntos", ventana.ancho, ventana.alto)?;
+    writeln!(a, "window:       {}×{} points", window.width, window.height)?;
     // **Cuántas pestañas había, y no solo cuáles se pintaron.** Los tramos de abajo se tomaron con
     // todas ellas bombeando, así que una tanda de dos pestañas y otra de una no se pueden comparar sin
     // este dato — y sin él, el informe de las dos se lee como si fuera de una sola y con el fotograma
     // inexplicablemente más caro.
-    writeln!(a, "pestañas:     {}", rejillas.len())?;
-    for (que_pestaña, rejillas) in rejillas {
-        let mirada = if *que_pestaña == visible {
-            "se veía"
+    writeln!(a, "tabs:         {}", grids.len())?;
+    for (which_tab, grids) in grids {
+        let seen_as = if *which_tab == visible {
+            "was visible"
         } else {
-            "de fondo, se bombeaba sin pintarse"
+            "in the background, pumped without being painted"
         };
-        writeln!(a, "pestaña {que_pestaña}:    {mirada}")?;
-        for (cual, (division, rejilla)) in rejillas.iter().enumerate() {
+        writeln!(a, "tab {which_tab}:        {seen_as}")?;
+        for (which, (pane, grid)) in grids.iter().enumerate() {
             writeln!(
                 a,
                 "{:<15} {}×{}{}",
-                format!("  división {division}:"),
-                rejilla.rows,
-                rejilla.cols,
-                donde_cae(rejillas.len(), cual)
+                format!("  pane {pane}:"),
+                grid.rows,
+                grid.cols,
+                where_it_falls(grids.len(), which)
             )?;
         }
     }
@@ -1053,15 +1052,11 @@ pub fn cabecera(
     // **La línea no sale cuando nadie pidió arrastres**, y eso es deliberado: las tandas del anexo
     // anteriores a este hito se compararían con informes de forma distinta, y aquí lo que se compara son
     // tandas entre sí.
-    if let Some(arrastres) = arrastres {
+    if let Some(drags) = drags {
         writeln!(
             a,
-            "arrastres:    {} inyectados · {} efectos · {} fotogramas con texto marcado · {} informes al programa ({})",
-            arrastres.inyectados,
-            arrastres.con_efecto,
-            arrastres.marcados,
-            arrastres.informados,
-            arrastres.gesto
+            "drags:        {} injected · {} effective · {} frames with marked text · {} reports to the program ({})",
+            drags.injected, drags.effective, drags.marked, drags.reported, drags.gesture
         )?;
     }
     // **De dónde salieron las consolas, y solo cuando salieron del fichero.** Sin esta línea, una tanda
@@ -1072,16 +1067,16 @@ pub fn cabecera(
     //
     // **Los dos tiempos van separados a propósito**: leer no crece con el número de consolas y abrirlas sí,
     // así que sumarlos daría un número que no se puede extrapolar a una disposición más grande.
-    if let Some(restauracion) = restauracion {
-        let leer = match restauracion.leer {
-            Some(cuanto) => format!("{cuanto:?}"),
-            None => "sin medir".to_string(),
+    if let Some(restoring) = restoring {
+        let read = match restoring.read {
+            Some(how_long) => format!("{how_long:?}"),
+            None => "not measured".to_string(),
         };
         writeln!(
             a,
-            "restauradas:  {} consolas · {leer} en leer y validar · {:?} en abrirlas (antes del primer \
-             fotograma, no se resta de ninguno)",
-            restauracion.consolas, restauracion.abrirlas
+            "restored:     {} consoles · {read} to read and validate · {:?} to open them (before the \
+             first frame, subtracted from none)",
+            restoring.consoles, restoring.opening
         )?;
     }
     // **Se declara SIEMPRE, se haya leído o no**, y ésa es la mitad que importa. Una corrida que leyó la
@@ -1089,61 +1084,61 @@ pub fn cabecera(
     // que ver, y sin esta línea sus informes son indistinguibles. Toda tanda de medida tiene el fichero
     // vetado, así que aquí debe leerse siempre «de fábrica»: si alguna vez dice otra cosa, esa corrida no
     // se compara con ninguna.
-    match configuracion {
+    match settings {
         // **Los tres estados se distinguen EN EL PRIMER SUSTANTIVO, no en el paréntesis**, y eso es lo
         // que hace que el guion de medida pueda leerlos. Con «de fábrica» para el vetado y para el que
         // miró y no encontró nada, un veto roto en una máquina sin fichero —que es **el caso real del
         // banco**, porque el guion vacía el directorio de configuración— se leería como una corrida buena.
         // Lo cazó una revisión.
-        LecturaDeAjustes::Vetada => writeln!(
+        ReadingSettings::Vetoed => writeln!(
             a,
-            "configuración: vetada (no se lee bajo la puerta de medida: el tamaño de letra de quien mide \
-             cambiaría la rejilla, y de la rejilla dependen todas las cifras publicadas)"
+            "settings:     vetoed (not read under the measurement gate: the font size of whoever \
+             measures would change the grid, and every published figure depends on the grid)"
         )?,
         // **«Se miró y no había» NO es «del usuario», y confundirlos publica un número con la etiqueta
         // cambiada.** Una máquina sin fichero y otra que aplicó un cuerpo de letra distinto tienen rejillas
         // que pueden no tener nada que ver, y con un solo estado para las dos sus informes salían
         // idénticos. Lo cazó una revisión.
-        LecturaDeAjustes::Sin => writeln!(
+        ReadingSettings::Missing => writeln!(
             a,
-            "configuración: de fábrica (se miró y no había nada que aplicar)"
+            "settings:     factory (looked and there was nothing to apply)"
         )?,
-        LecturaDeAjustes::Con { cuanto, avisos } => writeln!(
+        ReadingSettings::Applied { how_long, warnings } => writeln!(
             a,
-            "configuración: del usuario · {cuanto:?} en leerla · {avisos} línea(s) que no se pudieron \
-             aplicar (antes del primer fotograma, no se resta de ninguno)"
+            "settings:     the user's · {how_long:?} to read it · {warnings} line(s) that could not be \
+             applied (before the first frame, subtracted from none)"
         )?,
     }
     // **Solo cuando la hubo.** Con una sola pestaña no hay barra que pintar, y publicar «0 fotogramas»
     // invita a leer que no cuesta nada.
-    if let Some(media) = barra.por_fotograma() {
+    if let Some(mean) = tab_bar.per_frame() {
         writeln!(
             a,
-            "barra:        {} fotogramas · {:?} en total · {media:?} por fotograma · {} fichas \
-             marcadas a la vez como mucho (acumular los reclamos y pintar las fichas; se resta de su \
-             fotograma)",
-            barra.fotogramas, barra.total, barra.fichas_marcadas
+            "tab bar:      {} frames · {:?} in total · {mean:?} per frame · {} tabs marked at \
+             once at most (accumulating the claims and painting the tabs; subtracted from its \
+             frame)",
+            tab_bar.frames, tab_bar.total, tab_bar.marked_tabs
         )?;
     }
     // **Solo cuando hubo.** En una tanda que no redimensiona nada no se recoloca ni una vez, y
     // publicar «0 veces» invita a leer que no cuesta.
-    if let Some(cada) = reflujo.por_vez() {
+    if let Some(each) = reflow.per_reflow() {
         writeln!(
             a,
-            "recolocar:    {} veces · {:?} en total · {cada:?} cada vez (el texto, al cambiar el ancho \
-             de una consola; corre en la mitad lógica y se resta de su fotograma)",
-            reflujo.fotogramas, reflujo.total
+            "reflow:       {} times · {:?} in total · {each:?} each (the text, when a console's width \
+             changes; runs in the logical half and is subtracted from its frame)",
+            reflow.frames, reflow.total
         )?;
     }
-    writeln!(a, "renderizador: glow")?;
-    writeln!(a, "perfil:       {perfil}")?;
-    writeln!(a, "máquina:      {}", maquina())
+    writeln!(a, "renderer:     glow")?;
+    writeln!(a, "profile:      {profile}")?;
+    writeln!(a, "machine:      {}", machine())
 }
 
 /// Cómo se llama cada consola en el informe, por su sitio en la ventana.
 ///
 /// Un número suelto obliga a adivinar de qué lado es, y el reparto del ancho hace que el lado importe.
-pub const NOMBRE_DE_CONSOLA: [&str; 2] = ["izquierda", "derecha"];
+pub const CONSOLE_NAME: [&str; 2] = ["left", "right"];
 
 /// De qué lado cae una división, **si es que el lado significa algo**.
 ///
@@ -1158,16 +1153,16 @@ pub const NOMBRE_DE_CONSOLA: [&str; 2] = ["izquierda", "derecha"];
 /// tramos y la línea del foco—, cada uno con su propio adorno alrededor. Que la regla viva en un solo
 /// sitio es lo que evita que uno de los tres se quede indexando por su cuenta el día que partir una
 /// división deje de ser una rareza: desde que se puede partir, tres divisiones son un gesto.
-pub fn lado(cuantas: usize, cual: usize) -> Option<&'static str> {
-    match NOMBRE_DE_CONSOLA.get(cual) {
-        Some(donde) if cuantas == NOMBRE_DE_CONSOLA.len() => Some(donde),
+pub fn side(how_many: usize, which: usize) -> Option<&'static str> {
+    match CONSOLE_NAME.get(which) {
+        Some(side_name) if how_many == CONSOLE_NAME.len() => Some(side_name),
         _ => None,
     }
 }
 
 /// La pista de sitio tal y como la lleva la cabecera: entre paréntesis y con su sangría, o nada.
-fn donde_cae(cuantas: usize, cual: usize) -> String {
-    lado(cuantas, cual).map_or_else(String::new, |donde| format!("  ({donde})"))
+fn where_it_falls(how_many: usize, which: usize) -> String {
+    side(how_many, which).map_or_else(String::new, |side_name| format!("  ({side_name})"))
 }
 
 /// Cómo se llama esta máquina, o «desconocida» si no hay forma de saberlo.
@@ -1176,17 +1171,17 @@ fn donde_cae(cuantas: usize, cual: usize) -> String {
 /// línea en silencio es un número que mañana no se sabe de dónde salió. `HOSTNAME` es variable de
 /// shell y no suele estar exportada, así que apoyarse solo en ella era exactamente ese fallo
 /// silencioso: en el primer volcado medido la línea no salió y nadie se enteró.
-fn maquina() -> String {
-    if let Ok(nombre) = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")) {
-        return nombre;
+fn machine() -> String {
+    if let Ok(name) = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")) {
+        return name;
     }
     // El fichero es de Linux y de los BSD; en otros sistemas se cae al literal, que es la respuesta
     // honesta y no una invención.
     std::fs::read_to_string("/etc/hostname")
-        .map(|nombre| nombre.trim().to_owned())
+        .map(|name| name.trim().to_owned())
         .ok()
-        .filter(|nombre| !nombre.is_empty())
-        .unwrap_or_else(|| "desconocida".to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 #[cfg(test)]
@@ -1198,10 +1193,10 @@ mod tests {
     }
 
     /// Lo que el informe publica de verdad, leído del mismo camino que escribe por pantalla.
-    fn informe_de(medida: &Medida) -> String {
+    fn report_of(timings: &Timings) -> String {
         let mut salida = Vec::new();
-        medida
-            .publicar_tramos(&mut salida)
+        timings
+            .publish_spans(&mut salida)
             .expect("escribir a memoria no falla");
         String::from_utf8(salida).expect("el informe es texto")
     }
@@ -1210,68 +1205,61 @@ mod tests {
     ///
     /// El tamaño de ventana va fijo porque ninguna de las pruebas de aquí habla de él; la que sí lo hace
     /// lo pasa por su cuenta.
-    fn cabecera_de(rejillas: &[(usize, Vec<(usize, term_core::Size)>)], visible: usize) -> String {
-        cabecera_con(
-            EnPuntos {
-                ancho: 800.0,
-                alto: 600.0,
+    fn header_of(grids: &[(usize, Vec<(usize, term_core::Size)>)], visible: usize) -> String {
+        header_with(
+            SizeInPoints {
+                width: 800.0,
+                height: 600.0,
             },
-            rejillas,
+            grids,
             visible,
         )
     }
 
-    fn cabecera_con(
-        ventana: EnPuntos,
-        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+    fn header_with(
+        window: SizeInPoints,
+        grids: &[(usize, Vec<(usize, term_core::Size)>)],
         visible: usize,
     ) -> String {
-        cabecera_de_una_tanda(ventana, rejillas, visible, None)
+        header_of_a_run(window, grids, visible, None)
     }
 
-    fn cabecera_de_una_tanda(
-        ventana: EnPuntos,
-        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+    fn header_of_a_run(
+        window: SizeInPoints,
+        grids: &[(usize, Vec<(usize, term_core::Size)>)],
         visible: usize,
-        arrastres: Option<Arrastres>,
+        drags: Option<Drags>,
     ) -> String {
-        cabecera_completa(ventana, rejillas, visible, arrastres, None)
+        cabecera_completa(window, grids, visible, drags, None)
     }
 
     fn cabecera_completa(
-        ventana: EnPuntos,
-        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+        window: SizeInPoints,
+        grids: &[(usize, Vec<(usize, term_core::Size)>)],
         visible: usize,
-        arrastres: Option<Arrastres>,
-        restauracion: Option<Restauracion>,
+        drags: Option<Drags>,
+        restoring: Option<Restoring>,
     ) -> String {
-        con_barra(
-            ventana,
-            rejillas,
-            visible,
-            arrastres,
-            restauracion,
-            Barra::default(),
-        )
+        with_tab_bar(window, grids, visible, drags, restoring, TabBar::default())
     }
 
     /// La cabecera con un estado de configuración concreto, que es lo que el guion de medida lee.
-    fn con_configuracion(configuracion: LecturaDeAjustes) -> String {
+    fn with_settings(settings: ReadingSettings) -> String {
         let mut salida = Vec::new();
-        cabecera(
+        header(
             &mut salida,
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39))])],
             0,
-            DeLaSesion {
-                arrastres: None,
-                restauracion: None,
-                configuracion,
-                barra: Barra::default(),
-                reflujo: Reflujo::default(),
+            SessionHeader {
+                drags: None,
+                restoring: None,
+                settings,
+                tab_bar: TabBar::default(),
+                reflow: Reflow::default(),
             },
         )
         .expect("escribir a memoria no falla");
@@ -1288,61 +1276,61 @@ mod tests {
         // que un veto roto en el banco produce «se miró y no había»: si eso empezara igual que el vetado,
         // el veto roto se leería como una corrida buena. Lo cazó una revisión, después de que otra hubiera
         // pedido separar los estados sin ver esta consecuencia.
-        let vetada = con_configuracion(LecturaDeAjustes::Vetada);
-        let linea = vetada
+        let vetada = with_settings(ReadingSettings::Vetoed);
+        let line = vetada
             .lines()
-            .find(|l| l.starts_with("configuración:"))
+            .find(|l| l.starts_with("settings:"))
             .expect("no hay línea de configuración que el guion pueda leer");
         assert!(
-            linea.starts_with("configuración: vetada"),
-            "la línea de la configuración vetada ya no tiene la forma que el guion sabe leer: «{linea}»"
+            line.starts_with("settings:     vetoed"),
+            "la línea de la configuración vetada ya no tiene la forma que el guion sabe leer: «{line}»"
         );
 
-        let sin = con_configuracion(LecturaDeAjustes::Sin);
-        let linea = sin
+        let sin = with_settings(ReadingSettings::Missing);
+        let line = sin
             .lines()
-            .find(|l| l.starts_with("configuración:"))
+            .find(|l| l.starts_with("settings:"))
             .expect("no hay línea de configuración");
         assert!(
-            !linea.starts_with("configuración: vetada"),
+            !line.starts_with("settings:     vetoed"),
             "«se miró y no había» empieza igual que «vetada», así que un veto roto en el banco —donde no \
-             hay fichero por construcción— pasaría por una corrida buena: «{linea}»"
+             hay fichero por construcción— pasaría por una corrida buena: «{line}»"
         );
 
-        let con = con_configuracion(LecturaDeAjustes::Con {
-            cuanto: Duration::from_micros(25),
-            avisos: 0,
+        let con = with_settings(ReadingSettings::Applied {
+            how_long: Duration::from_micros(25),
+            warnings: 0,
         });
-        let linea = con
+        let line = con
             .lines()
-            .find(|l| l.starts_with("configuración:"))
+            .find(|l| l.starts_with("settings:"))
             .expect("no hay línea de configuración");
         assert!(
-            linea.starts_with("configuración: del usuario"),
-            "la línea de la configuración aplicada cambió de forma: «{linea}»"
+            line.starts_with("settings:     the user's"),
+            "la línea de la configuración aplicada cambió de forma: «{line}»"
         );
     }
 
-    fn con_barra(
-        ventana: EnPuntos,
-        rejillas: &[(usize, Vec<(usize, term_core::Size)>)],
+    fn with_tab_bar(
+        window: SizeInPoints,
+        grids: &[(usize, Vec<(usize, term_core::Size)>)],
         visible: usize,
-        arrastres: Option<Arrastres>,
-        restauracion: Option<Restauracion>,
-        barra: Barra,
+        drags: Option<Drags>,
+        restoring: Option<Restoring>,
+        tab_bar: TabBar,
     ) -> String {
         let mut salida = Vec::new();
-        cabecera(
+        header(
             &mut salida,
-            ventana,
-            rejillas,
+            window,
+            grids,
             visible,
-            DeLaSesion {
-                arrastres,
-                restauracion,
-                configuracion: LecturaDeAjustes::default(),
-                barra,
-                reflujo: Reflujo::default(),
+            SessionHeader {
+                drags,
+                restoring,
+                settings: ReadingSettings::default(),
+                tab_bar,
+                reflow: Reflow::default(),
             },
         )
         .expect("escribir a memoria no falla");
@@ -1357,21 +1345,21 @@ mod tests {
         // leyendo justo esta línea, así que si deja de salir, la tanda L pasa a medir el arranque de
         // siempre sin que nada lo diga.
         let restaurada = cabecera_completa(
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39)), (1, grid(49, 39))])],
             0,
             None,
-            Some(Restauracion {
-                consolas: 4,
-                leer: Some(Duration::from_micros(310)),
-                abrirlas: Duration::from_millis(12),
+            Some(Restoring {
+                consoles: 4,
+                read: Some(Duration::from_micros(310)),
+                opening: Duration::from_millis(12),
             }),
         );
         assert!(
-            restaurada.contains("restauradas:  4 consolas"),
+            restaurada.contains("restored:     4 consoles"),
             "la cabecera no declaró las consolas que salieron del fichero:\n{restaurada}"
         );
         // **Los dos tiempos, y por separado.** Publicar solo la suma daría un número que no se puede
@@ -1381,20 +1369,20 @@ mod tests {
             "la cabecera no declaró lo que costó leer y lo que costó abrirlas:\n{restaurada}"
         );
 
-        let de_fabrica = cabecera_completa(
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+        let from_factory = cabecera_completa(
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39)), (1, grid(49, 39))])],
             0,
             None,
             None,
         );
         assert!(
-            !de_fabrica.contains("restauradas"),
+            !from_factory.contains("restored"),
             "una ventana abierta de fábrica dice haber restaurado, que es el disfraz que esta línea \
-             existe para quitar:\n{de_fabrica}"
+             existe para quitar:\n{from_factory}"
         );
     }
 
@@ -1410,26 +1398,26 @@ mod tests {
         // que llega a quien interpreta la tanda, y ahí la diferencia entre «sin medir» y «0ns» es la
         // diferencia entre saber que nadie midió y creerse un número.
         let sin_medir = cabecera_completa(
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39)), (1, grid(49, 39))])],
             0,
             None,
-            Some(Restauracion {
-                consolas: 2,
-                leer: None,
-                abrirlas: Duration::from_millis(7),
+            Some(Restoring {
+                consoles: 2,
+                read: None,
+                opening: Duration::from_millis(7),
             }),
         );
 
         assert!(
-            sin_medir.contains("sin medir en leer y validar"),
+            sin_medir.contains("not measured to read and validate"),
             "una lectura que nadie tomó no se declara como tal:\n{sin_medir}"
         );
         assert!(
-            sin_medir.contains("7ms en abrirlas"),
+            sin_medir.contains("7ms to open them"),
             "la línea perdió lo que sí se midió:\n{sin_medir}"
         );
         // **Y con la forma que el guion sabe leer, incluso sin número de lectura.** La guarda de la tanda
@@ -1437,13 +1425,13 @@ mod tests {
         // detrás de «consolas» **exige que siga habiendo algo**: una línea que se quedara en
         // `restauradas:  2 consolas` no casaría, el guion no vería ninguna consola restaurada e
         // invalidaría una corrida buena diciendo que la ventana abrió de fábrica.
-        let linea = sin_medir
+        let line = sin_medir
             .lines()
-            .find(|linea| linea.starts_with("restauradas:"))
+            .find(|line| line.starts_with("restored:"))
             .expect("no hay línea de restauradas que el guion pueda leer");
         assert!(
-            linea.starts_with("restauradas:  2 consolas ·"),
-            "la línea de restauradas ya no tiene la forma que el guion de medida sabe leer: «{linea}»"
+            line.starts_with("restored:     2 consoles ·"),
+            "la línea de restauradas ya no tiene la forma que el guion de medida sabe leer: «{line}»"
         );
     }
 
@@ -1455,46 +1443,46 @@ mod tests {
         //
         // Los dos números son distintos a propósito: iguales no distinguirían publicar uno de publicar el
         // otro.
-        let con_gesto = cabecera_de_una_tanda(
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+        let with_gesture = header_of_a_run(
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39)), (1, grid(49, 39))])],
             0,
-            Some(Arrastres {
-                inyectados: 1720,
-                con_efecto: 1719,
-                marcados: 3,
-                informados: 7,
-                gesto: "moviendo consolas",
+            Some(Drags {
+                injected: 1720,
+                effective: 1719,
+                marked: 3,
+                reported: 7,
+                gesture: "moving consoles",
             }),
         );
         assert!(
-            con_gesto.contains(
-                "arrastres:    1720 inyectados · 1719 efectos · 3 fotogramas con texto marcado · \
-                 7 informes al programa (moviendo consolas)"
+            with_gesture.contains(
+                "drags:        1720 injected · 1719 effective · 3 frames with marked text · \
+                 7 reports to the program (moving consoles)"
             ),
-            "la cabecera no declaró los arrastres de la tanda:\n{con_gesto}"
+            "la cabecera no declaró los arrastres de la tanda:\n{with_gesture}"
         );
 
-        let sin_gesto = cabecera_de_una_tanda(
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+        let without_gesture = header_of_a_run(
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39)), (1, grid(49, 39))])],
             0,
             None,
         );
         assert!(
-            !sin_gesto.contains("arrastres"),
+            !without_gesture.contains("drags"),
             "la cabecera habla de arrastres en una tanda que no los tuvo, así que las tandas de los anexos \
-             anteriores dejan de tener la misma forma y no se pueden comparar:\n{sin_gesto}"
+             anteriores dejan de tener la misma forma y no se pueden comparar:\n{without_gesture}"
         );
     }
 
-    fn rejilla(rows: u16, cols: u16) -> term_core::Size {
+    fn grid(rows: u16, cols: u16) -> term_core::Size {
         term_core::Size { rows, cols }
     }
 
@@ -1511,33 +1499,33 @@ mod tests {
         // publicarla redondeada daría un número que no es el que hubo, y el guion compara con el mismo
         // margen de la aplicación precisamente porque la fracción llega. Los dos ejes son distintos para que
         // intercambiarlos no publique lo mismo.
-        let texto = cabecera_con(
-            EnPuntos {
-                ancho: 1279.8125,
-                alto: 800.0,
+        let texto = header_with(
+            SizeInPoints {
+                width: 1279.8125,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39))])],
             0,
         );
 
         assert!(
             texto
                 .lines()
-                .any(|linea| linea == "ventana:      1279.8125×800 puntos"),
+                .any(|line| line == "window:       1279.8125×800 points"),
             "la línea del tamaño no es la que el guion de medida sabe leer:\n{texto}"
         );
     }
 
     #[test]
     fn con_dos_divisiones_la_cabecera_dice_de_qué_lado_cae_cada_una() {
-        let texto = cabecera_de(&[(0, vec![(0, rejilla(59, 57)), (1, rejilla(59, 21))])], 0);
+        let texto = header_of(&[(0, vec![(0, grid(59, 57)), (1, grid(59, 21))])], 0);
 
         assert!(
-            texto.contains("  división 0:   59×57  (izquierda)"),
+            texto.contains("  pane 0:       59×57  (left)"),
             "no publica la primera con su lado:\n{texto}"
         );
         assert!(
-            texto.contains("  división 1:   59×21  (derecha)"),
+            texto.contains("  pane 1:       59×21  (right)"),
             "no publica la segunda con su lado:\n{texto}"
         );
     }
@@ -1553,58 +1541,54 @@ mod tests {
         // que con tres la pista tiene que **callarse**, no repartirse a las dos primeras. La aserción
         // mira las dos cosas porque un `get` que devuelva `None` solo para la tercera pasaría la primera
         // mitad y seguiría publicando una geometría falsa para las otras dos.
-        let texto = cabecera_de(
+        let texto = header_of(
             &[(
                 0,
-                vec![
-                    (0, rejilla(59, 30)),
-                    (1, rejilla(59, 30)),
-                    (2, rejilla(59, 30)),
-                ],
+                vec![(0, grid(59, 30)), (1, grid(59, 30)), (2, grid(59, 30))],
             )],
             0,
         );
 
-        for division in [0, 1, 2] {
+        for pane in [0, 1, 2] {
             assert!(
-                texto.contains(&format!("  división {division}:")),
-                "no publica la división {division}:\n{texto}"
+                texto.contains(&format!("  pane {pane}:")),
+                "no publica la división {pane}:\n{texto}"
             );
         }
-        for lado in NOMBRE_DE_CONSOLA {
+        for side in CONSOLE_NAME {
             assert!(
-                !texto.contains(lado),
-                "con tres divisiones sigue diciendo «{lado}», que ya no describe nada:\n{texto}"
+                !texto.contains(side),
+                "con tres divisiones sigue diciendo «{side}», que ya no describe nada:\n{texto}"
             );
         }
     }
 
     /// Una medida con un fotograma anotado, que es lo mínimo para que el informe hable.
-    fn con_un_fotograma() -> Medida {
-        let mut medida = Medida::default();
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
+    fn with_one_frame() -> Timings {
+        let mut timings = Timings::default();
+        timings.record_round(Spans::of_a_round(
             Some(Instant::now()),
             Instant::now(),
             ms(2),
             ms(1),
             ms(3),
         ));
-        medida.cerrar_fotograma(ms(7));
-        medida
+        timings.close_frame(ms(7));
+        timings
     }
 
     #[test]
     fn dos_pasadas_del_mismo_fotograma_suman_su_trabajo_en_vez_de_pisarse() {
-        // **El sesgo que esto arregla estuvo vivo y medido:** con `anotar_vuelta` sustituyendo, la
+        // **El sesgo que esto arregla estuvo vivo y medido:** con `record_round` sustituyendo, la
         // segunda pasada de un fotograma —egui la repite cuando algo pide recomponerse— machacaba la
         // vuelta buena de la primera. Y la segunda llega con lo interpretado a casi cero, porque la cola
         // ya se vació en la primera, así que lo que la consola interpretó de verdad desaparecía de lo
         // declarado y se publicaba como coste del framework de interfaz.
-        let mut medida = Medida::default();
+        let mut timings = Timings::default();
         let recogido = Instant::now();
 
         // La primera pasada: la que trae la espera y el trabajo de verdad.
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
+        timings.record_round(Spans::of_a_round(
             Some(recogido - ms(5)),
             recogido,
             ms(20),
@@ -1617,10 +1601,10 @@ mod tests {
         // interpreta —la cola se vació en la primera—, pero un cero aquí deja de distinguir sumar de no
         // sumar: comprobado mutándolo, con un cero en lo interpretado esta prueba pasaba **con la suma
         // de ese tramo quitada**. Los tres tienen que poder fallar por separado.
-        medida.anotar_vuelta(Tramos::de_una_vuelta(None, recogido, ms(3), ms(2), ms(1)));
+        timings.record_round(Spans::of_a_round(None, recogido, ms(3), ms(2), ms(1)));
 
         assert_eq!(
-            medida.cerrar_fotograma(ms(60)),
+            timings.close_frame(ms(60)),
             Some(ms(29)),
             "lo declarado no es la suma de lo que hicieron las dos pasadas: 20+2+1 de la primera y \
              3+2+1 de la segunda"
@@ -1632,30 +1616,30 @@ mod tests {
         // La espera **no es trabajo de la aplicación**: es cuánto llevaba en la cola el byte más
         // antiguo. Sumar las dos daría un número que nadie esperó, y ese número va a la media de
         // «tecla → pantalla» que el informe publica. Se queda con la de la pasada que de verdad recogió.
-        let mut medida = Medida::default();
+        let mut timings = Timings::default();
         let recogido = Instant::now();
 
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
+        timings.record_round(Spans::of_a_round(
             Some(recogido - ms(5)),
             recogido,
             ms(1),
             ms(0),
             ms(0),
         ));
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
+        timings.record_round(Spans::of_a_round(
             Some(recogido - ms(9)),
             recogido,
             ms(1),
             ms(0),
             ms(0),
         ));
-        medida.cerrar_fotograma(ms(10));
+        timings.close_frame(ms(10));
 
         // Se lee del informe, que es lo que un humano acaba viendo: la espera publicada tiene que ser
         // la de la primera pasada —5 ms— y no los 14 de sumarlas.
-        let informe = informe_de(&medida);
+        let informe = report_of(&timings);
         assert!(
-            informe.contains("esperando en la cola:   5.000ms de media"),
+            informe.contains("waiting in the queue:   5.000ms mean"),
             "la espera declarada no es la de la primera pasada; el informe dice: {informe}"
         );
         assert!(
@@ -1676,20 +1660,20 @@ mod tests {
         // **Se afirma sobre lo que el informe escribe, no sobre la constante.** Comprobar la
         // constante demostraría que la constante está bien redactada, no que alguien la imprima —
         // que es el fallo que en este proyecto ha dejado pasar ocho cosas con la suite en verde.
-        let informe = informe_de(&con_un_fotograma());
+        let informe = report_of(&with_one_frame());
 
         assert!(
-            informe.contains("el panel de estado:"),
+            informe.contains("the status panel:"),
             "el informe no publica el tramo del panel:\n{informe}"
         );
         assert!(
-            informe.contains("atender el arrastre de su frontera"),
+            informe.contains("serving the drag of its border"),
             "el informe publica el tramo del panel sin decir que ahí dentro se paga el gesto de \
              estrecharlo: quien lea la tanda creerá que ese coste está en el resto del fotograma, o sea \
              atribuido al framework de interfaz:\n{informe}"
         );
         assert!(
-            informe.contains("INCLUYE pintar el panel"),
+            informe.contains("INCLUDES painting the panel"),
             "el informe publica el tramo del panel sin decir que incluye pintarlo, que es lo que \
              hace que el número se pueda copiar mal:\n{informe}"
         );
@@ -1703,54 +1687,48 @@ mod tests {
         // **El quinto tramo es el panel**, y entró aquí en cuanto empezó a pintarse: un trabajo que
         // ocurre dentro del fotograma y no se declara se lo lleva el resto, que es precisamente el
         // número que decide si el framework de interfaz aguanta.
-        let mut medida = Medida::default();
-        let mut resto = RestoDelFotograma::default();
+        let mut timings = Timings::default();
+        let mut resto = RestOfFrame::default();
         let ahora = Instant::now();
 
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
+        timings.record_round(Spans::of_a_round(
             Some(ahora - ms(100)),
             ahora,
             ms(2),
             ms(3),
             ms(1),
         ));
-        let cronometrado = medida
-            .cerrar_fotograma(ms(10))
+        let timed = timings
+            .close_frame(ms(10))
             .expect("había tramos pendientes que cerrar");
-        resto.anotar(ms(10), cronometrado);
+        resto.record(ms(10), timed);
 
-        assert_eq!(medida.esperar.media(), ms(100));
-        assert_eq!(medida.interpretar.media(), ms(2));
-        assert_eq!(medida.encolar.media(), ms(3));
-        assert_eq!(medida.panel.media(), ms(1));
-        assert_eq!(resto.serie.media(), ms(4), "10 menos 2, 3 y 1");
-        assert_eq!(medida.vuelta.media(), ms(110), "la espera más el fotograma");
+        assert_eq!(timings.wait.mean(), ms(100));
+        assert_eq!(timings.interpret.mean(), ms(2));
+        assert_eq!(timings.enqueue.mean(), ms(3));
+        assert_eq!(timings.panel.mean(), ms(1));
+        assert_eq!(resto.series.mean(), ms(4), "10 menos 2, 3 y 1");
+        assert_eq!(timings.round.mean(), ms(110), "la espera más el fotograma");
     }
 
     /// **Lo que el panel le quita al resto, y por qué esta prueba existe aparte.** La de arriba pasaría
-    /// igual sumando el tramo del panel dentro de `encolar`: los dos se descuentan y el resto sale el
+    /// igual sumando el tramo del panel dentro de `enqueue`: los dos se descuentan y el resto sale el
     /// mismo. Lo que se rompería es la *etiqueta* —«encolando el pintado» incluyendo leer un fichero de
     /// disco—, y una etiqueta cambiada es el error que ya invalidó una medida entera en este proyecto.
     #[test]
     fn el_tramo_del_panel_no_se_le_suma_al_del_pintado() {
-        let mut medida = Medida::default();
+        let mut timings = Timings::default();
         let ahora = Instant::now();
 
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
-            Some(ahora),
-            ahora,
-            ms(2),
-            ms(3),
-            ms(4),
-        ));
-        medida.cerrar_fotograma(ms(10));
+        timings.record_round(Spans::of_a_round(Some(ahora), ahora, ms(2), ms(3), ms(4)));
+        timings.close_frame(ms(10));
 
         assert_eq!(
-            medida.encolar.media(),
+            timings.enqueue.mean(),
             ms(3),
             "el coste del panel se coló en el tramo del pintado"
         );
-        assert_eq!(medida.panel.media(), ms(4));
+        assert_eq!(timings.panel.mean(), ms(4));
     }
 
     #[test]
@@ -1758,19 +1736,19 @@ mod tests {
         // La razón de que el resto viva en la ventana: el consumo de CPU llega una sola vez por
         // pasada. Descontándole solo los tramos de una división, la otra se contaría como resto —y el
         // resto es justo el número que dice si el pintado aguanta.
-        let mut izquierda = Medida::default();
-        let mut derecha = Medida::default();
-        let mut resto = RestoDelFotograma::default();
+        let mut izquierda = Timings::default();
+        let mut derecha = Timings::default();
+        let mut resto = RestOfFrame::default();
         let ahora = Instant::now();
 
-        izquierda.anotar_vuelta(Tramos::de_una_vuelta(
+        izquierda.record_round(Spans::of_a_round(
             Some(ahora),
             ahora,
             ms(2),
             ms(1),
             Duration::ZERO,
         ));
-        derecha.anotar_vuelta(Tramos::de_una_vuelta(
+        derecha.record_round(Spans::of_a_round(
             Some(ahora),
             ahora,
             ms(3),
@@ -1778,38 +1756,35 @@ mod tests {
             Duration::ZERO,
         ));
 
-        let cronometrado: Duration = [
-            izquierda.cerrar_fotograma(ms(10)),
-            derecha.cerrar_fotograma(ms(10)),
-        ]
-        .into_iter()
-        .flatten()
-        .sum();
+        let timed: Duration = [izquierda.close_frame(ms(10)), derecha.close_frame(ms(10))]
+            .into_iter()
+            .flatten()
+            .sum();
 
-        resto.anotar(ms(10), cronometrado);
+        resto.record(ms(10), timed);
 
-        assert_eq!(cronometrado, ms(7), "2+1 de una y 3+1 de la otra");
-        assert_eq!(resto.serie.media(), ms(3), "10 menos las dos divisiones");
+        assert_eq!(timed, ms(7), "2+1 de una y 3+1 de la otra");
+        assert_eq!(resto.series.mean(), ms(3), "10 menos las dos divisiones");
     }
 
     #[test]
     fn un_fotograma_sin_salida_no_cuenta_como_vuelta_rapidisima() {
         // Sin este descarte, cada fotograma en reposo metería un cero en la serie y la media diría
         // que la aplicación responde al instante justamente por no haber hecho nada.
-        let mut medida = Medida::default();
+        let mut timings = Timings::default();
 
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
-            None,
-            Instant::now(),
-            ms(2),
-            ms(3),
-            ms(1),
-        ));
-        medida.cerrar_fotograma(ms(10));
+        timings.record_round(Spans::of_a_round(None, Instant::now(), ms(2), ms(3), ms(1)));
+        timings.close_frame(ms(10));
 
-        assert!(!medida.vuelta.hay(), "se anotó una vuelta que no ocurrió");
-        assert!(!medida.esperar.hay(), "se anotó una espera que no ocurrió");
-        assert!(!medida.panel.hay(), "tampoco el tramo del panel");
+        assert!(
+            !timings.round.has_samples(),
+            "se anotó una vuelta que no ocurrió"
+        );
+        assert!(
+            !timings.wait.has_samples(),
+            "se anotó una espera que no ocurrió"
+        );
+        assert!(!timings.panel.has_samples(), "tampoco el tramo del panel");
     }
 
     #[test]
@@ -1819,30 +1794,24 @@ mod tests {
         // pinta igual cada fotograma, así que su encolado es trabajo real; si no lo declarase, la
         // ventana no lo restaría del total y ese tiempo saldría publicado como «el resto del fotograma»
         // — el número que decide si el framework de interfaz aguanta varias consolas.
-        let mut medida = Medida::default();
-        let mut resto = RestoDelFotograma::default();
+        let mut timings = Timings::default();
+        let mut resto = RestOfFrame::default();
 
         // Y su panel también se mira cada fotograma, aunque su productor esté callado: el `ms(1)` es
         // lo que cuesta preguntar la fecha del fichero, que se paga igual que el pintado.
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
-            None,
-            Instant::now(),
-            ms(0),
-            ms(4),
-            ms(1),
-        ));
-        let cronometrado = medida
-            .cerrar_fotograma(ms(10))
+        timings.record_round(Spans::of_a_round(None, Instant::now(), ms(0), ms(4), ms(1)));
+        let timed = timings
+            .close_frame(ms(10))
             .expect("una consola pintada tiene que declarar lo que costó pintarla");
-        resto.anotar(ms(10), cronometrado);
+        resto.record(ms(10), timed);
 
         assert_eq!(
-            cronometrado,
+            timed,
             ms(5),
             "el encolado de la consola quieta más el vistazo a su panel"
         );
         assert_eq!(
-            resto.serie.media(),
+            resto.series.mean(),
             ms(5),
             "el resto se quedó con el pintado de la consola quieta"
         );
@@ -1855,34 +1824,43 @@ mod tests {
         // se mueven**, porque meter un cero de encolado en su media diría que pintar sale más barato
         // justamente en los fotogramas en los que no se pintó nada— y que lo interpretado **sí** se
         // devuelve para restarlo.
-        let mut medida = Medida::default();
-        let mut resto = RestoDelFotograma::default();
+        let mut timings = Timings::default();
+        let mut resto = RestOfFrame::default();
 
-        medida.anotar_vuelta(Tramos::de_una_vuelta(
+        timings.record_round(Spans::of_a_round(
             None,
             Instant::now(),
             ms(2),
             Duration::ZERO,
             Duration::ZERO,
         ));
-        let cronometrado = medida
-            .cerrar_fotograma(ms(10))
+        let timed = timings
+            .close_frame(ms(10))
             .expect("lo interpretado tiene que declararse aunque no se haya pintado");
-        resto.anotar(ms(10), cronometrado);
+        resto.record(ms(10), timed);
 
-        assert_eq!(cronometrado, ms(2), "lo que interpretó, y nada más");
+        assert_eq!(timed, ms(2), "lo que interpretó, y nada más");
         assert_eq!(
-            resto.serie.media(),
+            resto.series.mean(),
             ms(8),
             "el resto se quedó con lo que interpretó una consola que no se pintó"
         );
-        assert!(!medida.encolar.hay(), "se ensució la media de encolar");
         assert!(
-            !medida.interpretar.hay(),
+            !timings.enqueue.has_samples(),
+            "se ensució la media de encolar"
+        );
+        assert!(
+            !timings.interpret.has_samples(),
             "se ensució la media de interpretar"
         );
-        assert!(!medida.vuelta.hay(), "se anotó una vuelta que no ocurrió");
-        assert!(!medida.panel.hay(), "se ensució el tramo del panel");
+        assert!(
+            !timings.round.has_samples(),
+            "se anotó una vuelta que no ocurrió"
+        );
+        assert!(
+            !timings.panel.has_samples(),
+            "se ensució el tramo del panel"
+        );
     }
 
     #[test]
@@ -1890,36 +1868,36 @@ mod tests {
         // Los tramos y el total vienen de fotogramas contiguos y de relojes distintos, así que el
         // total puede quedarse corto. Antes de restar sin más, un resto negativo saldría publicado
         // como un número enorme y con toda la pinta de ser real.
-        let mut resto = RestoDelFotograma::default();
+        let mut resto = RestOfFrame::default();
 
-        resto.anotar(ms(1), ms(16));
+        resto.record(ms(1), ms(16));
 
-        assert_eq!(resto.serie.media(), Duration::ZERO);
+        assert_eq!(resto.series.mean(), Duration::ZERO);
     }
 
     #[test]
     fn el_95_por_ciento_no_lo_marca_el_peor_de_todos() {
         // Una sola pausa del escritorio no puede decidir el número que se publica.
-        let mut serie = Serie::default();
+        let mut series = Series::default();
         for _ in 0..99 {
-            serie.anotar(ms(1));
+            series.record(ms(1));
         }
-        serie.anotar(ms(500));
+        series.record(ms(500));
 
-        assert_eq!(serie.p95(), ms(1), "un valor suelto se llevó el percentil");
+        assert_eq!(series.p95(), ms(1), "un valor suelto se llevó el percentil");
     }
 
     #[test]
     fn la_cuenta_total_sobrevive_al_tope_de_muestras() {
         // El informe dice cuántas medidas hubo, no cuántas se guardaron: con el tope, las dos cifras
         // dejan de coincidir y publicar la segunda haría parecer corta una sesión larga.
-        let mut serie = Serie::default();
-        for _ in 0..(MUESTRAS + 10) {
-            serie.anotar(ms(1));
+        let mut series = Series::default();
+        for _ in 0..(SAMPLES + 10) {
+            series.record(ms(1));
         }
 
-        assert_eq!(serie.muestras.len(), MUESTRAS);
-        assert_eq!(serie.total, MUESTRAS + 10);
+        assert_eq!(series.samples.len(), SAMPLES);
+        assert_eq!(series.total, SAMPLES + 10);
     }
 
     /// **La línea que dice lo que cuesta la barra, y que solo sale cuando la hubo.** Sin ella, lo que
@@ -1928,61 +1906,61 @@ mod tests {
     /// pueden defender. Y el guion invalida la corrida leyendo justo esta línea.
     #[test]
     fn la_cabecera_dice_lo_que_costo_la_barra_solo_cuando_hubo_barra() {
-        let ventana = EnPuntos {
-            ancho: 1280.0,
-            alto: 800.0,
+        let window = SizeInPoints {
+            width: 1280.0,
+            height: 800.0,
         };
-        let rejillas = &[
-            (0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))]),
-            (1, vec![(2, rejilla(49, 39)), (3, rejilla(49, 39))]),
+        let grids = &[
+            (0, vec![(0, grid(49, 39)), (1, grid(49, 39))]),
+            (1, vec![(2, grid(49, 39)), (3, grid(49, 39))]),
         ];
 
-        let con = con_barra(
-            ventana,
-            rejillas,
+        let con = with_tab_bar(
+            window,
+            grids,
             0,
             None,
             None,
-            Barra {
-                fotogramas: 100,
+            TabBar {
+                frames: 100,
                 total: Duration::from_micros(3_600),
-                fichas_marcadas: 2,
+                marked_tabs: 2,
             },
         );
         assert!(
-            con.contains("barra:        100 fotogramas") && con.contains("36µs por fotograma"),
+            con.contains("tab bar:      100 frames") && con.contains("36µs per frame"),
             "la cabecera no declaró lo que costó la barra ni su media:\n{con}"
         );
 
-        let sin = con_barra(
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+        let sin = with_tab_bar(
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            rejillas,
+            grids,
             0,
             None,
             None,
-            Barra::default(),
+            TabBar::default(),
         );
         assert!(
-            !sin.contains("barra:"),
+            !sin.contains("tab bar:"),
             "sin barra que pintar, la cabecera publicó un tramo que nadie midió:\n{sin}"
         );
     }
 
-    fn con_reflujo(reflujo: Reflujo) -> String {
+    fn with_reflow(reflow: Reflow) -> String {
         let mut salida = Vec::new();
-        cabecera(
+        header(
             &mut salida,
-            EnPuntos {
-                ancho: 1280.0,
-                alto: 800.0,
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
             },
-            &[(0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 39))])],
+            &[(0, vec![(0, grid(49, 39)), (1, grid(49, 39))])],
             0,
-            DeLaSesion {
-                reflujo,
+            SessionHeader {
+                reflow,
                 ..Default::default()
             },
         )
@@ -2006,46 +1984,46 @@ mod tests {
     fn la_cabecera_dice_lo_que_costo_recolocar_solo_cuando_se_recoloco() {
         // Los números de una corrida publicada: 320 recolocaciones a los ~984 µs que cuesta recorrer el
         // historial de una consola.
-        let con = con_reflujo(Reflujo {
-            fotogramas: 320,
+        let con = with_reflow(Reflow {
+            frames: 320,
             total: Duration::from_micros(320 * 984),
         });
 
         assert!(
-            con.contains("314.88ms en total") && con.contains("984µs cada vez"),
+            con.contains("314.88ms in total") && con.contains("984µs each"),
             "la cabecera no declaró lo que costó recolocar ni lo que cuesta cada vez:\n{con}"
         );
 
         // **La forma exacta que el guion sabe leer.** El `.*` que sigue a «veces» exige que detrás haya
         // algo, igual que en la línea de restauradas: una línea recortada no casaría y el guion
         // invalidaría una corrida buena.
-        let linea = con
+        let line = con
             .lines()
-            .find(|linea| linea.starts_with("recolocar:"))
+            .find(|line| line.starts_with("reflow:"))
             .expect("no hay línea de recolocar que el guion pueda leer");
-        let (etiqueta, resto) = linea
-            .split_once(" veces ")
+        let (etiqueta, resto) = line
+            .split_once(" times ")
             .expect("la línea de recolocar perdió las palabras que el guion busca");
         assert!(
             etiqueta
-                .strip_prefix("recolocar:")
+                .strip_prefix("reflow:")
                 .expect("la línea empieza por su etiqueta")
                 .trim_start()
                 .parse::<usize>()
                 == Ok(320),
-            "el guion no sacaría 320 recolocaciones de esta línea: «{linea}»"
+            "el guion no sacaría 320 recolocaciones de esta línea: «{line}»"
         );
         assert!(
             !resto.is_empty(),
-            "detrás de «veces» no queda nada y el guion exige que quede algo: «{linea}»"
+            "detrás de «veces» no queda nada y el guion exige que quede algo: «{line}»"
         );
 
         // **Y en una tanda que no redimensiona nada, la línea no sale.** Publicar «0 veces» se lee como
         // «recolocar no cuesta nada» en vez de como «no se recolocó», y además le daría a la guarda del
         // guion un número que pasaría sus dos comprobaciones sin que nada se hubiera recolocado.
-        let sin = con_reflujo(Reflujo::default());
+        let sin = with_reflow(Reflow::default());
         assert!(
-            !sin.contains("recolocar:"),
+            !sin.contains("reflow:"),
             "sin recolocar nada, la cabecera publicó un tramo que nadie midió:\n{sin}"
         );
     }
@@ -2061,12 +2039,12 @@ mod tests {
     // el guion —cambia el `sed`, cambia la prueba, verde— y no habría atado nada.
 
     /// El guion de medida, leído en tiempo de compilación para que no se pueda desincronizar.
-    const GUION: &str = include_str!("../../../scripts/medir-fotograma.sh");
+    const SCRIPT: &str = include_str!("../../../scripts/medir-fotograma.sh");
 
     /// Un patrón que el guion aplica al informe, con la línea donde está para poder señalarlo.
-    struct DelGuion {
-        linea: usize,
-        orden: &'static str,
+    struct ScriptPattern {
+        line: usize,
+        order: &'static str,
         patron: String,
     }
 
@@ -2081,39 +2059,39 @@ mod tests {
     /// lleva ancla ni palabra clave, así que este criterio no lo ve. **No invalida ninguna corrida**
     /// —solo alimenta un mensaje— y por eso se deja fuera en vez de ensanchar el criterio hasta que
     /// empiece a recoger ruido; si algún día pasa a decidir algo, entra.
-    fn patrones_del_guion() -> Vec<DelGuion> {
+    fn script_patterns() -> Vec<ScriptPattern> {
         let mut encontrados = Vec::new();
         // **La orden se arrastra entre líneas a propósito.** El guion parte sus `sed` largos con
         // barra al final y pone cada `-e` en su propia línea, así que la línea que lleva el patrón
         // muchas veces **no** contiene la palabra `sed`. La primera versión de este extractor no lo
         // tuvo en cuenta y encontró 2 de 20 — lo cazó la guarda del recuento, que está justo debajo
         // para esto.
-        let mut orden_en_curso = "";
+        let mut order_in_progress = "";
         let mut continuacion = false;
-        for (numero, linea) in GUION.lines().enumerate() {
+        for (numero, line) in SCRIPT.lines().enumerate() {
             if !continuacion {
-                orden_en_curso = "";
+                order_in_progress = "";
             }
             // **Un comentario no es una orden, y contarlo infló el recuento de 21 a 24.** El guion
             // explica sus propias guardas citando los patrones que aplica, así que su prosa está
             // llena de `grep` y de literales entrecomillados. Con los comentarios dentro, la guarda
             // que existe para que esta prueba no pase por vacío **se satisfacía con prosa**.
-            if linea.trim_start().starts_with('#') {
+            if line.trim_start().starts_with('#') {
                 continue;
             }
-            if linea.contains("sed ") {
-                orden_en_curso = "sed";
-            } else if linea.contains("grep ") {
-                orden_en_curso = "grep";
+            if line.contains("sed ") {
+                order_in_progress = "sed";
+            } else if line.contains("grep ") {
+                order_in_progress = "grep";
             }
-            continuacion = linea.trim_end().ends_with('\\');
-            if orden_en_curso.is_empty() {
+            continuacion = line.trim_end().ends_with('\\');
+            if order_in_progress.is_empty() {
                 continue;
             }
             // Los patrones del guion van entre comillas, y usa **las dos**: simples para los `sed`
             // y dobles para los dos recuentos que busca sin anclar.
             for comilla in ['\'', '"'] {
-                let mut resto = linea;
+                let mut resto = line;
                 while let Some(abre) = resto.find(comilla) {
                     let tras = &resto[abre + 1..];
                     let Some(cierra) = tras.find(comilla) else {
@@ -2130,14 +2108,14 @@ mod tests {
                     // sino la salida del anterior, y sobre todo **no tiene texto que pueda cambiar
                     // de idioma**: no hay acoplamiento que atar ahí. Es un criterio y no una lista
                     // de excepciones, así que sigue valiendo cuando el guion crezca.
-                    let describe_el_informe = (dentro.contains('^')
-                        || dentro.contains("caracteres buscados")
-                        || dentro.contains("glifos rasterizados"))
+                    let describes_the_report = (dentro.contains('^')
+                        || dentro.contains("characters searched")
+                        || dentro.contains("glyphs rasterized"))
                         && dentro.chars().any(|c| c.is_alphabetic());
-                    if describe_el_informe {
-                        encontrados.push(DelGuion {
-                            linea: numero + 1,
-                            orden: orden_en_curso,
+                    if describes_the_report {
+                        encontrados.push(ScriptPattern {
+                            line: numero + 1,
+                            order: order_in_progress,
                             patron: dentro.to_string(),
                         });
                     }
@@ -2180,20 +2158,20 @@ mod tests {
     /// `#[cfg(unix)]` la haría desaparecer en silencio, que es peor. **F2.7 lleva Windows**, y ahí
     /// habrá que decidir: acotarla al sistema o dar por bueno que el banco no corre en esa
     /// plataforma.
-    fn extrae(p: &DelGuion, informe: &str) -> Salida {
+    fn extrae(p: &ScriptPattern, informe: &str) -> Salida {
         use std::io::Write as _;
         use std::process::{Command, Stdio};
 
-        let mut orden = Command::new(p.orden);
-        match p.orden {
+        let mut order = Command::new(p.order);
+        match p.order {
             "sed" => {
-                orden.arg("-n").arg(&p.patron);
+                order.arg("-n").arg(&p.patron);
             }
             _ => {
-                orden.arg("-E").arg(&p.patron);
+                order.arg("-E").arg(&p.patron);
             }
         }
-        let mut hijo = orden
+        let mut child = order
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -2201,21 +2179,22 @@ mod tests {
             .unwrap_or_else(|e| {
                 panic!(
                     "no se pudo lanzar «{}»: {e}. El banco tampoco funcionaría sin él",
-                    p.orden
+                    p.order
                 )
             });
-        hijo.stdin
+        child
+            .stdin
             .as_mut()
             .expect("la entrada está abierta")
             .write_all(informe.as_bytes())
             .expect("escribir a una tubería de memoria no falla");
-        let salida = hijo.wait_with_output().expect("recoger la salida");
+        let salida = child.wait_with_output().expect("recoger la salida");
         let codigo = salida.status.code().unwrap_or(-1);
         // **Cada orden dice «no he encontrado nada» de una forma distinta.** `grep` sale con 1
         // cuando no casa y con 2 o más cuando el patrón no le sirve; `sed` sale con 0 aunque no
         // sustituya nada, y solo se queja si el patrón está mal escrito. Sin esta distinción, un
         // patrón mal extraído por esta prueba se publicaría como un acoplamiento roto del proyecto.
-        let patron_invalido = match p.orden {
+        let patron_invalido = match p.order {
             "grep" => codigo >= 2,
             _ => codigo != 0,
         };
@@ -2234,53 +2213,53 @@ mod tests {
     /// **Son varios y no uno porque los tres estados de la configuración son excluyentes**: un
     /// informe no puede decir a la vez que la configuración está vetada y que se leyó la del
     /// usuario. Cada patrón tiene que extraer de **alguno**; ninguno tiene que extraer de todos.
-    fn informes_de_referencia() -> Vec<(&'static str, String)> {
-        let rejillas = vec![
-            (0, vec![(0, rejilla(49, 39)), (1, rejilla(49, 21))]),
-            (1, vec![(0, rejilla(49, 39))]),
+    fn reference_reports() -> Vec<(&'static str, String)> {
+        let grids = vec![
+            (0, vec![(0, grid(49, 39)), (1, grid(49, 21))]),
+            (1, vec![(0, grid(49, 39))]),
         ];
-        let ventana = EnPuntos {
-            ancho: 1280.0,
-            alto: 800.0,
+        let window = SizeInPoints {
+            width: 1280.0,
+            height: 800.0,
         };
 
-        let mut barra = Barra::default();
-        barra.anotar(ms(7));
-        barra.vio_marcadas(3);
+        let mut tab_bar = TabBar::default();
+        tab_bar.record(ms(7));
+        tab_bar.saw_marked(3);
 
-        let mut reflujo = Reflujo::default();
-        reflujo.anotar(ms(2));
+        let mut reflow = Reflow::default();
+        reflow.record(ms(2));
 
-        let arrastres = Arrastres {
-            inyectados: 12,
-            con_efecto: 6,
-            marcados: 4,
-            informados: 2,
-            gesto: "moviendo consolas",
+        let drags = Drags {
+            injected: 12,
+            effective: 6,
+            marked: 4,
+            reported: 2,
+            gesture: "moving consoles",
         };
 
-        let restauracion = Restauracion {
-            consolas: 4,
-            leer: Some(ms(1)),
-            abrirlas: ms(5),
+        let restoring = Restoring {
+            consoles: 4,
+            read: Some(ms(1)),
+            opening: ms(5),
         };
 
-        let cabecera_con_todo = |configuracion| {
+        let header_with_everything = |settings| {
             let mut salida = Vec::new();
-            cabecera(
+            header(
                 &mut salida,
-                EnPuntos {
-                    ancho: ventana.ancho,
-                    alto: ventana.alto,
+                SizeInPoints {
+                    width: window.width,
+                    height: window.height,
                 },
-                &rejillas,
+                &grids,
                 0,
-                DeLaSesion {
-                    arrastres: Some(arrastres),
-                    restauracion: Some(restauracion),
-                    configuracion,
-                    barra,
-                    reflujo,
+                SessionHeader {
+                    drags: Some(drags),
+                    restoring: Some(restoring),
+                    settings,
+                    tab_bar,
+                    reflow,
                 },
             )
             .expect("escribir a memoria no falla");
@@ -2288,54 +2267,54 @@ mod tests {
         };
 
         // Los tramos de la ventana que el guion también lee, cada uno poblado.
-        let mut guardado = Guardado::default();
-        guardado.anotar_espejo(ms(1));
-        guardado.anotar_escritura(ms(3), true);
-        guardado.anotar_escritura(ms(3), false);
+        let mut saving = Saving::default();
+        saving.record_mirror(ms(1));
+        saving.record_write(ms(3), true);
+        saving.record_write(ms(3), false);
 
-        let mut descubrimiento = Descubrimiento::default();
-        descubrimiento.anotar(ms(4), 9, 2);
+        let mut discovery = Discovery::default();
+        discovery.record(ms(4), 9, 2);
 
-        let mut rasterizado = Rasterizado::default();
-        rasterizado.anotar(ms(1), 15, 1);
+        let mut rasterizing = Rasterizing::default();
+        rasterizing.record(ms(1), 15, 1);
 
-        let mut tramos_de_la_ventana = Vec::new();
-        guardado
-            .publicar(&mut tramos_de_la_ventana)
+        let mut window_spans = Vec::new();
+        saving
+            .publish(&mut window_spans)
             .expect("escribir a memoria no falla");
-        descubrimiento
-            .publicar(&mut tramos_de_la_ventana)
+        discovery
+            .publish(&mut window_spans)
             .expect("escribir a memoria no falla");
-        rasterizado
-            .publicar(&mut tramos_de_la_ventana)
+        rasterizing
+            .publish(&mut window_spans)
             .expect("escribir a memoria no falla");
 
         vec![
             (
                 "cabecera con la configuración vetada",
-                cabecera_con_todo(LecturaDeAjustes::Vetada),
+                header_with_everything(ReadingSettings::Vetoed),
             ),
             (
                 "cabecera sin configuración que aplicar",
-                cabecera_con_todo(LecturaDeAjustes::Sin),
+                header_with_everything(ReadingSettings::Missing),
             ),
             (
                 "cabecera con la configuración del usuario",
-                cabecera_con_todo(LecturaDeAjustes::Con {
-                    cuanto: ms(1),
-                    avisos: 2,
+                header_with_everything(ReadingSettings::Applied {
+                    how_long: ms(1),
+                    warnings: 2,
                 }),
             ),
             (
                 "los tramos de la ventana",
-                String::from_utf8(tramos_de_la_ventana).expect("el informe es texto"),
+                String::from_utf8(window_spans).expect("el informe es texto"),
             ),
         ]
     }
 
     #[test]
     fn cada_patron_que_el_guion_busca_en_el_informe_sigue_extrayendo_algo() {
-        let patrones = patrones_del_guion();
+        let patrones = script_patterns();
 
         // **La guarda cuenta POR FORMA y no un total, y la diferencia la encontró una revisión
         // mutándola.** Con un total —«al menos 20», habiendo 21— la guarda toleraba perder
@@ -2348,10 +2327,10 @@ mod tests {
         // Contando las dos familias por separado, perder **uno solo** de los dos por palabra clave ya
         // cae. Y sigue siendo un criterio y no una lista, así que aguanta que el guion crezca.
         let anclados = patrones.iter().filter(|p| p.patron.contains('^')).count();
-        let por_palabra_clave = patrones.len() - anclados;
+        let by_keyword = patrones.len() - anclados;
         assert!(
-            anclados >= 19 && por_palabra_clave >= 2,
-            "el extractor ha encontrado {anclados} patrones anclados y {por_palabra_clave} por \
+            anclados >= 19 && by_keyword >= 2,
+            "el extractor ha encontrado {anclados} patrones anclados y {by_keyword} por \
              palabra clave, y hay al menos 19 y 2: ha dejado de reconocer la forma de alguno, así \
              que esta prueba estaría pasando por vacío justo donde menos se nota"
         );
@@ -2367,12 +2346,12 @@ mod tests {
         // una por una, con su razón — una lista corta y explícita envejece mejor que un criterio que
         // se ensancha hasta dejar de fallar.
         let mut sin_aportar = Vec::new();
-        for (numero, linea) in GUION.lines().enumerate() {
+        for (numero, line) in SCRIPT.lines().enumerate() {
             let numero = numero + 1;
-            if linea.trim_start().starts_with('#') || !linea.contains("$INFORME") {
+            if line.trim_start().starts_with('#') || !line.contains("$INFORME") {
                 continue;
             }
-            let aplica_un_patron = linea.contains("grep") || linea.contains("sed");
+            let aplica_un_patron = line.contains("grep") || line.contains("sed");
             if !aplica_un_patron {
                 continue;
             }
@@ -2382,16 +2361,15 @@ mod tests {
             // atrás al traducir. Es el mismo criterio que decide qué patrón se extrae, aplicado a
             // qué línea tiene que aportar uno — y por ser el mismo, las dos mitades no se pueden
             // desincronizar.
-            let algun_patron_con_texto =
-                linea
-                    .split(['\'', '"'])
+            let some_pattern_with_text =
+                line.split(['\'', '"'])
                     .skip(1)
                     .step_by(2)
                     .any(|entre_comillas| {
                         !entre_comillas.starts_with('$')
                             && entre_comillas.chars().any(|c| c.is_alphabetic())
                     });
-            if !algun_patron_con_texto {
+            if !some_pattern_with_text {
                 continue;
             }
             // La única exenta, y por eso va con su número: compone el mensaje de la rejilla al
@@ -2401,8 +2379,8 @@ mod tests {
             if numero == SOLO_COMPONE_UN_MENSAJE {
                 continue;
             }
-            if !patrones.iter().any(|p| p.linea == numero) {
-                sin_aportar.push(format!("  medir-fotograma.sh:{numero}: {}", linea.trim()));
+            if !patrones.iter().any(|p| p.line == numero) {
+                sin_aportar.push(format!("  medir-fotograma.sh:{numero}: {}", line.trim()));
             }
         }
         assert!(
@@ -2415,21 +2393,21 @@ mod tests {
             sin_aportar.join("\n")
         );
 
-        let informes = informes_de_referencia();
+        let informes = reference_reports();
         let mut huerfanos = Vec::new();
         let mut invalidos = Vec::new();
         for p in &patrones {
-            let mut extrajo_de_alguno = false;
+            let mut extracted_from_any = false;
             for (_, informe) in &informes {
                 match extrae(p, informe) {
-                    Salida::Extrajo => extrajo_de_alguno = true,
+                    Salida::Extrajo => extracted_from_any = true,
                     Salida::NoCaso => {}
                     // Una entrada por patrón y no por informe: el mismo corte mal hecho se veía
                     // cuatro veces, una por informe de referencia.
                     Salida::PatronInvalido(codigo) => {
                         let entrada = format!(
                             "  medir-fotograma.sh:{} ({}) {:?} → salió con {codigo}",
-                            p.linea, p.orden, p.patron
+                            p.line, p.order, p.patron
                         );
                         if !invalidos.contains(&entrada) {
                             invalidos.push(entrada);
@@ -2437,10 +2415,10 @@ mod tests {
                     }
                 }
             }
-            if !extrajo_de_alguno {
+            if !extracted_from_any {
                 huerfanos.push(format!(
                     "  medir-fotograma.sh:{} ({}) {:?}",
-                    p.linea, p.orden, p.patron
+                    p.line, p.order, p.patron
                 ));
             }
         }
@@ -2463,6 +2441,28 @@ mod tests {
             patrones.len(),
             huerfanos.join("\n")
         );
+
+        // **Y las cinco variables de entorno, que es la mitad del contrato que este test no ata.**
+        // Los `assert_eq!` de la ventana comparan cada constante consigo misma; lo que de verdad se
+        // pide es que el guion **exporte** ese nombre, porque la app lee estas variables para saber
+        // que la sesión la pidió la medida y decidir sus vetos. Sin este pin, renombrar a un solo
+        // lado solo estalla al medir, con la tanda ya en marcha.
+        use crate::{
+            DRAGS_VARIABLE, GESTURE_VARIABLE, PANES_VARIABLE, SIZE_VARIABLE, TABS_VARIABLE,
+        };
+        for variable in [
+            TABS_VARIABLE,
+            SIZE_VARIABLE,
+            PANES_VARIABLE,
+            DRAGS_VARIABLE,
+            GESTURE_VARIABLE,
+        ] {
+            assert!(
+                SCRIPT.contains(variable),
+                "el guion no menciona {variable}: la app dejaría de reconocer la sesión como una \
+                 tanda de medida y sus vetos de arranque dejarían de aplicarse"
+            );
+        }
     }
 
     #[test]
@@ -2473,10 +2473,10 @@ mod tests {
         // lado**: se renombran las dos mitades a la vez, queda verde, y el guion sigue sembrando el
         // nombre viejo.
         assert!(
-            GUION.contains(crate::session::FICHERO),
+            SCRIPT.contains(crate::session::FILE),
             "el guion de medida no siembra «{}», que es el fichero que la aplicación lee: la tanda \
              que restaura abriría de fábrica y su corrida se publicaría como buena",
-            crate::session::FICHERO
+            crate::session::FILE
         );
     }
 }

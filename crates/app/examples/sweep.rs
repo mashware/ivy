@@ -56,7 +56,7 @@ use term_core::{Screen, Size};
 
 /// El tamaño de cada consola simulada. **El mismo para todos los valores de N**: es lo que permite
 /// leer el resultado como «coste por consola» y ver si dos cuestan el doble que una, o más.
-const REJILLA: Size = Size { rows: 24, cols: 80 };
+const GRID: Size = Size { rows: 24, cols: 80 };
 
 /// Los valores de N que se barren.
 ///
@@ -70,30 +70,30 @@ const PLAN: [usize; 2] = [1, 2];
 /// El primer pase construye el atlas de la fuente y reserva las texturas, y sale varias veces más
 /// caro que los siguientes: contarlo subiría la media de una fase sin que nada de eso vuelva a
 /// pasar en las demás.
-const CALENTAMIENTO: usize = 60;
+const WARMUP: usize = 60;
 
 /// Fotogramas que se miden en cada fase.
 ///
 /// Se cuentan fotogramas y no segundos porque **el ritmo lo pone la pantalla**, no el banco: en un
 /// monitor de 120 Hz esto son cinco segundos por valor de N y en uno de 60, diez. Contar por tiempo
 /// mediría un número distinto de fotogramas en cada máquina y haría incomparables las tandas.
-const MEDIDOS: usize = 600;
+const MEASURED: usize = 600;
 
 /// El cuerpo de la letra.
 ///
 /// El mismo que usa la aplicación, y por ahora escrito aquí igual que en la pantalla de prueba: el
 /// producto lo tiene en una constante privada. Si los dos dejaran de coincidir, este número dejaría
 /// de ser el del producto sin que nada avise — unificarlo es trabajo de cuando el bucle esté dentro.
-const CUERPO: f32 = 14.0;
+const BODY: f32 = 14.0;
 
 fn main() -> eframe::Result {
-    let etiqueta = std::env::args().nth(1);
+    let label = std::env::args().nth(1);
 
-    let mut pantallas = Vec::new();
+    let mut screens = Vec::new();
     for _ in 0..PLAN.iter().copied().max().unwrap_or(1) {
-        let mut pantalla = Screen::new(REJILLA);
-        pantalla.advance(guion(REJILLA).as_bytes());
-        pantallas.push(pantalla);
+        let mut screen = Screen::new(GRID);
+        screen.advance(script(GRID).as_bytes());
+        screens.push(screen);
     }
 
     eframe::run_native(
@@ -106,19 +106,19 @@ fn main() -> eframe::Result {
             ..Default::default()
         },
         Box::new(move |_cc| {
-            Ok(Box::new(Barrido {
-                pantallas,
-                tema: Theme::default(),
-                etiqueta,
-                fase: 0,
-                vistos: 0,
-                lecturas: Vec::new(),
-                encolados: Vec::new(),
-                fotogramas: Vec::new(),
-                intervalos: Vec::new(),
-                anterior: None,
-                resultados: Vec::new(),
-                no_cabe: None,
+            Ok(Box::new(Sweep {
+                screens,
+                theme: Theme::default(),
+                label,
+                phase: 0,
+                seen: 0,
+                reads: Vec::new(),
+                enqueues: Vec::new(),
+                frames: Vec::new(),
+                intervals: Vec::new(),
+                previous: None,
+                results: Vec::new(),
+                doesnt_fit: None,
             }))
         }),
     )
@@ -130,29 +130,29 @@ fn main() -> eframe::Result {
 /// días o dos máquinas distintas sean comparables. Y **llena de color a propósito**: cada celda
 /// lleva fondo propio, que es lo que obliga al pintor a dibujar un rectángulo por celda además del
 /// glifo. Una pantalla de terminal de verdad está medio vacía; esta es el techo.
-fn guion(rejilla: Size) -> String {
-    let mut texto = String::new();
-    for fila in 0..rejilla.rows {
+fn script(grid: Size) -> String {
+    let mut text = String::new();
+    for row in 0..grid.rows {
         // Seis fondos y seis colores de letra, girando a ritmos distintos para que la letra nunca
         // caiga sobre su propio color: con los dos al mismo ritmo, una de cada seis filas salía
         // azul sobre azul. No cambia el número —el glifo se dibuja igual, se lea o no— pero una
         // banda ilegible en la pantalla invita a creer que esas filas no se pintaron.
-        let fondo = 41 + (fila % 6);
-        let frente = 31 + ((fila + 1) % 6);
-        texto.push_str(&format!("\x1b[{frente};{fondo}m"));
-        for columna in 0..rejilla.cols {
+        let background = 41 + (row % 6);
+        let foreground = 31 + ((row + 1) % 6);
+        text.push_str(&format!("\x1b[{foreground};{background}m"));
+        for col in 0..grid.cols {
             // Letras, nunca espacios: el pintor se salta los espacios, y una pantalla de espacios
             // mediría sobre todo el bucle vacío.
-            texto.push((b'a' + ((fila + columna) % 26) as u8) as char);
+            text.push((b'a' + ((row + col) % 26) as u8) as char);
         }
-        texto.push_str("\x1b[0m");
+        text.push_str("\x1b[0m");
         // Sin salto después de la última fila: desplazaría la pantalla y la primera dejaría de
         // verse, con lo que el banco mediría 23 filas creyendo medir 24.
-        if fila + 1 < rejilla.rows {
-            texto.push_str("\r\n");
+        if row + 1 < grid.rows {
+            text.push_str("\r\n");
         }
     }
-    texto
+    text
 }
 
 /// Cómo se colocan las consolas para que quepan, o nada si no caben de ninguna forma.
@@ -162,133 +162,124 @@ fn guion(rejilla: Size) -> String {
 /// necesitan más de 1 300 puntos de ancho, y una pantalla con el aumento del escritorio subido no
 /// llega — pero sí le sobra alto. Y no se puede elegir antes de abrir la ventana, porque hasta
 /// entonces no se sabe ni lo que mide la letra ni lo que da la pantalla.
-fn disposicion(hueco: egui::Vec2, consola: egui::Vec2, cuantas: usize) -> Option<egui::Vec2> {
-    let cuantas = cuantas as f32;
-    if hueco.x >= consola.x * cuantas && hueco.y >= consola.y {
-        Some(egui::vec2(consola.x, 0.0))
-    } else if hueco.y >= consola.y * cuantas && hueco.x >= consola.x {
-        Some(egui::vec2(0.0, consola.y))
+fn layout(available: egui::Vec2, console: egui::Vec2, count: usize) -> Option<egui::Vec2> {
+    let count = count as f32;
+    if available.x >= console.x * count && available.y >= console.y {
+        Some(egui::vec2(console.x, 0.0))
+    } else if available.y >= console.y * count && available.x >= console.x {
+        Some(egui::vec2(0.0, console.y))
     } else {
         None
     }
 }
 
 /// Lo medido en una fase del barrido.
-struct Resultado {
-    consolas: usize,
-    lectura: Resumen,
-    encolado: Resumen,
+struct PhaseResult {
+    consoles: usize,
+    read: Summary,
+    enqueue: Summary,
     /// El coste de CPU del fotograma entero, teselado y dibujo incluidos. El número que decide.
-    fotograma: Resumen,
-    fotogramas_por_segundo: f64,
+    frame: Summary,
+    frames_per_second: f64,
 }
 
 /// La media y el peor de una serie de tiempos. Los dos, porque dicen cosas distintas: la media dice
 /// cuánto cuesta, y el peor es el que se ve como un tirón.
-struct Resumen {
-    media: Duration,
-    peor: Duration,
+struct Summary {
+    mean: Duration,
+    worst: Duration,
 }
 
-impl Resumen {
-    fn de(tiempos: &[Duration]) -> Self {
-        let total: Duration = tiempos.iter().sum();
+impl Summary {
+    fn of(times: &[Duration]) -> Self {
+        let total: Duration = times.iter().sum();
         Self {
-            media: total / tiempos.len().max(1) as u32,
-            peor: tiempos.iter().copied().max().unwrap_or_default(),
+            mean: total / times.len().max(1) as u32,
+            worst: times.iter().copied().max().unwrap_or_default(),
         }
     }
 }
 
-struct Barrido {
-    pantallas: Vec<Screen>,
-    tema: Theme,
-    etiqueta: Option<String>,
-    fase: usize,
-    vistos: usize,
-    lecturas: Vec<Duration>,
-    encolados: Vec<Duration>,
+struct Sweep {
+    screens: Vec<Screen>,
+    theme: Theme,
+    label: Option<String>,
+    phase: usize,
+    seen: usize,
+    reads: Vec<Duration>,
+    enqueues: Vec<Duration>,
     /// Lo que `eframe` dice que costó de CPU el fotograma **anterior**. Va un fotograma por detrás
     /// de los otros dos, que en régimen continuo da igual y en el cambio de fase lo absorbe el
     /// calentamiento.
-    fotogramas: Vec<Duration>,
-    intervalos: Vec<Duration>,
-    anterior: Option<Instant>,
-    resultados: Vec<Resultado>,
+    frames: Vec<Duration>,
+    intervals: Vec<Duration>,
+    previous: Option<Instant>,
+    results: Vec<PhaseResult>,
     /// Lo que hacía falta y lo que había, si alguna vez las consolas no cupieron en la ventana. Una
     /// sola vez basta para invalidar la tanda: lo que no se ve no se dibuja, y el número saldría
     /// bien por no haber trabajado.
-    no_cabe: Option<(egui::Vec2, egui::Vec2)>,
+    doesnt_fit: Option<(egui::Vec2, egui::Vec2)>,
 }
 
-impl Barrido {
+impl Sweep {
     /// Cierra la fase actual y pasa a la siguiente. Devuelve si el barrido ha terminado.
-    fn cerrar_fase(&mut self) -> bool {
-        let intervalo = Resumen::de(&self.intervalos).media.as_secs_f64();
-        self.resultados.push(Resultado {
-            consolas: PLAN[self.fase],
-            lectura: Resumen::de(&self.lecturas),
-            encolado: Resumen::de(&self.encolados),
-            fotograma: Resumen::de(&self.fotogramas),
-            fotogramas_por_segundo: if intervalo > 0.0 {
-                1.0 / intervalo
-            } else {
-                0.0
-            },
+    fn close_phase(&mut self) -> bool {
+        let interval = Summary::of(&self.intervals).mean.as_secs_f64();
+        self.results.push(PhaseResult {
+            consoles: PLAN[self.phase],
+            read: Summary::of(&self.reads),
+            enqueue: Summary::of(&self.enqueues),
+            frame: Summary::of(&self.frames),
+            frames_per_second: if interval > 0.0 { 1.0 / interval } else { 0.0 },
         });
 
-        self.lecturas.clear();
-        self.encolados.clear();
-        self.fotogramas.clear();
-        self.intervalos.clear();
-        self.vistos = 0;
-        self.anterior = None;
-        self.fase += 1;
-        self.fase == PLAN.len()
+        self.reads.clear();
+        self.enqueues.clear();
+        self.frames.clear();
+        self.intervals.clear();
+        self.seen = 0;
+        self.previous = None;
+        self.phase += 1;
+        self.phase == PLAN.len()
     }
 
-    fn publicar(&self) {
-        if let Some((hacia_falta, habia)) = self.no_cabe {
+    fn publish(&self) {
+        if let Some((needed, had)) = self.doesnt_fit {
             println!(
                 "SIN NÚMERO: las consolas no cabían enteras en la ventana.\n\
                  Hacían falta {:.0}×{:.0} puntos y había {:.0}×{:.0}.\n\
                  Lo que queda fuera no se dibuja, así que la medida diría que todo va bien\n\
                  precisamente por no haber pintado. Con una pantalla más grande sale el número.",
-                hacia_falta.x, hacia_falta.y, habia.x, habia.y
+                needed.x, needed.y, had.x, had.y
             );
             return;
         }
 
-        let perfil = if cfg!(debug_assertions) {
+        let profile = if cfg!(debug_assertions) {
             "depuración — el número que vale es el de --release"
         } else {
             "release"
         };
         println!("\n── banco de repintado ──");
-        println!(
-            "rejilla:      {}×{} por consola",
-            REJILLA.rows, REJILLA.cols
-        );
-        println!("letra:        monoespaciada de {CUERPO} puntos");
+        println!("rejilla:      {}×{} por consola", GRID.rows, GRID.cols);
+        println!("letra:        monoespaciada de {BODY} puntos");
         println!("renderizador: glow");
-        println!("perfil:       {perfil}");
-        println!(
-            "medida:       {MEDIDOS} fotogramas por valor de N, {CALENTAMIENTO} de calentamiento"
-        );
-        if let Some(etiqueta) = &self.etiqueta {
-            println!("máquina:      {etiqueta}");
+        println!("perfil:       {profile}");
+        println!("medida:       {MEASURED} fotogramas por valor de N, {WARMUP} de calentamiento");
+        if let Some(label) = &self.label {
+            println!("máquina:      {label}");
         }
         println!();
 
-        for resultado in &self.resultados {
+        for result in &self.results {
             println!(
                 "N = {}  ·  leer {:>9.3?}  ·  encolar {:>9.3?}  ·  CPU del fotograma {:>9.3?} (peor {:>9.3?})  ·  {:.1} fps",
-                resultado.consolas,
-                resultado.lectura.media,
-                resultado.encolado.media,
-                resultado.fotograma.media,
-                resultado.fotograma.peor,
-                resultado.fotogramas_por_segundo,
+                result.consoles,
+                result.read.mean,
+                result.enqueue.mean,
+                result.frame.mean,
+                result.frame.worst,
+                result.frames_per_second,
             );
         }
 
@@ -297,31 +288,31 @@ impl Barrido {
         // es exactamente el síntoma que el roadmap describe. Se compara con el coste de CPU del
         // fotograma entero y no con el encolado: el encolado no incluye el teselado, que es la mitad
         // cara del trabajo y la que más crece con el número de celdas.
-        if let ([una], [dos]) = (&self.resultados[..1], &self.resultados[1..]) {
-            let referencia = una.fotograma.media.as_secs_f64().max(f64::MIN_POSITIVE);
-            let factor = dos.fotograma.media.as_secs_f64() / referencia;
+        if let ([one], [two]) = (&self.results[..1], &self.results[1..]) {
+            let reference = one.frame.mean.as_secs_f64().max(f64::MIN_POSITIVE);
+            let factor = two.frame.mean.as_secs_f64() / reference;
             println!("\ndos consolas cuestan {factor:.2}× lo que cuesta una");
 
             // Cuánto del hueco entre fotogramas se está gastando. Es lo que dice si sobra margen o
             // se va justo, que los fotogramas por segundo no pueden decir: están topados por la
             // sincronía vertical, así que solo demuestran que el fotograma cabe.
-            let hueco = 1.0 / dos.fotogramas_por_segundo.max(f64::MIN_POSITIVE);
+            let available = 1.0 / two.frames_per_second.max(f64::MIN_POSITIVE);
             println!(
                 "con dos, el fotograma gasta el {:.0} % de su hueco ({:.2} ms de {:.2} ms)",
-                100.0 * dos.fotograma.media.as_secs_f64() / hueco,
-                dos.fotograma.media.as_secs_f64() * 1e3,
-                hueco * 1e3,
+                100.0 * two.frame.mean.as_secs_f64() / available,
+                two.frame.mean.as_secs_f64() * 1e3,
+                available * 1e3,
             );
         }
     }
 }
 
-impl eframe::App for Barrido {
+impl eframe::App for Sweep {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // El barrido ha terminado y solo queda que la ventana se entere. El cierre no es inmediato
         // —el escritorio lo atiende cuando puede— así que todavía llegan fotogramas por aquí, y sin
         // esta salida el siguiente buscaría una fase que ya no existe.
-        if self.fase == PLAN.len() {
+        if self.phase == PLAN.len() {
             return;
         }
 
@@ -329,86 +320,86 @@ impl eframe::App for Barrido {
         // contrario de lo que hace el producto, y es el punto — aquí se mide el techo.
         ui.ctx().request_repaint();
 
-        let ahora = Instant::now();
-        let intervalo = self.anterior.replace(ahora).map(|previo| ahora - previo);
+        let now = Instant::now();
+        let interval = self.previous.replace(now).map(|prev| now - prev);
 
-        let metrica = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(CUERPO));
-        let consolas = PLAN[self.fase];
-        let hueco = ui.max_rect();
-        let consola = egui::vec2(
-            metrica.width() * REJILLA.cols as f32,
-            metrica.height() * REJILLA.rows as f32,
+        let metrics = CellMetrics::measure(ui.ctx(), egui::FontId::monospace(BODY));
+        let consoles = PLAN[self.phase];
+        let available = ui.max_rect();
+        let console = egui::vec2(
+            metrics.width() * GRID.cols as f32,
+            metrics.height() * GRID.rows as f32,
         );
 
         // La disposición se decide **con el mayor N del plan y no con el de esta fase**: si las dos
         // consolas van a acabar apiladas, la de la primera fase tiene que pintarse en el mismo sitio
         // y del mismo modo, o se estarían comparando dos cosas distintas.
-        let mayor = PLAN.iter().copied().max().unwrap_or(1);
-        let paso = disposicion(hueco.size(), consola, mayor);
+        let largest = PLAN.iter().copied().max().unwrap_or(1);
+        let step = layout(available.size(), console, largest);
 
         // Se da la tanda por perdida solo en los fotogramas que cuentan: durante el calentamiento la
         // ventana todavía se está maximizando, y darla por pequeña ahí sería tirarla por algo que
         // está a punto de arreglarse solo.
-        if paso.is_none() && self.vistos >= CALENTAMIENTO {
+        if step.is_none() && self.seen >= WARMUP {
             // Se informa de la disposición **más barata de las dos**, no del producto de los dos
             // ejes: apilar necesita el ancho de una consola y el alto de todas, y decir que hacían
             // falta las dos cosas a la vez pediría una pantalla que no hace falta.
-            self.no_cabe = Some((
-                egui::vec2(consola.x, consola.y * mayor as f32),
-                hueco.size(),
+            self.doesnt_fit = Some((
+                egui::vec2(console.x, console.y * largest as f32),
+                available.size(),
             ));
         }
-        let paso = paso.unwrap_or_default();
+        let step = step.unwrap_or_default();
 
-        let mut lectura = Duration::ZERO;
-        let mut encolado = Duration::ZERO;
-        for (indice, pantalla) in self.pantallas[..consolas].iter().enumerate() {
-            let antes = Instant::now();
-            let vista = pantalla.view();
-            let leido = antes.elapsed();
+        let mut read = Duration::ZERO;
+        let mut enqueue = Duration::ZERO;
+        for (index, screen) in self.screens[..consoles].iter().enumerate() {
+            let before = Instant::now();
+            let view = screen.view();
+            let took = before.elapsed();
 
-            let origen = hueco.left_top() + paso * indice as f32;
-            let antes = Instant::now();
+            let origin = available.left_top() + step * index as f32;
+            let before = Instant::now();
             // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
             // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
             // `resolve`, uno persistente solo acumularía apuntes que nadie mira.
             paint(
                 ui.painter(),
-                &vista,
-                &self.tema,
-                &metrica,
-                origen,
+                &view,
+                &self.theme,
+                &metrics,
+                origin,
                 &mut Default::default(),
             );
 
-            lectura += leido;
-            encolado += antes.elapsed();
+            read += took;
+            enqueue += before.elapsed();
         }
 
-        self.vistos += 1;
-        if self.vistos <= CALENTAMIENTO {
+        self.seen += 1;
+        if self.seen <= WARMUP {
             return;
         }
 
-        self.lecturas.push(lectura);
-        self.encolados.push(encolado);
+        self.reads.push(read);
+        self.enqueues.push(enqueue);
         // Lo que costó de CPU el fotograma anterior, con su teselado y su dibujo dentro. Es el
         // único de los tres que esta función no puede cronometrar por su cuenta: cuando el teselado
         // ocurre, ya ha terminado.
-        if let Some(segundos) = frame.info().cpu_usage {
-            self.fotogramas.push(Duration::from_secs_f32(segundos));
+        if let Some(usage) = frame.info().cpu_usage {
+            self.frames.push(Duration::from_secs_f32(usage));
         }
-        if let Some(intervalo) = intervalo {
-            self.intervalos.push(intervalo);
+        if let Some(interval) = interval {
+            self.intervals.push(interval);
         }
 
-        if self.lecturas.len() >= MEDIDOS && self.cerrar_fase() {
-            self.publicar();
+        if self.reads.len() >= MEASURED && self.close_phase() {
+            self.publish();
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.tema.background().to_normalized_gamma_f32()
+        self.theme.background().to_normalized_gamma_f32()
     }
 }
