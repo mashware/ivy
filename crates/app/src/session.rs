@@ -520,7 +520,7 @@ pub fn read(path: &Path) -> Result<Validated, LayoutProblem> {
     let bytes = read_capped(file, data.len())
         .map_err(|error| LayoutProblem::Unreadable(error.to_string()))?;
 
-    // **El techo se aplica aquí y no solo dentro de [`interpretar`], y esa aparente duplicación es el
+    // **El techo se aplica aquí y no solo dentro de [`interpret`], y esa aparente duplicación es el
     // arreglo de un fallo con nombre en el molde.** La lectura corta un byte por encima del techo, y ese
     // corte **parte un carácter de varios bytes**: sin esta comprobación, un fichero enorme con un acento
     // en el sitio justo saldría como «no es texto» en vez de «se pasa del techo», y el camino del techo
@@ -847,7 +847,7 @@ fn save_described(
 ) -> Result<(), SaveFailure> {
     let text = described.ok_or(SaveFailure::NotSerializable)?;
     // Sin directorio, o sin nombre de fichero, no hay sitio donde poner nada. Solo se llega con una ruta
-    // que no salió de `ruta_de` —la raíz, por ejemplo—, y el motivo es el mismo que el de no tener
+    // que no salió de `path_from` —la raíz, por ejemplo—, y el motivo es el mismo que el de no tener
     // directorio de configuración: no hay dónde. De ahí que la variante sea una y su línea las cubra.
     let directory = path.parent().ok_or(SaveFailure::NoPlace)?;
     create_directory(directory).map_err(SaveFailure::Directory)?;
@@ -1172,7 +1172,7 @@ mod tests {
     #[test]
     fn lo_que_no_es_json_se_rechaza_y_se_dice_por_que() {
         // **Se afirma que el motivo llega, no solo que falla.** El único canal para contarlo es una línea,
-        // así que un `Problema` sin texto dejaría al usuario con «no se pudo» y nada más.
+        // así que un `LayoutProblem` sin texto dejaría al usuario con «no se pudo» y nada más.
         let Err(LayoutProblem::Unintelligible(reason)) = interpret("{esto no es json") else {
             panic!("un documento roto tiene que caer por no entenderse");
         };
@@ -2092,7 +2092,7 @@ mod file_tests {
 
     #[test]
     fn una_ruta_que_no_nombra_un_fichero_no_tumba_el_guardado() {
-        // Ninguna de las dos sale de `ruta_de`, así que solo se llega colocándolas a mano. Lo que se ata es
+        // Ninguna de las dos sale de `path_from`, así que solo se llega colocándolas a mano. Lo que se ata es
         // que este camino no tiene ningún desenvolver que tumbe la ventana en vez de decir que no pudo:
         // guardar corre dos veces por segundo mientras se arrastra una frontera.
         let without_directory = save_to(Path::new("/"), 1, &test_document());

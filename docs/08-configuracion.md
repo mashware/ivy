@@ -1,7 +1,7 @@
 # El fichero de configuración
 
 Dónde va: **`$XDG_CONFIG_HOME/agent-terminal/config`** — o `~/.config/agent-terminal/config` si no tienes
-esa variable puesta. Al lado de `disposicion.json`, que es donde el terminal guarda solo cómo dejaste las
+esa variable puesta. Al lado de `layout.json`, que es donde el terminal guarda solo cómo dejaste las
 ventanas; éste lo escribes tú.
 
 **Si no existe, el terminal abre exactamente como siempre.** No hace falta crearlo.
@@ -13,8 +13,8 @@ ventanas; éste lo escribes tú.
 # Las líneas vacías no son nada.
 
 color.1 = #cf6a4c
-fondo   = #1d1f21
-foco    = #6c9ef8
+background = #1d1f21
+focus      = #6c9ef8
 ```
 
 Una línea es `clave = valor`. Los espacios alrededor no importan.
@@ -28,19 +28,18 @@ carácter de comentario y el principio de un color, así que un comentario al fi
 | Clave | Qué es |
 |---|---|
 | `color.0` … `color.15` | los dieciséis colores que un programa puede pedir. Del 0 al 7 los normales, del 8 al 15 los brillantes |
-| `fondo` | el fondo de la consola |
-| `texto` | el color con el que se escribe cuando el programa no pide otro |
+| `background` | el fondo de la consola |
+| `foreground` | el color con el que se escribe cuando el programa no pide otro |
 | `cursor` | el cursor |
-| `divisor` | la línea que separa dos consolas |
-| `foco` | con qué se señala la consola que tiene el teclado |
+| `divider` | la línea que separa dos consolas |
+| `focus` | con qué se señala la consola que tiene el teclado |
 | `panel` | el fondo del panel de estado |
-| `tamaño` (o `tamano`) | el cuerpo de la letra, en puntos |
+| `size` | el cuerpo de la letra, en puntos |
 
 Los colores se escriben **`#rrggbb`**, en hexadecimal, y da igual si en mayúsculas o en minúsculas.
 
 **El tamaño va de 4 a 96 puntos**, con decimales si quieres. El de siempre son **14**. Fuera de ese rango
-se te avisa y se usa el de siempre: con dos puntos no se lee nada y con doscientos caben tres columnas. Y **`tamano` sin eñe también
-vale**, para cuando escribes desde un teclado que no es el tuyo.
+se te avisa y se usa el de siempre: con dos puntos no se lee nada y con doscientos caben tres columnas.
 
 Cambiar el tamaño **cambia cuántas filas y columnas** te caben en la ventana, así que los programas que
 corren dentro lo notan.
@@ -49,40 +48,39 @@ corren dentro lo notan.
 
 ## Los atajos
 
-Los once atajos del terminal se cambian con `atajo.` y el nombre de lo que hacen:
+Los once atajos del terminal se cambian con `key.` y el nombre de lo que hacen:
 
 ```
-atajo.partir-al-lado = ctrl+shift+e
-atajo.cerrar-division = ninguno
+key.split-right = ctrl+shift+e
+key.close-pane = none
 ```
 
 | Nombre | Qué hace | De fábrica |
 |---|---|---|
-| `partir-al-lado` | parte la consola en dos, a lo ancho | `ctrl+shift+d` |
-| `partir-debajo` | la parte a lo alto | `ctrl+shift+b` |
-| `cerrar-division` | cierra la consola con el foco | `ctrl+shift+x` |
-| `pestaña-nueva` | abre una pestaña | `ctrl+shift+t` |
-| `cerrar-pestaña` | cierra la pestaña | `ctrl+shift+w` |
-| `pestaña-anterior` · `pestaña-siguiente` | se mueve entre pestañas | `ctrl+shift+←` · `ctrl+shift+→` |
-| `subir-una-pagina` · `bajar-una-pagina` | sube y baja por el historial | `shift+repág` · `shift+avpág` |
-| `ir-al-principio` · `ir-al-final` | va a los extremos del historial | `shift+home` · `shift+end` |
-
-Las eñes se pueden escribir también sin eñe (`pestana-nueva`).
+| `split-right` | parte la consola en dos, a lo ancho | `ctrl+shift+d` |
+| `split-down` | la parte a lo alto | `ctrl+shift+b` |
+| `close-pane` | cierra la consola con el foco | `ctrl+shift+x` |
+| `new-tab` | abre una pestaña | `ctrl+shift+t` |
+| `close-tab` | cierra la pestaña | `ctrl+shift+w` |
+| `previous-tab` · `next-tab` | se mueve entre pestañas | `ctrl+shift+←` · `ctrl+shift+→` |
+| `scroll-page-up` · `scroll-page-down` | sube y baja por el historial | `shift+pageup` · `shift+pagedown` |
+| `scroll-to-top` · `scroll-to-bottom` | va a los extremos del historial | `shift+home` · `shift+end` |
 
 **Un acorde se escribe con `+`**, en cualquier orden y sin importar mayúsculas: `ctrl+shift+e`,
-`shift+repág`, `alt+f4`. Vale `ctrl`, `shift` (o `mayúsculas`) y `alt`, y **hace falta al menos uno**: si
-no, te estarías quitando una letra de escribir.
+`shift+prior`, `alt+f4`. Vale `ctrl`, `shift` y `alt`, y **hace falta al menos uno**: si no, te estarías
+quitando una letra de escribir.
 
-Las teclas se escriben como las llamarías: `e`, `f4`, `espacio`, `supr`, `inicio`, `fin`, `repág`,
-`avpág`, `izquierda`. Valen también sus nombres en inglés (`space`, `delete`, `home`, `pageup`, `prior`).
+Las teclas se escriben como las llama el teclado: `e`, `f4`, `space`, `delete`, `home`, `end`, `pageup`,
+`pagedown`, `left`, `right`, `up`, `down`. Valen también las abreviaturas de siempre (`prior`, `next`,
+`pgup`, `pgdn`, `esc`) y las flechas con su símbolo (`←`, `↑`, `→`, `↓`).
 
 **`Ctrl+C` y `Ctrl+V` no se pueden asignar a nada.** El escritorio se los queda antes de que lleguen
 aquí, así que un atajo con esos acordes no se dispararía nunca y no tendrías forma de saber por qué.
 
-### `ninguno` te devuelve el acorde
+### `none` te devuelve el acorde
 
 ```
-atajo.cerrar-division = ninguno
+key.close-pane = none
 ```
 
 A partir de ahí ese acorde **le llega al programa que corre dentro**. Es lo que te permite recuperar
@@ -93,7 +91,7 @@ A partir de ahí ese acorde **le llega al programa que corre dentro**. Es lo que
 **Gana el último que escribas**, y se te dice cuál se ha quedado sin acorde:
 
 ```
-agent-terminal: «cerrar-division» se queda sin atajo: su acorde se lo lleva «partir-al-lado», que va después
+agent-terminal: 'close-pane' is left without a shortcut: its chord goes to 'split-right', which comes later
 ```
 
 ### Copiar y pegar no se reasignan: copiar solo se apaga
@@ -105,14 +103,14 @@ que mover, y por eso no están en la tabla.
 Lo que sí puedes es **apagar copiar**, que es lo que devuelve `Ctrl+Mayúsculas+C` a `vim` o a `tmux`:
 
 ```
-atajo.copiar = ninguno
+key.copy = none
 ```
 
 Cualquier otro valor se rechaza y se te dice por qué — asignarle otro acorde se aceptaría y no funcionaría
 nunca:
 
 ```
-agent-terminal: línea 3: el acorde de «atajo.copiar» lo decide el escritorio y no se puede cambiar; lo único que se puede es apagarlo con «ninguno»
+agent-terminal: line 3: the chord for 'key.copy' is the desktop's and cannot be changed; the only thing you can do is turn it off with 'none'
 ```
 
 ## Qué pasa si te equivocas
@@ -121,7 +119,7 @@ agent-terminal: línea 3: el acorde de «atajo.copiar» lo decide el escritorio 
 de error, y **el resto se aplica**:
 
 ```
-agent-terminal: línea 7: «morado» no vale para «color.3»
+agent-terminal: line 7: 'morado' is not valid for 'color.3'
 ```
 
 Se dicen hasta veinte líneas con problemas; si hay más, se te dice cuántas quedaron sin listar.
@@ -129,7 +127,7 @@ Se dicen hasta veinte líneas con problemas; si hay más, se te dice cuántas qu
 **Una clave repetida gana la última**, y también se te dice — así pegar un tema encima de otro hace lo que
 esperas, y no te pasas media hora cambiando una línea que otra de más abajo está pisando.
 
-**Y si te olvidas del valor** —`fondo =`— se te dice eso mismo, no que falte el igual: el igual está
+**Y si te olvidas del valor** —`background =`— se te dice eso mismo, no que falte el igual: el igual está
 puesto, lo que falta es el color.
 
 Lo que sí deja el terminal entero de fábrica, avisando de por qué:

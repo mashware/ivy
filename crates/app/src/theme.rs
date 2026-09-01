@@ -108,19 +108,19 @@ impl Theme {
     /// **Lo que el fichero no diga se queda de fábrica**, que es lo que permite cambiar un solo color sin
     /// escribir los veintidós. Y la paleta se sobrescribe hueco a hueco por lo mismo: pedir el color 1 no
     /// debe borrar los otros quince.
-    pub fn from_colors(colors: &crate::settings::Colores) -> Self {
+    pub fn from_colors(colors: &crate::settings::Colors) -> Self {
         let mut theme = Self::default();
-        for (slot, asked_for) in theme.palette.iter_mut().zip(colors.paleta.iter()) {
+        for (slot, asked_for) in theme.palette.iter_mut().zip(colors.palette.iter()) {
             if let Some(color) = asked_for {
                 *slot = *color;
             }
         }
         for (slot, asked_for) in [
-            (&mut theme.background, colors.fondo),
-            (&mut theme.foreground, colors.texto),
+            (&mut theme.background, colors.background),
+            (&mut theme.foreground, colors.foreground),
             (&mut theme.cursor, colors.cursor),
-            (&mut theme.divider, colors.divisor),
-            (&mut theme.focus, colors.foco),
+            (&mut theme.divider, colors.divider),
+            (&mut theme.focus, colors.focus),
             (&mut theme.panel_background, colors.panel),
         ] {
             if let Some(color) = asked_for {

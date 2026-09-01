@@ -68,6 +68,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/lib.rs",
     "app/src/measure.rs",
     "app/src/session.rs",
+    "app/src/settings.rs",
     "app/examples/sweep.rs",
     "app/examples/leak.rs",
     "app/examples/fonts.rs",
@@ -136,62 +137,6 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/examples/sweep.rs", "app"),
 ];
 
-/// Names that are **still Spanish on purpose**, because a later delivery owns them.
-///
-/// Every entry is a name a finished file still carries, with the delivery that takes it. They are
-/// listed one by one instead of being matched by a rule: **a short explicit list ages better than a
-/// criterion that widens until it stops failing**, and every line here is a line somebody has to
-/// delete, which is the point.
-///
-/// The seven at the top are the types whose field and variant names **are the layout file on disk**:
-/// they move with the measurement bench and the version bump, so that renaming the format and
-/// reseeding the script that writes it happen in one commit. The rest are types a finished file
-/// legitimately names because a file this milestone has not reached yet declares them.
-///
-/// **Every entry is checked against the file that declares the name, not against the intention of
-/// whoever added it.** Three entries have already been deleted for failing that check: two named
-/// types declared in the very file the delivery was renaming — so they hid its own work instead of
-/// somebody else's — and one, `MEDIR`, matched no identifier at all.
-///
-/// **A fourth entry has now been deleted, and by the same check: `Metrica`.** The type it named became
-/// `CellMetrics` three deliveries ago, so the entry matched no identifier in the tree — verified by
-/// removing it and finding every test still green. Four deletions out of the same rule: **every entry
-/// is checked against the file that declares the name**, and an entry whose name is gone exempts
-/// nothing while looking like it protects something.
-///
-/// **And this list exempts nothing today. Measured:** make the exemption below never fire and
-/// [`no_spanish_identifier_survives_in_a_finished_crate`] stays green, because the three finished
-/// crates have no name that needs exempting — they are finished. Its user is the delivery that puts
-/// `app/src/lib.rs` in [`FINISHED_CRATES`], and it is written now because that is when it was
-/// **derived**: pointing the guard at that file printed these names one by one, each verified against
-/// the file that declares it. Saying so here is the point — a list that quietly exempted nothing
-/// would read, to the next person, as a list that was doing work.
-const STILL_SPANISH: &[&str] = &[
-    // Types a finished file legitimately names because they are declared in a file that is not
-    // finished. **Every one of these is a line a later delivery deletes**, which is why they are
-    // written out one by one: the list shrinking is how the milestone shows its progress.
-    "Ajustes",
-    "Colores",
-    // **Los que el fichero grande NOMBRA sin declararlos**, y entran aquí porque esta
-    // guarda juzga a un fichero por los identificadores que **aparecen** en él, no por los que
-    // declara. Están verificados contra el fichero que los declara, agrupados por
-    // dueño, y **cada línea la borra la entrega de su módulo**: la lista es el marcador de progreso
-    // que su propio comentario dice que es. Sin ellos, el fichero grande no puede entrar en la lista
-    // de arriba aunque no le quede ni un nombre propio en español, que es justo lo que esa entrega
-    // consigue.
-    //
-    // **Y lo que esa lista NO compra, dicho aquí porque el número lo desmiente:** el vocabulario
-    // español se **deriva** de las flechas del anexo, y los 317 nombres que la entrega del fichero
-    // grande tradujo **no son flechas** — son locales, campos y parámetros, y el glosario decide
-    // tipos. Medido por una revisión: devolver uno de los 317 a su nombre español deja estas nueve
-    // pruebas en verde. Lo que protegió esa entrega fue el oráculo posicional del diff, no esta lista.
-    //
-    // De los ajustes (3), que se traducen con las claves de configuración:
-    "atajos",
-    "colores",
-    "guardados",
-];
-
 /// How much each shape of the annex has to yield for this test to mean anything.
 ///
 /// **Without a floor this test passes by being empty**, which is the failure mode a guard is most
@@ -246,23 +191,21 @@ struct Glossary {
     from_tables: usize,
 }
 
-/// Spanish accents folded onto ASCII, **with the case left alone**.
+/// Lowercase, and Spanish accents folded onto ASCII.
 ///
-/// **The exemption list is matched with this and not with [`fold`], and the difference is what keeps
-/// the list from blinding the guard.** A type a later delivery owns folds, lowercased, onto the very
-/// name a file gives its locals: `Gesto` and `gesto`, `Hueco` and `hueco`, `Nodo` and `nodo`. Listing
-/// the type would exempt the local too — and the local is the one thing this guard exists to catch.
+/// **Both sides get folded, and that is what closes a whole family of leftovers.** The glossary
+/// writes `Pestaña` and `TamañoPedido`; the code writes `pestanas` and `tamano_pedido`, because
+/// identifiers in this repository avoid the tilde on purpose. Without folding, the two never meet —
+/// measured, with `TAMANO`, which is a real constant of the measurement script.
 ///
-/// **Said plainly: today this changes no verdict.** None of the three finished crates has a local
-/// named after a listed type, so lowercasing and not lowercasing give the same answer for every file
-/// the guard currently reads. It was found while renaming the crate that comes next, where seventeen
-/// names did land on an entry that was never about them, and it is one line — so it goes in now
-/// rather than after the delivery it would have bitten.
-///
-/// Rust settles it for free: types are `CamelCase`, locals and fields are `snake_case`, so keeping
-/// the case makes the two unable to collide in the first place.
-fn unaccent(text: &str) -> String {
-    text.chars()
+/// **It lowercases first, so only the lowercase accents need an arm.** The two halves used to be two
+/// functions, and the split had one reason: the exemption list was matched **with the case kept**, so
+/// that an entry for somebody else's `Gesto` could not also exempt a file's own `gesto`. That list is
+/// gone — it had nothing left to exempt — and with it the only caller that ever wanted the case. Six
+/// uppercase arms with no caller are six arms no test can reach.
+fn fold(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
         .map(|c| match c {
             'á' => 'a',
             'é' => 'e',
@@ -270,25 +213,9 @@ fn unaccent(text: &str) -> String {
             'ó' => 'o',
             'ú' | 'ü' => 'u',
             'ñ' => 'n',
-            'Á' => 'A',
-            'É' => 'E',
-            'Í' => 'I',
-            'Ó' => 'O',
-            'Ú' | 'Ü' => 'U',
-            'Ñ' => 'N',
             other => other,
         })
         .collect()
-}
-
-/// Lowercase, and Spanish accents folded onto ASCII.
-///
-/// **Both sides get folded, and that is what closes a whole family of leftovers.** The glossary
-/// writes `Pestaña` and `TamañoPedido`; the code writes `pestanas` and `tamano_pedido`, because
-/// identifiers in this repository avoid the tilde on purpose. Without folding, the two never meet —
-/// measured, with `TAMANO`, which is a real constant of the measurement script.
-fn fold(text: &str) -> String {
-    unaccent(text).to_lowercase()
 }
 
 fn glossary() -> Glossary {
@@ -704,31 +631,6 @@ fn the_glossary_is_still_where_this_test_reads_it_from() {
 /// of the answers below are only ever reached by names that do not exist in the tree yet, and a rule
 /// with no oracle is the same thing as no rule.
 fn why_it_is_a_leftover(name: &str, glossary: &Glossary) -> Option<String> {
-    // **Still Spanish on purpose, matched by the WHOLE name and with the CASE KEPT.** Matching by
-    // segment would have exempted every identifier carrying one of these pieces — a local called
-    // `pestanas` as much as the stored type `Pestaña` — and the local is precisely what has to be
-    // caught. Case matters for the same reason and it cost a pass to see: lowercased, the entry for
-    // somebody else's `Gesto` would also exempt a file's own `gesto`. See [`unaccent`].
-    //
-    // **A prefix form used to be accepted here and it exempted nothing.** It was put in for the
-    // measurement gate's variables, on the belief that they are identifiers starting with `MEDIR_`;
-    // they are not — those are the environment variables' **strings**, and the constants that hold
-    // them were called `VARIABLE_DE_LAS_PESTAÑAS` and the like, before this milestone reached them. So the entry matched no name, the
-    // prefix matched no entry, and both are gone. Whole name or nothing.
-    // **Se compara el nombre ENTERO y tal cual: ni la caja ni las tildes se doblan.** Doblar la caja
-    // ya costó una pasada —la entrada del `Gesto` de otro fichero exentaba el `gesto` propio— y doblar
-    // las tildes costó otra: la entrada `pestañas`, que hace falta porque la sesión declara ese campo,
-    // exentaba de paso el caso `pestanas` de [`the_three_rules_answer_what_they_promise`], que es el
-    // único sujeto posible de la regla del plural con tilde. Una exención que apaga un caso de prueba
-    // deja la prueba en verde sin comprobar nada, y este fichero ya tiene ese disfraz fichado dos veces.
-    //
-    // Y la distinción no es un parche: **un nombre escrito con tilde y el mismo sin ella son dos
-    // identificadores distintos**, y este repositorio escribe unos con y otros sin a propósito. Exentar
-    // uno no puede exentar al otro.
-    if STILL_SPANISH.contains(&name) {
-        return None;
-    }
-
     // An identifier with a letter outside ASCII cannot be English. It is the cheapest half of this
     // guard and it needs no glossary at all.
     if name.chars().any(|c| c.is_alphabetic() && !c.is_ascii()) {
@@ -799,25 +701,77 @@ fn why_it_is_a_leftover(name: &str, glossary: &Glossary) -> Option<String> {
 /// would be code with nothing judging it: removing it leaves every crate green today. It is needed
 /// the moment the measurement module is translated — de-pluralising `Series` gives `serie`, and
 /// `Serie` is exactly the name it replaced.
+/// The names [`the_three_rules_answer_what_they_promise`] uses as **positive** cases.
+///
+/// They live here rather than only inside the test so the guard above them can walk them. **That guard
+/// used to point at the exemption list**, which is gone — it had nothing left to exempt — and the list
+/// was very nearly deleted with it. It is not, and the reason is the whole point: **the property it
+/// defended did not disappear, it moved.**
+///
+/// What it defends is that every positive case still exercises **its own rule** instead of leaving
+/// through a shortcut. The exemption list was one shortcut; the other is still there and is derived,
+/// not written — [`why_it_is_a_leftover`] gives up on a piece the moment the glossary's **English**
+/// side claims it. That side is extracted from the decisions record, which the deliveries still to come
+/// edit. The day an arrow adopts `celda`, `reparto` or `maqueta` as English, the case carrying that
+/// piece stops testing its rule and the suite stays green — which is the disguise this file has on
+/// record three times over (`color_del_reclamo`, `pestanas`, `gesto`).
+const POSITIVE_CASES: &[&str] = &[
+    "Celda",
+    "celda_de_arriba",
+    "CeldaDeArriba",
+    "banderas",
+    "base_de",
+    "lo_quiere",
+    "que_pestaña",
+    "RatonReclamado",
+    "en_puntos",
+    "tamano_pedido",
+    "pestanas",
+    "celda2",
+    "ANCHO_DE_FABRICA",
+    "CONSOLA_MINIMA",
+    "CONSOLA2_MINIMA",
+    "USO_ALTO",
+    "CELDA_ALTA",
+    "reparto",
+    "maqueta",
+    "Resultado",
+    "color_del_borde",
+];
+
 #[test]
 fn the_three_rules_answer_what_they_promise() {
     let glossary = glossary();
     let verdict = |name: &str| why_it_is_a_leftover(name, &glossary);
-
-    // **Esto va primero a propósito.** Cada nombre que este test usa como caso POSITIVO tiene que
-    // estar fuera de la lista de exenciones: el día que alguien añada uno de ellos —y son nombres
-    // corrientes, así que ocurrirá— el caso deja de comprobar su regla y pasa por la exención. Va
-    // antes que los casos para que el mensaje diga **la causa** y no el síntoma: sin esto, lo que se
-    // lee es «a retired name in the plural» y el motivo está a treinta líneas de distancia.
-    //
-    // Tres veces ya es un patrón: lo pagó `color_del_reclamo` en una entrega, `pestanas` y `gesto` en
-    // ésta.
+    // **Esto va primero a propósito.** Cada nombre que este test usa como caso POSITIVO tiene que quedar
+    // fuera del atajo que sigue vivo: el lado inglés del glosario, que sale del anexo y que las entregas
+    // de prosa todavía editan. El día que una flecha adopte uno de estos nombres como inglés, su caso
+    // deja de comprobar su regla y sale por el atajo. Va antes que los casos para que el mensaje diga
+    // **la causa** y no el síntoma, que estaría treinta líneas más abajo.
+    // **Y un suelo, porque sin él este bucle pasa por estar vacío.** Medido: vaciar la lista deja el
+    // caso en verde sin comprobar un solo sujeto, que es la forma exacta en la que mueren las guardas de
+    // este fichero. Son veintiún sujetos y la lista solo crece.
+    assert!(
+        POSITIVE_CASES.len() >= 21,
+        "la lista de sujetos positivos tiene {} entradas: alguien la vació o la recortó, y este caso \
+         dejó de mirar nada",
+        POSITIVE_CASES.len()
+    );
     for case in POSITIVE_CASES {
+        // **Cada sujeto tiene que seguir siendo un resto de verdad**, que es lo que lo hace un caso
+        // positivo. Una entrada que dejara de serlo estaría ahí sin defender ninguna regla.
         assert!(
-            !STILL_SPANISH.contains(case),
-            "«{case}» is a positive case of this test and somebody put it on the exemption list: the \
-             case now passes through the exemption and asserts nothing. Pick another subject for the \
-             rule, or the rule stops being tested"
+            verdict(case).is_some(),
+            "«{case}» está en la lista de casos positivos y ya no lo caza ninguna regla"
+        );
+        let silenced = segments(case)
+            .iter()
+            .any(|piece| glossary.english.contains(&fold(piece)));
+        assert!(
+            !silenced,
+            "«{case}» is a positive case of this test and the glossary now claims one of its pieces as \
+             English: the case leaves through that shortcut and asserts nothing. Pick another subject \
+             for the rule, or the rule stops being tested"
         );
     }
 
@@ -983,83 +937,15 @@ fn the_three_rules_answer_what_they_promise() {
     }
     // And the same name **as a Spanish compound** is still caught, so the rule above is not a hole.
     //
-    // **The name here must not be one the exemption list carries**, and that is not hypothetical: this
-    // case used to be `color_del_reclamo`, and the delivery that finished the panel put that very name
-    // on the list — because the theme still declares it — which silenced the case without touching the
-    // rule. A case that an exemption can switch off is a case that stops testing while staying green.
+    // **The subject used to be `color_del_reclamo` and had to be changed**, which is worth keeping: a
+    // delivery put that very name on the exemption list this file used to have, and the case went on
+    // passing while asserting nothing. The list is gone, so nothing can silence a case that way today
+    // — but `color_del_borde` is the subject because of it.
     assert!(
         verdict("color_del_borde").is_some(),
         "a Spanish compound whose first piece happens to be an English word"
     );
-
-    // **The exemption list keeps the case, and this is the pair that forced it.** `Gesto` is on the
-    // list because a file this milestone has not reached yet declares it; `gesto` is what a finished
-    // file called the local that holds one. Lowercased they are the same string, so the entry for the
-    // type exempted the local — and the local is the whole reason this guard runs. Same shape for
-    // `Nodo`/`nodo` and `Hueco`/`hueco`, which is seventeen names in the file this delivery finishes.
-    for kept in STILL_SPANISH {
-        assert_eq!(
-            verdict(kept),
-            None,
-            "«{kept}» is on the exemption list and has to come out exempt"
-        );
-    }
-    // **Los pares se derivan de la lista, no se escriben.** La primera versión los enumeraba a mano
-    // —`gesto`, `nodo`, `hueco`, `orientacion`— y dos de los cuatro acabaron **en la propia lista** por
-    // derecho propio, porque el módulo de medida declara un campo `gesto` y la sesión un `nodo`. En ese
-    // momento el caso deja de comprobar la regla y pasa por la exención: verde sin comprobar nada, que
-    // es el disfraz que este fichero lleva fichado tres veces. Derivados, el conjunto se ajusta solo.
-    // Y se filtran por **lo que el glosario retiró**: una entrada en `CamelCase` cuya forma en
-    // minúsculas el glosario nunca decidió no la caza ninguna regla, así que exigirle un veredicto
-    // sería pedirle a este test que compruebe otra cosa.
-    let pairs: Vec<String> = STILL_SPANISH
-        .iter()
-        .filter(|kept| kept.chars().next().is_some_and(char::is_uppercase))
-        .map(|kept| kept.to_lowercase())
-        .filter(|lowered| !STILL_SPANISH.contains(&lowered.as_str()))
-        .filter(|lowered| glossary.spanish.contains(&fold(lowered)))
-        .collect();
-    assert!(
-        !pairs.is_empty(),
-        "no CamelCase entry of the exemption list has a free lowercase twin, so this case is testing \
-         nothing: the rule it defends is that the list must not exempt a file's own local"
-    );
-    for own in &pairs {
-        assert!(
-            verdict(own).is_some(),
-            "«{own}» is what a file calls its own local, and the exemption list carries the CamelCase \
-             type of the same word: lowercasing the comparison would let this one through"
-        );
-    }
 }
-
-/// Los nombres que [`the_three_rules_answer_what_they_promise`] usa como casos **positivos**.
-///
-/// Están aquí en vez de solo en el cuerpo del test para que la guarda de arriba pueda recorrerlos. Es
-/// la lista de sujetos, no la de reglas: si un caso cambia de sujeto, se cambia aquí también.
-const POSITIVE_CASES: &[&str] = &[
-    "Celda",
-    "celda_de_arriba",
-    "CeldaDeArriba",
-    "banderas",
-    "base_de",
-    "lo_quiere",
-    "que_pestaña",
-    "RatonReclamado",
-    "en_puntos",
-    "tamano_pedido",
-    "pestanas",
-    "celda2",
-    "ANCHO_DE_FABRICA",
-    "CONSOLA_MINIMA",
-    "CONSOLA2_MINIMA",
-    "USO_ALTO",
-    "CELDA_ALTA",
-    "reparto",
-    "maqueta",
-    "Resultado",
-    "color_del_borde",
-];
 
 #[test]
 fn no_spanish_identifier_survives_in_a_finished_crate() {
@@ -1198,23 +1084,27 @@ const NOT_OURS: &[&str] = &[
     "set_var",
     "vars_os",
     "with",
-    // **The settings-file key for the font size, in both spellings.** It stopped being covered by
-    // anything the moment the painter's local called `tamano` was renamed, which is the useful part:
-    // a word in backticks that survives only because some sibling happens to have an identifier by
-    // that name was never a citation of anything.
-    "tamano",
-    // Values, not names: what a key is called in the settings file, what the panel contract admits
-    // for its `attention` field, what the measurement variable accepts, and what a report line is
-    // labelled. Every one of them is a string, so no set of identifiers can hold it — and every one
-    // is translated with the file that defines it, not with this one.
+    // Strings, not names: what a key is called and what it is worth in the settings file, what the
+    // panel contract admits for its `attention` field, what the measurement variable accepts, and what
+    // a report line is labelled. Every one of them is a string, so no set of identifiers can hold it —
+    // and every one is translated with the file that defines it, not with this one.
+    //
+    // **`version` is here as the settings key and not as the constant**, which the guard tells apart by
+    // itself: it compares with the case kept, and the constant is `VERSION`.
     "block",
     "Ctrl",
+    "esc",
     "Fin",
-    "frontera",
     "Inicio",
-    "ninguno",
+    "down",
+    "none",
+    "pgdn",
+    "pgup",
+    // **Sigue viva, comprobada quitándola**: el informe de medida la publica como etiqueta y dos
+    // comentarios la citan. Un revisor la dio por muerta razonando; el guardián la resucitó en rojo.
     "restauradas",
     "stale_after_minutes",
+    "version",
     "wait",
     // Single letters standing for a quantity in prose.
     "f",
@@ -1230,6 +1120,10 @@ const NOT_OURS: &[&str] = &[
     "VTE",
     // Items of the crates this one depends on.
     "break_on_newline",
+    // Los nombres con los que egui llama a las cuatro flechas, citados por el comentario que explica
+    // por qué este proyecto ya no necesita un alias para ellas.
+    "Down",
+    "Up",
     "Fonts",
     "from_name",
     "has_glyph",
@@ -1259,7 +1153,6 @@ const NOT_OURS: &[&str] = &[
     "pageup",
     "pending",
     "prior",
-    "supr",
     "waiting",
     // **A name that never existed, and the argument needs it.** The measurement bench's naming rule
     // is stated by counter-example — «a type called `Configuracion` inside the measurement module

@@ -3652,8 +3652,9 @@ el glosario existe para impedir y lo que un renombrado mecánico no puede ver.
 | `Glyphs::paste` | `Glyphs::blit` | Dos `paste` sin parentesco en la misma caja: éste **pega una imagen en el atlas**, el otro es el portapapeles |
 | `paint_character(width: bool)` | `is_wide` | A dos líneas de `metrics.width: f32`. Un `bool` llamado como una medida |
 
-Las cadenas del fichero de configuración —`"partir-al-lado"`, `"subir-una-pagina"`— **no se tocan**: son
-las claves que escribe quien usa el terminal y tienen su propia entrega.
+Las cadenas del fichero de configuración —`"partir-al-lado"`, `"subir-una-pagina"`— **no se tocan aquí**:
+son las claves que escribe quien usa el terminal y tienen su propia entrega, que es la de las claves de
+configuración. Allí pasan a `split-right` y `scroll-page-up`, bajo el prefijo `key.`.
 
 **Y la guarda de citas era ciega a los nombres de módulo, por una razón que no se ve leyéndola.** Esa
 guarda pregunta si el nombre citado existe **en alguna parte de la caja**, y **todos** los nombres de
@@ -4075,3 +4076,108 @@ arreglo y pasa a ser mecanismo:
 
 Tres mutaciones lo atan: exentar un caso positivo, volver a doblar las tildes y volver a doblar la caja.
 Las tres caen, y cada una nombra su propia causa.
+
+#### La entrega de las claves: lo que ve quien escribe el fichero, y una guarda que se borra
+
+Es la entrega que esta decisión usó de ejemplo desde el primer día —`background`, `size`,
+`key.split-right`— y la única que cambia **lo que teclea una persona**. Las claves quedan así:
+`background`, `text`, `cursor`, `divider`, `focus`, `panel`, `color.0`–`color.15`, `size`, `version`, y
+`key.<acción>` con los once nombres del código (`split-right`, `split-down`, `close-pane`, `new-tab`,
+`close-tab`, `previous-tab`, `next-tab`, `scroll-page-up`, `scroll-page-down`, `scroll-to-top`,
+`scroll-to-bottom`) más `key.copy`, que solo se apaga. El valor de apagar es `none`. Y son las seis que
+el anexo de los ocho módulos dejó apuntadas en `theme.rs`: se traducen aquí, como decía.
+
+**Se retiran dos acomodos sin sustituirlos, y hay que decir qué se pierde.** El primero eran las dos
+grafías del tamaño (`tamaño` y `tamano`); el segundo, los nombres de tecla y de modificador en español
+—`mayúsculas`, `supr`, `repág`, `avpág`, `inicio`, `fin`, `espacio`, `izquierda`…—. Los dos existían por
+el mismo problema: **una eñe que no está en el teclado que tienes delante**. Con `size` y `shift` ese
+problema no existe, así que el acomodo se queda sin razón. Sobreviven las cuatro flechas `←↑→↓`, que no
+tienen idioma, y se añaden `up`/`down`/`left`/`right`, que es como las llaman WezTerm y Ghostty.
+
+**«Sin tabla de alias» no lo ataba nada, y ahora sí.** Es la mitad de esta decisión que más fácil vuelve
+por la puerta de atrás: dejar una rama que siga aceptando la clave vieja no lo nota ninguna prueba y no
+lo ve ningún compilador. Van tres afirmaciones —la clave, el modificador y los nombres de acción—, y las
+tres caen al reponer la mitad vieja.
+
+##### La lista de exenciones se borra, y de sus tres mecanismos sobrevive uno
+
+Las cinco entradas que le quedaban —`Ajustes`, `Colores`, `atajos`, `colores`, `guardados`— son de este
+módulo, así que esta entrega las mata todas. **Vaciarla no era una opción**: la prueba de las reglas
+tiene un suelo escrito precisamente para negarse a comprobar una lista vacía, y con cero entradas cae. Y
+no queda entrega que le añada nada: de la de la prosa en adelante **no se renombra ni un identificador**.
+Es la regla que este mismo fichero aplica dos veces: un mecanismo sin escenario se borra.
+
+**Pero de los tres puntos que el anexo anterior dejó escritos, uno no era de la lista, y eso costó dos
+intentos.** Los dos primeros —comparar el nombre entero con la caja puesta, y derivar los pares
+tipo/local— describen cómo tenía que comportarse la exención, así que se van con ella. **El tercero
+no**: decía que *cada caso positivo de esa prueba se comprueba contra la lista, y lo primero*, y lo que
+defiende no es la lista sino que **cada caso siga ejercitando su regla en vez de salir por un atajo**.
+La lista era un atajo; **no era el único**. Sigue vivo el otro, y es peor porque no está escrito a mano:
+la guarda se rinde con una pieza en cuanto el lado **inglés** del glosario la reclama, y ese lado **se
+deriva del anexo**, que las entregas de prosa todavía editan. El día que una flecha adopte `celda`,
+`reparto` o `maqueta` como inglés, el caso que la lleva deja de comprobar nada y la suite sigue verde.
+Así que el bucle vuelve, apuntado a ese conjunto, con su suelo y con una afirmación más: que cada sujeto
+siga siendo un resto de verdad. Tres mutaciones lo atan y las tres caen.
+
+**Lo que sí desaparece de verdad.** La otra mitad —que doblar la caja al comparar no cegara la regla—
+**era de la lista** y se va con ella. Se probó a sustituirla por una afirmación directa sobre el nombre
+en minúsculas y **una revisión la refutó**: `segments` ya baja a minúsculas, así que esa afirmación
+recorría el mismo camino, byte a byte, que la que había treinta líneas más arriba. Un duplicado
+presentado como sustituto es peor que el hueco, porque el hueco se ve. Se borró.
+
+**Y arrastró dos cosas más, las dos verificadas por mutación.** `unaccent` existía separada de `fold`
+**solo** porque la lista comparaba con la caja puesta; con la lista fuera, su único cliente la baja a
+minúsculas en la línea siguiente, así que sus seis brazos en mayúscula no los alcanzaba nadie. Se funden
+en `fold`, y quitarle la eñe o el paso a minúsculas deja la guarda en rojo. La otra fue **un bloqueante
+de verdad**: la lista de casos positivos se quedó sin lector, y `clippy` con `-D warnings` convierte una
+constante sin uso en un error.
+
+**Y una exención que un revisor dio por muerta y no lo estaba.** `restauradas` se propuso borrar
+razonando que ya nadie la citaba; se quitó, la guarda se puso roja nombrando las dos citas vivas, y se
+repuso. `frontera` y `supr` sí salieron: las dos se quedaron sin cita en esta misma entrega. La regla
+que queda escrita: **una entrada se retira quitándola y viendo qué pasa**, nunca leyéndola.
+
+**Cómo se me pasó, que es la parte que sirve:** declaré la puerta en verde leyendo una corrida que no
+había vuelto a compilar la caja de pruebas. Una puerta que contesta desde la caché no se ha corrido. Van
+tres barridos de este hito publicando un cero por mirar el árbol en el estado equivocado.
+
+##### Cuatro nombres que el anexo ya había decidido, y yo no leí
+
+**El defecto de verdad de esta entrega fue mío y lo cazó la revisión.** El anexo de esta misma decisión
+ya había asignado los nombres del módulo, con su razón, y yo los deduje de cero en vez de leerlos:
+puse `Problem` donde dice **`ConfigProblem`** —hay otro `Problem` en `panel-contract`, y el criterio
+publicado es «mismo concepto, referente distinto → sustantivo compartido y calificador propio»—, `Line`
+donde dice **`ConfigLine`**, `Fault` donde la flecha dice **`Missing`**, y `Directory` donde dice
+**`TestDir`**, que es además el nombre que el módulo hermano ya llevaba desde la entrega anterior.
+
+**No lo cazaba nada, y esa es la mitad que importa.** La guarda del glosario deriva el vocabulario
+**español** de las flechas y no mira el lado inglés, así que un nombre inglés distinto del publicado
+compila, pasa la suite y se mezcla. En una entrega mecánica el compilador es oráculo del renombrado,
+pero **no de qué nombre tocaba**: eso solo lo dice el anexo, y hay que leerlo.
+
+**Y una quinta, que es la que se ve desde fuera:** la clave `text` fallaba el criterio que esta misma
+decisión escribió para elegir palabras —que la use la configuración, la documentación o los nombres de
+acción de **dos o más** de WezTerm, Kitty, Ghostty, tmux y Zellij—. Los tres primeros publican esa clave
+como `foreground`. Pasa a `foreground`, y con ella el campo, que es como el pintor ya la llamaba.
+
+##### El documento y el código, enfrentados por segunda y tercera vez
+
+Los once atajos ya tenían sus dos guardas. Las **ocho claves de la tabla** no tenían ninguna, y los
+**bloques de ejemplo** tampoco: son lo que alguien copia y pega, y nada los interpretaba. Medido antes de
+escribirlas: cambiarle al documento el prefijo `key.` o el valor `none` dejaba **las 873 pruebas en
+verde**. Ahora la tabla se le pasa al intérprete clave por clave, y cada línea `clave = valor` de cada
+bloque se interpreta de verdad, con suelo por si el recorrido deja de enganchar y afirmando además que la
+línea **aplica algo** —`version` aparte, que por definición no guarda ningún valor—.
+
+Y la mitad que **no** se puede derivar, dicha para que nadie la lea como cubierta: una clave que el
+código acepta y el documento calla no la caza nada. El `match` no se puede recorrer, y copiarlo a la
+prueba sería volver a tener la lista dos veces.
+
+##### Cuatro citas que ya mentían, y de quién eran
+
+Traducir este módulo destapó **cuatro comentarios de `session.rs`** que nombraban `interpretar`,
+`ruta_de` y `Problema` — **sus propios nombres viejos**, renombrados por la entrega anterior. Pasaban
+porque la guarda pregunta por la caja entera y `settings.rs` todavía declaraba esas palabras. Es
+exactamente lo que el anexo anterior anunció —«las entregas que quedan van a encontrar más, no menos»— y
+la primera confirmación con números: **la última entrega mecánica del hito arregla citas de la
+penúltima**.

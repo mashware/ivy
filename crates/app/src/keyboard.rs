@@ -645,7 +645,7 @@ mod tests {
 /// este hito, **ejecutándolo**, y de paso encontró que hasta entonces copiar no copiaba: interrumpía el
 /// programa.
 ///
-/// Los dos se apagan con `copiar = no` y `pegar = no`, que es lo único que se puede hacer con ellos.
+/// De copiar solo se puede **apagar** la atención, con `key.copy = none`; pegar no tiene clave.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
     SplitRight,
@@ -665,28 +665,25 @@ impl Action {
     /// Cómo se escribe en el fichero de configuración.
     pub fn as_written(self) -> &'static str {
         match self {
-            Self::SplitRight => "partir-al-lado",
-            Self::SplitDown => "partir-debajo",
-            Self::ClosePane => "cerrar-division",
-            Self::NewTab => "pestaña-nueva",
-            Self::CloseTab => "cerrar-pestaña",
-            Self::PreviousTab => "pestaña-anterior",
-            Self::NextTab => "pestaña-siguiente",
-            Self::ScrollPageUp => "subir-una-pagina",
-            Self::ScrollPageDown => "bajar-una-pagina",
-            Self::ScrollToTop => "ir-al-principio",
-            Self::ScrollToBottom => "ir-al-final",
+            Self::SplitRight => "split-right",
+            Self::SplitDown => "split-down",
+            Self::ClosePane => "close-pane",
+            Self::NewTab => "new-tab",
+            Self::CloseTab => "close-tab",
+            Self::PreviousTab => "previous-tab",
+            Self::NextTab => "next-tab",
+            Self::ScrollPageUp => "scroll-page-up",
+            Self::ScrollPageDown => "scroll-page-down",
+            Self::ScrollToTop => "scroll-to-top",
+            Self::ScrollToBottom => "scroll-to-bottom",
         }
     }
 
     /// La que se escribe así, si alguna.
-    ///
-    /// **Las eñes se admiten también sin eñe**, por lo mismo que el tamaño de letra: quien teclea desde un
-    /// teclado que no es el suyo no debería quedarse sin poder configurar las pestañas.
     pub fn from_written(text: &str) -> Option<Self> {
-        ALL.iter().copied().find(|action| {
-            action.as_written() == text || action.as_written().replace('ñ', "n") == text
-        })
+        ALL.iter()
+            .copied()
+            .find(|action| action.as_written() == text)
     }
 }
 
@@ -734,7 +731,7 @@ impl Chord {
             let part = part.trim();
             match part.to_ascii_lowercase().as_str() {
                 "ctrl" | "control" => chord.ctrl = true,
-                "shift" | "mayus" | "mayús" | "mayusculas" | "mayúsculas" => chord.shift = true,
+                "shift" => chord.shift = true,
                 "alt" => chord.alt = true,
                 _ => {
                     // **Una sola tecla por acorde.** Dos serían un acorde que no se puede pulsar, y
@@ -750,7 +747,7 @@ impl Chord {
         // **Los acordes de copiar y de pegar no se pueden reclamar, y aceptarlos sería prometer algo que
         // no ocurre.** El escritorio los resuelve **antes** de que lleguen: no aparecen como teclas, llegan
         // ya convertidos en un copiado o un pegado, y **sin decir si había Mayúsculas**. Un
-        // `atajo.partir-al-lado = ctrl+shift+c` se aceptaría, no funcionaría nunca, y quien lo escribió no
+        // `key.split-right = ctrl+shift+c` se aceptaría, no funcionaría nunca, y quien lo escribió no
         // tendría forma de saber por qué.
         if chord.ctrl && matches!(chord.key, eframe::egui::Key::C | eframe::egui::Key::V) {
             return None;
@@ -767,28 +764,29 @@ impl Chord {
 /// `f4` no, `PageUp` sí y `pageup` no. Comprobado ejecutándolo. Así que se prueba tal cual, y si no, con
 /// la inicial en mayúscula.
 ///
-/// **Y hay alias, en los dos idiomas.** `prior` y `next` son como los llaman los terminales de siempre —y
-/// como los llamaba el documento de este proyecto antes de que nadie comprobara que no existen—; los del
-/// español están porque el fichero se escribe en español y `supr` es lo que pone en el teclado.
+/// **Y hay alias.** `prior` y `next` son como los llaman los terminales de siempre —y como los llamaba el
+/// documento de este proyecto antes de que nadie comprobara que no existen—; `pgup`, `pgdn` y `esc` son las
+/// abreviaturas que están escritas en la propia tecla.
 fn key_named(name: &str) -> Option<eframe::egui::Key> {
     use eframe::egui::Key;
     let alias = match name.to_ascii_lowercase().as_str() {
-        "prior" | "pgup" | "repag" | "repág" => Some(Key::PageUp),
-        "next" | "pgdn" | "avpag" | "avpág" => Some(Key::PageDown),
-        "supr" | "suprimir" => Some(Key::Delete),
-        "inicio" => Some(Key::Home),
-        "fin" => Some(Key::End),
+        "prior" | "pgup" => Some(Key::PageUp),
+        "next" | "pgdn" => Some(Key::PageDown),
         "esc" => Some(Key::Escape),
-        "intro" | "retorno" => Some(Key::Enter),
-        "tabulador" => Some(Key::Tab),
-        "espacio" => Some(Key::Space),
-        // **Las flechas se escriben con la flecha, y así las publica el documento del proyecto.** No
-        // aceptarlas fue un desajuste real entre lo que se prometía y lo que el código entendía, cazado
-        // contrastando el documento contra la fuente.
-        "arriba" | "↑" => Some(Key::ArrowUp),
-        "abajo" | "↓" => Some(Key::ArrowDown),
-        "izquierda" | "←" => Some(Key::ArrowLeft),
-        "derecha" | "→" => Some(Key::ArrowRight),
+        // **Las flechas se escriben también con la flecha, y así las publica el documento del proyecto.**
+        // No aceptarlas fue un desajuste real entre lo que se prometía y lo que el código entendía, cazado
+        // contrastando el documento contra la fuente. **El símbolo no tiene idioma**, así que sobrevive al
+        // hito: lo que se retira es el nombre en español, no el dibujo de la tecla.
+        //
+        // **Y solo el símbolo: `up`, `down`, `left` y `right` NO están aquí porque no hacen falta.** egui
+        // llama a estas cuatro teclas `Up`, `Down`, `Left` y `Right`, así que el respaldo de abajo ya las
+        // resuelve por su nombre. Medido antes de quitarlas: sin estos cuatro brazos la suite entera sigue
+        // verde, incluidos los casos que las prueban. Un alias que repite lo que el respaldo ya hace se lee
+        // como una decisión y no lo es.
+        "↑" => Some(Key::ArrowUp),
+        "↓" => Some(Key::ArrowDown),
+        "←" => Some(Key::ArrowLeft),
+        "→" => Some(Key::ArrowRight),
         _ => None,
     };
     if alias.is_some() {
@@ -906,17 +904,17 @@ mod keymap_tests {
         // **La tabla de abajo se copia del documento a mano y a propósito.** Generarla del código mediría
         // que el código es consistente consigo mismo; lo que hay que atar es que lo publicado sea verdad.
         let published = [
-            ("partir-al-lado", "ctrl+shift+d", Action::SplitRight),
-            ("partir-debajo", "ctrl+shift+b", Action::SplitDown),
-            ("cerrar-division", "ctrl+shift+x", Action::ClosePane),
-            ("pestaña-nueva", "ctrl+shift+t", Action::NewTab),
-            ("cerrar-pestaña", "ctrl+shift+w", Action::CloseTab),
-            ("pestaña-anterior", "ctrl+shift+←", Action::PreviousTab),
-            ("pestaña-siguiente", "ctrl+shift+→", Action::NextTab),
-            ("subir-una-pagina", "shift+repág", Action::ScrollPageUp),
-            ("bajar-una-pagina", "shift+avpág", Action::ScrollPageDown),
-            ("ir-al-principio", "shift+home", Action::ScrollToTop),
-            ("ir-al-final", "shift+end", Action::ScrollToBottom),
+            ("split-right", "ctrl+shift+d", Action::SplitRight),
+            ("split-down", "ctrl+shift+b", Action::SplitDown),
+            ("close-pane", "ctrl+shift+x", Action::ClosePane),
+            ("new-tab", "ctrl+shift+t", Action::NewTab),
+            ("close-tab", "ctrl+shift+w", Action::CloseTab),
+            ("previous-tab", "ctrl+shift+←", Action::PreviousTab),
+            ("next-tab", "ctrl+shift+→", Action::NextTab),
+            ("scroll-page-up", "shift+pageup", Action::ScrollPageUp),
+            ("scroll-page-down", "shift+pagedown", Action::ScrollPageDown),
+            ("scroll-to-top", "shift+home", Action::ScrollToTop),
+            ("scroll-to-bottom", "shift+end", Action::ScrollToBottom),
         ];
         assert_eq!(
             published.len(),
@@ -999,7 +997,7 @@ mod keymap_tests {
     #[test]
     fn un_acorde_que_nadie_reclama_no_es_de_la_aplicacion() {
         // **Es la mitad que hace que desatar un atajo sirva de algo**: lo que no está en la tabla baja al
-        // programa de dentro. Sin ella, `ninguno` dejaría el acorde en un limbo donde ni hace nada ni
+        // programa de dentro. Sin ella, `none` dejaría el acorde en un limbo donde ni hace nada ni
         // llega a `vim`.
         let keymap = Keymap::default();
         assert_eq!(
@@ -1115,12 +1113,15 @@ mod keymap_tests {
                 "«{text}» no se entendió"
             );
         }
-        // **«Mayúsculas» también vale, con y sin tilde y con y sin eñe**, por lo mismo que el resto del
-        // fichero: quien teclea desde un teclado que no es el suyo no debería quedarse fuera.
+        // **Y la tecla de mando ya solo se escribe en inglés.** D27 mete en el hito lo que ve quien usa el
+        // terminal y decide no dejar tabla de alias; sin esta afirmación, una rama que siguiera admitiendo
+        // la grafía vieja no la nota nadie y devuelve por la puerta de atrás la deuda que la decisión se
+        // ahorró.
         for text in ["ctrl+mayusculas+e", "ctrl+mayúsculas+e", "ctrl+mayus+e"] {
-            assert!(
-                Chord::from_written(text).is_some_and(|a| a.shift && a.ctrl),
-                "«{text}» no se entendió"
+            assert_eq!(
+                Chord::from_written(text),
+                None,
+                "«{text}» se sigue aceptando: hay tabla de alias donde D27 dice que no la hay"
             );
         }
     }
@@ -1145,22 +1146,47 @@ mod keymap_tests {
             );
         }
 
-        // **Y los alias, en los dos idiomas.** `prior` y `next` son como los llaman los terminales de
-        // siempre — y como los llamaba el documento de este proyecto antes de que nadie comprobara que no
-        // existen. Los del español están porque el fichero se escribe en español.
+        // **Y los alias.** `prior` y `next` son como los llaman los terminales de siempre — y como los
+        // llamaba el documento de este proyecto antes de que nadie comprobara que no existen. Las flechas
+        // se escriben también con la flecha, que es como las publica el documento y no tiene idioma.
         for (text, expected) in [
             ("shift+prior", Key::PageUp),
             ("shift+next", Key::PageDown),
-            ("shift+repág", Key::PageUp),
-            ("ctrl+supr", Key::Delete),
-            ("shift+inicio", Key::Home),
-            ("shift+fin", Key::End),
-            ("ctrl+izquierda", Key::ArrowLeft),
+            ("shift+pgup", Key::PageUp),
+            ("shift+pgdn", Key::PageDown),
+            ("ctrl+esc", Key::Escape),
+            ("ctrl+left", Key::ArrowLeft),
+            ("ctrl+up", Key::ArrowUp),
+            // **Las cuatro flechas por su símbolo, y las cuatro porque son el único alias de este
+            // `match` que el respaldo NO puede resolver**: egui las llama `Up`, `Down`, `Left` y
+            // `Right`, así que sus nombres se resuelven solos y el dibujo no. Dos de ellas no las
+            // ejercía nada mientras el documento las publicaba.
+            ("ctrl+←", Key::ArrowLeft),
+            ("ctrl+→", Key::ArrowRight),
+            ("ctrl+↑", Key::ArrowUp),
+            ("ctrl+↓", Key::ArrowDown),
         ] {
             assert_eq!(
                 Chord::from_written(text).map(|a| a.key),
                 Some(expected),
                 "«{text}» no se entendió"
+            );
+        }
+
+        // **Y los nombres de tecla en español ya no valen**, por lo mismo que la tecla de mando de arriba:
+        // sin afirmarlo, la mitad de una tabla de alias que D27 prohíbe puede sobrevivir sin que nada caiga.
+        for text in [
+            "shift+repág",
+            "ctrl+supr",
+            "shift+inicio",
+            "shift+fin",
+            "ctrl+izquierda",
+            "ctrl+espacio",
+        ] {
+            assert_eq!(
+                Chord::from_written(text),
+                None,
+                "«{text}» se sigue aceptando: hay tabla de alias donde D27 dice que no la hay"
             );
         }
     }
@@ -1196,7 +1222,7 @@ mod keymap_tests {
     #[test]
     fn un_acorde_sin_tecla_de_mando_no_se_admite() {
         // **Admitirlo dejaría que quien configura se quite una letra de escribir** sin que nada se lo
-        // advierta: `atajo.copiar = c` haría que la `c` no llegara nunca al programa.
+        // advierta: `key.copy = c` haría que la `c` no llegara nunca al programa.
         for text in ["c", "e", "prior"] {
             assert_eq!(
                 Chord::from_written(text),
@@ -1211,22 +1237,32 @@ mod keymap_tests {
     }
 
     #[test]
-    fn las_acciones_se_escriben_con_y_sin_eñe() {
+    fn las_acciones_se_escriben_como_las_publica_el_documento() {
         for action in ALL {
             let written = action.as_written();
             assert_eq!(Action::from_written(written), Some(action));
-            assert_eq!(
-                Action::from_written(&written.replace('ñ', "n")),
-                Some(action),
-                "«{written}» sin eñe no se entendió"
-            );
         }
         assert_eq!(
-            Action::from_written("pegar"),
+            Action::from_written("paste"),
             None,
             "pegar no es un atajo reasignable"
         );
-        assert_eq!(Action::from_written("inventada"), None);
+        assert_eq!(Action::from_written("made-up"), None);
+
+        // **Y los nombres viejos ya no valen**, que es la mitad que D27 decide y nada más ataba: sin esto,
+        // dejar la lista vieja al lado de la nueva no lo nota ninguna prueba.
+        for old in [
+            "partir-al-lado",
+            "cerrar-division",
+            "pestaña-nueva",
+            "pestana-nueva",
+        ] {
+            assert_eq!(
+                Action::from_written(old),
+                None,
+                "«{old}» se sigue aceptando: hay tabla de alias donde D27 dice que no la hay"
+            );
+        }
     }
 
     /// **Los once nombres viven dos veces**: aquí y en el documento de configuración, escritos a mano
@@ -1242,6 +1278,83 @@ mod keymap_tests {
     /// comentario— y con eso caza que **el código** se desvíe de lo publicado. Pero al ser una copia,
     /// un cambio en el documento sin tocar el código la deja verde: medido. Ésta lee el documento de
     /// verdad, así que caza esa mitad. Hacen falta las dos, y por eso ninguna sobra.
+    /// **Los once nombres viven dos veces**: aquí y en el documento de configuración, escritos a mano
+    /// en los dos sitios. Nada los comparaba, así que renombrar uno dejaba publicado un fichero de
+    /// configuración con una clave que la aplicación rechaza — y ninguna prueba se enteraba.
+    ///
+    /// Se lee el documento en tiempo de compilación en vez de repetir la lista: una prueba que
+    /// copiase los once nombres se arregla sola cuando alguien los traduce en los dos lados y se
+    /// olvida del documento, que es exactamente el fallo que viene a cazar.
+    ///
+    /// **Y es la otra dirección de [`el_documento_publica_exactamente_los_atajos_que_el_codigo_tiene`],
+    /// no un duplicado suyo.** Aquélla copia la tabla del documento a mano **a propósito** —lo dice su
+    /// comentario— y con eso caza que **el código** se desvíe de lo publicado. Pero al ser una copia,
+    /// un cambio en el documento sin tocar el código la deja verde: medido. Ésta lee el documento de
+    /// verdad, así que caza esa mitad. Hacen falta las dos, y por eso ninguna sobra.
+    /// **Cada acorde que el documento publica se interpreta de verdad.**
+    ///
+    /// Es el hueco que quedaba entre las otras dos guardas: aquéllas atan los once **nombres** y la tabla
+    /// de claves, y dejan fuera la prosa —las grafías de tecla, la lista de teclas de mando y la columna
+    /// «De fábrica»—, que es de donde salió el desajuste histórico de este proyecto: el documento prometía
+    /// `shift+prior` y el código lo rechazaba, y no lo vio nadie hasta que una persona contrastó los dos
+    /// ficheros a mano. Ese acorde es uno de los catorce que esta prueba recorre.
+    ///
+    /// **Un acorde se reconoce por su forma y no por dónde está**, así que esta guarda no ancla en ninguna
+    /// frase. Eso importa porque la prosa de este documento está en español y **la traduce otra entrega**:
+    /// una guarda que enganchara por el texto moriría ese día sin que nadie lo notara.
+    #[test]
+    fn cada_acorde_que_el_documento_publica_lo_entiende_el_codigo() {
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+
+        // **Los bloques de ejemplo se quitan antes de partir por las comillas invertidas**, y no por
+        // gusto: sus vallas son tres comillas invertidas, así que partir sobre el documento entero
+        // devuelve el cuerpo del bloque como si fuera un token. Los ejemplos ya tienen su propia guarda,
+        // que los pasa por el intérprete del fichero.
+        let mut inside = false;
+        let prose: String = DOCUMENT
+            .lines()
+            .filter(|line| {
+                if line.starts_with("```") {
+                    inside = !inside;
+                    return false;
+                }
+                !inside
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let published: Vec<&str> = prose
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            // Un acorde es un `+` **entre dos partes**, y esa forma es la que lo distingue del `+` a
+            // secas con el que el documento explica cómo se escribe uno.
+            .filter(|token| token.contains('+') && token.split('+').all(|part| !part.is_empty()))
+            // **Y la caja distingue las dos cosas que el documento escribe con `+`.** Lo que va en
+            // minúsculas es una línea del fichero —los ejemplos y la columna «De fábrica»—; lo que lleva
+            // mayúscula nombra **la tecla que se pulsa** (`Ctrl+Mayúsculas+C`), que es prosa y no
+            // sintaxis. Los dos que el documento declara imposibles de asignar caen en el segundo grupo,
+            // y que se rechazan ya lo afirma [`los_acordes_de_copiar_y_pegar_no_se_pueden_reclamar`].
+            .filter(|token| **token == token.to_lowercase())
+            .collect();
+        // Sin suelo, un documento que dejara de escribir acordes entre comillas invertidas dejaría esta
+        // prueba pasando por estar vacía. Hoy publica catorce.
+        assert_eq!(
+            published.len(),
+            14,
+            "el documento publica {} acordes en minúsculas: o cambió de forma, o este recorrido dejó \
+             de encontrarlos y la prueba no está mirando nada — {published:?}",
+            published.len()
+        );
+
+        for chord in published {
+            assert!(
+                Chord::from_written(chord).is_some(),
+                "el documento publica el acorde «{chord}» y el código lo rechaza: quien lo copie \
+                 escribiría una línea que no hace nada"
+            );
+        }
+    }
+
     #[test]
     fn cada_accion_esta_publicada_en_el_documento_de_configuracion() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");

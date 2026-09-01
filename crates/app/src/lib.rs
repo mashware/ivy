@@ -1681,10 +1681,10 @@ enum Entry {
 fn settings_to_use(
     entry: Entry,
     path: Option<&std::path::Path>,
-) -> (settings::Ajustes, measure::ReadingSettings) {
+) -> (settings::Settings, measure::ReadingSettings) {
     if entry == Entry::Measuring {
         return (
-            settings::Ajustes::default(),
+            settings::Settings::default(),
             measure::ReadingSettings::Vetoed,
         );
     }
@@ -1692,33 +1692,33 @@ fn settings_to_use(
         // **Sin sitio de fiar tampoco se lee, y se dice.** Quien tenga el entorno sin una ruta absoluta
         // escribiría un fichero que no se aplica nunca; el módulo hermano ya tiene ese mismo verbo.
         eprintln!(
-            "agent-terminal: no hay dónde buscar la configuración (ni $XDG_CONFIG_HOME ni $HOME dan una \
-             ruta absoluta). Se abre con lo de fábrica."
+            "agent-terminal: there is nowhere to look for the settings (neither $XDG_CONFIG_HOME nor $HOME \
+             gives an absolute path). Opening with the factory ones."
         );
         return (
-            settings::Ajustes::default(),
+            settings::Settings::default(),
             measure::ReadingSettings::Missing,
         );
     };
     let started = Instant::now();
-    match settings::leer(path) {
+    match settings::read(path) {
         Ok((settings, warnings)) => {
             // **Se dicen todas las que se guardaron, y cuántas quedaron fuera.** Callar las de más sin
             // decir cuántas eran haría creer que a partir del techo el fichero está bien.
-            for warning in warnings.guardados() {
+            for warning in warnings.kept() {
                 eprintln!("agent-terminal: {warning}");
             }
-            if warnings.sin_listar() > 0 {
+            if warnings.unlisted() > 0 {
                 eprintln!(
-                    "agent-terminal: y {} línea(s) más con problemas, que no se listan",
-                    warnings.sin_listar()
+                    "agent-terminal: and {} more line(s) with problems, which are not listed",
+                    warnings.unlisted()
                 );
             }
             (
                 settings,
                 measure::ReadingSettings::Applied {
                     how_long: started.elapsed(),
-                    warnings: warnings.cuantos(),
+                    warnings: warnings.total(),
                 },
             )
         }
@@ -1727,7 +1727,7 @@ fn settings_to_use(
             // esta rama y cualquier otra que lea el fichero no dejen de coincidir.
             if problem.warrants_warning() {
                 eprintln!(
-                    "agent-terminal: no se pudo usar {}: {problem}. Se abre con lo de fábrica.",
+                    "agent-terminal: {} could not be used: {problem}. Opening with the factory ones.",
                     path.display()
                 );
             }
@@ -1735,7 +1735,7 @@ fn settings_to_use(
             // estaba roto» y «de fábrica porque una tanda lo vetó» son dos cosas distintas, y el informe
             // solo distingue tandas si esta línea no las confunde.
             (
-                settings::Ajustes::default(),
+                settings::Settings::default(),
                 measure::ReadingSettings::Missing,
             )
         }
@@ -1950,7 +1950,7 @@ pub fn run() -> eframe::Result {
     } else {
         Entry::Normal
     };
-    let (settings, what_it_cost) = settings_to_use(entry, settings::ruta().as_deref());
+    let (settings, what_it_cost) = settings_to_use(entry, settings::path().as_deref());
 
     let mut options = eframe::NativeOptions::default();
     // **Se pide el tamaño solo si alguien lo pidió**, y por eso no hay un tamaño por defecto aquí: sin
@@ -2846,7 +2846,7 @@ impl Pane {
             let mut to_copy = None;
             // **Un acorde sin Ctrl llega DOS veces, y consumir solo una lo deja actuar y escribir.**
             // egui emite el texto de la tecla junto a la tecla siempre que sea imprimible y no haya
-            // mandato, así que un `atajo.partir-al-lado = shift+e` partía la consola **y además** le
+            // mandato, así que un `key.split-right = shift+e` partía la consola **y además** le
             // escribía una `E` al programa. Los acordes de fábrica se libraban de casualidad —los que no
             // llevan Ctrl caen sobre teclas que no escriben nada—, pero el fichero acepta `shift+e` y el
             // documento lo publica como válido.
@@ -4234,26 +4234,26 @@ impl Window {
     /// **Va aquí y no en el constructor**, igual que los arrastres inyectados y el tramo de restaurar:
     /// llevarlo dentro obligaría a pasarlo por tres constructores con decenas de llamadas, y ninguna de
     /// ellas configura nada.
-    fn apply_the_settings(&mut self, settings: &settings::Ajustes) {
-        self.theme = Theme::from_colors(&settings.colores);
+    fn apply_the_settings(&mut self, settings: &settings::Settings) {
+        self.theme = Theme::from_colors(&settings.colors);
         // **Lo que el fichero no pida se queda como está**, que es lo que permite configurar solo un color
         // sin heredar de paso un cuerpo de letra que nadie escribió.
-        if let Some(font_size) = settings.cuerpo {
+        if let Some(font_size) = settings.font_size {
             self.font_size = font_size;
         }
-        if let Some(enabled) = settings.copiar {
+        if let Some(enabled) = settings.copy {
             self.copy_enabled = enabled;
         }
         // **Se aplican en el orden en que se escribieron, y por eso llegan como lista.** «Gana la última»
         // solo se puede decidir así, y es lo que hace que pegar un juego de atajos encima de otro haga lo
         // que se espera.
-        for (action, chord) in &settings.atajos {
+        for (action, chord) in &settings.shortcuts {
             if let Some(displaced) = self.keymap.bind(*action, *chord) {
                 // **El choque se dice, no se resuelve en silencio.** Sin esto, quien reasigne un acorde
                 // que ya tenía dueño pierde el otro atajo sin enterarse, y lo descubre el día que lo
                 // necesita.
                 eprintln!(
-                    "agent-terminal: «{}» se queda sin atajo: su acorde se lo lleva «{}», que va después",
+                    "agent-terminal: '{}' is left without a shortcut: its chord goes to '{}', which comes later",
                     displaced.as_written(),
                     action.as_written()
                 );
@@ -8355,7 +8355,7 @@ mod tests {
         // **El mismo gesto llega dos veces y hay que consumir las dos.** Cuando el acorde no lleva
         // ninguna tecla de mandato, el escritorio manda la tecla **y detrás el texto que esa tecla
         // escribe**; consumir solo la tecla dejaba el texto en la cola, caía en la tabla y se le mandaba
-        // al programa: `atajo.partir-al-lado = shift+e` partía la consola **y además** escribía una `E`
+        // al programa: `key.split-right = shift+e` partía la consola **y además** escribía una `E`
         // en el shell.
         //
         // Los acordes de fábrica no lo destapaban: los que no llevan Ctrl caen sobre teclas que no
@@ -9557,7 +9557,7 @@ mod tests {
     #[test]
     fn un_atajo_desatado_le_devuelve_su_acorde_al_programa() {
         // **Es la razón de ser de poder desatar**, y el criterio que este cambio cierra: quien necesite
-        // `Ctrl+Mayúsculas+D` dentro de `vim` o de `tmux` lo recupera escribiendo `ninguno`, y entonces sus
+        // `Ctrl+Mayúsculas+D` dentro de `vim` o de `tmux` lo recupera escribiendo `none`, y entonces sus
         // bytes bajan al programa en vez de partir una consola.
         //
         // **Se afirma sobre los bytes que llegan al programa**, no sobre la tabla: comprobar que el acorde
@@ -9579,8 +9579,8 @@ mod tests {
             "de fábrica el acorde no debe llegar al programa"
         );
 
-        window.apply_the_settings(&settings::Ajustes {
-            atajos: vec![(keyboard::Action::SplitRight, None)],
+        window.apply_the_settings(&settings::Settings {
+            shortcuts: vec![(keyboard::Action::SplitRight, None)],
             ..Default::default()
         });
 
@@ -9603,8 +9603,8 @@ mod tests {
         // que se dejó libre le llega al programa de dentro.
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
-        window.apply_the_settings(&settings::Ajustes {
-            atajos: vec![(
+        window.apply_the_settings(&settings::Settings {
+            shortcuts: vec![(
                 keyboard::Action::SplitRight,
                 Some(keyboard::Chord {
                     ctrl: true,
@@ -11576,7 +11576,7 @@ mod tests {
     #[test]
     fn con_el_atajo_de_copiar_apagado_el_acorde_es_del_programa() {
         // **Apagarlo es lo único que se puede hacer con este acorde, y tiene que hacer algo.** Quien
-        // escribe `atajo.copiar = ninguno` lo hace para devolvérselo a `vim` o a `tmux`: si aquí se
+        // escribe `key.copy = none` lo hace para devolvérselo a `vim` o a `tmux`: si aquí se
         // siguiera tragando el evento, el fichero mentiría y el programa no recibiría nada.
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
@@ -14489,17 +14489,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("crear el directorio de la prueba");
         let file = dir.join("config");
-        std::fs::write(&file, "tamaño = 42\ncolor.1 = #ff0000\nfondo = #010203")
+        std::fs::write(&file, "size = 42\ncolor.1 = #ff0000\nbackground = #010203")
             .expect("escribir la configuración de la prueba");
 
         // Sin medida se lee entero: si esto fallara, la prueba de abajo pasaría por no haber fichero.
         let (loaded, cost) = settings_to_use(Entry::Normal, Some(&file));
         assert_eq!(
-            loaded.cuerpo,
+            loaded.font_size,
             Some(42.0),
             "sin medida no se leyó la configuración"
         );
-        assert!(loaded.colores.fondo.is_some());
+        assert!(loaded.colors.background.is_some());
         assert!(
             matches!(cost, measure::ReadingSettings::Applied { .. }),
             "se aplicó la configuración y el informe no lo declararía: {cost:?}"
@@ -14514,7 +14514,7 @@ mod tests {
         );
         assert_eq!(
             under_measurement,
-            settings::Ajustes::default(),
+            settings::Settings::default(),
             "una tanda de medida leyó la configuración de quien mide: su tamaño de letra cambiaría la \
              rejilla, y de la rejilla dependen todas las cifras publicadas"
         );
@@ -14536,12 +14536,12 @@ mod tests {
     fn apagar_copiar_en_el_fichero_le_devuelve_el_acorde_al_programa() {
         // **El tramo que va del fichero a la ventana, y sin él la mitad de la promesa no está atada.** Que
         // el interruptor apague cuando se le pasa a mano lo prueba otra; ésta recorre el camino de verdad:
-        // el fichero dice `atajo.copiar = ninguno`, la ventana lo aplica, y el acorde acaba en el programa
+        // el fichero dice `key.copy = none`, la ventana lo aplica, y el acorde acaba en el programa
         // de dentro. Comprobado mutando: sin la línea que lo aplica, la suite entera seguía verde.
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
-        window.apply_the_settings(&settings::Ajustes {
-            copiar: Some(false),
+        window.apply_the_settings(&settings::Settings {
+            copy: Some(false),
             ..Default::default()
         });
         one_frame_in(&mut window, &ctx, area_of(1200.0), Vec::new());
@@ -14626,10 +14626,10 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
 
-        let grid_with = |cuerpo: Option<f32>| {
+        let grid_with = |font_size: Option<f32>| {
             let mut window = window_with("sleep 30", "sleep 30");
-            window.apply_the_settings(&settings::Ajustes {
-                cuerpo,
+            window.apply_the_settings(&settings::Settings {
+                font_size,
                 ..Default::default()
             });
             ui_pass(
@@ -20972,7 +20972,7 @@ mod tests {
     fn la_ventana_que_salio_de_un_fichero_de_verdad_publica_lo_que_costo_leerlo() {
         // **La otra mitad del número, y la que ninguna prueba tocaba.** La de al lado abre con una
         // persistencia que **nunca leyó el disco**, así que solo puede afirmar que el informe dice «sin
-        // medir»: con `leer` cableado a `None` en el constructor, esa prueba pasa igual y **toda corrida
+        // medir»: con `read` cableado a `None` en el constructor, esa prueba pasa igual y **toda corrida
         // de la tanda L publicaría «sin medir» sobre una lectura que sí ocurrió**. Aquí el fichero se
         // escribe, se carga y se restaura, que es el camino entero del arranque de verdad.
         //
