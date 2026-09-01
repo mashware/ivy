@@ -1421,7 +1421,7 @@ mod tests {
             "la línea perdió lo que sí se midió:\n{sin_medir}"
         );
         // **Y con la forma que el guion sabe leer, incluso sin número de lectura.** La guarda de la tanda
-        // L saca la cuenta de consolas con `s/^restauradas: *\([0-9]*\) consolas .*$/\1/p`, y ese `.*`
+        // L saca la cuenta de consolas con `s/^restored: *\([0-9]*\) consoles .*$/\1/p`, y ese `.*`
         // detrás de «consolas» **exige que siga habiendo algo**: una línea que se quedara en
         // `restauradas:  2 consolas` no casaría, el guion no vería ninguna consola restaurada e
         // invalidaría una corrida buena diciendo que la ventana abrió de fábrica.
@@ -1488,8 +1488,8 @@ mod tests {
 
     #[test]
     fn el_tamaño_de_la_ventana_sale_en_una_linea_entera_y_sin_redondear() {
-        // **Esta línea es un contrato con `scripts/medir-fotograma.sh`**, que la lee con una expresión
-        // anclada por los dos extremos —`^ventana: *\(.*\) puntos$`— para comprobar que la ventana abrió con
+        // **Esta línea es un contrato con `scripts/measure-frame.sh`**, que la lee con una expresión
+        // anclada por los dos extremos —`^window: *\(.*\) points$`— para comprobar que la ventana abrió con
         // el tamaño que se le pidió y para decidir si dos corridas se pueden promediar. Cualquier cosa
         // añadida **detrás** de «puntos» rompe el ancla del final sin romper el `contains` de la prueba de
         // `lib.rs`, y lo que el guion se encuentra entonces no es un error: es un tamaño **vacío**, o sea la
@@ -1974,9 +1974,9 @@ mod tests {
     /// egui. Con el historial encendido son casi mil microsegundos **por consola** y una frontera mueve
     /// dos.
     ///
-    /// **Y la forma de la línea es un contrato con `scripts/medir-fotograma.sh`**, que la lee para
+    /// **Y la forma de la línea es un contrato con `scripts/measure-frame.sh`**, que la lee para
     /// invalidar una corrida de la tanda M. Su guarda saca el número con
-    /// `s/^recolocar: *\([0-9]*\) veces .*$/\1/p` y compara contra los gestos inyectados: si la línea
+    /// `s/^reflow: *\([0-9]*\) times .*$/\1/p` y compara contra los gestos inyectados: si la línea
     /// cambia de forma, el guion no ve **ninguna** recolocación e invalida corridas buenas — y si la
     /// línea desaparece del todo, la guarda que dice cazar «la frontera se movió sin cruzar bordes de
     /// celda» deja de cazar nada.
@@ -2039,7 +2039,7 @@ mod tests {
     // el guion —cambia el `sed`, cambia la prueba, verde— y no habría atado nada.
 
     /// El guion de medida, leído en tiempo de compilación para que no se pueda desincronizar.
-    const SCRIPT: &str = include_str!("../../../scripts/medir-fotograma.sh");
+    const SCRIPT: &str = include_str!("../../../scripts/measure-frame.sh");
 
     /// Un patrón que el guion aplica al informe, con la línea donde está para poder señalarlo.
     struct ScriptPattern {
@@ -2312,6 +2312,379 @@ mod tests {
         ]
     }
 
+    /// **El guion se ejecuta, y hasta esta prueba nada lo comprobaba.**
+    ///
+    /// Todo lo que ata el guion —los patrones derivados, los literales, la siembra— lo lee **como
+    /// texto**. Eso caza que una expresión deje de extraer, y no caza nada de lo que hace que un
+    /// programa de `sh` funcione: una variable que se quedó con el nombre viejo dentro de un
+    /// `$(( ))`, una función a la que se llama por un nombre que ya no existe. `sh -n` tampoco: las
+    /// dos cosas son sintaxis válida.
+    ///
+    /// **Lo que se ejercita es el reparto de turnos**, que es el único mecanismo de concurrencia del
+    /// guion y el que decide qué consola vuelca y cuál se queda quieta — la tanda F entera cuelga de
+    /// él. Dos consolas contra el mismo directorio: la primera se queda el turno 1, la segunda el 2.
+    ///
+    /// **El fallo que esto caza no es hipotético**: la entrega que tradujo los identificadores del
+    /// guion dejó un `$((turno + 1))` con el nombre viejo. `sh` trata la variable sin definir como
+    /// cero, así que el contador se quedaba clavado en 1, la segunda consola no conseguía nunca su
+    /// turno y **el bucle no terminaba**. La suite entera seguía verde.
+    // **Solo en Linux, como el banco que ejercita.** El guion pide `/run/user/<uid>`, `pgrep -x` y
+    // `timeout`, que es de coreutils y no viene en macOS ni en los BSD. Sin esta condición, la caja
+    // que F2.7 va a compilar ahí fallaría en una prueba que no puede pasar, en vez de saltársela.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dos_consolas_del_guion_se_reparten_turnos_distintos_sin_pisarse() {
+        let root =
+            std::env::temp_dir().join(format!("agent-terminal-turns-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("crear el directorio de los turnos");
+
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/measure-frame.sh")
+            .canonicalize()
+            .expect("el guion vive dos niveles por encima de esta caja");
+
+        // `MEASURE_TRIES=0` deja a la consola sin carga que volcar: coge su turno y termina, que es
+        // exactamente el camino que hay que ejercitar y nada más.
+        // **La llamada va acotada en el tiempo a propósito.** El fallo que esta guarda caza —el
+        // contador de turnos que no avanza— no hace que el guion falle: hace que **no termine**, y una
+        // prueba que se cuelga es peor que una que no existe. Con el reloj puesto, el mismo fallo sale
+        // como código 124 y con su mensaje.
+        let console = || {
+            std::process::Command::new("timeout")
+                .arg("20")
+                .arg("sh")
+                .arg(&script)
+                .env("MEASURE_AS_CONSOLE", "1")
+                .env("MEASURE_RUNS", &root)
+                .env("MEASURE_TRIES", "0")
+                .output()
+                .expect("lanzar el guion en modo consola")
+        };
+
+        assert!(console().status.success(), "la primera consola no terminó");
+        assert!(console().status.success(), "la segunda consola no terminó");
+
+        // **Se afirma sobre los turnos que quedaron en disco, no sobre el código de salida.** Una
+        // consola que no consiguiera turno y saliera bien dejaría este directorio con un solo
+        // nombre, y el código de salida no lo diría.
+        let mut turns: Vec<String> = std::fs::read_dir(&root)
+            .expect("leer los turnos")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        turns.sort();
+        assert_eq!(
+            turns,
+            vec!["1".to_owned(), "2".to_owned()],
+            "las dos consolas no se repartieron un turno cada una: {turns:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **La otra mitad del guion que se ejecuta: el modo que decide si dos corridas se promedian.**
+    ///
+    /// Es un tercio del fichero y no lo tocaba ninguna prueba, aunque es el que **da el permiso** para
+    /// publicar una media en el registro de decisiones. Si se rompiera, no se rompería en rojo: diría
+    /// «se pueden promediar» de dos corridas que no lo son, o al revés, y el anexo publicaría un número
+    /// que no describe ninguna de las dos.
+    ///
+    /// Se le dan dos parejas por las dos puertas: una que solo difiere en la **fracción** con la que el
+    /// compositor entrega el tamaño —que es la que el margen existe para admitir— y otra con ventanas
+    /// distintas de verdad.
+    // **Solo en Linux, como el banco que ejercita.** El guion pide `/run/user/<uid>`, `pgrep -x` y
+    // `timeout`, que es de coreutils y no viene en macOS ni en los BSD. Sin esta condición, la caja
+    // que F2.7 va a compilar ahí fallaría en una prueba que no puede pasar, en vez de saltársela.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn el_modo_compare_del_guion_admite_la_fraccion_y_rechaza_otra_ventana() {
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts/measure-frame.sh")
+            .canonicalize()
+            .expect("el guion vive dos niveles por encima de esta caja");
+        let dir =
+            std::env::temp_dir().join(format!("agent-terminal-compare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("crear el directorio de la prueba");
+
+        let write = |name: &str, body: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, body).expect("escribir el informe de la prueba");
+            path
+        };
+        // Lo mínimo que el comparador lee: la ventana, las pestañas y la rejilla de cada división.
+        let exact = write(
+            "exact.txt",
+            "window: 1280x800 points\ntabs: 1\n  pane 0: 49x39\n",
+        );
+        // **La misma ventana, entregada con fracción.** No es un caso inventado: es lo que el
+        // compositor devuelve, y comparar carácter a carácter tiraba corridas perfectamente
+        // promediables.
+        let fraction = write(
+            "fraction.txt",
+            "window: 1279.8125x799.8125 points\ntabs: 1\n  pane 0: 49x39\n",
+        );
+        let other = write(
+            "other.txt",
+            "window: 800x600 points\ntabs: 1\n  pane 0: 30x20\n",
+        );
+        // **La misma ventana y OTRA rejilla, que es el caso que de verdad ata el comparador.** Sin
+        // él, el par que se rechaza difiere en las dos cosas a la vez y **la comparación de tamaños
+        // sola sostiene el rechazo**: medido, quitarle al comparador la línea que mira la rejilla de
+        // cada división dejaba esta prueba en verde. Es el segundo disfraz que este proyecto tiene
+        // fichado —elegir un caso con el que el defecto y el arreglo dan lo mismo— y lo cazó una
+        // revisión.
+        let same_window_other_grid = write(
+            "regrid.txt",
+            "window: 1280x800 points\ntabs: 1\n  pane 0: 30x20\n",
+        );
+        // Y la misma ventana y la misma rejilla, con las consolas venidas del fichero en vez de
+        // pedidas: es lo único que distingue la tanda que restaura de su control, y por construcción
+        // no se ve en la geometría.
+        // **Y la misma rejilla con OTRA ventana, que es el único caso que llega a preguntar por el
+        // tamaño.** El comparador cortocircuita —primero la geometría, y solo si coincide mira el
+        // tamaño—, así que un par que difiera en las dos cosas deja la comparación de tamaños sin
+        // ejercitar: medido, subir el margen a cien mil dejaba las demás afirmaciones en verde
+        // mientras el comparador daba por promediables una ventana de 1280×800 y otra de 800×600.
+        let other_window_same_grid = write(
+            "rewindow.txt",
+            "window: 800x600 points\ntabs: 1\n  pane 0: 49x39\n",
+        );
+        let restored = write(
+            "restored.txt",
+            "window: 1280x800 points\ntabs: 1\n  pane 0: 49x39\nrestored: 1 consoles in 5 ms\n",
+        );
+
+        let compare = |a: &std::path::Path, b: &std::path::Path| {
+            std::process::Command::new("timeout")
+                .arg("20")
+                .arg("sh")
+                .arg(&script)
+                .arg("compare")
+                .arg(a)
+                .arg(b)
+                .output()
+                .expect("lanzar el guion en modo compare")
+                .status
+                .success()
+        };
+
+        assert!(
+            compare(&exact, &fraction),
+            "el comparador rechaza dos corridas que solo difieren en la fracción del tamaño, que es \
+             justo lo que el margen existe para admitir"
+        );
+        assert!(
+            !compare(&exact, &other),
+            "el comparador da por promediables dos corridas de ventanas distintas: su media no \
+             describiría ninguna de las dos"
+        );
+        assert!(
+            !compare(&exact, &same_window_other_grid),
+            "el comparador da por promediables dos corridas con la MISMA ventana y distinta rejilla: \
+             es el caso que no puede cazar el margen del tamaño, y sin él la mitad que mira la \
+             rejilla no está atada por nada"
+        );
+        assert!(
+            !compare(&exact, &other_window_same_grid),
+            "el comparador da por promediables dos corridas con la misma rejilla y distinta ventana: \
+             es el único caso que llega a preguntar por el tamaño, así que sin él el margen no está \
+             atado por nada"
+        );
+        assert!(
+            !compare(&exact, &restored),
+            "el comparador da por promediables una corrida pedida y una restaurada: son idénticas en \
+             ventana, pestañas y rejilla por construcción, así que la línea que declara de dónde \
+             salieron las consolas es lo único que las distingue"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **El tercio del guion que decide qué tanda es cada letra, ejecutado.**
+    ///
+    /// Las dos guardas de arriba corren el modo consola y el modo `compare`. El **modo tanda** —el
+    /// reparto que traduce una letra en pestañas, divisiones, cuántas vuelcan, cuántos arrastres y
+    /// qué gesto— no lo recorría nadie, y es el que lleva la aritmética que ya mordió una vez: un
+    /// nombre viejo dentro de un `$(( ))` o de un `${VAR%x*}`.
+    ///
+    /// **Se ejercita el trozo que no toca la máquina de quien mide**, que llega hasta la comprobación
+    /// de los binarios: de ahí en adelante el guion borra los directorios de panel de
+    /// `/run/user/<uid>` y le pregunta a `pgrep` si hay una ventana abierta, y una prueba no puede
+    /// hacer ni lo uno —le destrozaría la sesión a quien esté trabajando— ni lo otro sin volverse
+    /// dependiente de lo que haya corriendo. Antes de esa línea ya han pasado la cabecera, las dos
+    /// puertas de modo, el `case` entero y las dos multiplicaciones que sacan cuántas consolas hay.
+    ///
+    /// **El guion se copia a un árbol propio**, y no es comodidad: `ROOT` sale de `dirname $0`, así
+    /// que corriendo el del repositorio el guion escribiría en `target/measurements` y **borraría el
+    /// directorio de turnos de una tanda en marcha**.
+    ///
+    /// **Y las letras no se escriben aquí: se le piden al guion.** Una lista copiada sería un segundo
+    /// sitio que mantener, y el día que discrepara la equivocada sería esta. Se le da una letra que no
+    /// existe, se leen las que su propio mensaje ofrece y se comprueba que **cada una de ellas** llega
+    /// al final del reparto — que es lo que una letra caída del `case` deja de hacer, publicando
+    /// «tanda desconocida» donde el anexo espera una medida.
+    // **Solo en Linux, como el banco que ejercita.** El guion pide `/run/user/<uid>`, `pgrep -x` y
+    // `timeout`, que es de coreutils y no viene en macOS ni en los BSD. Sin esta condición, la caja
+    // que F2.7 va a compilar ahí fallaría en una prueba que no puede pasar, en vez de saltársela.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cada_letra_que_el_guion_ofrece_atraviesa_su_reparto_de_tandas() {
+        let root =
+            std::env::temp_dir().join(format!("agent-terminal-batches-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("scripts")).expect("crear el árbol de la prueba");
+        let script = root.join("scripts/measure-frame.sh");
+        std::fs::write(&script, SCRIPT).expect("copiar el guion al árbol de la prueba");
+
+        // **Sin binarios a propósito.** Es lo que corta la corrida justo detrás del reparto, sin
+        // llegar a abrir ninguna ventana ni a tocar nada de la máquina.
+        let batch = |letter: &str| {
+            let out = std::process::Command::new("timeout")
+                .arg("20")
+                .arg("sh")
+                .arg(&script)
+                .arg(letter)
+                .output()
+                .expect("lanzar el guion en modo tanda");
+            (
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).into_owned(),
+            )
+        };
+
+        // **La letra que no existe, primero**: es la que da la lista y la que demuestra que el `case`
+        // sigue rechazando. Sin ella, un reparto que aceptara cualquier cosa dejaría verde todo lo de
+        // abajo.
+        let (code, offered) = batch("Ñ");
+        assert_eq!(
+            code,
+            Some(2),
+            "el guion ha aceptado una letra que no es ninguna tanda: {offered}"
+        );
+        assert!(
+            offered.contains("unknown batch"),
+            "el guion no rechaza una letra desconocida por su nombre, así que esta prueba no puede \
+             leerle la lista: {offered}"
+        );
+
+        let letters: Vec<String> = offered
+            .split("use ")
+            .nth(1)
+            .unwrap_or_default()
+            .split(|c: char| !c.is_ascii_uppercase())
+            .filter(|piece| piece.len() == 1)
+            .map(str::to_owned)
+            .collect();
+        // **Contar no es identificar**, que es el disfraz que este proyecto tiene fichado: un
+        // extractor que devolviera dieciséis letras cualesquiera dejaría contento un suelo a secas.
+        // Así que se piden por nombre tres de las que el anexo cita, una de cada familia: la de
+        // referencia, la que restaura del fichero y la que rasteriza color.
+        assert!(
+            letters.len() >= 16,
+            "el guion ofrece {} letras y las tandas del anexo son dieciséis: o se ha caído una del \
+             reparto, o esta prueba no sabe leer su mensaje — y entonces no está mirando nada: {:?}",
+            letters.len(),
+            letters
+        );
+        for known in ["A", "L", "Q"] {
+            assert!(
+                letters.iter().any(|letter| letter == known),
+                "el guion ya no ofrece la tanda {known}, que el anexo cita: sus corridas anteriores \
+                 se quedan sin forma de repetirse"
+            );
+        }
+
+        // **Y cada letra ofrecida tiene que atravesar el reparto entero.** Que el mensaje la nombre
+        // no dice que el `case` la reconozca: son dos literales distintos, y el día que discrepen la
+        // tanda se rechaza con «desconocida» quince minutos después de lanzarla.
+        for letter in &letters {
+            let (code, said) = batch(letter);
+            assert!(
+                said.contains("is missing — build with"),
+                "la tanda {letter} no llega al final de su reparto: el guion dijo «{}» en vez de \
+                 pararse al no encontrar los binarios. O la letra no está en el `case`, o algo de su \
+                 fila —las pestañas, las divisiones, el gesto— quedó con un nombre que ya no existe",
+                said.trim()
+            );
+            assert_eq!(
+                code,
+                Some(1),
+                "la tanda {letter} se paró al no encontrar los binarios y no salió con su código"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **Las variables de medida que el guion se manda a sí mismo, y la única que se rompe en
+    /// silencio.**
+    ///
+    /// La guarda de abajo comprueba que el guion **menciona** las cinco que la aplicación lee. Las
+    /// otras siete no las lee la aplicación: se las manda el modo tanda al modo consola, que es el
+    /// mismo fichero invocado como si fuera el intérprete de órdenes del usuario. Renombrar una de
+    /// esas **a un solo lado** no lo caza ni el compilador, ni `sh -n`, ni `set -u` —el guion las lee
+    /// con `${… :-}`—, ni ninguna de las veinte guardas del final.
+    ///
+    /// **Y lo que se pierde no es una corrida: es su significado.** `MEASURE_TRIES` es cuántas
+    /// consolas vuelcan, y se lee con dos por omisión. Exportada con otro nombre, las tandas F, G, H,
+    /// I y L —las de cuatro consolas— vuelcan **dos**, y el informe sale con sus cuatro divisiones,
+    /// su testigo, sus pestañas y su rejilla: idéntico al bueno. El anexo publicaría bajo la letra H
+    /// el coste de la mitad de la carga.
+    ///
+    /// Se comprueba en un solo sentido, que es el que hay: **todo lo que el guion lee lo tiene que
+    /// exportar él**. Al revés no, y a propósito — `MEASURE_SIZE`, `MEASURE_TABS`, `MEASURE_PANES` y
+    /// `MEASURE_DRAGS` las exporta para la aplicación y no las lee nunca.
+    #[test]
+    fn el_guion_exporta_todas_las_variables_de_medida_que_el_mismo_lee() {
+        let mut read = std::collections::BTreeSet::new();
+        let mut exported = std::collections::BTreeSet::new();
+        for line in SCRIPT.lines() {
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
+            for (at, _) in line.match_indices("MEASURE_") {
+                let name: String = line[at..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                let before = line[..at].chars().next_back();
+                let after = line[at + name.len()..].chars().next();
+                // `$MEASURE_X` y `${MEASURE_X:-…}` son lecturas; `MEASURE_X=` es lo que el guion
+                // pone en el entorno del hijo. Un `unset` no es ni lo uno ni lo otro.
+                if before == Some('$') || before == Some('{') {
+                    read.insert(name);
+                } else if after == Some('=') {
+                    exported.insert(name);
+                }
+            }
+        }
+
+        // **Los dos suelos, porque un extractor que no reconociera nada pasaría por vacío.** Y con
+        // nombre, no solo con número: contar no es identificar.
+        assert!(
+            read.len() >= 6 && exported.len() >= 10,
+            "el extractor ha visto {} variables leídas y {} exportadas, y hay al menos 6 y 10: ha \
+             dejado de reconocer su forma, así que esta prueba estaría pasando sin mirar nada",
+            read.len(),
+            exported.len()
+        );
+        for named in ["MEASURE_TRIES", "MEASURE_RUNS"] {
+            assert!(
+                read.contains(named),
+                "el extractor no ve que el guion lea {named}, que es de las que se manda a sí mismo: \
+                 está encontrando el número de variables y no las variables"
+            );
+        }
+
+        let orphans: Vec<&String> = read.difference(&exported).collect();
+        assert!(
+            orphans.is_empty(),
+            "el guion lee {:?} y no las exporta, así que el modo consola las recibe vacías: las que \
+             llevan valor por omisión —`MEASURE_TRIES` es cuántas consolas vuelcan— siguen midiendo, \
+             pero otra cosa, y el informe sale indistinguible del bueno",
+            orphans
+        );
+    }
+
     #[test]
     fn cada_patron_que_el_guion_busca_en_el_informe_sigue_extrayendo_algo() {
         let patrones = script_patterns();
@@ -2348,7 +2721,7 @@ mod tests {
         let mut sin_aportar = Vec::new();
         for (numero, line) in SCRIPT.lines().enumerate() {
             let numero = numero + 1;
-            if line.trim_start().starts_with('#') || !line.contains("$INFORME") {
+            if line.trim_start().starts_with('#') || !line.contains("$REPORT") {
                 continue;
             }
             let aplica_un_patron = line.contains("grep") || line.contains("sed");
@@ -2372,15 +2745,20 @@ mod tests {
             if !some_pattern_with_text {
                 continue;
             }
-            // La única exenta, y por eso va con su número: compone el mensaje de la rejilla al
-            // terminar y **no invalida ninguna corrida**. Su literal lo cubre de rebote el recuento
-            // de divisiones. Si algún día decide algo, se quita de aquí y tiene que aportar.
-            const SOLO_COMPONE_UN_MENSAJE: usize = 933;
-            if numero == SOLO_COMPONE_UN_MENSAJE {
+            // La única exenta: compone el mensaje de la rejilla al terminar y **no invalida ninguna
+            // corrida**. Su literal lo cubre de rebote el recuento de divisiones. Si algún día decide
+            // algo, deja de ser un `echo` y tiene que aportar.
+            //
+            // **Se exenta por lo que la línea ES y no por dónde está**, y eso lo pidió una revisión:
+            // iba anclada a un número de línea, y la entrega que tradujo el guion lo movió de 933 a
+            // 975 **sin que nada lo dijera** — la exención dejó de exentar y siguió pareciendo que
+            // protegía algo. Hoy hay exactamente una línea de esta forma entre las treinta y dos que
+            // llevan patrón.
+            if line.trim_start().starts_with("echo ") {
                 continue;
             }
             if !patrones.iter().any(|p| p.line == numero) {
-                sin_aportar.push(format!("  medir-fotograma.sh:{numero}: {}", line.trim()));
+                sin_aportar.push(format!("  measure-frame.sh:{numero}: {}", line.trim()));
             }
         }
         assert!(
@@ -2406,7 +2784,7 @@ mod tests {
                     // cuatro veces, una por informe de referencia.
                     Salida::PatronInvalido(codigo) => {
                         let entrada = format!(
-                            "  medir-fotograma.sh:{} ({}) {:?} → salió con {codigo}",
+                            "  measure-frame.sh:{} ({}) {:?} → salió con {codigo}",
                             p.line, p.order, p.patron
                         );
                         if !invalidos.contains(&entrada) {
@@ -2417,7 +2795,7 @@ mod tests {
             }
             if !extracted_from_any {
                 huerfanos.push(format!(
-                    "  medir-fotograma.sh:{} ({}) {:?}",
+                    "  measure-frame.sh:{} ({}) {:?}",
                     p.line, p.order, p.patron
                 ));
             }

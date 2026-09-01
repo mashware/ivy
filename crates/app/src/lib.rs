@@ -242,7 +242,7 @@ struct InjectedDrags {
     /// soltar no significa que la disposición cambie: el suelo geométrico rechaza el soltado cuando la
     /// consola de destino no puede darle su mínimo a las dos, y entonces `drop_a_pane` devuelve
     /// `false`, lo dice por la salida de errores y **el árbol no se toca**. Con una ventana estrecha
-    /// —`TAMANO=500x400`, por ejemplo— eso pasa en **todos** los soltados de la tanda: la corrida no lleva
+    /// —`WINDOW_SIZE=500x400`, por ejemplo— eso pasa en **todos** los soltados de la tanda: la corrida no lleva
     /// ni una reordenación dentro, y contando solo los inyectados el informe declararía «1.720 hechos» y el
     /// guion la daría por buena. El anexo publicaría entonces que el gesto no cuesta nada, que es
     /// exactamente el número mal etiquetado que la regla dura del proyecto persigue.
@@ -853,7 +853,7 @@ const MINIMUM_ROWS: f32 = 3.0;
 /// La variable de entorno que dice con cuántas pestañas abrir.
 ///
 /// **Existe para poder medir sin nadie delante, y por eso lleva el prefijo del guion de medida** —
-/// `MEASURE_MIB` y `MEASURE_BATCH` ya viven en `scripts/medir-fotograma.sh`. Los atajos que crean pestañas
+/// `MEASURE_MIB` y `MEASURE_BATCH` ya viven en `scripts/measure-frame.sh`. Los atajos que crean pestañas
 /// entran por eventos del framework, así que un guion no tiene forma de abrir la segunda; sin esta
 /// puerta, la tanda de dos pestañas del anexo de D3 no se puede lanzar.
 ///
@@ -10820,7 +10820,7 @@ mod tests {
 
     #[test]
     fn la_variable_que_se_lee_es_la_del_guion_de_medida() {
-        // El nombre **es** el contrato con `scripts/medir-fotograma.sh`, que ya exporta `MEASURE_MIB` y
+        // El nombre **es** el contrato con `scripts/measure-frame.sh`, que ya exporta `MEASURE_MIB` y
         // `MEASURE_BATCH`. Cambiarlo aquí dejaría la puerta cerrada sin que nada se pusiera rojo: el guion
         // seguiría midiendo una sola pestaña creyendo que mide dos.
         assert_eq!(TABS_VARIABLE, "MEASURE_TABS");
@@ -13862,7 +13862,7 @@ mod tests {
 
     #[test]
     fn el_informe_declara_los_gestos_inyectados_y_los_que_surtieron_efecto() {
-        // **La línea es un contrato con `scripts/medir-fotograma.sh`**, que la lee para invalidar una tanda
+        // **La línea es un contrato con `scripts/measure-frame.sh`**, que la lee para invalidar una tanda
         // que pidió arrastres y no llegó a hacer ninguno. Los dos números hacen falta: con solo los hechos
         // no se distingue una tanda sin arrastres de una que los pidió y no pudo.
         let ctx = egui::Context::default();
@@ -19868,7 +19868,7 @@ mod tests {
         // deja la consola estrecha en 23 columnas: tres por encima del suelo, o sea que este número **no
         // se sube sin volver aquí**, y con el panel de fábrica más ancho tampoco.
         //
-        // Se mide con la ventana de la tanda —los 1.280 puntos de `TAMANO`—, porque el margen depende de
+        // Se mide con la ventana de la tanda —los 1.280 puntos de `WINDOW_SIZE`—, porque el margen depende de
         // cuántas celdas hay que repartir.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
@@ -22290,7 +22290,19 @@ mod tests {
             inside_the_console,
         );
 
-        wait_for_the_pane_to_say(&mut window, 0, "^[[<0;6;1M");
+        // **Se espera al SOLTAR del centinela y no a su apretar**, que es lo que hace determinista
+        // esta prueba: la afirmación de abajo cuenta los dos extremos, así que esperar solo al primero
+        // deja el segundo en carrera con la lectura de la pantalla — verde con la máquina libre y roja
+        // en cuanto algo más compite. Medido: con dos pruebas que lanzan procesos en la misma tanda,
+        // caía una de cada dos.
+        //
+        // **Y esperar al soltar no lo hace «menos probable», lo hace imposible**, que es la diferencia
+        // entre un arreglo y un parche. Los bytes llegan por **un solo pseudoterminal y en orden**, y
+        // después del gesto del centinela **no corre ninguna pasada más**: nada puede escribir detrás
+        // de ese soltar. Verlo en pantalla demuestra que todo lo anterior ya está interpretado. Lo que
+        // esa razón NO cubre, dicho para el que venga: añadir una pasada después del centinela, o un
+        // defecto que difiriera un informe a un fotograma posterior, reabre la carrera en silencio.
+        wait_for_the_pane_to_say(&mut window, 0, "^[[<0;6;1m");
         let on_screen = window.active().panes()[0]
             .screen
             .to_text()

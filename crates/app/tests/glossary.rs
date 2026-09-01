@@ -195,8 +195,13 @@ struct Glossary {
 ///
 /// **Both sides get folded, and that is what closes a whole family of leftovers.** The glossary
 /// writes `Pestaña` and `TamañoPedido`; the code writes `pestanas` and `tamano_pedido`, because
-/// identifiers in this repository avoid the tilde on purpose. Without folding, the two never meet —
-/// measured, with `TAMANO`, which is a real constant of the measurement script.
+/// identifiers in this repository avoid the tilde on purpose. Without folding, the two never meet.
+///
+/// **The example this sentence used to carry was the measurement script's `TAMANO`, and the delivery
+/// that translated the script renamed it away.** A name with no tilde and no case mismatch cannot
+/// demonstrate folding, so it is replaced rather than kept: `tamano_pedido` — the test name two of
+/// the finished crates still carry — folds onto the glossary's `TamañoPedido`, which is what the rule
+/// is for. A live example, not a retired one.
 ///
 /// **It lowercases first, so only the lowercase accents need an arm.** The two halves used to be two
 /// functions, and the split had one reason: the exemption list was matched **with the case kept**, so
@@ -1054,12 +1059,21 @@ const NOT_OURS: &[&str] = &[
     // and the ones the measurement script exports leave with the script, in a later delivery.
     "MEASURE_MIB",
     "MEASURE_BATCH",
+    // Y las cinco de la puerta de medida, que este fichero cita al explicar cuáles se manda el guion
+    // a sí mismo y cuáles exporta para la aplicación. Sus **constantes** —`TABS_VARIABLE` y las
+    // demás— sí son identificadores de esta caja y se comprueban solas; lo que va aquí es el nombre
+    // que viaja en el entorno.
+    "MEASURE_TRIES",
+    "MEASURE_SIZE",
+    "MEASURE_TABS",
+    "MEASURE_PANES",
+    "MEASURE_DRAGS",
     "PANEL_DIR",
     "PANEL_ID",
     "PWD",
     "SHELL",
     "SHLVL",
-    "TAMANO",
+    "WINDOW_SIZE",
     "TERM",
     // Items of the crates this one depends on.
     "click",
@@ -1115,8 +1129,14 @@ const NOT_OURS: &[&str] = &[
     "read",
     // Other programs, and the shell.
     "echo",
+    // De coreutils, y por eso las dos guardas que ejecutan el guion solo corren en Linux.
+    "timeout",
     "grep",
     "sed",
+    // Del intérprete de órdenes y de procps, que es lo que el guion usa para saber si hay una ventana
+    // abierta: la guarda que lo ejecuta se para **antes** de esa línea, y su comentario dice por qué.
+    "pgrep",
+    "unset",
     "VTE",
     // Items of the crates this one depends on.
     "break_on_newline",

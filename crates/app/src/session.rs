@@ -1323,7 +1323,7 @@ mod ceiling_tests {
 
     /// **Lo que la tanda de medida siembra tiene que seguir entendiéndose, y nadie lo afirmaba.**
     ///
-    /// `scripts/medir-fotograma.sh` escribe este documento **desde `sh`**, con las etiquetas del formato
+    /// `scripts/measure-frame.sh` escribe este documento **desde `sh`**, con las etiquetas del formato
     /// puestas a mano en un `printf`. Así que el día en que este enum renombre `leaf`, `branch`, `weight` o
     /// `orientation`, el guion seguiría escribiendo el nombre viejo y **la aplicación abriría de fábrica**:
     /// la tanda que dice medir el arranque restaurado mediría el de siempre. La corrida lo cazaría —el
