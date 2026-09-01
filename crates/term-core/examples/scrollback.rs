@@ -1,26 +1,29 @@
-//! Mide **lo que cuesta guardar historial**, que es lo que decide su techo.
+//! Measures **what it costs to keep history**, which is what decides its cap.
 //!
 //! ```text
 //! cargo run --release --example scrollback -p term-core
 //! ```
 //!
-//! **Mide el motor por debajo de esta caja, y es a propósito.** `Screen` fija hoy el historial en
-//! cero, así que medir a través de su fachada exigiría abrirle un hueco a la API de producción para
-//! un instrumento. Aquí se hace al revés: primero el número, y el número decide qué API hace falta.
+//! **It measures the engine below this crate, and that is on purpose.** `Screen` fixes history at
+//! zero today, so measuring through its facade would require opening a hole in the production API
+//! for an instrument. Here it is done the other way around: first the number, and the number
+//! decides what API is needed.
 //!
-//! **En depuración los tres números salen varias veces peores.** El que vale es el de `--release`.
+//! **In debug the three numbers come out several times worse.** The one that counts is the
+//! `--release` one.
 //!
-//! Las tres preguntas que contesta, y por qué cada una:
+//! The three questions it answers, and why each one:
 //!
-//! 1. **Cuánto ocupa de verdad una línea de historial.** El techo se elige en líneas y se paga en
-//!    memoria, así que sin este número el techo es una cuenta sobre el papel — y no hay techo de
-//!    divisiones, así que se multiplica por las consolas que haya.
-//! 2. **Cuánto cuesta refluir con N líneas guardadas.** Refluir recorre el historial **entero** cada
-//!    vez que cambia el número de columnas, y eso ocurre en **cada fotograma** mientras se arrastra
-//!    una frontera. Se miden varios puntos: con uno solo, la extrapolación es una recta inventada.
-//! 3. **Si guardar historial encarece interpretar un volcado.** Es la pregunta que puede reordenar el
-//!    hito: si sube, las tablas del anexo de D3 —con las que este proyecto juzgó a su framework— hay
-//!    que volver a tomarlas.
+//! 1. **How much a line of history really takes up.** The cap is chosen in lines and paid in
+//!    memory, so without this number the cap is a paper calculation — and there is no cap on
+//!    splits, so it multiplies by however many consoles there are.
+//! 2. **How much it costs to reflow with N stored lines.** Reflowing walks the **entire** history
+//!    every time the number of columns changes, and that happens on **every frame** while a border
+//!    is being dragged. Several points are measured: with just one, the extrapolation is an
+//!    invented straight line.
+//! 3. **Whether keeping history makes interpreting a dump more expensive.** It is the question that
+//!    can reorder the milestone: if it rises, the tables of the D3 annex —with which this project
+//!    judged its framework— have to be taken again.
 
 use std::time::Instant;
 
@@ -31,29 +34,29 @@ use alacritty_terminal::term::Config;
 use alacritty_terminal::term::cell::Cell;
 use alacritty_terminal::vte::ansi::Processor;
 
-/// Los techos que se comparan. El primero es el de hoy —ninguno— y el último, el que el motor trae
-/// por defecto y que esta medida existe para no heredar a ciegas.
+/// The caps being compared. The first is today's —none— and the last, the one the engine ships by
+/// default and that this measurement exists to avoid inheriting blindly.
 ///
-/// **Sin el 5 000 a propósito**: no distinguía nada del 3 500 por encima del ruido, así que era una
-/// fila que se lee como un dato y no lo es.
+/// **Without the 5,000 on purpose**: it distinguished nothing from the 3,500 above the noise, so it
+/// was a row that reads like a data point and is not.
 const CAPS: [usize; 4] = [0, 1_000, 3_500, 10_000];
 
-/// Cuántas veces se repite cada punto. **Una sola muestra por punto no es una medida**: la primera
-/// versión de este banco publicaba tres cifras significativas sobre una dispersión del 20 %, y un
-/// escalón de su tabla resultó ser ruido. Se publica la **mediana** y los extremos.
+/// How many times each point is repeated. **A single sample per point is not a measurement**: the
+/// first version of this bench published three significant figures over a 20 % spread, and one step
+/// of its table turned out to be noise. The **median** and the extremes are published.
 const REPEATS: usize = 5;
 
-/// Con cuántas columnas se mide. Es un ancho de consola realista en una ventana de trabajo, y
-/// **importa**: lo que ocupa una línea y lo que cuesta refluirla crecen con las columnas.
+/// How many columns it measures with. It is a realistic console width in a working window, and it
+/// **matters**: what a line takes up and what it costs to reflow it grow with the columns.
 const COLS: usize = 180;
 
-/// Cuántas filas tiene la parte visible. Sale de las tandas de medida de la aplicación.
+/// How many rows the visible part has. It comes from the application's measurement runs.
 const ROWS: usize = 49;
 
-/// Lo que se vuelca para llenar el historial y para medir el interpretado.
+/// What is dumped to fill the history and to measure the interpreting.
 const DUMP: usize = 8 * 1024 * 1024;
 
-/// Trozo con el que se alimenta la rejilla, del tamaño del búfer de lectura del pseudoterminal.
+/// Chunk the grid is fed with, the size of the pseudoterminal read buffer.
 const CHUNK: usize = 8192;
 
 struct Dims {
@@ -73,20 +76,20 @@ impl Dimensions for Dims {
     }
 }
 
-/// Texto con saltos y algún escape de color: un solo carácter repetido mediría el camino rápido del
-/// parser y mentiría sobre el caso real.
+/// Text with line breaks and the odd color escape: a single repeated character would measure the
+/// parser's fast path and lie about the real case.
 ///
-/// **Y en dos largos, porque de eso depende el número que más pesa.** Una línea más corta que la
-/// rejilla **no se recoloca**: al estrechar, el motor la empuja entera y sale por la puerta barata, así
-/// que un banco de líneas cortas mide el reflujo **que no ocurre**. La primera versión de esto medía
-/// solo el corto y publicó un número **cuatro veces** menor que el real. Los dos regímenes son reales
-/// —una sesión de terminal tiene de los dos— así que se publican los dos y el techo se elige contra el
-/// caro.
+/// **And in two lengths, because the heaviest number depends on it.** A line shorter than the grid
+/// **is not repositioned**: when narrowing, the engine pushes it whole and it leaves through the
+/// cheap door, so a bench of short lines measures the reflow **that does not happen**. The first
+/// version of this measured only the short one and published a number **four times** smaller than
+/// the real one. Both regimes are real —a terminal session has both— so both are published and the
+/// cap is chosen against the expensive one.
 fn dump(wraps: bool) -> Vec<u8> {
     let short = b"\x1b[32mlorem ipsum dolor sit amet\x1b[0m consectetur adipiscing elit\n".to_vec();
     let pattern = if wraps {
-        // Metro y medio de rejilla: garantiza que cada línea lógica ocupe dos físicas y que
-        // estrechar tenga que recolocarla de verdad.
+        // A grid and a half: guarantees that each logical line takes up two physical ones and that
+        // narrowing has to actually reposition it.
         let mut long = Vec::new();
         while long.len() < COLS * 3 / 2 {
             long.extend_from_slice(b"\x1b[32mlorem ipsum dolor\x1b[0m sit amet ");
@@ -104,7 +107,7 @@ fn dump(wraps: bool) -> Vec<u8> {
     bytes
 }
 
-/// La mediana y los extremos de unas cuantas muestras, que es lo que se publica de cada punto.
+/// The median and the extremes of a handful of samples, which is what is published for each point.
 fn summary(
     mut samples: Vec<std::time::Duration>,
 ) -> (
@@ -140,44 +143,46 @@ fn main() {
     let long = dump(true);
     let mib = short.len() as f64 / (1024.0 * 1024.0);
 
-    println!("rejilla:  {ROWS}×{COLS} · volcado de {mib:.1} MiB en trozos de {CHUNK} B");
+    println!("grid:     {ROWS}×{COLS} · dump of {mib:.1} MiB in {CHUNK} B chunks");
     println!(
-        "muestras: {REPEATS} por punto; se publica la mediana y, entre paréntesis, los extremos\n"
+        "samples:  {REPEATS} per point; the median is published and, in parentheses, the extremes\n"
     );
 
-    // ── 1. Lo que ocupa una celda, y lo que eso da de techo ──────────────────────────────────────
+    // ── 1. What a cell takes up, and the cap that yields ─────────────────────────────────────────
     //
-    // **El tamaño de la celda se pregunta, no se deduce del layout**: sumar los campos ignora el
-    // relleno que el compilador mete entre ellos, y el techo cuelga de este número.
+    // **The cell size is asked, not deduced from the layout**: summing the fields ignores the
+    // padding the compiler puts between them, and the cap hangs off this number.
     //
-    // **Lo demás de esta sección es una CUENTA, no una medida, y por eso se dice.** El motor no
-    // reserva el historial de antemano: su almacenamiento crece al llenarse. Así que estas cifras son
-    // **el techo** que una consola puede llegar a ocupar con el historial lleno, no lo que ocupa desde
-    // el principio.
+    // **The rest of this section is a CALCULATION, not a measurement, and that is why it is said.**
+    // The engine does not reserve the history in advance: its storage grows as it fills. So these
+    // figures are **the cap** a console can come to occupy with the history full, not what it takes
+    // up from the start.
     let cell = size_of::<Cell>();
-    println!("── lo que ocupa (medido: la celda; el resto es cuenta, y es un TECHO) ──");
-    println!("celda:    {cell} B  ← lo único medido aquí");
     println!(
-        "línea:    {} B con {COLS} columnas, sin contar lo que la fila reserva de más",
+        "── what it takes up (measured: the cell; the rest is a calculation, and it is a CAP) ──"
+    );
+    println!("cell:     {cell} B  ← the only thing measured here");
+    println!(
+        "line:     {} B with {COLS} columns, not counting what the row reserves on top",
         cell * COLS
     );
     for cap in CAPS {
         let per_console = cell * COLS * cap;
         println!(
-            "  techo {cap:>6}: hasta {:>6.1} MiB por consola · {:>6.1} MiB con cuatro",
+            "  cap {cap:>6}: up to {:>6.1} MiB per console · {:>6.1} MiB with four",
             per_console as f64 / (1024.0 * 1024.0),
             (per_console * 4) as f64 / (1024.0 * 1024.0)
         );
     }
 
-    // ── 2. Lo que cuesta recolocar el texto, en los dos regímenes ────────────────────────────────
+    // ── 2. What it costs to reposition the text, in the two regimes ──────────────────────────────
     //
-    // Se llena el historial de verdad antes de medir, y se cambia el número de **columnas**, que es lo
-    // que obliga a recolocar. Ida y vuelta para no dejar la rejilla creciendo hacia un lado y para
-    // esquivar la salida temprana del motor cuando el tamaño no cambia.
-    println!("\n── lo que cuesta recolocar el texto al cambiar el ancho ──");
-    for (name, bytes) in [("líneas cortas", &short), ("líneas que envuelven", &long)] {
-        println!("  con {name}:");
+    // The history is genuinely filled before measuring, and the number of **columns** is changed,
+    // which is what forces the repositioning. Round trip so as not to leave the grid growing to one
+    // side and to dodge the engine's early exit when the size does not change.
+    println!("\n── what it costs to reposition the text when the width changes ──");
+    for (name, bytes) in [("short lines", &short), ("wrapping lines", &long)] {
+        println!("  with {name}:");
         for cap in CAPS {
             let mut samples = Vec::with_capacity(REPEATS);
             for _ in 0..REPEATS {
@@ -197,17 +202,17 @@ fn main() {
             }
             let (mean, min, max) = summary(samples);
             println!(
-                "    techo {cap:>6}: {mean:>10.3?} por cambio de ancho  ({min:.3?} … {max:.3?}){}",
-                if cap == 0 { "  ← lo de hoy" } else { "" }
+                "    cap {cap:>6}: {mean:>10.3?} per width change  ({min:.3?} … {max:.3?}){}",
+                if cap == 0 { "  ← today's" } else { "" }
             );
         }
     }
 
-    // ── 3. Si guardar historial encarece interpretar ─────────────────────────────────────────────
+    // ── 3. Whether keeping history makes interpreting more expensive ─────────────────────────────
     //
-    // **Es la pregunta que puede reordenar el hito.** Si interpretar se encarece, las tablas de los
-    // anexos publicados se tomaron con otro régimen y hay que volver a tomarlas.
-    println!("\n── lo que cuesta interpretar el volcado ──");
+    // **It is the question that can reorder the milestone.** If interpreting gets more expensive,
+    // the tables of the published annexes were taken under another regime and have to be retaken.
+    println!("\n── what it costs to interpret the dump ──");
     for cap in CAPS {
         let mut samples = Vec::with_capacity(REPEATS);
         for _ in 0..REPEATS {
@@ -221,9 +226,9 @@ fn main() {
         }
         let (mean, min, max) = summary(samples);
         println!(
-            "  techo {cap:>6}: {mean:>10.3?} · {:>6.1} MiB/s  ({min:.3?} … {max:.3?}){}",
+            "  cap {cap:>6}: {mean:>10.3?} · {:>6.1} MiB/s  ({min:.3?} … {max:.3?}){}",
             mib / mean.as_secs_f64(),
-            if cap == 0 { "  ← lo de hoy" } else { "" }
+            if cap == 0 { "  ← today's" } else { "" }
         );
     }
 }

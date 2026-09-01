@@ -1,4 +1,4 @@
-//! El estado del terminal: los bytes se interpretan y quedan en una rejilla.
+//! The terminal state: bytes are interpreted and settle into a grid.
 
 use alacritty_terminal::Term;
 use alacritty_terminal::event::VoidListener;
@@ -13,12 +13,12 @@ use alacritty_terminal::vte::ansi::Processor;
 use crate::Size;
 use crate::view::{self, CellWidth, Cursor, View, ViewCell};
 
-/// Dimensiones en el vocabulario de `alacritty_terminal`.
+/// Dimensions in the vocabulary of `alacritty_terminal`.
 ///
-/// Existe para que ese trait no haya que implementarlo sobre [`Size`], que es público: así la
-/// dependencia no asoma en la API de este crate. El crate trae un tipo equivalente, pero vive en
-/// un módulo que él mismo declara «ayudas para tests», y construir sobre eso es apoyarse en algo
-/// que su autor no se ha comprometido a mantener.
+/// It exists so that this trait need not be implemented on [`Size`], which is public: this way the
+/// dependency does not surface in this crate's API. The crate ships an equivalent type, but it lives in
+/// a module it itself declares "test helpers", and building on that is leaning on something
+/// its author has not committed to maintaining.
 struct Dims {
     rows: usize,
     cols: usize,
@@ -47,38 +47,38 @@ impl From<Size> for Dims {
     }
 }
 
-/// La pantalla de una división: interpreta bytes de terminal y mantiene la rejilla resultante.
+/// The screen of a split: it interprets terminal bytes and maintains the resulting grid.
 ///
-/// Se alimenta a mano con [`advance`](Screen::advance), en los trozos que quien la usa decida. Esa
-/// es la diferencia con dejar que un hilo la actualice sola: quien pinta controla cuánto trabajo
-/// hace por pasada, que es lo que permite que un volcado enorme no se lo coma entero de una vez.
+/// It is fed by hand with [`advance`](Screen::advance), in the chunks that whoever uses it decides. That
+/// is the difference with letting a thread update it on its own: whoever paints controls how much work
+/// it does per pass, which is what lets a huge dump not swallow it whole in one go.
 pub struct Screen {
     term: Term<VoidListener>,
     parser: Processor,
 }
 
-/// Una celda de la rejilla **visible**, y de qué mitad de ella se habla.
+/// A cell of the **visible** grid, and which half of it is being talked about.
 ///
-/// **Vocabulario propio**, por lo mismo que [`Scroll`]: quien use esta caja no tiene que conocer
-/// los tipos del motor.
+/// **Its own vocabulary**, for the same reason as [`Scroll`]: whoever uses this crate does not have to know
+/// the engine's types.
 ///
-/// **Las coordenadas son las de lo que se ve**, con el desplazamiento del historial ya aplicado — o sea
-/// las mismas con las que se indexa [`View`]. Quien pinta cuenta filas y columnas desde arriba a la
-/// izquierda de lo que tiene delante, y obligarle a restar el desplazamiento sería pedirle que sepa que
-/// existe.
+/// **The coordinates are those of what is seen**, with the scrollback offset already applied — that is,
+/// the same ones with which [`View`] is indexed. Whoever paints counts rows and columns from the top
+/// left of what is in front of them, and forcing them to subtract the offset would be asking them to know it
+/// exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
     pub row: u16,
     pub col: u16,
-    /// De qué mitad de la celda se habla.
+    /// Which half of the cell is being talked about.
     ///
-    /// **No es un detalle de precisión: sin esto no se puede seleccionar un solo carácter.** Empezar y
-    /// terminar en la misma celda da una selección vacía o de un carácter según por qué lado se entró y
-    /// por cuál se sale, que es exactamente lo que hace el ratón en cualquier terminal.
+    /// **It is not a detail of precision: without this you cannot select a single character.** Starting and
+    /// ending in the same cell gives an empty selection or a one-character one depending on which side you entered
+    /// and which you leave by, which is exactly what the mouse does in any terminal.
     pub half: Half,
 }
 
-/// De qué mitad de una celda se habla, para empezar o terminar una selección.
+/// Which half of a cell is being talked about, to start or end a selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Half {
     Left,
@@ -86,10 +86,10 @@ pub enum Half {
 }
 
 impl Half {
-    /// Cuál de las dos mitades cae en esa fracción del ancho de la celda.
+    /// Which of the two halves that fraction of the cell's width falls in.
     ///
-    /// **Vive aquí y no en quien pinta** para que la regla —la mitad exacta— esté escrita una vez. Quien
-    /// pinta sabe puntos y celdas; dónde cae la frontera entre las dos mitades es de esta caja.
+    /// **It lives here and not in whoever paints** so that the rule —the exact half— is written once. Whoever
+    /// paints knows points and cells; where the boundary between the two halves falls belongs to this crate.
     pub fn from_fraction(within: f32) -> Self {
         if within < 0.5 {
             Self::Left
@@ -99,7 +99,7 @@ impl Half {
     }
 }
 
-/// Traduce la mitad de la celda al vocabulario del motor.
+/// Translates the cell half into the engine's vocabulary.
 fn engine_side(half: Half) -> Side {
     match half {
         Half::Left => Side::Left,
@@ -107,65 +107,65 @@ fn engine_side(half: Half) -> Side {
     }
 }
 
-/// Qué le ha pedido al terminal el programa de dentro sobre el ratón.
+/// What the inner program has asked the terminal about the mouse.
 ///
-/// **Vocabulario propio y no las banderas del motor**, por lo mismo que [`Scroll`] y
-/// [`Cell`]: quien use esta caja no tiene que conocer sus tipos ni migrar con ellos.
+/// **Its own vocabulary and not the engine's flags**, for the same reason as [`Scroll`] and
+/// [`Cell`]: whoever uses this crate does not have to know its types nor migrate with them.
 ///
-/// **Lo que hay aquí es lo que el programa PIDE, no lo que la ventana decide hacer.** El orden de
-/// prioridades —cuándo gana el historial, cuándo el programa— es de quien reparte los gestos, no de
-/// esta caja: aquí solo se contesta la pregunta.
+/// **What is here is what the program ASKS for, not what the window decides to do.** The order of
+/// priorities —when scrollback wins, when the program does— belongs to whoever hands out the gestures, not to
+/// this crate: here only the question is answered.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MouseReporting {
-    /// Quiere que se le avise de apretar y de soltar los botones.
+    /// It wants to be told about pressing and releasing the buttons.
     pub buttons: bool,
-    /// Quiere que se le avise también mientras se arrastra con un botón apretado.
+    /// It wants to be told also while dragging with a button held down.
     pub drag: bool,
-    /// Quiere que se le avise del movimiento **aunque no haya ningún botón apretado**.
+    /// It wants to be told about movement **even when no button is held down**.
     pub motion: bool,
-    /// Quiere el informe en la codificación extendida, la que no tiene techo de columna.
+    /// It wants the report in the extended encoding, the one with no column ceiling.
     pub extended: bool,
 }
 
 impl MouseReporting {
-    /// Si el programa quiere el ratón para algo.
+    /// Whether the program wants the mouse for anything.
     ///
-    /// **`extended` no cuenta**: dice *cómo* quiere el informe, no *si* lo quiere. Un programa que
-    /// solo encendiera esa bandera no ha pedido nada, y mandarle informes sería hablarle sin que
-    /// preguntara.
+    /// **`extended` does not count**: it says *how* it wants the report, not *whether* it wants it. A program that
+    /// only turned on that flag has asked for nothing, and sending it reports would be talking to it without its
+    /// asking.
     pub fn wants_mouse(&self) -> bool {
         self.buttons || self.drag || self.motion
     }
 }
 
-/// Cuánto se sube o se baja por el historial de una consola.
+/// How far one scrolls up or down through a console's scrollback.
 ///
-/// **Vocabulario propio, no el del motor**, por lo mismo que el resto de esta caja: quien la use no
-/// tiene que conocer los tipos de sus dependencias ni migrar con ellos.
+/// **Its own vocabulary, not the engine's**, for the same reason as the rest of this crate: whoever uses it
+/// does not have to know its dependencies' types nor migrate with them.
 ///
-/// Los números son **líneas**, positivos hacia lo viejo — la dirección en la que se sube.
+/// The numbers are **lines**, positive toward the old — the direction in which one scrolls up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scroll {
-    /// Tantas líneas hacia lo viejo; en negativo, hacia lo nuevo.
+    /// That many lines toward the old; negative, toward the new.
     Lines(i32),
-    /// Tantas pantallas hacia lo viejo; en negativo, hacia lo nuevo. **La pantalla la decide la
-    /// rejilla**, no un número fijo: una consola estrecha y alta no tiene la misma página que una
-    /// ancha y baja.
+    /// That many screens toward the old; negative, toward the new. **The screen is decided by the
+    /// grid**, not a fixed number: a narrow, tall console does not have the same page as a
+    /// wide, short one.
     Pages(i32),
-    /// Del todo hacia lo viejo.
+    /// All the way toward the old.
     ToTop,
-    /// Del todo hacia lo nuevo, que es donde el programa escribe.
+    /// All the way toward the new, which is where the program writes.
     ToBottom,
 }
 
 impl Scroll {
-    /// Lo traduce a lo que el motor entiende. **Privado a la caja**: el tipo del motor no sale de
-    /// aquí.
+    /// Translates it to what the engine understands. **Private to the crate**: the engine's type does not leave
+    /// here.
     fn to_engine(self, rows: u16) -> GridScroll {
         match self {
             Self::Lines(count) => GridScroll::Delta(count),
-            // Una página es la pantalla entera menos una línea, que es lo que hace cualquier
-            // paginador: deja una de contexto para no perder el hilo entre pantalla y pantalla.
+            // A page is the whole screen minus one line, which is what any
+            // pager does: it leaves one of context so as not to lose the thread between screen and screen.
             Self::Pages(count) => GridScroll::Delta(count * (rows.saturating_sub(1)) as i32),
             Self::ToTop => GridScroll::Top,
             Self::ToBottom => GridScroll::Bottom,
@@ -173,26 +173,26 @@ impl Scroll {
     }
 }
 
-/// Cuántas líneas recuerda cada consola de lo que salió por arriba.
+/// How many lines each console remembers of what scrolled off the top.
 ///
-/// **El número lo pone este proyecto y no se hereda del motor**, que trae 10 000. Se eligió midiendo
-/// —el banco está en `examples/scrollback.rs`— y la decisión entera, con la tabla y lo descartado, es
-/// **D21** de `docs/02-decisiones.md`. Lo que hay que saber para tocarlo:
+/// **The number is set by this project and not inherited from the engine**, which ships 10,000. It was chosen by measuring
+/// —the bench is in `examples/scrollback.rs`— and the whole decision, with the table and what was discarded, is
+/// **D21** in `docs/02-decisiones.md`. What you have to know to touch it:
 ///
-/// - **Es el defecto de WezTerm**, que es el listón contra el que este proyecto se mide.
-/// - **Recolocar el texto al cambiar el ancho recorre el historial entero.** Con estas líneas y
-///   contenido que envuelve son ~984 µs por consola; con las 10 000 del motor, 4,07 ms — y una
-///   frontera mueve **dos** consolas, así que serían más de ocho milisegundos por fotograma
-///   **mientras se arrastra**.
-/// - **Guardar historial encarece interpretar un volcado un 85 %**, de 182 a 98 MiB/s. Ese precio
-///   está declarado y aceptado en D21; no es un descuido que alguien pueda «arreglar» bajando esto
-///   sin leer la decisión.
-/// - **Hasta 14,4 MiB por consola** con el historial lleno a 180 columnas, y no hay techo de
-///   divisiones (**D14**).
+/// - **It is WezTerm's default**, which is the bar this project measures itself against.
+/// - **Relaying out the text when the width changes walks the whole scrollback.** With these lines and
+///   content that wraps it is ~984 µs per console; with the engine's 10,000, 4.07 ms — and one
+///   boundary moves **two** consoles, so it would be more than eight milliseconds per frame
+///   **while being dragged**.
+/// - **Keeping scrollback makes interpreting a dump 85 % more expensive**, from 182 to 98 MiB/s. That price
+///   is declared and accepted in D21; it is not an oversight that someone could "fix" by lowering this
+///   without reading the decision.
+/// - **Up to 14.4 MiB per console** with the scrollback full at 180 columns, and there is no ceiling on
+///   splits (**D14**).
 pub const SCROLLBACK: usize = 3_500;
 
 impl Screen {
-    /// Crea una pantalla vacía del tamaño dado.
+    /// Creates an empty screen of the given size.
     pub fn new(size: Size) -> Self {
         let config = Config {
             scrolling_history: SCROLLBACK,
@@ -205,32 +205,32 @@ impl Screen {
         }
     }
 
-    /// Interpreta un trozo de salida del terminal.
+    /// Interprets a chunk of the terminal's output.
     ///
-    /// Acepta cualquier corte: el parser conserva su estado entre llamadas, así que una secuencia
-    /// de escape partida en dos entregas produce el mismo resultado que entera. Es lo que hace
-    /// correcto que el PTY entregue lecturas parciales.
+    /// It accepts any cut: the parser keeps its state between calls, so an escape
+    /// sequence split across two deliveries produces the same result as a whole one. It is what makes
+    /// it correct for the PTY to deliver partial reads.
     pub fn advance(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
     }
 
-    /// Cambia el tamaño de la rejilla y refluye su contenido.
+    /// Changes the grid's size and reflows its content.
     ///
-    /// **Solo cambia la rejilla.** El programa que corre dentro del pseudoterminal no se entera por
-    /// esta vía: para eso está [`Pty::resize`](crate::Pty::resize), y hay que llamar a las dos —
-    /// **esta primero**. En cuanto el programa sepa el tamaño nuevo empieza a mandar bytes para él,
-    /// y si la rejilla siguiera siendo la vieja se interpretarían contra dimensiones equivocadas.
-    /// Están separadas porque son dos piezas que no se conocen entre sí, y esconder una dentro de
-    /// la otra ataría la rejilla a tener siempre un pseudoterminal detrás — que no es el caso en
-    /// los tests, ni tiene por qué serlo después.
+    /// **It only changes the grid.** The program running inside the pseudoterminal does not find out by
+    /// this route: for that there is [`Pty::resize`](crate::Pty::resize), and both must be called —
+    /// **this one first**. As soon as the program knows the new size it starts sending bytes for it,
+    /// and if the grid were still the old one they would be interpreted against the wrong dimensions.
+    /// They are separated because they are two pieces that do not know each other, and hiding one inside
+    /// the other would tie the grid to always having a pseudoterminal behind it — which is not the case in
+    /// the tests, nor does it have to be later.
     pub fn resize(&mut self, size: Size) {
         self.term.resize(Dims::from(size));
     }
 
-    /// El tamaño actual de la rejilla.
+    /// The grid's current size.
     ///
-    /// Se lee de la propia rejilla en vez de guardarse aparte: con dos copias del mismo dato,
-    /// redimensionar y actualizar solo una las deja divergir sin que nada falle.
+    /// It is read from the grid itself instead of being stored separately: with two copies of the same datum,
+    /// resizing and updating only one lets them diverge without anything failing.
     pub fn size(&self) -> Size {
         let grid = self.term.grid();
         Size {
@@ -239,36 +239,36 @@ impl Screen {
         }
     }
 
-    /// Sube o baja por lo que salió por arriba.
+    /// Scrolls up or down through what scrolled off the top.
     ///
-    /// **No le llega nada al programa de dentro**: mirar el historial es cosa del terminal, y el
-    /// programa ni se entera ni tiene por qué. Es lo que separa esto de mandarle las flechas.
+    /// **Nothing reaches the inner program**: looking at the scrollback is the terminal's business, and the
+    /// program neither finds out nor has any reason to. It is what separates this from sending it the arrows.
     ///
-    /// **Y el desplazamiento se queda donde está aunque siga entrando salida.** Lo sostiene el propio
-    /// motor: mientras hay desplazamiento, lo que llega se acumula por debajo sin mover lo que se
-    /// mira. Es lo que uno espera al parar a leer algo mientras un programa sigue escribiendo.
+    /// **And the offset stays where it is even if output keeps coming in.** The engine itself
+    /// sustains it: while there is an offset, what arrives accumulates below without moving what is being
+    /// looked at. It is what one expects when stopping to read something while a program keeps writing.
     pub fn scroll_by(&mut self, amount: Scroll) {
         self.term.scroll_display(amount.to_engine(self.size().rows));
     }
 
-    /// Si el programa de dentro ha pedido que lo pegado le llegue **marcado como pegado**.
+    /// Whether the inner program has asked that what is pasted reach it **marked as pasted**.
     ///
-    /// Un shell que lo pide no ejecuta lo que reciba así aunque traiga saltos de línea: lo deja
-    /// escrito para que se revise antes de darle a Enter. Sin la pregunta, quien pega varias líneas
-    /// las ejecuta una a una sin haberlas visto, que es lo que este accesor existe para evitar.
+    /// A shell that asks for it does not execute what it receives that way even if it carries line breaks: it leaves it
+    /// written so it can be reviewed before hitting Enter. Without the question, whoever pastes several lines
+    /// runs them one by one without having seen them, which is what this accessor exists to prevent.
     ///
-    /// **Devuelve `bool` y no el tipo del motor a propósito.** Esta caja existe para sobrevivir a que
-    /// la interfaz se reescriba, y lo consigue no dejando asomar los tipos de sus dependencias por su
-    /// API pública: quien la use no tiene que conocerlos ni migrar con ellos.
+    /// **It returns `bool` and not the engine's type on purpose.** This crate exists to survive the
+    /// interface being rewritten, and it achieves that by not letting its dependencies' types surface through its
+    /// public API: whoever uses it does not have to know them nor migrate with them.
     pub fn bracketed_paste(&self) -> bool {
         self.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 
-    /// Qué le ha pedido el programa de dentro al terminal sobre el ratón.
+    /// What the inner program has asked the terminal about the mouse.
     ///
-    /// **Devuelve un tipo propio y no las banderas del motor**, por la misma razón que
-    /// [`bracketed_paste`](Screen::bracketed_paste): esta caja existe para sobrevivir a que la interfaz
-    /// se reescriba, y lo consigue no dejando asomar los tipos de sus dependencias por su API.
+    /// **It returns its own type and not the engine's flags**, for the same reason as
+    /// [`bracketed_paste`](Screen::bracketed_paste): this crate exists to survive the interface
+    /// being rewritten, and it achieves that by not letting its dependencies' types surface through its API.
     pub fn mouse_reporting(&self) -> MouseReporting {
         let mode = self.term.mode();
         MouseReporting {
@@ -279,64 +279,64 @@ impl Screen {
         }
     }
 
-    /// Si girar la rueda tiene que llegarle al programa **como flechas**.
+    /// Whether turning the wheel has to reach the program **as arrows**.
     ///
-    /// Es lo que hace que `less` y `man` se desplacen con la rueda sin pedir el ratón: piden la
-    /// pantalla alterna y encienden el desplazamiento alternativo, y el terminal les traduce el giro a
-    /// las teclas que ya saben atender.
+    /// It is what makes `less` and `man` scroll with the wheel without asking for the mouse: they ask for the
+    /// alternate screen and turn on alternate scrolling, and the terminal translates the turn into
+    /// the keys they already know how to attend to.
     ///
-    /// **El desplazamiento alternativo viene encendido de fábrica** —está en el modo por defecto del
-    /// motor, leído y no supuesto, igual que hace `xterm`—, así que en la práctica lo que decide es la
-    /// pantalla alterna. La bandera sigue preguntándose porque un programa **puede apagarla**: `vim` lo
-    /// hace en cuanto quiere el ratón para sí, y darle flechas entonces movería su punto de inserción
-    /// sin que nadie tocara una tecla.
+    /// **Alternate scrolling comes turned on out of the box** —it is in the engine's default
+    /// mode, read and not assumed, just as `xterm` does—, so in practice what decides is the
+    /// alternate screen. The flag is still queried because a program **can turn it off**: `vim` does
+    /// so as soon as it wants the mouse for itself, and giving it arrows then would move its insertion point
+    /// without anyone touching a key.
     pub fn wheel_acts_as_arrows(&self) -> bool {
         let mode = self.term.mode();
         mode.contains(TermMode::ALT_SCREEN) && mode.contains(TermMode::ALTERNATE_SCROLL)
     }
 
-    /// Una foto de la rejilla visible: todas las celdas y el cursor.
+    /// A snapshot of the visible grid: all the cells and the cursor.
     ///
-    /// Es el lector que usa quien pinta, y **no toca la pantalla**: a diferencia de consultar los
-    /// daños, se puede llamar tantas veces como haga falta y siempre devuelve lo mismo mientras no
-    /// entren bytes nuevos. Eso es lo que permite pintar dos veces el mismo frame sin que la
-    /// segunda salga en blanco.
+    /// It is the reader that whoever paints uses, and it **does not touch the screen**: unlike querying the
+    /// damage, it can be called as many times as needed and always returns the same while no
+    /// new bytes come in. That is what lets the same frame be painted twice without the
+    /// second coming out blank.
     ///
-    /// Convive con [`to_text`](Screen::to_text) en vez de sustituirlo: son dos contratos distintos
-    /// —uno da texto legible, el otro celdas con atributos— y fusionarlos no lo pide nadie.
+    /// It coexists with [`to_text`](Screen::to_text) instead of replacing it: they are two distinct contracts
+    /// —one gives legible text, the other cells with attributes— and merging them is asked for by no one.
     pub fn view(&self) -> View {
         let size = self.size();
         let cols = size.cols as usize;
         let mut cells = vec![ViewCell::default(); size.rows as usize * cols];
-        // Vacío en el caso corriente: solo crece con las celdas que llevan algo pegado.
+        // Empty in the common case: it only grows with the cells that carry something attached.
         let mut combining = Vec::new();
 
         let contents = self.term.renderable_content();
-        // **El rango de la selección se saca UNA vez y se pregunta por celda**, y quien contesta es el
-        // motor: sus dos reglas finas —el acompañante de un carácter ancho va con su cabeza, y el cursor
-        // de bloque no se realza en los extremos— no se rehacen aquí.
+        // **The selection range is pulled out ONCE and queried per cell**, and whoever answers is the
+        // engine: its two fine rules —a wide character's companion goes with its head, and the block
+        // cursor is not highlighted at the ends— are not redone here.
         let selection = contents.selection;
         let cursor_shape = contents.cursor.shape;
-        // Las coordenadas del iterador y las del cursor van en el mismo sistema, que cuenta desde
-        // el principio del historial. Sumar el desplazamiento las lleva a coordenadas visibles, que
-        // son con las que quien pinta puede indexar. Para las **celdas** la cuenta basta —el
-        // iterador solo recorre lo visible—; para el **cursor** no, porque puede quedarse fuera:
-        // ver más abajo.
+        // The iterator's coordinates and the cursor's go in the same system, which counts from
+        // the start of the scrollback. Adding the offset brings them to visible coordinates, which
+        // are the ones whoever paints can index with. For the **cells** the sum is enough —the
+        // iterator only walks the visible—; for the **cursor** it is not, because it can end up outside:
+        // see below.
         let scroll = contents.display_offset as i32;
 
-        // **Si la celda anterior era la cabeza de un carácter ancho Y estaba realzada.** Ver abajo por
-        // qué hace falta llevar la cuenta.
+        // **Whether the previous cell was the head of a wide character AND was highlighted.** See below why
+        // it is necessary to keep track.
         let mut wide_head_was_highlighted = false;
         for indexed in contents.display_iter {
             let row = indexed.point.line.0 + scroll;
             let col = indexed.point.column.0;
-            // El iterador no sale de lo visible —comprobado contra su fuente—, así que esto no
-            // debería dispararse nunca. Se queda como aserción y no como salto silencioso: si una
-            // versión futura cambiara el rango, saltaría en los tests en vez de dejar filas en
-            // blanco que nadie sabría explicar.
+            // The iterator does not leave the visible —checked against its source—, so this should
+            // never fire. It stays as an assertion and not as a silent skip: if a
+            // future version changed the range, it would trip in the tests instead of leaving blank
+            // rows that no one could explain.
             debug_assert!(
                 row >= 0 && row < size.rows as i32 && col < cols,
-                "el iterador salió de lo visible: fila {row}, columna {col}"
+                "the iterator left the visible: row {row}, column {col}"
             );
             if row < 0 || row >= size.rows as i32 || col >= cols {
                 continue;
@@ -345,16 +345,16 @@ impl Screen {
                 range.contains_cell(&indexed, contents.cursor.point, cursor_shape)
             });
             let mut cell = view::cell_from(indexed.cell, selected, &mut combining);
-            // **El acompañante de un carácter ancho se realza con su cabeza, y esto lo pone ESTA caja.**
-            // El motor hace solo el camino contrario —marca la cabeza cuando el acompañante cae dentro,
-            // para que su texto no salga cortado— y le basta porque su pintor dibuja el fondo de un
-            // carácter ancho de dos celdas de ancho. El nuestro pinta **el fondo de cada celda por
-            // separado**, así que sin esto un carácter ancho en el borde de la selección sale con media
-            // letra realzada y media no, justo donde hay CJK o emoji.
+            // **A wide character's companion is highlighted along with its head, and THIS crate sets that.**
+            // The engine only does the opposite path —it marks the head when the companion falls inside,
+            // so that its text does not come out cut off— and that is enough for it because its painter draws the background of a
+            // wide character two cells wide. Ours paints **the background of each cell
+            // separately**, so without this a wide character at the edge of the selection comes out with half a
+            // letter highlighted and half not, right where there is CJK or an emoji.
             //
-            // Se lleva con una bandera y no con una segunda pasada porque el recorrido es por filas y el
-            // acompañante viene **justo detrás** de su cabeza: una pasada más sobre la rejilla entera se
-            // paga en todos los fotogramas para arreglar dos celdas.
+            // It is carried with a flag and not with a second pass because the walk is by rows and the
+            // companion comes **right behind** its head: one more pass over the whole grid is
+            // paid on every frame to fix two cells.
             if cell.width == CellWidth::WideTail && wide_head_was_highlighted {
                 cell.selected = true;
             }
@@ -362,11 +362,11 @@ impl Screen {
             cells[row as usize * cols + col] = cell;
         }
 
-        // **El cursor puede no verse, y ahora se dice en vez de recortarse.** Subiendo por el
-        // historial el cursor sigue en el área activa, que queda por debajo de lo que se mira:
-        // recortarlo a la última fila lo dibujaría en un sitio donde no está, y quien mirase creería
-        // que el programa escribe ahí. Esto es exactamente lo que el comentario de este sitio
-        // anunciaba desde F1.2, cuando el historial no existía.
+        // **The cursor may not be visible, and now that is said instead of clamped.** Scrolling up through the
+        // scrollback the cursor stays in the active area, which sits below what is being looked at:
+        // clamping it to the last row would draw it in a place where it is not, and whoever looked would believe
+        // that the program writes there. This is exactly what this spot's comment
+        // announced ever since F1.2, when the scrollback did not exist.
         let cursor_row = contents.cursor.point.line.0 + scroll;
         let cursor = (0..size.rows as i32).contains(&cursor_row).then(|| Cursor {
             row: cursor_row as u16,
@@ -377,15 +377,15 @@ impl Screen {
         View::new(size, cells, combining, cursor, contents.display_offset)
     }
 
-    /// Empieza una selección en esa celda, **tirando la que hubiera**.
+    /// Starts a selection at that cell, **throwing away any that existed**.
     ///
-    /// **El punto es de la rejilla visible** y aquí se convierte al sistema del motor, que cuenta desde
-    /// el principio del historial: restar el desplazamiento es lo que hace que seleccionar algo que se
-    /// fue por arriba marque **eso** y no lo que hoy ocupa su sitio en pantalla.
+    /// **The point is from the visible grid** and here it is converted to the engine's system, which counts from
+    /// the start of the scrollback: subtracting the offset is what makes selecting something that
+    /// scrolled off the top mark **that** and not what occupies its place on screen today.
     ///
-    /// **No se comprueba que la celda exista.** El motor acota el punto por su cuenta al convertirlo a
-    /// rango, y una celda fuera de la rejilla no es un error de quien llama: es el ratón saliéndose de la
-    /// consola mientras se arrastra, que es el caso normal.
+    /// **It is not checked that the cell exists.** The engine clamps the point on its own when converting it to a
+    /// range, and a cell outside the grid is not a caller's error: it is the mouse leaving the
+    /// console while dragging, which is the normal case.
     pub fn start_selection(&mut self, at: Cell) {
         self.term.selection = Some(Selection::new(
             SelectionType::Simple,
@@ -394,11 +394,11 @@ impl Screen {
         ));
     }
 
-    /// Lleva hasta esa celda la selección empezada, si hay alguna.
+    /// Extends the started selection up to that cell, if there is one.
     ///
-    /// **Sin selección empezada no hace nada, y eso no es una guarda por si acaso**: el arrastre se
-    /// atiende en cada fotograma mientras el botón está apretado, y el primero de todos es el que la
-    /// empieza. Los demás llegan aquí sin que nadie haya soltado nada.
+    /// **With no started selection it does nothing, and that is not a just-in-case guard**: the drag is
+    /// attended on every frame while the button is held down, and the very first is the one that
+    /// starts it. The rest arrive here without anyone having released anything.
     pub fn extend_selection(&mut self, to: Cell) {
         let point = self.engine_point(to);
         let half = engine_side(to.half);
@@ -407,16 +407,16 @@ impl Screen {
         }
     }
 
-    /// Tira la selección que hubiera. Sin selección, no hace nada.
+    /// Throws away any selection that existed. With no selection, it does nothing.
     pub fn clear_selection(&mut self) {
         self.term.selection = None;
     }
 
-    /// Si hay algo seleccionado ahora mismo.
+    /// Whether there is something selected right now.
     ///
-    /// **No es lo mismo que «se ha empezado una selección»**: arrastrar y volver al punto de partida deja
-    /// una selección empezada y **vacía**, y de ahí no se copia nada. Quien pregunte para decidir si
-    /// copiar tiene que preguntar esto.
+    /// **It is not the same as "a selection has been started"**: dragging and returning to the starting point leaves
+    /// a started and **empty** selection, and nothing is copied from that. Whoever asks to decide whether to
+    /// copy has to ask this.
     pub fn has_selection(&self) -> bool {
         self.term
             .selection
@@ -424,22 +424,22 @@ impl Screen {
             .is_some_and(|selection| !selection.is_empty())
     }
 
-    /// El texto de lo seleccionado, o nada si no hay selección.
+    /// The text of what is selected, or nothing if there is no selection.
     ///
-    /// **Las reglas de qué es «el texto» son del motor y están escritas en D22 del registro de decisiones**:
-    /// las líneas que envuelven
-    /// se unen **sin salto**, el relleno del final de cada línea se **recorta**, el acompañante de un
-    /// carácter ancho **no se duplica** y el hueco de una tabulación se salta. Heredar el código es
-    /// correcto; heredar la decisión sin decirla, no.
+    /// **The rules of what "the text" is belong to the engine and are written in D22 of the decision log**:
+    /// the lines that wrap
+    /// are joined **with no break**, the padding at the end of each line is **trimmed**, a wide
+    /// character's companion **is not duplicated** and a tab's gap is skipped. Inheriting the code is
+    /// correct; inheriting the decision without saying it, not.
     ///
-    /// **No filtra caracteres de control**, al revés que pegar: lo que sale de aquí son caracteres de
-    /// celdas y el motor no guarda escapes. Pegar filtra porque protege al programa de dentro de lo que
-    /// entra; aquí la dirección es la contraria.
+    /// **It does not filter control characters**, unlike pasting: what comes out of here are characters from
+    /// cells and the engine does not keep escapes. Pasting filters because it protects the inner program from what
+    /// comes in; here the direction is the opposite.
     pub fn selected_text(&self) -> Option<String> {
         self.term.selection_to_string()
     }
 
-    /// Lleva una celda de lo visible al sistema de coordenadas del motor.
+    /// Brings a visible cell into the engine's coordinate system.
     fn engine_point(&self, cell: Cell) -> Point {
         let scroll = self.term.grid().display_offset() as i32;
         Point::new(
@@ -448,21 +448,21 @@ impl Screen {
         )
     }
 
-    /// Vuelca **el área activa** a texto — donde el programa escribe, no necesariamente lo que se
-    /// está mirando.
+    /// Dumps **the active area** to text — where the program writes, not necessarily what is
+    /// being looked at.
     ///
-    /// **La diferencia importa desde que hay historial, y por eso está dicha así.** Subiendo por lo
-    /// que salió por arriba, lo que se ve **no** es el área activa; esto sigue devolviendo el área
-    /// activa, que es lo que quiere quien comprueba qué escribió un programa. Quien necesite lo que
-    /// se ve tiene [`view`](Screen::view), que sí lleva el desplazamiento aplicado.
+    /// **The difference matters ever since there is scrollback, and that is why it is said this way.** Scrolling up through what
+    /// scrolled off the top, what is seen is **not** the active area; this still returns the active
+    /// area, which is what whoever checks what a program wrote wants. Whoever needs what
+    /// is seen has [`view`](Screen::view), which does carry the offset applied.
     ///
-    /// Recorta los espacios finales de cada línea, descarta las líneas vacías del final y une con
-    /// saltos de línea, sin salto al final. Una pantalla sin contenido devuelve la cadena vacía.
+    /// It trims the trailing spaces of each line, discards the empty lines at the end and joins with
+    /// line breaks, with no break at the end. A screen with no content returns the empty string.
     ///
-    /// Se descartan las líneas vacías finales porque una pantalla casi siempre tiene la mitad de
-    /// abajo en blanco, y arrastrar esos saltos convierte cualquier comparación en una cuenta de
-    /// líneas invisibles. Cuántas filas tiene la rejilla lo dice [`size`](Screen::size), que es
-    /// donde esa información no estorba.
+    /// The trailing empty lines are discarded because a screen almost always has its bottom half
+    /// blank, and dragging those breaks along turns any comparison into a count of
+    /// invisible lines. How many rows the grid has is said by [`size`](Screen::size), which is
+    /// where that information does not get in the way.
     pub fn to_text(&self) -> String {
         let grid = self.term.grid();
         let mut lines: Vec<String> = Vec::with_capacity(grid.screen_lines());
@@ -472,17 +472,17 @@ impl Screen {
             let mut line = String::with_capacity(grid.columns());
             for col in 0..grid.columns() {
                 let cell = &row[Column(col)];
-                // Un carácter ancho ocupa dos celdas pero es un solo carácter: la segunda es un
-                // acompañante sin contenido y duplicaría el glifo si se copiara.
+                // A wide character takes up two cells but is a single character: the second is a
+                // companion with no content and would duplicate the glyph if it were copied.
                 if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
                     continue;
                 }
                 line.push(cell.c);
-                // **Y lo que va pegado detrás, que también lo escribió el programa.** Sin esto, `☁️`
-                // sale como `☁` —el selector de emoji no ocupa columna pero SÍ es texto—, y devolver
-                // eso es devolver un carácter **distinto** del que se escribió. Es la misma regla que
-                // **D22** fija para copiar: lo que sale de aquí es lo que el programa puso, ni un
-                // carácter más ni uno menos.
+                // **And what goes attached behind it, which the program also wrote.** Without this, `☁️`
+                // comes out as `☁` —the emoji selector takes up no column but IS text—, and returning
+                // that is returning a **different** character from the one that was written. It is the same rule that
+                // **D22** sets for copying: what comes out of here is what the program put, not one
+                // character more nor one less.
                 line.extend(cell.zerowidth().into_iter().flatten());
             }
             lines.push(line.trim_end().to_string());
@@ -501,22 +501,22 @@ mod tests {
     use super::*;
     use crate::{CellWidth, CursorShape, TermColor, Underline};
 
-    /// Una celda por la que empezar o terminar una selección.
+    /// A cell to start or end a selection by.
     fn cell(row: u16, col: u16, half: Half) -> Cell {
         Cell { row, col, half }
     }
 
-    /// Selecciona de la primera celda a la última **incluida**, que es lo que hace un arrastre.
+    /// Selects from the first cell to the last **included**, which is what a drag does.
     fn select(screen: &mut Screen, from: (u16, u16), to: (u16, u16)) {
         screen.start_selection(cell(from.0, from.1, Half::Left));
         screen.extend_selection(cell(to.0, to.1, Half::Right));
     }
 
     #[test]
-    fn una_linea_que_envuelve_se_copia_sin_el_salto_que_no_escribio_nadie() {
-        // **La primera de las reglas de qué es «el texto», y es la que más se nota.** Una línea más
-        // larga que la rejilla la parte el terminal, no el programa: copiarla con un salto dentro
-        // devuelve algo que **nadie escribió**, y pegarlo en un shell ejecuta dos órdenes en vez de una.
+    fn a_line_that_wraps_is_copied_without_the_break_that_no_one_wrote() {
+        // **The first of the rules of what "the text" is, and the most noticeable.** A line
+        // longer than the grid is split by the terminal, not the program: copying it with a break inside
+        // returns something that **no one wrote**, and pasting it into a shell runs two commands instead of one.
         let mut screen = Screen::new(Size { rows: 4, cols: 10 });
         screen.advance(b"0123456789abcde");
 
@@ -525,15 +525,15 @@ mod tests {
         assert_eq!(
             screen.selected_text().as_deref(),
             Some("0123456789abcde"),
-            "la línea envuelta se copió partida"
+            "the wrapped line was copied split"
         );
     }
 
     #[test]
-    fn dos_lineas_de_verdad_se_copian_con_su_salto() {
-        // **El otro lado de la regla, y sin esta prueba la de arriba se cumple quitando todos los
-        // saltos.** Lo que distingue una línea envuelta de dos líneas es quién puso el final: el
-        // terminal o el programa.
+    fn two_real_lines_are_copied_with_their_break() {
+        // **The other side of the rule, and without this test the one above is satisfied by removing all the
+        // breaks.** What distinguishes a wrapped line from two lines is who put the ending: the
+        // terminal or the program.
         let mut screen = Screen::new(Size { rows: 4, cols: 10 });
         screen.advance(b"uno\r\ndos");
 
@@ -542,15 +542,15 @@ mod tests {
         assert_eq!(
             screen.selected_text().as_deref(),
             Some("uno\ndos"),
-            "dos líneas escritas por el programa se pegaron en una"
+            "two lines written by the program were glued into one"
         );
     }
 
     #[test]
-    fn el_relleno_del_final_de_la_linea_no_se_copia() {
-        // **Seleccionar hasta el borde derecho no arrastra los espacios que nadie escribió.** Una
-        // rejilla está llena de celdas vacías a la derecha de lo escrito; copiarlas convierte cualquier
-        // pegado en una línea con cola de espacios.
+    fn the_padding_at_the_end_of_the_line_is_not_copied() {
+        // **Selecting up to the right edge does not drag along the spaces no one wrote.** A
+        // grid is full of empty cells to the right of what was written; copying them turns any
+        // paste into a line with a tail of spaces.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"hola");
 
@@ -559,15 +559,15 @@ mod tests {
         assert_eq!(
             screen.selected_text().as_deref(),
             Some("hola"),
-            "se copió el relleno del final de la línea"
+            "the padding at the end of the line was copied"
         );
     }
 
     #[test]
-    fn el_hueco_de_una_tabulacion_no_se_copia_como_espacios() {
-        // **La cuarta regla de qué es «el texto».** Una tabulación deja celdas vacías hasta la siguiente
-        // parada; copiarlas como espacios convierte una tabla alineada en una fila de espacios sueltos, y
-        // pegarla en cualquier sitio que vuelva a tabular la descoloca.
+    fn a_tabs_gap_is_not_copied_as_spaces() {
+        // **The fourth rule of what "the text" is.** A tab leaves empty cells up to the next
+        // stop; copying them as spaces turns an aligned table into a row of loose spaces, and
+        // pasting it anywhere that tabs again knocks it out of place.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"a\tb");
 
@@ -576,14 +576,14 @@ mod tests {
         assert_eq!(
             screen.selected_text().as_deref(),
             Some("a\tb"),
-            "el hueco de la tabulación se copió como espacios"
+            "the tab's gap was copied as spaces"
         );
     }
 
     #[test]
-    fn el_acompanante_de_un_caracter_ancho_no_se_duplica_al_copiar() {
-        // **Un carácter ancho ocupa dos celdas y es UNO.** La segunda es su acompañante: copiar las dos
-        // devolvería el carácter repetido, que es lo que se ve al pegar CJK o un emoji.
+    fn a_wide_characters_companion_is_not_duplicated_when_copying() {
+        // **A wide character takes up two cells and is ONE.** The second is its companion: copying both
+        // would return the character repeated, which is what you see when pasting CJK or an emoji.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance("日本".as_bytes());
 
@@ -592,20 +592,20 @@ mod tests {
         assert_eq!(
             screen.selected_text().as_deref(),
             Some("日本"),
-            "el acompañante del carácter ancho se copió como carácter"
+            "the wide character's companion was copied as a character"
         );
     }
 
     #[test]
-    fn el_realce_de_un_caracter_ancho_cubre_sus_dos_celdas() {
-        // **Un carácter ancho ocupa dos celdas y se ve como una cosa**, así que realzar solo la primera
-        // lo parte por la mitad: media letra sobre el fondo de la selección y media sobre el de la
-        // consola. Quien decide esto es el motor —el acompañante va con su cabeza—, y esta prueba es lo
-        // que impide rehacer la regla aquí con una comparación de coordenadas que no la conoce.
+    fn the_highlight_of_a_wide_character_covers_its_two_cells() {
+        // **A wide character takes up two cells and is seen as one thing**, so highlighting only the first
+        // splits it down the middle: half a letter over the selection's background and half over the
+        // console's. Who decides this is the engine —the companion goes with its head—, and this test is what
+        // prevents redoing the rule here with a coordinate comparison that does not know it.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance("日x".as_bytes());
 
-        // Solo la CABEZA del carácter ancho: la columna 1 es su acompañante y no se toca.
+        // Only the HEAD of the wide character: column 1 is its companion and is not touched.
         screen.start_selection(cell(0, 0, Half::Left));
         screen.extend_selection(cell(0, 0, Half::Right));
 
@@ -613,7 +613,7 @@ mod tests {
         let highlighted: Vec<usize> = (0..3)
             .filter(|col| {
                 view.cell(0, *col as u16)
-                    .expect("la celda está en la rejilla")
+                    .expect("the cell is in the grid")
                     .selected
             })
             .collect();
@@ -621,37 +621,35 @@ mod tests {
         assert_eq!(
             highlighted,
             vec![0, 1],
-            "el realce no cubrió las dos celdas del carácter ancho: se ve partido por la mitad"
+            "the highlight did not cover the wide character's two cells: it looks split down the middle"
         );
     }
 
     #[test]
-    fn marcar_el_acompanante_de_un_caracter_ancho_realza_tambien_su_cabeza() {
-        // **El camino contrario del de arriba, y lo pone el motor.** Arrastrando desde la derecha se
-        // entra por el acompañante antes que por la cabeza: sin esta regla, el primer fotograma del
-        // gesto realzaría la mitad vacía del carácter y no la que lleva la letra. Rehacer el realce aquí
-        // con una comparación de coordenadas se lleva esta regla por delante sin que nada se queje.
+    fn marking_a_wide_characters_companion_also_highlights_its_head() {
+        // **The opposite path from the one above, and the engine sets it.** Dragging from the right you
+        // enter through the companion before the head: without this rule, the gesture's first frame
+        // would highlight the character's empty half and not the one that carries the letter. Redoing the highlight here
+        // with a coordinate comparison takes this rule out without anything complaining.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance("日x".as_bytes());
 
-        // Solo el ACOMPAÑANTE: la columna 1.
+        // Only the COMPANION: column 1.
         screen.start_selection(cell(0, 1, Half::Left));
         screen.extend_selection(cell(0, 1, Half::Right));
 
         let view = screen.view();
         assert!(
-            view.cell(0, 0)
-                .expect("la celda está en la rejilla")
-                .selected,
-            "se marcó el acompañante y su cabeza —la que lleva la letra— se quedó sin realzar"
+            view.cell(0, 0).expect("the cell is in the grid").selected,
+            "the companion was marked and its head —the one carrying the letter— was left unhighlighted"
         );
     }
 
     #[test]
-    fn arrastrar_y_volver_al_punto_de_partida_no_deja_nada_que_copiar() {
-        // **«Hay selección empezada» y «hay algo seleccionado» no son lo mismo**, y quien decide si
-        // copiar tiene que preguntar lo segundo: un clic seco deja lo primero puesto, y copiar entonces
-        // devolvería la celda de debajo del puntero sin que nadie la haya seleccionado.
+    fn dragging_and_returning_to_the_starting_point_leaves_nothing_to_copy() {
+        // **"There is a started selection" and "there is something selected" are not the same**, and whoever decides whether to
+        // copy has to ask the second: a bare click leaves the first set, and copying then
+        // would return the cell under the pointer without anyone having selected it.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"hola mundo");
 
@@ -660,76 +658,76 @@ mod tests {
 
         assert!(
             !screen.has_selection(),
-            "un clic sin arrastrar dejó algo seleccionado"
+            "a click without dragging left something selected"
         );
     }
 
     #[test]
-    fn cambiar_de_columnas_borra_la_seleccion_y_conservarlas_la_conserva() {
-        // **Las dos mitades de la misma regla heredada del motor, y hacen falta las dos.** Al cambiar el
-        // número de columnas el texto se recoloca: lo que estaba marcado deja de estar donde estaba, y
-        // conservar el rango dejaría realzado un trozo que nadie eligió. Con las mismas columnas no se
-        // recoloca nada, así que la selección **sobrevive** — y sin esta segunda mitad, «borrar siempre»
-        // pasaría la prueba.
+    fn changing_columns_clears_the_selection_and_keeping_them_keeps_it() {
+        // **The two halves of the same rule inherited from the engine, and both are needed.** When the
+        // number of columns changes the text relays out: what was marked stops being where it was, and
+        // keeping the range would leave highlighted a stretch no one chose. With the same columns nothing
+        // relays out, so the selection **survives** — and without this second half, "always clear"
+        // would pass the test.
         let mut screen = Screen::new(Size { rows: 6, cols: 20 });
         screen.advance(b"hola mundo");
         select(&mut screen, (0, 0), (0, 3));
-        assert!(screen.has_selection(), "no se llegó a seleccionar nada");
+        assert!(screen.has_selection(), "nothing ended up being selected");
 
         screen.resize(Size { rows: 3, cols: 20 });
         assert!(
             screen.has_selection(),
-            "cambiar solo las filas borró la selección: no se recoloca nada, así que no hay motivo"
+            "changing only the rows cleared the selection: nothing relays out, so there is no reason"
         );
 
         screen.resize(Size { rows: 3, cols: 10 });
         assert!(
             !screen.has_selection(),
-            "cambiar de columnas dejó la selección puesta, realzando un trozo que nadie eligió"
+            "changing columns left the selection set, highlighting a stretch no one chose"
         );
     }
 
     #[test]
-    fn saltar_a_pantalla_alterna_borra_la_seleccion() {
-        // **Lo que se marcó no está en la pantalla nueva.** Un programa de pantalla completa —`vim`,
-        // `less`, `htop`— cambia a la alterna al arrancar, y una selección que sobreviviera quedaría
-        // realzando celdas de un contenido que ya no existe.
+    fn jumping_to_the_alternate_screen_clears_the_selection() {
+        // **What was marked is not on the new screen.** A full-screen program —`vim`,
+        // `less`, `htop`— switches to the alternate one on startup, and a selection that survived would end up
+        // highlighting cells of content that no longer exists.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"hola mundo");
         select(&mut screen, (0, 0), (0, 3));
-        assert!(screen.has_selection(), "no se llegó a seleccionar nada");
+        assert!(screen.has_selection(), "nothing ended up being selected");
 
         screen.advance(b"\x1b[?1049h");
 
         assert!(
             !screen.has_selection(),
-            "la selección sobrevivió al salto a pantalla alterna"
+            "the selection survived the jump to the alternate screen"
         );
     }
 
     #[test]
-    fn limpiar_una_region_que_cruza_la_seleccion_la_borra() {
-        // **El programa borró lo que estaba marcado.** Si la selección sobreviviera, seguiría realzando
-        // celdas vacías y copiarlas devolvería nada — o peor, lo que el programa escriba después ahí.
+    fn clearing_a_region_that_crosses_the_selection_clears_it() {
+        // **The program cleared what was marked.** If the selection survived, it would keep highlighting
+        // empty cells and copying them would return nothing — or worse, what the program writes there afterward.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"hola mundo");
         select(&mut screen, (0, 0), (0, 3));
-        assert!(screen.has_selection(), "no se llegó a seleccionar nada");
+        assert!(screen.has_selection(), "nothing ended up being selected");
 
-        // Limpiar la pantalla entera, que es lo que hace `clear`.
+        // Clear the whole screen, which is what `clear` does.
         screen.advance(b"\x1b[2J");
 
         assert!(
             !screen.has_selection(),
-            "se limpió lo que estaba marcado y la selección se quedó ahí"
+            "what was marked was cleared and the selection stayed there"
         );
     }
 
     #[test]
-    fn se_selecciona_lo_que_se_ve_tambien_subido_por_el_historial() {
-        // **Las coordenadas de la selección son las de lo que se MIRA**, no las del área activa. Subido
-        // por el historial, marcar la primera fila tiene que dar la línea vieja que se está mirando; con
-        // las coordenadas sin trasladar daría la que hoy ocupa ese sitio en el área activa.
+    fn what_is_seen_is_selected_also_when_scrolled_up_through_the_history() {
+        // **The selection's coordinates are those of what is LOOKED at**, not those of the active area. Scrolled
+        // up through the scrollback, marking the first row has to give the old line being looked at; with
+        // the coordinates untranslated it would give the one occupying that place in the active area today.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..40 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
@@ -741,63 +739,69 @@ mod tests {
         assert_eq!(
             screen.selected_text().as_deref(),
             Some("linea 0"),
-            "se seleccionó por coordenadas del área activa en vez de por lo que se ve"
+            "selection went by active-area coordinates instead of by what is seen"
         );
     }
 
     #[test]
-    fn el_programa_puede_pedir_y_retirar_que_lo_pegado_le_llegue_marcado() {
-        // De este modo depende que pegar varias líneas se deje escrito en vez de ejecutarse línea a
-        // línea, así que hay que poder preguntarlo — y que la respuesta siga al programa, que lo
-        // pone al arrancar un shell interactivo y lo quita al ceder el terminal a otra cosa.
+    fn the_program_can_ask_for_and_withdraw_that_pasted_text_reach_it_marked() {
+        // On this mode depends whether pasting several lines is left written instead of being run line by
+        // line, so it has to be possible to ask it — and for the answer to follow the program, which
+        // sets it on starting an interactive shell and removes it on handing the terminal over to something else.
         let mut screen = Screen::new(Size::default());
         assert!(
             !screen.bracketed_paste(),
-            "nadie lo ha pedido y ya está puesto"
+            "no one has asked for it and it is already set"
         );
 
         screen.advance(b"\x1b[?2004h");
-        assert!(screen.bracketed_paste(), "se pidió y no se enteró");
+        assert!(
+            screen.bracketed_paste(),
+            "it was asked for and it did not find out"
+        );
 
         screen.advance(b"\x1b[?2004l");
-        assert!(!screen.bracketed_paste(), "se retiró y siguió puesto");
+        assert!(
+            !screen.bracketed_paste(),
+            "it was withdrawn and it stayed set"
+        );
     }
 
     #[test]
-    fn una_pantalla_recien_creada_no_tiene_contenido() {
+    fn a_freshly_created_screen_has_no_content() {
         let screen = Screen::new(Size::default());
 
         assert_eq!(screen.to_text(), "");
-        // El tamaño no se pierde por volcar vacío: lo dice `size`, no el texto.
+        // The size is not lost by dumping empty: it is said by `size`, not the text.
         assert_eq!(screen.size(), Size::default());
     }
 
     #[test]
-    fn las_lineas_vacias_del_final_no_se_arrastran() {
+    fn the_trailing_empty_lines_are_not_dragged_along() {
         let mut screen = Screen::new(Size::default());
 
         screen.advance(b"primera\r\nsegunda");
 
-        // Dos líneas con contenido, no 24 con veintidós en blanco detrás.
+        // Two lines with content, not 24 with twenty-two blank behind.
         assert_eq!(screen.to_text(), "primera\nsegunda");
     }
 
     #[test]
-    fn el_texto_plano_aparece_sin_secuencias_de_escape() {
+    fn the_plain_text_appears_without_escape_sequences() {
         let mut screen = Screen::new(Size::default());
 
         screen.advance(b"\x1b[31mhola\x1b[0m");
 
         let text = screen.to_text();
-        assert!(text.starts_with("hola"), "texto inesperado: {text:?}");
+        assert!(text.starts_with("hola"), "unexpected text: {text:?}");
         assert!(
             !text.contains('\x1b'),
-            "el volcado no debe llevar escapes crudos: {text:?}"
+            "the dump must not carry raw escapes: {text:?}"
         );
     }
 
     #[test]
-    fn redimensionar_deja_el_tamano_pedido_y_conserva_el_contenido() {
+    fn resizing_leaves_the_requested_size_and_keeps_the_content() {
         let mut screen = Screen::new(Size::default());
         screen.advance(b"hola");
 
@@ -815,114 +819,117 @@ mod tests {
         );
         assert!(
             screen.to_text().starts_with("hola"),
-            "el contenido no sobrevivió al redimensionado: {:?}",
+            "the content did not survive the resize: {:?}",
             screen.to_text()
         );
     }
 
     #[test]
-    fn la_vista_es_densa_y_del_tamano_de_la_rejilla() {
+    fn the_view_is_dense_and_the_size_of_the_grid() {
         let screen = Screen::new(Size { rows: 3, cols: 10 });
 
         let view = screen.view();
 
         assert_eq!(view.size(), Size { rows: 3, cols: 10 });
         assert_eq!(view.cells().len(), 30);
-        assert_eq!(view.row(2).expect("falta la última fila").len(), 10);
-        assert!(view.row(3).is_none(), "no debería haber una cuarta fila");
-        assert!(view.cell(0, 10).is_none(), "no debería haber columna 10");
+        assert_eq!(view.row(2).expect("the last row is missing").len(), 10);
+        assert!(view.row(3).is_none(), "there should not be a fourth row");
+        assert!(
+            view.cell(0, 10).is_none(),
+            "there should not be a column 10"
+        );
     }
 
     #[test]
-    fn un_caracter_ancho_ocupa_dos_columnas_y_la_segunda_guarda_su_hueco() {
-        // Es la razón de que la vista sea densa: si el acompañante se omitiera, quien pinta tendría
-        // que llevar la cuenta del desplazamiento, y ahí es donde se descoloca una fila con CJK.
+    fn a_wide_character_takes_up_two_columns_and_the_second_keeps_its_gap() {
+        // It is the reason the view is dense: if the companion were omitted, whoever paints would have
+        // to keep track of the offset, and that is where a row with CJK gets knocked out of place.
         let mut screen = Screen::new(Size::default());
         screen.advance("漢a".as_bytes());
 
         let view = screen.view();
 
-        let first = view.cell(0, 0).expect("falta la celda 0");
+        let first = view.cell(0, 0).expect("cell 0 is missing");
         assert_eq!(first.c, '漢');
         assert_eq!(first.width, CellWidth::WideHead);
 
-        let companion = view.cell(0, 1).expect("falta el acompañante");
+        let companion = view.cell(0, 1).expect("the companion is missing");
         assert_eq!(
             companion.width,
             CellWidth::WideTail,
-            "la segunda columna del carácter ancho tiene que estar en la vista"
+            "the wide character's second column has to be in the view"
         );
 
-        // Y la letra siguiente cae en la columna 2, no en la 1: el ancho no descolocó la fila.
-        let next = view.cell(0, 2).expect("falta la celda 2");
+        // And the next letter falls in column 2, not column 1: the width did not knock the row out of place.
+        let next = view.cell(0, 2).expect("cell 2 is missing");
         assert_eq!(next.c, 'a');
         assert_eq!(next.width, CellWidth::Single);
     }
 
     #[test]
-    fn el_hueco_que_deja_un_ancho_que_no_cabe_se_distingue_de_un_espacio() {
-        // Cuatro columnas: «abc» llena tres y el carácter ancho necesita dos. No cabe, así que el
-        // terminal deja la última en blanco y lo baja entero. Ese blanco no lo escribió el
-        // programa, y es la única señal de que la fila no acaba donde parece.
+    fn the_gap_left_by_a_wide_one_that_does_not_fit_is_distinct_from_a_space() {
+        // Four columns: "abc" fills three and the wide character needs two. It does not fit, so the
+        // terminal leaves the last one blank and moves it down whole. That blank was not written by the
+        // program, and it is the only sign that the row does not end where it seems.
         let mut screen = Screen::new(Size { rows: 2, cols: 4 });
         screen.advance("abc漢".as_bytes());
 
         let view = screen.view();
 
         assert_eq!(
-            view.cell(0, 3).expect("falta la última columna").width,
+            view.cell(0, 3).expect("the last column is missing").width,
             CellWidth::WrapFiller,
-            "el hueco de arrastre tiene que distinguirse de un espacio normal"
+            "the wrap gap has to be distinct from a normal space"
         );
-        assert_eq!(view.cell(1, 0).expect("falta la fila 1").c, '漢');
+        assert_eq!(view.cell(1, 0).expect("row 1 is missing").c, '漢');
         assert_eq!(
-            view.cell(1, 0).expect("falta la fila 1").width,
+            view.cell(1, 0).expect("row 1 is missing").width,
             CellWidth::WideHead
         );
     }
 
     #[test]
-    fn el_video_inverso_llega_ya_resuelto() {
+    fn inverse_video_arrives_already_resolved() {
         let mut normal = Screen::new(Size::default());
         normal.advance(b"X");
-        let normal = *normal.view().cell(0, 0).expect("falta la celda");
+        let normal = *normal.view().cell(0, 0).expect("the cell is missing");
 
         let mut inverse = Screen::new(Size::default());
         inverse.advance(b"\x1b[7mX");
-        let inverse = *inverse.view().cell(0, 0).expect("falta la celda");
+        let inverse = *inverse.view().cell(0, 0).expect("the cell is missing");
 
         assert_eq!(
             (inverse.fg, inverse.bg),
             (normal.bg, normal.fg),
-            "el vídeo inverso tiene que llegar con los colores ya intercambiados"
+            "inverse video has to arrive with the colors already swapped"
         );
     }
 
     #[test]
-    fn los_atributos_y_el_color_llegan_sin_resolver() {
+    fn the_attributes_and_the_color_arrive_unresolved() {
         let mut screen = Screen::new(Size::default());
-        // Rojo con nombre, negrita, atenuado, cursiva, subrayado y tachado a la vez.
+        // Named red, bold, dim, italic, underlined and struck through all at once.
         screen.advance(b"\x1b[31;1;2;3;4;9mX");
 
-        let cell = *screen.view().cell(0, 0).expect("falta la celda");
+        let cell = *screen.view().cell(0, 0).expect("the cell is missing");
 
         assert_eq!(
             cell.fg,
             TermColor::Indexed(1),
-            "el rojo con nombre es la entrada 1 de la paleta"
+            "named red is entry 1 of the palette"
         );
         assert!(cell.bold && cell.dim && cell.italic && cell.strikeout);
         assert_eq!(cell.underline, Underline::Single);
     }
 
     #[test]
-    fn los_cinco_subrayados_se_distinguen() {
-        // Con un booleano, un diagnóstico de LSP en `nvim` —que es ondulado— llegaba a la vista sin
-        // ninguna marca y no había forma de recuperarlo.
+    fn the_five_underlines_are_distinguished() {
+        // With a boolean, an LSP diagnostic in `nvim` —which is curly— reached the view with
+        // no mark and there was no way to recover it.
         let cases = [
             (&b"\x1b[4m"[..], Underline::Single),
-            // El doble es `4:2`, no el `21` que se lee por ahí: para este parser `21` es cancelar
-            // la negrita. Comprobado en su tabla de atributos, no supuesto.
+            // The double one is `4:2`, not the `21` you read about around: for this parser `21` is cancelling
+            // the bold. Checked in its attribute table, not assumed.
             (&b"\x1b[4:2m"[..], Underline::Double),
             (&b"\x1b[4:3m"[..], Underline::Curl),
             (&b"\x1b[4:4m"[..], Underline::Dotted),
@@ -935,56 +942,56 @@ mod tests {
             screen.advance(sequence);
             screen.advance(b"X");
 
-            let cell = *screen.view().cell(0, 0).expect("falta la celda");
+            let cell = *screen.view().cell(0, 0).expect("the cell is missing");
             assert_eq!(
                 cell.underline,
                 expected,
-                "con la secuencia {:?}",
+                "with the sequence {:?}",
                 String::from_utf8_lossy(sequence)
             );
         }
     }
 
     #[test]
-    fn con_video_inverso_la_intensidad_se_refiere_al_color_que_pasa_a_ser_fondo() {
-        // Fija el filo que hereda quien resuelva el tema: la intensidad describe el primer plano
-        // **declarado**, y con vídeo inverso ese color acaba en `bg`. Aquí lo que hay que atenuar es
-        // el rojo, no el fondo del tema. Si esto cambia, que cambie con este test delante.
+    fn with_inverse_video_the_intensity_refers_to_the_color_that_becomes_background() {
+        // It pins the edge inherited by whoever resolves the theme: the intensity describes the **declared**
+        // foreground, and with inverse video that color ends up in `bg`. Here what has to be dimmed is
+        // the red, not the theme's background. If this changes, let it change with this test in front.
         let mut screen = Screen::new(Size::default());
         screen.advance(b"\x1b[2;31;7mX");
 
-        let cell = *screen.view().cell(0, 0).expect("falta la celda");
+        let cell = *screen.view().cell(0, 0).expect("the cell is missing");
 
         assert_eq!(cell.fg, TermColor::Background);
         assert_eq!(
             cell.bg,
             TermColor::Indexed(1),
-            "el rojo pasa a ser el fondo"
+            "the red becomes the background"
         );
-        assert!(cell.dim, "y es el rojo lo que está atenuado, no el fg");
+        assert!(cell.dim, "and it is the red that is dimmed, not the fg");
         assert!(
             cell.inverse,
-            "y hay que decirlo: sin esta marca, quien pinta no puede saber a cuál de los dos \
-             colores se refiere la intensidad, y la aplica al que ya no se ve"
+            "and it has to be said: without this mark, whoever paints cannot know which of the two \
+             colors the intensity refers to, and applies it to the one that is no longer seen"
         );
     }
 
     #[test]
-    fn el_cursor_sale_en_coordenadas_visibles() {
+    fn the_cursor_comes_out_in_visible_coordinates() {
         let mut screen = Screen::new(Size::default());
         screen.advance(b"hola");
 
         let cursor = screen
             .view()
             .cursor()
-            .expect("con la pantalla al día el cursor se ve");
+            .expect("with the screen up to date the cursor is visible");
 
         assert_eq!((cursor.row, cursor.col), (0, 4));
         assert_eq!(cursor.shape, CursorShape::Block);
     }
 
     #[test]
-    fn un_cursor_apagado_se_dice_como_tal() {
+    fn a_turned_off_cursor_is_reported_as_such() {
         let mut screen = Screen::new(Size::default());
         screen.advance(b"\x1b[?25l");
 
@@ -992,33 +999,33 @@ mod tests {
             screen
                 .view()
                 .cursor()
-                .expect("escondido no es lo mismo que fuera de pantalla")
+                .expect("hidden is not the same as off-screen")
                 .shape,
             CursorShape::Hidden
         );
     }
 
     #[test]
-    fn leer_la_vista_no_gasta_la_pantalla() {
-        // A diferencia de consultar los daños, este lector no es destructivo. Si lo fuera, el
-        // segundo frame de un repintado saldría en blanco.
+    fn reading_the_view_does_not_consume_the_screen() {
+        // Unlike querying the damage, this reader is not destructive. If it were, the
+        // second frame of a repaint would come out blank.
         let mut screen = Screen::new(Size::default());
         screen.advance(b"hola");
 
         let first = screen.view();
         let second = screen.view();
 
-        // Comprobar solo que las dos son iguales no bastaría: si el lector devolviera una vista
-        // vacía las dos veces, el test pasaría igual. Hay que ver primero que hay algo que perder.
-        assert_eq!(first.cell(0, 0).expect("falta la celda").c, 'h');
+        // Checking only that the two are equal would not be enough: if the reader returned an empty view
+        // both times, the test would pass just the same. You have to see first that there is something to lose.
+        assert_eq!(first.cell(0, 0).expect("the cell is missing").c, 'h');
         assert_eq!(first, second);
     }
 
     #[test]
-    fn una_secuencia_partida_entre_dos_llamadas_da_el_mismo_resultado() {
-        // Es el contrato que sostiene todo el diseño: el PTY entrega lecturas parciales, así que
-        // un escape puede llegar cortado por la mitad. Si esto no se cumpliera, habría que
-        // acumular bytes antes de interpretarlos y el diseño sería otro.
+    fn a_sequence_split_across_two_calls_gives_the_same_result() {
+        // It is the contract that holds up the whole design: the PTY delivers partial reads, so
+        // an escape can arrive cut down the middle. If this did not hold, one would have to
+        // accumulate bytes before interpreting them and the design would be different.
         let mut whole = Screen::new(Size::default());
         whole.advance(b"\x1b[31mrojo");
 
@@ -1030,69 +1037,69 @@ mod tests {
         assert!(split.to_text().starts_with("rojo"));
     }
 
-    /// **Lo que sale por arriba se recuerda, y esa es la mitad que no existía.** Con el historial
-    /// apagado —como estaba— subir no llevaba a ninguna parte: la primera línea de un volcado se
-    /// perdía en cuanto la pantalla se llenaba.
+    /// **What scrolls off the top is remembered, and that is the half that did not exist.** With the scrollback
+    /// off —as it was— scrolling up led nowhere: the first line of a dump was
+    /// lost as soon as the screen filled up.
     #[test]
-    fn lo_que_sale_por_arriba_se_puede_volver_a_ver() {
+    fn what_scrolls_off_the_top_can_be_seen_again() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
         }
 
-        // Sin subir, lo primero ya no está: la pantalla son cuatro filas.
+        // Without scrolling up, the first thing is gone: the screen is four rows.
         assert!(!text_of(&screen.view()).contains("linea 0"));
 
         screen.scroll_by(Scroll::ToTop);
 
         assert!(
             text_of(&screen.view()).contains("linea 0"),
-            "subiendo del todo tenía que aparecer la primera línea del volcado"
+            "scrolling all the way up, the first line of the dump had to appear"
         );
     }
 
-    /// **Y el techo es el techo**: pasadas las líneas que se recuerdan, lo más viejo se cae. Sin esta
-    /// prueba, un techo mal puesto —o el del motor, que es tres veces mayor— no lo notaría nadie
-    /// hasta ver la memoria.
+    /// **And the ceiling is the ceiling**: past the lines that are remembered, the oldest falls off. Without this
+    /// test, a badly set ceiling —or the engine's, which is three times larger— would go unnoticed
+    /// until you looked at the memory.
     #[test]
-    fn del_historial_no_se_recuerda_mas_de_lo_que_dice_el_techo() {
+    fn no_more_of_the_history_is_remembered_than_the_ceiling_says() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
-        // Bastante más de lo que cabe, para que el principio tenga que haberse caído.
+        // Quite a bit more than fits, so the beginning must have fallen off.
         for n in 0..(SCROLLBACK + 500) {
             screen.advance(format!("linea {n}\r\n").as_bytes());
         }
 
         screen.scroll_by(Scroll::ToTop);
 
-        // **Subir del todo deja el desplazamiento en lo que se recuerda**, así que este número *es*
-        // el techo. Afirmar sobre él —y no sobre qué línea quedó la primera— es lo que hace que la
-        // prueba caiga si alguien cambia la constante o hereda la del motor, sin depender de cómo
-        // cuente el motor las filas de la pantalla.
+        // **Scrolling all the way up leaves the offset at what is remembered**, so this number *is*
+        // the ceiling. Asserting on it —and not on which line ended up first— is what makes the
+        // test fall if someone changes the constant or inherits the engine's, without depending on how
+        // the engine counts the screen's rows.
         assert_eq!(
             screen.view().scroll(),
             SCROLLBACK,
-            "el historial guardó otra cosa de lo que dice su techo"
+            "the scrollback kept something other than what its ceiling says"
         );
         let top = text_of(&screen.view());
         assert!(
             !top.starts_with("linea 0"),
-            "se escribió más de lo que cabe, así que lo más viejo tenía que haberse caído: {}",
+            "more than fits was written, so the oldest had to have fallen off: {}",
             top.lines().next().unwrap_or("")
         );
     }
 
-    /// **Subiendo por el historial, el cursor deja de verse — y la foto lo dice en vez de recortarlo.**
-    /// Recortarlo lo dibujaba en la última fila, o sea en un sitio donde no está: quien mirase creería
-    /// que el programa escribe ahí. Es el caso que el comentario de `view` anunciaba desde F1.2.
+    /// **Scrolling up through the scrollback, the cursor stops being visible — and the snapshot says so instead of clamping it.**
+    /// Clamping it drew it in the last row, that is, in a place where it is not: whoever looked would believe
+    /// that the program writes there. It is the case that `view`'s comment announced ever since F1.2.
     #[test]
-    fn subiendo_por_el_historial_el_cursor_deja_de_verse() {
+    fn scrolling_up_through_the_history_the_cursor_stops_being_visible() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
         }
         assert!(
             screen.view().cursor().is_some(),
-            "sin subir, el cursor tiene que verse"
+            "without scrolling up, the cursor has to be visible"
         );
 
         screen.scroll_by(Scroll::ToTop);
@@ -1100,14 +1107,14 @@ mod tests {
         assert_eq!(
             screen.view().cursor(),
             None,
-            "arriba del todo el cursor está fuera de la pantalla, y decirlo es la única forma honesta"
+            "all the way up the cursor is off-screen, and saying so is the only honest way"
         );
     }
 
-    /// **La foto dice cuánto se ha subido**, que es lo que separa una pantalla quieta de una que se
-    /// quedó atrás mientras el programa seguía escribiendo.
+    /// **The snapshot says how far it has been scrolled up**, which is what separates a still screen from one that
+    /// stayed behind while the program kept writing.
     #[test]
-    fn la_foto_dice_cuanto_se_ha_subido() {
+    fn the_snapshot_says_how_far_it_has_been_scrolled_up() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
@@ -1119,12 +1126,12 @@ mod tests {
         assert_eq!(screen.view().scroll(), 3);
     }
 
-    /// **Lo que sigue llegando no te devuelve al final.** Es lo que uno espera al parar a leer algo
-    /// mientras un programa sigue escribiendo: lo nuevo se acumula por debajo y lo que se mira no se
-    /// mueve. Sin esto, subir mientras algo vuelca sería inútil — que es exactamente el caso en el que
-    /// hace falta.
+    /// **What keeps coming in does not send you back to the end.** It is what one expects when stopping to read something
+    /// while a program keeps writing: the new accumulates below and what is being looked at does not
+    /// move. Without this, scrolling up while something dumps would be useless — which is exactly the case in which
+    /// it is needed.
     #[test]
-    fn lo_que_sigue_llegando_no_devuelve_la_vista_al_final() {
+    fn what_keeps_coming_in_does_not_send_the_view_back_to_the_end() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
@@ -1139,14 +1146,14 @@ mod tests {
         assert_eq!(
             text_of(&screen.view()),
             looking,
-            "siguió entrando salida y la vista se movió: leer algo mientras un programa escribe sería \
-             imposible"
+            "output kept coming in and the view moved: reading something while a program writes would be \
+             impossible"
         );
     }
 
-    /// Y **bajando del todo se vuelve a lo último**, que es donde el programa escribe.
+    /// And **scrolling all the way down returns to the latest**, which is where the program writes.
     #[test]
-    fn bajando_del_todo_se_vuelve_a_donde_el_programa_escribe() {
+    fn scrolling_all_the_way_down_returns_to_where_the_program_writes() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
@@ -1159,15 +1166,15 @@ mod tests {
         assert_eq!(text_of(&screen.view()), up_to_date);
         assert!(
             screen.view().cursor().is_some(),
-            "y el cursor vuelve a verse"
+            "and the cursor is visible again"
         );
     }
 
-    /// **Una página es la pantalla menos una línea**, como en cualquier paginador: deja una de
-    /// contexto para no perder el hilo entre pantalla y pantalla. Con la pantalla entera, la línea de
-    /// unión se pierde en cada salto y nadie sabe por dónde iba.
+    /// **A page is the screen minus one line**, as in any pager: it leaves one of
+    /// context so as not to lose the thread between screen and screen. With the whole screen, the joining
+    /// line is lost on every jump and no one knows where they were.
     #[test]
-    fn una_pagina_deja_una_linea_de_contexto() {
+    fn a_page_leaves_one_line_of_context() {
         let mut screen = Screen::new(Size { rows: 10, cols: 20 });
         for n in 0..50 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
@@ -1178,15 +1185,15 @@ mod tests {
         assert_eq!(
             screen.view().scroll(),
             9,
-            "una página de diez filas tiene que subir nueve líneas, no diez"
+            "a page of ten rows has to scroll up nine lines, not ten"
         );
     }
 
-    /// El volcado a texto sigue dando **el área activa** aunque se esté mirando el historial, y su
-    /// documentación lo dice así. Es lo que quiere quien comprueba qué escribió un programa; quien
-    /// quiera lo que se ve tiene la foto.
+    /// The text dump still gives **the active area** even while the scrollback is being looked at, and its
+    /// documentation says so. It is what whoever checks what a program wrote wants; whoever
+    /// wants what is seen has the snapshot.
     #[test]
-    fn el_volcado_a_texto_da_el_area_activa_aunque_se_mire_el_historial() {
+    fn the_text_dump_gives_the_active_area_even_while_looking_at_the_history() {
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..20 {
             screen.advance(format!("linea {n}\r\n").as_bytes());
@@ -1198,27 +1205,26 @@ mod tests {
         assert_eq!(screen.to_text(), active);
         assert!(
             !text_of(&screen.view()).contains("linea 19"),
-            "la prueba no está mirando el historial, así que no compara nada"
+            "the test is not looking at the scrollback, so it compares nothing"
         );
     }
 
     #[test]
-    fn una_consola_recien_abierta_no_reclama_el_raton() {
-        // El caso de todos los días: un shell no pide el ratón, así que el terminal se lo queda entero
-        // para seleccionar. Si esto fuera al revés, arrastrar en un `bash` dejaría de marcar texto.
+    fn a_freshly_opened_console_does_not_claim_the_mouse() {
+        // The everyday case: a shell does not ask for the mouse, so the terminal keeps it whole
+        // for selecting. If this were the other way around, dragging in a `bash` would stop marking text.
         let screen = Screen::new(Size { rows: 4, cols: 20 });
-
         assert!(
             !screen.mouse_reporting().wants_mouse(),
-            "un shell sin pedir nada se llevó el ratón"
+            "a shell that asked for nothing took the mouse"
         );
     }
 
     #[test]
-    fn cada_bandera_del_raton_se_lee_por_separado() {
-        // **Las tres se piden con secuencias distintas y significan cosas distintas**: un programa que
-        // solo quiere clics no quiere que se le informe de cada píxel que recorre el puntero. Leerlas
-        // en bloque mandaría informes de movimiento a `vim`, que pide `1002` y no `1003`.
+    fn each_mouse_flag_is_read_separately() {
+        // **The three are asked for with distinct sequences and mean distinct things**: a program that
+        // only wants clicks does not want to be told about every pixel the pointer travels. Reading them
+        // as a block would send motion reports to `vim`, which asks for `1002` and not `1003`.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"\x1b[?1000h");
         assert_eq!(
@@ -1227,57 +1233,57 @@ mod tests {
                 buttons: true,
                 ..MouseReporting::default()
             },
-            "pedir los clics encendió algo más"
+            "asking for clicks turned on something more"
         );
 
         screen.advance(b"\x1b[?1002h");
         assert!(
             screen.mouse_reporting().drag,
-            "pedir el arrastre no se leyó"
+            "asking for the drag was not read"
         );
         assert!(
             !screen.mouse_reporting().motion,
-            "pedir el arrastre encendió también el movimiento"
+            "asking for the drag also turned on motion"
         );
-        // **Y los tres se SUSTITUYEN, no se acumulan** —leído en el motor, no supuesto—: pedir el
-        // arrastre apaga el de solo clics. Importa porque quien lee estas banderas decide con
-        // `wants_mouse()`, que las mira todas: si se acumularan, apagar el arrastre dejaría los clics
-        // encendidos y la consola no recuperaría la selección.
+        // **And the three REPLACE, they do not accumulate** —read in the engine, not assumed—: asking for the
+        // drag turns off the clicks-only one. It matters because whoever reads these flags decides with
+        // `wants_mouse()`, which looks at them all: if they accumulated, turning off the drag would leave the clicks
+        // on and the console would not recover the selection.
         assert!(
             !screen.mouse_reporting().buttons,
-            "pedir el arrastre dejó encendido el modo de solo clics: los tres se sustituyen"
+            "asking for the drag left the clicks-only mode on: the three replace each other"
         );
 
         screen.advance(b"\x1b[?1003h");
         assert!(
             screen.mouse_reporting().motion,
-            "pedir el movimiento no se leyó"
+            "asking for motion was not read"
         );
     }
 
     #[test]
-    fn pedir_solo_la_codificacion_extendida_no_es_pedir_el_raton() {
-        // **`extended` dice CÓMO se quiere el informe, no SI se quiere.** Contarlo como querer el
-        // ratón haría que un programa que enciende la codificación por delante —y muchos la encienden
-        // junto con otras cosas al arrancar— se llevara el botón izquierdo sin haberlo pedido, y con
-        // él la selección.
+    fn asking_only_for_the_extended_encoding_is_not_asking_for_the_mouse() {
+        // **`extended` says HOW the report is wanted, not WHETHER it is wanted.** Counting it as wanting the
+        // mouse would make a program that turns on the encoding up front —and many turn it on
+        // along with other things at startup— take the left button without having asked for it, and with
+        // it the selection.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"\x1b[?1006h");
 
         assert!(
             screen.mouse_reporting().extended,
-            "la codificación extendida no se leyó"
+            "the extended encoding was not read"
         );
         assert!(
             !screen.mouse_reporting().wants_mouse(),
-            "encender solo la codificación se llevó el ratón"
+            "turning on only the encoding took the mouse"
         );
     }
 
     #[test]
-    fn apagar_el_raton_lo_devuelve() {
-        // Un programa que termina apaga lo que encendió. Sin esto, salir de `htop` dejaría la consola
-        // sin poder seleccionar hasta cerrarla.
+    fn turning_off_the_mouse_returns_it() {
+        // A program that finishes turns off what it turned on. Without this, exiting `htop` would leave the console
+        // unable to select until it is closed.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"\x1b[?1000h");
         assert!(screen.mouse_reporting().wants_mouse());
@@ -1286,35 +1292,35 @@ mod tests {
 
         assert!(
             !screen.mouse_reporting().wants_mouse(),
-            "el programa apagó el ratón y el terminal siguió creyendo que lo quería"
+            "the program turned off the mouse and the terminal kept believing it wanted it"
         );
     }
 
     #[test]
-    fn la_rueda_va_como_flechas_solo_en_pantalla_alterna() {
-        // **El desplazamiento alternativo viene ENCENDIDO de fábrica** —leído en el motor, no supuesto:
-        // su modo por defecto ya lo trae, igual que `xterm`—. Así que lo único que hace falta para que
-        // el giro se traduzca es la pantalla alterna, y quien no la pide no recibe flechas: mandárselas
-        // a un shell le cambiaría la orden que tiene escrita en cada giro.
+    fn the_wheel_acts_as_arrows_only_on_the_alternate_screen() {
+        // **Alternate scrolling comes turned ON out of the box** —read in the engine, not assumed:
+        // its default mode already brings it, just like `xterm`—. So the only thing needed for
+        // the turn to be translated is the alternate screen, and whoever does not ask for it does not receive arrows: sending them
+        // to a shell would change the command it has written on each turn.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         assert!(
             !screen.wheel_acts_as_arrows(),
-            "un shell sin pantalla alterna recibió flechas al girar la rueda"
+            "a shell without the alternate screen received arrows when turning the wheel"
         );
 
         screen.advance(b"\x1b[?1049h");
         assert!(
             screen.wheel_acts_as_arrows(),
-            "en pantalla alterna el giro no se tradujo, y `less` no se desplazaría"
+            "on the alternate screen the turn was not translated, and `less` would not scroll"
         );
     }
 
     #[test]
-    fn un_programa_puede_apagar_el_desplazamiento_alternativo() {
-        // La otra mitad de la regla, y la que hace falta porque la bandera viene encendida: un programa
-        // de pantalla alterna que la apaga —`vim` lo hace en cuanto quiere el ratón para sí— deja de
-        // recibir flechas al girar. Sin esta mitad, girar la rueda dentro de un editor movería el punto
-        // de inserción sin que nadie tocara una tecla.
+    fn a_program_can_turn_off_alternate_scrolling() {
+        // The other half of the rule, and the one needed because the flag comes on: an alternate-screen
+        // program that turns it off —`vim` does so as soon as it wants the mouse for itself— stops
+        // receiving arrows on turning. Without this half, turning the wheel inside an editor would move the insertion
+        // point without anyone touching a key.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         screen.advance(b"\x1b[?1049h");
         assert!(screen.wheel_acts_as_arrows());
@@ -1323,16 +1329,16 @@ mod tests {
 
         assert!(
             !screen.wheel_acts_as_arrows(),
-            "el programa apagó el desplazamiento alternativo y siguió recibiendo flechas"
+            "the program turned off alternate scrolling and kept receiving arrows"
         );
     }
 
-    /// Lo que la foto enseña, en texto: es lo que se **ve**, no lo que el programa tiene escrito.
+    /// What the snapshot shows, in text: it is what is **seen**, not what the program has written.
     fn text_of(view: &View) -> String {
         (0..view.size().rows)
             .map(|row| {
                 view.row(row)
-                    .expect("la fila está dentro")
+                    .expect("the row is inside")
                     .iter()
                     .map(|cell| cell.c)
                     .collect::<String>()
@@ -1342,48 +1348,48 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
-    // ── Lo que va pegado a una celda ──────────────────────────────────────────────────────────
+    // ── What goes attached to a cell ──────────────────────────────────────────────────────────
 
-    /// Lo pegado a la primera celda de la vista, escrito con las mismas palabras que usa quien pinta.
+    /// What is attached to the view's first cell, written with the same words whoever paints uses.
     fn attached_at(screen: &Screen, col: u16) -> Vec<char> {
         let view = screen.view();
-        let cell = *view.cell(0, col).expect("la celda existe");
+        let cell = *view.cell(0, col).expect("the cell exists");
         view.combining_of(&cell).to_vec()
     }
 
     #[test]
-    fn el_selector_que_convierte_un_simbolo_en_emoji_llega_a_la_vista() {
-        // **Es la razón de ser de este dato.** `☁` y `☁️` son el mismo carácter con presentación
-        // distinta, y lo que los separa —el selector U+FE0F— no ocupa columna: se quedaba en el motor,
-        // así que las dos formas llegaban a quien pinta **idénticas** y no había forma de distinguirlas.
+    fn the_selector_that_turns_a_symbol_into_an_emoji_reaches_the_view() {
+        // **It is the reason this datum exists.** `☁` and `☁️` are the same character with distinct
+        // presentation, and what separates them —the U+FE0F selector— takes up no column: it stayed in the engine,
+        // so the two forms reached whoever paints **identical** and there was no way to distinguish them.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         screen.advance("\u{2601}\u{FE0F}".as_bytes());
 
         assert_eq!(
             attached_at(&screen, 0),
             vec!['\u{FE0F}'],
-            "el selector de emoji no llegó a la vista"
+            "the emoji selector did not reach the view"
         );
     }
 
     #[test]
-    fn el_mismo_simbolo_sin_selector_no_trae_nada_pegado() {
-        // **La otra mitad, y sin ella la de arriba se cumple devolviendo siempre el selector.** Lo que
-        // se afirma es que la vista distingue los dos casos, no que sepa producir uno.
+    fn the_same_symbol_without_a_selector_brings_nothing_attached() {
+        // **The other half, and without it the one above is satisfied by always returning the selector.** What
+        // is asserted is that the view distinguishes the two cases, not that it knows how to produce one.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         screen.advance("\u{2601}".as_bytes());
 
         assert!(
             attached_at(&screen, 0).is_empty(),
-            "una celda sin nada pegado trajo algo"
+            "a cell with nothing attached brought something"
         );
     }
 
     #[test]
-    fn cada_celda_se_queda_con_lo_suyo_y_no_con_lo_de_la_vecina() {
-        // **El tramo de cada celda apunta a un vector común**, así que dos celdas con cosas pegadas es
-        // el caso donde un desplazamiento mal calculado le da a una lo de la otra. Los dos selectores
-        // son distintos a propósito: con el mismo, cruzarlos daría el mismo resultado.
+    fn each_cell_keeps_its_own_and_not_the_neighbors() {
+        // **Each cell's span points into a shared vector**, so two cells with things attached is
+        // the case where a badly computed offset gives one what belongs to the other. The two selectors
+        // are distinct on purpose: with the same one, crossing them would give the same result.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         screen.advance("\u{2601}\u{FE0F}\u{2601}\u{FE0E}".as_bytes());
 
@@ -1392,17 +1398,17 @@ mod tests {
     }
 
     #[test]
-    fn lo_pegado_tiene_techo_y_el_motor_no_lo_tiene() {
-        // **El `Vec<char>` de la dependencia crece sin tope**, así que un programa que escupa marcas
-        // combinantes sobre la misma celda lo hace crecer sin límite: una entrada de fuera sin acotar,
-        // el patrón que D8 castigó con la cola de salida. El techo lo pone esta caja al copiar.
+    fn what_is_attached_has_a_ceiling_and_the_engine_does_not() {
+        // **The dependency's `Vec<char>` grows without a cap**, so a program that spews combining
+        // marks onto the same cell makes it grow without limit: an unbounded input from outside,
+        // the pattern D8 punished with the output queue. The ceiling is set by this crate when copying.
         //
-        // **La PRIMERA marca es distinta de todas las demás, y ésa es la mitad de la prueba.** Con
-        // doscientas marcas iguales, quedarse con las dieciséis **últimas** en vez de con las primeras da
-        // el mismo resultado y esta prueba pasa igual — el segundo disfraz que las reglas del proyecto
-        // nombran: elegir números con los que el defecto y el arreglo coinciden. Y alternar dos marcas
-        // tampoco basta: 200 − 16 = 184 es par, así que el tramo del final arranca con la misma que el
-        // del principio y **la prueba vuelve a pasar rota**. Hicieron falta las dos correcciones.
+        // **The FIRST mark is distinct from all the rest, and that is half the test.** With
+        // two hundred equal marks, keeping the **last** sixteen instead of the first gives
+        // the same result and this test passes just the same — the second disguise the project's rules
+        // name: choosing numbers with which the defect and the fix coincide. And alternating two marks
+        // is not enough either: 200 − 16 = 184 is even, so the final stretch starts with the same one as
+        // the beginning and **the test passes broken again**. Both corrections were needed.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         let mut bytes = String::from("a");
         let alternating: Vec<char> = (0..200)
@@ -1419,49 +1425,49 @@ mod tests {
         assert_eq!(
             attached.len(),
             16,
-            "lo pegado a una celda pasó del techo de esta caja"
+            "what is attached to a cell went past this crate's ceiling"
         );
         assert_eq!(
             attached,
             alternating[..16].to_vec(),
-            "el recorte se quedó con las marcas equivocadas: lo que decide la presentación es lo que va \
-             JUSTO detrás del carácter, así que el techo tiene que cortar por el final"
+            "the trim kept the wrong marks: what decides the presentation is what goes \
+             RIGHT behind the character, so the ceiling has to cut off at the end"
         );
     }
     #[test]
-    fn la_celda_no_engorda_sin_que_nadie_se_entere() {
-        // **La rejilla se reserva ENTERA cada fotograma** (`vec![ViewCell::default(); rows × cols]`),
-        // así que cada byte que engorde la celda se paga multiplicado por las celdas y por los fotogramas.
-        // Este número no es sagrado —lo pegado a una celda ya lo subió de 24 a 28— pero subirlo tiene que
-        // ser una decisión que alguien tome mirándola, no un efecto de haber añadido un campo. Y ya ha
-        // hecho su trabajo: la primera versión del tramo iba en dos campos anidados y costaba **32**;
-        // empaquetarlo en un entero devolvió cuatro bytes por celda, que son cuatro por fotograma también.
+    fn the_cell_does_not_fatten_without_anyone_finding_out() {
+        // **The grid is allocated WHOLE every frame** (`vec![ViewCell::default(); rows × cols]`),
+        // so each byte that fattens the cell is paid multiplied by the cells and by the frames.
+        // This number is not sacred —what is attached to a cell already raised it from 24 to 28— but raising it has to
+        // be a decision someone makes looking at it, not an effect of having added a field. And it has already
+        // done its job: the span's first version went in two nested fields and cost **32**;
+        // packing it into an integer gave back four bytes per cell, which are four per frame too.
         assert_eq!(
             std::mem::size_of::<ViewCell>(),
             28,
-            "la celda de la vista cambió de tamaño: mira qué campo lo hizo y si compensa"
+            "the view cell changed size: look at which field did it and whether it is worth it"
         );
     }
     #[test]
-    fn el_volcado_a_texto_no_se_deja_lo_que_va_pegado() {
-        // **Devolver `☁` donde el programa escribió `☁️` es devolver OTRO carácter.** El selector de
-        // emoji no ocupa columna pero es texto igual, y quien lea este volcado —una prueba hoy, un
-        // agente leyendo su consola mañana— se lleva algo que nadie escribió. Es la misma regla que
-        // **D22** fija para copiar con el ratón, que el motor ya cumple por su cuenta.
+    fn the_text_dump_does_not_leave_behind_what_is_attached() {
+        // **Returning `☁` where the program wrote `☁️` is returning ANOTHER character.** The emoji
+        // selector takes up no column but is text all the same, and whoever reads this dump —a test today, an
+        // agent reading its console tomorrow— takes away something no one wrote. It is the same rule that
+        // **D22** sets for copying with the mouse, which the engine already meets on its own.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         screen.advance("\u{2601}\u{FE0F}".as_bytes());
 
         assert_eq!(
             screen.to_text(),
             "\u{2601}\u{FE0F}",
-            "el volcado a texto se dejó el selector por el camino"
+            "the text dump left the selector behind along the way"
         );
     }
 
     #[test]
-    fn el_volcado_a_texto_de_lo_corriente_no_cambia() {
-        // **La otra mitad, y sin ella la de arriba se cumple metiendo caracteres de más.** Lo que el
-        // programa no escribió no puede aparecer aquí.
+    fn the_text_dump_of_the_ordinary_does_not_change() {
+        // **The other half, and without it the one above is satisfied by putting in extra characters.** What the
+        // program did not write cannot appear here.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         screen.advance(b"hola");
 
@@ -1469,41 +1475,41 @@ mod tests {
     }
 
     #[test]
-    fn lo_pegado_va_con_la_cabeza_del_caracter_ancho_y_no_con_su_acompanante() {
-        // **Es el caso normal de este hito, no una esquina**: CJK y los emojis son ANCHOS, así que
-        // cualquier cosa que se les pegue llega a una celda de dos columnas. Quien pinta recorre celda a
-        // celda, y si el acompañante trajera una copia de lo pegado, la mitad derecha de un emoji se
-        // pintaría con otra presentación que la izquierda.
+    fn what_is_attached_goes_with_the_wide_characters_head_and_not_with_its_companion() {
+        // **It is the normal case of this milestone, not a corner**: CJK and emojis are WIDE, so
+        // anything attached to them reaches a two-column cell. Whoever paints walks cell by
+        // cell, and if the companion carried a copy of what is attached, the right half of an emoji would
+        // be painted with a different presentation than the left.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         screen.advance("\u{1F600}\u{FE0F}".as_bytes());
 
         let view = screen.view();
-        let head = *view.cell(0, 0).expect("la cabeza existe");
-        let companion = *view.cell(0, 1).expect("el acompañante existe");
+        let head = *view.cell(0, 0).expect("the head exists");
+        let companion = *view.cell(0, 1).expect("the companion exists");
 
         assert_eq!(head.width, CellWidth::WideHead);
         assert_eq!(companion.width, CellWidth::WideTail);
         assert_eq!(
             view.combining_of(&head),
             &['\u{FE0F}'],
-            "la cabeza del carácter ancho perdió lo que llevaba pegado"
+            "the wide character's head lost what it carried attached"
         );
         assert!(
             view.combining_of(&companion).is_empty(),
-            "el acompañante se quedó con una copia de lo pegado, y no es suyo"
+            "the companion kept a copy of what is attached, and it is not its own"
         );
     }
 
     #[test]
-    fn lo_pegado_sigue_ahi_cuando_se_sube_por_el_historial() {
-        // **Subir por el historial reconstruye la vista desde otro sitio de la rejilla**, y ahí es donde
-        // un dato nuevo se cae sin que nadie lo note: lo que se ve arriba ya no viene del área activa.
-        // Si el selector se perdiera al subir, la misma línea se pintaría de una forma mientras se
-        // escribe y de otra al volver a mirarla.
+    fn what_is_attached_is_still_there_when_scrolling_up_through_the_history() {
+        // **Scrolling up through the scrollback rebuilds the view from another spot in the grid**, and that is where
+        // a new datum falls off without anyone noticing: what is seen up there no longer comes from the active area.
+        // If the selector were lost on scrolling up, the same line would be painted one way while it is
+        // written and another when looked at again.
         //
-        // **Se comprueba primero que la línea NO se ve sin subir**, y eso no es ceremonia: sin ese paso
-        // la prueba pasa igual sin desplazarse ni una línea, y entonces no habla del historial. Lo
-        // destapó mutarla.
+        // **It is first checked that the line is NOT visible without scrolling up**, and that is not ceremony: without that step
+        // the test passes just the same without scrolling even one line, and then it does not talk about the scrollback. It was
+        // uncovered by mutating it.
         let mut screen = Screen::new(Size { rows: 2, cols: 10 });
         screen.advance("\u{2601}\u{FE0F}\r\n".as_bytes());
         for _ in 0..5 {
@@ -1512,25 +1518,25 @@ mod tests {
 
         let before_scrolling = screen.view();
         assert_ne!(
-            before_scrolling.cell(0, 0).expect("la fila 0 existe").c,
+            before_scrolling.cell(0, 0).expect("row 0 exists").c,
             '\u{2601}',
-            "la línea del selector se ve sin subir: esta prueba no estaría mirando el historial"
+            "the selector's line is visible without scrolling up: this test would not be looking at the scrollback"
         );
 
         screen.scroll_by(Scroll::ToTop);
         let view = screen.view();
         assert!(
             view.scroll() > 0,
-            "no se subió por el historial: el desplazamiento sigue en cero"
+            "it did not scroll up through the scrollback: the offset is still at zero"
         );
         let cell = *view
             .cell(0, 0)
-            .expect("la primera línea del historial se ve");
+            .expect("the first line of the scrollback is visible");
         assert_eq!(cell.c, '\u{2601}');
         assert_eq!(
             view.combining_of(&cell),
             &['\u{FE0F}'],
-            "lo pegado se perdió al subir por el historial"
+            "what is attached was lost when scrolling up through the scrollback"
         );
     }
 }

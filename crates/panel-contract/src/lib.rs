@@ -1,20 +1,20 @@
 #![deny(rustdoc::broken_intra_doc_links)]
-// **Un enlace de rustdoc roto no lo ve el compilador, y medio repositorio es rustdoc.** Cuando esto
-// se puso, el árbol ya tenía uno apuntando a una constante que un renombrado anterior había dejado
-// atrás: nadie lo notó porque `cargo doc` avisa y no falla. Con el `deny` falla, y el hito que
-// renombra 46.458 líneas lo va a agradecer.
+// **A broken rustdoc link is invisible to the compiler, and half the repository is rustdoc.** When
+// this was put in, the tree already had one pointing at a constant that an earlier rename had left
+// behind: nobody noticed because `cargo doc` warns and does not fail. With the `deny` it fails, and
+// the milestone that renames 46,458 lines is going to be grateful for it.
 //
-// Salta en `cargo doc`, **no** en `cargo test` — este repositorio no tiene integración continua, así
-// que sigue habiendo que invocarlo. Lo que cambia es que ahora se rompe en vez de avisar.
-//! Tipos de `panel.json`, lectura y validación, y **el directorio donde ese fichero vive**.
+// It fires on `cargo doc`, **not** on `cargo test` — this repository has no continuous integration,
+// so it still has to be invoked. What changes is that now it breaks instead of warning.
+//! Types for `panel.json`, reading and validation, and **the directory where that file lives**.
 //!
-//! No depende de nada visual: si la capa de pintado se reescribe, esta caja sigue sirviendo.
+//! It depends on nothing visual: if the painting layer is rewritten, this crate keeps serving.
 //!
-//! El directorio está aquí y no en quien lanza las consolas por lo que dice la línea de arriba:
-//! **nada de generar un nombre, crear un directorio y borrarlo tiene que ver con pintar**, así que
-//! ponerlo en la caja que se va a reescribir el día que cambie el framework de interfaz obligaría a
-//! reescribirlo con ella sin ninguna razón. Y *dónde* se publica el estado es parte del contrato,
-//! igual que *qué* se publica.
+//! The directory is here and not in whoever launches the consoles for the reason the line above
+//! gives: **nothing about generating a name, creating a directory and deleting it has anything to do
+//! with painting**, so putting it in the crate that is going to be rewritten the day the interface
+//! framework changes would force it to be rewritten along with it for no reason at all. And *where*
+//! the state is published is part of the contract, just as much as *what* is published.
 
 use std::ffi::OsStr;
 use std::fs::DirBuilder;
@@ -28,28 +28,28 @@ pub use panel::{
     read_if_newer,
 };
 
-/// El único fichero que el contrato pone dentro del directorio. Lo escribe quien hace el trabajo,
-/// no esta caja.
+/// The only file the contract puts inside the directory. It is written by whoever does the work,
+/// not by this crate.
 ///
-/// **Público porque hace falta fuera.** El vigilante que llega con F1.6 corre en la aplicación y
-/// tiene que descartar los avisos de cualquier otra ruta, así que necesita nombrar este fichero; sin
-/// exportarlo, la cadena se volvería a escribir a mano en cada sitio y el contrato dejaría de vivir
-/// en uno solo.
+/// **Public because it is needed outside.** The watcher that arrives with F1.6 runs in the
+/// application and has to discard the notifications from any other path, so it needs to name this
+/// file; without exporting it, the string would be written out by hand in every place and the
+/// contract would stop living in a single one.
 pub const PANEL_FILE: &str = "panel.json";
 
-/// Los nombres de las dos variables del contrato, en un solo sitio.
+/// The names of the contract's two variables, in a single place.
 ///
-/// Están aquí, y no en cada sitio que las escribe, porque hacen falta **también cuando no hay
-/// directorio**: entonces hay que quitarlas del entorno del programa, y para quitarlas hay que
-/// saber cómo se llaman.
+/// They are here, and not in every place that writes them, because they are needed **also when there
+/// is no directory**: then they have to be removed from the program's environment, and to remove
+/// them you have to know what they are called.
 pub const ENV_NAMES: [&str; 2] = ["PANEL_ID", "PANEL_DIR"];
 
-/// El directorio de una división: su identificador y la ruta donde su productor publica el estado.
+/// The directory of a split: its identifier and the path where its producer publishes the state.
 ///
-/// Nace con el directorio ya creado y **lo borra al morir**. Esa es la razón de que sea un tipo y no
-/// dos funciones sueltas: el `Drop` cubre caminos que una limpieza explícita se dejaría —el error a
-/// medio construir de quien lo usa, y el pánico, donde el framework de interfaz no ejecuta su gancho
-/// de apagado pero los destructores sí corren.
+/// It is born with the directory already created and **deletes it when it dies**. That is the reason
+/// it is a type and not two loose functions: the `Drop` covers paths that an explicit cleanup would
+/// miss —the half-built error of whoever uses it, and the panic, where the interface framework does
+/// not run its shutdown hook but destructors do run.
 #[derive(Debug)]
 pub struct PanelDir {
     id: String,
@@ -57,13 +57,13 @@ pub struct PanelDir {
 }
 
 impl PanelDir {
-    /// Genera el identificador, crea su directorio y lo deja listo para que el productor escriba.
+    /// Generates the identifier, creates its directory and leaves it ready for the producer to write.
     ///
-    /// **La creación es la comprobación de unicidad**: el directorio se crea sin recursión, así que
-    /// si el nombre ya existiera esto falla en vez de compartir el directorio con otra división —y
-    /// compartirlo rompería en silencio el acotado por identificador del que depende el resto.
-    /// Por eso también la ruta añade **un solo componente**: no hay ningún tramo intermedio que
-    /// hubiera que crear antes, ni que un tercero pueda dejar preparado en un temporal compartido.
+    /// **Creation is the uniqueness check**: the directory is created without recursion, so if the
+    /// name already existed this fails instead of sharing the directory with another split —and
+    /// sharing it would silently break the per-identifier scoping the rest depends on. That is also
+    /// why the path adds **a single component**: there is no intermediate segment that would have to
+    /// be created first, nor that a third party could leave prepared in a shared temporary.
     pub fn create() -> io::Result<Self> {
         let id = generate_id()?;
         let path = base_dir().join(format!("agent-terminal-{id}"));
@@ -80,14 +80,14 @@ impl PanelDir {
         &self.path
     }
 
-    /// Las dos variables que el proceso de la división hereda.
+    /// The two variables the split's process inherits.
     ///
-    /// **El array es de dos y no una lista, porque esa cifra es lo que se revisa.** Quien lanza el
-    /// programa acepta una lista abierta de pares —tiene que aceptarla, porque no sabe qué es un
-    /// panel—, así que el techo no está ahí: está en que lo único que se le pasa sale de aquí.
-    /// Añadir una tercera variable obliga a cambiar este tipo, en la caja del contrato; con una
-    /// lista construida en el sitio de la llamada, inyectar una más —una credencial, por ejemplo—
-    /// sería un dato y no un cambio que alguien tuviera que aprobar.
+    /// **The array is of two and not a list, because that number is what gets reviewed.** Whoever
+    /// launches the program accepts an open list of pairs —it has to accept it, because it does not
+    /// know what a panel is—, so the ceiling is not there: it is in that the only thing passed to it
+    /// comes from here. Adding a third variable forces a change to this type, in the contract crate;
+    /// with a list built at the call site, injecting one more —a credential, for example— would be
+    /// data and not a change that someone would have to approve.
     pub fn env(&self) -> [(&'static str, &OsStr); 2] {
         [
             (ENV_NAMES[0], OsStr::new(&self.id)),
@@ -97,34 +97,35 @@ impl PanelDir {
 }
 
 impl Drop for PanelDir {
-    /// Borra lo que el contrato pone en el directorio, y después el directorio.
+    /// Deletes what the contract puts in the directory, and then the directory.
     ///
-    /// **Sin recursión, a propósito.** El directorio es de esta caja, pero su contenido es del
-    /// productor: un borrado recursivo se llevaría por delante lo que hubiera dejado ahí, y
-    /// convertiría cualquier ruta mal construida en pérdida de datos en vez de en un error. Si queda
-    /// algo que no es del contrato, el directorio sobrevive y se dice por dónde.
+    /// **Without recursion, on purpose.** The directory belongs to this crate, but its content
+    /// belongs to the producer: a recursive delete would wipe out whatever it had left there, and
+    /// would turn any badly built path into data loss instead of an error. If something that is not
+    /// the contract's remains, the directory survives and it is said where.
     fn drop(&mut self) {
-        // Se avisa porque el respaldo a un temporal del sistema **no** se vacía al cerrar la sesión,
-        // al contrario que el directorio de ejecución del usuario: sin esta línea, un resto ahí sería
-        // invisible y se iría acumulando en cuanto haya productores que escriban de verdad.
+        // A notice is emitted because the fallback to a system temporary is **not** emptied when the
+        // session closes, unlike the user's runtime directory: without this line, a leftover there
+        // would be invisible and would pile up as soon as there are producers writing for real.
         if let Some(failure) = remove(&self.path) {
             eprintln!(
-                "queda el directorio del panel {} ({failure})",
+                "the panel directory {} remains ({failure})",
                 self.path.display()
             );
         }
     }
 }
 
-/// Borra el fichero del contrato y el directorio, y devuelve **lo que merece un aviso**.
+/// Deletes the contract file and the directory, and returns **what deserves a notice**.
 ///
-/// Que el directorio ya no esté no lo merece: el usuario tiene un shell dentro de su consola y puede
-/// haberlo borrado él. Que quede algo que no es del contrato, sí.
+/// That the directory is no longer there does not deserve one: the user has a shell inside their
+/// console and may have deleted it themselves. That something not belonging to the contract remains,
+/// yes.
 ///
-/// Está separado del destructor para poder comprobarse: un destructor no devuelve nada, y la decisión
-/// de qué se calla y qué se dice es justo lo que hay que poder afirmar.
+/// It is separate from the destructor so it can be tested: a destructor returns nothing, and the
+/// decision of what is kept quiet and what is said is exactly what has to be assertable.
 fn remove(path: &Path) -> Option<io::Error> {
-    // Que no esté es lo normal: hasta que alguien publique, el directorio está vacío.
+    // That it is not there is the normal case: until someone publishes, the directory is empty.
     let _ = std::fs::remove_file(path.join(PANEL_FILE));
 
     match std::fs::remove_dir(path) {
@@ -134,17 +135,17 @@ fn remove(path: &Path) -> Option<io::Error> {
     }
 }
 
-/// Crea el directorio, y **falla si ya existe**.
+/// Creates the directory, and **fails if it already exists**.
 ///
-/// Sin recursión por las dos razones: no hay tramo intermedio que crear, y el modo de crear que sí
-/// admite tramos intermedios tampoco protesta cuando la ruta ya está — adoptaría un directorio que
-/// esta caja no hizo.
+/// Without recursion for the two reasons: there is no intermediate segment to create, and the
+/// creation mode that does accept intermediate segments also does not complain when the path is
+/// already there — it would adopt a directory this crate did not make.
 fn create_dir(path: &Path) -> io::Result<()> {
     let mut builder = DirBuilder::new();
-    // Sin esto el modo sale de la máscara de la sesión —medido: `0775` con la de esta máquina—, y
-    // ahí va a vivir un fichero que cuenta en qué anda el usuario. Bajo el directorio de ejecución
-    // del usuario no se alcanzaría, porque ya es suyo y solo suyo; pero el respaldo puede ser un
-    // temporal compartido por todos.
+    // Without this the mode comes from the session's umask —measured: `0775` with this machine's—,
+    // and a file that tells what the user is up to is going to live there. Under the user's runtime
+    // directory it would not be reachable, because it is already theirs and theirs alone; but the
+    // fallback can be a temporary shared by everyone.
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
@@ -153,42 +154,43 @@ fn create_dir(path: &Path) -> io::Result<()> {
     builder.create(path)
 }
 
-/// Ocho dígitos hexadecimales.
+/// Eight hexadecimal digits.
 ///
-/// Los cuatro del ejemplo de la decisión que fija esto son 65.536 nombres, y con una creación que
-/// falla si el nombre ya existe una colisión deja a una división sin identidad. Treinta y dos bits
-/// cuestan lo mismo.
+/// The four in the example of the decision that sets this are 65,536 names, and with a creation that
+/// fails if the name already exists a collision leaves a split without an identity. Thirty-two bits
+/// cost the same.
 fn generate_id() -> io::Result<String> {
-    // El error se convierte a mano y no con `?` para no tener que activarle a `getrandom` la feature
-    // que trae esa conversión: ya está compilado en el árbol sin ella, y pedirla lo recompilaría.
+    // The error is converted by hand and not with `?` so as not to have to enable for `getrandom`
+    // the feature that brings that conversion: it is already compiled in the tree without it, and
+    // asking for it would recompile it.
     let random = getrandom::u32().map_err(|failure| io::Error::other(failure.to_string()))?;
     Ok(format_id(random))
 }
 
-/// El formato, aparte del sorteo, para poder comprobarlo con valores dados.
+/// The formatting, apart from the draw, so it can be tested with given values.
 ///
-/// El relleno con ceros es lo que hace que sean **siempre** ocho dígitos: sin él, un número pequeño
-/// daría un nombre más corto, y una prueba que mire la longitud de un identificador sorteado al azar
-/// casi nunca lo notaría.
+/// The zero-padding is what makes them **always** eight digits: without it, a small number would
+/// give a shorter name, and a test that looks at the length of a randomly drawn identifier would
+/// almost never notice.
 fn format_id(random: u32) -> String {
     format!("{random:08x}")
 }
 
-/// Dónde viven los directorios de las divisiones.
+/// Where the splits' directories live.
 ///
-/// El directorio de ejecución del usuario es la primera opción por lo que es: suyo y solo suyo, en
-/// memoria, y el sistema lo vacía al cerrar la sesión. Cuando no existe —macOS, o una sesión de
-/// Linux sin gestor— se cae al temporal del sistema, que es la única alternativa que existe en todas
-/// partes.
+/// The user's runtime directory is the first choice for what it is: theirs and theirs alone, in
+/// memory, and the system empties it when the session closes. When it does not exist —macOS, or a
+/// Linux session without a manager— it falls back to the system temporary, which is the only
+/// alternative that exists everywhere.
 fn base_dir() -> PathBuf {
     base_dir_from(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
 }
 
-/// La decisión, separada de leer el entorno para poder comprobarla sin tocarlo.
+/// The decision, separated from reading the environment so it can be tested without touching it.
 ///
-/// **Una variable definida y vacía no es una ruta**: dejarla pasar daría una ruta relativa, y el
-/// directorio se crearía dentro del directorio de trabajo de la aplicación — sin fallar, que es lo
-/// peor que podría hacer.
+/// **A variable that is defined and empty is not a path**: letting it through would give a relative
+/// path, and the directory would be created inside the application's working directory — without
+/// failing, which is the worst thing it could do.
 fn base_dir_from(value: Option<&OsStr>) -> PathBuf {
     match value {
         Some(path) if !path.is_empty() => PathBuf::from(path),
@@ -201,22 +203,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn el_directorio_nace_creado_y_se_puede_escribir_dentro() {
-        let panel = PanelDir::create().expect("crear el directorio del panel");
+    fn the_directory_is_born_created_and_can_be_written_inside() {
+        let panel = PanelDir::create().expect("create the panel directory");
 
-        assert!(panel.path().is_dir(), "no es un directorio: {panel:?}");
+        assert!(panel.path().is_dir(), "not a directory: {panel:?}");
         std::fs::write(panel.path().join(PANEL_FILE), b"{}")
-            .expect("el productor tiene que poder publicar ahí");
+            .expect("the producer has to be able to publish there");
     }
 
     #[test]
-    fn la_ruta_termina_en_el_identificador() {
-        let panel = PanelDir::create().expect("crear el directorio del panel");
+    fn the_path_ends_in_the_identifier() {
+        let panel = PanelDir::create().expect("create the panel directory");
 
         let last = panel
             .path()
             .file_name()
-            .expect("la ruta tiene un último tramo")
+            .expect("the path has a last segment")
             .to_string_lossy()
             .into_owned();
 
@@ -224,61 +226,65 @@ mod tests {
     }
 
     #[test]
-    fn al_soltarlo_el_directorio_desaparece() {
+    fn when_dropped_the_directory_disappears() {
         let path = {
-            let panel = PanelDir::create().expect("crear el directorio del panel");
+            let panel = PanelDir::create().expect("create the panel directory");
             panel.path().to_path_buf()
         };
 
-        assert!(!path.exists(), "quedó el directorio: {}", path.display());
+        assert!(!path.exists(), "the directory remained: {}", path.display());
     }
 
-    /// El fichero del contrato lo escribe el productor, no esta caja — y aun así se lo lleva al
-    /// cerrar. Sin este test, el borrado pasaría igual el resto de la suite y dejaría un directorio
-    /// por división en cuanto alguien publicara de verdad.
+    /// The contract file is written by the producer, not by this crate — and even so it takes it
+    /// away on closing. Without this test, the deletion would pass the rest of the suite all the same
+    /// and would leave a directory per split as soon as someone published for real.
     #[test]
-    fn al_soltarlo_se_lleva_el_fichero_del_contrato() {
+    fn when_dropped_it_takes_the_contract_file_with_it() {
         let path = {
-            let panel = PanelDir::create().expect("crear el directorio del panel");
+            let panel = PanelDir::create().expect("create the panel directory");
             std::fs::write(panel.path().join(PANEL_FILE), b"{\"lines\":[]}")
-                .expect("publicar un panel");
+                .expect("publish a panel");
             panel.path().to_path_buf()
         };
 
-        assert!(!path.exists(), "quedó el directorio: {}", path.display());
+        assert!(!path.exists(), "the directory remained: {}", path.display());
     }
 
-    /// La cara B del borrado sin recursión: lo que no es del contrato no se toca, y por eso el
-    /// directorio sigue ahí. Es la propiedad que se quiere, no un descuido.
+    /// The flip side of deletion without recursion: what does not belong to the contract is not
+    /// touched, and that is why the directory is still there. It is the property that is wanted, not
+    /// an oversight.
     #[test]
-    fn un_fichero_que_no_es_del_contrato_deja_el_directorio_en_pie() {
+    fn a_file_that_is_not_the_contracts_leaves_the_directory_standing() {
         let path = {
-            let panel = PanelDir::create().expect("crear el directorio del panel");
-            std::fs::write(panel.path().join("registro.log"), b"trabajo del productor")
-                .expect("escribir algo ajeno al contrato");
+            let panel = PanelDir::create().expect("create the panel directory");
+            std::fs::write(panel.path().join("record.log"), b"producer's work")
+                .expect("write something foreign to the contract");
             panel.path().to_path_buf()
         };
 
-        // Se recoge el hecho y se limpia **antes** de afirmar: con la limpieza detrás del `assert`, un
-        // fallo del test dejaría el directorio ahí para siempre.
-        let survived = path.join("registro.log").is_file();
-        std::fs::remove_dir_all(&path).expect("limpiar lo que el test dejó a propósito");
+        // The fact is captured and cleanup happens **before** asserting: with the cleanup behind the
+        // `assert`, a test failure would leave the directory there forever.
+        let survived = path.join("record.log").is_file();
+        std::fs::remove_dir_all(&path).expect("clean up what the test left on purpose");
 
-        assert!(survived, "se borró algo que no era del contrato");
+        assert!(
+            survived,
+            "something that was not the contract's was deleted"
+        );
     }
 
     #[test]
-    fn dos_directorios_no_comparten_ni_identificador_ni_ruta() {
-        let first = PanelDir::create().expect("crear el primero");
-        let second = PanelDir::create().expect("crear el segundo");
+    fn two_directories_share_neither_identifier_nor_path() {
+        let first = PanelDir::create().expect("create the first");
+        let second = PanelDir::create().expect("create the second");
 
         assert_ne!(first.id(), second.id());
         assert_ne!(first.path(), second.path());
     }
 
     #[test]
-    fn las_dos_variables_son_las_del_contrato_y_apuntan_al_directorio() {
-        let panel = PanelDir::create().expect("crear el directorio del panel");
+    fn the_two_variables_are_the_contracts_and_point_to_the_directory() {
+        let panel = PanelDir::create().expect("create the panel directory");
 
         let [(id_name, id_value), (dir_name, dir_value)] = panel.env();
 
@@ -288,75 +294,79 @@ mod tests {
         assert_eq!(dir_value, panel.path().as_os_str());
     }
 
-    /// La unicidad no se comprueba: se obtiene de que crear falle. Si esto dejara de fallar, dos
-    /// divisiones podrían acabar compartiendo directorio y nada más en la caja lo notaría.
+    /// Uniqueness is not checked: it is obtained from creation failing. If this stopped failing, two
+    /// splits could end up sharing a directory and nothing else in the crate would notice.
     #[test]
-    fn crear_sobre_un_directorio_que_ya_existe_falla() {
-        let panel = PanelDir::create().expect("crear el directorio del panel");
+    fn creating_over_a_directory_that_already_exists_fails() {
+        let panel = PanelDir::create().expect("create the panel directory");
 
         let again = create_dir(panel.path());
 
         assert!(
             again.is_err(),
-            "crear sobre lo que ya existe tiene que fallar"
+            "creating over what already exists has to fail"
         );
     }
 
     #[cfg(unix)]
     #[test]
-    fn el_directorio_no_lo_puede_leer_nadie_mas() {
+    fn the_directory_cannot_be_read_by_anyone_else() {
         use std::os::unix::fs::PermissionsExt;
 
-        let panel = PanelDir::create().expect("crear el directorio del panel");
+        let panel = PanelDir::create().expect("create the panel directory");
 
         let mode = panel
             .path()
             .metadata()
-            .expect("leer los permisos")
+            .expect("read the permissions")
             .permissions()
             .mode()
             & 0o777;
 
-        assert_eq!(mode, 0o700, "modo {mode:o}, y ahí va a vivir el panel");
-    }
-
-    #[test]
-    fn el_identificador_de_verdad_tiene_ocho_digitos_hexadecimales() {
-        let id = generate_id().expect("generar un identificador");
-
-        assert_eq!(id.len(), 8, "no son ocho dígitos: {id}");
-        assert!(
-            id.chars()
-                .all(|d| d.is_ascii_hexdigit() && !d.is_uppercase()),
-            "no es hexadecimal en minúscula: {id}"
+        assert_eq!(
+            mode, 0o700,
+            "mode {mode:o}, and the panel is going to live there"
         );
     }
 
-    /// Con valores dados, y no solo con uno sorteado: mirar la longitud de un identificador al azar
-    /// deja pasar la falta del relleno con ceros, porque solo se nota con números pequeños — uno de
-    /// cada dieciséis.
     #[test]
-    fn el_formato_rellena_con_ceros_hasta_ocho() {
+    fn the_real_identifier_has_eight_hexadecimal_digits() {
+        let id = generate_id().expect("generate an identifier");
+
+        assert_eq!(id.len(), 8, "not eight digits: {id}");
+        assert!(
+            id.chars()
+                .all(|d| d.is_ascii_hexdigit() && !d.is_uppercase()),
+            "not lowercase hexadecimal: {id}"
+        );
+    }
+
+    /// With given values, and not just with a drawn one: looking at the length of a random identifier
+    /// lets the missing zero-padding through, because it only shows with small numbers — one in
+    /// sixteen.
+    #[test]
+    fn the_format_pads_with_zeros_up_to_eight() {
         assert_eq!(format_id(0), "00000000");
         assert_eq!(format_id(0xff), "000000ff");
         assert_eq!(format_id(0x0abcdef1), "0abcdef1");
         assert_eq!(format_id(u32::MAX), "ffffffff");
     }
 
-    /// El caso que no falla y hace lo incorrecto: con la variable **definida y vacía** la ruta saldría
-    /// relativa, y el directorio del panel acabaría dentro del directorio de trabajo.
+    /// The case that does not fail and does the wrong thing: with the variable **defined and empty**
+    /// the path would come out relative, and the panel directory would end up inside the working
+    /// directory.
     #[test]
-    fn una_variable_de_entorno_vacia_no_cuenta_como_ruta() {
+    fn an_empty_environment_variable_does_not_count_as_a_path() {
         assert_eq!(base_dir_from(Some(OsStr::new(""))), std::env::temp_dir());
     }
 
     #[test]
-    fn sin_directorio_de_ejecucion_se_cae_al_temporal_del_sistema() {
+    fn without_a_runtime_directory_it_falls_back_to_the_system_temporary() {
         assert_eq!(base_dir_from(None), std::env::temp_dir());
     }
 
     #[test]
-    fn con_directorio_de_ejecucion_se_usa_ese() {
+    fn with_a_runtime_directory_that_one_is_used() {
         assert_eq!(
             base_dir_from(Some(OsStr::new("/run/user/1000"))),
             PathBuf::from("/run/user/1000")
@@ -364,30 +374,30 @@ mod tests {
     }
 
     #[test]
-    fn borrar_lo_que_ya_no_esta_no_merece_aviso() {
+    fn deleting_what_is_no_longer_there_does_not_deserve_a_notice() {
         let path = {
-            let panel = PanelDir::create().expect("crear el directorio del panel");
+            let panel = PanelDir::create().expect("create the panel directory");
             panel.path().to_path_buf()
         };
 
         assert!(
             remove(&path).is_none(),
-            "avisó de un directorio que ya no estaba"
+            "it warned about a directory that was no longer there"
         );
     }
 
     #[test]
-    fn lo_que_queda_sin_borrar_si_merece_aviso() {
-        let panel = PanelDir::create().expect("crear el directorio del panel");
-        std::fs::write(panel.path().join("registro.log"), b"del productor")
-            .expect("escribir algo ajeno al contrato");
+    fn what_is_left_undeleted_does_deserve_a_notice() {
+        let panel = PanelDir::create().expect("create the panel directory");
+        std::fs::write(panel.path().join("record.log"), b"from the producer")
+            .expect("write something foreign to the contract");
 
         let warning = remove(panel.path());
-        std::fs::remove_dir_all(panel.path()).expect("limpiar lo que el test dejó a propósito");
+        std::fs::remove_dir_all(panel.path()).expect("clean up what the test left on purpose");
 
         assert!(
             warning.is_some(),
-            "el directorio sobrevivió con algo dentro y nadie lo dijo"
+            "the directory survived with something inside and nobody said so"
         );
     }
 }

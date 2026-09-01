@@ -1,8 +1,8 @@
-//! Lanza un shell en un pseudoterminal, le manda `ls` e imprime la salida cruda.
+//! Spawns a shell in a pseudoterminal, sends it `ls` and prints the raw output.
 //!
-//! Es la comprobación a mano del hito: `cargo run --example shell -p term-core`. La salida sale
-//! tal cual la escribe el shell, secuencias de escape incluidas — interpretarlas es trabajo de
-//! otra capa, y verlas en crudo aquí es justamente la prueba de que llegan enteras.
+//! It is the by-hand check of the milestone: `cargo run --example shell -p term-core`. The output
+//! comes out exactly as the shell writes it, escape sequences included — interpreting them is the
+//! job of another layer, and seeing them raw here is precisely the proof that they arrive whole.
 
 use std::io::{self, Write};
 use std::sync::mpsc::RecvTimeoutError;
@@ -14,8 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut pty, pty_output) = Pty::spawn("zsh", &["-l"], Size::default())?;
     pty.write(b"ls\n")?;
 
-    // El shell sigue vivo esperando más órdenes, así que el canal no se va a cerrar solo: se lee
-    // durante un rato y se sale.
+    // The shell is still alive waiting for more commands, so the channel won't close on its own:
+    // we read for a while and then exit.
     let until = Instant::now() + Duration::from_secs(2);
     let output = io::stdout();
     let mut output = output.lock();
@@ -25,13 +25,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 output.write_all(&bytes)?;
                 output.flush()?;
             }
-            // El shell murió por su cuenta (un `exit`, un fallo al arrancar): no hay nada más que
-            // leer y seguir esperando al plazo solo alargaría la salida sin motivo.
+            // The shell died on its own (an `exit`, a failure to start): there is nothing more to
+            // read and waiting out the deadline would only drag out the exit for no reason.
             Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => continue,
         }
     }
 
-    // Al soltar `pty` se mata el shell y se espera al hilo lector: no queda ningún proceso huérfano.
+    // Dropping `pty` kills the shell and waits for the reader thread: no orphaned process is left.
     Ok(())
 }

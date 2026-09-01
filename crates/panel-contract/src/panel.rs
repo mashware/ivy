@@ -1,108 +1,112 @@
-//! Lo que dice `panel.json`, y cómo se lee sin que nada de lo que traiga tire la ventana.
+//! What `panel.json` says, and how it is read without anything it carries taking down the window.
 //!
-//! Los nombres de los tipos y de sus campos **son los del contrato**, en inglés como él: quien compare
-//! este fichero con la especificación no tiene que traducir nada por el camino.
+//! The names of the types and of their fields **are the contract's**, in English like it: whoever
+//! compares this file with the specification does not have to translate anything along the way.
 
 use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-/// Lo que se lee de un fichero como mucho.
+/// The most that is read from a file.
 ///
-/// No es prudencia: acota **lo que un fichero de fuera puede hacer reservar al interpretarse**, y por
-/// eso se aplica **dentro** de la lectura —ver [`read`]—, porque comprobarlo después ya habría
-/// reservado.
+/// It is not prudence: it bounds **what a file from outside can make get reserved when it is
+/// interpreted**, and that is why it is applied **inside** the read —see [`read`]—, because checking
+/// it afterwards would already have reserved.
 ///
-/// **El multiplicador depende de la forma del fichero, no de su tamaño**, y por eso hay tres números y
-/// no uno. Con 256 KiB justos, medido en `--release` con
+/// **The multiplier depends on the shape of the file, not on its size**, and that is why there are
+/// three numbers and not one. With exactly 256 KiB, measured in `--release` with
 /// `cargo run --release --example read -p panel-contract`:
 ///
-/// | Forma | Pico | Factor | Interpretar |
+/// | Shape | Peak | Factor | Interpret |
 /// |---|---|---|---|
-/// | Líneas de un panel real | 1,8 MiB | 7× | 2,8 ms |
-/// | Una sola línea gigante | 769 KiB | 3× | 0,1 ms |
-/// | Objetos de una clave, 32.766 de ellos — el peor caso | **24 MiB** | **95×** | **22 ms** |
+/// | Lines of a real panel | 1.8 MiB | 7× | 2.8 ms |
+/// | A single giant line | 769 KiB | 3× | 0.1 ms |
+/// | Objects with one key, 32,766 of them — the worst case | **24 MiB** | **95×** | **22 ms** |
 ///
-/// **Lo que el techo NO acota es el tiempo.** El caso normal no se acerca: los nueve `panel.json` que
-/// hay en el repo cuestan unos **10 µs cada uno**, así que releer los cuatro de cuatro divisiones sería
-/// la cuarta parte del 1 % de un fotograma. El que muerde es el patológico —22 ms, un fotograma y
-/// medio—, y basta con que sea posible: quien lea esto desde un bucle de pintado **no puede releer en
-/// cada fotograma**, tiene que releer solo cuando el fichero haya cambiado de verdad.
+/// **What the ceiling does NOT bound is the time.** The normal case does not come close: the nine
+/// `panel.json` in the repo cost around **10 µs each**, so re-reading the four of four splits would be
+/// a quarter of 1 % of a frame. The one that bites is the pathological one —22 ms, a frame and a
+/// half—, and it is enough that it is possible: whoever reads this from a painting loop **cannot
+/// re-read on every frame**, it has to re-read only when the file has really changed.
 ///
-/// Y de paso acota las líneas y su largo, que es lo que hace innecesario ponerles techo aparte.
+/// And along the way it bounds the lines and their length, which is what makes it unnecessary to put a
+/// separate ceiling on them.
 pub const MAX_BYTES: u64 = 256 * 1024;
 
-/// Lo más que se sangra una línea.
+/// The most a line is indented.
 ///
-/// Es el ancho del panel más ancho de la maqueta, en celdas: más que eso no cabría de todas formas, y
-/// sin techo quien pinte repetiría tantos espacios como diga un fichero de fuera.
+/// It is the width of the widest panel in the mockup, in cells: more than that would not fit anyway,
+/// and without a ceiling whoever paints would repeat as many spaces as a file from outside says.
 pub const MAX_INDENT: u64 = 64;
 
-/// Cuánto silencio es legítimo antes de avisar, cuando el productor no lo dice.
+/// How much silence is legitimate before warning, when the producer does not say.
 pub const STALE_AFTER: Duration = Duration::from_secs(30 * 60);
 
-/// Lo que el productor publica.
+/// What the producer publishes.
 ///
-/// Todos los campos pueden faltar salvo las líneas: un panel sin líneas no es un panel.
+/// All fields may be absent except the lines: a panel without lines is not a panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Panel {
-    /// Versión del contrato. **Falta en siete de los nueve ficheros que hay en el repo**, porque se
-    /// añadió después: su ausencia no es un error.
+    /// Contract version. **Absent in seven of the nine files in the repo**, because it was added
+    /// later: its absence is not an error.
     pub version: Option<u64>,
-    /// Lo que el productor dice de cuándo publicó, tal cual, **como texto y sin interpretar**. Se
-    /// pinta; no se usa para calcular la antigüedad — ver [`Panel::written_at`].
+    /// What the producer says about when it published, as is, **as text and uninterpreted**. It is
+    /// painted; it is not used to compute the age — see [`Panel::written_at`].
     pub updated_at: Option<String>,
-    /// En qué está el productor. Texto libre suyo, y se pinta literal: traducirlo a un color o a un
-    /// icono sería interpretar su vocabulario, y el vocabulario es de quien trabaja.
+    /// What the producer is working on. Free text of its own, and painted literally: translating it
+    /// to a color or an icon would be interpreting its vocabulary, and the vocabulary belongs to
+    /// whoever does the work.
     pub phase: Option<String>,
-    /// Si la aplicación añade su línea de identidad arriba. Por omisión, sí.
+    /// Whether the application adds its identity line at the top. By default, yes.
     pub header: bool,
-    /// Cuánto silencio tolera este productor antes de que su panel se marque como viejo.
+    /// How much silence this producer tolerates before its panel is marked as old.
     pub stale_after: Duration,
-    /// Si esta división **reclama algo**, y de qué clase. Nada = no reclama.
+    /// Whether this split **is calling for something**, and of what kind. Nothing = it is not calling.
     ///
-    /// **Es el único campo del contrato que la aplicación interpreta**, y eso es deliberado: responde
-    /// la única pregunta que necesita para navegar —¿tengo que ir ahí?— y de ahí salen el indicador
-    /// del panel y el de la ficha de su pestaña. El resto del vocabulario —las marcas, los estilos, la
-    /// fase— **se guarda y se pinta**, porque traducirlo sería que la aplicación decida qué significa
-    /// el trabajo de otro.
+    /// **It is the only field of the contract that the application interprets**, and that is
+    /// deliberate: it answers the only question it needs in order to navigate —do I have to go there?—
+    /// and from it come the panel's indicator and the one on its tab's label. The rest of the
+    /// vocabulary —the marks, the styles, the phase— **is stored and painted**, because translating it
+    /// would be the application deciding what someone else's work means.
     ///
-    /// **No se deduce del cuerpo**: una línea con [`Mark::Block`] es contenido del resumen, no una
-    /// señal. Deducirlo de ahí sería frágil de la forma más tonta — un «esperé aprobación el martes»
-    /// marcaría la pestaña para siempre.
+    /// **It is not deduced from the body**: a line with [`Mark::Block`] is content of the summary, not
+    /// a signal. Deducing it from there would be fragile in the silliest way — a "I waited for approval
+    /// on Tuesday" would mark the tab forever.
     pub attention: Option<Attention>,
-    /// El cuerpo.
+    /// The body.
     pub lines: Vec<Line>,
-    /// Cuándo se escribió el fichero, **que es de donde sale la antigüedad**.
+    /// When the file was written, **which is where the age comes from**.
     ///
-    /// No sale de `updated_at`, y la razón es del propio contrato: el productor **machaca el fichero
-    /// entero** en cada publicación, así que la fecha del fichero *es* la de su última publicación. Así
-    /// hay aviso de rancio incluso cuando el productor no escribe su marca —que es cuando más falta
-    /// hace— y esta caja no necesita interpretar fechas ni arrastrar un calendario.
+    /// It does not come from `updated_at`, and the reason is the contract's own: the producer
+    /// **overwrites the whole file** on every publication, so the file's date *is* that of its last
+    /// publication. This way there is a stale notice even when the producer does not write its mark
+    /// —which is when it is most needed— and this crate does not need to interpret dates nor drag along
+    /// a calendar.
     pub written_at: Option<SystemTime>,
 }
 
-/// Una línea del panel.
+/// A line of the panel.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Line {
     pub text: String,
-    /// Qué **es** esta línea. La aplicación elige con qué símbolo se pinta y cómo se alinea.
+    /// What this line **is**. The application chooses what symbol it is painted with and how it is
+    /// aligned.
     pub mark: Option<Mark>,
-    /// Etiqueta corta que se alinea en columna. No tiene que ser un número.
+    /// Short label that is aligned in a column. It does not have to be a number.
     pub reference: Option<String>,
-    /// Cómo se pinta. **Puede venir junto a una marca**, y entonces el color lo pone el estilo y el
-    /// símbolo la marca: dos de los nueve ficheros del repo lo hacen, y a propósito — es como se dice
-    /// «esta línea es información, y su color *es* el dato».
+    /// How it is painted. **It can come alongside a mark**, and then the color is set by the style and
+    /// the symbol by the mark: two of the nine files in the repo do it, and on purpose — it is how you
+    /// say "this line is information, and its color *is* the data".
     pub style: Option<Style>,
-    /// Sangría manual, en celdas.
+    /// Manual indentation, in cells.
     pub indent: usize,
-    /// La dirección que el productor asocia a esta línea. **Se lee y no se usa todavía**: pintarla
-    /// mostraría algo distinto de lo que se copiaría, porque el pintado descarta caracteres que la
-    /// cadena sí tiene.
+    /// The address the producer associates with this line. **It is read and not used yet**: painting
+    /// it would show something different from what would be copied, because painting discards
+    /// characters the string does have.
     pub link: Option<String>,
 }
 
-/// Qué es una línea. Los seis del contrato, ni uno más.
+/// What a line is. The six of the contract, not one more.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mark {
     Done,
@@ -113,40 +117,41 @@ pub enum Mark {
     Info,
 }
 
-/// Qué reclama una división, cuando reclama algo.
+/// What a split is calling for, when it is calling for something.
 ///
-/// **Se ordena por la prioridad que el contrato declara**, no por el sitio en que estén escritas las
-/// variantes: cuando una pestaña tiene varias divisiones, «lo que más reclama» es el máximo de sus
-/// reclamos. [`Attention::Wait`] es el mayor porque **es lo único que se desatasca contigo delante ahora
-/// mismo**; una división atascada por un tercero puede esperar cinco minutos más, y una que terminó y
-/// nadie ha mirado, todo el día.
+/// **It is ordered by the priority the contract declares**, not by the place where the variants are
+/// written: when a tab has several splits, "what calls the most" is the maximum of their calls.
+/// [`Attention::Wait`] is the greatest because **it is the only one that gets unblocked with you in
+/// front of it right now**; a split blocked by a third party can wait five more minutes, and one that
+/// finished and nobody has looked at, all day.
 ///
-/// **El orden se escribe, no se deriva, y la diferencia importa el día que haya un cuarto valor.** Un
-/// `Ord` derivado ordena por la posición de las variantes en el fichero: quien añadiera una en medio
-/// cambiaría la prioridad **en silencio**, sin que fallara la compilación ni ninguna prueba. Con el
-/// `match` de abajo, esa cuarta variante **no compila** hasta que alguien decida qué prioridad tiene —
-/// que es exactamente la conversación que hay que tener. Y las variantes pueden entonces declararse en
-/// **el orden del contrato**, como las de [`Mark`], en vez de al revés para que el derive salga.
+/// **The order is written, not derived, and the difference matters the day there is a fourth value.** A
+/// derived `Ord` orders by the position of the variants in the file: whoever added one in the middle
+/// would change the priority **silently**, without the compilation or any test failing. With the
+/// `match` below, that fourth variant **does not compile** until someone decides what priority it has —
+/// which is exactly the conversation that has to happen. And the variants can then be declared in
+/// **the contract's order**, like those of [`Mark`], instead of the other way around just so the
+/// derive works out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Attention {
-    /// **Te espera a ti**: una pregunta, un permiso, una decisión.
+    /// **It is waiting for you**: a question, a permission, a decision.
     Wait,
-    /// Atascada por algo que no eres tú.
+    /// Blocked by something that is not you.
     Block,
-    /// Terminó, y nadie lo ha mirado.
+    /// Finished, and nobody has looked at it.
     Done,
 }
 
 impl Attention {
-    /// Las tres, para quien tenga que recorrerlas — una tabla de color, una de símbolos, una prueba.
+    /// The three, for whoever has to iterate over them — a color table, a symbol one, a test.
     ///
-    /// **Vive aquí, pegada a `priority`, y no en cada sitio que las recorre.** Una lista literal
-    /// repetida por ahí admite una cuarta variante **en silencio**, que es justo lo que el `match` de
-    /// abajo impide para las tablas de producción: quien añada una no compilará hasta tocar
-    /// `priority`, y entonces tiene esta lista tres líneas más arriba.
+    /// **It lives here, right next to `priority`, and not in every place that iterates over them.** A
+    /// literal list repeated around admits a fourth variant **silently**, which is exactly what the
+    /// `match` below prevents for the production tables: whoever adds one will not compile until
+    /// touching `priority`, and then has this list three lines above.
     pub const ALL: [Self; 3] = [Self::Wait, Self::Block, Self::Done];
 
-    /// Cuánto reclama, para poder comparar dos. Números sin más significado que su orden.
+    /// How much it is calling, so two can be compared. Numbers with no more meaning than their order.
     fn priority(self) -> u8 {
         match self {
             Self::Done => 0,
@@ -168,7 +173,7 @@ impl PartialOrd for Attention {
     }
 }
 
-/// Cómo se pinta una línea. Los siete del contrato.
+/// How a line is painted. The seven of the contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Normal,
@@ -180,73 +185,74 @@ pub enum Style {
     Error,
 }
 
-/// Por qué no se pudo leer un panel.
+/// Why a panel could not be read.
 ///
-/// Cada variante es una cosa distinta que decirle al usuario: que su productor no ha publicado todavía
-/// no se parece en nada a que haya publicado algo que no se entiende.
+/// Each variant is a different thing to tell the user: that its producer has not published yet looks
+/// nothing like it having published something that cannot be understood.
 #[derive(Debug)]
 pub enum Problem {
-    /// Todavía no hay fichero. El caso normal antes de la primera publicación.
+    /// There is no file yet. The normal case before the first publication.
     Missing,
-    /// Hay algo con ese nombre, pero no es un fichero.
+    /// There is something with that name, but it is not a file.
     ///
-    /// **Importa porque una tubería con nombre bloquearía la apertura**, y como leer ocurre dentro del
-    /// fotograma, eso sería la ventana congelada. Se comprueba **antes** de abrir, así que cubre el
-    /// descuido —un productor que crea ahí lo que no debe— y no una carrera deliberada: entre la
-    /// comprobación y la apertura hay un hueco, y quien pueda escribir en ese directorio es el propio
-    /// usuario.
+    /// **It matters because a named pipe would block the open**, and since reading happens inside the
+    /// frame, that would be the window frozen. It is checked **before** opening, so it covers the
+    /// oversight —a producer that creates there what it should not— and not a deliberate race: between
+    /// the check and the open there is a gap, and whoever can write in that directory is the user
+    /// themselves.
     NotRegular,
-    /// Se pasa del techo de [`MAX_BYTES`].
+    /// It goes over the [`MAX_BYTES`] ceiling.
     TooBig,
-    /// No se pudo abrir o leer.
+    /// It could not be opened or read.
     Unreadable(std::io::Error),
-    /// Se leyó, pero no es un panel: no es JSON, o no trae líneas.
+    /// It was read, but it is not a panel: it is not JSON, or it carries no lines.
     Invalid(String),
 }
 
 impl std::fmt::Display for Problem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Missing => write!(f, "sin publicar todavía"),
-            Self::NotRegular => write!(f, "hay algo ahí que no es un fichero"),
-            Self::TooBig => write!(f, "pasa de {} KiB", MAX_BYTES / 1024),
-            Self::Unreadable(failure) => write!(f, "no se pudo leer ({failure})"),
-            Self::Invalid(reason) => write!(f, "no se entiende ({reason})"),
+            Self::Missing => write!(f, "not published yet"),
+            Self::NotRegular => write!(f, "there is something there that is not a file"),
+            Self::TooBig => write!(f, "over {} KiB", MAX_BYTES / 1024),
+            Self::Unreadable(failure) => write!(f, "could not be read ({failure})"),
+            Self::Invalid(reason) => write!(f, "not understood ({reason})"),
         }
     }
 }
 
 impl Panel {
-    /// Si lo que se ve ya no es de fiar por viejo.
+    /// Whether what is shown is no longer trustworthy for being old.
     ///
-    /// **La resta va con signo a propósito.** Una fecha en el futuro no es el caso raro: basta con un
-    /// reloj adelantado o un sistema de ficheros ajeno. Con la resta ingenua de tiempos eso es un
-    /// pánico, y este camino no puede entrar en pánico por nada que venga de fuera.
+    /// **The subtraction is signed on purpose.** A date in the future is not the rare case: a fast
+    /// clock or a foreign filesystem is enough. With the naive subtraction of times that is a panic,
+    /// and this path cannot panic over anything that comes from outside.
     pub fn is_stale_at(&self, now: SystemTime) -> bool {
         let Some(written) = self.written_at else {
             return false;
         };
         match now.duration_since(written) {
             Ok(silence) => silence > self.stale_after,
-            // El fichero dice que se escribió en el futuro: no hay silencio que medir.
+            // The file says it was written in the future: there is no silence to measure.
             Err(_) => false,
         }
     }
 }
 
-/// Lee el panel de un directorio **solo si su fichero ha cambiado** desde la fecha que se le dice.
+/// Reads a directory's panel **only if its file has changed** since the date it is given.
 ///
-/// `Ok(None)` significa «lo que tienes sigue vigente», y es la respuesta que hace barata la relectura
-/// desde un bucle de pintado: preguntar la fecha cuesta menos de un microsegundo, e interpretar puede
-/// costar un fotograma entero — ver [`MAX_BYTES`].
+/// `Ok(None)` means "what you have is still current", and it is the answer that makes re-reading from
+/// a painting loop cheap: asking for the date costs less than a microsecond, and interpreting can cost
+/// a whole frame — see [`MAX_BYTES`].
 ///
-/// **Vive aquí y no en quien llama, y esa frontera es la razón de que exista.** Decidir si el fichero
-/// cambió exige saber **cómo se llama el fichero**, y ese nombre es del contrato: quien lo mirase por
-/// su cuenta lo estaría escribiendo por segunda vez, y pediría los datos del fichero dos veces por
-/// lectura. La fecha con la que comparar sale de [`Panel::written_at`] de la lectura anterior.
+/// **It lives here and not in the caller, and that boundary is the reason it exists.** Deciding whether
+/// the file changed requires knowing **what the file is called**, and that name is the contract's:
+/// whoever looked at it on their own would be writing it a second time, and would ask for the file's
+/// data twice per read. The date to compare against comes from [`Panel::written_at`] of the previous
+/// read.
 ///
-/// Sin fichero se devuelve el problema, no `None`: «desapareció» y «sigue igual» son cosas distintas
-/// para quien pinta.
+/// Without a file the problem is returned, not `None`: "it disappeared" and "it is unchanged" are
+/// different things for whoever paints.
 pub fn read_if_newer(dir: &Path, seen: Option<SystemTime>) -> Result<Option<Panel>, Problem> {
     match std::fs::metadata(dir.join(crate::PANEL_FILE)) {
         Ok(metadata)
@@ -256,19 +262,19 @@ pub fn read_if_newer(dir: &Path, seen: Option<SystemTime>) -> Result<Option<Pane
         {
             Ok(None)
         }
-        // **La ausencia se resuelve aquí y no volviendo a [`read`]**, que es el caso más frecuente de
-        // todos: una consola cuyo productor no publica nada pasa por aquí en cada fotograma, y
-        // dejarla seguir pediría los datos del fichero **dos veces** para llegar a la misma
-        // conclusión.
+        // **Absence is resolved here and not by going back to [`read`]**, which is the most frequent
+        // case of all: a console whose producer publishes nothing passes through here on every frame,
+        // and letting it continue would ask for the file's data **twice** to reach the same
+        // conclusion.
         Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => Err(Problem::Missing),
         _ => read(dir).map(Some),
     }
 }
 
-/// Lee el panel que hay en un directorio de división.
+/// Reads the panel in a split's directory.
 ///
-/// El nombre del fichero lo pone esta caja, no quien llama: es parte del contrato y vive en un solo
-/// sitio.
+/// The file name is set by this crate, not the caller: it is part of the contract and lives in a
+/// single place.
 pub fn read(dir: &Path) -> Result<Panel, Problem> {
     let path = dir.join(crate::PANEL_FILE);
 
@@ -285,54 +291,57 @@ pub fn read(dir: &Path) -> Result<Panel, Problem> {
 
     let file = std::fs::File::open(&path).map_err(Problem::Unreadable)?;
     let bytes = read_capped(file, metadata.len()).map_err(Problem::Unreadable)?;
-    // **El tope y la codificación se deciden por separado, y en este orden.** Leer directamente a
-    // texto ataba las dos cosas: el corte del tope parte un carácter de varios bytes —y aquí hay
-    // acentos y guiones largos en todos los ficheros reales—, así que un fichero enorme salía como
-    // «no se pudo leer» y el camino de «se pasa del techo» casi nunca se alcanzaba.
+    // **The cap and the encoding are decided separately, and in this order.** Reading directly to
+    // text tied the two things together: the cap's cut splits a multi-byte character —and here there
+    // are accents and em dashes in every real file—, so a huge file came out as "could not be read"
+    // and the "goes over the ceiling" path was almost never reached.
     if bytes.len() as u64 > MAX_BYTES {
         return Err(Problem::TooBig);
     }
     let text =
-        String::from_utf8(bytes).map_err(|_| Problem::Invalid("no es texto UTF-8".to_owned()))?;
+        String::from_utf8(bytes).map_err(|_| Problem::Invalid("not UTF-8 text".to_owned()))?;
 
     let mut panel = parse(&text)?;
     panel.written_at = metadata.modified().ok();
     Ok(panel)
 }
 
-/// Lee como mucho un byte más que el techo.
+/// Reads at most one byte more than the ceiling.
 ///
-/// **El techo se aplica leyendo, y solo aquí.** Mirar el tamaño antes de abrir parece más barato, pero
-/// sería un segundo camino que ninguna prueba puede ejercitar —el primero rechazaría siempre antes— y
-/// encima dejaría fuera la carrera que importa: el productor machaca el fichero entero, así que entre
-/// mirar y leer puede haber escrito uno más grande.
+/// **The ceiling is applied while reading, and only here.** Looking at the size before opening seems
+/// cheaper, but it would be a second path that no test can exercise —the first would always reject
+/// earlier— and on top of that it would leave out the race that matters: the producer overwrites the
+/// whole file, so between looking and reading it may have written a bigger one.
 ///
-/// El byte de más es lo que permite distinguir «ocupa justo el techo» de «se pasa». Y está separado del
-/// resto **para poder afirmar cuánto se lee**: mirando solo el resultado de [`read`], un tope que no
-/// acotara nada daría el mismo error, porque la comprobación de después lo taparía.
+/// The extra byte is what lets "it takes up exactly the ceiling" be told apart from "it goes over". And
+/// it is separate from the rest **so that how much is read can be asserted**: looking only at the
+/// result of [`read`], a cap that bounded nothing would give the same error, because the check
+/// afterwards would cover it up.
 ///
-/// **`expected` es una pista de tamaño, no una comprobación**, y la distinción es justo la que la
-/// decisión de arriba defiende: nadie decide nada con ese número, solo se reserva sitio de una vez.
-/// Sin él, `read_to_end` empieza por 32 bytes y duplica: medido, **nueve llamadas al sistema para un
-/// panel de 861 bytes y diecisiete para uno en el techo**, que además deja reservado el doble de lo que
-/// ocupa. Con la pista son cuatro y cinco, y ninguna reasignación. Importa poco en un disco local y
-/// mucho en uno de red, donde cada ida y vuelta son milisegundos dentro del fotograma. Si el productor
-/// machaca el fichero con uno mayor entre el `metadata` y la lectura, la pista se queda corta y
-/// `read_to_end` crece solo: el techo lo sigue poniendo el `take`.
+/// **`expected` is a size hint, not a check**, and the distinction is exactly the one the decision
+/// above defends: nobody decides anything with that number, it only reserves room in one go. Without
+/// it, `read_to_end` starts at 32 bytes and doubles: measured, **nine system calls for an 861-byte
+/// panel and seventeen for one at the ceiling**, which on top of that leaves reserved twice what it
+/// takes up. With the hint it is four and five, and no reallocation. It matters little on a local disk
+/// and much on a network one, where each round trip is milliseconds inside the frame. If the producer
+/// overwrites the file with a bigger one between the `metadata` and the read, the hint falls short and
+/// `read_to_end` grows on its own: the ceiling is still set by the `take`.
 fn read_capped(file: std::fs::File, expected: u64) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::with_capacity(expected.min(MAX_BYTES) as usize + 1);
     file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
-/// Convierte el texto en un panel, tolerando por campo.
+/// Turns the text into a panel, tolerating per field.
 ///
-/// **La tolerancia es por campo y no por documento**, y eso decide cómo se lee: un campo suelto que no
-/// se entiende —un número donde iba texto, un nombre de marca que no existe— se ignora y se usa su
-/// valor por omisión, en vez de tirar el fichero entero. Quien publica es un agente escribiendo JSON a
-/// mano: pasará, y perder el panel completo por un campo que nadie mira sería lo peor que podría hacer.
+/// **Tolerance is per field and not per document**, and that decides how it is read: a single field
+/// that is not understood —a number where text went, a mark name that does not exist— is ignored and
+/// its default value is used, instead of throwing away the whole file. Whoever publishes is an agent
+/// writing JSON by hand: it will happen, and losing the complete panel over a field nobody looks at
+/// would be the worst thing it could do.
 ///
-/// Solo hay dos formas de que un fichero no valga: que no sea JSON, o que no traiga líneas.
+/// There are only two ways for a file not to be valid: that it is not JSON, or that it carries no
+/// lines.
 fn parse(text: &str) -> Result<Panel, Problem> {
     let raw: serde_json::Value =
         serde_json::from_str(text).map_err(|failure| Problem::Invalid(failure.to_string()))?;
@@ -340,7 +349,7 @@ fn parse(text: &str) -> Result<Panel, Problem> {
     let lines = raw
         .get("lines")
         .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| Problem::Invalid("no trae «lines»".to_owned()))?;
+        .ok_or_else(|| Problem::Invalid("carries no \"lines\"".to_owned()))?;
 
     Ok(Panel {
         version: raw.get("v").and_then(serde_json::Value::as_u64),
@@ -362,13 +371,13 @@ fn parse(text: &str) -> Result<Panel, Problem> {
     })
 }
 
-/// Convierte un elemento de la lista en una línea, o **la descarta**.
+/// Turns an element of the list into a line, or **discards it**.
 ///
-/// Un elemento que no es ni cadena ni objeto —un número, un nulo— no es una línea de nada: pintarlo
-/// como una línea en blanco sería inventar contenido a partir de basura.
+/// An element that is neither a string nor an object —a number, a null— is not a line of anything:
+/// painting it as a blank line would be inventing content out of garbage.
 fn line(raw: &serde_json::Value) -> Option<Line> {
-    // Una cadena suelta es una línea normal, y la cadena vacía es un hueco: los dos casos son lo mismo
-    // aquí, y es quien pinta el que sabe que un texto vacío deja un espacio.
+    // A loose string is a normal line, and the empty string is a gap: the two cases are the same
+    // here, and it is whoever paints that knows an empty text leaves a space.
     if let Some(text) = raw.as_str() {
         return Some(Line {
             text: text.to_owned(),
@@ -384,9 +393,10 @@ fn line(raw: &serde_json::Value) -> Option<Line> {
         mark: string_ref(raw, "mark").and_then(mark),
         reference: string(raw, "ref"),
         style: string_ref(raw, "style").and_then(style),
-        // Acotada **aquí**, que es la frontera con lo que viene de fuera: quien pinte va a repetir
-        // ese número de espacios, y un valor absurdo sería un pánico por reservar memoria. El techo
-        // también evita que la conversión trunque en silencio donde el entero de máquina sea menor.
+        // Bounded **here**, which is the boundary with what comes from outside: whoever paints is
+        // going to repeat that number of spaces, and an absurd value would be a panic from reserving
+        // memory. The ceiling also prevents the conversion from silently truncating where the
+        // machine's integer is smaller.
         indent: raw
             .get("indent")
             .and_then(serde_json::Value::as_u64)
@@ -400,12 +410,14 @@ fn string(raw: &serde_json::Value, field: &str) -> Option<String> {
     string_ref(raw, field).map(str::to_owned)
 }
 
-/// Lo mismo, **sin copiar**: para los campos cuyo valor se traduce a un tipo propio y se tira.
+/// The same, **without copying**: for the fields whose value is translated to an own type and thrown
+/// away.
 ///
-/// **Existe porque esta caja mide lo que reserva.** Los tres vocabularios cerrados —la marca, el estilo
-/// y el reclamo— convierten la cadena en un `enum` que cabe en un byte y sueltan el texto una llamada
-/// después; pedir memoria para eso son tres reservas por línea que nadie llega a usar, en una caja con
-/// un módulo entero dedicado a contar reservas y una tabla de picos en su documentación.
+/// **It exists because this crate measures what it reserves.** The three closed vocabularies —the
+/// mark, the style and the call— turn the string into an `enum` that fits in a byte and drop the text
+/// one call later; asking for memory for that is three reservations per line that nobody ever uses, in
+/// a crate with a whole module dedicated to counting reservations and a table of peaks in its
+/// documentation.
 fn string_ref<'a>(raw: &'a serde_json::Value, field: &str) -> Option<&'a str> {
     raw.get(field).and_then(serde_json::Value::as_str)
 }
@@ -449,50 +461,52 @@ mod tests {
     use super::*;
     use crate::PanelDir;
 
-    /// Compuesto con las rarezas de varios `panel.json` de verdad del repo —no es la copia de uno—: **estilo y marca en la
-    /// misma línea**, la versión ausente, y referencias de anchos muy distintos con un guion largo.
+    /// Composed from the quirks of several real `panel.json` in the repo —it is not a copy of one—:
+    /// **style and mark on the same line**, the version absent, and references of very different widths
+    /// with an em dash.
     const ACTUAL: &str = r##"{
       "updated_at": "2026-08-11T22:00:00+02:00",
       "phase": "done",
       "header": true,
       "lines": [
-        {"text": "F1.4: dos divisiones lado a lado", "style": "title"},
+        {"text": "F1.4: two splits side by side", "style": "title"},
         "",
-        {"ref": "#1", "text": "extraer Division de la ventana", "mark": "done",
+        {"ref": "#1", "text": "extract Division from the window", "mark": "done",
          "link": "https://github.com/mashware/agent-terminal/pull/31"},
-        {"ref": "#1–#11", "text": "el conocimiento", "mark": "wait"},
-        {"ref": "Ahora", "text": "hito cerrado", "mark": "info", "style": "ok"},
-        "una línea suelta"
+        {"ref": "#1–#11", "text": "the knowledge", "mark": "wait"},
+        {"ref": "Now", "text": "milestone closed", "mark": "info", "style": "ok"},
+        "a loose line"
       ]
     }"##;
 
     fn panel_in(dir: &PanelDir, contents: &str) -> Result<Panel, Problem> {
-        std::fs::write(dir.path().join(crate::PANEL_FILE), contents).expect("publicar el panel");
+        std::fs::write(dir.path().join(crate::PANEL_FILE), contents).expect("publish the panel");
         read(dir.path())
     }
 
     #[test]
-    fn un_panel_de_verdad_se_lee_entero_y_en_orden() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_in(&dir, ACTUAL).expect("leer el panel");
+    fn a_real_panel_is_read_whole_and_in_order() {
+        let dir = PanelDir::create().expect("create the directory");
+        let panel = panel_in(&dir, ACTUAL).expect("read the panel");
 
         assert_eq!(panel.lines.len(), 6);
         assert_eq!(panel.lines[0].style, Some(Style::Title));
-        assert_eq!(panel.lines[1].text, "", "la cadena vacía es un hueco");
+        assert_eq!(panel.lines[1].text, "", "the empty string is a gap");
         assert_eq!(panel.lines[2].mark, Some(Mark::Done));
         assert_eq!(panel.lines[2].reference.as_deref(), Some("#1"));
         assert_eq!(panel.lines[3].reference.as_deref(), Some("#1–#11"));
-        assert_eq!(panel.lines[5].text, "una línea suelta");
+        assert_eq!(panel.lines[5].text, "a loose line");
         assert_eq!(panel.phase.as_deref(), Some("done"));
     }
 
-    /// El contrato describe el estilo como algo «para líneas sin marca», pero **dos de los nueve
-    /// ficheros del repo los combinan**, y a propósito: la marca dice qué es la línea y el estilo dice
-    /// que su color es el dato. Si esto se leyera como excluyente, se perdería uno de los dos.
+    /// The contract describes the style as something "for lines without a mark", but **two of the nine
+    /// files in the repo combine them**, and on purpose: the mark says what the line is and the style
+    /// says its color is the data. If this were read as mutually exclusive, one of the two would be
+    /// lost.
     #[test]
-    fn una_linea_puede_traer_marca_y_estilo_a_la_vez() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_in(&dir, ACTUAL).expect("leer el panel");
+    fn a_line_can_carry_a_mark_and_a_style_at_the_same_time() {
+        let dir = PanelDir::create().expect("create the directory");
+        let panel = panel_in(&dir, ACTUAL).expect("read the panel");
 
         let now_line = &panel.lines[4];
         assert_eq!(now_line.mark, Some(Mark::Info));
@@ -500,168 +514,173 @@ mod tests {
     }
 
     #[test]
-    fn la_version_puede_faltar() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_in(&dir, ACTUAL).expect("leer el panel");
+    fn the_version_can_be_absent() {
+        let dir = PanelDir::create().expect("create the directory");
+        let panel = panel_in(&dir, ACTUAL).expect("read the panel");
 
         assert_eq!(
             panel.version, None,
-            "siete de los nueve del repo no la traen"
+            "seven of the nine in the repo do not carry it"
         );
     }
 
     #[test]
-    fn la_cabecera_se_da_por_puesta_y_se_puede_quitar() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_header_is_assumed_and_can_be_removed() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        let unstated = panel_in(&dir, r#"{"lines":[]}"#).expect("leer");
-        assert!(unstated.header, "por omisión la pone la aplicación");
+        let unstated = panel_in(&dir, r#"{"lines":[]}"#).expect("read");
+        assert!(unstated.header, "by default the application adds it");
 
-        let removed = panel_in(&dir, r#"{"header":false,"lines":[]}"#).expect("leer");
+        let removed = panel_in(&dir, r#"{"header":false,"lines":[]}"#).expect("read");
         assert!(!removed.header);
     }
 
-    /// **La tolerancia es por campo, no por documento.** Quien publica es un agente escribiendo JSON a
-    /// mano: un campo mal puesto pasará, y perder el panel entero por uno que nadie mira sería lo peor
-    /// que se podría hacer con él.
+    /// **Tolerance is per field, not per document.** Whoever publishes is an agent writing JSON by
+    /// hand: a badly placed field will happen, and losing the whole panel over one that nobody looks
+    /// at would be the worst thing that could be done with it.
     #[test]
-    fn un_campo_que_no_se_entiende_no_tira_el_fichero() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_field_that_is_not_understood_does_not_throw_away_the_file() {
+        let dir = PanelDir::create().expect("create the directory");
         let panel = panel_in(
             &dir,
-            r#"{"v":"uno","header":"sí","stale_after_minutes":-5,"attention":3,
-                "lines":[{"text":"vale","mark":"inventada","style":42,"indent":"mucha"}]}"#,
+            r#"{"v":"one","header":"yes","stale_after_minutes":-5,"attention":3,
+                "lines":[{"text":"ok","mark":"made-up","style":42,"indent":"a lot"}]}"#,
         )
-        .expect("un campo malo no invalida el panel");
+        .expect("a bad field does not invalidate the panel");
 
         assert_eq!(panel.version, None);
         assert_eq!(
             panel.attention, None,
-            "un reclamo que no es ni siquiera una cadena tiene que caer en «no reclama», no explotar"
+            "a call that is not even a string has to fall into \"not calling\", not blow up"
         );
         assert!(
             panel.header,
-            "un valor que no es booleano cae en el de omisión"
+            "a value that is not a boolean falls into the default"
         );
         assert_eq!(panel.stale_after, STALE_AFTER);
         assert_eq!(panel.lines.len(), 1);
-        assert_eq!(panel.lines[0].text, "vale", "la línea se conserva");
+        assert_eq!(panel.lines[0].text, "ok", "the line is kept");
         assert_eq!(
             panel.lines[0].mark, None,
-            "una marca que no existe se ignora"
+            "a mark that does not exist is ignored"
         );
         assert_eq!(panel.lines[0].style, None);
         assert_eq!(panel.lines[0].indent, 0);
     }
 
     #[test]
-    fn el_silencio_tolerado_lo_dice_el_productor() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_tolerated_silence_is_said_by_the_producer() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        let its_own = panel_in(&dir, r#"{"stale_after_minutes":5,"lines":[]}"#).expect("leer");
+        let its_own = panel_in(&dir, r#"{"stale_after_minutes":5,"lines":[]}"#).expect("read");
         assert_eq!(its_own.stale_after, Duration::from_secs(300));
 
-        let by_default = panel_in(&dir, r#"{"lines":[]}"#).expect("leer");
+        let by_default = panel_in(&dir, r#"{"lines":[]}"#).expect("read");
         assert_eq!(by_default.stale_after, STALE_AFTER);
     }
 
     #[test]
-    fn sin_lineas_no_es_un_panel() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn without_lines_it_is_not_a_panel() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        let failure = panel_in(&dir, r#"{"phase":"algo"}"#).expect_err("sin líneas no vale");
+        let failure =
+            panel_in(&dir, r#"{"phase":"something"}"#).expect_err("without lines it is not valid");
 
-        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "was {failure:?}");
     }
 
-    /// Un `lines` que no es una lista **no es un panel vacío**: si se leyera como tal, quien pinta
-    /// perdería el último panel bueno y en su sitio dejaría un hueco, que es exactamente lo que la
-    /// distinción entre «no se entiende» y «no hay nada» existe para evitar.
+    /// A `lines` that is not a list **is not an empty panel**: if it were read as such, whoever paints
+    /// would lose the last good panel and in its place would leave a gap, which is exactly what the
+    /// distinction between "not understood" and "there is nothing" exists to avoid.
     #[test]
-    fn unas_lineas_que_no_son_una_lista_no_son_un_panel() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn lines_that_are_not_a_list_are_not_a_panel() {
+        let dir = PanelDir::create().expect("create the directory");
 
         for text in [
-            r#"{"lines":"una sola"}"#,
-            r#"{"lines":{"1":"una"}}"#,
+            r#"{"lines":"just one"}"#,
+            r#"{"lines":{"1":"one"}}"#,
             r#"{"lines":7}"#,
         ] {
-            let failure = panel_in(&dir, text).expect_err("«lines» tiene que ser una lista");
+            let failure = panel_in(&dir, text).expect_err("\"lines\" has to be a list");
             assert!(
                 matches!(failure, Problem::Invalid(_)),
-                "con {text} fue {failure:?}"
+                "with {text} was {failure:?}"
             );
         }
     }
 
-    /// JSON válido pero de otra forma: la raíz tiene que ser un objeto. Sin esto, buscar las líneas en
-    /// algo que no las tiene podría acabar tomando la propia raíz por el cuerpo del panel.
+    /// Valid JSON but of another shape: the root has to be an object. Without this, looking for the
+    /// lines in something that does not have them could end up taking the root itself for the panel's
+    /// body.
     #[test]
-    fn un_json_que_no_es_un_objeto_en_la_raiz_no_es_un_panel() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_json_that_is_not_an_object_at_the_root_is_not_a_panel() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        for text in [r#"["una","otra"]"#, r#""solo una cadena""#, "42", "null"] {
-            let failure = panel_in(&dir, text).expect_err("la raíz tiene que ser un objeto");
+        for text in [r#"["one","another"]"#, r#""just a string""#, "42", "null"] {
+            let failure = panel_in(&dir, text).expect_err("the root has to be an object");
             assert!(
                 matches!(failure, Problem::Invalid(_)),
-                "con {text} fue {failure:?}"
+                "with {text} was {failure:?}"
             );
         }
     }
 
     #[test]
-    fn lo_que_no_es_json_se_dice_sin_romper_nada() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn what_is_not_json_is_reported_without_breaking_anything() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        // Un fichero a medio escribir es exactamente esto: JSON cortado por la mitad.
-        let failure = panel_in(&dir, r#"{"lines":[{"text":"a med"#).expect_err("no es JSON");
+        // A half-written file is exactly this: JSON cut in half.
+        let failure = panel_in(&dir, r#"{"lines":[{"text":"a hal"#).expect_err("not JSON");
 
-        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "was {failure:?}");
     }
 
-    /// **El fichero de cero bytes es el instante intermedio de cada publicación**: el productor que
-    /// machaca abre para truncar y todavía no ha escrito nada. Tiene que salir «no se entiende» y no un
-    /// panel vacío, porque un panel vacío borraría el último bueno justo en mitad de cada escritura.
+    /// **The zero-byte file is the intermediate instant of each publication**: the producer that
+    /// overwrites opens to truncate and has not written anything yet. It has to come out "not
+    /// understood" and not an empty panel, because an empty panel would erase the last good one right
+    /// in the middle of each write.
     #[test]
-    fn un_fichero_vacio_es_una_escritura_a_medias_y_no_un_panel_sin_lineas() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn an_empty_file_is_a_half_write_and_not_a_panel_without_lines() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        let failure = panel_in(&dir, "").expect_err("un fichero vacío no es un panel");
+        let failure = panel_in(&dir, "").expect_err("an empty file is not a panel");
 
-        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "was {failure:?}");
     }
 
     #[test]
-    fn sin_publicar_todavia_no_es_un_error_raro() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn not_published_yet_is_not_a_strange_error() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        let failure = read(dir.path()).expect_err("no hay fichero");
+        let failure = read(dir.path()).expect_err("there is no file");
 
-        assert!(matches!(failure, Problem::Missing), "fue {failure:?}");
+        assert!(matches!(failure, Problem::Missing), "was {failure:?}");
     }
 
-    /// «Todavía no ha publicado» y «hay algo ahí que no puedo leer» son dos cosas distintas que
-    /// decirle a quien mira, y solo la primera es normal. Sin permisos es lo único que separa las dos
-    /// ramas de fallo, y hay **dos** ramas: la de mirar qué hay y la de abrirlo.
+    /// "It has not published yet" and "there is something there I cannot read" are two different things
+    /// to tell whoever looks, and only the first is normal. No permissions is the only thing that
+    /// separates the two failure branches, and there are **two** branches: the one that looks at what
+    /// is there and the one that opens it.
     #[cfg(unix)]
     #[test]
-    fn sin_permiso_para_leerlo_no_se_confunde_con_no_haber_publicado() {
+    fn without_permission_to_read_it_it_is_not_confused_with_not_having_published() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = PanelDir::create().expect("crear el directorio");
+        let dir = PanelDir::create().expect("create the directory");
         let path = dir.path().join(crate::PANEL_FILE);
-        std::fs::write(&path, r#"{"lines":[]}"#).expect("publicar el panel");
+        std::fs::write(&path, r#"{"lines":[]}"#).expect("publish the panel");
         let mode = |path: &Path, mode| {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-                .expect("cambiar los permisos")
+                .expect("change the permissions")
         };
 
-        // Los permisos se devuelven enseguida, **antes** de afirmar nada: con la restauración detrás
-        // del `assert`, un fallo del test dejaría un directorio que su destructor ya no puede vaciar.
+        // The permissions are restored right away, **before** asserting anything: with the restoration
+        // behind the `assert`, a test failure would leave a directory its destructor can no longer
+        // empty.
         mode(&path, 0o000);
-        // Quien corra la suite como administrador puede leer igualmente, y entonces aquí no hay nada
-        // que comprobar. Se pregunta en vez de suponerlo, que sale más barato que traer una
-        // biblioteca solo para mirar el usuario efectivo.
+        // Whoever runs the suite as administrator can read anyway, and then there is nothing to check
+        // here. It is asked instead of assumed, which is cheaper than bringing in a library just to
+        // look at the effective user.
         let unreadable = std::fs::File::open(&path).is_err();
         let from_file = read(dir.path());
         mode(&path, 0o600);
@@ -673,136 +692,142 @@ mod tests {
         if unreadable {
             assert!(
                 matches!(from_file, Err(Problem::Unreadable(_))),
-                "el fichero sin permisos salió como {from_file:?}"
+                "the file without permissions came out as {from_file:?}"
             );
             assert!(
                 matches!(from_dir, Err(Problem::Unreadable(_))),
-                "el directorio sin permisos salió como {from_dir:?}"
+                "the directory without permissions came out as {from_dir:?}"
             );
         }
     }
 
-    /// **La misma propiedad que la de abajo, pero sobre el camino de verdad.**
+    /// **The same property as the one below, but over the real path.**
     ///
-    /// La de abajo llama a [`read_capped`] directamente, así que solo ata al ayudante: sustituyendo
-    /// dentro de [`read`] esa llamada por un `std::fs::read` —reservar el fichero entero, que es justo
-    /// lo que el techo existe para impedir— **la suite seguía verde**, porque la comprobación de
-    /// después devuelve [`Problem::TooBig`] igual. Medido: el error no distingue los dos caminos, solo
-    /// la memoria lo hace.
+    /// The one below calls [`read_capped`] directly, so it only ties down the helper: replacing that
+    /// call inside [`read`] with a `std::fs::read` —reserving the whole file, which is exactly what the
+    /// ceiling exists to prevent— **the suite stayed green**, because the check afterwards returns
+    /// [`Problem::TooBig`] all the same. Measured: the error does not tell the two paths apart, only
+    /// the memory does.
     ///
-    /// El fichero mide ocho veces el techo, así que leerlo entero reservaría 2 MiB y el margen contra
-    /// el que se afirma es de 1 MiB: entre lo que cuesta el camino honesto —unos 512 KiB, lo que la
-    /// duplicación de `read_to_end` deja de holgura sobre 256 KiB— y lo que costaría el deshonesto hay
-    /// un factor de cuatro, que es sitio de sobra para que esto no dependa de la máquina.
+    /// The file is eight times the ceiling, so reading it whole would reserve 2 MiB and the margin
+    /// asserted against is 1 MiB: between what the honest path costs —around 512 KiB, the slack that
+    /// `read_to_end`'s doubling leaves over 256 KiB— and what the dishonest one would cost there is a
+    /// factor of four, which is plenty of room for this not to depend on the machine.
     #[test]
-    fn leer_un_fichero_enorme_no_reserva_lo_que_ocupa() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn reading_a_huge_file_does_not_reserve_what_it_takes_up() {
+        let dir = PanelDir::create().expect("create the directory");
         let padding = "x".repeat(MAX_BYTES as usize * 8);
         let contents = format!(r#"{{"lines":["{padding}"]}}"#);
-        std::fs::write(dir.path().join(crate::PANEL_FILE), &contents).expect("publicar uno enorme");
+        std::fs::write(dir.path().join(crate::PANEL_FILE), &contents).expect("publish a huge one");
         drop(contents);
 
         let (failure, peak) = while_measuring(|| read(dir.path()));
 
-        assert!(matches!(failure, Err(Problem::TooBig)), "fue {failure:?}");
+        assert!(matches!(failure, Err(Problem::TooBig)), "was {failure:?}");
         assert!(
             peak < MAX_BYTES as usize * 4,
-            "reservó {peak} bytes leyendo un fichero que se rechaza por grande"
+            "it reserved {peak} bytes reading a file that is rejected for being big"
         );
     }
 
-    /// La propiedad es **cuánto se lee**, no qué error sale: mirando solo el error de `read`, un tope
-    /// que no acotara nada daría el mismo resultado porque la comprobación de después lo taparía.
+    /// The property is **how much is read**, not what error comes out: looking only at the error of
+    /// `read`, a cap that bounded nothing would give the same result because the check afterwards would
+    /// cover it up.
     ///
-    /// **Y la pista de tamaño no puede convertirse en el tope.** Se le pasa la mentira más grande que
-    /// cabe —que el fichero no ocupa nada—: si algún día alguien reserva por la pista en vez de leer
-    /// hasta el `take`, este caso devuelve un byte y cae aquí.
+    /// **And the size hint cannot turn into the cap.** It is passed the biggest lie that fits —that the
+    /// file takes up nothing—: if some day someone reserves by the hint instead of reading up to the
+    /// `take`, this case returns one byte and falls here.
     #[test]
-    fn de_un_fichero_enorme_solo_se_leen_los_primeros_bytes() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn of_a_huge_file_only_the_first_bytes_are_read() {
+        let dir = PanelDir::create().expect("create the directory");
         let path = dir.path().join(crate::PANEL_FILE);
-        std::fs::write(&path, "x".repeat(MAX_BYTES as usize * 4)).expect("escribir uno enorme");
+        std::fs::write(&path, "x".repeat(MAX_BYTES as usize * 4)).expect("write a huge one");
 
-        let read_back = read_capped(std::fs::File::open(&path).expect("abrir"), 0).expect("leer");
+        let read_back = read_capped(std::fs::File::open(&path).expect("open"), 0).expect("read");
 
         assert_eq!(
             read_back.len() as u64,
             MAX_BYTES + 1,
-            "se leyó más que el techo y un byte"
+            "more than the ceiling and one byte was read"
         );
     }
 
     #[test]
-    fn un_fichero_enorme_no_se_lee_entero() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_huge_file_is_not_read_whole() {
+        let dir = PanelDir::create().expect("create the directory");
         let padding = "x".repeat(MAX_BYTES as usize + 1024);
         let too_big = format!(r#"{{"lines":["{padding}"]}}"#);
 
-        let failure = panel_in(&dir, &too_big).expect_err("se pasa del techo");
+        let failure = panel_in(&dir, &too_big).expect_err("it goes over the ceiling");
 
-        assert!(matches!(failure, Problem::TooBig), "fue {failure:?}");
+        assert!(matches!(failure, Problem::TooBig), "was {failure:?}");
     }
 
-    /// **Con acentos, que es lo normal aquí**: todos los ficheros reales del repo llevan tildes y
-    /// guiones largos. Leer directamente a texto ataba el tope a la codificación, y el corte partía un
-    /// carácter de dos bytes: el fichero enorme salía como «no se pudo leer» y este camino no se
-    /// alcanzaba nunca.
+    /// **With accents, which is the normal thing here**: every real file in the repo carries accents
+    /// and em dashes. Reading directly to text tied the cap to the encoding, and the cut split a
+    /// two-byte character: the huge file came out as "could not be read" and this path was never
+    /// reached.
     #[test]
-    fn un_fichero_enorme_con_acentos_sigue_siendo_demasiado_grande() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_huge_file_with_accents_is_still_too_big() {
+        let dir = PanelDir::create().expect("create the directory");
         let padding = "ñ".repeat(MAX_BYTES as usize);
 
         let failure = panel_in(&dir, &format!(r#"{{"lines":["{padding}"]}}"#))
-            .expect_err("se pasa del techo");
+            .expect_err("it goes over the ceiling");
 
-        assert!(matches!(failure, Problem::TooBig), "fue {failure:?}");
+        assert!(matches!(failure, Problem::TooBig), "was {failure:?}");
     }
 
-    /// Un fichero que no es texto no es «no se pudo leer» —eso suena a permisos— sino «no se entiende».
-    /// Y es un caso real: una escritura cortada justo entre los dos bytes de una letra acentuada.
+    /// A file that is not text is not "could not be read" —that sounds like permissions— but "not
+    /// understood". And it is a real case: a write cut right between the two bytes of an accented
+    /// letter.
     #[test]
-    fn lo_que_no_es_texto_se_dice_como_lo_que_es() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn what_is_not_text_is_reported_as_what_it_is() {
+        let dir = PanelDir::create().expect("create the directory");
         let path = dir.path().join(crate::PANEL_FILE);
-        std::fs::write(&path, b"{\"lines\":[\"caf\xe9\"]}").expect("escribir bytes crudos");
+        std::fs::write(&path, b"{\"lines\":[\"caf\xe9\"]}").expect("write raw bytes");
 
-        let failure = read(dir.path()).expect_err("no es UTF-8");
+        let failure = read(dir.path()).expect_err("not UTF-8");
 
-        assert!(matches!(failure, Problem::Invalid(_)), "fue {failure:?}");
+        assert!(matches!(failure, Problem::Invalid(_)), "was {failure:?}");
     }
 
-    /// Lo que no es ni cadena ni objeto no es una línea: pintarlo en blanco sería inventar contenido a
-    /// partir de basura.
+    /// What is neither a string nor an object is not a line: painting it blank would be inventing
+    /// content out of garbage.
     #[test]
-    fn lo_que_no_es_una_linea_se_descarta_en_vez_de_pintarse_en_blanco() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn what_is_not_a_line_is_discarded_instead_of_painted_blank() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        let panel = panel_in(&dir, r#"{"lines":[null,42,"buena",{"text":"también"}]}"#)
-            .expect("las buenas se leen");
+        let panel = panel_in(&dir, r#"{"lines":[null,42,"good",{"text":"too"}]}"#)
+            .expect("the good ones are read");
 
-        assert_eq!(panel.lines.len(), 2, "el nulo y el número no son líneas");
-        assert_eq!(panel.lines[0].text, "buena");
-        assert_eq!(panel.lines[1].text, "también");
+        assert_eq!(
+            panel.lines.len(),
+            2,
+            "the null and the number are not lines"
+        );
+        assert_eq!(panel.lines[0].text, "good");
+        assert_eq!(panel.lines[1].text, "too");
     }
 
-    /// El tiempo que el productor tolera se multiplica por sesenta: un número absurdo no puede desbordar.
+    /// The time the producer tolerates is multiplied by sixty: an absurd number cannot overflow.
     #[test]
-    fn un_tiempo_de_tolerancia_absurdo_no_desborda() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn an_absurd_tolerance_time_does_not_overflow() {
+        let dir = PanelDir::create().expect("create the directory");
 
         let panel = panel_in(
             &dir,
             r#"{"stale_after_minutes":18446744073709551615,"lines":[]}"#,
         )
-        .expect("leer");
+        .expect("read");
 
         assert_eq!(panel.stale_after, Duration::from_secs(u64::MAX));
     }
 
-    /// Las tres palabras con las que un productor dice que su división reclama algo.
+    /// The three words with which a producer says its split is calling for something.
     #[test]
-    fn las_tres_clases_de_reclamo_se_leen() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_three_kinds_of_call_are_read() {
+        let dir = PanelDir::create().expect("create the directory");
 
         for (written, expected) in [
             ("wait", Attention::Wait),
@@ -810,24 +835,24 @@ mod tests {
             ("done", Attention::Done),
         ] {
             let panel = panel_in(&dir, &format!(r#"{{"attention":"{written}","lines":[]}}"#))
-                .expect("leer");
+                .expect("read");
 
-            assert_eq!(panel.attention, Some(expected), "con «{written}»");
+            assert_eq!(panel.attention, Some(expected), "with \"{written}\"");
         }
     }
 
-    /// **La prioridad es el orden del tipo, y de eso depende lo que enseñe una ficha de pestaña.**
+    /// **The priority is the type's order, and what a tab's label shows depends on it.**
     ///
-    /// Se afirma sobre el **máximo de una lista**, que es como la va a usar quien acumule, y no sobre
-    /// comparaciones sueltas: con `a < b` a pares, un orden mal declarado puede seguir pasando si las
-    /// parejas que se prueban no son las que mandan.
+    /// It is asserted on the **maximum of a list**, which is how whoever accumulates is going to use
+    /// it, and not on loose comparisons: with `a < b` in pairs, a badly declared order can keep passing
+    /// if the pairs that are tested are not the ones that rule.
     ///
-    /// **Lo que esta prueba NO puede cubrir, y por eso la prioridad se escribe a mano**: una cuarta
-    /// clase de reclamo que alguien añadiera mañana no aparecería en ninguna de estas listas, así que la
-    /// prueba seguiría en verde con la prioridad nueva sin decidir. Lo que lo impide es que el `match`
-    /// de `priority` deja de compilar.
+    /// **What this test CANNOT cover, and that is why the priority is written by hand**: a fourth kind
+    /// of call that someone added tomorrow would not appear in any of these lists, so the test would
+    /// stay green with the new priority undecided. What prevents it is that the `match` of `priority`
+    /// stops compiling.
     #[test]
-    fn lo_que_mas_reclama_es_el_maximo() {
+    fn what_calls_the_most_is_the_maximum() {
         use Attention::{Block, Done, Wait};
 
         assert_eq!([Done, Block, Wait].into_iter().max(), Some(Wait));
@@ -836,175 +861,171 @@ mod tests {
         assert_eq!([Done].into_iter().max(), Some(Done));
     }
 
-    /// Lo escribe un tercero a mano, así que una palabra que no existe es cuestión de tiempo — y el
-    /// resto de su panel no tiene la culpa.
+    /// It is written by a third party by hand, so a word that does not exist is a matter of time — and
+    /// the rest of its panel is not to blame.
     #[test]
-    fn un_reclamo_que_no_existe_se_lee_como_si_no_hubiera_dicho_nada() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_call_that_does_not_exist_is_read_as_if_nothing_had_been_said() {
+        let dir = PanelDir::create().expect("create the directory");
 
         let panel = panel_in(
             &dir,
-            r#"{"attention":"waiting","phase":"validate","lines":[{"text":"algo"}]}"#,
+            r#"{"attention":"waiting","phase":"validate","lines":[{"text":"something"}]}"#,
         )
-        .expect("leer");
+        .expect("read");
 
         assert_eq!(panel.attention, None);
         assert_eq!(
             panel.phase.as_deref(),
             Some("validate"),
-            "un campo mal escrito se llevó por delante el resto del panel"
+            "a badly written field wiped out the rest of the panel"
         );
-        assert_eq!(panel.lines.len(), 1, "y también el cuerpo");
+        assert_eq!(panel.lines.len(), 1, "and the body too");
     }
 
-    /// **El cuerpo no es una señal, y esto es la mitad del hito que vive en esta caja.** Bastaría un
-    /// «esperé aprobación el martes» para dejar una pestaña marcada para siempre.
+    /// **The body is not a signal, and this is the half of the milestone that lives in this crate.** A
+    /// "I waited for approval on Tuesday" would be enough to leave a tab marked forever.
     ///
-    /// **Es una prueba de regresión, no de cobertura, y conviene saber qué la hace caer**: hoy no hay
-    /// ningún camino que derive el reclamo del cuerpo, así que la afirmación se cumple por ausencia. Cae
-    /// **cuando alguien escribe ese camino** — comprobado añadiendo a la lectura un `or_else` que
-    /// buscara la primera línea con marca de espera o de bloqueo. Ése es exactamente el atajo que este
-    /// hito existe para que nadie tome.
+    /// **It is a regression test, not a coverage one, and it is worth knowing what makes it fail**:
+    /// today there is no path that derives the call from the body, so the assertion holds by absence.
+    /// It fails **when someone writes that path** — verified by adding to the read an `or_else` that
+    /// looked for the first line with a wait or block mark. That is exactly the shortcut this milestone
+    /// exists so that nobody takes.
     #[test]
-    fn una_marca_del_cuerpo_no_es_un_reclamo_de_la_division() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_body_mark_is_not_a_call_from_the_split() {
+        let dir = PanelDir::create().expect("create the directory");
 
         let panel = panel_in(
             &dir,
-            r#"{"lines":[{"text":"esperé aprobación el martes","mark":"wait"},{"text":"y esto","mark":"block"}]}"#,
+            r#"{"lines":[{"text":"I waited for approval on Tuesday","mark":"wait"},{"text":"and this","mark":"block"}]}"#,
         )
-        .expect("leer");
+        .expect("read");
 
         assert_eq!(
             panel.lines[0].mark,
             Some(Mark::Wait),
-            "el cuerpo sí la trae"
+            "the body does carry it"
         );
         assert_eq!(
             panel.attention, None,
-            "el cuerpo produjo un reclamo de la división entera"
+            "the body produced a call for the whole split"
         );
     }
 
-    /// La sangría viene de fuera y quien pinta repetirá esos espacios.
+    /// The indentation comes from outside and whoever paints will repeat those spaces.
     #[test]
-    fn una_sangria_absurda_se_acota() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn an_absurd_indentation_is_bounded() {
+        let dir = PanelDir::create().expect("create the directory");
 
         let panel = panel_in(
             &dir,
             r#"{"lines":[{"text":"t","indent":18446744073709551615}]}"#,
         )
-        .expect("leer");
+        .expect("read");
 
         assert_eq!(panel.lines[0].indent, MAX_INDENT as usize);
     }
 
-    /// Una sangría negativa no es «mucha sangría»: es un campo mal escrito y vale su valor por omisión.
-    /// El caso existe porque el número entra sin signo, y leerlo con signo para después convertirlo
-    /// daría la vuelta al valor y sangraría hasta el tope justo cuando el productor pedía lo contrario.
+    /// A negative indentation is not "a lot of indentation": it is a badly written field and is worth
+    /// its default value. The case exists because the number comes in unsigned, and reading it signed
+    /// to then convert it would flip the value around and would indent up to the ceiling exactly when
+    /// the producer was asking for the opposite.
     #[test]
-    fn una_sangria_negativa_no_da_la_vuelta() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_negative_indentation_does_not_flip_around() {
+        let dir = PanelDir::create().expect("create the directory");
 
-        let panel = panel_in(&dir, r#"{"lines":[{"text":"t","indent":-3}]}"#).expect("leer");
+        let panel = panel_in(&dir, r#"{"lines":[{"text":"t","indent":-3}]}"#).expect("read");
 
         assert_eq!(panel.lines[0].indent, 0);
     }
 
-    /// Lo que hay ahí podría no ser un fichero, y una tubería con nombre bloquearía la apertura: como
-    /// leer ocurre dentro del fotograma, eso sería la ventana congelada.
+    /// What is there might not be a file, and a named pipe would block the open: since reading happens
+    /// inside the frame, that would be the window frozen.
     #[test]
-    fn lo_que_no_es_un_fichero_se_rechaza_antes_de_abrirlo() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn what_is_not_a_file_is_rejected_before_opening_it() {
+        let dir = PanelDir::create().expect("create the directory");
         std::fs::create_dir(dir.path().join(crate::PANEL_FILE))
-            .expect("poner un directorio donde iba el fichero");
+            .expect("put a directory where the file went");
 
         let failure = read(dir.path());
-        // Se limpia **antes** de afirmar: con la limpieza detrás, un fallo del test dejaría un
-        // directorio que el destructor tampoco puede borrar, porque no está vacío.
-        std::fs::remove_dir(dir.path().join(crate::PANEL_FILE)).expect("limpiar");
+        // Cleanup happens **before** asserting: with the cleanup behind, a test failure would leave a
+        // directory the destructor also cannot delete, because it is not empty.
+        std::fs::remove_dir(dir.path().join(crate::PANEL_FILE)).expect("clean up");
 
         assert!(
             matches!(failure, Err(Problem::NotRegular)),
-            "fue {failure:?}"
+            "was {failure:?}"
         );
     }
 
-    /// **El caso para el que existe el mecanismo, y hasta ahora no estaba probado.** El test de arriba
-    /// usa un directorio, que es precisamente el que **no** bloquea: abrirlo falla y ya. Una tubería con
-    /// nombre sí se queda esperando a que alguien escriba al otro lado, y como leer ocurre dentro del
-    /// fotograma, eso es la ventana congelada — para siempre, no un rato.
+    /// **The case the mechanism exists for, and until now was not tested.** The test above uses a
+    /// directory, which is precisely the one that does **not** block: opening it fails and that is
+    /// that. A named pipe does stay waiting for someone to write on the other side, and since reading
+    /// happens inside the frame, that is the window frozen — forever, not for a while.
     ///
-    /// Si esta prueba llegara a colgarse en vez de fallar, **ese es el fallo**: significa que la
-    /// comprobación de fichero regular desapareció.
+    /// If this test were to hang instead of fail, **that is the failure**: it means the regular-file
+    /// check disappeared.
     #[cfg(unix)]
     #[test]
-    fn una_tuberia_con_nombre_se_rechaza_en_vez_de_colgar_la_ventana() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_named_pipe_is_rejected_instead_of_hanging_the_window() {
+        let dir = PanelDir::create().expect("create the directory");
         let path = dir.path().join(crate::PANEL_FILE);
         let mkfifo = std::process::Command::new("mkfifo")
             .arg(&path)
             .status()
             .is_ok_and(|status| status.success());
-        assert!(mkfifo, "no se pudo crear la tubería con nombre");
+        assert!(mkfifo, "the named pipe could not be created");
 
         let failure = read(dir.path());
-        std::fs::remove_file(&path).expect("limpiar la tubería");
+        std::fs::remove_file(&path).expect("clean up the pipe");
 
         assert!(
             matches!(failure, Err(Problem::NotRegular)),
-            "fue {failure:?}"
+            "was {failure:?}"
         );
     }
 
-    /// **La cara B de exigir un fichero: un enlace a un fichero normal sí vale.** Lo que se rechaza es
-    /// lo que bloquearía la apertura, y un enlace no bloquea nada. Y no es un caso rebuscado: el
-    /// productor que existe hoy publica en el directorio de su trabajo, así que enlazar el fichero del
-    /// contrato ahí es la forma evidente de aparecer en el panel sin cambiar de sitio.
+    /// **The flip side of requiring a file: a link to a normal file does work.** What is rejected is
+    /// what would block the open, and a link blocks nothing. And it is not a contrived case: the
+    /// producer that exists today publishes in its work directory, so linking the contract file there
+    /// is the obvious way to appear in the panel without moving.
     #[cfg(unix)]
     #[test]
-    fn un_enlace_a_un_fichero_normal_se_lee_como_el_fichero_que_apunta() {
-        let producer_dir = PanelDir::create().expect("crear el directorio del productor");
-        let dir = PanelDir::create().expect("crear el directorio de la división");
+    fn a_link_to_a_normal_file_is_read_as_the_file_it_points_to() {
+        let producer_dir = PanelDir::create().expect("create the producer's directory");
+        let dir = PanelDir::create().expect("create the split's directory");
         let published = producer_dir.path().join(crate::PANEL_FILE);
-        std::fs::write(&published, r#"{"lines":["desde el otro lado"]}"#).expect("publicar");
+        std::fs::write(&published, r#"{"lines":["from the other side"]}"#).expect("publish");
         std::os::unix::fs::symlink(&published, dir.path().join(crate::PANEL_FILE))
-            .expect("enlazar el fichero del contrato");
+            .expect("link the contract file");
 
-        let panel = read(dir.path()).expect("un enlace a un fichero normal se lee");
+        let panel = read(dir.path()).expect("a link to a normal file is read");
 
-        assert_eq!(panel.lines[0].text, "desde el otro lado");
+        assert_eq!(panel.lines[0].text, "from the other side");
     }
 
-    /// **La cadena entera de la antigüedad, de punta a punta.** Los dos tests de abajo construyen el
-    /// panel a mano, así que ninguno ata la decisión que importa: que la antigüedad sale de la fecha del
-    /// fichero. Sin este, olvidarse de guardarla dejaría la suite verde y **ningún panel se marcaría
-    /// viejo jamás**.
+    /// **The whole chain of the age, end to end.** The two tests below build the panel by hand, so
+    /// none of them ties down the decision that matters: that the age comes from the file's date.
+    /// Without this one, forgetting to store it would leave the suite green and **no panel would ever
+    /// be marked old**.
     #[test]
-    fn la_antiguedad_sale_de_la_fecha_del_fichero_leido() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        let panel = panel_in(&dir, r#"{"stale_after_minutes":1,"lines":[]}"#).expect("leer");
+    fn the_age_comes_from_the_date_of_the_read_file() {
+        let dir = PanelDir::create().expect("create the directory");
+        let panel = panel_in(&dir, r#"{"stale_after_minutes":1,"lines":[]}"#).expect("read");
 
-        let written = panel
-            .written_at
-            .expect("la fecha del fichero tiene que venir puesta");
+        let written = panel.written_at.expect("the file's date has to come set");
 
-        assert!(
-            !panel.is_stale_at(written),
-            "recién escrito no puede estar rancio"
-        );
+        assert!(!panel.is_stale_at(written), "just written cannot be stale");
         assert!(
             panel.is_stale_at(written + Duration::from_secs(120)),
-            "dos minutos de silencio con un tope de uno es rancio"
+            "two minutes of silence with a cap of one is stale"
         );
     }
 
-    /// Las seis marcas y los siete estilos, **todos**. Con solo los que trae un fichero de ejemplo,
-    /// borrar el brazo de tres marcas y de cinco estilos dejaba la suite verde.
+    /// The six marks and the seven styles, **all of them**. With only the ones an example file carries,
+    /// deleting the arm of three marks and five styles left the suite green.
     #[test]
-    fn se_leen_las_seis_marcas_y_los_siete_estilos() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_six_marks_and_the_seven_styles_are_read() {
+        let dir = PanelDir::create().expect("create the directory");
         let panel = panel_in(
             &dir,
             r#"{"lines":[
@@ -1017,7 +1038,7 @@ mod tests {
                 {"text":"m","style":"error"}
             ]}"#,
         )
-        .expect("leer");
+        .expect("read");
 
         let marks: Vec<Option<Mark>> = panel.lines[..6].iter().map(|l| l.mark).collect();
         assert_eq!(
@@ -1047,17 +1068,17 @@ mod tests {
         );
     }
 
-    /// Los tres campos que solo se guardan para que alguien los use después. Sin esto, «no se lee» y
-    /// «viene vacío» son indistinguibles.
+    /// The three fields that are only stored for someone to use later. Without this, "it is not read"
+    /// and "it comes empty" are indistinguishable.
     #[test]
-    fn se_leen_la_version_la_marca_de_tiempo_del_productor_y_el_enlace() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_version_the_producers_timestamp_and_the_link_are_read() {
+        let dir = PanelDir::create().expect("create the directory");
         let panel = panel_in(
             &dir,
             r#"{"v":1,"updated_at":"2026-08-06T18:12:00+02:00",
                 "lines":[{"text":"t","link":"https://example.test/1","indent":3}]}"#,
         )
-        .expect("leer");
+        .expect("read");
 
         assert_eq!(panel.version, Some(1));
         assert_eq!(
@@ -1068,26 +1089,27 @@ mod tests {
             panel.lines[0].link.as_deref(),
             Some("https://example.test/1")
         );
-        assert_eq!(panel.lines[0].indent, 3, "una sangría válida se conserva");
+        assert_eq!(panel.lines[0].indent, 3, "a valid indentation is kept");
     }
 
-    /// Las dos fronteras exactas, que es donde un `>` de más o de menos no se nota.
+    /// The two exact boundaries, which is where a `>` too many or too few does not show.
     #[test]
-    fn justo_en_el_techo_se_acepta_y_un_byte_mas_no() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        let overhead = r#"{"lines":["ANCHO"]}"#.len() - "ANCHO".len();
+    fn right_at_the_ceiling_it_is_accepted_and_one_byte_more_is_not() {
+        let dir = PanelDir::create().expect("create the directory");
+        let overhead = r#"{"lines":["WIDTH"]}"#.len() - "WIDTH".len();
         let exact_fit = "x".repeat(MAX_BYTES as usize - overhead);
 
-        let fits = panel_in(&dir, &format!(r#"{{"lines":["{exact_fit}"]}}"#)).expect("justo cabe");
+        let fits =
+            panel_in(&dir, &format!(r#"{{"lines":["{exact_fit}"]}}"#)).expect("it just fits");
         assert_eq!(fits.lines.len(), 1);
 
         let failure =
-            panel_in(&dir, &format!(r#"{{"lines":["{exact_fit}x"]}}"#)).expect_err("uno más, no");
-        assert!(matches!(failure, Problem::TooBig), "fue {failure:?}");
+            panel_in(&dir, &format!(r#"{{"lines":["{exact_fit}x"]}}"#)).expect_err("one more, no");
+        assert!(matches!(failure, Problem::TooBig), "was {failure:?}");
     }
 
     #[test]
-    fn el_silencio_justo_igual_al_tope_todavia_no_es_rancio() {
+    fn silence_exactly_equal_to_the_cap_is_not_stale_yet() {
         let panel = Panel {
             stale_after: Duration::from_secs(60),
             written_at: Some(SystemTime::UNIX_EPOCH),
@@ -1099,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn un_panel_callado_desde_hace_rato_esta_rancio() {
+    fn a_panel_silent_for_a_while_is_stale() {
         let panel = Panel {
             stale_after: Duration::from_secs(60),
             written_at: Some(SystemTime::UNIX_EPOCH),
@@ -1110,10 +1132,10 @@ mod tests {
         assert!(!panel.is_stale_at(SystemTime::UNIX_EPOCH + Duration::from_secs(30)));
     }
 
-    /// Una fecha en el futuro no es el caso raro: basta un reloj adelantado. Con la resta de tiempos
-    /// ingenua esto sería un pánico, y nada que venga de fuera puede provocar uno.
+    /// A date in the future is not the rare case: a fast clock is enough. With the naive subtraction of
+    /// times this would be a panic, and nothing that comes from outside can cause one.
     #[test]
-    fn una_fecha_en_el_futuro_no_entra_en_panico_ni_marca_rancio() {
+    fn a_date_in_the_future_does_not_panic_nor_mark_stale() {
         let panel = Panel {
             stale_after: Duration::from_secs(60),
             written_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(7200)),
@@ -1124,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn sin_saber_cuando_se_escribio_no_hay_rancio_que_medir() {
+    fn without_knowing_when_it_was_written_there_is_no_staleness_to_measure() {
         assert!(!empty_panel().is_stale_at(SystemTime::now()));
     }
 
@@ -1141,21 +1163,22 @@ mod tests {
         }
     }
 
-    // ─── Contar lo que se reserva ──────────────────────────────────────────────────────────────
+    // ─── Counting what is reserved ──────────────────────────────────────────────────────────────
     //
-    // Existe por una sola prueba, y no había forma más barata: la propiedad «no se lee el fichero
-    // entero» **no se ve en el resultado** —el error es el mismo se reserve un cuarto de mega o diez—,
-    // así que o se mide la memoria o no está atada. Desde fuera del proceso tampoco vale: el máximo
-    // residente que da el sistema es el de toda la corrida, y aquí corren decenas de pruebas a la vez.
+    // It exists for a single test, and there was no cheaper way: the property "the whole file is not
+    // read" **is not visible in the result** —the error is the same whether a quarter of a meg or ten
+    // is reserved—, so either the memory is measured or it is not tied down. From outside the process
+    // it is no good either: the resident maximum the system gives is that of the whole run, and here
+    // dozens of tests run at once.
     //
-    // **La cuenta es por hilo, a propósito.** Las pruebas corren en paralelo, y un contador compartido
-    // haría que lo que reserva una se le achacara a otra: el fallo sería intermitente, que es la peor
-    // clase de prueba. Con un hilo por prueba, cada una mide lo suyo.
+    // **The count is per thread, on purpose.** The tests run in parallel, and a shared counter would
+    // make what one reserves get blamed on another: the failure would be intermittent, which is the
+    // worst kind of test. With one thread per test, each measures its own.
 
-    /// Lo vivo y el máximo que llegó a estarlo, **en este hilo**.
+    /// What is live and the maximum it ever was, **in this thread**.
     ///
-    /// Se inicializan sin reservar —de ahí el `const`—: un valor perezoso reservaría memoria dentro del
-    /// asignador la primera vez que se mira, que es una llamada a sí mismo.
+    /// They are initialized without reserving —hence the `const`—: a lazy value would reserve memory
+    /// inside the allocator the first time it is looked at, which is a call to itself.
     mod counting {
         use std::cell::Cell;
 
@@ -1167,10 +1190,10 @@ mod tests {
 
     struct Counter;
 
-    /// Suma o resta lo vivo y se queda con el máximo.
+    /// Adds to or subtracts from what is live and keeps the maximum.
     ///
-    /// `try_with` y no `with`: al deshacerse un hilo, sus variables locales ya no están, y ahí todavía
-    /// se libera memoria. Con `with` eso sería un pánico dentro del asignador.
+    /// `try_with` and not `with`: when a thread is torn down, its thread-locals are gone, and there
+    /// memory is still freed. With `with` that would be a panic inside the allocator.
     fn record(delta: isize) {
         let _ = counting::LIVE.try_with(|live| {
             let current = live.get().saturating_add_signed(delta);
@@ -1210,7 +1233,7 @@ mod tests {
     #[global_allocator]
     static ALLOCATOR: Counter = Counter;
 
-    /// Ejecuta el trabajo y devuelve, además de lo que produjo, **cuánto llegó a tener vivo de más**.
+    /// Runs the work and returns, besides what it produced, **how much extra it ever had live**.
     fn while_measuring<T>(work: impl FnOnce() -> T) -> (T, usize) {
         let baseline = counting::LIVE.get();
         counting::PEAK.set(baseline);

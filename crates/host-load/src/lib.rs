@@ -1,113 +1,114 @@
 #![deny(rustdoc::broken_intra_doc_links)]
-// **Un enlace de rustdoc roto no lo ve el compilador, y medio repositorio es rustdoc.** Cuando esto
-// se puso, el árbol ya tenía uno apuntando a una constante que un renombrado anterior había dejado
-// atrás: nadie lo notó porque `cargo doc` avisa y no falla. Con el `deny` falla, y el hito que
-// renombra 46.458 líneas lo va a agradecer.
+// **A broken rustdoc link is invisible to the compiler, and half the repository is rustdoc.** When
+// this was put in, the tree already had one pointing to a constant that an earlier rename had left
+// behind: nobody noticed because `cargo doc` warns and does not fail. With the `deny` it fails, and
+// the milestone that renames 46,458 lines is going to be grateful for it.
 //
-// Salta en `cargo doc`, **no** en `cargo test` — este repositorio no tiene integración continua, así
-// que sigue habiendo que invocarlo. Lo que cambia es que ahora se rompe en vez de avisar.
-//! Mide cuánto tarda un terminal en **vaciar** una carga fija que se le vuelca por la salida
-//! estándar, y agrega el resultado de varias divisiones que producen a la vez.
+// It fires on `cargo doc`, **not** on `cargo test` — this repository has no continuous integration,
+// so it still has to be invoked. What changes is that now it breaks instead of warning.
+//! Measures how long a terminal takes to **drain** a fixed load dumped at it through standard
+//! output, and aggregates the result of several splits producing at once.
 //!
-//! # Qué mide, y qué no
+//! # What it measures, and what it does not
 //!
-//! Mide lo que el terminal **saca del pseudoterminal**, no lo que **pinta**. Un terminal que traga
-//! rápido y luego descarta frames sale bien en este número y mal a la vista, así que esto es un
-//! **suelo**, no un techo.
+//! It measures what the terminal **pulls out of the pseudoterminal**, not what it **paints**. A
+//! terminal that swallows fast and then drops frames looks good in this number and bad to the eye,
+//! so this is a **floor**, not a ceiling.
 //!
-//! Eso lo hace un buen instrumento para **comparar terminales ajenos** —si uno falla ya en el
-//! vaciado, no hace falta ver el pintado para descartarlo— y un **mal criterio para el nuestro**:
-//! la mitigación que el roadmap planifica para F1.3 es repintar solo cuando el PTY produzca
-//! cambios, o sea coalescer frames, que aprobaría esta prueba por construcción.
+//! That makes it a good instrument to **compare other people's terminals** —if one already fails at
+//! the drain, there is no need to look at the painting to rule it out— and a **bad criterion for
+//! ours**: the mitigation the roadmap plans for F1.3 is to repaint only when the PTY produces
+//! changes, that is, to coalesce frames, which would pass this test by construction.
 //!
-//! El pintado es **inobservable desde aquí**: ningún protocolo de terminal reporta un frame
-//! presentado, y el ida y vuelta de `ESC[6n` solo demuestra *consumido y parseado*. El instrumento
-//! que sí lo vería son contadores dentro de la propia app —bytes procesados por frame, frames
-//! presentados, retraso del último—, y eso necesita un bucle de pintado que todavía no existe.
+//! The painting is **unobservable from here**: no terminal protocol reports a presented frame, and
+//! the round trip of `ESC[6n` only proves *consumed and parsed*. The instrument that would see it
+//! is counters inside the app itself —bytes processed per frame, frames presented, lag of the last
+//! one—, and that needs a paint loop that does not yet exist.
 //!
-//! # Protocolo
+//! # Protocol
 //!
 //! ```text
-//! # 1. Una sola división: la referencia
+//! # 1. A single split: the reference
 //! cargo run --release -p host-load -- run --tag wezterm-1
 //!
-//! # 2. N divisiones visibles a la vez, una orden por división, dentro de la misma ventana de 30 s
+//! # 2. N splits visible at once, one command per split, within the same 30 s window
 //! cargo run --release -p host-load -- run --tag wezterm-4
 //!
-//! # 3. El agregado de cada tanda
+//! # 3. The aggregate of each run
 //! cargo run --release -p host-load -- report --tag wezterm-4
 //! ```
 //!
-//! Lo que decide **no es el MiB/s absoluto**, es si el agregado **sube** con N o baja. Un terminal
-//! que reparte el trabajo de verdad multiplica el agregado; uno que se pelea por un hilo común lo
-//! mantiene o lo empeora.
+//! What decides is **not the absolute MiB/s**, it is whether the aggregate **rises** with N or
+//! falls. A terminal that genuinely spreads the work multiplies the aggregate; one that fights over
+//! a shared thread keeps it the same or makes it worse.
 //!
-//! Las divisiones tienen que estar **visibles a la vez**: un terminal que solo monta la pestaña
-//! activa mediría una sola por muy abiertas que estén las demás.
+//! The splits have to be **visible at once**: a terminal that only mounts the active tab would
+//! measure a single one no matter how open the others are.
 //!
-//! ## Deja el ancho de la ventana fuera del experimento
+//! ## Keep the window width out of the experiment
 //!
-//! Al partir una ventana en N divisiones, cada una se estrecha. Las líneas de la carga miden ~46
-//! columnas: por debajo de eso el terminal empieza a **envolver**, que es trabajo extra, y el
-//! agregado bajaría con N por una razón que no es la que se quiere medir.
+//! When splitting a window into N splits, each one narrows. The load's lines measure ~46 columns:
+//! below that the terminal starts to **wrap**, which is extra work, and the aggregate would fall
+//! with N for a reason that is not the one you want to measure.
 //!
-//! Así que **la comparación honesta es a igual ancho**: o cada división mantiene ≥46 columnas, o se
-//! mide con la misma anchura por división en las dos fases. La herramienta no puede comprobarlo
-//! —desde el proceso productor no se ve el reparto de la ventana— así que queda en manos de quien
-//! mide, y por eso está escrito aquí.
+//! So **the honest comparison is at equal width**: either each split keeps ≥46 columns, or it is
+//! measured with the same width per split in both phases. The tool cannot check it —from the
+//! producing process the window's layout is not visible— so it is left in the hands of whoever
+//! measures, and that is why it is written here.
 //!
-//! ## Los dos regímenes se leen distinto, y no se comparan entre sí
+//! ## The two regimes read differently, and are not compared to each other
 //!
-//! Sin `--rate` la carga sale tan rápido como el terminal admita, y el MiB/s responde «cuánto da».
-//! Con `--rate` responde otra cosa: **si aguantó el caudal pedido**. Al ir a ritmo, el tiempo total
-//! incluye las esperas, así que un terminal que va sobrado devuelve exactamente el caudal que se le
-//! pidió y ninguno más — medido: `--rate 10` da 10,0 MiB/s clavados. Lo que informa es la caída:
-//! con un consumidor que no daba abasto, esa misma orden devolvió 0,3 MiB/s.
+//! Without `--rate` the load comes out as fast as the terminal allows, and the MiB/s answers "how
+//! much it gives". With `--rate` it answers something else: **whether it held the requested
+//! throughput**. Going at a pace, the total time includes the waits, so a terminal with room to
+//! spare returns exactly the throughput it was asked for and no more — measured: `--rate 10` gives
+//! 10.0 MiB/s dead on. What it reports is the drop: with a consumer that could not keep up, that
+//! same command returned 0.3 MiB/s.
 //!
-//! O sea que en modo caudal la medida está **censurada por arriba**: sirve para detectar al que no
-//! aguanta, no para ordenar a los que sí. Mezclar los dos regímenes bajo una etiqueta daría un
-//! agregado sin sentido, así que [`aggregate`] **se niega a hacerlo** en vez de fiarlo a la
-//! disciplina de quien mide.
+//! That is, in throughput mode the measurement is **censored from above**: it serves to detect the
+//! one that cannot hold up, not to rank the ones that can. Mixing the two regimes under one label
+//! would give a meaningless aggregate, so [`aggregate`] **refuses to do it** instead of trusting it
+//! to the discipline of whoever measures.
 //!
-//! # Números de referencia
+//! # Reference numbers
 //!
-//! Medidos el 8 de agosto de 2026, Wayland, GPU por hardware, 22,7 MiB de carga:
+//! Measured on 8 August 2026, Wayland, hardware GPU, 22.7 MiB of load:
 //!
 //! ```text
-//!             1 división            4 divisiones visibles      caída   agregado
-//! WezTerm     0,80 s · 28,4 MiB/s   0,98 / 0,98 / 1,01 / 1,06   ×1,26   85,7 MiB/s
-//! Orca        2,63 s ·  8,6 MiB/s   8,44 / 12,50 / 12,72 / 12,64  ×4,4    7,1 MiB/s
+//!             1 split               4 splits visible           drop    aggregate
+//! WezTerm     0.80 s · 28.4 MiB/s   0.98 / 0.98 / 1.01 / 1.06   ×1.26   85.7 MiB/s
+//! Orca        2.63 s ·  8.6 MiB/s   8.44 / 12.50 / 12.72 / 12.64  ×4.4    7.1 MiB/s
 //! ```
 //!
-//! Orca mueve **menos** trabajo total con cuatro divisiones que con una: escala negativo. Es el
-//! resultado que sostiene la decisión D3 de no construir sobre Electron y xterm.js.
+//! Orca moves **less** total work with four splits than with one: negative scaling. It is the
+//! result that underpins decision D3 not to build on Electron and xterm.js.
 
 use std::time::Duration;
 
-/// Tamaño del trozo con el que se alimenta la salida.
+/// Size of the chunk the output is fed with.
 ///
-/// Coincide con el búfer de lectura del PTY en `term-core`, pero **lo que llega al otro lado no es
-/// un bloque de este tamaño**: Rust interpone un `LineWriter` en la salida estándar, y medido con
-/// `strace` cada trozo sale en dos llamadas —una corta con la cola de línea que quedó pendiente y
-/// otra de ~8 KiB hasta el último salto—. El sesgo es constante, así que la comparación entre
-/// terminales sobrevive; el MiB/s absoluto lleva ese sesgo dentro.
+/// It matches the PTY read buffer in `term-core`, but **what arrives on the other side is not a
+/// block of this size**: Rust interposes a `LineWriter` on standard output, and measured with
+/// `strace` each chunk comes out in two calls —a short one with the line tail that was left pending
+/// and another of ~8 KiB up to the last break—. The bias is constant, so the comparison between
+/// terminals survives; the absolute MiB/s carries that bias inside it.
 pub const CHUNK: usize = 8 * 1024;
 
-/// Cada cuántas líneas la carga repinta la barra de estado.
+/// Every how many lines the load repaints the status bar.
 const LINES_PER_REPAINT: usize = 50;
 
-/// Construye la carga.
+/// Builds the load.
 ///
-/// **Determinista a propósito**: el contenido de la línea `i` depende solo de `i`, sin reloj, sin
-/// azar y sin la ruta de ningún fichero. Dos máquinas distintas generan los mismos bytes, que es
-/// lo que hace comparables dos medidas.
+/// **Deterministic on purpose**: the content of line `i` depends only on `i`, with no clock, no
+/// randomness and no file path. Two different machines generate the same bytes, which is what makes
+/// two measurements comparable.
 ///
-/// El patrón lleva color, negrita, atenuado y un repintado con movimiento de cursor **a propósito**:
-/// alimentar un terminal con un solo carácter repetido recorre el camino rápido de su parser y da
-/// un número que miente sobre el caso real.
+/// The pattern carries color, bold, dim and a repaint with cursor movement **on purpose**: feeding
+/// a terminal a single repeated character walks its parser's fast path and gives a number that lies
+/// about the real case.
 ///
-/// Se dejan de añadir líneas al llegar a `target_bytes`, sin cortar la última: truncar a mitad
-/// dejaría una secuencia de escape partida, y eso ya no sería la misma carga.
+/// Lines stop being added upon reaching `target_bytes`, without cutting the last one: truncating
+/// mid-way would leave a split escape sequence, and that would no longer be the same load.
 pub fn build_load(target_bytes: usize) -> Vec<u8> {
     let mut load = Vec::with_capacity(target_bytes + 256);
     let mut i: usize = 1;
@@ -116,13 +117,13 @@ pub fn build_load(target_bytes: usize) -> Vec<u8> {
         let ms = 3 + i % 40;
         load.extend_from_slice(
             format!(
-                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m compilando el módulo {i} … \x1b[32mhecho\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
+                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m compiling module {i} … \x1b[32mdone\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
             )
             .as_bytes(),
         );
         if i.is_multiple_of(LINES_PER_REPAINT) {
-            // Guardar cursor, saltar al origen, pintar en vídeo inverso, volver: lo que hace una
-            // interfaz de texto y lo que más trabajo le da al que pinta.
+            // Save cursor, jump to the origin, paint in reverse video, come back: what a text
+            // interface does and what gives the painter the most work.
             load.extend_from_slice(format!("\x1b7\x1b[H\x1b[7m {i} \x1b[0m\x1b8").as_bytes());
         }
         i += 1;
@@ -130,37 +131,37 @@ pub fn build_load(target_bytes: usize) -> Vec<u8> {
     load
 }
 
-/// Los caracteres con los que la carga en CJK escribe, y por qué éstos.
+/// The characters the CJK load writes with, and why these ones.
 ///
-/// **Cubren los tres bloques que el hito de las fuentes persigue** —kanji, hiragana y hangul— más un
-/// icono del Área de Uso Privado, que es el otro caso. Ninguno lo cubren las fuentes de fábrica de egui,
-/// así que cada uno **dispara de verdad** el camino de descubrimiento en vez de rozarlo.
+/// **They cover the three blocks the fonts milestone pursues** —kanji, hiragana and hangul— plus a
+/// Private Use Area icon, which is the other case. None of them are covered by egui's factory fonts,
+/// so each one **genuinely triggers** the discovery path instead of grazing it.
 const CJK_LETTERS: &[char] = &[
     '日', '本', '語', '漢', '字', '中', '文', 'あ', 'い', 'う', 'え', 'お', '한', '국', '어',
     '\u{f015}',
 ];
 
-/// La misma carga, pero escribiendo en CJK.
+/// The same load, but writing in CJK.
 ///
-/// **Existe aparte y `build_load` no se toca, y eso es deliberado**: cambiar la carga de siempre haría
-/// que las tandas nuevas no fueran comparables con ninguno de los anexos publicados. Ésta solo la pide la
-/// tanda que mide el descubrimiento de fuentes.
+/// **It exists separately and `build_load` is not touched, and that is deliberate**: changing the
+/// usual load would make the new runs incomparable with any of the published annexes. Only the run
+/// that measures font discovery asks for this one.
 ///
-/// **Determinista igual que la otra**: el contenido de la línea `i` depende solo de `i`.
+/// **Deterministic just like the other**: the content of line `i` depends only on `i`.
 pub fn build_load_cjk(target_bytes: usize) -> Vec<u8> {
     let mut load = Vec::with_capacity(target_bytes + 256);
     let mut i: usize = 1;
     while load.len() < target_bytes {
         let color = 31 + i % 7;
-        // **Una palabra distinta por línea, rotando**, para que no sea siempre el mismo carácter: quien
-        // pinta cachea por carácter, así que repetir uno solo recorrería el camino rápido y mediría el
-        // descubrimiento de **una** fuente en vez del de una pantalla de verdad.
+        // **A different word per line, rotating**, so that it is not always the same character:
+        // the painter caches per character, so repeating a single one would walk the fast path and
+        // measure the discovery of **one** font instead of that of a real screen.
         let word: String = (0..4)
             .map(|n| CJK_LETTERS[(i + n) % CJK_LETTERS.len()])
             .collect();
         load.extend_from_slice(
             format!(
-                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {word} — compilando el módulo {i} … \x1b[32m完了\x1b[0m\n"
+                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {word} — compiling module {i} … \x1b[32m完了\x1b[0m\n"
             )
             .as_bytes(),
         );
@@ -172,15 +173,16 @@ pub fn build_load_cjk(target_bytes: usize) -> Vec<u8> {
     load
 }
 
-/// Los emojis con los que escribe la carga a color, y por qué éstos.
+/// The emojis the color load writes with, and why these ones.
 ///
-/// **Los tres casos que la regla de presentación distingue, y ni uno más:** uno que va a color por
-/// defecto, uno de texto **con** su selector —que tiene que salir a color— y uno de texto **sin** él —que
-/// no—. Sin los tres, una tanda pintaría todo por el mismo camino y mediría la mitad del trabajo.
+/// **The three cases the presentation rule distinguishes, and not one more:** one that goes to
+/// color by default, one text one **with** its selector —which has to come out in color— and one
+/// text one **without** it —which does not—. Without all three, a run would paint everything by the
+/// same path and measure half the work.
 ///
-/// **Y son muchos distintos a propósito.** Quien pinta recuerda por carácter, así que repetir uno solo
-/// recorrería el camino rápido y publicaría el coste de rasterizar **un** glifo como si fuera el de una
-/// pantalla de verdad.
+/// **And there are many different ones on purpose.** The painter remembers per character, so
+/// repeating a single one would walk the fast path and publish the cost of rasterizing **one** glyph
+/// as if it were that of a real screen.
 const EMOJIS: &[&str] = &[
     "\u{1F600}",
     "\u{1F44D}",
@@ -196,13 +198,13 @@ const EMOJIS: &[&str] = &[
     "\u{2714}\u{FE0F}",
 ];
 
-/// La misma carga, pero salpicada de emojis.
+/// The same load, but sprinkled with emojis.
 ///
-/// **Existe aparte y `build_load` no se toca**, por lo mismo que la de CJK: cambiar la carga de siempre
-/// dejaría las tandas nuevas sin poder compararse con ningún anexo publicado. Ésta solo la pide la tanda
-/// que mide lo que cuesta rasterizar un glifo de color.
+/// **It exists separately and `build_load` is not touched**, for the same reason as the CJK one:
+/// changing the usual load would leave the new runs unable to be compared with any published annex.
+/// Only the run that measures what it costs to rasterize a color glyph asks for this one.
 ///
-/// **Determinista igual que las otras**: el contenido de la línea `i` depende solo de `i`.
+/// **Deterministic just like the others**: the content of line `i` depends only on `i`.
 pub fn build_load_color(target_bytes: usize) -> Vec<u8> {
     let mut load = Vec::with_capacity(target_bytes + 256);
     let mut i: usize = 1;
@@ -212,7 +214,7 @@ pub fn build_load_color(target_bytes: usize) -> Vec<u8> {
         let ms = 3 + i % 40;
         load.extend_from_slice(
             format!(
-                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {face} compilando el módulo {i} … \x1b[32mhecho\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
+                "\x1b[{color}m[\x1b[1m{i:06}\x1b[0m\x1b[{color}m]\x1b[0m {face} compiling module {i} … \x1b[32mdone\x1b[0m \x1b[2m({ms} ms)\x1b[0m\n"
             )
             .as_bytes(),
         );
@@ -224,17 +226,17 @@ pub fn build_load_color(target_bytes: usize) -> Vec<u8> {
     load
 }
 
-/// Primer instante alineado en el que arrancar, contado desde la época.
+/// First aligned instant at which to start, counted from the epoch.
 ///
-/// **Trabaja en fracciones de segundo, y eso es lo único que hace que sirva.** La primera versión
-/// restaba dos épocas ya truncadas a segundo y dormía esa diferencia entera, con lo que la fracción
-/// del lanzamiento se arrastraba intacta: dos divisiones lanzadas con medio segundo de diferencia
-/// arrancaban con medio segundo de diferencia — medido, 470,314 contra 470,807 cuando las dos
-/// debían salir en 470,000. Peor todavía, con `now` = 120,5 y `at` = 30 el objetivo truncado caía
-/// **en el pasado** y esa división salía disparada mientras otra lanzada 0,5 s después esperaba
-/// 29 s. Alinear mal es peor que no alinear: la desalineación queda escondida.
+/// **It works in fractions of a second, and that is the only thing that makes it useful.** The
+/// first version subtracted two epochs already truncated to the second and slept that whole
+/// difference, so the launch fraction was dragged along intact: two splits launched half a second
+/// apart started half a second apart — measured, 470.314 against 470.807 when both should have gone
+/// off at 470.000. Worse still, with `now` = 120.5 and `at` = 30 the truncated target fell **in the
+/// past** and that split shot off while another launched 0.5 s later waited 29 s. Aligning badly is
+/// worse than not aligning: the misalignment stays hidden.
 ///
-/// Con `at` a cero, ahora mismo. Si `now` cae exactamente en un múltiplo, es `now`.
+/// With `at` at zero, right now. If `now` falls exactly on a multiple, it is `now`.
 pub fn start_instant(now: Duration, at: u64) -> Duration {
     if at == 0 {
         return now;
@@ -246,11 +248,11 @@ pub fn start_instant(now: Duration, at: u64) -> Duration {
     }
 }
 
-/// Cuánto esperar antes del siguiente trozo para no superar el caudal objetivo.
+/// How long to wait before the next chunk so as not to exceed the target throughput.
 ///
-/// `None` cuando no hay caudal objetivo o cuando ya se va por detrás de él: **nunca acelera para
-/// alcanzarlo**. Si el terminal no da el caudal pedido, el caudal real sale por debajo, y eso *es*
-/// el resultado de la medida.
+/// `None` when there is no target throughput or when it is already running behind it: **it never
+/// speeds up to catch up**. If the terminal does not give the requested throughput, the real
+/// throughput comes out below it, and that *is* the result of the measurement.
 pub fn pace_delay(
     bytes_written: u64,
     elapsed: Duration,
@@ -262,49 +264,51 @@ pub fn pace_delay(
     }
     let should_have_taken = bytes_written as f64 / rate_bytes;
     let spare = should_have_taken - elapsed.as_secs_f64();
-    // `Duration::from_secs_f64` entra en pánico con un valor no finito o desbordado, y un caudal
-    // absurdamente pequeño (`--rate 1e-25`) lo produce. Comprobarlo aquí es lo que evita que la
-    // herramienta reviente en vez de decir que no va a esperar.
+    // `Duration::from_secs_f64` panics with a non-finite or overflowed value, and an absurdly small
+    // throughput (`--rate 1e-25`) produces one. Checking it here is what keeps the tool from
+    // blowing up instead of saying it is not going to wait.
     (spare > 0.0 && spare.is_finite() && spare < Duration::MAX.as_secs_f64())
         .then(|| Duration::from_secs_f64(spare))
 }
 
-/// Una medida: lo que una división escribió y cuánto tardó su terminal en tragarlo.
+/// A measurement: what a split wrote and how long its terminal took to swallow it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Run {
     pub tag: String,
     pub bytes: u64,
     pub seconds: f64,
-    /// Instante real de arranque en segundos desde la época, **con fracción**.
+    /// Real start instant in seconds since the epoch, **with fraction**.
     ///
-    /// Guardarlo truncado a segundo es lo que hacía inútil la comprobación de solape: dos medidas
-    /// desfasadas 900 ms anotaban el mismo segundo, pasaban por concurrentes y su agregado salía
-    /// al doble de lo real.
+    /// Storing it truncated to the second is what made the overlap check useless: two measurements
+    /// 900 ms apart recorded the same second, passed for concurrent and their aggregate came out at
+    /// double the real value.
     pub start: f64,
-    /// El `--at` con el que se lanzó. Informativo.
+    /// The `--at` it was launched with. Informational.
     pub at: u64,
-    /// Caudal objetivo en MiB/s, si se pidió. Distingue el régimen: [`aggregate`] no mezcla una
-    /// medida de ráfaga con una de caudal, porque responden a preguntas distintas.
+    /// Target throughput in MiB/s, if requested. Distinguishes the regime: [`aggregate`] does not
+    /// mix a burst measurement with a throughput one, because they answer different questions.
     pub rate: Option<f64>,
-    /// Si la salida era un terminal de verdad. Si no lo era, la medida no mide un terminal.
+    /// Whether the output was a real terminal. If it was not, the measurement does not measure a
+    /// terminal.
     pub tty: bool,
 }
 
-/// Deja la etiqueta en una sola línea y sin tabuladores.
+/// Leaves the tag on a single line and without tabs.
 ///
-/// No es cosmético: un tabulador parte la línea en campos que no son y la medida se pierde en
-/// silencio; un salto de línea permite **colar una medida inventada** en el fichero de resultados.
+/// It is not cosmetic: a tab splits the line into fields that are not the real ones and the
+/// measurement is lost silently; a line break allows **sneaking in a made-up measurement** into the
+/// results file.
 fn tag_on_one_line(tag: &str) -> String {
     tag.replace(['\t', '\n', '\r'], " ")
 }
 
 impl Run {
-    /// Fin de la ventana de ejecución, en segundos desde la época.
+    /// End of the execution window, in seconds since the epoch.
     fn end(&self) -> f64 {
         self.start + self.seconds
     }
 
-    /// Los dos regímenes no se comparan entre sí; esto es lo que los distingue.
+    /// The two regimes are not compared to each other; this is what distinguishes them.
     fn regime(&self) -> Option<u64> {
         self.rate.map(f64::to_bits)
     }
@@ -321,16 +325,16 @@ impl Run {
                 Some(r) => format!("{r}"),
                 None => "-".to_string(),
             },
-            if self.tty { "si" } else { "no" }
+            if self.tty { "yes" } else { "no" }
         )
     }
 
-    /// Relee una línea del fichero de resultados.
+    /// Re-reads a line from the results file.
     ///
-    /// Devuelve `None` ante cualquier cosa que no sea una medida válida — incluidos los números
-    /// **no finitos**. Un `seconds` a `NaN` no se descartaba solo: `f64::max` y `f64::min` ignoran
-    /// los `NaN`, así que la medida no aportaba ni al final más temprano ni a la más lenta, pero
-    /// sus bytes sí entraban en la suma e **inflaban el agregado**.
+    /// Returns `None` for anything that is not a valid measurement — including **non-finite**
+    /// numbers. A `seconds` of `NaN` was not discarded on its own: `f64::max` and `f64::min` ignore
+    /// `NaN`s, so the measurement contributed neither to the earliest end nor to the slowest one,
+    /// but its bytes did enter the sum and **inflated the aggregate**.
     pub fn from_line(line: &str) -> Option<Self> {
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() != 7 {
@@ -356,7 +360,7 @@ impl Run {
             start,
             at: fields[4].parse().ok()?,
             rate,
-            tty: fields[6] == "si",
+            tty: fields[6] == "yes",
         })
     }
 
@@ -368,36 +372,36 @@ impl Run {
     }
 }
 
-/// Por qué una medida se queda fuera del agregado.
+/// Why a measurement is left out of the aggregate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Excluded {
-    /// La salida no era un terminal: el número mide una tubería o un fichero, no un terminal.
+    /// The output was not a terminal: the number measures a pipe or a file, not a terminal.
     NoTty,
-    /// Las medidas de la etiqueta no coincidieron en el tiempo, así que nunca compitieron entre sí.
+    /// The tag's measurements did not coincide in time, so they never competed with each other.
     NoOverlap,
-    /// La etiqueta mezcla ráfaga con caudal sostenido, que responden a preguntas distintas.
+    /// The tag mixes burst with sustained throughput, which answer different questions.
     MixedRegime,
 }
 
-/// El agregado de una etiqueta, y lo que se ha dejado fuera al calcularlo.
+/// The aggregate of a tag, and what has been left out when computing it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Aggregate {
     pub included: Vec<Run>,
     pub excluded: Vec<(Run, Excluded)>,
-    /// `None` cuando no hay nada agregable. No es un error: es no tener respuesta.
+    /// `None` when there is nothing aggregable. It is not an error: it is having no answer.
     pub mib_s: Option<f64>,
 }
 
-/// Agrega las medidas de una etiqueta.
+/// Aggregates the measurements of a tag.
 ///
-/// El agregado es `Σ bytes / max(seconds)`. Se divide por el **máximo** y no por la media porque
-/// la tanda ocupa el terminal hasta que termina la última división: con la media, cuatro divisiones
-/// de 8, 12, 12 y 12 s parecerían más rápidas de lo que fueron.
+/// The aggregate is `Σ bytes / max(seconds)`. It divides by the **maximum** and not by the mean
+/// because the run occupies the terminal until the last split finishes: with the mean, four splits
+/// of 8, 12, 12 and 12 s would look faster than they were.
 ///
-/// **Se niega a agregar lo que no compitió**, y las tres comprobaciones vienen de errores reales:
-/// una medida cuya salida no era un terminal (una tubería tragó 22 MiB a 3.010 MiB/s), medidas
-/// lanzadas en ventanas distintas que nunca se solaparon, y ráfaga mezclada con caudal sostenido
-/// bajo la misma etiqueta.
+/// **It refuses to aggregate what did not compete**, and the three checks come from real errors: a
+/// measurement whose output was not a terminal (a pipe swallowed 22 MiB at 3,010 MiB/s),
+/// measurements launched in different windows that never overlapped, and burst mixed with sustained
+/// throughput under the same tag.
 pub fn aggregate(runs: Vec<Run>) -> Aggregate {
     let mut excluded = Vec::new();
     let mut candidates = Vec::new();
@@ -413,16 +417,17 @@ pub fn aggregate(runs: Vec<Run>) -> Aggregate {
         return without_aggregate(excluded);
     }
 
-    // Régimen: la mayoría manda, y lo que no encaje se declara fuera en vez de contaminar la suma.
+    // Regime: the majority rules, and whatever does not fit is declared out instead of
+    // contaminating the sum.
     let regime = candidates[0].regime();
     if candidates.iter().any(|r| r.regime() != regime) {
         excluded.extend(candidates.into_iter().map(|r| (r, Excluded::MixedRegime)));
         return without_aggregate(excluded);
     }
 
-    // Solapan todas si el arranque más tardío cae antes del final más temprano. Con una sola medida
-    // no hay nada con lo que solapar, así que la comprobación no aplica — comprobarla igualmente
-    // descartaba una medida legítima de duración cero.
+    // They all overlap if the latest start falls before the earliest end. With a single
+    // measurement there is nothing to overlap with, so the check does not apply — checking it
+    // anyway discarded a legitimate zero-duration measurement.
     if candidates.len() > 1 {
         let latest_start = candidates.iter().map(|r| r.start).fold(f64::MIN, f64::max);
         let earliest_end = candidates.iter().map(Run::end).fold(f64::MAX, f64::min);
@@ -468,90 +473,94 @@ mod tests {
     }
 
     #[test]
-    fn la_carga_es_identica_en_dos_pasadas() {
+    fn the_load_is_identical_across_two_passes() {
         assert_eq!(build_load(200_000), build_load(200_000));
     }
 
     #[test]
-    fn la_carga_lleva_el_patron_que_no_toma_el_camino_rapido_del_parser() {
+    fn the_load_carries_the_pattern_that_does_not_take_the_parsers_fast_path() {
         let load = build_load(200_000);
         let text = String::from_utf8_lossy(&load);
 
-        assert!(text.contains("\x1b[1m"), "falta la negrita");
-        assert!(text.contains("\x1b[2m"), "falta el atenuado");
-        assert!(text.contains("\x1b[32m"), "falta el color");
+        assert!(text.contains("\x1b[1m"), "the bold is missing");
+        assert!(text.contains("\x1b[2m"), "the dim is missing");
+        assert!(text.contains("\x1b[32m"), "the color is missing");
         assert!(
             text.contains("\x1b7") && text.contains("\x1b8"),
-            "falta el repintado que guarda y restaura el cursor"
+            "the repaint that saves and restores the cursor is missing"
         );
         assert!(
             text.contains("\x1b[7m"),
-            "falta el vídeo inverso de la barra"
+            "the bar's reverse video is missing"
         );
     }
 
     #[test]
-    fn la_carga_llega_al_tamano_pedido_sin_cortar_a_mitad() {
+    fn the_load_reaches_the_requested_size_without_cutting_midway() {
         for target in [1_000, 100_000, 1_000_000] {
             let load = build_load(target);
-            assert!(load.len() >= target, "se quedó corta con {target}");
-            // Toda unidad que se añade acaba en salto de línea o en el `\x1b8` que restaura el
-            // cursor: si acabara en otra cosa, se habría cortado una secuencia de escape a mitad.
-            let last = *load.last().expect("carga vacía");
+            assert!(load.len() >= target, "it came up short with {target}");
+            // Every unit that is added ends in a line break or in the `\x1b8` that restores the
+            // cursor: if it ended in something else, an escape sequence would have been cut midway.
+            let last = *load.last().expect("empty load");
             assert!(
                 last == b'\n' || last == b'8',
-                "la carga de {target} acabó a mitad, en el byte {last}"
+                "the load of {target} ended midway, at byte {last}"
             );
         }
     }
 
     #[test]
-    fn el_instante_alineado_es_el_siguiente_multiplo() {
+    fn the_aligned_instant_is_the_next_multiple() {
         let aligned = start_instant(Duration::from_secs(1_000_001), 30);
         assert_eq!(aligned, Duration::from_secs(1_000_020));
     }
 
     #[test]
-    fn si_ya_esta_alineado_no_espera_un_ciclo_de_mas() {
+    fn if_already_aligned_it_does_not_wait_an_extra_cycle() {
         let aligned = start_instant(Duration::from_secs(1_000_020), 30);
         assert_eq!(aligned, Duration::from_secs(1_000_020));
     }
 
     #[test]
-    fn con_at_cero_arranca_ya() {
+    fn with_at_zero_it_starts_right_away() {
         let now = Duration::from_millis(1_000_001_500);
         assert_eq!(start_instant(now, 0), now);
     }
 
     #[test]
-    fn dos_divisiones_lanzadas_con_desfase_arrancan_en_el_mismo_instante() {
-        // El fallo que este cálculo existe para evitar: con aritmética de segundos enteros, una
-        // lanzada en 1.000.000,05 y otra en 1.000.000,95 arrancaban con 900 ms de diferencia.
+    fn two_splits_launched_out_of_sync_start_at_the_same_instant() {
+        // The bug this calculation exists to avoid: with whole-second arithmetic, one launched at
+        // 1,000,000.05 and another at 1,000,000.95 started 900 ms apart.
         let a = start_instant(Duration::from_micros(1_000_000_050_000), 30);
         let b = start_instant(Duration::from_micros(1_000_000_950_000), 30);
-        assert_eq!(a, b, "las dos tienen que salir en el mismo instante");
+        assert_eq!(a, b, "the two have to go off at the same instant");
         assert_eq!(a, Duration::from_secs(1_000_020));
     }
 
     #[test]
-    fn un_instante_fraccionario_ya_pasado_el_multiplo_espera_al_siguiente() {
-        // Con truncado a segundo, 1.000.020,5 daba objetivo 1.000.020 —en el pasado— y esa
-        // división salía disparada mientras otra lanzada medio segundo después esperaba 29 s.
+    fn a_fractional_instant_already_past_the_multiple_waits_for_the_next_one() {
+        // With truncation to the second, 1,000,020.5 gave target 1,000,020 —in the past— and that
+        // split shot off while another launched half a second later waited 29 s.
         let aligned = start_instant(Duration::from_micros(1_000_020_500_000), 30);
         assert_eq!(aligned, Duration::from_secs(1_000_050));
     }
 
     #[test]
-    fn el_caudal_espera_lo_que_le_sobra() {
-        // 1 MiB escrito con un objetivo de 1 MiB/s debería llevar 1 s; lleva 0,25 → espera 0,75.
+    fn the_throughput_waits_for_the_spare_it_has() {
+        // 1 MiB written with a target of 1 MiB/s should take 1 s; it takes 0.25 → it waits 0.75.
         let wait = pace_delay(1_048_576, Duration::from_millis(250), Some(1_048_576.0))
-            .expect("debería esperar");
-        assert!((wait.as_secs_f64() - 0.75).abs() < 1e-6, "esperó {wait:?}");
+            .expect("it should wait");
+        assert!(
+            (wait.as_secs_f64() - 0.75).abs() < 1e-6,
+            "it waited {wait:?}"
+        );
     }
 
     #[test]
-    fn el_caudal_nunca_acelera_para_recuperar() {
-        // Va por detrás del objetivo: no hay nada que esperar, y tampoco se compensa.
+    fn the_throughput_never_speeds_up_to_catch_up() {
+        // It is running behind the target: there is nothing to wait for, and it is not compensated
+        // either.
         assert_eq!(
             pace_delay(1_048_576, Duration::from_secs(3), Some(1_048_576.0)),
             None
@@ -559,14 +568,14 @@ mod tests {
     }
 
     #[test]
-    fn sin_caudal_objetivo_no_hay_espera() {
+    fn without_target_throughput_there_is_no_wait() {
         assert_eq!(pace_delay(1_048_576, Duration::from_millis(1), None), None);
     }
 
     #[test]
-    fn un_caudal_absurdo_no_hace_reventar_la_herramienta() {
-        // Antes de la comprobación de finitud, esto entraba en pánico dentro de
-        // `Duration::from_secs_f64`: la espera calculada se iba a infinito.
+    fn an_absurd_throughput_does_not_blow_up_the_tool() {
+        // Before the finiteness check, this panicked inside `Duration::from_secs_f64`: the
+        // calculated wait ran off to infinity.
         for absurd in [
             f64::MIN_POSITIVE,
             1e-320,
@@ -581,10 +590,10 @@ mod tests {
     }
 
     #[test]
-    fn la_linea_de_resultados_va_y_vuelve_igual() {
+    fn the_results_line_round_trips_unchanged() {
         let mut original = run(22_700_000, 1.234_567, 1_800_000_000.5, true);
         original.rate = Some(10.0);
-        let round_trip = Run::from_line(&original.to_line()).expect("no se pudo releer la línea");
+        let round_trip = Run::from_line(&original.to_line()).expect("could not re-read the line");
         assert_eq!(original.tag, round_trip.tag);
         assert_eq!(original.bytes, round_trip.bytes);
         assert_eq!(original.rate, round_trip.rate);
@@ -592,38 +601,38 @@ mod tests {
         assert!((original.seconds - round_trip.seconds).abs() < 1e-6);
         assert!(
             (original.start - round_trip.start).abs() < 1e-6,
-            "se perdió la fracción del instante de arranque"
+            "the fraction of the start instant was lost"
         );
     }
 
     #[test]
-    fn una_etiqueta_con_tabulador_o_salto_no_parte_la_linea() {
+    fn a_tag_with_a_tab_or_break_does_not_split_the_line() {
         let mut r = run(1, 1.0, 0.0, true);
-        r.tag = "con\ttabulador\ny salto".into();
+        r.tag = "with\ttab\nand break".into();
         let line = r.to_line();
         assert_eq!(line.split('\t').count(), 7);
         assert!(
             !line.contains('\n'),
-            "un salto permitiría colar una medida inventada"
+            "a break would allow sneaking in a made-up measurement"
         );
     }
 
     #[test]
-    fn una_medida_con_segundos_no_finitos_se_rechaza_al_releerla() {
-        // No basta con ignorarla en los máximos y mínimos: sus bytes entrarían en la suma e
-        // inflarían el agregado.
+    fn a_measurement_with_non_finite_seconds_is_rejected_when_reread() {
+        // Ignoring it in the maxima and minima is not enough: its bytes would enter the sum and
+        // inflate the aggregate.
         for poison in ["NaN", "inf", "-1"] {
-            let line = format!("t\t1048576\t{poison}\t100.0\t30\t-\tsi");
+            let line = format!("t\t1048576\t{poison}\t100.0\t30\t-\tyes");
             assert!(
                 Run::from_line(&line).is_none(),
-                "debería rechazarse: {line}"
+                "it should be rejected: {line}"
             );
         }
     }
 
     #[test]
-    fn el_agregado_divide_por_la_division_mas_lenta() {
-        // Cuatro divisiones solapadas de 1 MiB: la tanda dura lo que la más lenta, 2 s.
+    fn the_aggregate_divides_by_the_slowest_split() {
+        // Four overlapping splits of 1 MiB: the run lasts as long as the slowest one, 2 s.
         let mib = 1_048_576;
         let runs = vec![
             run(mib, 1.0, 100.0, true),
@@ -634,18 +643,18 @@ mod tests {
         let a = aggregate(runs);
         assert_eq!(a.included.len(), 4);
         assert!(a.excluded.is_empty());
-        assert!((a.mib_s.expect("sin agregado") - 2.0).abs() < 1e-9);
+        assert!((a.mib_s.expect("no aggregate") - 2.0).abs() < 1e-9);
     }
 
     #[test]
-    fn no_agrega_medidas_que_nunca_coincidieron_en_el_tiempo() {
-        // La segunda arranca cuando la primera ya terminó: nunca compitieron.
+    fn it_does_not_aggregate_measurements_that_never_coincided_in_time() {
+        // The second starts when the first has already finished: they never competed.
         let runs = vec![
             run(1_048_576, 1.0, 100.0, true),
             run(1_048_576, 1.0, 500.0, true),
         ];
         let a = aggregate(runs);
-        assert!(a.mib_s.is_none(), "no debería haber agregado");
+        assert!(a.mib_s.is_none(), "there should be no aggregate");
         assert!(a.included.is_empty());
         assert_eq!(a.excluded.len(), 2);
         assert!(
@@ -656,8 +665,8 @@ mod tests {
     }
 
     #[test]
-    fn detecta_el_desfase_de_menos_de_un_segundo() {
-        // El caso que el instante truncado escondía: 900 ms de desfase con medidas de 0,8 s.
+    fn it_detects_the_sub_second_offset() {
+        // The case the truncated instant hid: 900 ms of offset with measurements of 0.8 s.
         let runs = vec![
             run(1_048_576, 0.8, 100.05, true),
             run(1_048_576, 0.8, 100.95, true),
@@ -665,12 +674,12 @@ mod tests {
         let a = aggregate(runs);
         assert!(
             a.mib_s.is_none(),
-            "no se solaparon: el agregado habría salido al doble"
+            "they did not overlap: the aggregate would have come out at double"
         );
     }
 
     #[test]
-    fn excluye_del_agregado_lo_que_no_salio_por_un_terminal() {
+    fn it_excludes_from_the_aggregate_what_did_not_come_out_through_a_terminal() {
         let runs = vec![
             run(1_048_576, 1.0, 100.0, true),
             run(1_048_576, 0.001, 100.0, false),
@@ -681,16 +690,16 @@ mod tests {
             a.excluded,
             vec![(run(1_048_576, 0.001, 100.0, false), Excluded::NoTty)]
         );
-        assert!((a.mib_s.expect("sin agregado") - 1.0).abs() < 1e-9);
+        assert!((a.mib_s.expect("no aggregate") - 1.0).abs() < 1e-9);
     }
 
     #[test]
-    fn no_mezcla_rafaga_con_caudal_sostenido() {
+    fn it_does_not_mix_burst_with_sustained_throughput() {
         let burst = run(1_048_576, 1.0, 100.0, true);
         let mut sustained = run(1_048_576, 1.0, 100.0, true);
         sustained.rate = Some(10.0);
         let a = aggregate(vec![burst, sustained]);
-        assert!(a.mib_s.is_none(), "responden a preguntas distintas");
+        assert!(a.mib_s.is_none(), "they answer different questions");
         assert!(
             a.excluded
                 .iter()
@@ -699,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn una_etiqueta_sin_resultados_no_es_un_error() {
+    fn a_tag_with_no_results_is_not_an_error() {
         let a = aggregate(Vec::new());
         assert!(a.mib_s.is_none());
         assert!(a.included.is_empty());
@@ -707,46 +716,48 @@ mod tests {
     }
 
     #[test]
-    fn la_carga_con_emojis_trae_los_tres_casos_de_presentacion() {
-        // **Sin los tres, la tanda mide la mitad del trabajo y nadie se entera.** Quien pinta decide por
-        // la regla de presentación de Unicode: un emoji que va a color **por defecto**, uno de texto **con**
-        // el selector —que tiene que salir a color— y uno de texto **sin** él —que no—. Una carga que solo
-        // trajera del primer tipo recorrería un camino y publicaría su coste como si fueran los tres.
-        let load = String::from_utf8(build_load_color(64 * 1024)).expect("la carga no es texto");
+    fn the_emoji_load_brings_the_three_presentation_cases() {
+        // **Without all three, the run measures half the work and nobody notices.** The painter
+        // decides by Unicode's presentation rule: an emoji that goes to color **by default**, a text
+        // one **with** the selector —which has to come out in color— and a text one **without** it
+        // —which does not—. A load that only carried the first type would walk one path and publish
+        // its cost as if it were all three.
+        let load = String::from_utf8(build_load_color(64 * 1024)).expect("the load is not text");
         assert!(
             load.contains('\u{1F600}'),
-            "no hay ningún emoji de los que van a color por defecto"
+            "there is no emoji of those that go to color by default"
         );
         assert!(
             load.contains("\u{2601}\u{FE0F}"),
-            "no hay ningún símbolo de texto CON selector de emoji: falta el caso que la regla convierte"
+            "there is no text symbol WITH an emoji selector: the case the rule converts is missing"
         );
         assert!(
             load.contains('\u{2601}')
                 && load.matches('\u{2601}').count() > load.matches("\u{2601}\u{FE0F}").count(),
-            "no hay ningún símbolo de texto SIN selector: falta el caso que tiene que quedarse en gris"
+            "there is no text symbol WITHOUT a selector: the case that has to stay gray is missing"
         );
     }
 
     #[test]
-    fn la_carga_con_emojis_es_la_misma_en_dos_corridas() {
-        // **Es lo que hace comparables dos corridas de la misma tanda**, que es de lo que vive el banco de
-        // medida entero: si el contenido cambiara entre corridas, promediar las dos sería promediar dos
-        // cargas distintas. Lo prometen las tres funciones de carga; solo la nueva lo comprueba.
+    fn the_emoji_load_is_the_same_across_two_runs() {
+        // **It is what makes two runs of the same batch comparable**, which is what the whole
+        // measurement bench lives on: if the content changed between runs, averaging the two would
+        // be averaging two different loads. All three load functions promise it; only the new one
+        // checks it.
         assert_eq!(
             build_load_color(32 * 1024),
             build_load_color(32 * 1024),
-            "dos corridas de la misma carga dieron bytes distintos: las tandas dejan de ser comparables"
+            "two runs of the same load gave different bytes: the batches stop being comparable"
         );
     }
 
     #[test]
-    fn una_sola_division_no_tiene_con_quien_solapar() {
-        // Incluida la de duración cero, que la comprobación de solape descartaba por comparar una
-        // medida consigo misma.
+    fn a_single_split_has_nobody_to_overlap_with() {
+        // Including the zero-duration one, which the overlap check discarded for comparing a
+        // measurement with itself.
         for seconds in [1.0, 0.0] {
             let a = aggregate(vec![run(1_048_576, seconds, 100.0, true)]);
-            assert_eq!(a.included.len(), 1, "con seconds = {seconds}");
+            assert_eq!(a.included.len(), 1, "with seconds = {seconds}");
         }
     }
 }

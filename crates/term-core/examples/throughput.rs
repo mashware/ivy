@@ -1,29 +1,29 @@
-//! Mide cuánto absorbe la rejilla en un volcado masivo.
+//! Measures how much the grid absorbs in a massive dump.
 //!
-//! Es el riesgo que el roadmap asigna a este hito: un `cat` de un fichero grande. La mitigación
-//! acordada **no** es poner un tope dentro de la caja, sino saber el número y que la forma de la
-//! API permita trocear — el tope lo pondrá quien pinte, en F1.3, cuando exista un frame contra el
-//! que medirlo.
+//! It is the risk the roadmap assigns to this milestone: a `cat` of a large file. The agreed
+//! mitigation is **not** to put a cap inside the crate, but to know the number and to make the
+//! shape of the API allow chunking — the cap will be set by whoever paints, in F1.3, once there is
+//! a frame to measure it against.
 //!
 //! ```text
 //! cargo run --release --example throughput -p term-core
 //! ```
 //!
-//! En depuración el número sale varias veces peor; el que vale es el de `--release`.
+//! In debug the number comes out several times worse; the one that counts is the `--release` one.
 
 use std::time::Instant;
 
 use term_core::{Screen, Size};
 
-/// Tamaño del volcado. Diez megas es un `cat` de un fichero grande de verdad, no un juguete.
+/// Size of the dump. Ten megs is a `cat` of a genuinely large file, not a toy.
 const BYTES: usize = 10 * 1024 * 1024;
 
-/// Trozo con el que se alimenta la rejilla, del tamaño del búfer de lectura del PTY.
+/// Chunk the grid is fed with, the size of the PTY read buffer.
 const CHUNK: usize = 8192;
 
 fn main() {
-    // Texto con saltos de línea y algún escape de color: alimentar el parser con un solo carácter
-    // repetido mediría el camino rápido y mentiría sobre el caso real.
+    // Text with line breaks and the odd color escape: feeding the parser a single repeated
+    // character would measure the fast path and lie about the real case.
     let pattern = b"\x1b[32mlorem ipsum dolor sit amet\x1b[0m consectetur adipiscing elit\n";
     let mut dump = Vec::with_capacity(BYTES + pattern.len());
     while dump.len() < BYTES {
@@ -39,11 +39,11 @@ fn main() {
     let took = start.elapsed();
 
     let mib = dump.len() as f64 / (1024.0 * 1024.0);
-    println!("volcado:  {mib:.1} MiB en trozos de {CHUNK} B");
-    println!("tiempo:   {took:.3?}");
-    println!("absorbe:  {:.1} MiB/s", mib / took.as_secs_f64());
+    println!("dump:     {mib:.1} MiB in {CHUNK} B chunks");
+    println!("time:     {took:.3?}");
+    println!("absorbs:  {:.1} MiB/s", mib / took.as_secs_f64());
     println!(
-        "por trozo: {:.1} µs de media",
+        "per chunk: {:.1} µs on average",
         took.as_secs_f64() * 1e6 / dump.len().div_ceil(CHUNK) as f64
     );
 }

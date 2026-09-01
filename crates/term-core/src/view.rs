@@ -1,151 +1,153 @@
-//! Cómo se lee la rejilla desde fuera: una vista de celdas y el cursor.
+//! How the grid is read from outside: a view of cells and the cursor.
 //!
-//! Todo lo que hay aquí es **nuestro**. Ningún tipo de `alacritty_terminal` asoma, y no es por
-//! gusto: la capa de pintado se va a reescribir —egui ahora, GPUI cuando haga falta— y quien pinte
-//! no debería tener que conocer la librería que hay debajo ni migrar con ella.
+//! Everything here is **ours**. No type from `alacritty_terminal` shows through, and not by
+//! whim: the painting layer is going to be rewritten —egui now, GPUI when needed— and whoever paints
+//! should not have to know the library underneath nor migrate with it.
 //!
-//! La vista es una **foto**, no una ventana: se construye entera en el momento de pedirla y no
-//! guarda ninguna referencia a la pantalla. Eso permite leerla mientras la pantalla sigue
-//! avanzando, y es lo que hace que quien pinta pueda quedarse con la suya durante un frame.
+//! The view is a **snapshot**, not a window: it is built whole at the moment it is requested and
+//! keeps no reference to the screen. That allows reading it while the screen keeps
+//! advancing, and it is what lets whoever paints hold on to their own during a frame.
 
 use crate::Size;
 
-/// Un color tal y como lo declaró el programa, **sin resolver**.
+/// A color exactly as the program declared it, **unresolved**.
 ///
-/// Sin resolver a propósito: traducir a píxeles es elegir un tema, y el tema no es asunto de esta
-/// caja. Aquí solo se conserva *qué dijo* el programa, para que quien pinte decida qué significa.
+/// Unresolved on purpose: translating to pixels is choosing a theme, and the theme is not this
+/// crate's business. Here only *what the program said* is kept, so that whoever paints decides what it
+/// means.
 ///
-/// Los dieciséis colores con nombre son, para el terminal, las dieciséis primeras entradas de la
-/// paleta, así que se entregan como [`TermColor::Indexed`] en vez de duplicarlos en variantes con
-/// nombre. Lo que sí necesita variante propia es lo que **no** es una entrada fija: el primer plano
-/// y el fondo del tema, el color del cursor y las formas atenuadas.
+/// The sixteen named colors are, for the terminal, the first sixteen entries of the
+/// palette, so they are handed out as [`TermColor::Indexed`] instead of duplicating them in named
+/// variants. What does need its own variant is what is **not** a fixed entry: the theme's foreground
+/// and background, the cursor color and the dimmed forms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TermColor {
-    /// Una entrada de la paleta de 256. Las dieciséis primeras son los colores ANSI con nombre.
+    /// An entry of the 256-color palette. The first sixteen are the named ANSI colors.
     Indexed(u8),
-    /// Un color exacto pedido por el programa.
+    /// An exact color requested by the program.
     Rgb { r: u8, g: u8, b: u8 },
-    /// El primer plano por defecto del tema.
+    /// The theme's default foreground.
     Foreground,
-    /// El fondo por defecto del tema.
+    /// The theme's default background.
     Background,
-    /// El color propio del cursor.
+    /// The cursor's own color.
     Cursor,
-    /// Variante atenuada de una de las ocho primeras entradas de la paleta.
+    /// Dimmed variant of one of the first eight entries of the palette.
     ///
-    /// El terminal distingue «rojo atenuado» de «rojo», y quien pinta decide si son dos colores o
-    /// el mismo con menos alfa. Colapsarlos aquí perdería la distinción sin poder recuperarla.
+    /// The terminal distinguishes "dim red" from "red", and whoever paints decides whether they are
+    /// two colors or the same one with less alpha. Collapsing them here would lose the distinction
+    /// without being able to recover it.
     Dim(u8),
-    /// Primer plano brillante del tema.
+    /// The theme's bright foreground.
     BrightForeground,
-    /// Primer plano atenuado del tema.
+    /// The theme's dim foreground.
     DimForeground,
 }
 
-/// Cuántas columnas ocupa una celda, y cuál de ellas es.
+/// How many columns a cell occupies, and which of them it is.
 ///
-/// **Fuente única del ancho.** La librería de debajo lo marca con dos banderas distintas; tenerlo
-/// aquí también en un booleano aparte sería el mismo hecho en dos sitios que pueden discrepar.
+/// **Single source of the width.** The library underneath marks it with two distinct flags; having it
+/// here too in a separate boolean would be the same fact in two places that can disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellWidth {
-    /// Una columna.
+    /// One column.
     Single,
-    /// Primera de las dos columnas de un carácter ancho. **Es la que lleva el carácter.**
+    /// First of the two columns of a wide character. **It is the one that carries the character.**
     WideHead,
-    /// Segunda columna de un carácter ancho: ocupa su hueco y no tiene carácter propio.
+    /// Second column of a wide character: it occupies its slot and has no character of its own.
     ///
-    /// Va en la vista en vez de omitirse porque la vista es **densa**: la columna `n` de una fila
-    /// está siempre en la posición `n`. Saltársela obligaría a quien pinta a llevar la cuenta del
-    /// desplazamiento, que es justo el error que descoloca una fila con CJK o emoji.
+    /// It goes in the view instead of being omitted because the view is **dense**: column `n` of a row
+    /// is always at position `n`. Skipping it would force whoever paints to keep track of the
+    /// offset, which is exactly the error that misaligns a row with CJK or emoji.
     WideTail,
-    /// Hueco al final de una fila donde un carácter ancho **no cabía**: el carácter se fue entero
-    /// a la fila siguiente y esta columna queda vacía a propósito.
+    /// Gap at the end of a row where a wide character **did not fit**: the character went whole
+    /// to the next row and this column is left empty on purpose.
     ///
-    /// Se distingue de [`CellWidth::Single`] porque no es un espacio que el programa haya escrito,
-    /// sino relleno del terminal. Hoy las dos se pintarían igual —el contenido es un espacio— pero
-    /// confundirlas al medir columnas o al seleccionar texto daría un resultado que nadie sabría
-    /// explicar.
+    /// It is distinguished from [`CellWidth::Single`] because it is not a space the program wrote,
+    /// but padding from the terminal. Today the two would paint the same —the content is a space— but
+    /// confusing them when measuring columns or selecting text would give a result nobody could
+    /// explain.
     WrapFiller,
 }
 
-/// Estilo de subrayado que pidió el programa.
+/// Underline style the program requested.
 ///
-/// Son cinco y no uno, y la diferencia se ve todos los días: el subrayado ondulado es lo que usa
-/// un diagnóstico de LSP en `nvim`. Con un booleano, ese error de compilación llegaba a la vista
-/// sin ninguna marca y no había forma de recuperarlo.
+/// There are five and not one, and the difference shows every day: the wavy underline is what an
+/// LSP diagnostic uses in `nvim`. With a boolean, that compile error reached the view
+/// with no mark at all and there was no way to recover it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Underline {
     #[default]
     None,
     Single,
     Double,
-    /// Ondulado. El de los errores de un LSP.
+    /// Wavy. The one for an LSP's errors.
     Curl,
     Dotted,
     Dashed,
 }
 
-/// Cuántos caracteres de anchura cero se conservan pegados a una celda.
+/// How many zero-width characters are kept attached to a cell.
 ///
-/// **El motor no tiene ninguno**, y ésa es la razón de que este exista: el `Vec<char>` de
-/// `alacritty_terminal 0.26` crece sin tope, así que un programa que escupa marcas combinantes sobre la
-/// misma celda lo hace crecer sin límite. Es una entrada de fuera sin acotar — el mismo patrón que **D8**
-/// castigó con la cola de salida.
+/// **The engine has none**, and that is the reason this one exists: the `Vec<char>` of
+/// `alacritty_terminal 0.26` grows without a cap, so a program that spews combining marks onto the
+/// same cell makes it grow without limit. It is an unbounded input from outside — the same pattern **D8**
+/// punished with the output queue.
 ///
-/// **Dieciséis, y la razón es acotar, no preservar una secuencia concreta.** La primera versión de este
-/// comentario decía que hacían falta seis para no partir una familia de emoji unida por juntadores
-/// (`👨‍👩‍👧‍👦`), y **eso es falso con este motor**: se comprobó ejecutándolo contra
-/// `alacritty_terminal 0.26`, que solo adjunta caracteres de **anchura cero**, y los cuatro miembros de
-/// esa familia son **anchos**. Llegan como **cuatro celdas**, cada una con **un** juntador pegado — no
-/// como una celda con seis. Quien de verdad puede apilar muchos es una marca combinante repetida, que no
-/// tiene número canónico ninguno.
+/// **Sixteen, and the reason is to bound, not to preserve a concrete sequence.** The first version of this
+/// comment said six were needed so as not to split a family of emoji joined by joiners
+/// (`👨‍👩‍👧‍👦`), and **that is false with this engine**: it was checked by running it against
+/// `alacritty_terminal 0.26`, which only attaches characters of **zero width**, and the four members of
+/// that family are **wide**. They arrive as **four cells**, each with **one** joiner attached — not
+/// as one cell with six. What can truly stack many is a repeated combining mark, which has
+/// no canonical number at all.
 ///
-/// Así que este número **no preserva nada concreto**: pone un techo donde el motor no tiene ninguno, y
-/// dieciséis es holgado para todo lo que se ha visto llegar. Si algún día algo real se corta aquí, se
-/// sube — con la secuencia delante, que es lo que faltaba la primera vez.
+/// So this number **preserves nothing concrete**: it puts a ceiling where the engine has none, and
+/// sixteen is generous for everything that has been seen to arrive. If some day something real is cut off
+/// here, it is raised — with the sequence in hand, which is what was missing the first time.
 const COMBINING_PER_CELL: usize = 16;
 
-// El tramo se empaqueta en un solo entero de 32 bits (ver `CombiningSpan`), así que el techo tiene que caber
-// en los cinco bits bajos. Sin esto, subirlo a 32 haría que `count` diera la vuelta **en silencio** y
-// todas las celdas declararan que no llevan nada.
+// The span is packed into a single 32-bit integer (see `CombiningSpan`), so the ceiling has to fit
+// in the low five bits. Without this, raising it to 32 would make `count` wrap around **silently** and
+// every cell would declare it carries nothing.
 const _: () = assert!(COMBINING_PER_CELL <= MAX_COUNT as usize);
 
-/// Los caracteres de anchura cero que van pegados a una celda: **dónde están, no cuáles son**.
+/// The zero-width characters attached to a cell: **where they are, not which they are**.
 ///
-/// Es opaco a propósito. Los caracteres viven en un vector plano de la [`View`], y esto es el tramo que
-/// los señala; se leen con [`View::combining_of`].
+/// It is opaque on purpose. The characters live in a flat vector of the [`View`], and this is the span that
+/// points to them; they are read with [`View::combining_of`].
 ///
-/// **Por qué no van dentro de la celda.** [`ViewCell`] es `Copy` y la rejilla se reconstruye **entera cada
-/// fotograma**, así que un `Vec` por celda sería una reserva de memoria por celda y por fotograma en el
-/// camino más caliente del proyecto — y le quitaría el `Copy` a un tipo que lo tiene por eso mismo.
-/// Preguntar por una celda que no lleva nada cuesta comparar un entero con cero.
+/// **Why they do not go inside the cell.** [`ViewCell`] is `Copy` and the grid is rebuilt **whole every
+/// frame**, so a `Vec` per cell would be a memory allocation per cell and per frame on the
+/// hottest path of the project — and it would strip `Copy` off a type that has it for exactly that reason.
+/// Asking about a cell that carries nothing costs comparing an integer with zero.
 ///
-/// **Y lo que ese trato cuesta, dicho aquí para que nadie lo descubra a la mala: comparar dos
-/// [`ViewCell`] solo significa algo dentro de la MISMA vista.** Esto es dónde están guardados los
-/// caracteres, no cuáles son, así que dos celdas que muestran exactamente lo mismo en dos vistas
-/// distintas pueden salir **distintas**, y dentro de una misma vista dos celdas sin nada pegado salen
-/// iguales solo porque su tramo vacío arranca en el mismo sitio. Hoy no las compara nadie; el día que
-/// alguien lo necesite, lo que quiere comparar es el carácter y lo que [`View::combining_of`] devuelva.
-/// **Va en UN entero y no en dos campos, y son cuatro bytes por celda.** Medido: con `offset: u32` y
-/// `count: u8` como campos de un tipo anidado, la celda pasa de 24 a **32** bytes, porque el tipo trae
-/// su propio relleno y el `u8` no puede colarse en el hueco que la celda ya tenía. Empaquetado son **28**.
-/// Cuatro bytes por celda, reservados y puestos a cero **cada fotograma**, en el camino que este mismo
-/// módulo vigila con una prueba.
+/// **And what that deal costs, said here so nobody discovers it the hard way: comparing two
+/// [`ViewCell`] only means something within the SAME view.** This is where the characters are stored,
+/// not which they are, so two cells that show exactly the same thing in two different views
+/// can come out **different**, and within one same view two cells with nothing attached come out
+/// equal only because their empty span starts at the same place. Today nobody compares them; the day
+/// someone needs to, what they want to compare is the character and what [`View::combining_of`] returns.
+/// **It goes in ONE integer and not two fields, and it is four bytes per cell.** Measured: with `offset: u32` and
+/// `count: u8` as fields of a nested type, the cell goes from 24 to **32** bytes, because the type brings
+/// its own padding and the `u8` cannot slip into the hole the cell already had. Packed it is **28**.
+/// Four bytes per cell, allocated and zeroed **every frame**, on the path this very
+/// module watches with a test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CombiningSpan(u32);
 
-/// Cuántos caben en los cinco bits bajos del tramo.
+/// How many fit in the low five bits of the span.
 const MAX_COUNT: u32 = 31;
-/// Y cuántos caracteres puede haber por delante en el vector, en los veintisiete de arriba.
+/// And how many characters there can be ahead in the vector, in the upper twenty-seven.
 const MAX_OFFSET: u32 = (1 << 27) - 1;
 
 impl CombiningSpan {
-    /// El tramo que empieza en `offset` y dura `count`, **o nada si alguno no cabe**.
+    /// The span that starts at `offset` and lasts `count`, **or nothing if either does not fit**.
     ///
-    /// **Nada, y no un tramo recortado**: un `offset` que no quepa y se sature apuntaría a caracteres
-    /// **reales de otra celda**, que es peor que no tener ninguno. La primera versión saturaba, y una
-    /// revisión lo cazó. Es inalcanzable —el vector está acotado por celdas × dieciséis, y aquí caben
-    /// ciento treinta y cuatro millones— así que esto no defiende de nada: **elige el modo de fallo**.
+    /// **Nothing, and not a clipped span**: an `offset` that did not fit and got saturated would point at
+    /// **real characters of another cell**, which is worse than having none. The first version saturated, and a
+    /// review caught it. It is unreachable —the vector is bounded by cells × sixteen, and here fit
+    /// a hundred and thirty-four million— so this defends against nothing: **it chooses the failure mode**.
     fn new(offset: usize, count: usize) -> Self {
         let (Ok(offset), Ok(count)) = (u32::try_from(offset), u32::try_from(count)) else {
             return Self::default();
@@ -165,59 +167,59 @@ impl CombiningSpan {
     }
 }
 
-/// Una celda de la rejilla, ya resuelta para quien la pinte.
+/// A cell of the grid, already resolved for whoever paints it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewCell {
     pub c: char,
-    /// Lo que va **pegado** a este carácter y no ocupa columna: selectores de presentación, marcas
-    /// combinantes, los juntadores de una secuencia de emoji.
+    /// What goes **attached** to this character and occupies no column: presentation selectors, combining
+    /// marks, the joiners of an emoji sequence.
     ///
-    /// **Sin esto, `☁` y `☁️` son la misma celda.** Son el mismo carácter con presentación distinta —la
-    /// segunda lleva detrás el selector de emoji— y quien pinta no tenía forma de distinguirlos: el
-    /// carácter que los separa no ocupa columna, así que se quedaba en el motor.
+    /// **Without this, `☁` and `☁️` are the same cell.** They are the same character with different
+    /// presentation —the second carries the emoji selector behind it— and whoever paints had no way to
+    /// distinguish them: the character that separates them occupies no column, so it stayed in the engine.
     ///
-    /// Los caracteres se leen con [`View::combining_of`]; esto solo dice dónde están.
+    /// The characters are read with [`View::combining_of`]; this only says where they are.
     pub combining: CombiningSpan,
-    /// Color del carácter. **El vídeo inverso ya está aplicado**: si el programa lo pidió, este es
-    /// el fondo declarado. Resolverlo aquí evita que cada capa de pintado repita la misma regla, y
-    /// que una de ellas se olvide.
+    /// Color of the character. **Inverse video is already applied**: if the program requested it, this is
+    /// the declared background. Resolving it here avoids each painting layer repeating the same rule, and
+    /// one of them forgetting it.
     pub fg: TermColor,
-    /// Color del fondo, con el vídeo inverso ya aplicado igual que en `fg`.
+    /// Color of the background, with inverse video already applied just like in `fg`.
     pub bg: TermColor,
     pub width: CellWidth,
-    /// Los dos colores **ya vienen intercambiados**; esto dice que lo están.
+    /// The two colors **already come swapped**; this says that they are.
     ///
-    /// No es información redundante ni una invitación a rehacer el intercambio. Hace falta porque
-    /// la intensidad —negrita y atenuado— describe el color que el programa declaró como **primer
-    /// plano**, y con vídeo inverso ese color es el que ahora viaja en `bg`. Sin este dato, quien
-    /// pinta aplica la intensidad al campo equivocado: con `\x1b[2;31;7m` atenúa un color que ya no
-    /// se ve y deja el rojo a plena intensidad. Lo comprobó una revisión del pintor, no la teoría.
+    /// It is not redundant information nor an invitation to redo the swap. It is needed because
+    /// the intensity —bold and dim— describes the color the program declared as **foreground**,
+    /// and with inverse video that color is the one now traveling in `bg`. Without this datum, whoever
+    /// paints applies the intensity to the wrong field: with `\x1b[2;31;7m` it dims a color no longer
+    /// visible and leaves the red at full intensity. A review of the painter proved it, not theory.
     pub inverse: bool,
-    /// Negrita. **No se resuelve aquí**: «negrita = brillante» es decisión de tema, no de lectura.
+    /// Bold. **Not resolved here**: "bold = bright" is a theme decision, not a reading one.
     ///
-    /// **Ojo con el vídeo inverso.** La intensidad describe el color que el programa declaró como
-    /// primer plano; si pidió vídeo inverso, ese color es ahora el campo `bg`. O sea que con
-    /// `\x1b[2;31;7m` lo que hay que atenuar es el rojo, que está en `bg`, no el `fg`. Resolverlo
-    /// del todo aquí exigiría aplicar el tema, que es de la capa de arriba.
+    /// **Mind inverse video.** The intensity describes the color the program declared as
+    /// foreground; if it requested inverse video, that color is now the `bg` field. Which is to say that with
+    /// `\x1b[2;31;7m` what has to be dimmed is the red, which is in `bg`, not the `fg`. Resolving it
+    /// fully here would require applying the theme, which belongs to the layer above.
     pub bold: bool,
-    /// Atenuado. Mismo aviso sobre el vídeo inverso que en `bold`.
+    /// Dim. Same warning about inverse video as in `bold`.
     pub dim: bool,
     pub italic: bool,
     pub underline: Underline,
     pub strikeout: bool,
-    /// El programa pidió no mostrar el contenido. El carácter sigue estando: quien pinta decide.
+    /// The program requested not to show the content. The character is still there: whoever paints decides.
     pub hidden: bool,
-    /// Esta celda está dentro de lo que hay seleccionado ahora mismo.
+    /// This cell is within what is selected right now.
     ///
-    /// **Un booleano por celda y no el rango de la selección**, que es el criterio fundacional de esta
-    /// caja: el rango es un tipo del motor y sacarlo por aquí lo filtraría. Y quien pinta no necesita el
-    /// rango —ya recorre la rejilla celda a celda—, necesita saber de cada una si va realzada.
+    /// **A boolean per cell and not the range of the selection**, which is the founding criterion of this
+    /// crate: the range is a type of the engine and exposing it out here would leak it. And whoever paints does not need the
+    /// range —it already traverses the grid cell by cell—, it needs to know of each one whether it is highlighted.
     ///
-    /// **Lo decide el motor y no una comparación de coordenadas aquí**, y la diferencia no es cosmética:
-    /// el acompañante de un carácter ancho cuenta como seleccionado cuando lo está su cabeza, y el
-    /// cursor de bloque **no** se realza en los extremos de la selección. Rehacer esas dos reglas aquí
-    /// sería reescribir lo que la dependencia ya sostiene, y con ellas mal la selección se ve rota
-    /// exactamente donde hay emoji.
+    /// **The engine decides it and not a comparison of coordinates here**, and the difference is not cosmetic:
+    /// the companion of a wide character counts as selected when its head is, and the
+    /// block cursor is **not** highlighted at the ends of the selection. Redoing those two rules here
+    /// would be rewriting what the dependency already upholds, and with them wrong the selection looks broken
+    /// exactly where there is emoji.
     pub selected: bool,
 }
 
@@ -241,21 +243,21 @@ impl Default for ViewCell {
     }
 }
 
-/// Forma del cursor, tal y como la pidió el programa.
+/// Shape of the cursor, exactly as the program requested it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CursorShape {
     Block,
     Underline,
     Beam,
     HollowBlock,
-    /// El programa lo apagó. Quien pinta no debe dibujarlo.
+    /// The program turned it off. Whoever paints must not draw it.
     Hidden,
 }
 
-/// Dónde está el cursor y qué forma tiene.
+/// Where the cursor is and what shape it has.
 ///
-/// La fila y la columna son **coordenadas visibles**: la fila 0 es la de arriba de lo que se ve,
-/// no la del historial. Quien pinta puede indexar la vista directamente con ellas.
+/// The row and the column are **visible coordinates**: row 0 is the top of what is seen,
+/// not that of the history. Whoever paints can index the view directly with them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cursor {
     pub row: u16,
@@ -263,38 +265,38 @@ pub struct Cursor {
     pub shape: CursorShape,
 }
 
-/// Una foto de la rejilla visible.
+/// A snapshot of the visible grid.
 ///
-/// **Densa**: hay exactamente `size.rows * size.cols` celdas, y la de la fila `f` columna `c` está
-/// en la posición `f * size.cols + c`. Sin huecos y sin saltos, incluidos los acompañantes de los
-/// caracteres anchos.
+/// **Dense**: there are exactly `size.rows * size.cols` cells, and the one at row `f` column `c` is
+/// at position `f * size.cols + c`. Without gaps and without jumps, including the companions of the
+/// wide characters.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
-    /// Privado con el resto: la densidad es un invariante entre el tamaño y las celdas, y con el
-    /// tamaño público cualquiera podía escribir `view.size.cols = 5` sobre una vista de 80. A
-    /// partir de ahí `cell(1, 0)` devolvería una celda real pero equivocada en vez de `None`, y
-    /// nada fallaría — la comprobación del constructor solo corre en depuración.
+    /// Private along with the rest: the density is an invariant between the size and the cells, and with the
+    /// size public anyone could write `view.size.cols = 5` over a view of 80. From
+    /// there `cell(1, 0)` would return a real but wrong cell instead of `None`, and
+    /// nothing would fail — the constructor's check only runs in debug.
     size: Size,
     cells: Vec<ViewCell>,
-    /// Todo lo que va pegado a las celdas, **plano y en un solo sitio**.
+    /// Everything attached to the cells, **flat and in a single place**.
     ///
-    /// Cada celda que lleve algo señala aquí su tramo; las que no llevan nada —casi todas— no ocupan.
-    /// Ver [`CombiningSpan`] para por qué no van dentro de la celda.
+    /// Each cell that carries something points to its span here; those that carry nothing —almost all— take no space.
+    /// See [`CombiningSpan`] for why they do not go inside the cell.
     combining: Vec<char>,
-    /// Dónde está el cursor, **si es que se ve**.
+    /// Where the cursor is, **if it is visible at all**.
     ///
-    /// **Es opcional desde que hay historial, y no es prudencia**: subiendo por el historial el
-    /// cursor sigue estando donde estaba —en el área activa— y eso queda **fuera de la pantalla**.
-    /// Recortarlo a la última fila lo dibujaría en un sitio donde no está, que es peor que no
-    /// dibujarlo: quien mira creería que el programa escribe ahí.
+    /// **It is optional since there is history, and it is not prudence**: scrolling up through the history the
+    /// cursor is still where it was —in the active area— and that lands **off the screen**.
+    /// Clamping it to the last row would draw it in a place where it is not, which is worse than not
+    /// drawing it: whoever looks would believe the program is writing there.
     cursor: Option<Cursor>,
-    /// Cuántas líneas se ha subido por el historial: **cero es «se está mirando lo último»**.
+    /// How many lines have been scrolled up through the history: **zero is "the latest is being looked at"**.
     ///
-    /// **Hoy no lo pinta nadie, y decirlo importa**: es lo que separa una pantalla quieta de una que se
-    /// ha quedado atrás mientras el programa sigue escribiendo, y enseñarlo —una marca, una barra— es de
-    /// su propio hito. Lo que sostiene mientras tanto es que se pueda **comprobar el efecto** de subir
-    /// desde fuera de este módulo, que es la única forma de que una prueba del historial afirme sobre lo
-    /// que se ve y no sobre el campo donde se apunta.
+    /// **Nobody paints it today, and saying so matters**: it is what separates a still screen from one that has
+    /// fallen behind while the program keeps writing, and showing it —a mark, a bar— belongs to
+    /// its own milestone. What it upholds in the meantime is that the effect of scrolling up can be **checked**
+    /// from outside this module, which is the only way a history test can assert about what
+    /// is seen and not about the field where the value is noted down.
     scroll: usize,
 }
 
@@ -316,47 +318,47 @@ impl View {
         }
     }
 
-    /// Los caracteres de anchura cero pegados a una celda, en el orden en que llegaron.
+    /// The zero-width characters attached to a cell, in the order in which they arrived.
     ///
-    /// Vacío es el caso corriente. **La celda se pasa entera y no su tramo**: `view.combining_of(cell.combining)`
-    /// decía dos veces la misma palabra, y esa repetición era la señal de que la costura estaba puesta
-    /// donde no se usa.
+    /// Empty is the ordinary case. **The whole cell is passed and not its span**: `view.combining_of(cell.combining)`
+    /// said the same word twice, and that repetition was the sign that the seam was placed
+    /// where it is not used.
     pub fn combining_of(&self, cell: &ViewCell) -> &[char] {
         let span = cell.combining;
         let (offset, end) = (span.offset(), span.offset() + span.count());
-        // **Un tramo que se saliera es una vista mal construida, no un dato del programa**, así que salta
-        // en las pruebas en vez de disfrazarse de «esta celda no llevaba nada». En producción degrada a
-        // vacío, que es lo único seguro que se puede hacer con un índice en el que ya no se confía.
+        // **A span that ran off the end is a badly built view, not a datum of the program**, so it fires
+        // in the tests instead of disguising itself as "this cell carried nothing". In production it degrades to
+        // empty, which is the only safe thing that can be done with an index no longer trusted.
         //
-        // La primera versión decía esto mismo en un comentario y hacía lo contrario: devolvía vacío **sin
-        // saltar**, o sea exactamente el disfraz que decía evitar. Lo cazó una revisión.
+        // The first version said this same thing in a comment and did the opposite: it returned empty **without
+        // firing**, that is, exactly the disguise it said it avoided. A review caught it.
         debug_assert!(
             end <= self.combining.len(),
-            "un tramo de la vista apunta fuera de su propio vector: {offset}..{end} de {}",
+            "a span of the view points outside its own vector: {offset}..{end} of {}",
             self.combining.len()
         );
         self.combining.get(offset..end).unwrap_or_default()
     }
 
-    /// El tamaño de la rejilla que retrata esta vista.
+    /// The size of the grid this view portrays.
     pub fn size(&self) -> Size {
         self.size
     }
 
-    /// Dónde está el cursor y qué forma tiene, **o nada si no se ve**.
+    /// Where the cursor is and what shape it has, **or nothing if it is not visible**.
     ///
-    /// No se ve cuando se ha subido por el historial lo bastante como para dejarlo fuera de la
-    /// pantalla. Ver el campo.
+    /// It is not visible when the history has been scrolled up enough to leave it off the
+    /// screen. See the field.
     pub fn cursor(&self) -> Option<Cursor> {
         self.cursor
     }
 
-    /// Cuántas líneas se ha subido por el historial. **Cero es «se está mirando lo último»**.
+    /// How many lines have been scrolled up through the history. **Zero is "the latest is being looked at"**.
     pub fn scroll(&self) -> usize {
         self.scroll
     }
 
-    /// Una celda por fila y columna, o `None` si cae fuera.
+    /// A cell by row and column, or `None` if it falls outside.
     pub fn cell(&self, row: u16, col: u16) -> Option<&ViewCell> {
         if row >= self.size.rows || col >= self.size.cols {
             return None;
@@ -365,7 +367,7 @@ impl View {
             .get(row as usize * self.size.cols as usize + col as usize)
     }
 
-    /// Una fila entera, o `None` si cae fuera. Siempre tiene `size.cols` celdas.
+    /// A whole row, or `None` if it falls outside. It always has `size.cols` cells.
     pub fn row(&self, row: u16) -> Option<&[ViewCell]> {
         if row >= self.size.rows {
             return None;
@@ -375,27 +377,27 @@ impl View {
         self.cells.get(offset..offset + width)
     }
 
-    /// Todas las celdas, en orden de lectura.
+    /// All the cells, in reading order.
     pub fn cells(&self) -> &[ViewCell] {
         &self.cells
     }
 }
 
-// ── Traducción desde el vocabulario de la librería ───────────────────────────────────────────
+// ── Translation from the library's vocabulary ───────────────────────────────────────────
 //
-// Vive aquí y no en `screen.rs` para que quede en un solo sitio qué se convierte en qué: si la
-// dependencia cambia de forma, este es el fichero que se toca.
+// It lives here and not in `screen.rs` so that it stays in a single place what is converted into what: if the
+// dependency changes shape, this is the file that gets touched.
 //
-// **Funciones y no `impl From`, y esto es el criterio del hito, no estilo.** Un `impl` de trait no
-// lleva visibilidad: `impl From<Color> for TermColor` es API **pública** aunque `Color` sea de la
-// dependencia, y sale publicado en la documentación. Con él puesto, subir `alacritty_terminal`
-// rompería la API de esta caja sin que nadie tocara una línea nuestra — que es exactamente lo que
-// el criterio existe para impedir. Se comprobó generando la doc y buscando `From<Color>`.
+// **Functions and not `impl From`, and this is the milestone's criterion, not style.** A trait `impl`
+// carries no visibility: `impl From<Color> for TermColor` is **public** API even though `Color` is from
+// the dependency, and it comes out published in the documentation. With it in place, bumping `alacritty_terminal`
+// would break this crate's API without anyone touching a line of ours — which is exactly what
+// the criterion exists to prevent. It was checked by generating the doc and searching for `From<Color>`.
 
-// `Cell` con alias, como `CursorShape` justo debajo: esta caja **exporta su propio `Cell`**
-// desde el módulo hermano, y con el ajeno importado a pelo el mismo nombre significaría dos
-// cosas distintas según el fichero — un enlace de rustdoc `[`Cell`]` escrito aquí apuntaría
-// al de la dependencia y resolvería sin avisar. El alias va al ajeno, que es la regla.
+// `Cell` with an alias, like `CursorShape` right below: this crate **exports its own `Cell`**
+// from the sibling module, and with the foreign one imported bare the same name would mean two
+// different things depending on the file — a rustdoc link `[`Cell`]` written here would point
+// at the dependency's and would resolve without warning. The alias goes on the foreign one, which is the rule.
 use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
 use alacritty_terminal::vte::ansi::{Color, CursorShape as AlacrittyShape, NamedColor};
 
@@ -415,7 +417,7 @@ fn named_color(named: NamedColor) -> TermColor {
     {
         use NamedColor::*;
         match named {
-            // Los dieciséis con nombre son las dieciséis primeras entradas de la paleta.
+            // The sixteen named ones are the first sixteen entries of the palette.
             Black => TermColor::Indexed(0),
             Red => TermColor::Indexed(1),
             Green => TermColor::Indexed(2),
@@ -461,9 +463,9 @@ pub(crate) fn shape_from(shape: AlacrittyShape) -> CursorShape {
     }
 }
 
-/// El estilo de subrayado, que son cinco banderas mutuamente excluyentes.
+/// The underline style, which is five mutually exclusive flags.
 ///
-/// La librería las retira todas antes de poner la que toca, así que como mucho hay una puesta.
+/// The library removes them all before setting the right one, so there is at most one set.
 fn underline_from(flags: Flags) -> Underline {
     if flags.contains(Flags::DOUBLE_UNDERLINE) {
         Underline::Double
@@ -480,16 +482,16 @@ fn underline_from(flags: Flags) -> Underline {
     }
 }
 
-/// Traduce una celda del motor a la nuestra, diciendo aparte si va dentro de la selección.
+/// Translates a cell of the engine to ours, saying separately whether it goes inside the selection.
 ///
-/// **La selección llega como parámetro y no se lee de la celda**, porque no es suya: el motor la guarda
-/// como un rango de la rejilla, no como una bandera por celda. Quien recorre la rejilla ya sabe de cada
-/// celda si el rango la incluye, y preguntárselo aquí obligaría a pasarle el rango entero —o sea a
-/// filtrar un tipo del motor hasta este módulo.
+/// **The selection arrives as a parameter and is not read from the cell**, because it is not the cell's: the engine keeps it
+/// as a range of the grid, not as a flag per cell. Whoever traverses the grid already knows of each
+/// cell whether the range includes it, and asking here would force passing it the whole range —that is, to
+/// leak a type of the engine all the way to this module.
 ///
-/// **`combining` es el vector de toda la vista, y esta función escribe en él.** Lo que va pegado a la celda
-/// no cabe dentro de ella —ver [`CombiningSpan`]—, así que se copia al final del vector común y la celda se
-/// queda con el tramo.
+/// **`combining` is the vector of the whole view, and this function writes into it.** What goes attached to the cell
+/// does not fit inside it —see [`CombiningSpan`]—, so it is copied to the end of the common vector and the cell is
+/// left with the span.
 pub(crate) fn cell_from(
     cell: &AlacrittyCell,
     selected: bool,
@@ -500,17 +502,17 @@ pub(crate) fn cell_from(
 
         let attached = cell.zerowidth().unwrap_or_default();
         let count = attached.len().min(COMBINING_PER_CELL);
-        // **El tramo se toma antes de copiar**, que es cuando `offset` vale el final actual del vector.
+        // **The span is taken before copying**, which is when `offset` equals the current end of the vector.
         let span = CombiningSpan::new(combining.len(), count);
-        // **Los PRIMEROS, no los últimos.** Lo que decide la presentación es el carácter que va justo
-        // detrás del de la celda, así que recortar por el otro extremo se llevaría por delante justo el
-        // que importa.
+        // **The FIRST ones, not the last.** What decides the presentation is the character right
+        // behind the cell's, so clipping from the other end would take away exactly the
+        // one that matters.
         combining.extend_from_slice(&attached[..count]);
 
-        // Son tres banderas, no dos: además del carácter ancho y su acompañante, el terminal marca
-        // el hueco que deja al final de una fila cuando el carácter no cabe y lo baja entera a la
-        // siguiente. Tratarlo como celda normal sería perder la única señal de que ese espacio no
-        // lo escribió el programa.
+        // There are three flags, not two: besides the wide character and its companion, the terminal marks
+        // the gap it leaves at the end of a row when the character does not fit and drops it whole to the
+        // next. Treating it as a normal cell would lose the only sign that that space was not
+        // written by the program.
         let width = if flags.contains(Flags::WIDE_CHAR) {
             CellWidth::WideHead
         } else if flags.contains(Flags::WIDE_CHAR_SPACER) {
@@ -521,9 +523,9 @@ pub(crate) fn cell_from(
             CellWidth::Single
         };
 
-        // El vídeo inverso se resuelve aquí, intercambiando los dos colores. Es una regla del
-        // terminal, no del tema: dejarla para quien pinta la haría repetirse en cada capa de
-        // pintado, y basta con que una se la salte para que el cursor de `vim` se vuelva invisible.
+        // Inverse video is resolved here, swapping the two colors. It is a rule of the
+        // terminal, not the theme: leaving it to whoever paints would make it repeat itself in each painting
+        // layer, and it is enough for one to skip it for `vim`'s cursor to turn invisible.
         let (fg, bg) = if flags.contains(Flags::INVERSE) {
             (color_from(cell.bg), color_from(cell.fg))
         } else {
@@ -552,7 +554,7 @@ pub(crate) fn cell_from(
 mod tests {
     use super::*;
 
-    /// Una vista de una sola celda con ese vector de caracteres pegados detrás.
+    /// A view of a single cell with that vector of characters attached behind it.
     fn view_with(combining: Vec<char>) -> View {
         View::new(
             Size { rows: 1, cols: 1 },
@@ -563,7 +565,7 @@ mod tests {
         )
     }
 
-    /// Una celda que señala ese tramo.
+    /// A cell that points to that span.
     fn cell_pointing_to(span: CombiningSpan) -> ViewCell {
         ViewCell {
             combining: span,
@@ -572,34 +574,35 @@ mod tests {
     }
 
     #[test]
-    fn un_tramo_que_no_cabe_en_el_entero_deja_la_celda_sin_nada_en_vez_de_recortarse() {
-        // **Recortar al máximo que cabe sería enseñar lo de la celda de al lado como si fuera de
-        // ésta.** Los caracteres de todas las celdas viven en un vector común, así que un `count`
-        // saturado a los treinta y uno que caben en el entero se lleva por delante los de quien venga
-        // detrás — y el que mira no tiene forma de saber que lo que ve no lo escribió ahí nadie.
-        // Rendirse deja la celda sin nada pegado, que es exactamente como se veía antes de esta
-        // entrega.
+    fn a_span_that_does_not_fit_in_the_integer_leaves_the_cell_with_nothing_instead_of_being_clipped()
+     {
+        // **Clipping to the maximum that fits would be showing the neighboring cell's as if it were
+        // this one's.** The characters of all the cells live in a common vector, so a `count`
+        // saturated to the thirty-one that fit in the integer takes away those of whoever comes
+        // behind — and the one who looks has no way to know that what they see was written there by no one.
+        // Giving up leaves the cell with nothing attached, which is exactly how it looked before this
+        // delivery.
         //
-        // Los cuarenta caracteres del vector son los que un `count` saturado devolvería: si se
-        // recortara, esta celda se quedaría con treinta y uno de ellos.
+        // The forty characters of the vector are those a saturated `count` would return: if it were
+        // clipped, this cell would keep thirty-one of them.
         let view = view_with(vec!['\u{0301}'; 40]);
         let cell = cell_pointing_to(CombiningSpan::new(0, 40));
 
         assert!(
             view.combining_of(&cell).is_empty(),
-            "un tramo que no cabe se recortó en vez de rendirse, y lo recortado son caracteres de otra celda"
+            "a span that does not fit was clipped instead of giving up, and what was clipped are characters of another cell"
         );
     }
 
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "apunta fuera de su propio vector")]
-    fn un_tramo_que_se_sale_del_vector_salta_en_vez_de_pasar_por_una_celda_sin_nada() {
-        // **Devolver vacío sin más convierte una vista mal construida en «esta celda no llevaba
-        // nada».** Son dos cosas distintas y se ven igual, así que el fallo viajaría hasta el pintado
-        // y se manifestaría como un emoji que perdió su selector — a mil líneas de donde se rompió.
-        // En depuración salta aquí; en producción degrada a vacío, que es lo único seguro que se
-        // puede hacer con un índice del que ya no te fías.
+    #[should_panic(expected = "points outside its own vector")]
+    fn a_span_that_runs_off_the_vector_fires_instead_of_passing_as_a_cell_with_nothing() {
+        // **Returning empty just like that turns a badly built view into "this cell carried
+        // nothing".** They are two different things and look the same, so the failure would travel to the painting
+        // and manifest as an emoji that lost its selector — a thousand lines from where it broke.
+        // In debug it fires here; in production it degrades to empty, which is the only safe thing that
+        // can be done with an index you no longer trust.
         let view = view_with(vec!['\u{FE0F}']);
         let cell = cell_pointing_to(CombiningSpan::new(0, 2));
 

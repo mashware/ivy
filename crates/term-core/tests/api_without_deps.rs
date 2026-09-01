@@ -1,98 +1,98 @@
-//! Que la API pública de `term-core` está hecha de tipos propios.
+//! That the public API of `term-core` is made of bespoke types.
 //!
-//! Es el criterio del hito y **se comprueba compilando**, no ejecutando: este fichero recorre toda
-//! la superficie pública del lector nombrando únicamente tipos de `term_core`, y hace `match`
-//! exhaustivo sobre sus enumeraciones. Si `Screen::view` devolviera los tipos de
-//! `alacritty_terminal` en vez de los nuestros, ninguno de estos `match` compilaría: sus variantes
-//! no existen allí, y las que existen tienen otros nombres.
+//! It is the milestone's criterion and **it is checked by compiling**, not by running: this file traverses
+//! the whole public surface of the reader naming only types of `term_core`, and does an exhaustive
+//! `match` over its enumerations. If `Screen::view` returned the types of
+//! `alacritty_terminal` instead of ours, none of these `match` would compile: their variants
+//! do not exist there, and the ones that do have other names.
 //!
-//! Vive en `tests/` y no dentro del módulo a propósito: aquí se consume la caja **desde fuera**,
-//! igual que la va a consumir quien pinte.
+//! It lives in `tests/` and not inside the module on purpose: here the crate is consumed **from outside**,
+//! just as whoever paints is going to consume it.
 //!
-//! **Lo que esto NO demuestra, y conviene saberlo antes de fiarse.** No detecta un tipo ajeno que
-//! entre por una vía que no sea el tipo de retorno. La que se coló en la primera versión de este
-//! PR fue un `impl From<Color> for TermColor`: los `impl` de trait **no llevan visibilidad**, así
-//! que son API pública aunque el tipo de la izquierda sea de la dependencia, y este test pasaba
-//! exactamente igual con la fuga puesta. Mirar que no hay `pub use` de la dependencia tampoco la
-//! habría visto.
+//! **What this does NOT prove, and it is worth knowing before trusting it.** It does not detect a foreign type that
+//! enters by a route other than the return type. The one that slipped into the first version of this
+//! PR was an `impl From<Color> for TermColor`: trait `impl`s **carry no visibility**, so
+//! they are public API even though the type on the left is from the dependency, and this test passed
+//! exactly the same with the leak in place. Checking that there is no `pub use` of the dependency would not have
+//! seen it either.
 //!
-//! La comprobación que sí la ve es generar la documentación y buscar el nombre ajeno:
+//! The check that does see it is generating the documentation and searching for the foreign name:
 //!
 //! ```text
 //! cargo doc -p term-core --no-deps
-//! grep -rl "From&#60;Color&#62;\|From&#60;&#38;Cell&#62;" target/doc/term_core/   # tiene que no encontrar nada
+//! grep -rl "From&#60;Color&#62;\|From&#60;&#38;Cell&#62;" target/doc/term_core/   # has to find nothing
 //! ```
 //!
-//! **Sigue cazando las dos fugas, y está medido.** Se sospechó que el renombrado se lo había llevado
-//! —el tipo propio pasó a llamarse igual que el del motor— así que se inyectaron las dos fugas, una
-//! por cada tipo, y el patrón las encuentra las dos: `rustdoc` escribe el nombre **real** del tipo en
-//! la cabecera del `impl`, no el alias con que este crate lo importa. Casi se cambió por
-//! `grep alacritty_terminal`, que suena mejor y **no encuentra ninguna de las dos**.
+//! **It still catches both leaks, and it is measured.** It was suspected that the rename had taken it away
+//! —the bespoke type came to be named the same as the engine's— so both leaks were injected, one
+//! per type, and the pattern finds them both: `rustdoc` writes the **real** name of the type in
+//! the header of the `impl`, not the alias with which this crate imports it. It was almost changed to
+//! `grep alacritty_terminal`, which sounds nicer and **finds neither of the two**.
 //!
-//! Lo que sí perdió es precisión en el otro sentido: un `impl From&#60;&#38;Cell&#62;` legítimo **sobre
-//! nuestro propio `Cell`** ahora daría un acierto. Sería un falso positivo, no un silencio — y este
-//! fichero prohíbe justo esos `impl` tres párrafos más abajo, así que el caso no se da.
+//! What it did lose is precision in the other direction: a legitimate `impl From&#60;&#38;Cell&#62;` **over
+//! our own `Cell`** would now give a hit. It would be a false positive, not a silence — and this
+//! file forbids exactly those `impl`s three paragraphs further down, so the case does not arise.
 //!
-//! Por eso la traducción vive en funciones `pub(crate)` y no en `impl From`: no es estilo, es lo
-//! que hace la fuga **imposible** en vez de dejarla en manos de acordarse de mirar.
+//! That is why the translation lives in `pub(crate)` functions and not in `impl From`: it is not style, it is what
+//! makes the leak **impossible** instead of leaving it up to remembering to look.
 
 use term_core::{
     Cell, CellWidth, CursorShape, Half, MouseReporting, Screen, Scroll, Size, TermColor, Underline,
     ViewCell,
 };
 
-/// Recorre todas las variantes de color sin nombrar el enum de la librería de debajo.
+/// Traverses all the color variants without naming the enum of the library underneath.
 fn describe(color: TermColor) -> &'static str {
     match color {
-        TermColor::Indexed(_) => "entrada de la paleta",
-        TermColor::Rgb { .. } => "color exacto",
-        TermColor::Foreground => "primer plano del tema",
-        TermColor::Background => "fondo del tema",
-        TermColor::Cursor => "color del cursor",
-        TermColor::Dim(_) => "entrada atenuada",
-        TermColor::BrightForeground => "primer plano brillante",
-        TermColor::DimForeground => "primer plano atenuado",
+        TermColor::Indexed(_) => "palette entry",
+        TermColor::Rgb { .. } => "exact color",
+        TermColor::Foreground => "theme foreground",
+        TermColor::Background => "theme background",
+        TermColor::Cursor => "cursor color",
+        TermColor::Dim(_) => "dimmed entry",
+        TermColor::BrightForeground => "bright foreground",
+        TermColor::DimForeground => "dim foreground",
     }
 }
 
 fn describe_width(width: CellWidth) -> &'static str {
     match width {
-        CellWidth::Single => "una columna",
-        CellWidth::WideHead => "primera de dos",
-        CellWidth::WideTail => "acompañante",
-        CellWidth::WrapFiller => "hueco de arrastre",
+        CellWidth::Single => "one column",
+        CellWidth::WideHead => "first of two",
+        CellWidth::WideTail => "companion",
+        CellWidth::WrapFiller => "wrap gap",
     }
 }
 
 fn describe_underline(style: Underline) -> &'static str {
     match style {
-        Underline::None => "sin subrayado",
-        Underline::Single => "simple",
-        Underline::Double => "doble",
-        Underline::Curl => "ondulado",
-        Underline::Dotted => "punteado",
-        Underline::Dashed => "discontinuo",
+        Underline::None => "no underline",
+        Underline::Single => "single",
+        Underline::Double => "double",
+        Underline::Curl => "wavy",
+        Underline::Dotted => "dotted",
+        Underline::Dashed => "dashed",
     }
 }
 
 fn describe_cursor(shape: CursorShape) -> &'static str {
     match shape {
-        CursorShape::Block => "bloque",
-        CursorShape::Underline => "subrayado",
-        CursorShape::Beam => "barra",
-        CursorShape::HollowBlock => "bloque hueco",
-        CursorShape::Hidden => "apagado",
+        CursorShape::Block => "block",
+        CursorShape::Underline => "underline",
+        CursorShape::Beam => "beam",
+        CursorShape::HollowBlock => "hollow block",
+        CursorShape::Hidden => "off",
     }
 }
 
 #[test]
-fn la_vista_se_consume_entera_con_tipos_propios() {
+fn the_view_is_consumed_whole_with_bespoke_types() {
     let mut screen = Screen::new(Size { rows: 4, cols: 20 });
     screen.advance(b"\x1b[7;1;4mhola\x1b[0m");
 
     let view = screen.view();
 
-    // Cada campo público de la celda, leído sin importar nada de la dependencia.
+    // Every public field of the cell, read without importing anything of the dependency.
     for cell in view.cells() {
         let ViewCell {
             c,
@@ -114,13 +114,13 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
         assert!(!describe(bg).is_empty());
         assert!(!describe_width(width).is_empty());
         assert!(!describe_underline(underline).is_empty());
-        // **Lo pegado se consume de verdad, no se descarta.** Es el campo que más fácil sería sacar
-        // con un tipo de la dependencia —el motor lo guarda en un `Vec<char>` suyo— y lo que esta
-        // prueba defiende es justo eso: sale como un tramo de `char` del estándar.
+        // **What is attached is really consumed, not discarded.** It is the field that would be easiest to expose
+        // with a type of the dependency —the engine stores it in a `Vec<char>` of its own— and what this
+        // test defends is exactly that: it comes out as a slice of `char` from the standard library.
         let attached: &[char] = view.combining_of(cell);
         assert!(
             attached.is_empty(),
-            "esta pantalla es ASCII: ninguna celda debería traer nada pegado"
+            "this screen is ASCII: no cell should bring anything attached"
         );
         let _ = combining;
         let _ = (c, inverse, bold, dim, italic, strikeout, hidden, selected);
@@ -129,7 +129,7 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
     assert!(
         !describe_cursor(
             view.cursor()
-                .expect("con la pantalla al día el cursor se ve")
+                .expect("with the screen up to date the cursor is visible")
                 .shape
         )
         .is_empty()
@@ -138,27 +138,27 @@ fn la_vista_se_consume_entera_con_tipos_propios() {
     assert_eq!(view.cells().len(), 80);
     assert_eq!(
         view.cursor()
-            .expect("con la pantalla al día el cursor se ve")
+            .expect("with the screen up to date the cursor is visible")
             .row,
         0
     );
 }
 
-/// Que **mirar el historial** también se pide y se lee con tipos propios.
+/// That **looking at the history** is also requested and read with bespoke types.
 ///
-/// Va aparte de la vista porque es superficie nueva y **la prueba de arriba no la custodiaba**: el motor
-/// de debajo tiene su propio vocabulario para esto —un enum de desplazamiento con sus variantes— y
-/// dejarlo asomar sería exactamente la fuga que este fichero existe para impedir. Se recorren **todas**
-/// las variantes con un `match` exhaustivo, que es lo que hace que compilar sea la comprobación: si
-/// `Scroll` fuera el tipo ajeno, sus variantes no se llamarían así.
+/// It goes apart from the view because it is new surface and **the test above did not guard it**: the engine
+/// underneath has its own vocabulary for this —a scroll enum with its variants— and
+/// letting it show through would be exactly the leak this file exists to prevent. **All** the
+/// variants are traversed with an exhaustive `match`, which is what makes compiling the check: if
+/// `Scroll` were the foreign type, its variants would not be named this way.
 #[test]
-fn el_historial_se_pide_y_se_lee_con_tipos_propios() {
+fn the_history_is_requested_and_read_with_bespoke_types() {
     fn describe(amount: Scroll) -> &'static str {
         match amount {
-            Scroll::Lines(_) => "unas líneas",
-            Scroll::Pages(_) => "unas pantallas",
-            Scroll::ToTop => "hasta lo más viejo que se guarda",
-            Scroll::ToBottom => "de vuelta a donde el programa escribe",
+            Scroll::Lines(_) => "a few lines",
+            Scroll::Pages(_) => "a few screens",
+            Scroll::ToTop => "up to the oldest that is kept",
+            Scroll::ToBottom => "back to where the program writes",
         }
     }
 
@@ -177,22 +177,22 @@ fn el_historial_se_pide_y_se_lee_con_tipos_propios() {
         screen.scroll_by(amount);
     }
 
-    // Y lo que se lee de vuelta es un número nuestro, no la posición interna del motor.
+    // And what is read back is a number of ours, not the internal position of the engine.
     let amount: usize = screen.view().scroll();
-    assert_eq!(amount, 0, "se acabó pidiendo volver al final");
+    assert_eq!(amount, 0, "it ended up requesting to return to the end");
 }
 
-/// Que **la selección** también se pide y se lee con tipos propios.
+/// That **the selection** is also requested and read with bespoke types.
 ///
-/// Es superficie nueva y de la clase que este fichero vigila: el motor guarda la selección como un rango
-/// suyo, con su punto y su mitad, y dejar asomar cualquiera de los tres sería la fuga. Lo que sale de aquí
-/// son una celda nuestra, una mitad nuestra, un `bool` por celda y una cadena.
+/// It is new surface and of the kind this file watches: the engine keeps the selection as a range
+/// of its own, with its point and its half, and letting any of the three show through would be the leak. What comes out of here
+/// are a cell of ours, a half of ours, a `bool` per cell and a string.
 #[test]
-fn la_seleccion_se_pide_y_se_lee_con_tipos_propios() {
+fn the_selection_is_requested_and_read_with_bespoke_types() {
     fn describe(half: Half) -> &'static str {
         match half {
-            Half::Left => "por la mitad de la izquierda",
-            Half::Right => "por la mitad de la derecha",
+            Half::Left => "by the left half",
+            Half::Right => "by the right half",
         }
     }
 
@@ -220,24 +220,24 @@ fn la_seleccion_se_pide_y_se_lee_con_tipos_propios() {
     assert!(has);
     assert_eq!(text.as_deref(), Some("hola"));
 
-    // Y el realce llega a la foto como un booleano por celda, no como el rango.
+    // And the highlight reaches the snapshot as a boolean per cell, not as the range.
     let view = screen.view();
     let highlighted = view.cells().iter().filter(|cell| cell.selected).count();
-    assert_eq!(highlighted, 4, "el realce no llegó celda a celda");
+    assert_eq!(highlighted, 4, "the highlight did not arrive cell by cell");
 
     screen.clear_selection();
     assert!(!screen.has_selection());
 }
 
-/// Que preguntar por el ratón también se hace con tipos propios.
+/// That asking about the mouse is also done with bespoke types.
 ///
-/// **Va aparte de las de arriba porque es superficie nueva y ninguna la custodiaba.** Lo que
-/// `mouse_reporting` lee son las banderas del motor, así que devolverlas tal cual es el refactor
-/// natural — y con él, toda la caja seguiría compilando y este fichero seguiría pasando. La prueba
-/// nombra el tipo propio y **desestructura sus cuatro campos**, que es lo que hace imposible que el
-/// tipo del motor pase por aquí: sus banderas no tienen estos nombres.
+/// **It goes apart from those above because it is new surface and none guarded it.** What
+/// `mouse_reporting` reads are the engine's flags, so returning them as they are is the natural
+/// refactor — and with it, the whole crate would still compile and this file would still pass. The test
+/// names the bespoke type and **destructures its four fields**, which is what makes it impossible for the
+/// engine's type to pass through here: its flags do not have these names.
 #[test]
-fn el_raton_se_pregunta_y_se_lee_con_tipos_propios() {
+fn the_mouse_is_asked_and_read_with_bespoke_types() {
     let mut screen = Screen::new(Size { rows: 4, cols: 20 });
     screen.advance(b"\x1b[?1000h\x1b[?1002h\x1b[?1006h");
 
@@ -248,12 +248,12 @@ fn el_raton_se_pregunta_y_se_lee_con_tipos_propios() {
         extended,
     } = screen.mouse_reporting();
 
-    // **Los tres modos se SUSTITUYEN, no se acumulan** —leído en el motor, no supuesto—: pedir el
-    // arrastre apaga el de solo clics. Por eso aquí queda encendido el arrastre y no los botones. La
-    // codificación sí es aparte y convive con cualquiera de los tres.
+    // **The three modes are REPLACED, not accumulated** —read in the engine, not assumed—: requesting the
+    // drag turns off the clicks-only one. That is why here the drag stays on and not the buttons. The
+    // encoding is indeed separate and coexists with any of the three.
     assert!(drag && extended);
     assert!(!buttons && !motion);
     assert!(screen.mouse_reporting().wants_mouse());
-    // Y la otra pregunta de la superficie nueva, que devuelve un `bool` y no el modo del motor.
+    // And the other question of the new surface, which returns a `bool` and not the engine's mode.
     let _: bool = screen.wheel_acts_as_arrows();
 }

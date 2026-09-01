@@ -1,7 +1,7 @@
-//! Lanza un programa, mete su salida en la rejilla y la vuelca como texto.
+//! Spawns a program, feeds its output into the grid and dumps it as text.
 //!
-//! Es la comprobación a mano del hito: se ve lo que el terminal *entiende*, no los bytes que
-//! recibe. Con `vim` o `htop` dentro, la rejilla tiene que leerse como su interfaz.
+//! It is the by-hand check of the milestone: you see what the terminal *understands*, not the
+//! bytes it receives. With `vim` or `htop` inside, the grid has to read as their interface.
 //!
 //! ```text
 //! cargo run --example grid -p term-core            # zsh -l
@@ -9,7 +9,7 @@
 //! cargo run --example grid -p term-core -- htop
 //! ```
 //!
-//! A los 2 segundos redimensiona a 30×100 y vuelve a volcar, que es como se comprueba el reflujo.
+//! At 2 seconds it resizes to 30×100 and dumps again, which is how the reflow is checked.
 
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 use term_core::{Pty, Screen, Size};
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Sin argumentos, un shell de login. Con argumentos, lo que se pida tal cual: `-l` significa
-    // cosas distintas en cada programa (en `vim` es modo lisp), así que no se cuela por detrás.
+    // With no arguments, a login shell. With arguments, whatever is asked as-is: `-l` means
+    // different things in each program (in `vim` it is lisp mode), so it is not slipped in behind.
     let mut cli = std::env::args().skip(1);
     let program = cli.next().unwrap_or_else(|| "zsh".to_string());
     let args: Vec<String> = match cli.collect::<Vec<_>>() {
@@ -33,13 +33,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut screen = Screen::new(initial);
 
     pump(&pty_output, &mut screen, Duration::from_secs(2));
-    println!("── rejilla {}×{} ──", initial.rows, initial.cols);
+    println!("── grid {}×{} ──", initial.rows, initial.cols);
     println!("{}", screen.to_text());
 
-    // Las dos mitades del redimensionado: la rejilla refluye, y el programa se entera y repinta.
-    // La rejilla va primero a propósito: en cuanto el programa sepa el tamaño nuevo empieza a
-    // mandar bytes para él, y si la rejilla siguiera siendo la vieja se interpretarían contra unas
-    // dimensiones equivocadas.
+    // The two halves of the resize: the grid reflows, and the program finds out and repaints.
+    // The grid goes first on purpose: as soon as the program knows the new size it starts to send
+    // bytes for it, and if the grid were still the old one they would be interpreted against the
+    // wrong dimensions.
     let resized = Size {
         rows: 30,
         cols: 100,
@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     pump(&pty_output, &mut screen, Duration::from_secs(2));
     println!(
-        "\n── rejilla {}×{} tras redimensionar ──",
+        "\n── grid {}×{} after resizing ──",
         resized.rows, resized.cols
     );
     println!("{}", screen.to_text());
@@ -57,12 +57,12 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     Ok(())
 }
 
-/// Pasa lo que haya en el canal a la rejilla durante un rato.
+/// Passes whatever is in the channel into the grid for a while.
 ///
-/// `advance` se llama desde aquí y no desde un hilo: quien consume decide cuánto procesa por
-/// pasada. Ojo, esto **no** es ascendible tal cual al bucle de pintado: `recv_timeout` bloquea y se
-/// queda con el hilo hasta agotar el plazo, y un frame es una llamada que tiene que devolver el
-/// control. Lo que se hereda es la forma, no el código.
+/// `advance` is called from here and not from a thread: the consumer decides how much it processes
+/// per pass. Careful, this is **not** promotable as-is to the paint loop: `recv_timeout` blocks and
+/// holds the thread until the deadline runs out, and a frame is a call that has to return control.
+/// What is inherited is the shape, not the code.
 fn pump(pty_output: &Receiver<Vec<u8>>, screen: &mut Screen, for_how_long: Duration) {
     let until = Instant::now() + for_how_long;
     while Instant::now() < until {

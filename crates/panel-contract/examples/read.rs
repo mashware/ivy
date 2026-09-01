@@ -1,23 +1,23 @@
-//! Mide lo que cuesta leer un `panel.json`: tiempo por llamada y **pico de memoria al interpretar**.
+//! Measures what it costs to read a `panel.json`: time per call and **memory peak while interpreting**.
 //!
-//! **Ata los números que el código afirma**: el pico y el tiempo que [`panel_contract::MAX_BYTES`]
-//! declara para un fichero en el techo, y el coste del caso que va a ocurrir de verdad —los
-//! `panel.json` que hay en el repo—. La versión anterior de ese comentario decía «10 MiB, unas
-//! cuarenta veces el fichero» y nadie podía volver a comprobarlo: era 7× con líneas realistas y 95×
-//! en el peor caso. Un número escrito en el código sin con qué reejecutarlo envejece mal, y este
-//! ejemplo existe para que no vuelva a pasar.
+//! **It ties down the numbers the code asserts**: the peak and the time that
+//! [`panel_contract::MAX_BYTES`] declares for a file at the ceiling, and the cost of the case that is
+//! actually going to happen —the `panel.json` in the repo—. The previous version of that comment said
+//! "10 MiB, about forty times the file" and nobody could check it again: it was 7× with realistic
+//! lines and 95× in the worst case. A number written in the code with nothing to re-run it ages
+//! badly, and this example exists so it does not happen again.
 //!
-//! **Lo que midió y no está aquí**, a propósito: las llamadas al sistema por lectura, el coste de
-//! comprobar que los bytes son texto, y la comparación contra lo que `serde` derivaría. Son
-//! diagnóstico de una sola vez —sus respuestas ya viven en el comentario de [`panel_contract::read`]
-//! y en el diseño—, no números que el código afirme, y la última obligaba a arrastrar tres tipos
-//! duplicados del contrato que nadie recordaría actualizar.
+//! **What it measured and is not here**, on purpose: the system calls per read, the cost of checking
+//! that the bytes are text, and the comparison against what `serde` would derive. They are one-time
+//! diagnostics —their answers already live in the comment of [`panel_contract::read`] and in the
+//! design—, not numbers the code asserts, and the last one forced dragging along three duplicated
+//! types of the contract that nobody would remember to update.
 //!
 //! ```text
 //! cargo run --release --example read -p panel-contract
 //! ```
 //!
-//! En depuración los números salen varias veces peores; los que valen son los de `--release`.
+//! In debug the numbers come out several times worse; the ones that count are those of `--release`.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::io::Read;
@@ -27,10 +27,10 @@ use std::time::Instant;
 
 use panel_contract::{MAX_BYTES, read};
 
-// ─── El contador de memoria ────────────────────────────────────────────────────────────────────
+// ─── The memory counter ────────────────────────────────────────────────────────────────────────
 //
-// El pico no se puede sacar de fuera del proceso: `/usr/bin/time` da el máximo residente de toda la
-// corrida, que aquí incluye los ficheros de prueba. Hace falta contar lo vivo en cada instante.
+// The peak cannot be obtained from outside the process: `/usr/bin/time` gives the resident maximum of
+// the whole run, which here includes the test files. What is live at each instant has to be counted.
 
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
@@ -73,14 +73,14 @@ fn add(amount: usize) {
 #[global_allocator]
 static ALLOCATOR: Counter = Counter;
 
-/// Lo que costó una llamada, en memoria.
+/// What a call cost, in memory.
 struct Usage {
     peak: usize,
     allocations: usize,
     reallocations: usize,
 }
 
-/// Ejecuta midiendo, y **devuelve lo producido vivo**: el pico incluye lo que la llamada deja hecho.
+/// Runs while measuring, and **returns what was produced, live**: the peak includes what the call leaves done.
 fn while_measuring<T>(work: impl FnOnce() -> T) -> (T, Usage) {
     let baseline = LIVE.load(Relaxed);
     PEAK.store(baseline, Relaxed);
@@ -97,43 +97,45 @@ fn while_measuring<T>(work: impl FnOnce() -> T) -> (T, Usage) {
     (produced, usage)
 }
 
-// ─── Las medidas ───────────────────────────────────────────────────────────────────────────────
+// ─── The measurements ──────────────────────────────────────────────────────────────────────────
 
 fn main() {
     let bench = Bench::new();
 
-    println!("== 1. Los `panel.json` de verdad del repo ==\n");
+    println!("== 1. The real `panel.json` of the repo ==\n");
     real_files(&bench);
 
-    println!("\n== 2. Un fichero justo en el techo, en cuatro formas ==\n");
-    println!("Con los mismos bytes, lo que cambia el pico es cuántos valores traen: se reserva un");
-    println!("nodo por cada uno.\n");
+    println!("\n== 2. A file right at the ceiling, in four shapes ==\n");
+    println!(
+        "With the same bytes, what changes the peak is how many values they carry: one node is"
+    );
+    println!("reserved for each.\n");
     for filler in fillers_at_the_cap() {
         at_the_cap(&bench, &filler);
     }
 
-    println!("\n== 3. Lo que reserva la lectura de bytes ==\n");
+    println!("\n== 3. What reading the bytes reserves ==\n");
     allocations_of_a_read(&bench);
 }
 
-/// Un directorio temporal donde escribir lo que se va a leer.
+/// A temporary directory to write what is going to be read.
 ///
-/// No se usa `PanelDir` a propósito: sortea un nombre y borra al morir, y aquí hace falta un sitio
-/// estable donde reescribir el mismo fichero muchas veces.
+/// `PanelDir` is not used on purpose: it draws a random name and deletes on death, and here a stable
+/// place is needed to rewrite the same file many times.
 struct Bench {
     dir: PathBuf,
 }
 
 impl Bench {
     fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!("panel-lectura-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("crear el banco");
+        let dir = std::env::temp_dir().join(format!("panel-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create the bench");
         Self { dir }
     }
 
-    /// Publica un contenido y devuelve el directorio que `read` espera.
+    /// Publishes some content and returns the directory that `read` expects.
     fn publish(&self, contents: &str) -> &Path {
-        std::fs::write(self.dir.join("panel.json"), contents).expect("publicar");
+        std::fs::write(self.dir.join("panel.json"), contents).expect("publish");
         &self.dir
     }
 
@@ -148,12 +150,12 @@ impl Drop for Bench {
     }
 }
 
-/// Los nueve ficheros que hay en el repo, uno a uno.
+/// The nine files in the repo, one by one.
 fn real_files(bench: &Bench) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
-        .expect("la raíz del repo")
+        .expect("the repo root")
         .to_path_buf();
 
     let mut real = Vec::new();
@@ -162,13 +164,13 @@ fn real_files(bench: &Bench) {
     real.sort();
 
     if real.is_empty() {
-        println!("  (no se encontró ningún `panel.json` en el repo)");
+        println!("  (no `panel.json` was found in the repo)");
         return;
     }
 
     println!(
         "  {:<46} {:>6} {:>4} {:>8} {:>9} {:>9} {:>7}",
-        "fichero", "bytes", "lín", "µs read", "de ellos", "pico", "factor"
+        "file", "bytes", "lns", "µs read", "of those", "peak", "factor"
     );
     println!(
         "  {:<46} {:>6} {:>4} {:>8} {:>9} {:>9} {:>7}",
@@ -177,10 +179,10 @@ fn real_files(bench: &Bench) {
 
     let mut total = 0.0;
     for path in &real {
-        let contents = std::fs::read_to_string(path).expect("leer el fichero real");
+        let contents = std::fs::read_to_string(path).expect("read the real file");
         let dir = bench.publish(&contents);
 
-        // Una pasada en frío antes de medir: la primera lectura paga el caché del directorio.
+        // A cold pass before measuring: the first read pays for the directory cache.
         let _ = read(dir);
 
         const ROUNDS: u32 = 5000;
@@ -191,7 +193,7 @@ fn real_files(bench: &Bench) {
         let micros = start.elapsed().as_secs_f64() * 1e6 / f64::from(ROUNDS);
         total += micros;
 
-        // Lo mismo sin interpretar: metadata + open + read_to_end, que es el suelo irreductible.
+        // The same without interpreting: metadata + open + read_to_end, which is the irreducible floor.
         let file = bench.path();
         let start = Instant::now();
         for _ in 0..ROUNDS {
@@ -201,7 +203,7 @@ fn real_files(bench: &Bench) {
         let io = start.elapsed().as_secs_f64() * 1e6 / f64::from(ROUNDS);
 
         let (panel, usage) =
-            while_measuring(|| read(dir).expect("un fichero real del repo se lee"));
+            while_measuring(|| read(dir).expect("a real file from the repo is read"));
 
         println!(
             "  {:<46} {:>6} {:>4} {:>8.1} {:>9.1} {:>9} {:>6.1}×",
@@ -216,13 +218,10 @@ fn real_files(bench: &Bench) {
     }
 
     println!(
-        "\n  Media: {:.1} µs por lectura. A 60 fotogramas por segundo, releer los nueve en cada uno",
+        "\n  Mean: {:.1} µs per read. At 60 frames per second, re-reading the nine in each one",
         total / real.len() as f64
     );
-    println!(
-        "  costaría {:.2} ms de los 16,7 del fotograma.",
-        total / 1000.0
-    );
+    println!("  would cost {:.2} ms of the frame's 16.7.", total / 1000.0);
 }
 
 fn collect_into(from: &Path, en: &mut Vec<PathBuf>) {
@@ -246,36 +245,36 @@ fn short(path: &Path, root: &Path) -> String {
         .to_string()
 }
 
-/// Una forma de llenar el techo, con su nombre.
+/// A way to fill the ceiling, with its name.
 struct Filler {
     name: &'static str,
     text: String,
 }
 
-/// Tres maneras de gastar 256 KiB, de la más realista a los dos extremos.
+/// Three ways to spend 256 KiB, from the most realistic to the two extremes.
 fn fillers_at_the_cap() -> Vec<Filler> {
-    // La forma que tiene un panel de verdad: objetos con referencia, texto, marca, estilo y enlace.
-    let real_line = r##"{"ref": "#12", "text": "extraer Division de la ventana y dejarla sola", "mark": "done", "style": "ok", "link": "https://github.com/mashware/agent-terminal/pull/31"}"##;
-    // El peor caso por número de nodos: el objeto más pequeño que sigue siendo una línea.
+    // The shape a real panel has: objects with reference, text, mark, style and link.
+    let real_line = r##"{"ref": "#12", "text": "extract Division from the window and leave it alone", "mark": "done", "style": "ok", "link": "https://github.com/mashware/agent-terminal/pull/31"}"##;
+    // The worst case by number of nodes: the smallest object that is still a line.
     let minimal_line = r#"{"text":"x"}"#;
 
     vec![
         Filler {
-            name: "líneas como las de un panel real",
+            name: "lines like those of a real panel",
             text: repeat(real_line),
         },
         Filler {
-            name: "objetos mínimos del contrato (más nodos por byte)",
+            name: "minimal contract objects (more nodes per byte)",
             text: repeat(minimal_line),
         },
-        // El peor caso de verdad: ni siquiera hace falta que el campo exista en el contrato. Basta
-        // con que el objeto tenga **una** clave para que su mapa reserve un nodo entero de árbol.
+        // The real worst case: the field does not even need to exist in the contract. It is enough
+        // for the object to have **one** key for its map to reserve a whole tree node.
         Filler {
-            name: "objetos de una clave cualquiera (el peor caso)",
+            name: "objects with any single key (the worst case)",
             text: repeat(r#"{"a":0}"#),
         },
         Filler {
-            name: "una sola línea gigante",
+            name: "a single giant line",
             text: {
                 let padding = "x".repeat(MAX_BYTES as usize - 32);
                 format!(r#"{{"lines":["{padding}"]}}"#)
@@ -284,7 +283,7 @@ fn fillers_at_the_cap() -> Vec<Filler> {
     ]
 }
 
-/// Repite un elemento hasta rozar el techo por debajo.
+/// Repeats an element until it just grazes the ceiling from below.
 fn repeat(item: &str) -> String {
     let mut text = String::from(r#"{"lines":["#);
     let closing = "]}";
@@ -309,103 +308,105 @@ fn at_the_cap(bench: &Bench, filler: &Filler) {
     let millis = start.elapsed().as_secs_f64() * 1e3 / f64::from(ROUNDS);
 
     let before = LIVE.load(Relaxed);
-    let (panel, usage) = while_measuring(|| read(dir).expect("en el techo todavía se lee"));
-    // Lo que **queda** vivo con el panel en la mano: el pico es un instante, esto se paga mientras
-    // la división exista.
+    let (panel, usage) = while_measuring(|| read(dir).expect("at the ceiling it still reads"));
+    // What **stays** live with the panel in hand: the peak is an instant, this is paid as long as
+    // the split exists.
     let resident = LIVE.load(Relaxed).saturating_sub(before);
 
-    // Cuánto de ese tiempo es el disco y no el intérprete.
+    // How much of that time is the disk and not the interpreter.
     let path = bench.path();
     let start = Instant::now();
     for _ in 0..ROUNDS {
-        std::hint::black_box(std::fs::read(&path).expect("leer los bytes"));
+        std::hint::black_box(std::fs::read(&path).expect("read the bytes"));
     }
     let io = start.elapsed().as_secs_f64() * 1e3 / f64::from(ROUNDS);
 
     println!("  {}", filler.name);
     println!(
-        "    {} bytes · {} líneas leídas",
+        "    {} bytes · {} lines read",
         filler.text.len(),
         panel.lines.len()
     );
     println!(
-        "    tiempo   {millis:.2} ms  (de los que {io:.2} ms son leer los bytes → {:.2} ms interpretar)",
+        "    time     {millis:.2} ms  (of which {io:.2} ms is reading the bytes → {:.2} ms interpret)",
         millis - io
     );
     println!(
-        "    pico     {}  = {:.1}× el fichero   ({} reservas, {} reasignaciones)",
+        "    peak     {}  = {:.1}× the file   ({} reservations, {} reallocations)",
         human(usage.peak),
         usage.peak as f64 / filler.text.len() as f64,
         usage.allocations,
         usage.reallocations
     );
     println!(
-        "    queda    {} vivos con el panel en la mano ({:.0} % del pico)",
+        "    stays    {} live with the panel in hand ({:.0} % of the peak)",
         human(resident),
         resident as f64 * 100.0 / usage.peak as f64
     );
-    // Cuatro divisiones **una detrás de otra en el mismo hilo**, que es como ocurriría: el pico no
-    // se multiplica por cuatro, porque el intermedio de cada lectura muere antes de la siguiente.
+    // Four splits **one after another in the same thread**, which is how it would happen: the peak
+    // does not multiply by four, because the intermediate of each read dies before the next.
     let before = LIVE.load(Relaxed);
     PEAK.store(before, Relaxed);
-    let four: Vec<_> = (0..4).map(|_| read(dir).expect("leer")).collect();
+    let four: Vec<_> = (0..4).map(|_| read(dir).expect("read")).collect();
     let peak_of_four = PEAK.load(Relaxed).saturating_sub(before);
     std::hint::black_box(&four);
     drop(four);
 
     println!(
-        "    cuatro divisiones seguidas: {} de pico — no {}, porque los intermedios no coinciden\n",
+        "    four splits in a row: {} of peak — not {}, because the intermediates do not coincide\n",
         human(peak_of_four),
         human(usage.peak * 4)
     );
 }
 
-/// Las dos formas de acumular los bytes leídos, replicadas y contadas.
+/// The two ways of accumulating the read bytes, replicated and counted.
 ///
-/// **Es una comparación, no una copia de `read_capped`**: lo que ata es *por qué* esa función dice
-/// de antemano cuánto espera. Sin la pista, `read_to_end` lee tanto como quepa en lo reservado
-/// —empezando por 32 bytes—, así que cada duplicación del búfer es una llamada al sistema más: siete
-/// lecturas para un panel de 861 B y quince para uno en el techo, contadas con `strace`. Con la
-/// pista son dos, pase lo que pase, y la capacidad final deja de ser el doble del fichero.
+/// **It is a comparison, not a copy of `read_capped`**: what it ties down is *why* that function says
+/// in advance how much it expects. Without the hint, `read_to_end` reads as much as fits in what is
+/// reserved —starting at 32 bytes—, so each doubling of the buffer is one more system call: seven
+/// reads for an 861 B panel and fifteen for one at the ceiling, counted with `strace`. With the hint
+/// it is two, no matter what, and the final capacity stops being twice the file.
 fn allocations_of_a_read(bench: &Bench) {
-    println!("  Acumular los bytes sin decir de antemano cuántos se esperan, contra decirlo.");
+    println!(
+        "  Accumulating the bytes without saying in advance how many are expected, versus saying it."
+    );
     println!(
         "\n  {:<24} {:>9} {:>10} {:>16}",
-        "fichero", "reservas", "reasign.", "capacidad final"
+        "file", "reservations", "realloc.", "final capacity"
     );
 
     for (name, contents) in [
-        ("uno real (861 B)", "x".repeat(861)),
+        ("a real one (861 B)", "x".repeat(861)),
         ("16 KiB", "x".repeat(16 * 1024)),
-        ("en el techo", "x".repeat(MAX_BYTES as usize)),
+        ("at the ceiling", "x".repeat(MAX_BYTES as usize)),
     ] {
         bench.publish(&contents);
         let path = bench.path();
         let (bytes, usage) = while_measuring(|| {
-            let file = std::fs::File::open(&path).expect("abrir");
+            let file = std::fs::File::open(&path).expect("open");
             let mut bytes = Vec::new();
             file.take(MAX_BYTES + 1)
                 .read_to_end(&mut bytes)
-                .expect("leer");
+                .expect("read");
             bytes
         });
 
-        // Lo mismo diciendo de antemano cuánto se espera, acotado al techo. El tamaño no cuesta
-        // nada: quien lee acaba de pedir los metadatos para comprobar que es un fichero regular. Y
-        // no decide nada — el techo lo siguen aplicando el `take` y la comprobación de después, así
-        // que un fichero que crezca entre medias no rompe nada: el `Vec` crece solo.
-        let expected = std::fs::metadata(&path).expect("metadatos").len();
+        // The same saying in advance how much is expected, bounded to the ceiling. The size costs
+        // nothing: whoever reads has just asked for the metadata to check that it is a regular file.
+        // And it decides nothing — the ceiling is still applied by the `take` and the check
+        // afterwards, so a file that grows in between breaks nothing: the `Vec` grows on its own.
+        let expected = std::fs::metadata(&path).expect("metadata").len();
         let (with_capacity, usage_with) = while_measuring(|| {
-            let file = std::fs::File::open(&path).expect("abrir");
+            let file = std::fs::File::open(&path).expect("open");
             let mut bytes = Vec::with_capacity(expected.min(MAX_BYTES) as usize + 1);
             file.take(MAX_BYTES + 1)
                 .read_to_end(&mut bytes)
-                .expect("leer");
+                .expect("read");
             bytes
         });
 
         println!(
-            "  {:<24} {:>9} {:>10} {:>16}   →   con capacidad previa: {} + {}, {}",
+            "  {:<24} {:>9} {:>10} {:>16}   →   with prior capacity: {} + {}, {}",
             name,
             usage.allocations,
             usage.reallocations,

@@ -1125,7 +1125,7 @@ mod tests {
         assert!(
             painted
                 .iter()
-                .any(|row| row.contains("no es lo último") && row.contains("no se entiende")),
+                .any(|row| row.contains("no es lo último") && row.contains("not understood")),
             "se sigue enseñando lo viejo como si fuera lo último: {painted:?}"
         );
         assert!(
@@ -1152,7 +1152,7 @@ mod tests {
         assert!(
             painted
                 .iter()
-                .any(|row| row.contains("sin panel") && row.contains("no se entiende")),
+                .any(|row| row.contains("sin panel") && row.contains("not understood")),
             "no se dice por qué no hay panel: {painted:?}"
         );
     }

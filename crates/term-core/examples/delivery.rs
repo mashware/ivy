@@ -1,23 +1,23 @@
-//! Mide cuánto entrega el pseudoterminal a un programa que imprime líneas, con y sin el
-//! procesamiento de salida del núcleo.
+//! Measures how much the pseudoterminal delivers to a program that prints lines, with and without
+//! the kernel's output processing.
 //!
 //! ```text
 //! cargo run --release --example delivery -p term-core
 //! ```
 //!
-//! Los dos números salen de la **misma** cadena y de la misma máquina: el programa de dentro
-//! enciende o apaga el interruptor por su cuenta con `stty`, así que no hace falta ninguna API para
-//! medir la diferencia, y lo que se compara no depende de dos ejecuciones distintas.
+//! The two numbers come from the **same** string and the same machine: the program inside turns the
+//! switch on or off by itself with `stty`, so no API is needed to measure the difference, and what
+//! is compared does not depend on two separate runs.
 //!
-//! **Lo que cuesta es cada salto de línea, no cada byte**, así que la relación depende de cuántos
-//! haya por byte — por eso se mide con dos largos y no con uno. Un solo número parece universal y no
-//! lo es.
+//! **What costs is each line break, not each byte**, so the ratio depends on how many there are per
+//! byte — that is why it is measured with two line lengths and not one. A single number looks
+//! universal and is not.
 //!
-//! **Este coste se paga a propósito.** Se intentó quitar apagando `OPOST` al abrir el pseudoterminal,
-//! y se revirtió: reponer el retorno de carro desde fuera exige saber si el programa lo quiere, y esa
-//! información desaparece en cuanto se le miente sobre el estado de su terminal. La autopsia entera
-//! está en **D12** de `docs/02-decisiones.md`. El ejemplo se queda porque el coste sigue ahí y
-//! conviene poder volver a mirarlo.
+//! **This cost is paid on purpose.** We tried to remove it by turning off `OPOST` when opening the
+//! pseudoterminal, and reverted it: putting the carriage return back from outside requires knowing
+//! whether the program wants it, and that information disappears the moment you lie to it about the
+//! state of its terminal. The full autopsy is in **D12** of `docs/02-decisiones.md`. The example
+//! stays because the cost is still there and it is worth being able to look at it again.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,83 +25,83 @@ use std::time::{Duration, Instant};
 
 use term_core::{Pty, Size};
 
-/// Tamaño del fichero que se vuelca. Doce megas es un `cat` de un log de verdad.
+/// Size of the file that is dumped. Twelve megs is a `cat` of a real log.
 const BYTES: usize = 12 * 1024 * 1024;
 
-/// Margen por lectura. No es el tiempo total: es cuánto se espera a que llegue *algo más* antes de
-/// dar por terminada la entrega.
+/// Margin per read. It is not the total time: it is how long we wait for *something more* to arrive
+/// before considering the delivery finished.
 const DEADLINE: Duration = Duration::from_secs(60);
 
 fn main() {
-    // Se vuelca un fichero con `cat` y no se generan las líneas con un bucle del shell. Medido: un
-    // `while` de `sh` con `printf` entrega 12 MiB/s **con el interruptor puesto de las dos formas**,
-    // porque el cuello es el propio bucle. Con eso, la medida daba «1×» y habría enterrado el
-    // hallazgo del ticket con un número tranquilizador y falso.
+    // A file is dumped with `cat` and the lines are not generated with a shell loop. Measured: a
+    // `while` of `sh` with `printf` delivers 12 MiB/s **with the switch set both ways**, because the
+    // bottleneck is the loop itself. With that, the measurement gave "1×" and would have buried the
+    // ticket's finding under a reassuring, false number.
     for (tag, line) in [
         (
-            "línea de log (70 B)",
+            "log line   (70 B)",
             &b"lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod\n"[..],
         ),
-        ("línea corta   (2 B)", &b"y\n"[..]),
+        ("short line (2 B)", &b"y\n"[..]),
     ] {
         let file = seed(line);
         let without_lines = measure(&file, "stty -opost");
         let with_lines = measure(&file, "stty opost onlcr");
         let _ = std::fs::remove_file(&file);
 
-        println!("{tag} — {} líneas", BYTES / line.len());
-        report("procesando en el núcleo", &with_lines);
-        report("sin procesar en el núcleo", &without_lines);
+        println!("{tag} — {} lines", BYTES / line.len());
+        report("processing in the kernel", &with_lines);
+        report("without kernel processing", &without_lines);
         println!(
-            "  relación: {:.0}×\n",
+            "  ratio: {:.0}×\n",
             with_lines.took.as_secs_f64() / without_lines.took.as_secs_f64()
         );
     }
 }
 
-/// Lo que costó volcar el fichero, y cuánto llegó de verdad al otro lado.
+/// What it cost to dump the file, and how much actually arrived on the other side.
 struct Delivery {
     took: Duration,
     delivered: usize,
 }
 
-/// El caudal se calcula sobre lo que **escribió el programa**, no sobre lo que se entregó.
+/// The throughput is computed over what the **program wrote**, not over what was delivered.
 ///
-/// No son lo mismo y por eso importa: con el procesamiento encendido llegan más bytes de los que se
-/// escribieron —un retorno de carro por salto, y dos si además se traduce aquí—, así que dividir por
-/// lo entregado premiaría a la configuración lenta por hacer bulto.
+/// They are not the same and that is why it matters: with processing on, more bytes arrive than
+/// were written —a carriage return per line break, and two if it is also translated here—, so
+/// dividing by what was delivered would reward the slow configuration for padding the count.
 fn report(tag: &str, delivery: &Delivery) {
     let written = BYTES as f64 / (1024.0 * 1024.0);
     let delivered = delivery.delivered as f64 / (1024.0 * 1024.0);
     println!(
-        "  {tag:<26}: {:>9.3?}  →  {:>6.1} MiB/s   ({delivered:.1} MiB entregados)",
+        "  {tag:<26}: {:>9.3?}  →  {:>6.1} MiB/s   ({delivered:.1} MiB delivered)",
         delivery.took,
         written / delivery.took.as_secs_f64(),
     );
 }
 
-/// Escribe el fichero que se volcará.
+/// Writes the file that will be dumped.
 fn seed(line: &[u8]) -> PathBuf {
-    let path = std::env::temp_dir().join("term-core-entrega.txt");
-    let mut file = std::fs::File::create(&path).expect("crear el fichero de la medida");
+    let path = std::env::temp_dir().join("term-core-delivery.txt");
+    let mut file = std::fs::File::create(&path).expect("create the measurement file");
     let mut written = 0;
     while written < BYTES {
-        file.write_all(line).expect("escribir el fichero");
+        file.write_all(line).expect("write the file");
         written += line.len();
     }
-    file.flush().expect("cerrar el fichero");
+    file.flush().expect("close the file");
     path
 }
 
 fn measure(file: &Path, variant: &str) -> Delivery {
     let command = format!("{variant}; cat {}", file.display());
-    let (_pty, channel) = Pty::spawn("sh", &["-c", &command], Size::default()).expect("lanzar sh");
+    let (_pty, channel) = Pty::spawn("sh", &["-c", &command], Size::default()).expect("spawn sh");
 
-    // El reloj arranca con el primer byte, no antes: arrancar el shell y abrir el fichero no es lo
-    // que se está midiendo.
+    // The clock starts with the first byte, not before: starting the shell and opening the file is
+    // not what is being measured.
     let first = channel
         .recv_timeout(DEADLINE)
-        .expect("el programa no escribió");
+        .expect("the program did not write");
     let start = Instant::now();
     let mut delivered = first.len();
     while let Ok(chunk) = channel.recv_timeout(DEADLINE) {
