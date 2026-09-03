@@ -1,19 +1,20 @@
-//! El formato con el que la disposición de la ventana va y vuelve de disco, y lo que se le exige.
+//! The format in which the window layout goes to and comes back from disk, and what is required of it.
 //!
-//! **Aquí no hay ni una consola.** Este módulo describe formas y las valida; materializarlas —que es
-//! bifurcar un proceso por hoja— ocurre en la raíz, que es donde viven los campos de una división. La
-//! frontera no es de gusto: mantiene esta mitad **pura y probable sin abrir un pseudoterminal**, y deja
-//! el `fork` en un solo sitio.
+//! **There is not a single console here.** This module describes shapes and validates them;
+//! materializing them —which is forking one process per leaf— happens at the root, which is where the
+//! fields of a pane live. The boundary is not a matter of taste: it keeps this half **pure and testable
+//! without opening a pseudoterminal**, and leaves the `fork` in a single place.
 //!
-//! **Y los tipos de aquí son un espejo, no los de la disposición viva.** Cambiarle un campo al árbol de
-//! [`crate::Node`] no debe cambiar lo que hay escrito en el disco de nadie; el precio es una conversión
-//! de ida y otra de vuelta, y lo que compra es que las dos formas evolucionen por separado. La única
-//! excepción, y por su razón, es el peso: ver [`StoredChild::weight`].
+//! **And the types here are a mirror, not those of the live layout.** Changing a field on the
+//! [`crate::Node`] tree must not change what is written on anyone's disk; the price is one conversion
+//! each way, and what it buys is that the two shapes evolve separately. The only exception, and for its
+//! reason, is the weight: see [`StoredChild::weight`].
 //!
-//! **La segunda mitad del módulo sí toca el disco**, y también sin abrir ninguna consola: dónde vive el
-//! fichero ([`path_from`]), cómo se lee ([`read`]) y cómo se sustituye sin poder dejarlo a medias
-//! ([`Persistence::save`]). Está aquí y no en quien arranca porque el nombre del fichero, su techo y su
-//! versión **son el formato**: quien los mirara por su cuenta los estaría escribiendo por segunda vez.
+//! **The second half of the module does touch the disk**, and also without opening any console: where
+//! the file lives ([`path_from`]), how it is read ([`read`]) and how it is replaced without being able
+//! to leave it half done ([`Persistence::save`]). It is here and not in whoever starts up because the
+//! file name, its ceiling and its version **are the format**: whoever looked at them on their own would
+//! be writing them a second time.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -22,87 +23,90 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Cuántas hojas se aceptan en un documento entero.
+/// How many leaves are accepted in a whole document.
 ///
-/// **Existe aunque D14 descartara ponerle techo al número de divisiones, y no la contradice.** Partir
-/// exige un gesto humano y la geometría **se niega antes de crear nada**; restaurar bifurca N shells
-/// **antes de que exista geometría** —al abrir no se sabe el tamaño de la ventana—, así que el suelo que
-/// protege a partir está **aguas abajo del `fork`**. Es techo **del documento**, no de divisiones.
+/// **It exists even though D14 rejected putting a ceiling on the number of panes, and it does not
+/// contradict it.** Splitting requires a human gesture and the geometry **refuses before creating
+/// anything**; restoring forks N shells **before any geometry exists** —when opening, the window size is
+/// unknown—, so the floor that protects splitting is **downstream of the `fork`**. It is a ceiling **on
+/// the document**, not on panes.
 ///
-/// **Y el número se elige contra el recurso que guarda, no contra lo que cabe en pantalla.** Cada hoja
-/// restaurada es un proceso, un pseudoterminal, sus descriptores y ~1,06 MiB de colas: un millar de hojas
-/// —lo que deja pasar el techo de bytes— serían más de un gigabyte de colas antes de pintar nada, o sea
-/// el techo convertido en el desastre que venía a evitar. 128 son unos 136 MiB, y siguen estando por
-/// encima de las del orden de cien consolas que caben en la ventana con la que se mide.
+/// **And the number is chosen against the resource it guards, not against what fits on screen.** Each
+/// restored leaf is a process, a pseudoterminal, its descriptors and ~1.06 MiB of queues: a thousand
+/// leaves —what the byte ceiling lets through— would be more than a gigabyte of queues before painting
+/// anything, that is, the ceiling turned into the very disaster it came to avoid. 128 are about 136 MiB,
+/// and are still above the order of a hundred consoles that fit in the window it is measured with.
 pub const MAX_LEAVES: usize = 128;
 
-/// La versión del formato.
+/// The format version.
 ///
-/// **Es obligatoria, al contrario que la del contrato del panel, y por la razón contraria.** Allí puede
-/// faltar porque hay ficheros anteriores al campo, escritos por terceros; aquí no existe ninguno, porque
-/// este fichero lo escribe siempre la aplicación.
+/// **It is mandatory, unlike the panel contract's, and for the opposite reason.** There it may be
+/// missing because there are files older than the field, written by third parties; here none exists,
+/// because this file is always written by the application.
 ///
-/// Sube **solo con lo que un lector viejo malinterpretaría** —una clave renombrada, quitada, o con otro
-/// significado—; **añadir una clave opcional no la sube**, y que se quede en 2 mucho tiempo es la señal
-/// de que funciona. Va **una vez por documento y nunca por nodo**: versiones anidadas dejarían mezclar
-/// formas dentro de un mismo fichero.
+/// It goes up **only with what an old reader would misinterpret** —a renamed key, a removed one, or one
+/// with a different meaning—; **adding an optional key does not raise it**, and staying at 2 for a long
+/// time is the sign that it works. It goes **once per document and never per node**: nested versions
+/// would allow mixing shapes within the same file.
 pub const VERSION: u64 = 2;
 
-/// Lo más grande que se acepta interpretar.
+/// The largest thing that is accepted for interpretation.
 ///
-/// **Está aquí y no en quien lea el fichero, y eso es la decisión.** D16 compromete este techo, y si
-/// viviera en el camino que abre el fichero, quien escriba **otro** camino que interprete un documento
-/// tendría que acordarse por su cuenta. En el módulo que posee el formato no hay nada que recordar.
+/// **It is here and not in whoever reads the file, and that is the decision.** D16 commits to this
+/// ceiling, and if it lived on the path that opens the file, whoever writes **another** path that
+/// interprets a document would have to remember it on their own. In the module that owns the format
+/// there is nothing to remember.
 ///
-/// **64 KiB y no los 256 del contrato del panel**: el documento legítimo más grande que este formato
-/// produce son unos 27 KiB —el techo de hojas por lo que ocupa cada una—, así que esto es 2,4 veces eso.
-/// Y la razón de que haya techo no es el pico de interpretar: es que **el fichero tiene tamaño
-/// arbitrario, y leerlo sin tope es reservar sin tope en el arranque**.
+/// **64 KiB and not the panel contract's 256**: the largest legitimate document this format produces is
+/// about 27 KiB —the leaf ceiling times what each one takes up—, so this is 2.4 times that. And the
+/// reason there is a ceiling is not the interpretation peak: it is that **the file has an arbitrary
+/// size, and reading it without a cap is allocating without a cap at startup**.
 pub const MAX_BYTES: usize = 64 * 1024;
 
-/// Lo que se guarda de una consola, y es todo lo que se guarda de ella.
+/// What is saved of a console, and it is everything that is saved of it.
 ///
-/// De los quince campos de una división viva, dos. Los otros trece no, y cada uno por su razón: el
-/// nombre porque el contador que garantiza que no se repitan es de la ventana y un nombre viejo chocaría
-/// con él; el directorio del panel y su estado porque una consola restaurada **estrena identidad**; el
-/// pseudoterminal y su pantalla porque son un proceso vivo y un historial; y los cronómetros porque son
-/// de la corrida.
+/// Of the fifteen fields of a live pane, two. The other thirteen no, and each one for its reason: the
+/// name because the counter that guarantees they do not repeat belongs to the window and an old name
+/// would clash with it; the panel directory and its state because a restored console **gets a fresh
+/// identity**; the pseudoterminal and its screen because they are a live process and a history; and the
+/// timers because they belong to the run.
 ///
-/// **Y ningún campo de texto libre, que es una decisión y no una casualidad.** Ni programa, ni
-/// argumentos, ni entorno, ni directorio de trabajo, ni ninguna ruta. El lanzamiento de una consola deja
-/// de ser inofensivo en cuanto el programa o sus argumentos **procedan de configuración**, y este fichero
-/// es configuración: si el tipo no lo tiene, no hay nada que conectar a un `spawn`.
+/// **And no free-text field, which is a decision and not an accident.** No program, no arguments, no
+/// environment, no working directory, no path at all. Launching a console stops being harmless the
+/// moment the program or its arguments **come from configuration**, and this file is configuration: if
+/// the type does not have it, there is nothing to connect to a `spawn`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct StoredLeaf {
-    /// En celdas, como en la división viva: lo que el panel tiene que conservar al cambiar el aumento
-    /// del escritorio es **cuántos caracteres caben**, no cuántos puntos ocupa.
+    /// In cells, as in the live pane: what the panel has to preserve when the desktop zoom changes is
+    /// **how many characters fit**, not how many points it takes up.
     pub panel_width: usize,
-    /// Aparte del ancho a propósito: plegar no pierde el ancho de trabajo, y desplegar vuelve **al que
-    /// tenía** en vez de inventarse uno.
+    /// Separate from the width on purpose: folding does not lose the working width, and unfolding goes
+    /// back **to the one it had** instead of inventing one.
     pub folded: bool,
 }
 
-/// En qué sentido reparte una rama.
+/// In which direction a branch divides.
 ///
-/// **Es un tipo propio y no [`crate::Orientation`], a propósito.** Los nombres de este enum son **el
-/// formato**: aparecen literalmente en el fichero de todo el que use la aplicación. Reutilizar el tipo
-/// vivo ataría el fichero a un nombre que el código puede querer cambiar mañana por razones que no
-/// tienen nada que ver con el disco. El precio son cuatro líneas de conversión.
+/// **It is a type of its own and not [`crate::Orientation`], on purpose.** The names of this enum are
+/// **the format**: they appear literally in the file of everyone who uses the application. Reusing the
+/// live type would tie the file to a name that the code may want to change tomorrow for reasons that
+/// have nothing to do with the disk. The price is four lines of conversion.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StoredOrientation {
-    /// Una al lado de otra; se reparte el ancho.
+    /// Side by side; the width is divided.
     Columns,
-    /// Una encima de otra; se reparte el alto.
+    /// One above the other; the height is divided.
     Rows,
 }
 
-/// Una consola, o un corte con sus partes.
+/// A console, or a cut with its parts.
 ///
-/// **Etiqueta explícita —`leaf` o `branch`— y no «se deduce de qué clave está presente».** La forma sin
-/// etiqueta se lee igual de bien y **pierde el motivo del fallo**: quien intente resolver la disyuntiva
-/// probando formas devuelve «no encaja en ninguna», y lo que hace falta decir es **qué** clave sobra o
-/// falta y **dónde**. La etiqueta la escribe `serde` de serie, así que el motivo sale gratis.
+/// **Explicit tag —`leaf` or `branch`— and not «deduced from which key is present».** The untagged
+/// shape reads just as well and **loses the reason for the failure**: whoever tries to resolve the
+/// either-or by trying shapes returns «fits none of them», and what needs to be said is **which** key is
+/// extra or missing and **where**. The tag is written by `serde` out of the box, so the reason comes for
+/// free.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StoredNode {
@@ -113,221 +117,224 @@ pub enum StoredNode {
     },
 }
 
-/// Un hijo de una rama, con lo que le toca del reparto.
+/// A child of a branch, with the share of the tiling that falls to it.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct StoredChild {
-    /// **Un número suelto, y no el tipo del peso vivo, y esto sí es deliberado.** Derivar la lectura
-    /// sobre [`crate::Weight`] **se saltaría su constructor**, que es lo único que hace imposible una suma
-    /// de pesos igual a cero — el `NaN` en un rectángulo que ese tipo existe para evitar. Así que el
-    /// cable lleva `f32` y la validación lo pasa por `crate::Weight::new`: **una sola implementación de la
-    /// invariante**, la que ya estaba probada.
+    /// **A bare number, and not the live weight type, and this one is deliberate.** Deriving the reading
+    /// over [`crate::Weight`] **would skip its constructor**, which is the only thing that makes a sum of
+    /// weights equal to zero impossible — the `NaN` in a rectangle that that type exists to avoid. So the
+    /// wire carries `f32` and the validation passes it through `crate::Weight::new`: **a single
+    /// implementation of the invariant**, the one that was already tested.
     pub weight: f32,
     pub node: StoredNode,
 }
 
-/// Una pestaña.
+/// A tab.
 ///
-/// **Un objeto con una sola clave en vez del nodo suelto**, para poder añadirle algo opcional mañana sin
-/// subir la versión. No lleva ni el foco ni el nombre: la ventana abre en la primera pestaña, y los
-/// nombres no se reutilizan.
+/// **An object with a single key instead of the bare node**, so that something optional can be added to
+/// it tomorrow without raising the version. It carries neither the focus nor the name: the window opens
+/// on the first tab, and names are not reused.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct StoredTab {
     pub root: StoredNode,
 }
 
-/// El documento entero, tal como se lee del disco: **sin validar todavía**.
+/// The whole document, just as it is read from disk: **not validated yet**.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct StoredDocument {
-    /// La versión del formato. La clave es corta porque aparece en todos los ficheros y no dice nada
-    /// más de lo que dice.
+    /// The format version. The key is short because it appears in every file and says nothing more than
+    /// what it says.
     pub v: u64,
     pub tabs: Vec<StoredTab>,
 }
 
-/// Un documento que **ya pasó por la validación**, y por eso se puede materializar.
+/// A document that **has already gone through validation**, and can therefore be materialized.
 ///
-/// **El campo es privado y no hay más forma de construirlo que [`validate`]**, así que «este árbol está
-/// bien formado» es propiedad del tipo y no de que alguien se acuerde de comprobarlo antes. Es la misma
-/// doctrina que [`crate::Weight`] un nivel más arriba, y por el mismo motivo: este proyecto tiene contado
-/// con números lo que pasa con las invariantes que dependen de la memoria de quien escribe.
+/// **The field is private and there is no way to construct it other than [`validate`]**, so «this tree
+/// is well formed» is a property of the type and not of someone remembering to check it beforehand. It
+/// is the same doctrine as [`crate::Weight`] one level up, and for the same reason: this project has
+/// counted with numbers what happens to invariants that depend on the memory of whoever writes.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Validated {
     document: StoredDocument,
-    /// **La cuenta que hizo la validación, guardada en vez de recalculada.** Recorrer el árbol otra vez
-    /// para volver a contar lo mismo tiene dos costes y solo uno es el trabajo: el otro es que **el
-    /// número que se comprobó contra el techo y el que lee quien llama podrían dejar de ser el mismo**.
+    /// **The count that validation made, stored instead of recomputed.** Walking the tree again to
+    /// recount the same thing has two costs and only one is the work: the other is that **the number
+    /// that was checked against the ceiling and the one the caller reads could stop being the same**.
     leaves: usize,
 }
 
 impl Validated {
-    /// Las pestañas del documento, en orden.
+    /// The tabs of the document, in order.
     pub fn tabs(&self) -> &[StoredTab] {
         &self.document.tabs
     }
 
-    /// Cuántas consolas va a haber que abrir. Se sabe **antes** de abrir ninguna.
+    /// How many consoles will have to be opened. It is known **before** opening any.
     pub fn leaves(&self) -> usize {
         self.leaves
     }
 }
 
-/// Por qué un documento no sirve.
+/// Why a document is no good.
 ///
-/// **La tolerancia es por documento y no por campo, al contrario que en el contrato del panel.** Aquel
-/// lo escribe un agente a mano y perder el panel entero por un campo que nadie mira sería lo peor
-/// posible; este lo escribe siempre la aplicación, así que si no se entiende, **abrir de fábrica es una
-/// respuesta correcta y barata** y adivinar media disposición es peor que no restaurarla.
+/// **Tolerance is per document and not per field, unlike in the panel contract.** That one is written
+/// by an agent by hand and losing the whole panel over a field no one looks at would be the worst
+/// possible thing; this one is always written by the application, so if it is not understood, **opening
+/// factory-fresh is a correct and cheap answer** and guessing half a layout is worse than not restoring
+/// it.
 ///
-/// Cada variante lleva **qué** y **dónde**, porque el único canal para decirlo es una línea.
+/// Each variant carries **what** and **where**, because the only channel to say it is one line.
 ///
-/// **Un solo tipo para los fallos del fichero y los de la forma, y eso lo decide el molde.** El contrato
-/// del panel reúne los suyos igual —«no está», «no es un fichero», «no se entiende»— en un enum
-/// (`crates/panel-contract/src/panel.rs:121`), y por la razón que aquí vale doble: quien lee no puede
-/// hacer nada distinto con un fichero ausente y con uno corrupto salvo **abrir de fábrica**, así que
-/// partirlos en dos tipos daría dos caminos que acaban en la misma línea de aviso. El techo de bytes ya
-/// estaba en este enum antes de que hubiera fichero, que es la misma frontera.
+/// **A single type for the file failures and the shape failures, and that is decided by the mold.** The
+/// panel contract gathers its own the same way —«it's not there», «it's not a file», «it's not
+/// understood»— in an enum (`crates/panel-contract/src/panel.rs:121`), and for the reason that here
+/// counts double: whoever reads cannot do anything different with an absent file and with a corrupt one
+/// other than **open factory-fresh**, so splitting them into two types would give two paths that end in
+/// the same warning line. The byte ceiling was already in this enum before there was a file, which is
+/// the same boundary.
 #[derive(Clone, PartialEq, Debug)]
 pub enum LayoutProblem {
-    /// No hay fichero todavía. **Es el primer arranque de todos, así que no se avisa de él**: la
-    /// distinción con «hay algo y no se entiende» es justo lo que hace que el caso normal sea callado.
+    /// There is no file yet. **It is everyone's very first startup, so it is not warned about**: the
+    /// distinction with «there is something and it is not understood» is exactly what makes the normal
+    /// case quiet.
     Absent,
-    /// Hay algo con ese nombre y no es un fichero.
+    /// There is something with that name and it is not a file.
     ///
-    /// **Se comprueba antes de abrir**, con los datos que hacía falta pedir de todas formas —son la
-    /// pista de reserva de [`read`]—, así que la rama es gratis. Y lo que evita importa: una tubería con
-    /// nombre ahí **bloquearía la apertura**, y esto ocurre antes de que la ventana exista, así que no
-    /// abriría nunca.
+    /// **It is checked before opening**, with the data that had to be requested anyway —it is [`read`]'s
+    /// reserve hint—, so the branch is free. And what it prevents matters: a named pipe there **would
+    /// block the opening**, and this happens before the window exists, so it would never open.
     ///
-    /// **Cubre el descuido, no una carrera**, igual que en el molde: pedir los datos y abrir son dos
-    /// resoluciones distintas de la misma ruta, y entre las dos cabe una sustitución. Quien pueda hacerla
-    /// es el propio usuario en su propio directorio de configuración.
+    /// **It covers the oversight, not a race**, just as in the mold: requesting the data and opening are
+    /// two distinct resolutions of the same path, and between the two a substitution fits. Whoever can
+    /// make it is the user themselves in their own configuration directory.
     NotAFile,
-    /// No se pudo abrir o leer.
+    /// It could not be opened or read.
     ///
-    /// **Lleva el motivo como texto y no como el error del sistema**, para que este enum siga siendo
-    /// comparable consigo mismo: el error de entrada y salida no se puede clonar ni comparar, y las
-    /// pruebas de la tabla de fallos afirman sobre el problema entero.
+    /// **It carries the reason as text and not as the system error**, so that this enum stays comparable
+    /// with itself: the input/output error cannot be cloned or compared, and the failure-table tests
+    /// assert over the whole problem.
     Unreadable(String),
-    /// Se leyó, y los bytes no son texto.
+    /// It was read, and the bytes are not text.
     NotText,
-    /// No es JSON, o no encaja en la forma. Trae el motivo tal como lo da el intérprete, que ya nombra
-    /// la clave y la posición.
+    /// It is not JSON, or it does not fit the shape. It carries the reason just as the interpreter gives
+    /// it, which already names the key and the position.
     Unintelligible(String),
-    /// La versión no es la que este binario conoce. **Qué hacer con eso no se decide aquí**: una más
-    /// nueva no se puede sobrescribir y una más vieja habría que leerla con su lector, y las dos cosas
-    /// son del camino que toca el fichero.
+    /// The version is not the one this binary knows. **What to do with that is not decided here**: a
+    /// newer one cannot be overwritten and an older one would have to be read with its reader, and both
+    /// things belong to the path that touches the file.
     Version { found: u64 },
-    /// Un documento sin pestañas no describe ninguna ventana.
+    /// A document with no tabs describes no window.
     NoTabs,
-    /// Una rama con menos de dos hijos. **La invariante que sostiene la razón de ser del árbol**: si una
-    /// rama puede tener una sola hija, vuelve el anidamiento que hace que una frontera arrastre un
-    /// bloque de dos consolas, que es lo que más se le critica a `tmux`.
+    /// A branch with fewer than two children. **The invariant that upholds the tree's reason for
+    /// being**: if a branch can have a single child, back comes the nesting that makes a boundary drag a
+    /// block of two consoles, which is what `tmux` is most criticized for.
     SingleChildBranch { tab: usize },
-    /// Dos ramas del mismo sentido, una dentro de otra. La otra mitad de la misma invariante: partir
-    /// inserta como hermana justamente para no construir esto.
+    /// Two branches of the same direction, one inside the other. The other half of the same invariant:
+    /// splitting inserts as a sibling precisely so as not to build this.
     NestedBranches { tab: usize },
-    /// Un peso que el tipo del peso vivo rechaza —cero, negativo, o no un número— o que se sale del
-    /// rango que el reparto puede multiplicar.
+    /// A weight that the live weight type rejects —zero, negative, or not a number— or that falls
+    /// outside the range the tiling can multiply.
     ///
-    /// **No lleva el valor, y eso lo decidió una revisión.** Llevándolo, este tipo se comparaba mal
-    /// consigo mismo: un peso `NaN` guardado aquí hace que `PesoInvalido != PesoInvalido`, porque `NaN`
-    /// no es igual a nada, ni a sí mismo. El síntoma ya estaba en las pruebas —la de los pesos era **la
-    /// única** obligada a comprobar solo la variante mientras sus vecinas comparaban el problema
-    /// entero—, así que dejaba de atar **cuál** peso se rechazó. El valor va en el mensaje, que es donde
-    /// lo lee quien tiene que arreglarlo.
+    /// **It does not carry the value, and a review decided that.** Carrying it, this type compared badly
+    /// with itself: a `NaN` weight stored here makes `InvalidWeight != InvalidWeight`, because `NaN` is
+    /// not equal to anything, not even itself. The symptom was already in the tests —the weights one was
+    /// **the only** one forced to check just the variant while its neighbors compared the whole
+    /// problem—, so it stopped pinning down **which** weight was rejected. The value goes in the message,
+    /// which is where whoever has to fix it reads it.
     InvalidWeight { tab: usize },
-    /// Los pesos de una rama son cada uno un número **y su suma no lo es**.
+    /// The weights of a branch are each a number **and their sum is not**.
     ///
-    /// **No es «los pesos tienen que sumar algo concreto», que se descartó a propósito**: son
-    /// proporciones, y `{3, 1}` y `{0,5, 1,5}` describen el mismo reparto. Es que el reparto **divide
-    /// cada peso por la suma de su rama**, así que con una suma infinita a **todas** les toca cero — dos
-    /// pesos de 3·10³⁸ son cada uno finito y positivo, y sumados desbordan. La otra dirección **no hace
-    /// falta comprobarla**: dos números positivos no pueden sumar cero.
+    /// **It is not «the weights have to sum to something specific», which was rejected on purpose**: they
+    /// are proportions, and `{3, 1}` and `{0.5, 1.5}` describe the same tiling. It is that the
+    /// division **divides each weight by the sum of its branch**, so with an infinite sum **all** of them
+    /// get zero — two weights of 3·10³⁸ are each finite and positive, and summed they overflow. The other
+    /// direction **does not need checking**: two positive numbers cannot sum to zero.
     ///
-    /// **Y es la puerta que sostiene el formato entero desde que no hay rango propio de pesos.** La suma de
-    /// una rama es lo único que los gestos **no** hacen crecer —arrastrar la conserva, partir divide en dos
-    /// mitades que suman lo mismo, cerrar reparte el peso del grupo entre sus nietas—, así que exigirla
-    /// finita aquí es exigir exactamente la invariante que el árbol vivo mantiene. Ni una condición más ni
-    /// una menos: eso es lo que hace que la ida y vuelta no pueda perder una disposición.
+    /// **And it is the gate that upholds the whole format now that there is no dedicated weight range.**
+    /// The sum of a branch is the only thing the gestures do **not** grow —dragging preserves it,
+    /// splitting divides into two halves that sum to the same, closing shares the group's weight among
+    /// its grandchildren—, so requiring it finite here is requiring exactly the invariant the live tree
+    /// maintains. Not one condition more nor one less: that is what makes the round trip unable to lose a
+    /// layout.
     NonFiniteSum { tab: usize },
-    /// Más consolas de las que se aceptan abrir de golpe.
+    /// More consoles than are accepted to open at once.
     TooManyLeaves { count: usize },
-    /// Más bytes de los que se aceptan interpretar.
+    /// More bytes than are accepted for interpretation.
     TooLarge { bytes: u64 },
 }
 
 impl std::fmt::Display for LayoutProblem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Absent => write!(f, "no hay ninguna disposición guardada"),
-            Self::NotAFile => write!(f, "hay algo ahí que no es un fichero"),
-            Self::Unreadable(reason) => write!(f, "no se pudo leer ({reason})"),
-            Self::NotText => write!(f, "no es texto UTF-8"),
-            Self::Unintelligible(reason) => write!(f, "no se entiende: {reason}"),
+            Self::Absent => write!(f, "there is no saved layout"),
+            Self::NotAFile => write!(f, "there is something there that is not a file"),
+            Self::Unreadable(reason) => write!(f, "could not be read ({reason})"),
+            Self::NotText => write!(f, "it is not UTF-8 text"),
+            Self::Unintelligible(reason) => write!(f, "not understood: {reason}"),
             Self::Version { found } => {
                 write!(
                     f,
-                    "lo escribió la versión {found} del formato y esta conoce la {VERSION}"
+                    "it was written by version {found} of the format and this one knows {VERSION}"
                 )
             }
-            Self::NoTabs => write!(f, "no trae ninguna pestaña"),
+            Self::NoTabs => write!(f, "it carries no tab"),
             Self::SingleChildBranch { tab } => {
-                write!(f, "la pestaña {tab} tiene un corte con un solo hijo")
+                write!(f, "tab {tab} has a cut with a single child")
             }
             Self::NestedBranches { tab } => write!(
                 f,
-                "la pestaña {tab} anida dos cortes del mismo sentido, que es la forma que hace \
-                 que un divisor arrastre dos consolas"
+                "tab {tab} nests two cuts of the same direction, which is the shape that makes \
+                 a divider drag two consoles"
             ),
             Self::InvalidWeight { tab } => write!(
                 f,
-                "la pestaña {tab} trae un peso que no puede serlo: ni cero, ni negativo, ni infinito"
+                "tab {tab} carries a weight that cannot be one: neither zero, nor negative, nor infinite"
             ),
             Self::NonFiniteSum { tab } => write!(
                 f,
-                "la pestaña {tab} tiene un corte cuyos pesos son números y su suma no: repartir \
-                 dejaría a todas sus consolas con cero de ancho"
+                "tab {tab} has a cut whose weights are numbers and their sum is not: dividing \
+                 would leave all its consoles with zero width"
             ),
             Self::TooManyLeaves { count } => write!(
                 f,
-                "pide {count} consolas y no se abren más de {MAX_LEAVES} de golpe"
+                "it asks for {count} consoles and no more than {MAX_LEAVES} are opened at once"
             ),
             Self::TooLarge { bytes } => write!(
                 f,
-                "ocupa {bytes} bytes y no se interpretan más de {MAX_BYTES}"
+                "it takes up {bytes} bytes and no more than {MAX_BYTES} are interpreted"
             ),
         }
     }
 }
 
-/// Lo único que se le exige a un documento **antes** de exigirle su forma.
+/// The only thing required of a document **before** requiring its shape.
 ///
-/// **Existe porque mirar la versión después de encajar la forma es no tener versión.** La versión sube
-/// justo con lo que un lector viejo malinterpretaría —una clave renombrada, quitada, o con otro
-/// significado—, o sea **precisamente con lo que hace fallar al intérprete de la forma**. Leyéndola
-/// después, un fichero de la versión 2 con una clave nueva no se distingue de uno nuestro estropeado, y el
-/// camino que guarda lo sobrescribe: un binario viejo llevándose por delante la disposición del nuevo, que
-/// es el daño exacto que la versión existe para evitar.
+/// **It exists because looking at the version after fitting the shape is having no version.** The
+/// version goes up exactly with what an old reader would misinterpret —a renamed key, a removed one, or
+/// one with a different meaning—, that is, **precisely with what makes the shape interpreter fail**.
+/// Reading it afterwards, a version 2 file with a new key is indistinguishable from one of ours that is
+/// broken, and the saving path overwrites it: an old binary running over the new one's layout, which is
+/// the exact damage the version exists to avoid.
 #[derive(Deserialize)]
 struct StoredProbe {
     v: u64,
 }
 
-/// Lo que dice un documento, si dice algo que se pueda construir.
+/// What a document says, if it says something that can be constructed.
 pub fn interpret(text: &str) -> Result<Validated, LayoutProblem> {
-    // **El techo se aplica ANTES de interpretar, no después.** Interpretar reserva el árbol entero, así
-    // que comprobar el tamaño al final es no tener techo: el gasto ya ocurrió.
+    // **The ceiling is applied BEFORE interpreting, not after.** Interpreting allocates the whole tree,
+    // so checking the size at the end is having no ceiling: the cost already happened.
     if text.len() > MAX_BYTES {
         return Err(LayoutProblem::TooLarge {
             bytes: text.len() as u64,
         });
     }
 
-    // Dos pasadas del intérprete a propósito, y la primera es sobre un molde de un campo: cuesta lo que
-    // cuesta recorrer el texto una vez —una vez al arrancar— y es lo que hace que la versión mande sobre
-    // la forma en vez de al revés. Que `v` falte o no sea un número entra por aquí como «no se entiende»,
-    // que es lo que corresponde: un fichero sin versión no es de una versión que no conozcamos, es un
-    // fichero nuestro estropeado, y se sobrescribe.
+    // Two interpreter passes on purpose, and the first is over a one-field mold: it costs what walking
+    // the text once costs —once at startup— and it is what makes the version rule over the shape instead
+    // of the other way around. That `v` is missing or not a number comes through here as «not
+    // understood», which is what corresponds: a file with no version is not of a version we do not know,
+    // it is a file of ours that is broken, and it gets overwritten.
     let sonda: StoredProbe = serde_json::from_str(text)
         .map_err(|error| LayoutProblem::Unintelligible(error.to_string()))?;
     if sonda.v != VERSION {
@@ -339,33 +346,33 @@ pub fn interpret(text: &str) -> Result<Validated, LayoutProblem> {
     validate(document)
 }
 
-/// Lo que hay que escribir para volver a leer esto, o **nada** si no se pudo.
+/// What has to be written to read this back, or **nothing** if it could not be done.
 ///
-/// **Devuelve `Option` y no una cadena, y eso lo decidió una revisión.** La primera versión devolvía
-/// cadena vacía al fallar, y el camino que escribe el fichero **no habría podido distinguirla de un
-/// documento**: escribe un temporal y lo renombra encima del bueno, así que un fallo aquí habría
-/// **destruido la disposición guardada** y dejado cero bytes en su sitio. Abrir de fábrica es la
-/// respuesta a un fichero que no se entiende; **borrar el que sí se entendía no es respuesta a nada.**
-/// Con `None`, quien escribe se salta el renombrado y el fichero anterior sobrevive.
+/// **It returns `Option` and not a string, and a review decided that.** The first version returned an
+/// empty string on failure, and the path that writes the file **would not have been able to distinguish
+/// it from a document**: it writes a temporary and renames it over the good one, so a failure here would
+/// have **destroyed the saved layout** and left zero bytes in its place. Opening factory-fresh is the
+/// answer to a file that is not understood; **deleting the one that was understood is no answer to
+/// anything.** With `None`, whoever writes skips the rename and the previous file survives.
 pub fn serialize(document: &StoredDocument) -> Option<String> {
-    // Sin sangrar: nadie lo edita a mano —lo escribe siempre la aplicación— y una línea por consola
-    // hace el fichero varias veces más grande sin que nadie lo agradezca.
+    // Unindented: no one edits it by hand —it is always written by the application— and one line per
+    // console makes the file several times larger without anyone being grateful for it.
     match serde_json::to_string(document) {
         Ok(text) => Some(text),
         Err(error) => {
-            // Inalcanzable con los tipos de aquí —no hay claves que no sean texto ni números que no
-            // puedan serlo—, así que se dice y no se calla: un fallo silencioso en el camino que guarda
-            // es el que se descubre al reabrir y no encontrar nada.
-            eprintln!("no se pudo escribir la disposición ({error})");
+            // Unreachable with the types here —there are no keys that are not text nor numbers that
+            // cannot be ones—, so it is said and not kept quiet: a silent failure on the saving path is
+            // the one that is discovered when reopening and finding nothing.
+            eprintln!("could not write the layout ({error})");
             None
         }
     }
 }
 
-/// El único camino que produce un [`Validated`].
+/// The only path that produces a [`Validated`].
 ///
-/// **Se recorre el árbol entero antes de aceptar nada**, y en particular se cuentan las hojas **antes**
-/// de que se abra la primera: comprobar el techo después del `fork` es no tener techo.
+/// **The whole tree is walked before accepting anything**, and in particular the leaves are counted
+/// **before** the first one is opened: checking the ceiling after the `fork` is having no ceiling.
 pub fn validate(document: StoredDocument) -> Result<Validated, LayoutProblem> {
     if document.v != VERSION {
         return Err(LayoutProblem::Version { found: document.v });
@@ -374,9 +381,9 @@ pub fn validate(document: StoredDocument) -> Result<Validated, LayoutProblem> {
         return Err(LayoutProblem::NoTabs);
     }
 
-    // **Un solo recorrido, que valida y cuenta.** Dos —uno para revisar y otro para contar— visitan cada
-    // nodo dos veces en el camino del arranque, y además abren la puerta a que el número que se compara
-    // con el techo no sea el que luego se lee.
+    // **A single walk, that validates and counts.** Two —one to review and another to count— visit each
+    // node twice on the startup path, and moreover open the door to the number that is compared against
+    // the ceiling not being the one that is later read.
     let mut leaves = 0;
     for (which, tab) in document.tabs.iter().enumerate() {
         leaves += check(&tab.root, None, which)?;
@@ -389,10 +396,11 @@ pub fn validate(document: StoredDocument) -> Result<Validated, LayoutProblem> {
     Ok(Validated { document, leaves })
 }
 
-/// Las invariantes de forma, rama por rama.
+/// The shape invariants, branch by branch.
 ///
-/// `from_outside` es el sentido de la rama que contiene a ésta, o nada en la raíz: es lo único que hace
-/// falta para cazar el anidamiento, porque partir solo puede crearlo entre una rama y su madre directa.
+/// `from_outside` is the direction of the branch that contains this one, or nothing at the root: it is
+/// the only thing needed to catch the nesting, because splitting can only create it between a branch and
+/// its direct parent.
 fn check(
     node: &StoredNode,
     from_outside: Option<StoredOrientation>,
@@ -415,22 +423,23 @@ fn check(
 
     let mut leaves = 0;
     for child in children {
-        // **Una sola puerta por peso, la del tipo vivo, y ninguna propia.** Es la única forma de que no
-        // haya dos implementaciones de la misma invariante —la de allí ya está probada— y, sobre todo, de
-        // que **lo que el árbol puede tener se pueda volver a leer**: hubo un rango propio, `[1e-6, 1e6]`,
-        // y los dos extremos rechazaban estados a los que se llega **arrastrando**. Por abajo, porque el
-        // arrastre recorta la *fracción* y no el peso; por arriba, porque lo que conserva es la **suma del
-        // par**, así que un peso sube hasta el 99 % de lo que sumaban dos vecinos. Lo que el reparto
-        // necesita de verdad no es un peso acotado: es **una suma de rama finita**, y eso se comprueba
-        // abajo.
+        // **A single gate per weight, the live type's, and none of our own.** It is the only way for
+        // there not to be two implementations of the same invariant —the one over there is already
+        // tested— and, above all, for **what the tree can hold to be readable back**: there was a
+        // dedicated range, `[1e-6, 1e6]`, and both ends rejected states that are reached by **dragging**.
+        // At the bottom, because dragging trims the *fraction* and not the weight; at the top, because
+        // what it preserves is the **sum of the pair**, so a weight rises up to 99 % of what two
+        // neighbors summed. What the tiling really needs is not a bounded weight: it is **a finite
+        // branch sum**, and that is checked below.
         if crate::Weight::new(child.weight).is_none() {
             return Err(LayoutProblem::InvalidWeight { tab });
         }
         leaves += check(&child.node, Some(*orientation), tab)?;
     }
 
-    // **Y la suma, que es una invariante de la rama y no de cada peso.** Con el rango de arriba esto ya no
-    // puede desbordar con dos hijos, pero se deja: el rango puede ampliarse mañana, y cuesta una suma.
+    // **And the sum, which is an invariant of the branch and not of each weight.** With the range above
+    // this can no longer overflow with two children, but it is kept: the range may be widened tomorrow,
+    // and it costs one sum.
     let sum: f32 = children.iter().map(|child| child.weight).sum();
     if !sum.is_finite() {
         return Err(LayoutProblem::NonFiniteSum { tab });
@@ -439,24 +448,24 @@ fn check(
     Ok(leaves)
 }
 
-// ── El fichero: dónde vive, cómo se lee y cómo se sustituye ─────────────────────────────────────
+// ── The file: where it lives, how it is read and how it is replaced ──────────────────────────────
 
-/// El directorio propio dentro del de configuración del usuario.
+/// The dedicated directory inside the user's configuration one.
 pub const DIRECTORY: &str = "agent-terminal";
 
-/// El nombre del fichero, **fijo**.
+/// The file name, **fixed**.
 ///
-/// Que no dependa de nada es lo que hace que la disposición sea una, global, como decidió el ticket. Y
-/// es también de dónde sale el límite aceptado: dos instancias abiertas escriben el mismo destino y **la
-/// última que guarde se lo lleva**.
+/// That it depends on nothing is what makes the layout one, global, as the ticket decided. And it is
+/// also where the accepted limit comes from: two open instances write the same destination and **the
+/// last one to save takes it**.
 pub const FILE: &str = "layout.json";
 
-/// Dónde vive la disposición, leyendo el entorno.
+/// Where the layout lives, reading the environment.
 ///
-/// **La envoltura de una línea, y el trabajo en [`path_from`]**, que es el patrón que el arranque ya sigue
-/// cinco veces: `std::env::set_var` tiene contrato sobre todo el proceso y esta suite corre en paralelo
-/// lanzando procesos, así que una prueba que quisiera fijar estas variables sería comportamiento
-/// indefinido.
+/// **The one-line wrapper, and the work in [`path_from`]**, which is the pattern that startup already
+/// follows five times: `std::env::set_var` has a contract over the whole process and this suite runs in
+/// parallel launching processes, so a test that wanted to set these variables would be undefined
+/// behavior.
 pub fn path() -> Option<PathBuf> {
     path_from(
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),
@@ -464,45 +473,48 @@ pub fn path() -> Option<PathBuf> {
     )
 }
 
-/// La decisión, con los dos valores dados: **el fichero, o nada si no hay sitio de fiar**.
+/// The decision, given the two values: **the file, or nothing if there is no trustworthy place**.
 ///
-/// **Nada significa que no se persiste: ni se lee ni se escribe, y no se cae a un directorio temporal.**
-/// La caída existe en la caja hermana (`crates/panel-contract/src/lib.rs:186`) y allí es correcta porque
-/// aquel directorio **debe** vaciarse al cerrar la sesión; aquí sería restaurar desde un fichero que el
-/// sistema borra, o sea una máquina de fallos silenciosos.
+/// **Nothing means it is not persisted: it is neither read nor written, and it does not fall back to a
+/// temporary directory.** The fallback exists in the sibling crate
+/// (`crates/panel-contract/src/lib.rs:186`) and there it is correct because that directory **must** be
+/// emptied when the session closes; here it would be restoring from a file the system deletes, that is,
+/// a machine of silent failures.
 ///
-/// **Y una variable definida y vacía no es una ruta.** Es la trampa ya pagada de la caja hermana: dejarla
-/// pasar da una ruta relativa y el directorio se crea dentro del directorio de trabajo **sin fallar**, que
-/// con un nombre de fichero fijo acaba dentro de cualquier repositorio que alguien clone. Aquí lo dice la
-/// misma comprobación que rechaza lo relativo, porque la cadena vacía tampoco es absoluta.
+/// **And a variable that is set and empty is not a path.** It is the trap already paid for in the
+/// sibling crate: letting it through gives a relative path and the directory is created inside the
+/// working directory **without failing**, which with a fixed file name ends up inside any repository
+/// someone clones. Here it is caught by the same check that rejects the relative case, because the empty
+/// string is not absolute either.
 pub fn path_from(config: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
     Some(directory_from(config, home)?.join(FILE))
 }
 
-/// El directorio propio dentro del de configuración, con los dos valores dados.
+/// The dedicated directory inside the configuration one, given the two values.
 ///
-/// **Sale aparte porque este proyecto guarda ahí más de un fichero.** La disposición la escribe la
-/// aplicación; los ajustes los escribe quien usa el terminal. Comparten sitio y la decisión de qué sitio
-/// es, que es justo lo que esta función encierra; no comparten nada más.
+/// **It comes out separately because this project saves more than one file there.** The layout is
+/// written by the application; the settings are written by whoever uses the terminal. They share the
+/// place and the decision of what place it is, which is exactly what this function encloses; they share
+/// nothing else.
 pub fn directory_from(config: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
-    // El orden es el del estándar del escritorio: la variable propia manda, y donde no hay se usa
-    // `.config` de la casa. Que una de las dos no sirva **no descarta la otra**: lo que descarta es que
-    // no sirva ninguna.
+    // The order is the desktop standard's: the dedicated variable rules, and where there is none the
+    // home's `.config` is used. That one of the two is no good **does not rule out the other**: what
+    // rules out is that neither is any good.
     let base = absolute(config).or_else(|| absolute(home).map(|home| home.join(".config")))?;
     Some(base.join(DIRECTORY))
 }
 
-/// La ruta que trae una variable, si es de fiar.
+/// The path a variable carries, if it is trustworthy.
 fn absolute(variable: Option<&OsStr>) -> Option<PathBuf> {
     let path = PathBuf::from(variable?);
     path.is_absolute().then_some(path)
 }
 
-/// Lee la disposición guardada en esa ruta.
+/// Reads the layout saved at that path.
 ///
-/// **El orden es el del molde y no es casual** (`crates/panel-contract/src/panel.rs:199`): pedir los
-/// datos del fichero, comprobar que es un fichero, abrir, leer acotado, aplicar el techo **sobre bytes**
-/// y solo entonces mirar si es texto.
+/// **The order is the mold's and it is no accident** (`crates/panel-contract/src/panel.rs:199`):
+/// request the file's data, check that it is a file, open, read capped, apply the ceiling **on bytes**
+/// and only then look at whether it is text.
 pub fn read(path: &Path) -> Result<Validated, LayoutProblem> {
     let data = match std::fs::metadata(path) {
         Ok(data) => data,
@@ -520,17 +532,18 @@ pub fn read(path: &Path) -> Result<Validated, LayoutProblem> {
     let bytes = read_capped(file, data.len())
         .map_err(|error| LayoutProblem::Unreadable(error.to_string()))?;
 
-    // **El techo se aplica aquí y no solo dentro de [`interpret`], y esa aparente duplicación es el
-    // arreglo de un fallo con nombre en el molde.** La lectura corta un byte por encima del techo, y ese
-    // corte **parte un carácter de varios bytes**: sin esta comprobación, un fichero enorme con un acento
-    // en el sitio justo saldría como «no es texto» en vez de «se pasa del techo», y el camino del techo
-    // casi nunca se alcanzaría. El número es el mismo del formato; lo que se decide dos veces es *cuándo*.
+    // **The ceiling is applied here and not only inside [`interpret`], and that apparent duplication is
+    // the fix of a named bug in the mold.** The read cuts one byte above the ceiling, and that cut
+    // **splits a multi-byte character**: without this check, a huge file with an accent in just the
+    // right spot would come out as «not text» instead of «over the ceiling», and the ceiling path would
+    // almost never be reached. The number is the same as the format's; what is decided twice is *when*.
     //
-    // **Lo que DECIDE es lo leído, y el número que se dice es el mayor de los dos.** Decidir con el dato
-    // del disco sería fiarse de una cifra que ya puede ser vieja —el fichero se sustituye por renombrado, y
-    // entre pedir los datos y leer puede haber cambiado— y además trunca en objetivos de 32 bits; lo leído
-    // está acotado por definición y no puede ni mentir ni desbordar. Para el mensaje, en cambio, lo leído
-    // se queda corto por construcción: diría «ocupa 65537» de un fichero de un mega.
+    // **What DECIDES is what was read, and the number that is said is the larger of the two.** Deciding
+    // with the disk's datum would be trusting a figure that may already be stale —the file is replaced by
+    // rename, and between requesting the data and reading it may have changed— and moreover it truncates
+    // on 32-bit targets; what was read is bounded by definition and can neither lie nor overflow. For the
+    // message, in contrast, what was read falls short by construction: it would say «takes up 65537» of a
+    // one-megabyte file.
     if bytes.len() > MAX_BYTES {
         return Err(LayoutProblem::TooLarge {
             bytes: data.len().max(bytes.len() as u64),
@@ -541,11 +554,11 @@ pub fn read(path: &Path) -> Result<Validated, LayoutProblem> {
     interpret(&text)
 }
 
-/// Lee como mucho un byte más que el techo.
+/// Reads at most one byte more than the ceiling.
 ///
-/// El byte de más es lo que distingue «ocupa justo el techo» de «se pasa». Y `expected` es **pista de
-/// reserva y no comprobación**: nadie decide nada con ese número, solo evita que la lectura crezca
-/// duplicando desde treinta y dos bytes. El techo lo sigue poniendo el corte.
+/// The extra byte is what distinguishes «takes up exactly the ceiling» from «goes over». And `expected`
+/// is a **reserve hint and not a check**: no one decides anything with that number, it just keeps the
+/// read from growing by doubling from thirty-two bytes. The ceiling is still set by the cut.
 pub(crate) fn read_capped(file: std::fs::File, expected: u64) -> std::io::Result<Vec<u8>> {
     let ceiling = MAX_BYTES as u64;
     let mut bytes = Vec::with_capacity(expected.min(ceiling) as usize + 1);
@@ -553,54 +566,55 @@ pub(crate) fn read_capped(file: std::fs::File, expected: u64) -> std::io::Result
     Ok(bytes)
 }
 
-/// Si un problema al cargar merece una línea.
+/// Whether a problem on loading deserves a line.
 ///
-/// **La única excepción es el caso normal**: que no haya fichero es el primer arranque de todos, y avisar
-/// de eso pondría una línea de error en la primera vez de cada usuario. Está separado de quien la imprime
-/// **porque la decisión es lo único que se puede afirmar**: escribir a la salida de error no se observa
-/// desde dentro del proceso, así que una prueba sobre el aviso solo puede mirar esto.
+/// **The only exception is the normal case**: that there is no file is everyone's very first startup,
+/// and warning about that would put an error line on every user's first time. It is separate from
+/// whoever prints it **because the decision is the only thing that can be asserted**: writing to the
+/// error output cannot be observed from inside the process, so a test about the warning can only look at
+/// this.
 fn warrants_warning(problem: &LayoutProblem) -> bool {
     !matches!(problem, LayoutProblem::Absent)
 }
 
-/// Por qué no se guardó la disposición.
+/// Why the layout was not saved.
 ///
-/// **Cada variante es un motivo distinto, y eso tiene una consecuencia visible**: el aviso se suprime
-/// **por motivo** ([`Persistence::save`]), así que dos fallos que el usuario no puede distinguir no deben
-/// ser dos variantes, y dos que pide arreglar de forma distinta —un directorio que no se puede crear y un
-/// renombrado que no se puede hacer— no deben ser una.
+/// **Each variant is a distinct reason, and that has a visible consequence**: the warning is suppressed
+/// **per reason** ([`Persistence::save`]), so two failures the user cannot distinguish must not be two
+/// variants, and two that call for a different fix —a directory that cannot be created and a rename that
+/// cannot be done— must not be one.
 #[derive(Debug)]
 pub(crate) enum SaveFailure {
-    /// No hay sitio de fiar donde ponerlo: ver [`path_from`]. **Lo usa también el camino que carga**, con su
-    /// propio verbo, porque la causa es la misma y el usuario no tiene dos cosas que arreglar.
+    /// There is no trustworthy place to put it: see [`path_from`]. **The loading path also uses it**,
+    /// with its own verb, because the cause is the same and the user does not have two things to fix.
     NoPlace,
-    /// En disco hay una disposición de una versión **más nueva**, y no se pisa.
+    /// On disk there is a layout of a **newer** version, and it is not overwritten.
     Vetoed { found: u64 },
-    /// El documento no se pudo describir. **Inalcanzable con estos tipos**, y aun así una variante y no
-    /// un `unwrap`: lo que hay en disco es lo que el usuario colocó a mano.
+    /// The document could not be described. **Unreachable with these types**, and even so a variant and
+    /// not an `unwrap`: what is on disk is what the user placed by hand.
     NotSerializable,
-    /// No se pudo crear el directorio.
+    /// The directory could not be created.
     Directory(std::io::Error),
-    /// No se pudo crear el temporal **en exclusiva**. Que ya exista entra por aquí, y es lo que impide
-    /// escribir a través de lo que otro haya plantado con ese nombre.
+    /// The temporary could not be created **exclusively**. That it already exists comes through here,
+    /// and it is what prevents writing through whatever someone else has planted with that name.
     TempFile(std::io::Error),
-    /// No se pudo escribir el temporal.
+    /// The temporary could not be written.
     Writing(std::io::Error),
-    /// No se pudo renombrar el temporal encima del destino. **El destino se queda como estaba.**
+    /// The temporary could not be renamed over the destination. **The destination stays as it was.**
     Renaming(std::io::Error),
-    /// Esta sesión **no debe pisar** lo que hay en disco, y trae por qué.
+    /// This session **must not overwrite** what is on disk, and it carries why.
     ///
-    /// **Existe porque no todas las razones para no escribir son del fichero.** Dos, hoy: que la aplicación
-    /// **no pudiera abrir** la disposición guardada —entonces lo que hay en pantalla es una ventana de
-    /// fábrica, y escribirla se llevaría por delante la del usuario **para siempre**— y que la sesión la
-    /// haya pedido una tanda de medida, que abre lo que la tanda diga y no lo que el usuario dejó.
+    /// **It exists because not all reasons for not writing belong to the file.** Two, today: that the
+    /// application **could not open** the saved layout —then what is on screen is a factory-fresh window,
+    /// and writing it would run over the user's **forever**— and that a measurement batch requested it,
+    /// which opens what the batch says and not what the user left.
     WontOverwrite(&'static str),
-    /// Lo que hay en pantalla **no cabe en el formato**: hoy, más consolas que las que se aceptan abrir
-    /// de golpe.
+    /// What is on screen **does not fit the format**: today, more consoles than are accepted to open at
+    /// once.
     ///
-    /// **Variante propia y no compartida con otro motivo**, que es lo que el contrato de este enum exige:
-    /// el aviso se suprime **por motivo**, así que dos cosas que se arreglan de forma distinta —cerrar
-    /// consolas, y que el disco vuelva— no pueden gastar la misma ranura.
+    /// **A variant of its own and not shared with another reason**, which is what this enum's contract
+    /// demands: the warning is suppressed **per reason**, so two things fixed in a different way —closing
+    /// consoles, and the disk coming back— cannot spend the same slot.
     DoesntFit,
 }
 
@@ -609,83 +623,84 @@ impl std::fmt::Display for SaveFailure {
         match self {
             Self::NoPlace => write!(
                 f,
-                "no hay ningún sitio donde ponerla: ni $XDG_CONFIG_HOME ni $HOME dan una ruta absoluta"
+                "there is nowhere to put it: neither $XDG_CONFIG_HOME nor $HOME give an absolute path"
             ),
             Self::Vetoed { found } => write!(
                 f,
-                "en disco hay una disposición de la versión {found} del formato y esta conoce la \
-                 {VERSION}, así que no se sobrescribe"
+                "on disk there is a layout of version {found} of the format and this one knows \
+                 {VERSION}, so it is not overwritten"
             ),
-            Self::NotSerializable => write!(f, "no se pudo describir la disposición"),
-            Self::Directory(error) => write!(f, "no se pudo crear el directorio ({error})"),
-            Self::TempFile(error) => write!(f, "no se pudo crear el fichero temporal ({error})"),
+            Self::NotSerializable => write!(f, "the layout could not be described"),
+            Self::Directory(error) => write!(f, "the directory could not be created ({error})"),
+            Self::TempFile(error) => write!(f, "the temporary file could not be created ({error})"),
             Self::Writing(error) => {
-                write!(f, "no se pudo escribir el fichero temporal ({error})")
+                write!(f, "the temporary file could not be written ({error})")
             }
             Self::Renaming(error) => {
-                write!(f, "no se pudo poner el fichero en su sitio ({error})")
+                write!(f, "the file could not be put in its place ({error})")
             }
-            Self::WontOverwrite(reason) => write!(f, "no se pisa lo que hay guardado: {reason}"),
-            Self::DoesntFit => write!(f, "la disposición de ahora no cabe en el formato"),
+            Self::WontOverwrite(reason) => write!(f, "what is saved is not overwritten: {reason}"),
+            Self::DoesntFit => write!(f, "the current layout does not fit the format"),
         }
     }
 }
 
-/// La política de guardado **de una sesión**: dónde va, si se puede escribir, y de qué ya se avisó.
+/// The saving policy **of a session**: where it goes, whether it can be written, and what has already
+/// been warned about.
 ///
-/// **No es un fichero y por eso no se llama así.** No tiene descriptor, no abre nada y sobrevive a todas
-/// las lecturas y escrituras; lo que guarda es lo que dura **hasta que la aplicación se cierre**: el veto
-/// de una versión más nueva, los motivos de los que ya se ha avisado, y la cuenta de intentos. Con esos
-/// datos en los parámetros de una función libre, quien llama tendría que llevarlos —y eso es exactamente
-/// la clase de invariante que este módulo se niega a dejar en la memoria de quien escribe.
+/// **It is not a file and that is why it is not named one.** It has no descriptor, opens nothing and
+/// survives every read and write; what it holds is what lasts **until the application closes**: the veto
+/// of a newer version, the reasons already warned about, and the count of attempts. With that data in
+/// the parameters of a free function, the caller would have to carry it —and that is exactly the kind of
+/// invariant this module refuses to leave in the memory of whoever writes.
 ///
-/// **Y de ahí la regla para quien la use: la que carga al arrancar y la que guarda después tienen que ser
-/// LA MISMA.** Crear una segunda a mitad de sesión **pierde el veto**, y perder el veto significa
-/// sobrescribir la disposición de una versión más nueva, que es el daño exacto que la versión del formato
-/// existe para evitar.
+/// **And hence the rule for whoever uses it: the one that loads at startup and the one that saves
+/// afterwards have to be THE SAME.** Creating a second one mid-session **loses the veto**, and losing
+/// the veto means overwriting the layout of a newer version, which is the exact damage the format
+/// version exists to avoid.
 pub struct Persistence {
     path: Option<PathBuf>,
-    /// La versión hallada en disco que impide sobrescribirlo.
+    /// The version found on disk that prevents overwriting it.
     ///
-    /// **Se pone al leer y no se quita.** Un binario viejo abierto sobre la disposición de uno nuevo no
-    /// puede restaurarla —no sabe su forma— y tampoco debe machacarla: tener dos versiones instaladas en
-    /// la misma máquina no es raro, y el daño sería silencioso y en el sitio que más se nota.
+    /// **It is set on reading and never removed.** An old binary opened over a new one's layout cannot
+    /// restore it —it does not know its shape— nor should it clobber it: having two versions installed
+    /// on the same machine is not rare, and the damage would be silent and in the most noticeable place.
     veto: Option<u64>,
-    /// Por qué esta sesión no debe escribir, si hay razón. Ver [`SaveFailure::WontOverwrite`].
+    /// Why this session must not write, if there is a reason. See [`SaveFailure::WontOverwrite`].
     ///
-    /// **Aparte del veto de versión a propósito**: aquel trae un número y viene de lo que había en disco;
-    /// éste viene de lo que le pasó a esta sesión. Juntarlos en un campo obligaría a inventar un número
-    /// para el segundo caso.
+    /// **Separate from the version veto on purpose**: that one carries a number and comes from what was
+    /// on disk; this one comes from what happened to this session. Joining them into one field would
+    /// force inventing a number for the second case.
     no_overwrite: Option<&'static str>,
-    /// De qué motivos ya se avisó. Un disco lleno imprimiría una línea por cada plazo vencido, o sea
-    /// dos por segundo mientras la ventana se use.
+    /// Which reasons have already been warned about. A full disk would print one line per missed
+    /// deadline, that is, two per second while the window is in use.
     warned: HashSet<std::mem::Discriminant<SaveFailure>>,
-    /// Cuántas veces se ha intentado guardar. **Va en el nombre del temporal, y eso lo pidió una
-    /// revisión.**
+    /// How many times a save has been attempted. **It goes in the temporary's name, and a review asked
+    /// for that.**
     ///
-    /// Con el nombre dependiendo solo del número de proceso, un temporal que sobreviviera a una muerte
-    /// violenta —entre crearlo y renombrarlo— dejaría **sin guardar a toda sesión futura** a la que el
-    /// sistema le diera ese mismo número, porque crear en exclusiva fallaría siempre y adoptar lo que
-    /// hay está prohibido con razón. Contando los intentos, un temporal plantado estorba **un intento**
-    /// y no una sesión.
+    /// With the name depending only on the process number, a temporary that survived a violent death
+    /// —between creating it and renaming it— would leave **every future session unable to save** that
+    /// the system gave that same number, because exclusive creation would always fail and adopting what
+    /// is there is rightly forbidden. Counting the attempts, a planted temporary hinders **one attempt**
+    /// and not a session.
     attempts: usize,
-    /// Lo que tardó [`Self::load`] la última vez que se la llamó, si se la llamó.
+    /// How long [`Self::load`] took the last time it was called, if it was called.
     ///
-    /// **Vive aquí y no lo devuelve `load`, y es lo que evita tocar seis firmas para publicar un
-    /// número.** Quien lo publica es el informe de medida, que ya recibe esta misma `Persistence` por
-    /// otro motivo —el veto de versión se queda con la ventana—, así que el dato viaja con quien ya
-    /// viajaba. Devolverlo en el `Option` habría obligado a cambiar el tipo con el que abre la ventana y
-    /// las seis pruebas que lo construyen a mano.
+    /// **It lives here and is not returned by `load`, and it is what avoids touching six signatures to
+    /// publish one number.** Whoever publishes it is the measurement report, which already receives this
+    /// same `Persistence` for another reason —the version veto stays with the window—, so the datum
+    /// travels with whoever already traveled. Returning it in the `Option` would have forced changing the
+    /// type the window opens with and the six tests that build it by hand.
     load_time: Option<Duration>,
 }
 
 impl Persistence {
-    /// El fichero que dice el entorno.
+    /// The file the environment says.
     pub fn from_env() -> Self {
         Self::at(path())
     }
 
-    /// El de una ruta dada, o el de ninguna. **Nada aquí toca el disco todavía.**
+    /// The one at a given path, or the one at none. **Nothing here touches the disk yet.**
     pub fn at(path: Option<PathBuf>) -> Self {
         Self {
             path,
@@ -697,22 +712,22 @@ impl Persistence {
         }
     }
 
-    /// Deja dicho que esta sesión **no puede pisar** lo que hay guardado, y por qué.
+    /// Leaves it stated that this session **cannot overwrite** what is saved, and why.
     ///
-    /// **Es lo que impide la pérdida de datos que una revisión destapó.** Si la aplicación leyó bien el
-    /// fichero y **no pudo abrirlo** —un descriptor agotado, un pseudoterminal que no se concede—, lo que
-    /// queda en pantalla es una ventana de fábrica; sin esto, el primer cambio del usuario la escribiría
-    /// encima y su disposición de veinte consolas desaparecería **para siempre**, cuando antes de guardar
-    /// automáticamente el fichero sobrevivía y el arranque siguiente la recuperaba.
+    /// **It is what prevents the data loss a review uncovered.** If the application read the file well
+    /// and **could not open it** —an exhausted descriptor, a pseudoterminal that is not granted—, what is
+    /// left on screen is a factory-fresh window; without this, the user's first change would write over
+    /// it and their twenty-console layout would disappear **forever**, whereas before saving
+    /// automatically the file survived and the next startup recovered it.
     pub fn forbid_overwrite(&mut self, reason: &'static str) {
         self.no_overwrite = Some(reason);
     }
 
-    /// La disposición guardada, si hay alguna que se entienda.
+    /// The saved layout, if there is one that is understood.
     ///
-    /// **Todo lo que falla devuelve nada y deja arrancar**, que es la tolerancia por documento de este
-    /// formato: adivinar media disposición es peor que no restaurarla. Se avisa de todo salvo de que no
-    /// haya fichero.
+    /// **Everything that fails returns nothing and lets startup proceed**, which is this format's
+    /// per-document tolerance: guessing half a layout is worse than not restoring it. Everything is
+    /// warned about except that there is no file.
     pub fn load(&mut self) -> Option<Validated> {
         let start = std::time::Instant::now();
         let loaded = self.loading();
@@ -720,25 +735,26 @@ impl Persistence {
         loaded
     }
 
-    /// Lo que tardó la última carga, para que el informe de medida lo declare. **Nada si nadie la
-    /// llamó.**
+    /// How long the last load took, for the measurement report to declare. **Nothing if no one called
+    /// it.**
     ///
-    /// **Y esa distinción es la que impide publicar un número inventado**, que era el hueco que dejó la
-    /// primera versión: devolviendo un `Duration` a secas, una ventana construida con una persistencia
-    /// que nunca tocó el disco —lo que hacen las pruebas, y lo que podría hacer un camino nuevo—
-    /// publicaba `0ns en leer y validar`, indistinguible de una lectura instantánea de verdad. Con
-    /// `None` el informe dice «sin medir», que es lo que pasó.
+    /// **And that distinction is what prevents publishing an invented number**, which was the gap the
+    /// first version left: returning a bare `Duration`, a window built with a persistence that never
+    /// touched the disk —what the tests do, and what a new path could do— published `0ns reading and
+    /// validating`, indistinguishable from a genuinely instantaneous read. With `None` the report says
+    /// «not measured», which is what happened.
     pub fn load_time(&self) -> Option<Duration> {
         self.load_time
     }
 
     fn loading(&mut self) -> Option<Validated> {
         let Some(path) = self.path.clone() else {
-            // **Con su propio verbo, y sin tocar la lista de motivos ya avisados, y las dos cosas las
-            // pidió una revisión.** Decir «no se guardó» antes de haber intentado guardar nada es un
-            // mensaje que no corresponde a su camino; y gastar aquí el motivo dejaría **mudo** al primer
-            // fallo de guardado de verdad, que es el que el usuario necesita ver.
-            eprintln!("no se restauró la disposición: {}", SaveFailure::NoPlace);
+            // **With its own verb, and without touching the list of reasons already warned about, and a
+            // review asked for both things.** Saying «it was not saved» before having attempted to save
+            // anything is a message that does not correspond to its path; and spending the reason here
+            // would leave **mute** the first genuine save failure, which is the one the user needs to
+            // see.
+            eprintln!("the layout was not restored: {}", SaveFailure::NoPlace);
             return None;
         };
 
@@ -746,35 +762,36 @@ impl Persistence {
             Ok(validated) => Some(validated),
             Err(problem) if !warrants_warning(&problem) => None,
             Err(problem) => {
-                // **Una versión que no es la nuestra no es un fichero roto, y la regla depende de por qué
-                // lado no lo es.** Más nueva: la escribió una versión que sabe algo que ésta no, así que
-                // se veta la escritura para toda la sesión. Más vieja **y conocida**: se leería con el
-                // lector de esa versión y se reescribiría en la nueva al primer guardado —hoy solo existe
-                // la 1, así que no hay caso, pero retirar el soporte de una versión vieja es una decisión
-                // aparte y se escribe—. Y lo que no es ninguna de las dos, como un cero, es un fichero
-                // nuestro estropeado: de fábrica, y se sobrescribe.
+                // **A version that is not ours is not a broken file, and the rule depends on which side
+                // it is not by.** Newer: it was written by a version that knows something this one does
+                // not, so writing is vetoed for the whole session. Older **and known**: it would be read
+                // with that version's reader and rewritten in the new one on the first save —today only
+                // 1 exists, so there is no case, but withdrawing support for an old version is a separate
+                // decision and it is written down—. And what is neither of the two, like a zero, is a
+                // file of ours that is broken: factory-fresh, and it is overwritten.
                 if let LayoutProblem::Version { found } = problem
                     && found > VERSION
                 {
                     self.veto = Some(found);
                 }
-                eprintln!("no se restauró la disposición: {problem}");
+                eprintln!("the layout was not restored: {problem}");
                 None
             }
         }
     }
 
-    /// Deja en disco esa disposición, y dice si lo consiguió.
+    /// Leaves that layout on disk, and says whether it succeeded.
     ///
-    /// **Recibe lo ya validado y no un documento cualquiera, y eso lo pidió una revisión.** Sin eso, el
-    /// camino que escribe aceptaba exactamente lo que el camino que lee rechazaría: se podría dejar en
-    /// disco un fichero que al reabrir se descarta, y el usuario perdería su disposición **sin que nada lo
-    /// dijera** —el fallo aparecería un arranque más tarde y sin causa visible—. Pasando por el mismo tipo
-    /// que la lectura exige, lo que se escribe se puede volver a leer **por construcción**.
+    /// **It receives the already-validated one and not just any document, and a review asked for that.**
+    /// Without it, the writing path accepted exactly what the reading path would reject: a file could be
+    /// left on disk that on reopening is discarded, and the user would lose their layout **without
+    /// anything saying so** —the failure would appear one startup later and with no visible cause—.
+    /// Passing through the same type the read demands, what is written can be read back **by
+    /// construction**.
     ///
-    /// **Cada fallo se avisa una vez por motivo, y el reintento no se suprime**: quien llama vuelve a
-    /// intentarlo con el cambio siguiente, así que un disco que se vacía se recupera solo sin haber
-    /// llenado la salida de error mientras estaba lleno.
+    /// **Each failure is warned about once per reason, and the retry is not suppressed**: the caller
+    /// tries again with the next change, so a disk that empties recovers on its own without having filled
+    /// the error output while it was full.
     pub fn save(&mut self, layout: &Validated) -> bool {
         self.attempts = self.attempts.wrapping_add(1);
         let attempt = if let Some(found) = self.veto {
@@ -796,74 +813,75 @@ impl Persistence {
         }
     }
 
-    /// Avisa de que lo que hay en pantalla **no se puede guardar**, una vez por sesión.
+    /// Warns that what is on screen **cannot be saved**, once per session.
     ///
-    /// **Existe porque el formato tiene un techo que la ventana no tiene.** No se aceptan más de
-    /// [`MAX_LEAVES`] consolas en un documento —el techo acota el `fork` del arranque, así que no puede
-    /// quitarse—, y en cambio nadie impide abrir más pestañas de las que caben ahí. Sin este aviso, quien
-    /// llegue a ese número perdería su disposición **sin ninguna señal**: se dejaría de guardar y lo notaría
-    /// al reabrir, un día después, sin causa visible.
+    /// **It exists because the format has a ceiling that the window does not.** No more than
+    /// [`MAX_LEAVES`] consoles are accepted in a document —the ceiling bounds the startup `fork`, so it
+    /// cannot be removed—, and yet nothing prevents opening more tabs than fit there. Without this
+    /// warning, whoever reaches that number would lose their layout **with no signal at all**: saving
+    /// would stop and they would notice it on reopening, a day later, with no visible cause.
     pub fn warn_cannot_save(&mut self, problem: &LayoutProblem) {
         if self.should_warn(&SaveFailure::DoesntFit) {
-            eprintln!("la disposición de ahora no se puede guardar: {problem}");
+            eprintln!("the current layout cannot be saved: {problem}");
         }
     }
 
-    /// Dice la línea, si de ese motivo no se ha dicho ya.
+    /// Says the line, if that reason has not been said already.
     fn warn(&mut self, error: SaveFailure) {
         if self.should_warn(&error) {
-            eprintln!("no se guardó la disposición: {error}");
+            eprintln!("the layout was not saved: {error}");
         }
     }
 
-    /// La decisión, aparte de decir la línea: **es lo único que tiene contenido que afirmar**, porque
-    /// escribir a la salida de error no se puede observar desde dentro del proceso.
+    /// The decision, apart from saying the line: **it is the only thing with content to assert**,
+    /// because writing to the error output cannot be observed from inside the process.
     fn should_warn(&mut self, error: &SaveFailure) -> bool {
         self.warned.insert(std::mem::discriminant(error))
     }
 }
 
-/// Escribe el documento en esa ruta **sustituyéndola de golpe**.
+/// Writes the document at that path **replacing it in one go**.
 fn save_to(path: &Path, attempt: usize, document: &StoredDocument) -> Result<(), SaveFailure> {
     save_described(path, attempt, serialize(document))
 }
 
-/// La escritura, recibiendo ya el texto **o la falta de él**.
+/// The write, already receiving the text **or the lack of it**.
 ///
-/// **Que reciba `Option` es lo que hace comprobable la promesa central de este camino**: sin texto no se
-/// renombra nada, así que lo que ya estaba guardado sobrevive. Con la llamada dentro, la única forma de
-/// llegar a ese caso sería un fallo que estos tipos no pueden producir, y la promesa se quedaría escrita
-/// en un comentario.
+/// **That it receives `Option` is what makes this path's central promise checkable**: with no text
+/// nothing is renamed, so what was already saved survives. With the call inside, the only way to reach
+/// that case would be a failure these types cannot produce, and the promise would be left written in a
+/// comment.
 ///
-/// **Sin `fsync`, y es una decisión con su límite.** Con el sistema en marcha, «nunca se ve medio fichero»
-/// lo da el renombrado solo. Tras un corte de corriente **sí** puede quedar un destino truncado, según el
-/// sistema de ficheros: eso sale al reabrir como un fichero que no se entiende, o sea abrir de fábrica, que
-/// es lo que ya está aceptado para el último plazo perdido. Lo que el renombrado garantiza es que **nadie
-/// lo ve a medias mientras la máquina funciona**; no es un diario.
+/// **No `fsync`, and it is a decision with its limit.** With the system running, «half a file is never
+/// seen» is given by the rename alone. After a power cut a truncated destination **can** be left,
+/// depending on the file system: that comes out on reopening as a file that is not understood, that is,
+/// opening factory-fresh, which is what is already accepted for the last missed deadline. What the
+/// rename guarantees is that **no one sees it half done while the machine works**; it is not a journal.
 fn save_described(
     path: &Path,
     attempt: usize,
     described: Option<String>,
 ) -> Result<(), SaveFailure> {
     let text = described.ok_or(SaveFailure::NotSerializable)?;
-    // Sin directorio, o sin nombre de fichero, no hay sitio donde poner nada. Solo se llega con una ruta
-    // que no salió de `path_from` —la raíz, por ejemplo—, y el motivo es el mismo que el de no tener
-    // directorio de configuración: no hay dónde. De ahí que la variante sea una y su línea las cubra.
+    // With no directory, or no file name, there is nowhere to put anything. It is only reached with a
+    // path that did not come out of `path_from` —the root, for example—, and the reason is the same as
+    // not having a configuration directory: there is nowhere. Hence the variant is one and its line
+    // covers them both.
     let directory = path.parent().ok_or(SaveFailure::NoPlace)?;
     create_directory(directory).map_err(SaveFailure::Directory)?;
 
     let temp_path = temp_path_for(path, attempt).ok_or(SaveFailure::NoPlace)?;
     let mut file = create_exclusive(&temp_path).map_err(SaveFailure::TempFile)?;
 
-    // A partir de aquí hay un fichero de más en el directorio, y **cada salida tiene que llevárselo**.
-    // Dejarlo no rompe el guardado siguiente —el nombre lleva la cuenta de intentos—, pero se acumularía
-    // uno por fallo en el directorio de configuración del usuario, que es basura sin techo.
+    // From here on there is an extra file in the directory, and **every exit has to take it away**.
+    // Leaving it does not break the next save —the name carries the attempt count—, but one would
+    // accumulate per failure in the user's configuration directory, which is unbounded garbage.
     if let Err(error) = file.write_all(text.as_bytes()) {
         remove(&temp_path);
         return Err(SaveFailure::Writing(error));
     }
-    // Cerrado antes de renombrar. No hay nada que vaciar —esto escribe directo, sin memoria intermedia—,
-    // así que cerrar es solo devolver el descriptor.
+    // Closed before renaming. There is nothing to flush —this writes directly, without intermediate
+    // buffering—, so closing is just returning the descriptor.
     drop(file);
 
     if let Err(error) = std::fs::rename(&temp_path, path) {
@@ -873,33 +891,35 @@ fn save_described(
     Ok(())
 }
 
-/// El temporal al lado del destino, con el número de este proceso y el del intento.
+/// The temporary next to the destination, with this process's number and the attempt's.
 ///
-/// **En el mismo directorio y no en el temporal del sistema**, porque ése sería otro sistema de ficheros
-/// con toda probabilidad, el renombrado fallaría por cruzarlos, y el respaldo —copiar y truncar— ya no
-/// sería atómico. La tentación es real y está en el repo: la caja hermana cae ahí a propósito.
+/// **In the same directory and not in the system's temporary one**, because that would in all
+/// likelihood be another file system, the rename would fail for crossing them, and the fallback —copy
+/// and truncate— would no longer be atomic. The temptation is real and it is in the repo: the sibling
+/// crate falls there on purpose.
 ///
-/// **El número de proceso porque nada impide dos instancias abiertas**: con un nombre fijo las dos
-/// escribirían el mismo temporal, se entrelazarían los bytes y se renombraría un documento corrupto encima
-/// del bueno. **Y el del intento porque el del proceso se recicla**: un temporal que sobreviva a una muerte
-/// violenta no lo limpia nadie, y con el nombre dependiendo solo del proceso dejaría sin guardar, para
-/// siempre, a toda sesión a la que el sistema le diera ese número.
+/// **The process number because nothing prevents two open instances**: with a fixed name both would
+/// write the same temporary, the bytes would interleave and a corrupt document would be renamed over the
+/// good one. **And the attempt's because the process's is recycled**: a temporary that survives a
+/// violent death is cleaned by no one, and with the name depending only on the process it would leave,
+/// forever, every session the system gave that number unable to save.
 fn temp_path_for(path: &Path, attempt: usize) -> Option<PathBuf> {
     let mut name = path.file_name()?.to_os_string();
     name.push(format!(".{}.{attempt}", std::process::id()));
     Some(path.with_file_name(name))
 }
 
-/// Crea el directorio si no está, **solo para el usuario**.
+/// Creates the directory if it is not there, **only for the user**.
 ///
-/// Sin el modo, el permiso lo decide la máscara de la sesión: medida en esta máquina en `0002`, un
-/// directorio saldría `0775` —legible y recorrible por todo el mundo— y este fichero cuenta cómo trabaja el
-/// usuario: qué tenía abierto y cómo lo tenía colocado.
+/// Without the mode, the permission is decided by the session's mask: measured on this machine at
+/// `0002`, a directory would come out `0775` —readable and traversable by everyone— and this file tells
+/// how the user works: what they had open and how they had it laid out.
 ///
-/// **Con tramos intermedios y sin protestar si ya existe**, y las dos cosas hacen falta: el directorio de
-/// configuración puede no existir en una cuenta recién hecha, y a partir del segundo guardado el nuestro
-/// ya está. El modo solo se aplica a lo que **esta** llamada cree; un directorio que ya estaba conserva
-/// sus permisos, y por eso lo único que protege al temporal es crearlo en exclusiva.
+/// **With intermediate segments and without complaining if it already exists**, and both things are
+/// needed: the configuration directory may not exist on a freshly made account, and from the second save
+/// on ours is already there. The mode is only applied to what **this** call creates; a directory that
+/// was already there keeps its permissions, and that is why the only thing protecting the temporary is
+/// creating it exclusively.
 fn create_directory(path: &Path) -> std::io::Result<()> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
@@ -911,10 +931,11 @@ fn create_directory(path: &Path) -> std::io::Result<()> {
     builder.create(path)
 }
 
-/// Crea el temporal **y falla si ya existe**.
+/// Creates the temporary **and fails if it already exists**.
 ///
-/// El nombre es predecible, así que sin esto un enlace plantado ahí se abriría y **se escribiría a
-/// través**: el destino está protegido por no abrirse nunca para escribir, y el temporal solo por esto.
+/// The name is predictable, so without this a link planted there would be opened and **written
+/// through**: the destination is protected by never being opened for writing, and the temporary only by
+/// this.
 fn create_exclusive(path: &Path) -> std::io::Result<std::fs::File> {
     let mut builder = std::fs::OpenOptions::new();
     builder.write(true).create_new(true);
@@ -926,10 +947,10 @@ fn create_exclusive(path: &Path) -> std::io::Result<std::fs::File> {
     builder.open(path)
 }
 
-/// Se lleva el temporal, y se calla si no puede.
+/// Takes the temporary away, and keeps quiet if it cannot.
 ///
-/// Lo que se está reportando es el fallo de antes; un segundo aviso por no haber podido limpiar diría dos
-/// cosas de las que solo una se puede arreglar.
+/// What is being reported is the earlier failure; a second warning for not having been able to clean up
+/// would say two things of which only one can be fixed.
 fn remove(temp_path: &Path) {
     let _ = std::fs::remove_file(temp_path);
 }
@@ -945,7 +966,7 @@ mod tests {
         })
     }
 
-    /// Una rama con esos pesos y una hoja por cada uno.
+    /// A branch with those weights and one leaf for each.
     fn branch(orientation: StoredOrientation, weights: &[f32]) -> StoredNode {
         StoredNode::Branch {
             orientation,
@@ -967,16 +988,16 @@ mod tests {
     }
 
     #[test]
-    fn hoja_y_rama_se_distinguen_por_una_etiqueta_explicita() {
-        // **Esto es el contrato, así que se afirma sobre el texto literal y no sobre el tipo.** Si un día
-        // alguien cambia la representación del enum, la ida y vuelta seguiría funcionando y **el fichero
-        // de todo el que ya use la aplicación dejaría de leerse**: es justo el fallo que la versión del
-        // formato existe para no tener que arreglar por sorpresa.
+    fn a_leaf_and_a_branch_are_told_apart_by_an_explicit_tag() {
+        // **This is the contract, so it is asserted over the literal text and not over the type.** If one
+        // day someone changes the enum's representation, the round trip would still work and **the file
+        // of everyone who already uses the application would stop being read**: it is exactly the failure
+        // the format version exists to avoid having to fix by surprise.
         let written = serialize(&document(vec![branch(
             StoredOrientation::Columns,
             &[3.0, 1.0],
         )]))
-        .expect("un documento de dos hojas se escribe");
+        .expect("a two-leaf document is written");
 
         assert_eq!(
             written,
@@ -985,7 +1006,7 @@ mod tests {
     }
 
     #[test]
-    fn lo_escrito_se_vuelve_a_leer_igual() {
+    fn what_is_written_is_read_back_the_same() {
         let start = document(vec![
             StoredNode::Branch {
                 orientation: StoredOrientation::Columns,
@@ -1018,18 +1039,18 @@ mod tests {
             leaf(36),
         ]);
 
-        let written = serialize(&start).expect("un documento válido se escribe");
-        let after = interpret(&written).expect("lo que se acaba de escribir se lee");
+        let written = serialize(&start).expect("a valid document is written");
+        let after = interpret(&written).expect("what was just written is read");
 
         assert_eq!(after.tabs(), start.tabs.as_slice());
     }
 
     #[test]
-    fn los_pesos_no_tienen_que_sumar_nada_concreto() {
-        // Los pesos son **proporciones**, y el reparto normaliza por la suma de su rama: `{3, 1}` y
-        // `{0,5, 1,5}` describen exactamente el mismo reparto. Exigir que sumaran uno o cien sería una
-        // guarda sin escenario **y rompería la ida y vuelta** de cualquier árbol construido arrastrando,
-        // que es de donde salen los pesos de verdad.
+    fn the_weights_do_not_have_to_sum_to_anything_specific() {
+        // The weights are **proportions**, and the tiling normalizes by the sum of its branch: `{3, 1}`
+        // and `{0.5, 1.5}` describe exactly the same tiling. Requiring them to sum to one or a hundred
+        // would be a guard with no scenario **and would break the round trip** of any tree built by
+        // dragging, which is where the real weights come from.
         let middle = document(vec![branch(StoredOrientation::Rows, &[0.5, 1.5])]);
         let whole = document(vec![branch(StoredOrientation::Rows, &[3.0, 9.0])]);
 
@@ -1038,10 +1059,10 @@ mod tests {
     }
 
     #[test]
-    fn una_rama_con_un_solo_hijo_se_rechaza() {
-        // **La invariante que sostiene la razón de ser del árbol.** Si una rama puede tener una sola hija,
-        // vuelve el anidamiento que hace que una frontera arrastre un bloque de dos consolas — lo que más
-        // se le critica a `tmux` y lo que D14 existe para evitar.
+    fn a_branch_with_a_single_child_is_rejected() {
+        // **The invariant that upholds the tree's reason for being.** If a branch can have a single
+        // child, back comes the nesting that makes a boundary drag a block of two consoles — what `tmux`
+        // is most criticized for and what D14 exists to avoid.
         let one = document(vec![branch(StoredOrientation::Columns, &[1.0])]);
 
         assert_eq!(
@@ -1051,7 +1072,7 @@ mod tests {
     }
 
     #[test]
-    fn dos_ramas_del_mismo_sentido_anidadas_se_rechazan() {
+    fn two_nested_branches_of_the_same_direction_are_rejected() {
         let nested = document(vec![StoredNode::Branch {
             orientation: StoredOrientation::Columns,
             children: vec![
@@ -1073,10 +1094,10 @@ mod tests {
     }
 
     #[test]
-    fn dos_ramas_de_sentidos_distintos_anidadas_se_aceptan() {
-        // **El hermano de la prueba anterior, y hace falta.** Sin él, «rechaza el anidamiento» y «rechaza
-        // cualquier rama dentro de otra» pasan las mismas pruebas, y la segunda haría imposible la
-        // disposición en cuadro que F2.2 entrega.
+    fn two_nested_branches_of_different_directions_are_accepted() {
+        // **The sibling of the previous test, and it is needed.** Without it, «reject the nesting» and
+        // «reject any branch inside another» pass the same tests, and the second would make impossible
+        // the grid layout that F2.2 delivers.
         let grid = document(vec![StoredNode::Branch {
             orientation: StoredOrientation::Columns,
             children: vec![
@@ -1095,30 +1116,27 @@ mod tests {
     }
 
     #[test]
-    fn un_peso_que_el_tipo_vivo_rechaza_se_rechaza_aqui() {
-        // Cero y negativo llegan por JSON; `NaN` e infinito no tienen literal, así que la única forma de
-        // que entren es un documento armado a mano — y aun así el constructor los para.
+    fn a_weight_the_live_type_rejects_is_rejected_here() {
+        // Zero and negative arrive via JSON; `NaN` and infinity have no literal, so the only way for them
+        // to get in is a document built by hand — and even then the constructor stops them.
         for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
             let document = document(vec![branch(StoredOrientation::Columns, &[1.0, bad])]);
 
             assert!(
                 matches!(validate(document), Err(LayoutProblem::InvalidWeight { .. })),
-                "un peso de {bad} tenía que caer"
+                "a weight of {bad} had to fall"
             );
         }
     }
 
     #[test]
-    fn el_techo_acepta_las_hojas_justas_y_rechaza_una_mas() {
-        // **Las dos mitades, y la de abajo es la que importa.** Un techo probado solo por arriba no
-        // distingue «rechaza más de 128» de «rechaza más de 1»: con la prueba de rechazo sola, poner el
-        // techo en cualquier número más pequeño seguiría dando verde.
+    fn the_ceiling_accepts_exactly_the_leaves_and_rejects_one_more() {
+        // **The two halves, and the bottom one is the one that matters.** A ceiling tested only from
+        // above does not distinguish «reject more than 128» from «reject more than 1»: with the rejection
+        // test alone, setting the ceiling at any smaller number would still be green.
         let weights: Vec<f32> = vec![1.0; MAX_LEAVES];
         let justas = document(vec![branch(StoredOrientation::Columns, &weights)]);
-        assert!(
-            validate(justas).is_ok(),
-            "{MAX_LEAVES} hojas tienen que caber"
-        );
+        assert!(validate(justas).is_ok(), "{MAX_LEAVES} leaves have to fit");
 
         let weights: Vec<f32> = vec![1.0; MAX_LEAVES + 1];
         let one_more = document(vec![branch(StoredOrientation::Columns, &weights)]);
@@ -1131,9 +1149,10 @@ mod tests {
     }
 
     #[test]
-    fn el_techo_cuenta_las_hojas_de_todo_el_documento_y_no_de_una_pestaña() {
-        // Si contara por pestaña, dos pestañas de 128 abrirían 256 consolas y el techo no habría servido
-        // de nada: lo que se acota es cuántos procesos se bifurcan **al abrir**, y eso es de la ventana.
+    fn the_ceiling_counts_the_leaves_of_the_whole_document_and_not_of_one_tab() {
+        // If it counted per tab, two tabs of 128 would open 256 consoles and the ceiling would have been
+        // of no use: what is bounded is how many processes are forked **on opening**, and that belongs to
+        // the window.
         let half: Vec<f32> = vec![1.0; MAX_LEAVES / 2 + 1];
         let dos = document(vec![
             branch(StoredOrientation::Columns, &half),
@@ -1147,7 +1166,7 @@ mod tests {
     }
 
     #[test]
-    fn una_version_que_no_es_la_conocida_se_rechaza_diciendo_cual_es() {
+    fn a_version_that_is_not_the_known_one_is_rejected_saying_which_it_is() {
         let of_the_future = StoredDocument {
             v: VERSION + 1,
             tabs: vec![StoredTab { root: leaf(36) }],
@@ -1160,7 +1179,7 @@ mod tests {
     }
 
     #[test]
-    fn un_documento_sin_pestañas_se_rechaza() {
+    fn a_document_with_no_tabs_is_rejected() {
         let empty = StoredDocument {
             v: VERSION,
             tabs: Vec::new(),
@@ -1170,20 +1189,21 @@ mod tests {
     }
 
     #[test]
-    fn lo_que_no_es_json_se_rechaza_y_se_dice_por_que() {
-        // **Se afirma que el motivo llega, no solo que falla.** El único canal para contarlo es una línea,
-        // así que un `LayoutProblem` sin texto dejaría al usuario con «no se pudo» y nada más.
-        let Err(LayoutProblem::Unintelligible(reason)) = interpret("{esto no es json") else {
-            panic!("un documento roto tiene que caer por no entenderse");
+    fn what_is_not_json_is_rejected_and_the_reason_is_said() {
+        // **It asserts that the reason arrives, not only that it fails.** The only channel to tell it is
+        // one line, so a `LayoutProblem` with no text would leave the user with «could not» and nothing
+        // more.
+        let Err(LayoutProblem::Unintelligible(reason)) = interpret("{this is not json") else {
+            panic!("a broken document has to fall for not being understood");
         };
 
-        assert!(!reason.is_empty(), "el motivo tiene que decir algo");
+        assert!(!reason.is_empty(), "the reason has to say something");
     }
 
     #[test]
-    fn un_nodo_sin_etiqueta_no_se_lee() {
-        // La forma que se descartó: hoja o rama deducidas de qué clave está presente. Si esto se leyera,
-        // el fichero tendría dos formas válidas y una de ellas no sería la del contrato.
+    fn a_node_with_no_tag_is_not_read() {
+        // The shape that was rejected: leaf or branch deduced from which key is present. If this were
+        // read, the file would have two valid shapes and one of them would not be the contract's.
         let unlabeled = r#"{"v":2,"tabs":[{"root":{"panel_width":36,"folded":false}}]}"#;
 
         assert!(matches!(
@@ -1219,42 +1239,44 @@ mod ceiling_tests {
     }
 
     #[test]
-    fn dos_pesos_cuyo_producto_seria_cero_se_aceptan_porque_el_cero_lo_impide_quien_reescala() {
-        // **Esta prueba afirmaba lo contrario, y estaba mal.** El agujero es real —al cerrar una división
-        // las nietas suben con el peso escalado, `w · suyo / suma`, y ese producto **subdesborda**:
-        // comprobado ejecutándolo, `1e-40 · 1e-40 / 2e-40` da **cero**— pero cerrarlo aquí, rechazando el
-        // documento, era cerrarlo en el sitio equivocado: **a estos números se llega arrastrando**, así que
-        // lo que este rechazo tiraba era la disposición de quien había usado la aplicación. La respuesta
-        // vive ahora donde el producto ocurre, en `crate::Weight::scaled`, y por eso aquí se aceptan.
+    fn two_weights_whose_product_would_be_zero_are_accepted_because_the_rescaler_prevents_the_zero()
+    {
+        // **This test asserted the opposite, and it was wrong.** The hole is real —when a pane is closed
+        // the grandchildren rise with the scaled weight, `w · theirs / sum`, and that product
+        // **underflows**: checked by running it, `1e-40 · 1e-40 / 2e-40` gives **zero**— but closing it
+        // here, rejecting the document, was closing it in the wrong place: **these numbers are reached by
+        // dragging**, so what this rejection threw away was the layout of whoever had used the
+        // application. The answer now lives where the product happens, in `crate::Weight::scaled`, and
+        // that is why they are accepted here.
         let tiny = 1.0e-40_f32;
         assert!(
             crate::Weight::new(tiny).is_some(),
-            "cada peso por separado tiene que ser válido, o esta prueba no prueba nada"
+            "each weight on its own has to be valid, or this test proves nothing"
         );
         assert_eq!(
             tiny * tiny / (tiny + tiny),
             0.0,
-            "y su escalado tiene que dar cero, o tampoco"
+            "and its scaling has to give zero, or it does not either"
         );
 
         assert!(validate(with_weights(&[tiny, tiny])).is_ok());
     }
 
     #[test]
-    fn dos_pesos_finitos_cuya_suma_no_es_un_numero_se_rechazan() {
+    fn two_finite_weights_whose_sum_is_not_a_number_are_rejected() {
         let at_limit = 3.0e38_f32;
         assert!(
             crate::Weight::new(at_limit).is_some(),
-            "cada peso por separado tiene que ser válido"
+            "each weight on its own has to be valid"
         );
         assert!(
             !(at_limit + at_limit).is_finite(),
-            "y su suma tiene que desbordar"
+            "and their sum has to overflow"
         );
 
-        // **Y cae por la suma, no por el peso.** Desde que no hay rango propio, ésta es la puerta que
-        // sostiene el formato: se afirma la variante exacta porque confundirlas sería no saber cuál de las
-        // dos comprobaciones está trabajando.
+        // **And it falls for the sum, not for the weight.** Now that there is no dedicated range, this is
+        // the gate that upholds the format: the exact variant is asserted because confusing them would be
+        // not knowing which of the two checks is working.
         assert_eq!(
             validate(with_weights(&[at_limit, at_limit])),
             Err(LayoutProblem::NonFiniteSum { tab: 0 })
@@ -1262,12 +1284,12 @@ mod ceiling_tests {
     }
 
     #[test]
-    fn se_acepta_cualquier_peso_que_el_arbol_vivo_pueda_tener() {
-        // **Y esto arregla un defecto en vez de evitarlo.** Hubo un rango propio, `[1e-6, 1e6]`, y los dos
-        // extremos rechazaban disposiciones a las que se llega **arrastrando**: por abajo el arrastre recorta
-        // la fracción y no el peso, y por arriba lo que conserva es la suma del par, así que un peso sube
-        // hasta el 99 % de lo que sumaban dos vecinos. Cualquiera de los dos rechazos perdía la colocación
-        // del usuario al reabrir, sin que nada se hubiera visto en pantalla.
+    fn any_weight_the_live_tree_can_have_is_accepted() {
+        // **And this fixes a defect instead of avoiding it.** There was a dedicated range, `[1e-6, 1e6]`,
+        // and both ends rejected layouts that are reached by **dragging**: at the bottom dragging trims
+        // the fraction and not the weight, and at the top what it preserves is the sum of the pair, so a
+        // weight rises up to 99 % of what two neighbors summed. Either of the two rejections lost the
+        // user's placement on reopening, without anything having been seen on screen.
         for weights in [
             [1.0, 1e-30],
             [1.0, f32::MIN_POSITIVE],
@@ -1277,28 +1299,29 @@ mod ceiling_tests {
         ] {
             assert!(
                 validate(with_weights(&weights)).is_ok(),
-                "{weights:?} tenía que valer"
+                "{weights:?} had to be valid"
             );
         }
     }
 
     #[test]
-    fn lo_que_no_es_un_peso_se_sigue_rechazando() {
-        // La puerta que queda, y es la del tipo vivo: ni cero, ni negativo, ni infinito.
+    fn what_is_not_a_weight_is_still_rejected() {
+        // The gate that remains, and it is the live type's: neither zero, nor negative, nor infinite.
         for bad in [0.0, -1.0, f32::INFINITY] {
             assert_eq!(
                 validate(with_weights(&[1.0, bad])),
                 Err(LayoutProblem::InvalidWeight { tab: 0 }),
-                "un peso de {bad:e} tenía que caer"
+                "a weight of {bad:e} had to fall"
             );
         }
     }
 
     #[test]
-    fn un_documento_mas_grande_que_el_techo_se_rechaza_sin_interpretarlo() {
-        // **Y se rechaza por el tamaño, no por la sintaxis.** El texto es basura: si el techo se
-        // comprobara después de interpretar, el motivo sería «no se entiende» y el gasto ya habría
-        // ocurrido. Que el motivo sea el tamaño **es** la prueba de que el orden es el correcto.
+    fn a_document_larger_than_the_ceiling_is_rejected_without_interpreting_it() {
+        // **And it is rejected for the size, not for the syntax.** The text is garbage: if the ceiling
+        // were checked after interpreting, the reason would be «not understood» and the cost would
+        // already have happened. That the reason is the size **is** the proof that the order is the
+        // correct one.
         let huge = "x".repeat(MAX_BYTES + 1);
 
         assert_eq!(
@@ -1310,9 +1333,9 @@ mod ceiling_tests {
     }
 
     #[test]
-    fn un_documento_justo_del_tamaño_del_techo_se_interpreta() {
-        // La otra mitad: el techo no puede estar en cero disfrazado. Se rellena con espacios, que JSON
-        // ignora, hasta ocupar exactamente el techo.
+    fn a_document_exactly_the_size_of_the_ceiling_is_interpreted() {
+        // The other half: the ceiling cannot be a disguised zero. It is padded with spaces, which JSON
+        // ignores, until it takes up exactly the ceiling.
         let minimum = r#"{"v":2,"tabs":[{"root":{"leaf":{"panel_width":36,"folded":false}}}]}"#;
         let padding = " ".repeat(MAX_BYTES - minimum.len());
         let exactly = format!("{minimum}{padding}");
@@ -1321,38 +1344,39 @@ mod ceiling_tests {
         assert!(interpret(&exactly).is_ok());
     }
 
-    /// **Lo que la tanda de medida siembra tiene que seguir entendiéndose, y nadie lo afirmaba.**
+    /// **What the measurement batch seeds has to keep being understood, and no one asserted it.**
     ///
-    /// `scripts/measure-frame.sh` escribe este documento **desde `sh`**, con las etiquetas del formato
-    /// puestas a mano en un `printf`. Así que el día en que este enum renombre `leaf`, `branch`, `weight` o
-    /// `orientation`, el guion seguiría escribiendo el nombre viejo y **la aplicación abriría de fábrica**:
-    /// la tanda que dice medir el arranque restaurado mediría el de siempre. La corrida lo cazaría —el
-    /// informe no declararía consolas restauradas y el guion la invalida— pero eso son quince minutos de
-    /// medida tirados, y esta prueba lo caza en la suite.
+    /// `scripts/measure-frame.sh` writes this document **from `sh`**, with the format tags put in by
+    /// hand in a `printf`. So the day this enum renames `leaf`, `branch`, `weight` or `orientation`, the
+    /// script would keep writing the old name and **the application would open factory-fresh**: the batch
+    /// that claims to measure restored startup would measure the usual one. The run would catch it —the
+    /// report would not declare restored consoles and the script invalidates it— but that is fifteen
+    /// minutes of measurement thrown away, and this test catches it in the suite.
     #[test]
-    fn el_documento_que_siembra_la_tanda_de_medida_se_sigue_entendiendo() {
+    fn the_document_the_measurement_batch_seeds_keeps_being_understood() {
         let seeded = r#"{"v":2,"tabs":[{"root":{"branch":{"orientation":"columns","children":[{"weight":1.0,"node":{"leaf":{"panel_width":36,"folded":false}}},{"weight":1.0,"node":{"leaf":{"panel_width":36,"folded":false}}},{"weight":1.0,"node":{"leaf":{"panel_width":36,"folded":false}}},{"weight":1.0,"node":{"leaf":{"panel_width":36,"folded":false}}}]}}}]}"#;
 
         let validated =
-            interpret(seeded).expect("la tanda siembra un documento que ya no se entiende");
+            interpret(seeded).expect("the batch seeds a document that is no longer understood");
 
-        assert_eq!(validated.leaves(), 4, "las cuatro consolas de la tanda L");
+        assert_eq!(validated.leaves(), 4, "the four consoles of batch L");
 
-        // **Y dónde lo deja, que es la otra mitad y se escapaba.** El guion escribe en
-        // `<config>/agent-terminal/layout.json` con esos dos nombres puestos a mano; renombrar
-        // cualquiera de las dos constantes dejaría la suite en verde mientras **cada corrida de la tanda
-        // abriría de fábrica**, porque la aplicación buscaría su fichero en otro sitio y no encontraría
-        // nada.
+        // **And where it leaves it, which is the other half and was slipping away.** The script writes
+        // to `<config>/agent-terminal/layout.json` with those two names put in by hand; renaming either
+        // of the two constants would leave the suite green while **every run of the batch would open
+        // factory-fresh**, because the application would look for its file elsewhere and would find
+        // nothing.
         assert_eq!(
             DIRECTORY, "agent-terminal",
-            "el guion siembra en este directorio"
+            "the script seeds in this directory"
         );
-        assert_eq!(FILE, "layout.json", "y con este nombre de fichero");
+        assert_eq!(FILE, "layout.json", "and with this file name");
     }
 
     #[test]
-    fn la_cuenta_de_hojas_que_se_publica_es_la_que_se_comparo_con_el_techo() {
-        // Si `leaves()` recalculara en vez de leer lo guardado, podrían dejar de ser el mismo número.
+    fn the_leaf_count_that_is_published_is_the_one_compared_against_the_ceiling() {
+        // If `leaves()` recomputed instead of reading what was stored, they could stop being the same
+        // number.
         let two_and_three = StoredDocument {
             v: VERSION,
             tabs: vec![
@@ -1386,7 +1410,7 @@ mod ceiling_tests {
             ],
         };
 
-        let validated = validate(two_and_three).expect("el documento es válido");
+        let validated = validate(two_and_three).expect("the document is valid");
         assert_eq!(validated.leaves(), 3);
     }
 }
@@ -1395,33 +1419,32 @@ mod ceiling_tests {
 mod file_tests {
     use super::*;
 
-    /// El directorio de una prueba, que se lleva al acabar lo que la prueba escribió.
+    /// A test's directory, which is taken away when what the test wrote is done.
     ///
-    /// **Uno por prueba y con el número de proceso**, porque la suite corre en paralelo y el nombre del
-    /// fichero es fijo: dos pruebas que compartieran directorio se leerían la disposición la una a la
-    /// otra y fallarían solo a veces.
+    /// **One per test and with the process number**, because the suite runs in parallel and the file
+    /// name is fixed: two tests that shared a directory would read each other's layout and would fail
+    /// only sometimes.
     struct TestDir(PathBuf);
 
     impl TestDir {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "agent-terminal-prueba-{}-{name}",
-                std::process::id()
-            ));
+            let path = std::env::temp_dir()
+                .join(format!("agent-terminal-test-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
-            std::fs::create_dir_all(&path).expect("crear el directorio de la prueba");
+            std::fs::create_dir_all(&path).expect("create the test directory");
             Self(path)
         }
 
-        /// El fichero donde la aplicación lo pondría.
+        /// The file where the application would put it.
         ///
-        /// **Con el directorio de configuración sin crear, y no solo el propio de la aplicación**: en una
-        /// cuenta recién hecha tampoco existe, así que cada prueba que guarda ejercita la creación de los
-        /// dos tramos. Con el de arriba ya hecho, una creación que no admitiera tramos intermedios pasaría
-        /// estas pruebas y fallaría en la máquina de quien estrena la aplicación.
+        /// **With the configuration directory not created, and not just the application's own**: on a
+        /// freshly made account it does not exist either, so every test that saves exercises the creation
+        /// of both segments. With the upper one already made, a creation that did not admit intermediate
+        /// segments would pass these tests and would fail on the machine of whoever first runs the
+        /// application.
         fn file(&self) -> PathBuf {
             path_from(Some(self.0.join("config").as_os_str()), None)
-                .expect("la ruta de la prueba es absoluta")
+                .expect("the test path is absolute")
         }
     }
 
@@ -1431,13 +1454,13 @@ mod file_tests {
         }
     }
 
-    /// Un documento con dos consolas de anchos distintos, una plegada y con pesos desiguales.
+    /// A document with two consoles of different widths, one folded and with unequal weights.
     ///
-    /// **Nada de un documento mínimo**: con una sola consola de ancho de fábrica, una ida y vuelta que
-    /// perdiera los anchos, los pesos o la orientación seguiría pasando.
-    /// Lo mismo, ya validado: es lo que el camino que guarda exige.
+    /// **Nothing like a minimal document**: with a single console of factory width, a round trip that
+    /// lost the widths, the weights or the orientation would still pass.
+    /// The same, already validated: it is what the saving path demands.
     fn test_layout() -> Validated {
-        validate(test_document()).expect("el documento de prueba es válido")
+        validate(test_document()).expect("the test document is valid")
     }
 
     fn test_document() -> StoredDocument {
@@ -1467,167 +1490,167 @@ mod file_tests {
         }
     }
 
-    /// **Lo que se publica como tiempo de lectura tiene que salir de una lectura**, y nada lo afirmaba.
+    /// **What is published as read time has to come out of a read**, and nothing asserted it.
     ///
-    /// El informe de medida imprime este número. Sin prueba, cambiar el cronómetro por un cero dejaba la
-    /// suite entera en verde mientras el informe publicaba un tiempo que nadie tomó — el disfraz que
-    /// este proyecto nombra: elegir un cero con el que el defecto y el arreglo dan lo mismo.
+    /// The measurement report prints this number. Without a test, changing the stopwatch for a zero left
+    /// the whole suite green while the report published a time no one took — the disguise this project
+    /// names: choosing a zero with which the defect and the fix give the same thing.
     #[test]
-    fn el_tiempo_de_carga_solo_existe_cuando_hubo_carga() {
-        let home = TestDir::new("tiempo-de-carga");
+    fn the_load_time_only_exists_when_there_was_a_load() {
+        let home = TestDir::new("load-time");
         let file = home.file();
-        std::fs::create_dir_all(file.parent().expect("el fichero tiene directorio"))
-            .expect("crear el directorio de configuración");
+        std::fs::create_dir_all(file.parent().expect("the file has a directory"))
+            .expect("create the configuration directory");
         std::fs::write(
             &file,
             r#"{"v":2,"tabs":[{"root":{"leaf":{"panel_width":36,"folded":false}}}]}"#,
         )
-        .expect("sembrar la disposición");
+        .expect("seed the layout");
 
         let mut persistence = Persistence::at(Some(file));
         assert!(
             persistence.load_time().is_none(),
-            "dice haber medido una carga que todavía no ha ocurrido"
+            "it claims to have measured a load that has not happened yet"
         );
 
-        persistence.load().expect("el documento se entiende");
+        persistence.load().expect("the document is understood");
 
-        // **Mayor que cero, y no solo «hay número».** Afirmando `is_some()` a secas, cambiar el
-        // cronómetro por un cero deja la prueba en verde: `Some(0)` también es algo. Y un cero es
-        // exactamente lo que este proyecto tiene fichado como el número con el que el defecto y el
-        // arreglo dan el mismo resultado. Leer un fichero del disco no tarda cero.
+        // **Greater than zero, and not just «there is a number».** Asserting a bare `is_some()`, changing
+        // the stopwatch for a zero leaves the test green: `Some(0)` is also something. And a zero is
+        // exactly what this project has on file as the number with which the defect and the fix give the
+        // same result. Reading a file from disk does not take zero.
         let took = persistence
             .load_time()
-            .expect("leyó el fichero y no dejó dicho lo que tardó: el informe diría «sin medir»");
+            .expect("it read the file and did not state how long it took: the report would say «not measured»");
         assert!(
             took > Duration::ZERO,
-            "publica un cero como tiempo de lectura, que es un número que nadie tomó"
+            "it publishes a zero as read time, which is a number no one took"
         );
     }
 
     #[test]
-    fn la_ruta_sale_del_directorio_de_configuracion() {
+    fn the_path_comes_out_of_the_configuration_directory() {
         assert_eq!(
-            path_from(Some(OsStr::new("/casa/config")), Some(OsStr::new("/casa"))),
-            Some(PathBuf::from("/casa/config/agent-terminal/layout.json"))
+            path_from(Some(OsStr::new("/home/config")), Some(OsStr::new("/home"))),
+            Some(PathBuf::from("/home/config/agent-terminal/layout.json"))
         );
     }
 
     #[test]
-    fn sin_directorio_de_configuracion_se_cae_a_la_casa() {
+    fn with_no_configuration_directory_it_falls_back_to_home() {
         assert_eq!(
-            path_from(None, Some(OsStr::new("/casa"))),
-            Some(PathBuf::from("/casa/.config/agent-terminal/layout.json"))
+            path_from(None, Some(OsStr::new("/home"))),
+            Some(PathBuf::from("/home/.config/agent-terminal/layout.json"))
         );
     }
 
     #[test]
-    fn una_variable_vacia_o_relativa_no_es_una_ruta_y_no_descarta_la_otra() {
-        // La casa es distinta de las dos variables de arriba a propósito: si la vacía o la relativa se
-        // colaran, la ruta no sería ésta.
+    fn an_empty_or_relative_variable_is_not_a_path_and_does_not_rule_out_the_other() {
+        // Home is different from the two variables above on purpose: if the empty or the relative one
+        // slipped through, the path would not be this one.
         for variable in ["", "config", "./config", "~/config"] {
             assert_eq!(
-                path_from(Some(OsStr::new(variable)), Some(OsStr::new("/casa"))),
-                Some(PathBuf::from("/casa/.config/agent-terminal/layout.json")),
-                "con {variable:?} no se cayó a la casa"
+                path_from(Some(OsStr::new(variable)), Some(OsStr::new("/home"))),
+                Some(PathBuf::from("/home/.config/agent-terminal/layout.json")),
+                "with {variable:?} it did not fall back to home"
             );
         }
     }
 
     #[test]
-    fn sin_ninguna_ruta_absoluta_no_se_persiste() {
+    fn with_no_absolute_path_at_all_nothing_is_persisted() {
         assert_eq!(path_from(None, None), None);
         assert_eq!(path_from(Some(OsStr::new("")), Some(OsStr::new(""))), None);
         assert_eq!(
-            path_from(Some(OsStr::new("config")), Some(OsStr::new("casa"))),
+            path_from(Some(OsStr::new("config")), Some(OsStr::new("home"))),
             None
         );
     }
 
     #[test]
-    fn lo_guardado_se_vuelve_a_encontrar() {
-        let directory = TestDir::new("ida-y-vuelta");
+    fn what_is_saved_is_found_again() {
+        let directory = TestDir::new("round-trip");
         let path = directory.file();
 
         assert!(
             Persistence::at(Some(path.clone())).save(&test_layout()),
-            "no se guardó"
+            "it was not saved"
         );
 
-        let read_back = read(&path).expect("lo que se acaba de guardar se lee");
+        let read_back = read(&path).expect("what was just saved is read");
         assert_eq!(read_back.tabs(), test_document().tabs.as_slice());
     }
 
     #[cfg(unix)]
     #[test]
-    fn el_destino_se_sustituye_entero_y_nunca_se_escribe_encima() {
+    fn the_destination_is_replaced_whole_and_never_written_over() {
         use std::os::unix::fs::MetadataExt;
 
-        // **La promesa central del hito, y solo esto la ata.** Copiar el texto encima del destino dejaría
-        // las mismas tres pruebas de resultado final en verde —el fichero acaba con el contenido correcto
-        // y sin temporales al lado— y sin embargo habría un instante en que lo que hay en disco es medio
-        // documento. Lo que distingue sustituir de escribir encima es que **el destino es otro fichero**:
-        // con renombrado cambia de nodo, copiando no.
-        let directory = TestDir::new("sustitucion");
+        // **The milestone's central promise, and only this pins it down.** Copying the text over the
+        // destination would leave the same three final-result tests green —the file ends up with the
+        // correct content and no temporaries next to it— and yet there would be an instant in which what
+        // is on disk is half a document. What distinguishes replacing from writing over is that **the
+        // destination is another file**: with a rename it changes node, copying it does not.
+        let directory = TestDir::new("substitution");
         let path = directory.file();
         let mut persistence = Persistence::at(Some(path.clone()));
 
         assert!(persistence.save(&test_layout()));
-        let first = std::fs::metadata(&path).expect("existe").ino();
+        let first = std::fs::metadata(&path).expect("it exists").ino();
         assert!(persistence.save(&test_layout()));
-        let second = std::fs::metadata(&path).expect("existe").ino();
+        let second = std::fs::metadata(&path).expect("it exists").ino();
 
         assert_ne!(
             first, second,
-            "el destino se escribió encima en vez de sustituirse"
+            "the destination was written over instead of replaced"
         );
     }
 
     #[test]
-    fn el_guardado_no_deja_ningun_temporal_detras() {
-        let directory = TestDir::new("sin-restos");
+    fn saving_leaves_no_temporary_behind() {
+        let directory = TestDir::new("no-leftovers");
         let path = directory.file();
         let mut file = Persistence::at(Some(path.clone()));
 
-        // Dos veces, porque el segundo guardado es el que encuentra el directorio y el destino ya
-        // hechos: es el camino que se recorre de verdad, dos veces por segundo mientras se arrastra.
+        // Twice, because the second save is the one that finds the directory and the destination already
+        // made: it is the path that is really walked, twice per second while dragging.
         assert!(file.save(&test_layout()));
         assert!(file.save(&test_layout()));
 
-        let inside: Vec<_> = std::fs::read_dir(path.parent().expect("el directorio propio"))
-            .expect("leer el directorio")
-            .map(|entry| entry.expect("una entrada").file_name())
+        let inside: Vec<_> = std::fs::read_dir(path.parent().expect("the dedicated directory"))
+            .expect("read the directory")
+            .map(|entry| entry.expect("an entry").file_name())
             .collect();
         assert_eq!(inside, vec![std::ffi::OsString::from(FILE)]);
     }
 
     #[cfg(unix)]
     #[test]
-    fn el_directorio_y_el_fichero_nacen_solo_para_el_usuario() {
+    fn the_directory_and_the_file_are_born_only_for_the_user() {
         use std::os::unix::fs::PermissionsExt;
 
-        let directory = TestDir::new("permisos");
+        let directory = TestDir::new("permissions");
         let path = directory.file();
         assert!(Persistence::at(Some(path.clone())).save(&test_layout()));
 
         let modo = |path: &Path| {
             std::fs::metadata(path)
-                .expect("existe")
+                .expect("it exists")
                 .permissions()
                 .mode()
                 & 0o777
         };
         assert_eq!(
-            modo(path.parent().expect("el directorio propio")),
+            modo(path.parent().expect("the dedicated directory")),
             0o700,
-            "el directorio queda abierto a la máscara de la sesión"
+            "the directory is left open to the session's mask"
         );
-        assert_eq!(modo(&path), 0o600, "el fichero queda legible por otros");
+        assert_eq!(modo(&path), 0o600, "the file is left readable by others");
     }
 
     #[test]
-    fn un_fichero_ausente_no_restaura_nada_y_deja_arrancar() {
-        let directory = TestDir::new("ausente");
+    fn an_absent_file_restores_nothing_and_lets_startup_proceed() {
+        let directory = TestDir::new("absent");
         let path = directory.file();
 
         assert_eq!(read(&path), Err(LayoutProblem::Absent));
@@ -1635,24 +1658,25 @@ mod file_tests {
     }
 
     #[test]
-    fn lo_que_no_es_un_fichero_se_rechaza_antes_de_abrirlo() {
-        let directory = TestDir::new("no-es-fichero");
+    fn what_is_not_a_file_is_rejected_before_opening_it() {
+        let directory = TestDir::new("not-a-file");
         let path = directory.file();
-        std::fs::create_dir_all(&path).expect("plantar un directorio con el nombre del fichero");
+        std::fs::create_dir_all(&path).expect("plant a directory with the file's name");
 
         assert_eq!(read(&path), Err(LayoutProblem::NotAFile));
     }
 
     #[test]
-    fn un_fichero_que_se_pasa_del_techo_se_rechaza_por_su_tamaño_y_no_por_su_codificacion() {
-        let directory = TestDir::new("demasiado-grande");
+    fn a_file_that_goes_over_the_ceiling_is_rejected_for_its_size_and_not_for_its_encoding() {
+        let directory = TestDir::new("too-large");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        // **Acentos, y no letras sueltas, y ahí está el defecto que esto ata.** La lectura corta un byte
-        // por encima del techo; con caracteres de dos bytes ese corte parte uno por la mitad, así que sin
-        // la comprobación del tamaño esto saldría como «no es texto» y el techo no se alcanzaría nunca.
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        // **Accents, and not single letters, and there is the defect this pins down.** The read cuts one
+        // byte above the ceiling; with two-byte characters that cut splits one in half, so without the
+        // size check this would come out as «not text» and the ceiling would never be reached.
         let huge = "á".repeat(MAX_BYTES);
-        std::fs::write(&path, &huge).expect("escribir el fichero gordo");
+        std::fs::write(&path, &huge).expect("write the fat file");
 
         assert_eq!(
             read(&path),
@@ -1663,23 +1687,24 @@ mod file_tests {
     }
 
     #[test]
-    fn justo_en_el_techo_se_lee_y_un_byte_mas_no() {
-        let directory = TestDir::new("en-el-techo");
+    fn exactly_at_the_ceiling_it_is_read_and_one_byte_more_is_not() {
+        let directory = TestDir::new("at-the-ceiling");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        let document = serialize(&test_document()).expect("se describe");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        let document = serialize(&test_document()).expect("it is described");
 
-        // El relleno son espacios, que el intérprete acepta al final: así el documento sigue siendo
-        // válido y lo único que cambia entre las dos mitades de esta prueba es **un byte de tamaño**.
-        // Sin la mitad de abajo, un techo que no acotara nada pasaría igual.
+        // The padding is spaces, which the interpreter accepts at the end: this way the document stays
+        // valid and the only thing that changes between the two halves of this test is **one byte of
+        // size**. Without the bottom half, a ceiling that bounded nothing would pass just the same.
         let at_ceiling = format!("{document}{}", " ".repeat(MAX_BYTES - document.len()));
-        std::fs::write(&path, &at_ceiling).expect("escribir");
+        std::fs::write(&path, &at_ceiling).expect("write");
         assert!(
             read(&path).is_ok(),
-            "lo que ocupa justo el techo no se leyó"
+            "what takes up exactly the ceiling was not read"
         );
 
-        std::fs::write(&path, format!("{at_ceiling} ")).expect("escribir uno más");
+        std::fs::write(&path, format!("{at_ceiling} ")).expect("write one more");
         assert_eq!(
             read(&path),
             Err(LayoutProblem::TooLarge {
@@ -1689,25 +1714,26 @@ mod file_tests {
     }
 
     #[test]
-    fn lo_que_no_es_texto_se_rechaza() {
-        let directory = TestDir::new("no-es-texto");
+    fn what_is_not_text_is_rejected() {
+        let directory = TestDir::new("not-text");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        std::fs::write(&path, [0xff, 0xfe, b'{', b'}']).expect("escribir bytes que no son texto");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        std::fs::write(&path, [0xff, 0xfe, b'{', b'}']).expect("write bytes that are not text");
 
         assert_eq!(read(&path), Err(LayoutProblem::NotText));
     }
 
     #[test]
-    fn sin_texto_que_escribir_no_se_renombra_nada() {
-        // **Ésta es la razón de que la escritura reciba el texto ya descrito.** Si describir fallara y el
-        // camino renombrara igual, el destino quedaría con cero bytes: la disposición que el usuario
-        // colocó a mano, borrada por un fallo al guardar.
-        let directory = TestDir::new("sin-texto");
+    fn with_no_text_to_write_nothing_is_renamed() {
+        // **This is the reason the write receives the already-described text.** If describing failed and
+        // the path renamed anyway, the destination would be left with zero bytes: the layout the user
+        // placed by hand, deleted by a failure on saving.
+        let directory = TestDir::new("no-text");
         let path = directory.file();
         let mut file = Persistence::at(Some(path.clone()));
         assert!(file.save(&test_layout()));
-        let start = std::fs::read_to_string(&path).expect("hay algo guardado");
+        let start = std::fs::read_to_string(&path).expect("there is something saved");
 
         let error = save_described(&path, 1, None);
 
@@ -1716,134 +1742,140 @@ mod file_tests {
             "{error:?}"
         );
         assert_eq!(
-            std::fs::read_to_string(&path).expect("sigue estando"),
+            std::fs::read_to_string(&path).expect("it is still there"),
             start,
-            "se perdió la disposición que había guardada"
+            "the saved layout was lost"
         );
-        let inside = std::fs::read_dir(path.parent().expect("el directorio propio"))
-            .expect("leer el directorio")
+        let inside = std::fs::read_dir(path.parent().expect("the dedicated directory"))
+            .expect("read the directory")
             .count();
-        assert_eq!(inside, 1, "quedó algo más en el directorio");
+        assert_eq!(inside, 1, "something else was left in the directory");
     }
 
     #[test]
-    fn un_temporal_que_ya_existe_no_se_adopta() {
-        let directory = TestDir::new("temporal-plantado");
+    fn a_temporary_that_already_exists_is_not_adopted() {
+        let directory = TestDir::new("planted-temporary");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        let temp_path = temp_path_for(&path, 1).expect("el temporal tiene nombre");
-        std::fs::write(&temp_path, "de otro").expect("plantar el temporal");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        let temp_path = temp_path_for(&path, 1).expect("the temporary has a name");
+        std::fs::write(&temp_path, "someone else's").expect("plant the temporary");
 
         let error = save_to(&path, 1, &test_document());
 
         assert!(matches!(error, Err(SaveFailure::TempFile(_))), "{error:?}");
-        assert!(!path.exists(), "se escribió el destino de todas formas");
+        assert!(!path.exists(), "the destination was written anyway");
         assert_eq!(
-            std::fs::read_to_string(&temp_path).expect("sigue estando"),
-            "de otro",
-            "se escribió a través de lo que había plantado"
+            std::fs::read_to_string(&temp_path).expect("it is still there"),
+            "someone else's",
+            "it was written through what had been planted"
         );
     }
 
     #[test]
-    fn si_no_se_puede_poner_en_su_sitio_no_queda_el_temporal() {
-        // El destino es un directorio con algo dentro, que es una forma de que el renombrado falle sin
-        // tocar los permisos de nadie. Lo que se ata es la limpieza: un temporal que sobreviva a un fallo
-        // **deja a esta misma sesión sin poder crear el suyo en exclusiva**, así que el primer fallo
-        // sería el último intento.
-        let directory = TestDir::new("renombrado-imposible");
+    fn if_it_cannot_be_put_in_its_place_the_temporary_is_not_left() {
+        // The destination is a directory with something inside, which is a way to make the rename fail
+        // without touching anyone's permissions. What is pinned down is the cleanup: a temporary that
+        // survives a failure **leaves this very session unable to create its own exclusively**, so the
+        // first failure would be the last attempt.
+        let directory = TestDir::new("impossible-rename");
         let path = directory.file();
-        std::fs::create_dir_all(path.join("dentro"))
-            .expect("plantar un directorio con algo dentro");
+        std::fs::create_dir_all(path.join("inside"))
+            .expect("plant a directory with something inside");
 
         let error = save_to(&path, 1, &test_document());
 
         assert!(matches!(error, Err(SaveFailure::Renaming(_))), "{error:?}");
         assert!(
             !temp_path_for(&path, 1)
-                .expect("el temporal tiene nombre")
+                .expect("the temporary has a name")
                 .exists(),
-            "quedó el temporal, y con él la sesión se queda sin poder guardar"
+            "the temporary was left, and with it the session is left unable to save"
         );
     }
 
     #[test]
-    fn una_version_mas_nueva_no_se_toca_en_toda_la_sesion() {
-        let directory = TestDir::new("version-mas-nueva");
+    fn a_newer_version_is_not_touched_for_the_whole_session() {
+        let directory = TestDir::new("newer-version");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        // **La forma es la que una versión 3 tendría de verdad: una clave renombrada.** Y eso es el
-        // corazón de esta prueba, no un detalle. La versión sube **justo** con lo que un lector viejo
-        // malinterpretaría —una clave renombrada, quitada, o con otro significado—, o sea con lo que hace
-        // fallar al intérprete de la forma. Con un fichero de la versión 3 que conservara la forma de la 2,
-        // esta prueba pasa incluso mirando la versión **después** de exigir la forma, que es exactamente el
-        // defecto que se colaba: el fichero del futuro se leía como «no se entiende» y se sobrescribía.
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        // **The shape is the one a version 3 would really have: a renamed key.** And that is the heart of
+        // this test, not a detail. The version goes up **exactly** with what an old reader would
+        // misinterpret —a renamed key, a removed one, or one with a different meaning—, that is, with
+        // what makes the shape interpreter fail. With a version 3 file that kept version 2's shape, this
+        // test passes even looking at the version **after** requiring the shape, which is exactly the
+        // defect that was slipping through: the file from the future was read as «not understood» and
+        // overwritten.
         let of_the_future = r#"{"v":3,"solapas":[{"raiz":{"hoja":{"ancho":36,"plegado":false}}}]}"#;
-        std::fs::write(&path, of_the_future).expect("escribir el fichero del futuro");
+        std::fs::write(&path, of_the_future).expect("write the file from the future");
         let mut file = Persistence::at(Some(path.clone()));
 
         assert!(
             file.load().is_none(),
-            "se restauró una forma que no se conoce"
+            "a shape that is not known was restored"
         );
-        // Dos intentos, porque el veto es de la sesión y no del intento: con uno, un veto que solo
-        // valiera para el primero pasaría igual.
+        // Two attempts, because the veto belongs to the session and not to the attempt: with one, a veto
+        // that only held for the first would pass just the same.
         assert!(!file.save(&test_layout()));
         assert!(!file.save(&test_layout()));
         assert_eq!(
-            std::fs::read_to_string(&path).expect("sigue estando"),
+            std::fs::read_to_string(&path).expect("it is still there"),
             of_the_future,
-            "un binario viejo se llevó por delante la disposición del nuevo"
+            "an old binary ran over the new one's layout"
         );
     }
 
     #[test]
-    fn un_fichero_sin_version_es_uno_nuestro_estropeado_y_se_sobrescribe() {
-        // La otra mitad del veto, y la que distingue «no sé qué versión es esto» de «esto lo escribió algo
-        // que sabe más que yo». Un fichero **sin** versión no puede ser de una versión futura —todas la
-        // llevan—, así que es nuestro y está roto: se abre de fábrica y se sustituye.
-        let directory = TestDir::new("sin-version");
+    fn a_file_with_no_version_is_one_of_ours_that_is_broken_and_it_is_overwritten() {
+        // The other half of the veto, and the one that distinguishes «I don't know what version this is»
+        // from «this was written by something that knows more than I do». A file **with no** version
+        // cannot be of a future version —they all carry it—, so it is ours and it is broken: it opens
+        // factory-fresh and it is replaced.
+        let directory = TestDir::new("no-version");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
         std::fs::write(
             &path,
             r#"{"tabs":[{"root":{"leaf":{"panel_width":36,"folded":false}}}]}"#,
         )
-        .expect("escribir");
+        .expect("write");
         let mut persistence = Persistence::at(Some(path.clone()));
 
         assert!(persistence.load().is_none());
         assert!(
             persistence.save(&test_layout()),
-            "un fichero sin versión se trató como del futuro"
+            "a file with no version was treated as one from the future"
         );
         assert_eq!(
-            read(&path).expect("se lee").tabs(),
+            read(&path).expect("it is read").tabs(),
             test_document().tabs.as_slice()
         );
     }
 
     #[test]
-    fn una_version_que_no_se_conoce_y_no_es_mas_nueva_se_sobrescribe() {
-        let directory = TestDir::new("version-cero");
+    fn a_version_that_is_not_known_and_is_not_newer_is_overwritten() {
+        let directory = TestDir::new("version-zero");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        std::fs::write(&path, r#"{"v":0,"tabs":[]}"#).expect("escribir");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        std::fs::write(&path, r#"{"v":0,"tabs":[]}"#).expect("write");
         let mut file = Persistence::at(Some(path.clone()));
 
         assert!(file.load().is_none());
         assert!(
             file.save(&test_layout()),
-            "un fichero nuestro estropeado no se sustituye"
+            "a file of ours that is broken is not replaced"
         );
         assert_eq!(
-            read(&path).expect("se lee").tabs(),
+            read(&path).expect("it is read").tabs(),
             test_document().tabs.as_slice()
         );
     }
 
     #[test]
-    fn sin_sitio_donde_ponerlo_no_se_lee_ni_se_escribe() {
+    fn with_nowhere_to_put_it_it_is_neither_read_nor_written() {
         let mut file = Persistence::at(None);
 
         assert!(file.load().is_none());
@@ -1851,169 +1883,178 @@ mod file_tests {
     }
 
     #[test]
-    fn de_cada_motivo_se_avisa_una_vez_y_de_los_demas_igual() {
+    fn each_reason_is_warned_about_once_and_the_others_likewise() {
         let mut file = Persistence::at(None);
-        let other = || std::io::Error::other("otro");
+        let other = || std::io::Error::other("other");
 
         assert!(file.should_warn(&SaveFailure::Renaming(other())));
         assert!(
-            !file.should_warn(&SaveFailure::Renaming(std::io::Error::other("distinto"))),
-            "el mismo motivo con otro error del sistema se avisó dos veces"
+            !file.should_warn(&SaveFailure::Renaming(std::io::Error::other("different"))),
+            "the same reason with another system error was warned about twice"
         );
         assert!(
             file.should_warn(&SaveFailure::Directory(other())),
-            "un motivo nuevo se calló porque ya se había avisado de otro"
+            "a new reason was kept quiet because another had already been warned about"
         );
     }
 
     #[test]
-    fn del_unico_fallo_que_es_normal_no_se_avisa_y_de_los_demas_si() {
-        // El aviso es una línea a la salida de error, que no se puede observar desde dentro del proceso:
-        // lo que se puede afirmar es **la decisión**, y por eso vive aparte de quien la imprime.
+    fn the_only_failure_that_is_normal_is_not_warned_about_and_the_others_are() {
+        // The warning is a line to the error output, which cannot be observed from inside the process:
+        // what can be asserted is **the decision**, and that is why it lives apart from whoever prints
+        // it.
         assert!(
             !warrants_warning(&LayoutProblem::Absent),
-            "el primer arranque de cada usuario saldría con una línea de error"
+            "every user's first startup would come out with an error line"
         );
         for problem in [
             LayoutProblem::NotAFile,
             LayoutProblem::NotText,
-            LayoutProblem::Unreadable("cualquiera".to_owned()),
+            LayoutProblem::Unreadable("any".to_owned()),
             LayoutProblem::Version { found: 3 },
             LayoutProblem::TooLarge { bytes: 1 },
             LayoutProblem::NoTabs,
         ] {
-            assert!(warrants_warning(&problem), "se calla: {problem}");
+            assert!(warrants_warning(&problem), "it stays quiet: {problem}");
         }
     }
 
     #[test]
-    fn el_temporal_lleva_el_proceso_y_el_intento() {
-        // **Una afirmación sobre el nombre, y no sobre el efecto, porque el efecto no cabe en un proceso**:
-        // lo que el nombre evita es que dos instancias compartan temporal y que un temporal huérfano de una
-        // muerte violenta deje sin guardar a la sesión que reciba ese mismo número de proceso.
-        let path = PathBuf::from("/casa/.config/agent-terminal/layout.json");
+    fn the_temporary_carries_the_process_and_the_attempt() {
+        // **An assertion about the name, and not about the effect, because the effect does not fit in one
+        // process**: what the name avoids is that two instances share a temporary and that a temporary
+        // orphaned by a violent death leaves the session that receives that same process number unable to
+        // save.
+        let path = PathBuf::from("/home/.config/agent-terminal/layout.json");
         let pid = std::process::id();
 
-        let first = temp_path_for(&path, 1).expect("tiene nombre");
-        let second = temp_path_for(&path, 2).expect("tiene nombre");
+        let first = temp_path_for(&path, 1).expect("it has a name");
+        let second = temp_path_for(&path, 2).expect("it has a name");
 
         assert_eq!(
             first,
-            PathBuf::from(format!("/casa/.config/agent-terminal/layout.json.{pid}.1"))
+            PathBuf::from(format!("/home/.config/agent-terminal/layout.json.{pid}.1"))
         );
-        assert_ne!(first, second, "dos intentos comparten temporal");
+        assert_ne!(first, second, "two attempts share a temporary");
         assert_eq!(
             first.parent(),
             path.parent(),
-            "el temporal no está al lado del destino, así que el renombrado puede cruzar volúmenes"
+            "the temporary is not next to the destination, so the rename can cross volumes"
         );
     }
 
     #[test]
-    fn un_temporal_huerfano_estorba_un_intento_y_no_la_sesion() {
-        // El escenario: la aplicación murió entre crear el temporal y renombrarlo, así que quedó uno en
-        // disco que nadie limpia; y esta sesión recibió el mismo número de proceso. Adoptarlo está
-        // prohibido —se escribiría a través de lo que otro plantó—, así que lo que tiene que ocurrir es que
-        // el intento siguiente use otro nombre. Sin eso, esta sesión **no guardaría nunca nada**.
-        let directory = TestDir::new("huerfano");
+    fn an_orphaned_temporary_hinders_one_attempt_and_not_the_session() {
+        // The scenario: the application died between creating the temporary and renaming it, so one was
+        // left on disk that no one cleans; and this session received the same process number. Adopting it
+        // is forbidden —it would be written through what someone else planted—, so what has to happen is
+        // that the next attempt uses another name. Without that, this session **would never save
+        // anything**.
+        let directory = TestDir::new("orphan");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
         std::fs::write(
-            temp_path_for(&path, 1).expect("tiene nombre"),
-            "el que dejó el muerto",
+            temp_path_for(&path, 1).expect("it has a name"),
+            "the one the dead left",
         )
-        .expect("plantar el huérfano");
+        .expect("plant the orphan");
         let mut persistence = Persistence::at(Some(path.clone()));
 
         assert!(
             !persistence.save(&test_layout()),
-            "se adoptó el temporal que había"
+            "the temporary that was there was adopted"
         );
         assert!(
             persistence.save(&test_layout()),
-            "un huérfano dejó a la sesión entera sin poder guardar"
+            "an orphan left the whole session unable to save"
         );
         assert_eq!(
-            read(&path).expect("se lee").tabs(),
+            read(&path).expect("it is read").tabs(),
             test_document().tabs.as_slice()
         );
     }
 
     #[test]
-    fn leer_no_reserva_lo_que_el_fichero_dice_ocupar() {
-        // **El techo existe para acotar la reserva, no solo el intérprete**, y eso es lo único que esta
-        // prueba mira: la capacidad. Con el tamaño del fichero como reserva y sin acotarlo, un fichero que
-        // dice ocupar diez gigas los pide al arrancar, y el techo del formato no llega a mirarse.
-        let directory = TestDir::new("reserva");
+    fn reading_does_not_reserve_what_the_file_claims_to_take_up() {
+        // **The ceiling exists to bound the reservation, not only the interpreter**, and that is the only
+        // thing this test looks at: the capacity. With the file size as the reservation and without
+        // bounding it, a file that claims to take up ten gigs asks for them at startup, and the format's
+        // ceiling never gets looked at.
+        let directory = TestDir::new("reservation");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        let file = std::fs::File::create(&path).expect("crear");
-        // Un agujero, no cuatro megas de ceros escritos: lo que importa es lo que dicen los datos del
-        // fichero, que es de donde sale la reserva.
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        let file = std::fs::File::create(&path).expect("create");
+        // A hole, not four megs of written zeros: what matters is what the file's metadata says, which is
+        // where the reservation comes from.
         file.set_len(64 * MAX_BYTES as u64)
-            .expect("agrandarlo sin escribir");
+            .expect("enlarge it without writing");
         drop(file);
 
         let bytes = read_capped(
-            std::fs::File::open(&path).expect("abrir"),
-            std::fs::metadata(&path).expect("datos").len(),
+            std::fs::File::open(&path).expect("open"),
+            std::fs::metadata(&path).expect("metadata").len(),
         )
-        .expect("leer");
+        .expect("read");
 
         assert!(
             bytes.capacity() <= MAX_BYTES + 1,
-            "reservó {} bytes para un techo de {MAX_BYTES}",
+            "it reserved {} bytes for a ceiling of {MAX_BYTES}",
             bytes.capacity()
         );
     }
 
     #[cfg(unix)]
     #[test]
-    fn una_tuberia_con_nombre_se_rechaza_sin_quedarse_esperando() {
-        // **Es el caso que la comprobación de «es un fichero» existe para evitar, y el único que un
-        // directorio plantado no enseña**: abrir una tubería sin nadie al otro lado no falla, **espera**, y
-        // esto ocurre antes de que la ventana exista. El plazo es el testigo: sin la comprobación la lectura
-        // no vuelve nunca, y lo que esta prueba puede contar es que no volvió.
-        let directory = TestDir::new("tuberia");
+    fn a_named_pipe_is_rejected_without_waiting() {
+        // **It is the case the «is it a file» check exists to avoid, and the only one a planted directory
+        // does not show**: opening a pipe with no one at the other end does not fail, it **waits**, and
+        // this happens before the window exists. The deadline is the witness: without the check the read
+        // never returns, and what this test can tell is that it did not return.
+        let directory = TestDir::new("pipe");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
         let planted = std::process::Command::new("mkfifo")
             .arg(&path)
             .status()
-            .expect("lanzar mkfifo");
-        assert!(planted.success(), "no se pudo plantar la tubería");
+            .expect("launch mkfifo");
+        assert!(planted.success(), "the pipe could not be planted");
 
-        // En otro hilo a propósito: si la apertura se queda esperando, el que espera es él. Se queda
-        // colgado y se lo lleva el final del proceso.
+        // On another thread on purpose: if the opening keeps waiting, the one that waits is it. It hangs
+        // and is taken away by the end of the process.
         let (dice, listening) = std::sync::mpsc::channel();
         let its_own = path.clone();
         std::thread::spawn(move || dice.send(read(&its_own)));
 
         match listening.recv_timeout(std::time::Duration::from_secs(5)) {
             Ok(result) => assert_eq!(result, Err(LayoutProblem::NotAFile)),
-            Err(_) => panic!("abrir la tubería se quedó esperando: la ventana no llegaría a abrir"),
+            Err(_) => panic!("opening the pipe kept waiting: the window would never open"),
         }
     }
 
     #[cfg(unix)]
     #[test]
-    fn un_fichero_que_no_se_deja_leer_no_impide_arrancar_ni_veta_la_escritura() {
+    fn a_file_that_cannot_be_read_neither_prevents_startup_nor_vetoes_writing() {
         use std::os::unix::fs::PermissionsExt;
 
-        // El único fallo del sistema que la lectura puede dar y que nadie ejercita. Y lo que importa no es
-        // la variante: es que **no se confunde con una versión del futuro**, así que la sesión sigue
-        // pudiendo guardar. Un permiso mal puesto no debe dejar a nadie sin escribir el resto de la sesión.
+        // The only system failure the read can give and that no one exercises. And what matters is not
+        // the variant: it is that **it is not confused with a version from the future**, so the session
+        // can still save. A misset permission must not leave anyone unable to write for the rest of the
+        // session.
         //
-        // **Esta prueba supone que la suite no corre como administrador**, que se salta los permisos: ahí
-        // el fichero se leería y la prueba fallaría al no encontrar el fallo. Se deja fallar en vez de
-        // saltarse sola, porque una prueba que se desactiva según quién la corre no se distingue de una
-        // que pasa.
-        let directory = TestDir::new("ilegible");
+        // **This test assumes the suite does not run as administrator**, which skips permissions: there
+        // the file would be read and the test would fail on not finding the failure. It is let to fail
+        // instead of skipping itself, because a test that disables itself depending on who runs it is
+        // indistinguishable from one that passes.
+        let directory = TestDir::new("unreadable");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        std::fs::write(&path, r#"{"v":2,"tabs":[]}"#).expect("escribir");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        std::fs::write(&path, r#"{"v":2,"tabs":[]}"#).expect("write");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
-            .expect("quitarle todos los permisos");
+            .expect("strip it of all permissions");
 
         let problem = read(&path);
         assert!(
@@ -2025,31 +2066,32 @@ mod file_tests {
         assert!(persistence.load().is_none());
         assert!(
             persistence.save(&test_layout()),
-            "un fichero que no se pudo leer se trató como uno del futuro"
+            "a file that could not be read was treated as one from the future"
         );
         assert_eq!(
-            read(&path).expect("se lee").tabs(),
+            read(&path).expect("it is read").tabs(),
             test_document().tabs.as_slice()
         );
     }
 
     #[test]
-    fn una_forma_invalida_de_la_version_conocida_no_impide_arrancar_y_se_sustituye() {
-        // **La versión es la nuestra y la forma no vale**, que es lo que distingue este camino de los otros
-        // dos ficheros rotos: ahí falla el intérprete, y aquí encaja todo y lo que no se sostiene es el
-        // árbol. Sin esto, un lector que se olvidara de validar lo que interpreta pasaría igual: las
-        // pruebas de la forma llaman a `validate` a mano, así que ninguna ata que el camino del disco pase
-        // por ahí.
-        let directory = TestDir::new("forma-invalida");
+    fn an_invalid_shape_of_the_known_version_does_not_prevent_startup_and_is_replaced() {
+        // **The version is ours and the shape is no good**, which is what distinguishes this path from
+        // the other two broken files: there the interpreter fails, and here everything fits and what does
+        // not hold up is the tree. Without this, a reader that forgot to validate what it interprets
+        // would pass just the same: the shape tests call `validate` by hand, so none pins down that the
+        // disk path goes through there.
+        let directory = TestDir::new("invalid-shape");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        // Un corte con un solo hijo: la forma que hace que una frontera arrastre un bloque de dos.
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        // A cut with a single child: the shape that makes a boundary drag a block of two.
         std::fs::write(
             &path,
             r#"{"v":2,"tabs":[{"root":{"branch":{"orientation":"columns","children":[
                  {"weight":1.0,"node":{"leaf":{"panel_width":36,"folded":false}}}]}}}]}"#,
         )
-        .expect("escribir");
+        .expect("write");
         let mut persistence = Persistence::at(Some(path.clone()));
 
         assert_eq!(
@@ -2058,26 +2100,26 @@ mod file_tests {
         );
         assert!(
             persistence.load().is_none(),
-            "se restauró un árbol que la validación rechaza"
+            "a tree that validation rejects was restored"
         );
         assert!(
             persistence.save(&test_layout()),
-            "un fichero nuestro con una forma que no vale se trató como uno del futuro"
+            "a file of ours with a shape that is no good was treated as one from the future"
         );
         assert_eq!(
-            read(&path).expect("se lee").tabs(),
+            read(&path).expect("it is read").tabs(),
             test_document().tabs.as_slice()
         );
     }
 
     #[test]
-    fn si_el_directorio_no_se_puede_crear_se_dice_por_ese_motivo_y_no_por_otro() {
-        // **La variante importa porque el aviso se suprime por motivo**: un directorio que no se puede
-        // crear y un temporal que no se puede crear se arreglan en sitios distintos, así que llegar aquí
-        // como lo segundo dejaría al usuario mirando donde no es.
-        let directory = TestDir::new("directorio-imposible");
-        std::fs::write(directory.0.join("config"), "no soy un directorio")
-            .expect("plantar un fichero donde iría el directorio de configuración");
+    fn if_the_directory_cannot_be_created_it_is_said_for_that_reason_and_not_another() {
+        // **The variant matters because the warning is suppressed per reason**: a directory that cannot
+        // be created and a temporary that cannot be created are fixed in different places, so arriving
+        // here as the second would leave the user looking in the wrong place.
+        let directory = TestDir::new("impossible-directory");
+        std::fs::write(directory.0.join("config"), "I am not a directory")
+            .expect("plant a file where the configuration directory would go");
         let path = directory.file();
 
         let error = save_to(&path, 1, &test_document());
@@ -2085,16 +2127,16 @@ mod file_tests {
         assert!(matches!(error, Err(SaveFailure::Directory(_))), "{error:?}");
         assert!(
             !Persistence::at(Some(path.clone())).save(&test_layout()),
-            "se dio por guardado sin haber dónde ponerlo"
+            "it was taken as saved without anywhere to put it"
         );
-        assert!(!path.exists(), "algo acabó en el sitio del fichero");
+        assert!(!path.exists(), "something ended up in the file's place");
     }
 
     #[test]
-    fn una_ruta_que_no_nombra_un_fichero_no_tumba_el_guardado() {
-        // Ninguna de las dos sale de `path_from`, así que solo se llega colocándolas a mano. Lo que se ata es
-        // que este camino no tiene ningún desenvolver que tumbe la ventana en vez de decir que no pudo:
-        // guardar corre dos veces por segundo mientras se arrastra una frontera.
+    fn a_path_that_does_not_name_a_file_does_not_bring_down_the_save() {
+        // Neither of the two comes out of `path_from`, so it is only reached by placing them by hand.
+        // What is pinned down is that this path has no unwrap that brings down the window instead of
+        // saying it could not: saving runs twice per second while a boundary is dragged.
         let without_directory = save_to(Path::new("/"), 1, &test_document());
         assert!(
             matches!(without_directory, Err(SaveFailure::NoPlace)),
@@ -2102,11 +2144,11 @@ mod file_tests {
         );
         assert!(!Persistence::at(Some(PathBuf::from("/"))).save(&test_layout()));
 
-        let directory = TestDir::new("sin-nombre");
+        let directory = TestDir::new("no-name");
         let subiendo = directory
             .file()
             .parent()
-            .expect("el directorio propio")
+            .expect("the dedicated directory")
             .join("..");
         let without_name = save_to(&subiendo, 1, &test_document());
         assert!(
@@ -2117,62 +2159,63 @@ mod file_tests {
 
     #[cfg(unix)]
     #[test]
-    fn un_enlace_plantado_en_el_destino_no_se_escribe_a_traves() {
-        // El destino se protege **no abriéndolo nunca para escribir**, y esto es lo que eso compra: un
-        // enlace con su nombre no lleva la escritura a donde apunte. Que el destino cambie de nodo lo ata
-        // otra prueba; ésta ata que el fichero de fuera no se toca.
-        let directory = TestDir::new("enlace-en-el-destino");
+    fn a_link_planted_at_the_destination_is_not_written_through() {
+        // The destination is protected by **never opening it for writing**, and this is what that buys: a
+        // link with its name does not take the write to where it points. That the destination changes
+        // node is pinned down by another test; this one pins down that the outside file is not touched.
+        let directory = TestDir::new("link-at-the-destination");
         let path = directory.file();
-        std::fs::create_dir_all(path.parent().expect("el directorio propio")).expect("crearlo");
-        let victim = directory.0.join("victima");
-        std::fs::write(&victim, "lo que había fuera").expect("escribir la víctima");
-        std::os::unix::fs::symlink(&victim, &path).expect("plantar el enlace");
+        std::fs::create_dir_all(path.parent().expect("the dedicated directory"))
+            .expect("create it");
+        let victim = directory.0.join("victim");
+        std::fs::write(&victim, "what was outside").expect("write the victim");
+        std::os::unix::fs::symlink(&victim, &path).expect("plant the link");
 
         assert!(Persistence::at(Some(path.clone())).save(&test_layout()));
 
         assert_eq!(
-            std::fs::read_to_string(&victim).expect("sigue estando"),
-            "lo que había fuera",
-            "se escribió a través del enlace, o sea fuera del directorio de configuración"
+            std::fs::read_to_string(&victim).expect("it is still there"),
+            "what was outside",
+            "it was written through the link, that is, outside the configuration directory"
         );
         assert!(
             !std::fs::symlink_metadata(&path)
-                .expect("existe")
+                .expect("it exists")
                 .is_symlink(),
-            "el enlace sigue en el sitio del fichero"
+            "the link is still in the file's place"
         );
     }
 
     #[test]
-    fn un_guardado_que_falla_gasta_el_aviso_de_su_motivo() {
-        // **Ata que la supresión la aplica el camino que guarda**, y no solo que la lista de motivos
-        // funcione. Con el aviso impreso sin consultarla, un disco lleno diría dos líneas por segundo
-        // mientras la ventana se use, que es lo que la lista existe para evitar.
+    fn a_save_that_fails_spends_the_warning_of_its_reason() {
+        // **It pins down that the suppression is applied by the saving path**, and not only that the list
+        // of reasons works. With the warning printed without consulting it, a full disk would say two
+        // lines per second while the window is in use, which is what the list exists to avoid.
         let mut file = Persistence::at(None);
 
         assert!(!file.save(&test_layout()));
 
         assert!(
             !file.should_warn(&SaveFailure::NoPlace),
-            "el fallo del guardado no pasó por la supresión"
+            "the save failure did not go through the suppression"
         );
         assert!(
-            file.should_warn(&SaveFailure::Directory(std::io::Error::other("otro"))),
-            "gastó también el aviso de motivos que no han fallado"
+            file.should_warn(&SaveFailure::Directory(std::io::Error::other("other"))),
+            "it also spent the warning of reasons that have not failed"
         );
     }
 
     #[test]
-    fn cargar_sin_sitio_no_gasta_el_aviso_del_guardado() {
-        // Los dos caminos comparten el motivo y no el mensaje. Si cargar gastara el aviso, el primer fallo
-        // de guardado de verdad —el que el usuario necesita ver— saldría mudo.
+    fn loading_with_nowhere_does_not_spend_the_save_warning() {
+        // The two paths share the reason and not the message. If loading spent the warning, the first
+        // genuine save failure —the one the user needs to see— would come out mute.
         let mut file = Persistence::at(None);
 
         assert!(file.load().is_none());
 
         assert!(
             file.should_warn(&SaveFailure::NoPlace),
-            "cargar gastó el aviso y el primer fallo al guardar se quedaría sin decirse"
+            "loading spent the warning and the first failure on saving would go unsaid"
         );
     }
 }

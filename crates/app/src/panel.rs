@@ -1,13 +1,14 @@
-//! El panel de estado de una división: lo que su productor publica, pintado a la derecha de su
-//! consola.
+//! The status panel of a pane: what its producer publishes, painted to the right of its
+//! console.
 //!
-//! **Este módulo no decide qué significa nada.** El vocabulario —las marcas, los estilos, la fase— es
-//! del contrato y del productor; aquí solo se traduce a color y a posición. Esa raya es D6, y es la
-//! razón de que el panel valga para un agente, un despliegue o un script sin saber nada de ninguno.
+//! **This module decides the meaning of nothing.** The vocabulary —the marks, the styles, the phase— is
+//! the contract's and the producer's; here it is only translated into color and position. That line is
+//! D6, and it is the reason the panel works for an agent, a deployment or a script without knowing
+//! anything about any of them.
 //!
-//! Lo que este módulo **todavía no hace**, y llega con el hito: alinear la columna de referencias por
-//! bloques, envolver al ancho con su sangría de continuación, y pintar el símbolo de cada marca. Hasta
-//! entonces cada línea es una fila y lo que no cabe se recorta.
+//! What this module **does not do yet**, and arrives with the milestone: aligning the reference column by
+//! blocks, wrapping to the width with its continuation indent, and painting each mark's symbol. Until
+//! then each line is a row and what does not fit is clipped.
 
 use std::time::{Duration, SystemTime};
 
@@ -17,90 +18,90 @@ use panel_contract::{Attention, Line, Mark, Panel, Problem, Style};
 use crate::painter::CellMetrics;
 use crate::theme::Theme;
 
-/// Con cuántas celdas de la fuente nace el panel de una división.
+/// How many font cells the panel of a pane is born with.
 ///
-/// **En celdas y no en puntos**: un ancho en puntos se estrecha en columnas al subir el aumento del
-/// escritorio, y lo que el panel tiene que conservar es **cuántos caracteres caben**, que es lo que
-/// decide si su texto se lee. Con treinta y seis caben las líneas de los `panel.json` reales del repo
-/// sin que la consola se quede sin sus ochenta columnas de siempre en una ventana normal.
+/// **In cells and not in points**: a width in points narrows in columns when the desktop zoom is raised,
+/// and what the panel has to preserve is **how many characters fit**, which is what decides whether its
+/// text can be read. With thirty-six, the lines of the repo's real `panel.json` files fit without the
+/// console losing its usual eighty columns in a normal window.
 ///
-/// **De fábrica, no fijo**: desde que se puede arrastrar la frontera del panel, esto es solo el valor
-/// con el que empieza una división que nadie ha tocado. El que manda es el de cada división.
+/// **Factory default, not fixed**: since the panel's border can be dragged, this is only the value a
+/// pane that nobody has touched starts with. What rules is each pane's own.
 ///
-/// El razonamiento entero —por qué en celdas, por qué el que cede es el panel, que el ancho es de cada
-/// división, qué es el mínimo del gesto y por qué plegar es un estado aparte— está en **D10** de
-/// `docs/02-decisiones.md`, con lo que se descartó en cada caso.
+/// The whole reasoning —why in cells, why it is the panel that yields, that the width belongs to each
+/// pane, what the gesture's minimum is and why folding is a state apart— is in **D10** of
+/// `docs/02-decisiones.md`, with what was discarded in each case.
 pub(crate) const DEFAULT_WIDTH: usize = 36;
 
-/// Lo menos que se le deja a la consola cuando su panel le quita sitio, en celdas.
+/// The least left to the console when its panel takes room from it, in cells.
 ///
-/// **El panel cede, no la consola.** El panel es margen y la consola es el trabajo: en una ventana
-/// estrecha lo que sobra es el estado, no el programa. Con veinte columnas una consola sigue siendo
-/// usable; con cinco, no.
+/// **The panel yields, not the console.** The panel is margin and the console is the work: in a narrow
+/// window what is spare is the status, not the program. With twenty columns a console is still usable;
+/// with five, it is not.
 ///
-/// **Y es también el suelo que decide si una división se puede partir en dos**, que es el otro sitio
-/// donde hace falta saber cuándo una consola deja de servir. Son la misma pregunta, así que son la misma
-/// constante: dos números para «lo menos que necesita una consola» acabarían diciendo cosas distintas.
+/// **And it is also the floor that decides whether a pane can be split in two**, which is the other place
+/// where it is needed to know when a console stops being of use. They are the same question, so they are
+/// the same constant: two numbers for «the least a console needs» would end up saying different things.
 pub(crate) const MINIMUM_CONSOLE: f32 = 20.0;
 
-/// Lo menos que se le deja al panel cuando se arrastra su frontera, en celdas.
+/// The least left to the panel when its border is dragged, in cells.
 ///
-/// **Con una celda el panel casi no se ve, y eso es lo que se busca: que siempre quede dónde agarrar.**
-/// Llegando a cero, la frontera se iría con el panel y el gesto que lo cerró no se podría deshacer con
-/// el ratón — un viaje sin billete de vuelta.
+/// **With one cell the panel is almost invisible, and that is what is wanted: that there always be
+/// somewhere to grab.** Reaching zero, the border would go away with the panel and the gesture that closed
+/// it could not be undone with the mouse — a trip with no return ticket.
 ///
-/// Es el suelo del **gesto**, no del reparto: [`set_aside`] sigue pudiendo devolver un panel **más estrecho
-/// que esto** —hasta de ancho cero— cuando la división no da para más. Son dos preguntas distintas, lo
-/// que el usuario pide y lo que cabe, y confundirlas dejaría a la consola por debajo de su mínimo. (Lo
-/// que `set_aside` no devuelve nunca es *ningún* panel una vez se le pide un ancho: en el caso extremo
-/// devuelve el rectángulo vacío, y su prueba lo dice así.)
+/// It is the floor of the **gesture**, not of the pane: [`set_aside`] can still return a panel **narrower
+/// than this** —down to zero width— when the pane does not give for more. They are two distinct
+/// questions, what the user asks and what fits, and confusing them would leave the console below its
+/// minimum. (What `set_aside` never returns is *any* panel once it is asked for a width: in the extreme
+/// case it returns the empty rectangle, and its test says so.)
 ///
-/// **Y desde que se puede plegar, esto es exactamente la raya entre estrechar y plegar**: pedir menos que
-/// esto es lo que el gesto lee como «ciérralo». Antes de que el plegado existiera, este mismo número
-/// servía para lo contrario —impedir llegar a cero, porque la frontera se habría ido con el panel— y esa
-/// razón ya no es la suya: ahora lo que sostiene el regreso es el asidero que sobrevive al plegado.
+/// **And since folding became possible, this is exactly the line between narrowing and folding**: asking
+/// for less than this is what the gesture reads as «close it». Before folding existed, this same number
+/// served the opposite —preventing reaching zero, because the border would have gone away with the panel—
+/// and that reason is no longer its own: now what holds the return is the handle that survives the fold.
 pub(crate) const DRAG_FLOOR: usize = 1;
 
-/// Lo que se deja de margen a la izquierda del texto, en celdas.
+/// What is left as a margin to the left of the text, in cells.
 ///
-/// Una celda y no cero: pegado al borde, el texto se lee como un error de pintado. A la derecha no
-/// hace falta, porque ahí no hay nada — el panel es lo último de la división.
+/// One cell and not zero: flush against the border, the text reads as a painting error. On the right it
+/// is not needed, because there is nothing there — the panel is the last thing in the pane.
 const MARGIN: f32 = 1.0;
 
-/// Cómo queda repartido el rectángulo de una división entre lo que se ve.
+/// How a pane's rectangle ends up divided among what is shown.
 ///
-/// Tiene nombre, y no es una tupla, por lo mismo que lo tiene [`crate::Tiling`], que hace lo propio
-/// entre las dos consolas: dos repartos en el mismo fotograma que se leyeran distinto serían dos
-/// idiomas para una sola idea.
+/// It has a name, and is not a tuple, for the same reason [`crate::Tiling`] has one, which does the same
+/// between the two consoles: two divisions in the same frame that read differently would be two
+/// languages for a single idea.
 pub struct PanelTiling {
-    /// Lo que le queda a la consola, que es contra lo que hay que medir su rejilla.
+    /// What is left to the console, which is what its grid has to be measured against.
     pub console: Rect,
-    /// Dónde va el panel, y **el panel que va ahí**. Van juntos porque no existe el uno sin el otro:
-    /// separarlos deja escribible una rama —hueco sin panel— que no puede ocurrir.
+    /// Where the panel goes, and **the panel that goes there**. They go together because one does not
+    /// exist without the other: separating them leaves a branch writable —a gap without a panel— that
+    /// cannot happen.
     pub panel: Option<Rect>,
 }
 
-/// Parte el rectángulo de una división entre su consola y su panel.
+/// Splits a pane's rectangle between its console and its panel.
 ///
-/// **El descuento va aquí y no después de medir la rejilla**, que es lo que hace que la consola mida
-/// el hueco que le queda de verdad: midiendo primero el rectángulo entero, el programa de dentro
-/// creería tener columnas que el panel le ha quitado y escribiría debajo de él.
+/// **The deduction goes here and not after measuring the grid**, which is what makes the console measure
+/// the gap it really has left: measuring the whole rectangle first, the program inside would believe it
+/// had columns the panel has taken from it and would write beneath it.
 ///
-/// Sin panel que pintar, la consola se queda con todo y no hay segundo rectángulo: es lo que hace que
-/// una división cuyo productor no ha publicado nada se vea exactamente igual que antes de que el panel
-/// existiera.
+/// With no panel to paint, the console keeps everything and there is no second rectangle: it is what makes
+/// a pane whose producer has published nothing look exactly like it did before the panel existed.
 ///
-/// Con panel, el hueco es lo que sobre después del suelo de la consola, así que en una ventana
-/// estrecha el que se estrecha es el panel y puede llegar a desaparecer. Nunca al revés.
+/// With a panel, the gap is what is left over after the console's floor, so in a narrow window the one
+/// that narrows is the panel and it can come to disappear. Never the other way around.
 ///
-/// **`panel_cells` lleva las dos cosas en un solo parámetro, y no es por brevedad.** «Si hay algo
-/// que enseñar» y «cuánto ancho se lleva» son la misma decisión tomada en el mismo sitio: con dos
-/// parámetros existe el estado escribible «no hay panel, pero con treinta y seis celdas», y este
-/// módulo ya pagó una vez tener **dos criterios paralelos** para si el panel se ve — uno en el reparto
-/// del ancho y otro en el pintado, que se contradecían.
+/// **`panel_cells` carries both things in a single parameter, and it is not for brevity.** «Whether there
+/// is something to show» and «how much width it takes» are the same decision made in the same place: with
+/// two parameters the writable state «there is no panel, but with thirty-six cells» exists, and this
+/// module already paid once for having **two parallel criteria** for whether the panel is shown — one in
+/// the width tiling and another in the painting, which contradicted each other.
 ///
-/// El nombre dice la unidad a propósito: aquí conviven celdas y puntos, y un mismo nombre para las dos
-/// deja al lector sin saber cuál está mirando.
+/// The name says the unit on purpose: here cells and points coexist, and a single name for the two leaves
+/// the reader without knowing which one they are looking at.
 pub fn set_aside(pane: Rect, cell_width: f32, panel_cells: Option<usize>) -> PanelTiling {
     let Some(cells) = panel_cells else {
         return PanelTiling {
@@ -122,44 +123,44 @@ pub fn set_aside(pane: Rect, cell_width: f32, panel_cells: Option<usize>) -> Pan
     }
 }
 
-/// Lo que una división reclama ahora mismo.
+/// What a pane claims right now.
 ///
-/// **Dos cosas y no una**: *qué* reclama —que lo dice su productor y la aplicación no deduce— y si hay
-/// alguien **sosteniéndolo**, es decir si lo que se enseña es de fiar o es lo último que llegó de un
-/// productor que ya no contesta. Las dos caben en un solo símbolo, que es lo que hace falta donde no
-/// hay sitio para una frase.
+/// **Two things and not one**: *what* it claims —which its producer says and the application does not
+/// deduce— and whether there is someone **holding it**, that is whether what is shown is trustworthy or is
+/// the last thing that arrived from a producer that no longer answers. The two fit in a single symbol,
+/// which is what is needed where there is no room for a sentence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AttentionState {
-    /// Cuál de los tres del contrato.
+    /// Which of the contract's three.
     pub class: Attention,
-    /// Si hay alguien detrás de lo que este panel dice.
+    /// Whether there is someone behind what this panel says.
     ///
-    /// Sale del mismo sitio que el aviso que se pinta debajo, y no de un segundo criterio de «esto ya
-    /// no vale»: con dos, el día que discrepen el panel diría que el reclamo es de fiar mientras su
-    /// propia línea confiesa que no. Cubre las dos formas de quedarse sin nadie detrás —el silencio
-    /// largo y el fichero que dejó de leerse—, que en pantalla significan lo mismo.
+    /// It comes from the same place as the warning painted below, and not from a second criterion of «this
+    /// no longer holds»: with two, the day they disagree the panel would say the claim is trustworthy
+    /// while its own line confesses it is not. It covers the two ways of being left with no one behind
+    /// —the long silence and the file that stopped being read—, which on screen mean the same thing.
     ///
-    /// **Con una excepción, y está en el registro de decisiones**: lo *terminado* no se queda sin nadie
-    /// detrás por callar, porque callar es lo que hace quien terminó.
+    /// **With one exception, and it is in the decision log**: the *finished* is not left with no one
+    /// behind by falling silent, because falling silent is what whoever finished does.
     pub backed: bool,
 }
 
-/// Cuál de dos reclamos gana cuando hay que enseñar **uno solo** — la ficha de una pestaña tiene un
-/// símbolo y sus divisiones pueden reclamar cosas distintas.
+/// Which of two claims wins when **only one** has to be shown — a tab's chip has one symbol and its
+/// panes can claim different things.
 ///
-/// **Manda la clase, y a igualdad de clase gana el que alguien sostiene.** Con dos divisiones esperándote
-/// y una de ellas viva, la ficha tiene que decir que hay alguien esperando de verdad: pintar el
-/// atenuado sería mandarte a la que está muerta.
+/// **The class rules, and at equal class the one someone holds wins.** With two panes waiting for you
+/// and one of them alive, the chip has to say there is someone really waiting: painting the dimmed one
+/// would send you to the one that is dead.
 ///
-/// **A mano y no derivado**, por lo mismo que el orden de [`Attention`]: un `Ord` derivado ordena por el
-/// orden de los campos en el fichero, así que quien los reordenara —o metiera uno en medio— cambiaría
-/// cuál gana **en silencio**.
+/// **By hand and not derived**, for the same reason as the ordering of [`Attention`]: a derived `Ord`
+/// orders by the order of the fields in the file, so whoever reordered them —or put one in the middle—
+/// would change which one wins **silently**.
 impl Ord for AttentionState {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // **Se destructura para que un campo nuevo no compile.** Comparando por `self.campo` a mano, el
-        // día que este tipo gane un tercer campo el orden lo ignoraría en silencio y dejaría de ser
-        // coherente con el `Eq` derivado — que es justo lo que el orden de [`Attention`] evita con su
-        // `match` exhaustivo, y la razón de que aquí no haya un `derive`.
+        // **It is destructured so that a new field does not compile.** Comparing by `self.field` by hand,
+        // the day this type gains a third field the ordering would ignore it silently and stop being
+        // coherent with the derived `Eq` — which is exactly what the ordering of [`Attention`] avoids with
+        // its exhaustive `match`, and the reason there is no `derive` here.
         let Self { class, backed } = self;
         class.cmp(&other.class).then(backed.cmp(&other.backed))
     }
@@ -171,46 +172,46 @@ impl PartialOrd for AttentionState {
     }
 }
 
-/// Lo que una división sabe del panel de su productor.
+/// What a pane knows about its producer's panel.
 ///
-/// **Guarda el último panel bueno a propósito.** El productor machaca el fichero entero en cada
-/// publicación —así lo dice su contrato— así que una lectura puede caer justo en medio y no encontrar
-/// JSON válido. Sin esto el panel parpadearía a vacío en cada escritura, que es un fallo mucho más
-/// visible que el que evita. **Y por eso mismo hay que confesarlo**: conservar el último bueno sin
-/// decirlo esconde a un productor roto detrás de un resumen plausible de hace una hora.
+/// **It keeps the last good panel on purpose.** The producer clobbers the whole file on each publication
+/// —so says its contract— so a read can land right in the middle and not find valid JSON. Without this the
+/// panel would flicker to empty on every write, which is a much more visible failure than the one it
+/// avoids. **And for that very reason it has to be confessed**: keeping the last good one without saying
+/// so hides a broken producer behind a plausible summary from an hour ago.
 #[derive(Default)]
 pub struct PanelState {
     last_good: Option<Panel>,
-    /// Lo maquetado, y para qué se maquetó.
+    /// What was laid out, and what it was laid out for.
     ///
-    /// **Existe por coste, y el escenario es presente**: mientras una consola vuelca, la ventana
-    /// repinta todos los fotogramas, y envolver el panel al ancho se recalcularía sesenta veces por
-    /// segundo sin que su fichero haya cambiado.
+    /// **It exists for cost, and the scenario is the present**: while a console dumps, the window repaints
+    /// every frame, and wrapping the panel to the width would be recalculated sixty times per second
+    /// without its file having changed.
     layout: Option<PanelLayout>,
-    /// Por qué falló la última lectura, si falló. Es lo que distingue «aquí no hay productor» de «hay
-    /// uno y está roto», que se ven igual y no son lo mismo.
+    /// Why the last read failed, if it failed. It is what tells apart «there is no producer here» from
+    /// «there is one and it is broken», which look the same and are not the same thing.
     problem: Option<Problem>,
 }
 
-/// Una maqueta y las dos cosas de las que depende: si cambia cualquiera, hay que rehacerla.
+/// A layout and the two things it depends on: if either changes, it has to be redone.
 struct PanelLayout {
     width: usize,
-    /// **La línea que pone la app entra en la clave de la caché.** Un panel que envejece cambia lo que
-    /// hay que pintar sin que su fichero se haya tocado, así que una caché que solo mirara el ancho
-    /// seguiría enseñando la maqueta de cuando el panel era fresco — y el aviso no aparecería nunca.
+    /// **The line the app puts in enters the cache key.** A panel that ages changes what has to be
+    /// painted without its file having been touched, so a cache that only looked at the width would keep
+    /// showing the layout from when the panel was fresh — and the warning would never appear.
     warning: Option<String>,
     rows: Vec<Row>,
 }
 
 impl PanelState {
-    /// Vuelve a leer el panel si su fichero ha cambiado.
+    /// Reads the panel again if its file has changed.
     ///
-    /// **No cronometra nada**: quien mide es la ventana, con un solo reloj alrededor de leer y pintar.
-    /// Dos relojes para un tramo que se publica como uno es la forma más fácil de que el número deje de
-    /// significar lo que dice.
+    /// **It times nothing**: whoever measures is the window, with a single clock around reading and
+    /// painting. Two clocks for a stretch that is published as one is the easiest way for the number to
+    /// stop meaning what it says.
     pub fn refresh(&mut self, dir: &std::path::Path) {
-        // La fecha con la que se compara es la de la última lectura buena, que es la que el propio
-        // contrato devuelve. Guardarla aparte sería tener dos copias del mismo dato.
+        // The date it is compared against is that of the last good read, which is the one the contract
+        // itself returns. Keeping it separately would be having two copies of the same datum.
         let seen = self.last_good.as_ref().and_then(|panel| panel.written_at);
 
         match panel_contract::read_if_newer(dir, seen) {
@@ -219,107 +220,108 @@ impl PanelState {
                 self.problem = None;
                 self.layout = None;
             }
-            // **Lo que hay sigue vigente, y eso incluye borrar el problema anterior.** Que la lectura
-            // llegue hasta aquí significa que se pudo preguntar por el fichero y que su fecha es la del
-            // panel que ya se tiene: lo que se enseña **es** lo último, y un fallo de hace un rato ya no
-            // describe la realidad. Sin esto, un tropiezo pasajero —quedarse sin descriptores, un
-            // montaje de red que parpadea— acusaría al productor para siempre, porque su fichero no va a
-            // volver a cambiar de fecha por sí solo.
+            // **What there is stays valid, and that includes clearing the previous problem.** That the
+            // read reaches here means the file could be asked about and that its date is that of the panel
+            // already held: what is shown **is** the latest, and a failure from a while ago no longer
+            // describes reality. Without this, a passing stumble —running out of descriptors, a network
+            // mount that flickers— would accuse the producer forever, because its file is not going to
+            // change its date again on its own.
             Ok(None) => self.problem = None,
             Err(problem) => self.problem = Some(problem),
         }
     }
 
-    /// El último panel que se entendió, si hay alguno.
+    /// The last panel that was understood, if there is one.
     ///
-    /// **Solo lo usan las pruebas, y por eso está detrás de su bandera.** El pintado no lo necesita —
-    /// va por [`PanelState::lay_out_if_needed`], que puede componer un panel que es solo la confesión
-    /// de la aplicación— y dejarlo como método de producción sería una puerta abierta a que alguien
-    /// vuelva a decidir «hay panel» por su cuenta, que es justo lo que [`PanelState::is_visible`] centraliza.
+    /// **Only the tests use it, and that is why it is behind its flag.** Painting does not need it — it
+    /// goes through [`PanelState::lay_out_if_needed`], which can compose a panel that is only the
+    /// application's confession— and leaving it as a production method would be an open door to someone
+    /// deciding «there is a panel» on their own again, which is exactly what [`PanelState::is_visible`]
+    /// centralizes.
     #[cfg(test)]
     pub(crate) fn last_understood(&self) -> Option<&Panel> {
         self.last_good.as_ref()
     }
 
-    /// Si esta consola tiene algo que enseñar, sea del productor o de la propia aplicación.
+    /// Whether this console has something to show, be it the producer's or the application's own.
     ///
-    /// **Sale de lo mismo que decide el pintado, y no de un criterio paralelo.** Con dos predicados que
-    /// dicen «hay panel» por su cuenta, el día que discrepen se reserva una franja donde no se pinta
-    /// nada, o se pinta fuera de la que se reservó.
+    /// **It comes from the same thing that decides painting, and not from a parallel criterion.** With two
+    /// predicates that say «there is a panel» on their own, the day they disagree a strip is reserved
+    /// where nothing is painted, or something is painted outside the one that was reserved.
     ///
-    /// **Que el fichero no exista todavía no cuenta**, y esa es la raya que sostiene la promesa de que
-    /// una consola sin productor se ve exactamente como antes de este hito: no hay panel, no se
-    /// descuenta ancho, no hay nada.
+    /// **That the file does not exist yet does not count**, and that is the line that holds the promise
+    /// that a console with no producer looks exactly like it did before this milestone: there is no panel,
+    /// no width is deducted, there is nothing.
     pub fn is_visible(&self, now: SystemTime) -> bool {
         self.last_good.is_some() || self.warning(now).is_some()
     }
 
-    /// Qué reclama esta división **ahora**, si reclama algo.
+    /// What this pane claims **now**, if it claims anything.
     ///
-    /// **Sale del campo que el productor declaró y de nada más.** Ni del cuerpo del resumen, ni de la
-    /// fase, ni de si la consola escribe: deducirlo es exactamente lo que el contrato prohíbe, y una
-    /// línea con `mark: block` de la semana pasada dejaría la pestaña marcada para siempre.
+    /// **It comes from the field the producer declared and from nothing else.** Not from the summary body,
+    /// nor from the phase, nor from whether the console writes: deducing it is exactly what the contract
+    /// forbids, and a line with `mark: block` from last week would leave the tab marked forever.
     ///
-    /// **Sin panel bueno no hay reclamo**, aunque la aplicación tenga algo que confesar: lo que se
-    /// confiesa entonces es que no hay panel, y un panel que no se ha podido leer nunca no dijo nada
-    /// que reclamar.
+    /// **With no good panel there is no claim**, even if the application has something to confess: what is
+    /// confessed then is that there is no panel, and a panel that could never be read said nothing to
+    /// claim.
     pub fn attention(&self, now: SystemTime) -> Option<AttentionState> {
         self.attention_with(self.warning(now).is_none())
     }
 
-    /// Lo mismo, para quien ya tiene el aviso en la mano.
+    /// The same, for whoever already has the warning in hand.
     ///
-    /// **Existe para que el aviso se calcule una vez por división y fotograma** y no dos: el camino de
-    /// pintado ya lo necesita entero, y volver a pedirlo aquí solo para preguntarle si es `None` cuesta
-    /// un formateo de cadena en cada fotograma de una ventana que puede estar repintándose a sesenta.
+    /// **It exists so the warning is computed once per pane and frame** and not twice: the painting path
+    /// already needs it whole, and asking for it again here only to ask whether it is `None` costs a
+    /// string format on every frame of a window that may be repainting at sixty.
     fn attention_with(&self, nothing_to_confess: bool) -> Option<AttentionState> {
         let class = self.last_good.as_ref()?.attention?;
-        // **Lo terminado no necesita a nadie detrás.** Quien acabó deja de publicar *por definición*,
-        // así que el silencio no desmiente su «terminó y nadie lo ha mirado»: es su estado normal. Sin
-        // esta excepción, media hora después de acabar todo lo terminado se apagaría — y encontrar por
-        // la mañana lo que acabó de noche es justo para lo que sirve.
-        // Lo que sí lo desmiente es **no poder leer su fichero**, y eso es lo único que aquí se mira:
-        // `problem` es lo mismo que separa las dos clases de aviso en [`PanelState::warning`], de donde sale
-        // `nothing_to_confess`.
+        // **The finished needs no one behind it.** Whoever finished stops publishing *by definition*, so
+        // the silence does not belie its «terminó y nadie lo ha mirado»: it is its normal state.
+        // Without this exception, half an hour after finishing everything finished would go out — and
+        // finding in the morning what finished at night is exactly what it is for.
+        // What does belie it is **not being able to read its file**, and that is the only thing looked at
+        // here: `problem` is the same thing that separates the two classes of warning in
+        // [`PanelState::warning`], from which `nothing_to_confess` comes.
         let backed = nothing_to_confess || (class == Attention::Done && self.problem.is_none());
         Some(AttentionState { class, backed })
     }
 
-    /// Lo que la aplicación tiene que decir de su cuenta sobre este panel, si tiene algo que decir.
+    /// What the application has to say of its own about this panel, if it has something to say.
     ///
-    /// **Es la línea de la app, no una línea del productor**, y por eso no depende de `header`: esa
-    /// bandera decide si se pinta la identidad de la división, no si la aplicación puede ser honesta.
-    /// Un productor que la apagara para esconder que su panel está roto sería justo el caso que esto
-    /// viene a impedir.
+    /// **It is the app's line, not a producer's line**, and that is why it does not depend on `header`:
+    /// that flag decides whether the pane's identity is painted, not whether the application can be
+    /// honest. A producer that turned it off to hide that its panel is broken would be exactly the case
+    /// this comes to prevent.
     fn warning(&self, now: SystemTime) -> Option<String> {
-        // **El fichero que todavía no existe es la excepción, y va primero por eso.** El resto se
-        // ordena por lo que hay que decir: primero los fallos de lectura, que son lo más reciente que
-        // se sabe, y solo si no hay ninguno se mira el reloj.
+        // **The file that does not exist yet is the exception, and it goes first for that.** The rest is
+        // ordered by what has to be said: first the read failures, which are the most recent thing known,
+        // and only if there is none is the clock looked at.
         match (&self.problem, &self.last_good) {
             (Some(problem), _) if is_a_missing_file(problem) => self
                 .last_good
                 .as_ref()
-                .map(|_| "el fichero del panel ya no está".to_owned()),
-            (Some(problem), Some(_)) => Some(format!("lo que se ve no es lo último: {problem}")),
-            (Some(problem), None) => Some(format!("sin panel: {problem}")),
+                .map(|_| "the panel file is no longer there".to_owned()),
+            (Some(problem), Some(_)) => Some(format!("what is shown is not the latest: {problem}")),
+            (Some(problem), None) => Some(format!("no panel: {problem}")),
             (None, Some(panel)) if panel.is_stale_at(now) => Some(no_news(panel, now)),
             (None, _) => None,
         }
     }
 
-    /// Cuánto falta para que **cambie lo que este panel dice de sí mismo**, si es que va a cambiar.
+    /// How long until **what this panel says about itself changes**, if it is going to change.
     ///
-    /// **La ventana lo necesita para despertarse a tiempo.** Un productor que se muere o se cuelga no
-    /// escribe nada, así que no hay evento de fichero que avise: sin este despertador el aviso de
-    /// «esto es viejo» no aparecería jamás en una ventana en reposo, que es exactamente cuando hace
-    /// falta.
+    /// **The window needs it to wake up in time.** A producer that dies or hangs writes nothing, so there
+    /// is no file event to warn: without this alarm the warning of «this is old» would never appear in a
+    /// window at rest, which is exactly when it is needed.
     ///
-    /// **Y no acaba cuando el panel se marca como viejo**: el aviso lleva un número que avanza, así que
-    /// hay que volver cuando ese número cambie. Sin eso, un panel que se marcó viejo a los cinco
-    /// minutos seguiría diciendo «5 min» tres horas después — acertando en lo cualitativo y mintiendo
-    /// justo en el dato que sirve para decidir si el agente está muerto o solo lento.
+    /// **And it does not end when the panel is marked as old**: the warning carries a number that
+    /// advances, so it has to come back when that number changes. Without that, a panel marked old at five
+    /// minutes would keep saying «5 min» three hours later — right about the qualitative and lying just
+    /// about the datum that serves to decide whether the agent is dead or only slow.
     pub fn how_long_until_warning(&self, now: SystemTime) -> Option<Duration> {
-        // Con un problema el aviso ya está puesto y no cambia con el tiempo: no hay a qué volver.
+        // With a problem the warning is already set and does not change with time: there is nothing to
+        // come back to.
         if self.problem.is_some() {
             return None;
         }
@@ -327,14 +329,15 @@ impl PanelState {
         let silence = now.duration_since(panel.written_at?).ok()?;
 
         match panel.stale_after.checked_sub(silence) {
-            // Todavía no es viejo: lo próximo que cambia es que lo sea.
+            // It is not old yet: the next thing that changes is that it is.
             Some(missing) => Some(missing),
-            // Ya lo es, y lo que se enseña es un número redondeado: se vuelve cuando salte.
+            // It already is, and what is shown is a rounded number: it comes back when it ticks over.
             None => Some(until_the_next_step(silence)),
         }
     }
 
-    /// La maqueta para este ancho, este aviso y este reclamo, calculándola solo si no vale la que hay.
+    /// The layout for this width, this warning and this claim, computing it only if the one there is no
+    /// good.
     fn lay_out_if_needed(
         &mut self,
         id: &str,
@@ -347,10 +350,10 @@ impl PanelState {
             return None;
         }
 
-        // **El reclamo no está en la clave, y es a propósito**: se atenúa exactamente cuando aparece
-        // el aviso —que sí está— y su clase solo cambia al releer el fichero, que tira la maqueta
-        // entera. Meterlo sería un término que ninguna prueba puede tumbar. Quien cambie el criterio de
-        // «sostenido» y lo despegue del aviso tiene que añadirlo aquí.
+        // **The claim is not in the key, and it is on purpose**: it dims exactly when the warning appears
+        // —which is in it— and its class only changes on re-reading the file, which throws away the whole
+        // layout. Putting it in would be a term no test can knock down. Whoever changes the criterion of
+        // «backed» and detaches it from the warning has to add it here.
         let still_valid =
             matches!(&self.layout, Some(done) if done.width == width && done.warning == warning);
         if !still_valid {
@@ -371,16 +374,17 @@ impl PanelState {
     }
 }
 
-/// Si el problema es que el fichero no está, que es el único que **no** se enseña por sí solo.
+/// Whether the problem is that the file is not there, which is the only one that is **not** shown on its
+/// own.
 fn is_a_missing_file(problem: &Problem) -> bool {
     matches!(problem, Problem::Missing)
 }
 
-/// Lo que se dice de un panel que lleva callado más de lo suyo.
+/// What is said about a panel that has been quiet longer than its due.
 ///
-/// **Sin cuánto cuando el plazo es de menos de un minuto**: el contrato permite un
-/// `stale_after_minutes` de cero, y «sin noticias desde hace 0 min» un segundo después de publicar se
-/// lee como un fallo de la aplicación, no como una confesión.
+/// **Without a how-much when the deadline is under a minute**: the contract allows a `stale_after_minutes`
+/// of zero, and «sin noticias desde hace 0 min» a second after publishing reads as an application failure, not as a
+/// confession.
 fn no_news(panel: &Panel, now: SystemTime) -> String {
     match now.duration_since(panel.written_at.unwrap_or(now)) {
         Ok(silence) if silence.as_secs() >= 60 => {
@@ -390,11 +394,11 @@ fn no_news(panel: &Panel, now: SystemTime) -> String {
     }
 }
 
-/// Un rato, dicho como lo diría alguien: minutos hasta que son demasiados, y entonces horas.
+/// A while, said the way someone would say it: minutes until they are too many, and then hours.
 ///
-/// Sin segundos ni decimales a propósito. Lo que el aviso tiene que transmitir es «hace mucho», y un
-/// número que cambia cada segundo en una esquina de la pantalla es ruido, no información — y cada
-/// cambio cuesta un fotograma, porque hay que despertar a la ventana para pintarlo.
+/// Without seconds or decimals on purpose. What the warning has to convey is «a long time ago», and a
+/// number that changes every second in a corner of the screen is noise, not information — and every
+/// change costs a frame, because the window has to be woken to paint it.
 fn in_words(how_much: Duration) -> String {
     let minutes = how_much.as_secs() / 60;
     match minutes {
@@ -403,11 +407,10 @@ fn in_words(how_much: Duration) -> String {
     }
 }
 
-/// Cuánto falta para que el número de [`in_words`] cambie.
+/// How long until the number of [`in_words`] changes.
 ///
-/// Es lo que hace que el aviso no se pudra en pantalla sin despertar a la ventana más de lo justo:
-/// mientras se digan minutos se vuelve al siguiente minuto, y cuando se digan horas, a la siguiente
-/// hora.
+/// It is what makes the warning not rot on screen without waking the window more than needed: while
+/// minutes are said it comes back at the next minute, and when hours are said, at the next hour.
 fn until_the_next_step(silence: Duration) -> Duration {
     let step = if silence.as_secs() < 2 * 60 * 60 {
         60
@@ -418,36 +421,37 @@ fn until_the_next_step(silence: Duration) -> Duration {
     Duration::from_secs(step - silence.as_secs() % step)
 }
 
-/// Lo más largo que se pinta de una línea, en caracteres.
+/// The longest of a line that is painted, in characters.
 ///
-/// **No es cosmético: es lo único que acota el coste de pintar, y está medido.** El techo de tamaño
-/// del contrato acota lo que un fichero hace reservar al *interpretarse*, y su peor caso son treinta
-/// mil objetos diminutos. Pintar tiene el peor caso **inverso**: una sola línea de 260.000 caracteres
-/// —254 KiB, holgadamente por debajo del techo, y de las baratas de interpretar— cuesta **14,6 ms de
-/// teselado en cada fotograma** mientras siga publicada, con un millón de vértices por fotograma. El
-/// presupuesto entero son 16,7 ms y las dos consolas ya gastan 5,92.
+/// **It is not cosmetic: it is the only thing that bounds the cost of painting, and it is measured.** The
+/// size ceiling of the contract bounds what a file makes it reserve when *interpreted*, and its worst case
+/// is thirty thousand tiny objects. Painting has the **inverse** worst case: a single line of 260,000
+/// characters —254 KiB, comfortably below the ceiling, and one of the cheap ones to interpret— costs
+/// **14.6 ms of tessellation on every frame** while it stays published, with a million vertices per frame.
+/// The whole budget is 16.7 ms and the two consoles already spend 5.92.
 ///
-/// **Y el recorte al rectángulo no salva**: epaint descarta texto **por fila, no por glifo**
-/// (`tessellator.rs:2050`), así que una fila que empieza dentro del panel se copia entera a la malla
-/// aunque se salga por la derecha.
+/// **And clipping to the rectangle does not save you**: epaint discards text **by row, not by glyph**
+/// (`tessellator.rs:2050`), so a row that starts inside the panel is copied whole to the mesh even if it
+/// runs off to the right.
 ///
-/// Sigue haciendo falta con la envoltura puesta: envolver reparte el texto en filas, pero **no lo
-/// tira**, así que un millón de caracteres serían un millón de caracteres maquetados.
+/// It is still needed with wrapping in place: wrapping spreads the text across rows, but **does not throw
+/// it away**, so a million characters would be a million characters laid out.
 const MAX_CHARACTERS: usize = 512;
 
-/// Quita de una cadena de fuera lo que descuadraría la rejilla del panel, y acota lo que se pinta.
+/// Removes from an outside string what would knock the panel's grid out of square, and bounds what is
+/// painted.
 ///
-/// **Está medido en la fuente de epaint 0.36.1**: `break_on_newline` viene puesto por omisión en los
-/// trabajos de maquetado que usa `Painter::text` (`text_layout_types.rs:107`), así que una sola línea
-/// con un `\n` dentro pinta varias filas, y la maqueta cuenta una. Un tabulador es el otro caso:
-/// avanza el ancho de varias celdas mientras la medida de anchura lo cuenta como cero.
+/// **It is measured in the source of epaint 0.36.1**: `break_on_newline` comes set by default in the
+/// layout jobs `Painter::text` uses (`text_layout_types.rs:107`), so a single line with a `\n` inside
+/// paints several rows, and the layout counts one. A tab is the other case: it advances the width of
+/// several cells while the width measure counts it as zero.
 ///
-/// El `panel.json` puede venir de un repo clonado o de un contenedor, así que esto no es prudencia
-/// contra un descuido: es la frontera con lo de fuera. **Se aplica también a la referencia**, que es
-/// cadena ajena igual y desde este PR se pinta.
+/// The `panel.json` can come from a cloned repo or from a container, so this is not prudence against a
+/// slip: it is the border with the outside. **It is applied to the reference too**, which is an outside
+/// string all the same and since this PR is painted.
 ///
-/// Se sustituye por un espacio en vez de borrarse, para que dos palabras separadas por un salto de
-/// línea no acaben pegadas y se lean como una sola.
+/// It is replaced with a space instead of deleted, so that two words separated by a line break do not end
+/// up stuck together and read as one.
 fn sanitize(text: &str) -> String {
     text.chars()
         .take(MAX_CHARACTERS)
@@ -455,19 +459,20 @@ fn sanitize(text: &str) -> String {
         .collect()
 }
 
-/// El símbolo con el que se pinta cada marca del contrato.
+/// The symbol each contract mark is painted with.
 ///
-/// **Elegidos midiendo la fuente, no de memoria, y el ancho es el criterio.** De los seis del
-/// prototipo, `✓` no existe en la monoespaciada —ancho cero, igual que un codepoint inventado— y `⏸` y
-/// `⚠` solo están en las fuentes de emoji, donde miden 14 y 17,77 puntos frente a los 8,43 de una
-/// celda: **descuadrarían la columna**, que se lee peor que un cuadro porque no parece un fallo de
-/// fuente sino un panel mal alineado. Los otros tres del prototipo sí sirven tal cual.
+/// **Chosen by measuring the font, not from memory, and the width is the criterion.** Of the prototype's
+/// six, `✓` does not exist in the monospaced one —zero width, just like an invented codepoint— and `⏸`
+/// and `⚠` are only in the emoji fonts, where they measure 14 and 17.77 points against the 8.43 of a
+/// cell: **they would knock the column out of square**, which reads worse than a box because it does not
+/// look like a font failure but like a badly aligned panel. The other three of the prototype do serve as
+/// they are.
 ///
-/// `done` y `pending` comparten forma a propósito —el círculo lleno y el punto— porque son los dos
-/// extremos de lo mismo: lo acabado y lo que ni ha empezado.
+/// `done` and `pending` share a shape on purpose —the filled circle and the dot— because they are the two
+/// extremes of the same thing: the finished and what has not even started.
 ///
-/// Si algún día el juego se queda corto de expresividad, la salida está escrita en el plan: pintar las
-/// marcas como forma en vez de como carácter. Eso es otro hito.
+/// If some day the set falls short of expressiveness, the way out is written in the plan: painting the
+/// marks as a shape instead of as a character. That is another milestone.
 fn symbol(mark: Mark) -> char {
     match mark {
         Mark::Done => '●',
@@ -479,17 +484,17 @@ fn symbol(mark: Mark) -> char {
     }
 }
 
-/// El símbolo con el que se pinta cada clase de reclamo.
+/// The symbol each class of claim is painted with.
 ///
-/// **Los tres son propios y ninguno se repite con los del cuerpo**, a propósito: el mismo signo en dos
-/// sitios invita a leer que la aplicación dedujo el uno del otro, que es justo lo que el contrato
-/// prohíbe — un `mark: block` de una línea del resumen **no** es un reclamo de la división.
+/// **The three are their own and none is repeated with those of the body**, on purpose: the same sign in
+/// two places invites reading that the application deduced one from the other, which is exactly what the
+/// contract forbids — a `mark: block` from a line of the summary is **not** a claim of the pane.
 ///
-/// **Elegidos midiéndolos contra el ancho de una `M`**, con el mismo criterio y por la misma razón que
-/// los de arriba. La prueba que lo comprueba contra la fuente cuenta el porqué entero.
+/// **Chosen by measuring them against the width of an `M`**, with the same criterion and for the same
+/// reason as those above. The test that checks it against the font tells the whole why.
 ///
-/// `?` porque te preguntan a ti, `⊘` porque algo la tiene parada, y `∎` porque ahí ya no queda nada
-/// por hacer más que mirarlo.
+/// `?` because they are asking you, `⊘` because something has it stopped, and `∎` because there is nothing
+/// left there to do but look at it.
 pub(crate) fn attention_symbol(class: Attention) -> char {
     match class {
         Attention::Wait => '?',
@@ -498,13 +503,15 @@ pub(crate) fn attention_symbol(class: Attention) -> char {
     }
 }
 
-/// Lo que dice la fila del reclamo, en palabras.
+/// What the claim's row says, in words.
 ///
-/// **El símbolo no viaja solo**: en el panel hay sitio, y un signo suelto obliga a recordar una tabla.
+/// **The symbol does not travel alone**: in the panel there is room, and a loose sign forces recalling a
+/// table.
 ///
-/// Las tres frases son **las del contrato, palabra por palabra**, incluido el «a ti» de la primera —
-/// que es justo lo que la separa de la segunda, «por algo que **no** eres tú». Acortarlas por caber es
-/// perder la oposición que las distingue; lo que no cabe se envuelve, como todo lo demás del panel.
+/// The three phrases are **the contract's, word for word**, including the «a ti» of the first — which
+/// is exactly what separates it from the second, «por algo que **no** eres tú». Shortening them
+/// to fit is losing the opposition that tells them apart; what does not fit is wrapped, like everything
+/// else in the panel.
 fn attention_text(class: Attention) -> &'static str {
     match class {
         Attention::Wait => "te espera a ti",
@@ -513,14 +520,14 @@ fn attention_text(class: Attention) -> &'static str {
     }
 }
 
-/// Lo menos que se le deja al texto cuando la sangría y la columna se lo comen todo, en celdas.
+/// The least left to the text when the indent and the column eat it all, in cells.
 ///
-/// **Sin un suelo, la envoltura no progresa**: con el hueco a cero o negativo, cada vuelta del bucle
-/// mete cero caracteres y la ventana se cuelga. El prototipo ya lo aprendió, y por eso su envoltura
-/// lleva el mismo `max`.
+/// **Without a floor, wrapping does not progress**: with the gap at zero or negative, each turn of the
+/// loop puts in zero characters and the window hangs. The prototype already learned it, and that is why
+/// its wrapping carries the same `max`.
 const MINIMUM_SLOT: usize = 8;
 
-/// Una fila ya maquetada: en qué columna empieza, qué dice y de qué color.
+/// A row already laid out: which column it starts in, what it says and what color.
 #[derive(Debug, Clone, PartialEq)]
 struct Row {
     column: usize,
@@ -528,12 +535,12 @@ struct Row {
     color: Color32,
 }
 
-/// Convierte un panel en las filas que se van a pintar, al ancho dado en celdas.
+/// Turns a panel into the rows that are going to be painted, at the given width in cells.
 ///
-/// **Aquí está todo lo que cuesta y nada de lo que dibuja**, y esa separación es lo que permite
-/// recordar el resultado entre fotogramas: mientras el fichero y el ancho no cambien, la maqueta es la
-/// misma. Sin ella, envolver el panel se recalcularía sesenta veces por segundo mientras la consola de
-/// al lado vuelca.
+/// **Here is everything it costs and nothing it draws**, and that separation is what allows remembering
+/// the result between frames: as long as the file and the width do not change, the layout is the same.
+/// Without it, wrapping the panel would be recalculated sixty times per second while the console beside it
+/// dumps.
 fn lay_out(
     panel: Option<&Panel>,
     id: &str,
@@ -559,10 +566,10 @@ fn lay_out(
         );
     }
 
-    // **El reclamo va en la fila de la aplicación y no en la de identidad**, y esa frontera es la
-    // razón de ser de este hito: `header: false` esconde la identidad de la división, y la respuesta a
-    // «¿tengo que ir ahí?» no puede apagarla el productor con una bandera suya. Es la misma frontera
-    // que ya cumple el aviso de abajo.
+    // **The claim goes in the application's row and not in the identity one**, and that frontier is the
+    // reason this milestone exists: `header: false` hides the pane's identity, and the answer to «do I
+    // have to go there?» cannot be turned off by the producer with a flag of its own. It is the same
+    // frontier that the warning below already fulfills.
     if let Some(attention) = attention {
         wrap(
             &mut rows,
@@ -577,8 +584,9 @@ fn lay_out(
         );
     }
 
-    // **El aviso va arriba y no al final**, porque abajo es donde el recorte se come lo que no cabe:
-    // el aviso de que un panel no es de fiar sería justo lo primero en desaparecer de un panel largo.
+    // **The warning goes on top and not at the end**, because below is where the clip eats what does not
+    // fit: the warning that a panel is not trustworthy would be exactly the first thing to disappear from
+    // a long panel.
     if let Some(warning) = warning {
         wrap(
             &mut rows,
@@ -589,8 +597,8 @@ fn lay_out(
         );
     }
 
-    // La fila en blanco la escribe la maqueta, no el pintado: separada del cuerpo, lo que pone la
-    // aplicación se lee como lo que es y no como la primera línea del productor.
+    // The blank row is written by the layout, not by the painting: separated from the body, what the
+    // application puts reads as what it is and not as the producer's first line.
     if !rows.is_empty() {
         rows.push(Row {
             column: 0,
@@ -604,12 +612,12 @@ fn lay_out(
     };
 
     for block in blocks(&panel.lines) {
-        // **El ancho de la columna se calcula por bloque, y esa es la regla del contrato.** Con un
-        // ancho global, un solo bloque con una referencia larga desplazaría el texto de todos los
-        // demás, y lo que el panel gana alineando lo perdería en margen desperdiciado.
-        // **Y la columna se acota contra el ancho del panel.** El contrato no le pone techo a la
-        // referencia, así que una sola larguísima fijaría un ancho de columna que empuja el texto de
-        // todo su bloque fuera del rectángulo. Lo que no cabe se corta, como se corta el texto.
+        // **The column's width is computed per block, and that is the contract's rule.** With a global
+        // width, a single block with a long reference would displace the text of all the others, and what
+        // the panel gains by aligning it would lose in wasted margin.
+        // **And the column is bounded against the panel's width.** The contract puts no ceiling on the
+        // reference, so a single very long one would fix a column width that pushes the text of its whole
+        // block outside the rectangle. What does not fit is cut, as the text is cut.
         let column = block
             .iter()
             .filter_map(|line| line.reference.as_deref())
@@ -626,17 +634,17 @@ fn lay_out(
     rows
 }
 
-/// Parte las líneas en bloques por las líneas vacías, que es lo que el contrato usa para agruparlas.
+/// Splits the lines into blocks by the empty lines, which is what the contract uses to group them.
 ///
-/// El hueco **pertenece al bloque que cierra**: así se conserva como fila y la maqueta no tiene que
-/// acordarse de reponerlo entre bloque y bloque.
+/// The gap **belongs to the block it closes**: this way it is kept as a row and the layout does not have
+/// to remember to put it back between one block and the next.
 fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
     let mut blocks = vec![Vec::new()];
     for line in lines {
         let slot = line.text.is_empty() && line.reference.is_none() && line.mark.is_none();
         blocks
             .last_mut()
-            .expect("siempre hay uno abierto")
+            .expect("there is always one open")
             .push(line);
         if slot {
             blocks.push(Vec::new());
@@ -645,13 +653,13 @@ fn blocks(lines: &[Line]) -> Vec<Vec<&Line>> {
     blocks
 }
 
-/// Maqueta una línea: su símbolo, su referencia alineada, su sangría y su texto envuelto.
+/// Lays out a line: its symbol, its aligned reference, its indent and its wrapped text.
 fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<Row> {
     let color = theme.panel_color(line.mark, line.style);
     let reference = line.reference.as_deref().map(sanitize).unwrap_or_default();
     let text = sanitize(&line.text);
 
-    // Un hueco de verdad no lleva prefijo ni ocupa columna: es solo una fila en blanco.
+    // A real gap carries no prefix and takes no column: it is just a blank row.
     if text.is_empty() && reference.is_empty() && line.mark.is_none() {
         return vec![Row {
             column: 0,
@@ -660,30 +668,30 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
         }];
     }
 
-    // **La cabeza se acota antes de componerse, no después.** Símbolo, referencia y sangría se pintan
-    // en la primera fila sin pasar por la envoltura, así que una referencia más larga que el panel
-    // —forma legal: el contrato no le pone techo— sacaba esa fila entera fuera del rectángulo y con
-    // ella todas sus continuaciones. Lo que sobra de la referencia se corta, igual que se corta el
-    // texto: lo que no cabe no se puede leer, y fingir que sí desplaza todo lo demás.
+    // **The head is bounded before being composed, not after.** Symbol, reference and indent are painted
+    // in the first row without going through wrapping, so a reference longer than the panel —legal form:
+    // the contract puts no ceiling on it— pulled that whole row outside the rectangle and with it all its
+    // continuations. What is spare of the reference is cut, just as the text is cut: what does not fit
+    // cannot be read, and pretending it can displaces everything else.
     let head_cap = width.saturating_sub(MINIMUM_SLOT);
-    // Se corta al ancho de la columna, que ya viene acotado contra el panel: más larga que su columna,
-    // la referencia empujaría el texto de su propia línea y rompería la alineación del bloque.
+    // It is cut to the column's width, which already comes bounded against the panel: longer than its
+    // column, the reference would push the text of its own line and break the block's alignment.
     let reference: String = reference.chars().take(column).collect();
 
     let mut head = String::new();
     match line.mark {
         Some(mark) => head.push(symbol(mark)),
-        // El hueco del símbolo se reserva también sin marca: es lo que mantiene el texto de todas las
-        // líneas en la misma columna, que es de lo que va alinear.
+        // The symbol's slot is reserved even without a mark: it is what keeps the text of all the lines in
+        // the same column, which is what aligning is about.
         None => head.push(' '),
     }
     head.push(' ');
     if column > 0 {
         head.push_str(&format!("{reference:column$} "));
     }
-    // La sangría se acota contra lo mismo: un `indent` de 40 celdas es forma legal —el contrato admite
-    // hasta 64— y en un panel de 36 dejaría la continuación fuera del rectángulo, invisible y contada
-    // como fila visible, comiéndose renglones y falseando el aviso de cuántas faltan.
+    // The indent is bounded against the same: an `indent` of 40 cells is legal form —the contract admits
+    // up to 64— and in a panel of 36 it would leave the continuation outside the rectangle, invisible and
+    // counted as a visible row, eating rows and falsifying the warning of how many are missing.
     head.push_str(
         &" ".repeat(
             line.indent
@@ -695,15 +703,15 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
     let mut rows = Vec::new();
     wrap(&mut rows, indent, &text, color, width);
 
-    // La cabeza se pega a la primera fila; las de continuación arrancan ya sangradas, que es lo que
-    // alinea la envoltura bajo el texto y no bajo el símbolo.
+    // The head is stuck to the first row; the continuation ones start already indented, which is what
+    // aligns the wrapping under the text and not under the symbol.
     match rows.first_mut() {
         Some(first) => {
             first.text = format!("{head}{}", first.text);
-            // **Y la primera fila arranca en cero, lleve texto o no.** La rama de texto vacío de la
-            // envoltura devuelve su sangría —correcto para una continuación, no para la fila que lleva
-            // la cabeza pegada—, así que una línea con marca y sin texto salía desplazada por el ancho
-            // de su propio símbolo. Es forma legal del contrato.
+            // **And the first row starts at zero, whether it carries text or not.** The empty-text branch
+            // of the wrapping returns its indent —correct for a continuation, not for the row that carries
+            // the head stuck to it—, so a line with a mark and no text came out displaced by the width of
+            // its own symbol. It is legal form of the contract.
             first.column = 0;
         }
         None => rows.push(Row {
@@ -715,11 +723,11 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
     rows
 }
 
-/// Parte un texto en trozos que quepan, y los añade con la sangría de continuación puesta.
+/// Splits a text into chunks that fit, and adds them with the continuation indent in place.
 ///
-/// Corta **por palabras** cuando puede y por caracteres cuando una sola palabra no cabe, que es el caso
-/// de una ruta larga o de un identificador. Los espacios múltiples se colapsan, como el contrato avisa:
-/// no sirven para alinear.
+/// It cuts **by words** when it can and by characters when a single word does not fit, which is the case
+/// of a long path or of an identifier. Multiple spaces are collapsed, as the contract warns: they do not
+/// serve to align.
 fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: usize) {
     let slot = width.saturating_sub(indent).max(MINIMUM_SLOT);
     let mut pending: Vec<&str> = text.split_whitespace().rev().collect();
@@ -740,8 +748,8 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
             let room = slot - line.chars().count();
             if word.chars().count() > room {
                 if line.is_empty() {
-                    // Una palabra sola más larga que el hueco: se parte por caracteres, porque
-                    // dejarla entera desbordaría el panel y saltar de línea no la haría caber nunca.
+                    // A single word longer than the gap: it is split by characters, because leaving it
+                    // whole would overflow the panel and jumping to a line would never make it fit.
                     let cut = word.char_indices().nth(room).map_or(word.len(), |(i, _)| i);
                     line.push_str(&word[..cut]);
                     pending.push(&word[cut..]);
@@ -752,12 +760,12 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
             match pending.last() {
                 Some(next) if line.chars().count() + 1 + next.chars().count() <= slot => {
                     line.push(' ');
-                    word = pending.pop().expect("acabo de mirarla");
+                    word = pending.pop().expect("I just looked at it");
                 }
                 _ => break,
             }
         }
-        // La primera fila la coloca quien llama, pegándole la cabeza; las demás llevan su sangría.
+        // The first row is placed by the caller, sticking the head to it; the rest carry their indent.
         let column = if rows.is_empty() { 0 } else { indent };
         rows.push(Row {
             column,
@@ -767,18 +775,18 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
     }
 }
 
-/// Pinta el panel de una consola en el rectángulo al que su pintor está recortado.
+/// Paints a console's panel in the rectangle its painter is clipped to.
 ///
-/// Toma el estado prestado en exclusiva porque **maqueta si hace falta y se lo guarda**: la alternativa
-/// —maquetar fuera y pasar las filas— obligaría a que quien pinta llevara la cuenta de cuándo la
-/// maqueta caducó, y esa cuenta es de aquí.
+/// It borrows the state exclusively because **it lays out if needed and keeps it**: the alternative
+/// —laying out outside and passing the rows— would force whoever paints to keep track of when the layout
+/// expired, and that account belongs here.
 ///
-/// El identificador es el de la división, y es lo único que la aplicación aporta de su cosecha: la
-/// línea de identidad. **Se compone solo con lo que la app ya sabe y con lo que trae el propio
-/// fichero**, nunca leyendo un `meta.json` vecino — eso sería deducir el estado de otro.
+/// The identifier is the pane's, and it is the only thing the application contributes of its own: the
+/// identity line. **It is composed only with what the app already knows and with what the file itself
+/// brings**, never by reading a neighboring `meta.json` — that would be deducing another's state.
 ///
-/// El encuadre sale del propio pintor y no de un argumento aparte: con las dos vías, nada impediría
-/// que un día dejaran de coincidir.
+/// The framing comes from the painter itself and not from a separate argument: with the two ways, nothing
+/// would prevent them from ceasing to coincide one day.
 pub fn paint(
     painter: &Painter,
     state: &mut PanelState,
@@ -791,9 +799,9 @@ pub fn paint(
     let rect = painter.clip_rect();
     painter.rect_filled(rect, 0.0, theme.panel_background());
 
-    // El ancho en celdas se descuenta el margen de los dos lados aunque solo se pinte el de la
-    // izquierda: sin el de la derecha, la envoltura llenaría hasta el borde exacto del panel y el texto
-    // quedaría pegado a la consola de al lado.
+    // The width in cells is deducted the margin of both sides even though only the left one is painted:
+    // without the right one, the wrapping would fill to the exact edge of the panel and the text would be
+    // stuck to the console beside it.
     let width = ((rect.width() / metrics.width()) as usize).saturating_sub(2 * MARGIN as usize);
     let warning = state.warning(now);
     let attention = state.attention_with(warning.is_none());
@@ -801,9 +809,9 @@ pub fn paint(
         return;
     };
 
-    // **Sin un renglón entero no se pinta nada, ni siquiera el aviso.** Con un suelo de uno, un panel
-    // de alto cero encolaba «… N más» fuera de su rectángulo: un aviso de que falta contenido, en un
-    // sitio donde no cabe ningún contenido.
+    // **Without a whole row nothing is painted, not even the warning.** With a floor of one, a panel of
+    // zero height queued «… N more» outside its rectangle: a warning that content is missing, in a place
+    // where no content fits.
     let fit = (rect.height() / metrics.height()) as usize;
     if fit == 0 {
         return;
@@ -817,9 +825,9 @@ pub fn paint(
         if row.text.is_empty() {
             continue;
         }
-        // **El panel también descubre fuentes.** Lo que enseña es lo que publica su productor —texto
-        // libre, en cualquier idioma—, y sin apuntarlo un resumen en japonés se quedaba en cuadros para
-        // siempre porque nada disparaba la búsqueda.
+        // **The panel discovers fonts too.** What it shows is what its producer publishes —free text, in
+        // any language—, and without noting it a summary in Japanese stayed as boxes forever because
+        // nothing triggered the search.
         discoverer.note_text(&row.text);
         painter.text(
             Pos2::new(x, y),
@@ -835,17 +843,17 @@ pub fn paint(
         painter.text(
             Pos2::new(text_left, y),
             Align2::LEFT_TOP,
-            format!("… {leftover} más"),
+            format!("… {leftover} more"),
             metrics.font(),
             theme.panel_color(Some(Mark::Pending), None),
         );
     }
 }
 
-/// Cuántas filas se pintan y cuántas se quedan fuera.
+/// How many rows are painted and how many are left out.
 ///
-/// **El aviso ocupa su propia fila**, así que cuando algo sobra hay que pintar una menos: sin
-/// descontarla, la última línea de contenido quedaría tapada por el aviso que dice que falta contenido.
+/// **The warning takes its own row**, so when something is left over one fewer has to be painted: without
+/// deducting it, the last content line would be covered by the warning that says content is missing.
 fn clip(rows: &[Row], fit: usize) -> (&[Row], usize) {
     if rows.len() <= fit {
         return (rows, 0);
@@ -859,33 +867,33 @@ mod tests {
     use super::*;
     use panel_contract::{PANEL_FILE, PanelDir};
 
-    /// Un panel leído de un fichero de verdad, para probar la maqueta sin pasar por el pintado.
+    /// A panel read from a real file, to test the layout without going through the painting.
     fn panel_with(file: &str) -> Panel {
-        let dir = PanelDir::create().expect("crear el directorio");
+        let dir = PanelDir::create().expect("create the directory");
         publish(&dir, file);
         let mut state = PanelState::default();
         state.refresh(dir.path());
-        state.last_understood().expect("hay panel").clone()
+        state.last_understood().expect("there is a panel").clone()
     }
 
     fn publish(dir: &PanelDir, content: &str) {
-        std::fs::write(dir.path().join(PANEL_FILE), content).expect("publicar el panel");
+        std::fs::write(dir.path().join(PANEL_FILE), content).expect("publish the panel");
     }
 
-    /// Adelanta la fecha del fichero para que la relectura la vea cambiada.
+    /// Advances the file's date so that the re-read sees it changed.
     ///
-    /// A mano y no dejándolo al reloj: dos escrituras seguidas caen dentro del mismo tic en algunos
-    /// sistemas de ficheros, y entonces la prueba pasaría o fallaría según la máquina.
+    /// By hand and not leaving it to the clock: two writes in a row fall within the same tick on some file
+    /// systems, and then the test would pass or fail depending on the machine.
     fn age_the_file(dir: &PanelDir, seconds: u64) {
         let path = dir.path().join(PANEL_FILE);
         std::fs::File::open(&path)
-            .expect("abrir")
+            .expect("open")
             .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(seconds))
-            .expect("mover la fecha");
+            .expect("move the date");
     }
 
-    /// Lo que mide una celda de ancho en las pruebas del reparto: fijo, para que el suelo salga
-    /// redondo y los fallos se lean sin calcular nada.
+    /// What a cell of width measures in the pane tests: fixed, so that the floor comes out round and the
+    /// failures read without calculating anything.
     const CELL_WIDTH: f32 = 8.0;
 
     fn pane_of(width: f32) -> Rect {
@@ -893,75 +901,75 @@ mod tests {
     }
 
     #[test]
-    fn el_panel_se_lleva_su_ancho_y_la_consola_el_resto() {
+    fn the_panel_takes_its_width_and_the_console_the_rest() {
         let slot = set_aside(pane_of(800.0), CELL_WIDTH, Some(DEFAULT_WIDTH));
-        let panel = slot.panel.expect("hay panel");
+        let panel = slot.panel.expect("there is a panel");
 
         assert_eq!(panel.width(), DEFAULT_WIDTH as f32 * CELL_WIDTH);
         assert_eq!(
             slot.console.width() + panel.width(),
             800.0,
-            "entre los dos tienen que cubrir la división, sin hueco ni solape"
+            "between the two they have to cover the pane, with no gap or overlap"
         );
         assert_eq!(
             slot.console.right(),
             panel.left(),
-            "el panel empieza justo donde acaba la consola"
+            "the panel starts right where the console ends"
         );
     }
 
-    /// El panel es margen y la consola es el trabajo, así que en una ventana estrecha lo que se
-    /// estrecha es el panel. Con la regla al revés, arrastrar el divisor dejaría a un programa
-    /// interactivo sin sitio para escribir mientras su panel conserva sus treinta y seis columnas.
+    /// The panel is margin and the console is the work, so in a narrow window what narrows is the panel.
+    /// With the rule reversed, dragging the divider would leave an interactive program with no room to
+    /// write while its panel keeps its thirty-six columns.
     #[test]
-    fn en_una_division_estrecha_el_panel_cede_y_la_consola_conserva_su_suelo() {
+    fn in_a_narrow_pane_the_panel_yields_and_the_console_keeps_its_floor() {
         let narrow = (MINIMUM_CONSOLE + 4.0) * CELL_WIDTH;
 
         let slot = set_aside(pane_of(narrow), CELL_WIDTH, Some(DEFAULT_WIDTH));
 
         assert_eq!(
-            slot.panel.expect("hay panel").width(),
+            slot.panel.expect("there is a panel").width(),
             4.0 * CELL_WIDTH,
-            "el panel es el que cede"
+            "the panel is the one that yields"
         );
         assert_eq!(slot.console.width(), MINIMUM_CONSOLE * CELL_WIDTH);
     }
 
-    /// Y el borde del anterior: por debajo del suelo de la consola el panel desaparece del todo antes
-    /// que devolver un rectángulo invertido, que es lo que haría una resta sin suelo.
+    /// And the edge of the previous one: below the console's floor the panel disappears entirely rather
+    /// than return an inverted rectangle, which is what a subtraction without a floor would do.
     #[test]
-    fn en_una_division_mas_estrecha_que_el_suelo_el_panel_se_queda_sin_ancho() {
+    fn in_a_pane_narrower_than_the_floor_the_panel_is_left_with_no_width() {
         let slot = set_aside(pane_of(16.0), CELL_WIDTH, Some(DEFAULT_WIDTH));
-        let panel = slot.panel.expect("el rectángulo existe, aunque vacío");
+        let panel = slot.panel.expect("the rectangle exists, though empty");
 
         assert_eq!(panel.width(), 0.0);
         assert_eq!(slot.console.width(), 16.0);
         assert!(slot.console.left() <= slot.console.right() && panel.left() <= panel.right());
     }
 
-    /// **El ancho son treinta y seis columnas, no doscientos ochenta y ocho puntos**, y con una sola
-    /// medida de celda las dos cosas dan el mismo número: la primera prueba de este módulo pasa igual
-    /// con un ancho fijo en puntos. La diferencia solo se ve **entre fotogramas de aumentos distintos**
-    /// —la fuente cambia de tamaño y la métrica se vuelve a preguntar en cada pasada—, y es justo lo
-    /// que la decisión de contarlo en celdas existe para conservar: cuántos caracteres caben.
+    /// **The width is thirty-six columns, not two hundred eighty-eight points**, and with a single cell
+    /// measure the two things give the same number: this module's first test passes just the same with a
+    /// fixed width in points. The difference is only seen **between frames of different zooms** —the font
+    /// changes size and the metric is asked again on each pass—, and it is exactly what the decision to
+    /// count it in cells exists to preserve: how many characters fit.
     #[test]
-    fn el_ancho_del_panel_se_cuenta_en_celdas_y_no_en_puntos() {
-        // El doble de aumento, que es el salto que hace un escritorio al pasar a una pantalla densa.
+    fn the_panel_width_is_counted_in_cells_and_not_in_points() {
+        // Double the zoom, which is the jump a desktop makes when moving to a dense screen.
         for cell in [CELL_WIDTH, CELL_WIDTH * 2.0] {
             let slot = set_aside(pane_of(1600.0), cell, Some(DEFAULT_WIDTH));
 
             assert_eq!(
-                slot.panel.expect("hay panel").width() / cell,
+                slot.panel.expect("there is a panel").width() / cell,
                 DEFAULT_WIDTH as f32,
-                "con celdas de {cell} puntos el panel dejó de medir sus columnas"
+                "with cells of {cell} points the panel stopped measuring its columns"
             );
         }
     }
 
-    /// Sin nada que pintar no se descuenta ancho y no hay segundo
-    /// rectángulo: la división se ve exactamente como antes de que existiera el panel.
+    /// With nothing to paint no width is deducted and there is no second rectangle: the pane looks
+    /// exactly like it did before the panel existed.
     #[test]
-    fn sin_panel_que_pintar_la_consola_se_queda_con_todo() {
+    fn with_no_panel_to_paint_the_console_keeps_everything() {
         let whole = pane_of(800.0);
 
         let slot = set_aside(whole, CELL_WIDTH, None);
@@ -970,32 +978,32 @@ mod tests {
         assert!(slot.panel.is_none());
     }
 
-    /// El sitio que se le da al panel en las pruebas del pintado: de sobra de alto para que quepa
-    /// todo, así que lo que no salga es porque no se pintó y no porque no cupiera.
+    /// The room given to the panel in the painting tests: plenty of height so everything fits, so what
+    /// does not come out is because it was not painted and not because it did not fit.
     const PLACE: Rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 600.0));
 
-    /// Pinta un panel de verdad en el sitio dado y devuelve **todo lo que quedó encolado**.
+    /// Paints a real panel in the given place and returns **everything that got queued**.
     ///
-    /// Devuelve las formas enteras y no solo su texto porque dos propiedades del pintado no son
-    /// texto: **el fondo**, que es lo único que separa el panel de su consola, y **dónde cae** cada
-    /// fila.
+    /// It returns the whole shapes and not just their text because two properties of the painting are not
+    /// text: **the background**, which is the only thing that separates the panel from its console, and
+    /// **where** each row **falls**.
     fn what_gets_queued(file: &str, place: Rect) -> Vec<eframe::egui::Shape> {
-        let dir = PanelDir::create().expect("crear el directorio");
+        let dir = PanelDir::create().expect("create the directory");
         publish(&dir, file);
         let mut state = PanelState::default();
         state.refresh(dir.path());
         assert!(
             state.last_understood().is_some(),
-            "el fichero de la prueba no se leyó"
+            "the test's file was not read"
         );
 
         paint_the_state(&mut state, place, SystemTime::now())
     }
 
-    /// Pinta el estado que se le dé, en el momento que se le diga.
+    /// Paints the state it is given, at the moment it is told.
     ///
-    /// Separado de [`what_gets_queued`] porque la confesión depende de **cuándo** se mire: el mismo
-    /// panel se pinta distinto si ha pasado su plazo.
+    /// Separated from [`what_gets_queued`] because the confession depends on **when** you look: the same
+    /// panel is painted differently if its deadline has passed.
     fn paint_the_state(
         state: &mut PanelState,
         place: Rect,
@@ -1018,32 +1026,32 @@ mod tests {
             );
         });
 
-        // Las formas se sacan **antes** de soltar la salida: una pasada de interfaz que se suelta sin
-        // aplicar sus texturas entra en pánico, y aquí no hay pantalla donde aplicarlas.
+        // The shapes are taken **before** dropping the output: a UI pass dropped without applying its
+        // textures panics, and here there is no screen to apply them on.
         let shapes = std::mem::take(&mut output.shapes);
         output.drop_without_applying_deltas();
 
         shapes.into_iter().map(|clipped| clipped.shape).collect()
     }
 
-    /// Un estado con un panel publicado hace lo que se diga.
+    /// A state with a panel published does what it is told.
     ///
-    /// La fecha se mueve a mano y no se espera al reloj, por lo mismo que en [`age_the_file`]: una prueba
-    /// que dependa de cuánto tarda en correr da un resultado distinto en cada máquina.
+    /// The date is moved by hand and the clock is not waited on, for the same reason as in [`age_the_file`]:
+    /// a test that depended on how long it takes to run would give a different result on each machine.
     fn published_ago(file: &str, how_much: Duration) -> PanelState {
-        let dir = PanelDir::create().expect("crear el directorio");
+        let dir = PanelDir::create().expect("create the directory");
         publish(&dir, file);
         std::fs::File::open(dir.path().join(PANEL_FILE))
-            .expect("abrir")
+            .expect("open")
             .set_modified(SystemTime::now() - how_much)
-            .expect("mover la fecha");
+            .expect("move the date");
 
         let mut state = PanelState::default();
         state.refresh(dir.path());
         state
     }
 
-    /// El texto de lo que se pintó, fila a fila.
+    /// The text of what was painted, row by row.
     fn texts(shapes: Vec<eframe::egui::Shape>) -> Vec<String> {
         shapes
             .into_iter()
@@ -1054,15 +1062,15 @@ mod tests {
             .collect()
     }
 
-    /// **El productor que se muere no avisa de que se ha muerto.** Es el caso que este aviso existe
-    /// para cubrir: no escribe nada, así que no hay evento de fichero que lo delate — solo el tiempo.
+    /// **The producer that dies does not warn that it has died.** It is the case this warning exists to
+    /// cover: it writes nothing, so there is no file event to give it away — only time.
     #[test]
-    fn un_panel_que_lleva_callado_mas_de_lo_suyo_lo_confiesa() {
-        // 45 min **y medio**: el silencio se trunca a minutos enteros, y con la fecha justo en la
-        // frontera un sistema de ficheros que redondeara al alza diría «44 min» y la prueba señalaría
-        // al código sin que el código tenga nada.
+    fn a_panel_that_has_been_quiet_longer_than_its_due_confesses_it() {
+        // 45 min **and a half**: the silence is truncated to whole minutes, and with the date right on the
+        // border a file system that rounded up would say «44 min» and the test would point at the code
+        // without the code being at fault.
         let mut state = published_ago(
-            r#"{"stale_after_minutes":5,"lines":["lo que decía"]}"#,
+            r#"{"stale_after_minutes":5,"lines":["what it said"]}"#,
             Duration::from_secs(45 * 60 + 30),
         );
 
@@ -1070,32 +1078,32 @@ mod tests {
 
         assert!(
             painted.iter().any(|row| row.contains("sin noticias")),
-            "el panel lleva 45 minutos sin tocarse y se enseña como si fuera de ahora: {painted:?}"
+            "the panel has gone 45 minutes untouched and is shown as if from now: {painted:?}"
         );
         assert!(
             painted.iter().any(|row| row.contains("45 min")),
-            "el aviso no dice cuánto lleva callado: {painted:?}"
+            "the warning does not say how long it has been quiet: {painted:?}"
         );
         assert!(
-            painted.iter().any(|row| row.contains("lo que decía")),
-            "se perdió lo que el productor había publicado: {painted:?}"
+            painted.iter().any(|row| row.contains("what it said")),
+            "what the producer had published was lost: {painted:?}"
         );
 
-        // **Y va arriba, no al final.** Abajo es donde el recorte se come lo que no cabe: en un panel
-        // largo, el aviso de que no es de fiar sería lo primero en desaparecer.
+        // **And it goes on top, not at the end.** Below is where the clip eats what does not fit: in a
+        // long panel, the warning that it is not trustworthy would be the first to disappear.
         let where_at = |text: &str| painted.iter().position(|row| row.contains(text));
         assert!(
-            where_at("sin noticias") < where_at("lo que decía"),
-            "el aviso se pinta detrás del cuerpo del productor: {painted:?}"
+            where_at("sin noticias") < where_at("what it said"),
+            "the warning is painted behind the producer's body: {painted:?}"
         );
     }
 
-    /// Y la otra mitad: **un panel al día no dice nada**. Sin esto, un aviso puesto siempre pasaría por
-    /// bueno y el panel tendría una línea de ruido permanente.
+    /// And the other half: **a panel that is up to date says nothing**. Without this, a warning set always
+    /// would pass for good and the panel would have a line of permanent noise.
     #[test]
-    fn un_panel_recien_publicado_no_confiesa_nada() {
+    fn a_just_published_panel_confesses_nothing() {
         let mut state = published_ago(
-            r#"{"stale_after_minutes":5,"lines":["recién puesto"]}"#,
+            r#"{"stale_after_minutes":5,"lines":["just posted"]}"#,
             Duration::from_secs(10),
         );
 
@@ -1103,67 +1111,86 @@ mod tests {
 
         assert!(
             !painted.iter().any(|row| row.contains("sin noticias")),
-            "un panel de hace diez segundos se anuncia como viejo: {painted:?}"
+            "a panel from ten seconds ago announces itself as old: {painted:?}"
         );
     }
 
-    /// **Conservar el último panel bueno sin decirlo esconde a un productor roto** detrás de un resumen
-    /// plausible de hace una hora. Esta es la mitad de AC7 que faltaba: la ventana sigue en pie, se
-    /// conserva lo último bueno, **y el panel dice que eso no es lo último**.
+    /// **Keeping the last good panel without saying so hides a broken producer** behind a plausible
+    /// summary from an hour ago. This is the half of AC7 that was missing: the window stays up, the last
+    /// good one is kept, **and the panel says that is not the latest**.
     #[test]
-    fn una_publicacion_que_no_se_entiende_se_confiesa_sin_perder_lo_bueno() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, r#"{"lines":["lo bueno de antes"]}"#);
+    fn a_publication_that_is_not_understood_is_confessed_without_losing_the_good_one() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"lines":["the good stuff from before"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
-        publish(&dir, "esto no es json");
+        publish(&dir, "this is not json");
         age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
+        // The confession is one logical line but the panel wraps it, and the English wording is long
+        // enough to split «not understood» across two rows, so it is looked for in the joined painting
+        // rather than on a single row.
+        //
+        // **And by position, not by membership.** Two `contains` over the joined painting pass with the
+        // marker and its reason on unrelated rows: measured by swapping them in the production format,
+        // where the membership form stayed green and this one goes red. What the test defends is that
+        // the reason belongs to the marker, so the order is the assertion.
+        //
+        // **And both have to be there, which comparing two `Option`s does not ask.** `None` sorts before
+        // `Some`, so `find(a) < find(b)` passes with the marker missing altogether — the very thing the
+        // test exists to catch. The pair is matched instead.
+        let one_line = painted.join(" ");
+        let marker = one_line.find("not the latest");
+        let reason = one_line.find("not understood");
+        assert!(
+            matches!((marker, reason), (Some(marker), Some(reason)) if marker < reason),
+            "the old is still shown as if it were the latest: {painted:?}"
+        );
         assert!(
             painted
                 .iter()
-                .any(|row| row.contains("no es lo último") && row.contains("not understood")),
-            "se sigue enseñando lo viejo como si fuera lo último: {painted:?}"
-        );
-        assert!(
-            painted.iter().any(|row| row.contains("lo bueno de antes")),
-            "confesar no puede costar lo último que sí se entendió: {painted:?}"
+                .any(|row| row.contains("the good stuff from before")),
+            "confessing cannot cost the last thing that was understood: {painted:?}"
         );
     }
 
-    /// Y cuando **nunca** hubo nada bueno, el panel es solo la confesión. Sin esto, una consola cuyo
-    /// productor publica basura desde el principio se ve igual que una que no tiene productor: como una
-    /// consola pelada, sin una palabra que explique por qué no hay panel.
+    /// And when there **never** was anything good, the panel is only the confession. Without this, a
+    /// console whose producer publishes garbage from the start looks the same as one with no producer:
+    /// like a bare console, without a word explaining why there is no panel.
     #[test]
-    fn una_consola_sin_nada_bueno_ensena_el_aviso_a_solas() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, "ni esto tampoco");
+    fn a_console_with_nothing_good_shows_the_warning_on_its_own() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, "not this either");
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
         assert!(
             state.is_visible(SystemTime::now()),
-            "hay un productor publicando algo ilegible y la división se ve como si no lo hubiera"
+            "there is a producer publishing something illegible and the pane looks as if there were none"
         );
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
+        // **On one row, not on the joined painting.** This confession does fit a row —checked by
+        // restoring the per-row form, which passes— so joining would only drop the requirement that the
+        // reason accompany the warning. Its sibling above has to join because its wording wraps; this
+        // one does not, and copying the concession there would silence what it defends.
         assert!(
             painted
                 .iter()
-                .any(|row| row.contains("sin panel") && row.contains("not understood")),
-            "no se dice por qué no hay panel: {painted:?}"
+                .any(|row| row.contains("no panel") && row.contains("not understood")),
+            "it does not say why there is no panel: {painted:?}"
         );
     }
 
-    /// **Un fichero que se pasa del techo no se pinta, pero tampoco se calla.** El techo es lo que
-    /// impide que un `panel.json` ajeno cueste un fotograma entero en interpretarse; que además dejara
-    /// la consola indistinguible de una sin productor sería el fallo que este hito viene a evitar,
-    /// solo que provocado por la propia defensa.
+    /// **A file that goes over the ceiling is not painted, but does not go quiet either.** The ceiling is
+    /// what prevents an outside `panel.json` from costing a whole frame to interpret; that it also left
+    /// the console indistinguishable from one with no producer would be the failure this milestone comes
+    /// to avoid, only caused by the defense itself.
     #[test]
-    fn un_panel_que_pasa_del_techo_no_se_pinta_pero_se_dice_por_que() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_panel_that_goes_over_the_ceiling_is_not_painted_but_says_why() {
+        let dir = PanelDir::create().expect("create the directory");
         let filler = "x".repeat(panel_contract::MAX_BYTES as usize);
         publish(&dir, &format!(r#"{{"lines":["{filler}"]}}"#));
         let mut state = PanelState::default();
@@ -1171,62 +1198,62 @@ mod tests {
 
         assert!(
             state.is_visible(SystemTime::now()),
-            "hay un productor publicando algo enorme y la división se ve como si no lo hubiera"
+            "there is a producer publishing something huge and the pane looks as if there were none"
         );
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
             painted
                 .iter()
-                .any(|row| row.contains("sin panel") && row.contains("KiB")),
-            "no se dice por qué no hay panel: {painted:?}"
+                .any(|row| row.contains("no panel") && row.contains("KiB")),
+            "it does not say why there is no panel: {painted:?}"
         );
         assert!(
             !painted.iter().any(|row| row.contains("xxxx")),
-            "se pintó contenido de un fichero que pasa del techo: {painted:?}"
+            "content was painted from a file that goes over the ceiling: {painted:?}"
         );
     }
 
-    /// **La raya que sostiene la promesa del hito**: una consola cuyo productor no ha publicado todavía
-    /// se ve exactamente como antes de que el panel existiera. Que el fichero no esté es el estado
-    /// normal de arranque, no una avería que anunciar.
+    /// **The line that holds the milestone's promise**: a console whose producer has not published yet
+    /// looks exactly like it did before the panel existed. That the file is not there is the normal
+    /// startup state, not a breakdown to announce.
     #[test]
-    fn una_consola_sin_fichero_no_ensena_nada_ni_avisa_de_nada() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_console_with_no_file_shows_nothing_and_warns_of_nothing() {
+        let dir = PanelDir::create().expect("create the directory");
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
         assert!(
             !state.is_visible(SystemTime::now()),
-            "una consola sin productor se estrecha para enseñar un panel que no existe"
+            "a console with no producer narrows to show a panel that does not exist"
         );
         assert!(state.warning(SystemTime::now()).is_none());
     }
 
-    /// Pero si **había** panel y su fichero desaparece, eso sí se dice: el productor lo borró o alguien
-    /// limpió por debajo, y lo que se sigue viendo ya no tiene respaldo en disco.
+    /// But if there **was** a panel and its file disappears, that is said: the producer deleted it or
+    /// someone cleaned up underneath, and what is still shown no longer has backing on disk.
     #[test]
-    fn que_el_fichero_desaparezca_despues_si_se_confiesa() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, r#"{"lines":["estuve aquí"]}"#);
+    fn that_the_file_disappears_afterward_is_confessed() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"lines":["I was here"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
-        std::fs::remove_file(dir.path().join(PANEL_FILE)).expect("borrar el panel");
+        std::fs::remove_file(dir.path().join(PANEL_FILE)).expect("delete the panel");
         state.refresh(dir.path());
 
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
-            painted.iter().any(|row| row.contains("ya no está")),
-            "el fichero se borró y el panel sigue como si nada: {painted:?}"
+            painted.iter().any(|row| row.contains("no longer there")),
+            "the file was deleted and the panel carries on as if nothing happened: {painted:?}"
         );
     }
 
-    /// **`header: false` apaga la línea de identidad, no la honestidad de la aplicación.** Si la
-    /// apagara, a un productor le bastaría con ponerlo para que su panel roto no lo pareciera.
+    /// **`header: false` turns off the identity line, not the application's honesty.** If it turned it
+    /// off, a producer would only have to set it for its broken panel not to look it.
     #[test]
-    fn el_aviso_sale_aunque_el_productor_apague_la_cabecera() {
+    fn the_warning_comes_out_even_if_the_producer_turns_off_the_header() {
         let mut state = published_ago(
-            r#"{"header":false,"stale_after_minutes":1,"lines":["sin cabecera"]}"#,
+            r#"{"header":false,"stale_after_minutes":1,"lines":["without a header"]}"#,
             Duration::from_secs(60 * 60),
         );
 
@@ -1234,21 +1261,21 @@ mod tests {
 
         assert!(
             painted.iter().any(|row| row.contains("sin noticias")),
-            "apagar la cabecera escondió el aviso de la app: {painted:?}"
+            "turning off the header hid the app's warning: {painted:?}"
         );
         assert!(
             !painted.iter().any(|row| row.contains("a1b2")),
-            "`header: false` tiene que seguir escondiendo la identidad: {painted:?}"
+            "`header: false` has to keep hiding the identity: {painted:?}"
         );
     }
 
-    /// **El aviso entra en la clave de la maqueta guardada.** Un panel que envejece cambia lo que hay
-    /// que pintar sin que su fichero se toque, así que una caché que solo mirase el ancho seguiría
-    /// enseñando la maqueta de cuando era fresco y el aviso no aparecería nunca.
+    /// **The warning enters the stored layout's key.** A panel that ages changes what has to be painted
+    /// without its file being touched, so a cache that only looked at the width would keep showing the
+    /// layout from when it was fresh and the warning would never appear.
     #[test]
-    fn envejecer_tira_la_maqueta_aunque_el_fichero_no_cambie() {
+    fn aging_throws_away_the_layout_even_if_the_file_does_not_change() {
         let mut state = published_ago(
-            r#"{"stale_after_minutes":10,"lines":["lo mismo de siempre"]}"#,
+            r#"{"stale_after_minutes":10,"lines":["the same as always"]}"#,
             Duration::from_secs(60),
         );
 
@@ -1262,79 +1289,79 @@ mod tests {
         assert!(!fresh.iter().any(|row| row.contains("sin noticias")));
         assert!(
             stale.iter().any(|row| row.contains("sin noticias")),
-            "el panel envejeció y se siguió pintando la maqueta de cuando era fresco: {stale:?}"
+            "the panel aged and the layout from when it was fresh kept being painted: {stale:?}"
         );
     }
 
-    /// **Lo que el latido necesita saber**: cuánto queda para que toque avisar. Sin esto la ventana no
-    /// sabría cuándo despertarse, y con la consola callada el aviso no llegaría nunca.
+    /// **What the heartbeat needs to know**: how long until it is time to warn. Without this the window
+    /// would not know when to wake up, and with the console quiet the warning would never arrive.
     #[test]
-    fn se_sabe_cuanto_falta_para_que_toque_avisar() {
+    fn how_long_until_it_is_time_to_warn_is_known() {
         let state = published_ago(
-            r#"{"stale_after_minutes":10,"lines":["algo"]}"#,
+            r#"{"stale_after_minutes":10,"lines":["something"]}"#,
             Duration::from_secs(4 * 60),
         );
 
         let missing = state
             .how_long_until_warning(SystemTime::now())
-            .expect("todavía no es viejo, así que hay algo que esperar");
+            .expect("it is not old yet, so there is something to wait for");
 
-        // Seis minutos, con holgura para lo que tarde la propia prueba.
+        // Six minutes, with slack for how long the test itself takes.
         assert!(
             missing.as_secs() > 5 * 60 && missing.as_secs() <= 6 * 60,
-            "faltan {} s para avisar de un panel de hace 4 min con plazo de 10",
+            "{} s until warning about a panel from 4 min ago with a deadline of 10",
             missing.as_secs()
         );
     }
 
-    /// **Y un panel ya viejo sigue pidiendo despertador, porque su aviso lleva un número que avanza.**
-    /// Sin esto, el agente que muere a las 10:00 con un plazo de cinco minutos deja en pantalla «sin
-    /// noticias desde hace 5 min», y a las 13:00 sigue diciendo cinco: acierta en lo cualitativo y
-    /// miente en el dato que sirve para decidir si está muerto o solo lento.
+    /// **And a panel that is already old still asks for an alarm, because its warning carries a number
+    /// that advances.** Without this, the agent that dies at 10:00 with a deadline of five minutes leaves
+    /// on screen «sin noticias desde hace 5 min», and at 13:00 it still says five: right about the qualitative and
+    /// lying about the datum that serves to decide whether it is dead or only slow.
     #[test]
-    fn un_panel_ya_viejo_vuelve_a_despertar_cuando_su_numero_cambie() {
+    fn an_already_old_panel_wakes_again_when_its_number_changes() {
         let state = published_ago(
-            r#"{"stale_after_minutes":1,"lines":["algo"]}"#,
+            r#"{"stale_after_minutes":1,"lines":["something"]}"#,
             Duration::from_secs(45 * 60 + 40),
         );
 
-        let missing = state
-            .how_long_until_warning(SystemTime::now())
-            .expect("el número del aviso va a cambiar, así que hay a qué volver");
+        let missing = state.how_long_until_warning(SystemTime::now()).expect(
+            "the warning's number is going to change, so there is something to come back for",
+        );
 
-        // Al siguiente minuto, no dentro de un minuto: lo que importa es cuándo salta el número.
-        // Veinte segundos de margen entre mover la fecha y preguntar: el más estrecho de la suite
-        // era de diez, y es el que caería primero en una máquina saturada.
+        // At the next minute, not in a minute: what matters is when the number ticks over.
+        // Twenty seconds of margin between moving the date and asking: the narrowest of the suite was ten,
+        // and it is the one that would fall first on a saturated machine.
         assert!(
             missing.as_secs() > 10 && missing.as_secs() <= 20,
-            "vuelve en {} s, y al número le faltan 20 para saltar",
+            "it comes back in {} s, and the number has 20 to go before it ticks",
             missing.as_secs()
         );
     }
 
-    /// Cuando se dicen horas, se vuelve a la siguiente hora y no cada minuto: el número solo cambia
-    /// cuando cambia, y cada cambio cuesta despertar a la ventana.
+    /// When hours are said, it comes back at the next hour and not every minute: the number only changes
+    /// when it changes, and every change costs waking the window.
     #[test]
-    fn con_horas_de_silencio_se_despierta_una_vez_por_hora() {
+    fn with_hours_of_silence_it_wakes_once_per_hour() {
         let state = published_ago(
-            r#"{"stale_after_minutes":1,"lines":["algo"]}"#,
+            r#"{"stale_after_minutes":1,"lines":["something"]}"#,
             Duration::from_secs(5 * 60 * 60 + 10 * 60),
         );
 
         let missing = state
             .how_long_until_warning(SystemTime::now())
-            .expect("el número sigue avanzando");
+            .expect("the number keeps advancing");
 
         assert!(
             missing.as_secs() > 45 * 60,
-            "con cinco horas de silencio se despierta a los {} s, que es una vez por minuto",
+            "with five hours of silence it wakes at {} s, which is once per minute",
             missing.as_secs()
         );
     }
 
-    /// Sin panel no hay nada que esperar.
+    /// With no panel there is nothing to wait for.
     #[test]
-    fn sin_panel_no_se_pide_despertador() {
+    fn with_no_panel_no_alarm_is_asked_for() {
         assert!(
             PanelState::default()
                 .how_long_until_warning(SystemTime::now())
@@ -1342,51 +1369,51 @@ mod tests {
         );
     }
 
-    /// **Un fallo pasajero no puede acusar al productor para siempre.** Que la relectura diga «lo que
-    /// tienes sigue vigente» significa que se pudo preguntar por el fichero y que su fecha es la del
-    /// panel bueno que ya se tiene: el tropiezo de hace un rato —quedarse sin descriptores, un montaje
-    /// de red que parpadea— ya no describe nada. Sin limpiarlo, el aviso se quedaba pegado de por vida,
-    /// porque un fichero que nadie vuelve a tocar no cambia de fecha nunca.
+    /// **A passing failure cannot accuse the producer forever.** That the re-read says «what you have is
+    /// still valid» means the file could be asked about and that its date is that of the good panel
+    /// already held: the stumble from a while ago —running out of descriptors, a network mount that
+    /// flickers— no longer describes anything. Without clearing it, the warning stayed stuck for life,
+    /// because a file that nobody touches again never changes its date.
     #[test]
-    fn un_fallo_pasajero_no_deja_al_panel_acusado_para_siempre() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, r#"{"lines":["lo último de verdad"]}"#);
+    fn a_passing_failure_does_not_leave_the_panel_accused_forever() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"lines":["the real latest"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
-        // El fichero se vuelve ilegible un instante y luego se recupera, sin cambiar de fecha.
+        // The file becomes illegible for an instant and then recovers, without changing its date.
         let path = dir.path().join(PANEL_FILE);
         let date = std::fs::metadata(&path)
-            .expect("mirar la fecha")
+            .expect("look at the date")
             .modified()
-            .expect("hay fecha");
-        std::fs::write(&path, "roto").expect("romperlo");
+            .expect("there is a date");
+        std::fs::write(&path, "broken").expect("break it");
         std::fs::File::open(&path)
-            .expect("abrir")
+            .expect("open")
             .set_modified(date + Duration::from_secs(1))
-            .expect("mover la fecha");
+            .expect("move the date");
         state.refresh(dir.path());
-        publish(&dir, r#"{"lines":["lo último de verdad"]}"#);
+        publish(&dir, r#"{"lines":["the real latest"]}"#);
         std::fs::File::open(&path)
-            .expect("abrir")
+            .expect("open")
             .set_modified(date)
-            .expect("devolver la fecha");
+            .expect("restore the date");
 
         state.refresh(dir.path());
 
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
         assert!(
-            !painted.iter().any(|row| row.contains("no es lo último")),
-            "el fichero se lee bien y su panel sigue acusado: {painted:?}"
+            !painted.iter().any(|row| row.contains("not the latest")),
+            "the file reads fine and its panel is still accused: {painted:?}"
         );
     }
 
-    /// Con un plazo por debajo del minuto —que el contrato permite— el aviso **no dice un número**: «sin
-    /// noticias desde hace 0 min» un segundo después de publicar se lee como un fallo de la aplicación.
+    /// With a deadline under a minute —which the contract allows— the warning **does not say a number**:
+    /// «sin noticias desde hace 0 min» a second after publishing reads as an application failure.
     #[test]
-    fn con_un_plazo_de_cero_el_aviso_no_dice_cero_minutos() {
+    fn with_a_deadline_of_zero_the_warning_does_not_say_zero_minutes() {
         let mut state = published_ago(
-            r#"{"stale_after_minutes":0,"lines":["algo"]}"#,
+            r#"{"stale_after_minutes":0,"lines":["something"]}"#,
             Duration::from_secs(5),
         );
 
@@ -1394,19 +1421,19 @@ mod tests {
 
         assert!(
             painted.iter().any(|row| row.contains("sin noticias")),
-            "con plazo cero el panel es viejo desde el primer segundo: {painted:?}"
+            "with a deadline of zero the panel is old from the first second: {painted:?}"
         );
         assert!(
             !painted.iter().any(|row| row.contains("0 min")),
-            "el aviso dice «hace 0 min», que se lee como un fallo: {painted:?}"
+            "the warning says «0 min ago», which reads as a failure: {painted:?}"
         );
     }
 
-    /// Lo que mide una celda con la fuente con la que pinta el panel.
+    /// What a cell measures with the font the panel paints with.
     ///
-    /// Hace falta para afirmar sobre posiciones: el margen y el hueco de la identidad se cuentan en
-    /// celdas, así que compararlos con un número escrito a mano sería comprobar la fuente de esta
-    /// máquina en vez de la aritmética del panel.
+    /// It is needed to assert about positions: the margin and the identity gap are counted in cells, so
+    /// comparing them with a hand-written number would be checking this machine's font instead of the
+    /// panel's arithmetic.
     fn cell() -> (f32, f32) {
         let ctx = eframe::egui::Context::default();
         let mut measured = (0.0, 0.0);
@@ -1421,17 +1448,16 @@ mod tests {
         measured
     }
 
-    /// Pinta un panel de verdad y devuelve **lo que quedó encolado**: el texto de cada fila y su color.
+    /// Paints a real panel and returns **what got queued**: the text of each row and its color.
     ///
-    /// Sin esto, todo lo que ocurre dentro de `paint` es invisible para la suite: se puede dejar de
-    /// leer el estilo, pintarlo todo del mismo color o **no pintar nada**, y las pruebas de
-    /// `Theme::panel_color` siguen verdes porque afirman sobre el ayudante, no sobre el camino.
+    /// Without this, everything that happens inside `paint` is invisible to the suite: the style can stop
+    /// being read, everything painted the same color or **nothing painted at all**, and the
+    /// `Theme::panel_color` tests stay green because they assert about the helper, not about the path.
     fn what_gets_painted(file: &str) -> Vec<(String, Color32)> {
         texts_and_colors(what_gets_queued(file, PLACE))
     }
 
-    /// Lo mismo, para cuando la prueba necesita pintar en un momento concreto y no puede pasar por el
-    /// fichero.
+    /// The same, for when the test needs to paint at a specific moment and cannot go through the file.
     fn texts_and_colors(shapes: Vec<eframe::egui::Shape>) -> Vec<(String, Color32)> {
         shapes
             .into_iter()
@@ -1444,7 +1470,7 @@ mod tests {
             .collect()
     }
 
-    /// Dónde cae cada fila de texto, en el orden en que se encolaron.
+    /// Where each text row falls, in the order they were queued.
     fn where_each_row_falls(file: &str, place: Rect) -> Vec<(Pos2, String)> {
         what_gets_queued(file, place)
             .into_iter()
@@ -1455,57 +1481,61 @@ mod tests {
             .collect()
     }
 
-    /// **Cada fila en su renglón, y el hueco de la cadena vacía contado.**
+    /// **Each row in its own line, and the gap of the empty string counted.**
     ///
-    /// La prueba de abajo mira el contenido y el orden de la cola de formas, y eso **no ata dónde caen**:
-    /// quitando el avance de la altura, las tres líneas se pintan una encima de otra en el mismo
-    /// renglón y la suite seguía verde. Es la consecuencia que AC18 nombra —«no pinta encima de las
-    /// líneas siguientes»— y la mitad de AC2 que dice «en orden».
+    /// The test below looks at the content and the order of the shape queue, and that **does not tie down
+    /// where they fall**: removing the height advance, the three lines are painted one on top of another
+    /// in the same line and the suite stayed green. It is the consequence AC18 names —«does not paint over
+    /// the following lines»— and the half of AC2 that says «in order».
     ///
-    /// El hueco se comprueba **por la distancia**, que es la única forma de verlo: una cadena vacía no
-    /// encola ninguna forma, así que lo que demuestra que dejó su sitio es que entre sus vecinas haya
-    /// dos renglones y no uno.
+    /// The gap is checked **by the distance**, which is the only way to see it: an empty string does not
+    /// queue any shape, so what proves it left its spot is that between its neighbors there are two lines
+    /// and not one.
     #[test]
-    fn cada_fila_cae_en_su_renglon_y_la_vacia_deja_el_suyo() {
+    fn each_row_falls_in_its_own_line_and_the_empty_one_leaves_its_own() {
         let (_, height) = cell();
 
         let rows = where_each_row_falls(
-            r#"{"header":false,"lines":["la primera","","la tercera"]}"#,
+            r#"{"header":false,"lines":["the first","","the third"]}"#,
             PLACE,
         );
 
-        assert_eq!(rows.len(), 2, "la vacía no encola forma, las otras sí");
-        assert_eq!(rows[0].0.y, PLACE.top(), "la primera arranca arriba");
+        assert_eq!(
+            rows.len(),
+            2,
+            "the empty one queues no shape, the others do"
+        );
+        assert_eq!(rows[0].0.y, PLACE.top(), "the first starts at the top");
         assert_eq!(
             rows[1].0.y - rows[0].0.y,
             height * 2.0,
-            "entre la primera y la tercera tienen que caber dos renglones: el hueco es uno de ellos"
+            "between the first and the third two lines have to fit: the gap is one of them"
         );
     }
 
     #[test]
-    fn cada_linea_se_pinta_en_su_orden_y_las_vacias_dejan_su_hueco() {
-        let rows = what_gets_painted(r#"{"header":false,"lines":["la primera","","la tercera"]}"#);
+    fn each_line_is_painted_in_its_order_and_the_empty_ones_leave_their_gap() {
+        let rows = what_gets_painted(r#"{"header":false,"lines":["the first","","the third"]}"#);
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             texts,
-            ["  la primera", "  la tercera"],
-            "el hueco no se pinta, pero las dos que hay van en orden"
+            ["  the first", "  the third"],
+            "the gap is not painted, but the two there are go in order"
         );
     }
 
-    /// **El color sale del camino real, no del ayudante.** Con esta prueba, ignorar `linea.style` en
-    /// `paint` cae en rojo; sin ella, la suite seguía verde con el panel entero monocromo.
+    /// **The color comes from the real path, not from the helper.** With this test, ignoring `line.style`
+    /// in `paint` turns red; without it, the suite stayed green with the whole panel monochrome.
     #[test]
-    fn el_color_de_cada_linea_sale_de_su_estilo_y_de_su_marca() {
+    fn each_line_color_comes_from_its_style_and_its_mark() {
         let theme = Theme::default();
         let rows = what_gets_painted(
             r#"{"header":false,"lines":[
-                {"text":"un fallo","style":"error"},
-                {"text":"bloqueada","mark":"block"},
-                {"text":"y su color es el dato","mark":"info","style":"ok"},
-                {"text":"sin adjetivos"}
+                {"text":"a failure","style":"error"},
+                {"text":"blocked","mark":"block"},
+                {"text":"and its color is the data","mark":"info","style":"ok"},
+                {"text":"without adjectives"}
             ]}"#,
         );
 
@@ -1513,83 +1543,86 @@ mod tests {
             rows,
             vec![
                 (
-                    "  un fallo".to_owned(),
+                    "  a failure".to_owned(),
                     theme.panel_color(None, Some(panel_contract::Style::Error))
                 ),
                 (
-                    "× bloqueada".to_owned(),
+                    "× blocked".to_owned(),
                     theme.panel_color(Some(panel_contract::Mark::Block), None)
                 ),
                 (
-                    "› y su color es el dato".to_owned(),
+                    "› and its color is the data".to_owned(),
                     theme.panel_color(
                         Some(panel_contract::Mark::Info),
                         Some(panel_contract::Style::Ok)
                     )
                 ),
-                ("  sin adjetivos".to_owned(), theme.panel_color(None, None)),
+                (
+                    "  without adjectives".to_owned(),
+                    theme.panel_color(None, None)
+                ),
             ]
         );
     }
 
-    /// La línea de identidad la escribe la aplicación con lo que ya sabe: el identificador de la
-    /// división y la fase que el productor publica. Nada de un fichero vecino.
+    /// The identity line is written by the application with what it already knows: the pane's identifier
+    /// and the phase the producer publishes. Nothing from a neighboring file.
     #[test]
-    fn la_cabecera_lleva_la_identidad_de_la_division_y_su_fase() {
-        let rows = what_gets_painted(r#"{"phase":"build","lines":["el cuerpo"]}"#);
+    fn the_header_carries_the_panes_identity_and_its_phase() {
+        let rows = what_gets_painted(r#"{"phase":"build","lines":["the body"]}"#);
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["a1b2 · build", "  el cuerpo"]);
+        assert_eq!(texts, ["a1b2 · build", "  the body"]);
     }
 
     #[test]
-    fn con_la_cabecera_quitada_no_se_pinta_la_identidad() {
-        let rows = what_gets_painted(r#"{"header":false,"phase":"build","lines":["el cuerpo"]}"#);
+    fn with_the_header_removed_the_identity_is_not_painted() {
+        let rows = what_gets_painted(r#"{"header":false,"phase":"build","lines":["the body"]}"#);
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["  el cuerpo"], "la fase va dentro de la identidad");
+        assert_eq!(texts, ["  the body"], "the phase goes inside the identity");
     }
 
-    /// **El saneo, comprobado sobre lo que llega al pintor y no sobre la función suelta.**
+    /// **The sanitizing, checked on what reaches the painter and not on the loose function.**
     #[test]
-    fn lo_que_llega_al_pintor_no_lleva_saltos_de_linea() {
-        let rows = what_gets_painted(r#"{"header":false,"lines":["arriba\nabajo"]}"#);
+    fn what_reaches_the_painter_carries_no_line_breaks() {
+        let rows = what_gets_painted(r#"{"header":false,"lines":["above\nbelow"]}"#);
 
-        assert_eq!(rows[0].0, "  arriba abajo");
+        assert_eq!(rows[0].0, "  above below");
     }
 
-    /// **El coste de pintar tiene su propio peor caso, y es el inverso del de interpretar.** Una sola
-    /// línea larguísima es barata de leer y costaba 14,6 ms de teselado **en cada fotograma**, porque
-    /// epaint descarta texto por fila y no por glifo. Sin este tope, un `panel.json` ajeno deja la
-    /// ventana por encima de su presupuesto para siempre.
+    /// **The cost of painting has its own worst case, and it is the inverse of interpreting's.** A single
+    /// very long line is cheap to read and cost 14.6 ms of tessellation **on every frame**, because epaint
+    /// discards text by row and not by glyph. Without this cap, an outside `panel.json` leaves the window
+    /// over its budget forever.
     #[test]
-    fn una_linea_absurdamente_larga_se_corta_antes_de_pintarse() {
+    fn an_absurdly_long_line_is_cut_before_being_painted() {
         let long = "A".repeat(60_000);
 
         let rows = what_gets_painted(&format!(r#"{{"header":false,"lines":["{long}"]}}"#));
 
-        // **Se cuenta el total, no la primera fila.** Con la envoltura puesta, el tope no se ve en una
-        // fila suelta: la línea se reparte en varias, y lo que hay que acotar es cuánto texto se
-        // maqueta en total. Contar solo la primera dejaría pasar mil filas de cuarenta caracteres.
+        // **The total is counted, not the first row.** With wrapping in place, the cap is not seen in a
+        // loose row: the line is spread across several, and what has to be bounded is how much text is
+        // laid out in total. Counting only the first would let a thousand rows of forty characters through.
         let painted: usize = rows.iter().map(|(t, _)| t.chars().count()).sum();
-        // Los dos de margen son la columna del símbolo, que se reserva aunque la línea no traiga
-        // marca: es lo que mantiene el texto de todas alineado.
+        // The two of margin are the symbol's column, reserved even though the line carries no mark: it is
+        // what keeps all their text aligned.
         assert!(
             painted <= MAX_CHARACTERS + 2,
-            "se maquetaron {painted} caracteres de una línea de 60.000"
+            "{painted} characters of a 60,000-character line were laid out"
         );
-        assert!(rows.len() > 1, "y se envolvió en varias filas");
+        assert!(rows.len() > 1, "and it was wrapped across several rows");
     }
 
-    /// **El fondo se pinta aunque no haya nada que decir, y es lo único que separa el panel de su
-    /// consola** — no hay línea ni borde entre los dos. Sin él, donde debería verse el panel se ve el
-    /// fondo de la consola, con la consola ya estrechada: un hueco negro a la derecha que parece un
-    /// fallo de pintado en vez de un productor callado.
+    /// **The background is painted even if there is nothing to say, and it is the only thing that
+    /// separates the panel from its console** — there is no line or border between the two. Without it,
+    /// where the panel should show, the console's background shows, with the console already narrowed: a
+    /// black gap on the right that looks like a painting failure instead of a quiet producer.
     ///
-    /// Y el caso es forma legal del contrato: `lines` vacío con la cabecera quitada deja un panel en el
-    /// que el fondo es literalmente todo lo que hay.
+    /// And the case is legal form of the contract: empty `lines` with the header removed leaves a panel in
+    /// which the background is literally all there is.
     #[test]
-    fn un_panel_sin_lineas_ni_cabecera_pinta_su_fondo_y_nada_mas() {
+    fn a_panel_with_no_lines_or_header_paints_its_background_and_nothing_else() {
         let shapes = what_gets_queued(r#"{"header":false,"lines":[]}"#, PLACE);
 
         let backgrounds: Vec<_> = shapes
@@ -1602,56 +1635,54 @@ mod tests {
         assert_eq!(
             backgrounds,
             vec![(PLACE, Theme::default().panel_background())],
-            "el panel tiene que cubrir su rectángulo con su propio fondo"
+            "the panel has to cover its rectangle with its own background"
         );
         assert!(
             !shapes
                 .iter()
                 .any(|shape| matches!(shape, eframe::egui::Shape::Text(_))),
-            "sin líneas y sin cabecera no hay texto que pintar"
+            "with no lines and no header there is no text to paint"
         );
     }
 
-    /// Una división puede quedarse sin alto: la ventana aplastada contra el borde de la pantalla, o el
-    /// rectángulo de reserva mientras el escritorio todavía no ha dicho cuánto mide. Entonces no cabe
-    /// ni una fila, y lo que se comprueba aquí es que **el bucle para**: sin el corte por lo alto se
-    /// siguen encolando filas fuera del panel, y son formas que hay que teselar en cada fotograma para
-    /// no verse. Un rectángulo del revés —el alto negativo— entra por el mismo camino y tampoco puede
-    /// entrar en pánico.
+    /// A pane can be left with no height: the window squashed against the screen edge, or the reserve
+    /// rectangle while the desktop has not yet said how much it measures. Then not even one row fits, and
+    /// what is checked here is that **the loop stops**: without the cut by height, rows keep being queued
+    /// outside the panel, and they are shapes that have to be tessellated on every frame to not be seen. A
+    /// rectangle inside out —negative height— comes in by the same path and also cannot panic.
     #[test]
-    fn en_un_panel_sin_alto_no_se_encola_ninguna_fila() {
+    fn in_a_panel_with_no_height_no_row_is_queued() {
         let no_height = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(400.0, 0.0));
         let the_other_way_round = Rect::from_min_max(Pos2::new(0.0, 100.0), Pos2::new(400.0, 0.0));
 
         for place in [no_height, the_other_way_round] {
-            let rows = where_each_row_falls(r#"{"header":false,"lines":["una","otra"]}"#, place);
+            let rows = where_each_row_falls(r#"{"header":false,"lines":["one","another"]}"#, place);
 
             assert!(
                 rows.is_empty(),
-                "en {place:?} no cabe ninguna fila y se encolaron {rows:?}"
+                "in {place:?} no row fits and {rows:?} were queued"
             );
         }
     }
 
-    /// **La línea de identidad lleva dentro una cadena del productor**: la fase. El saneo de las líneas
-    /// no la alcanza —esta cadena la compone la aplicación—, así que un `\n` en la fase pintaría dos
-    /// filas donde va una y taparía la primera del cuerpo.
+    /// **The identity line carries a producer string inside it**: the phase. The lines' sanitizing does
+    /// not reach it —this string is composed by the application—, so a `\n` in the phase would paint two
+    /// rows where one goes and would cover the body's first.
     #[test]
-    fn la_fase_pasa_por_el_mismo_saneo_que_las_lineas() {
-        let rows = what_gets_painted(r#"{"phase":"build\nfalsa","lines":["el cuerpo"]}"#);
+    fn the_phase_goes_through_the_same_sanitizing_as_the_lines() {
+        let rows = what_gets_painted(r#"{"phase":"build\nfake","lines":["the body"]}"#);
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["a1b2 · build falsa", "  el cuerpo"]);
+        assert_eq!(texts, ["a1b2 · build fake", "  the body"]);
     }
 
-    /// Y el tope también: una fase larguísima es el mismo peor caso de teselado que una línea larguísima
-    /// —14,6 ms por fotograma mientras siga publicada— y llega por una cadena que el tope de las líneas
-    /// no toca.
+    /// And the cap too: a very long phase is the same tessellation worst case as a very long line —14.6 ms
+    /// per frame while it stays published— and arrives by a string the lines' cap does not touch.
     ///
-    /// De paso, el borde que el contrato declara: con `lines` vacío el panel enseña **solo** su línea de
-    /// identidad.
+    /// Along the way, the edge the contract declares: with empty `lines` the panel shows **only** its
+    /// identity line.
     #[test]
-    fn una_fase_absurdamente_larga_no_se_pinta_entera() {
+    fn an_absurdly_long_phase_is_not_painted_whole() {
         let long = "F".repeat(60_000);
 
         let rows = what_gets_painted(&format!(r#"{{"phase":"{long}","lines":[]}}"#));
@@ -1659,53 +1690,53 @@ mod tests {
         let painted: usize = rows.iter().map(|(t, _)| t.chars().count()).sum();
         assert!(
             painted <= MAX_CHARACTERS + "a1b2 · ".len(),
-            "se maquetaron {painted} caracteres de una fase de 60.000"
+            "{painted} characters of a 60,000-character phase were laid out"
         );
         assert!(
             rows.iter()
                 .all(|(t, _)| t.starts_with('F') || t.starts_with("a1b2")),
-            "sin líneas, lo único que hay es la identidad envuelta: {rows:?}"
+            "with no lines, the only thing there is is the identity wrapped: {rows:?}"
         );
     }
 
-    /// Dos decisiones del pintado que **no se ven ni en el texto ni en el color**, y que hasta aquí no
-    /// ataba nada: el texto no va pegado al borde izquierdo —pegado se lee como un error de pintado— y
-    /// la identidad deja una fila en blanco antes del cuerpo. Lo segundo importa porque la identidad la
-    /// escribe la aplicación y el cuerpo lo escribe el productor: pegadas, la suya se lee como la
-    /// primera línea de él.
+    /// Two painting decisions that **are seen neither in the text nor in the color**, and that until now
+    /// nothing tied down: the text does not go flush against the left border —flush it reads as a painting
+    /// error— and the identity leaves a blank row before the body. The second matters because the identity
+    /// is written by the application and the body is written by the producer: stuck together, the app's
+    /// reads as the producer's first line.
     #[test]
-    fn el_texto_deja_su_margen_y_la_identidad_su_fila_en_blanco() {
+    fn the_text_leaves_its_margin_and_the_identity_its_blank_row() {
         let (width, height) = cell();
 
-        let rows = where_each_row_falls(r#"{"phase":"build","lines":["el cuerpo"]}"#, PLACE);
+        let rows = where_each_row_falls(r#"{"phase":"build","lines":["the body"]}"#, PLACE);
 
         let [(identity, _), (body, _)] = rows.as_slice() else {
-            panic!("tenían que ser dos filas y son {rows:?}");
+            panic!("there had to be two rows and they are {rows:?}");
         };
-        // La celda de margen va escrita aquí y no como `MARGIN`: una expectativa que sale de la misma
-        // constante que describe se cumple sola, la pongan en el valor que la pongan.
+        // The margin cell is written here and not as `MARGIN`: an expectation that comes from the same
+        // constant it describes is met on its own, whatever value it is set to.
         assert_eq!(
             identity.x,
             PLACE.left() + width,
-            "el texto tiene que arrancar a una celda del borde"
+            "the text has to start one cell from the border"
         );
-        assert_eq!(body.x, identity.x, "el cuerpo no arranca donde ella");
+        assert_eq!(body.x, identity.x, "the body does not start where it does");
         assert_eq!(
             body.y - identity.y,
             2.0 * height,
-            "entre la identidad y el cuerpo tiene que quedar una fila en blanco"
+            "between the identity and the body a blank row has to remain"
         );
     }
 
-    /// **Los seis símbolos, preguntándoselo a la fuente y no a la memoria.**
+    /// **The six symbols, asking the font and not memory.**
     ///
-    /// El criterio es **el ancho**, no `has_glyphs`: ese predicado compara la cara resuelta contra la
-    /// de reemplazo, y con la monoespaciada la cara base *es* esa, así que responde «no» hasta para la
-    /// letra `A` — la tabla del diseño se tomó con él y salió invertida. Un glifo que la cara
-    /// monoespaciada tiene mide lo que mide la `M`; uno que falta mide cero; y uno que viene de las
-    /// fuentes de emoji mide más, que es lo que **descuadra la columna**.
+    /// The criterion is **the width**, not `has_glyphs`: that predicate compares the resolved face against
+    /// the replacement one, and with the monospaced one the base face *is* that, so it answers «no» even
+    /// for the letter `A` — the design table was taken with it and came out inverted. A glyph the
+    /// monospaced face has measures what the `M` measures; one that is missing measures zero; and one that
+    /// comes from the emoji fonts measures more, which is what **knocks the column out of square**.
     #[test]
-    fn los_seis_simbolos_estan_en_la_fuente_y_miden_una_celda() {
+    fn the_six_symbols_are_in_the_font_and_measure_one_cell() {
         let marks = [
             Mark::Done,
             Mark::Current,
@@ -1733,24 +1764,24 @@ mod tests {
         for (symbol, width) in widths {
             assert!(
                 (width - cell).abs() < 0.01,
-                "«{symbol}» mide {width} y una celda mide {cell}: {}",
+                "«{symbol}» measures {width} and a cell measures {cell}: {}",
                 if width == 0.0 {
-                    "no está en la fuente"
+                    "it is not in the font"
                 } else {
-                    "viene de la de emoji y descuadraría la columna"
+                    "it comes from the emoji one and would knock the column out of square"
                 }
             );
         }
     }
 
-    /// Los seis distintos entre sí: con dos marcas compartiendo símbolo, el panel diría menos de lo que
-    /// el productor escribió y nadie se enteraría.
-    /// **Cada marca con el suyo, no solo «los seis existen y son distintos».** Intercambiando el de
-    /// `done` con el de `wait` la suite seguía verde: un panel que pintara el punto suspensivo en lo
-    /// terminado y el círculo en lo que espera diría **lo contrario** de lo que el productor escribió, y
-    /// contradiría la tabla que el registro de decisiones publica.
+    /// The six distinct from each other: with two marks sharing a symbol, the panel would say less than
+    /// what the producer wrote and nobody would notice.
+    /// **Each mark with its own, not just «the six exist and are distinct».** Swapping `done`'s with
+    /// `wait`'s the suite stayed green: a panel that painted the ellipsis on the finished and the circle
+    /// on what waits would say **the opposite** of what the producer wrote, and would contradict the table
+    /// the decision log publishes.
     #[test]
-    fn cada_marca_lleva_el_simbolo_que_la_decision_le_asigno() {
+    fn each_mark_carries_the_symbol_the_decision_assigned_it() {
         assert_eq!(
             [
                 symbol(Mark::Done),
@@ -1765,7 +1796,7 @@ mod tests {
     }
 
     #[test]
-    fn ninguna_marca_comparte_simbolo_con_otra() {
+    fn no_mark_shares_a_symbol_with_another() {
         let all: std::collections::HashSet<char> = [
             Mark::Done,
             Mark::Current,
@@ -1781,192 +1812,192 @@ mod tests {
         assert_eq!(all.len(), 6);
     }
 
-    /// **La regla del contrato que hace legible un panel: la columna se calcula por bloque.**
+    /// **The contract rule that makes a panel legible: the column is computed per block.**
     ///
-    /// Con un ancho global, el bloque de arriba —cuya referencia es larga— empujaría el texto del de
-    /// abajo, y lo que se gana alineando se perdería en margen desperdiciado. Los bloques los separan
-    /// las líneas vacías.
+    /// With a global width, the block above —whose reference is long— would push the text of the one
+    /// below, and what is gained by aligning would be lost in wasted margin. The blocks are separated by
+    /// the empty lines.
     #[test]
-    fn la_columna_de_referencias_se_alinea_por_bloques_y_un_bloque_no_ensancha_al_otro() {
+    fn the_reference_column_aligns_per_block_and_one_block_does_not_widen_the_other() {
         let rows = what_gets_painted(
             r##"{"header":false,"lines":[
-                {"ref":"#1","text":"corta"},
-                {"ref":"#10-#25","text":"larga"},
+                {"ref":"#1","text":"short"},
+                {"ref":"#10-#25","text":"long"},
                 "",
-                {"ref":"#2","text":"otro bloque"}
+                {"ref":"#2","text":"another block"}
             ]}"##,
         );
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             texts,
-            ["  #1      corta", "  #10-#25 larga", "  #2 otro bloque"],
-            "el segundo bloque tiene que volver a su propio ancho"
+            ["  #1      short", "  #10-#25 long", "  #2 another block"],
+            "the second block has to return to its own width"
         );
     }
 
-    /// La continuación se sangra **hasta donde empieza el texto**, no hasta el borde: alineada al borde,
-    /// la segunda fila se leería como una línea nueva del productor y la columna dejaría de significar
-    /// nada.
+    /// The continuation is indented **to where the text starts**, not to the border: aligned to the
+    /// border, the second row would read as a new producer line and the column would stop meaning
+    /// anything.
     #[test]
-    fn una_linea_larga_se_envuelve_con_la_continuacion_bajo_su_texto() {
+    fn a_long_line_wraps_with_the_continuation_under_its_text() {
         let rows = where_each_row_falls(
-            r##"{"header":false,"lines":[{"ref":"#1","mark":"done","text":"palabras suficientes para no caber de ninguna manera en el panel"}]}"##,
+            r##"{"header":false,"lines":[{"ref":"#1","mark":"done","text":"words enough to not fit in the panel in any way"}]}"##,
             PLACE,
         );
 
-        assert!(rows.len() > 1, "tenía que envolverse: {rows:?}");
-        let (first, rest) = rows.split_first().expect("hay filas");
+        assert!(rows.len() > 1, "it had to wrap: {rows:?}");
+        let (first, rest) = rows.split_first().expect("there are rows");
 
-        // **La propiedad es la igualdad, no «más a la derecha».** Con solo `>`, cualquier sangría
-        // constante distinta de cero pasa —incluida una celda, o sea debajo del símbolo, que es
-        // literalmente lo que el criterio prohíbe—. Lo que hay que afirmar es que la continuación cae
-        // donde empieza el **texto** de la primera fila, y ese sitio se calcula de lo que ya se tiene:
-        // la x de la primera más lo que ocupa su cabeza.
+        // **The property is the equality, not «further right».** With only `>`, any constant nonzero
+        // indent passes —including one cell, i.e. under the symbol, which is literally what the criterion
+        // forbids—. What has to be asserted is that the continuation falls where the **text** of the first
+        // row starts, and that spot is computed from what is already held: the x of the first plus what
+        // its head takes.
         let (cell_width, _) = cell();
-        // En caracteres, no en bytes: el símbolo de la marca ocupa tres bytes y una sola celda.
+        // In characters, not in bytes: the mark's symbol takes three bytes and a single cell.
         let head = first.1.chars().count()
             - first
                 .1
-                .split_once("palabras")
-                .expect("la primera fila lleva su cabeza y luego el texto")
+                .split_once("words")
+                .expect("the first row carries its head and then the text")
                 .1
                 .chars()
                 .count()
-            - "palabras".chars().count();
+            - "words".chars().count();
         let under_the_text = first.0.x + head as f32 * cell_width;
 
         for (where_at, text) in rest {
             assert!(
                 (where_at.x - under_the_text).abs() < 0.01,
-                "«{text}» arrancó en {} y el texto de la primera empieza en {under_the_text}",
+                "«{text}» started at {} and the text of the first starts at {under_the_text}",
                 where_at.x
             );
         }
     }
 
-    /// Una palabra sola más larga que el hueco se parte por caracteres. Sin esto la envoltura no
-    /// progresa: la palabra no cabe nunca, y saltar de fila no la hace caber.
+    /// A single word longer than the gap is split by characters. Without this the wrapping does not
+    /// progress: the word never fits, and jumping to a row does not make it fit.
     #[test]
-    fn una_palabra_mas_larga_que_el_hueco_se_parte_en_vez_de_colgar() {
+    fn a_word_longer_than_the_gap_is_split_instead_of_hanging() {
         let rows = what_gets_painted(&format!(
             r#"{{"header":false,"lines":["{}"]}}"#,
             "x".repeat(200)
         ));
 
         assert!(rows.len() > 1);
-        assert!(
-            rows.iter().all(|(t, _)| !t.is_empty()),
-            "ninguna fila vacía"
-        );
+        assert!(rows.iter().all(|(t, _)| !t.is_empty()), "no empty row");
     }
 
-    /// **Con la sangría comida entera, la envoltura tiene que seguir avanzando.** Sin suelo, el hueco
-    /// sale cero y el bucle no mete ningún carácter por vuelta.
+    /// **With the indent eaten whole, the wrapping has to keep advancing.** Without a floor, the gap comes
+    /// out zero and the loop puts no character in per turn.
     ///
-    /// **Su modo de fallo es colgarse, no ponerse en rojo**, y eso hay que saberlo antes de verlo: con
-    /// `MINIMUM_SLOT` a cero esta prueba no falla, se queda girando y la suite entera muere por
-    /// memoria. Quien la vea colgada está viendo el fallo, no una prueba rota. Es el mismo modo que la
-    /// de la tubería con nombre en el crate del contrato.
+    /// **Its failure mode is hanging, not turning red**, and that has to be known before seeing it: with
+    /// `MINIMUM_SLOT` at zero this test does not fail, it stays spinning and the whole suite dies of
+    /// memory. Whoever sees it hung is seeing the failure, not a broken test. It is the same mode as the
+    /// one of the named pipe in the contract crate.
     #[test]
-    fn una_sangria_mayor_que_el_panel_no_cuelga_la_envoltura() {
+    fn an_indent_larger_than_the_panel_does_not_hang_the_wrapping() {
         let rows = what_gets_painted(
-            r#"{"header":false,"lines":[{"indent":64,"text":"esto no cabe de ninguna manera"}]}"#,
+            r#"{"header":false,"lines":[{"indent":64,"text":"this does not fit in any way"}]}"#,
         );
 
-        assert!(!rows.is_empty(), "algo se tiene que pintar");
+        assert!(!rows.is_empty(), "something has to be painted");
         assert!(rows.iter().all(|(t, _)| !t.is_empty()));
     }
 
-    /// **Lo que no cabe de alto se dice, no se descarta en silencio.** Un panel que se recorta callado
-    /// es un resumen que miente por omisión, que es justo lo que el contrato le prohíbe al productor.
+    /// **What does not fit by height is said, not discarded silently.** A panel that is clipped quietly is
+    /// a summary that lies by omission, which is exactly what the contract forbids the producer.
     #[test]
-    fn cuando_no_caben_todas_la_ultima_fila_dice_cuantas_faltan() {
+    fn when_they_do_not_all_fit_the_last_row_says_how_many_are_missing() {
         let (_, height) = cell();
         let four_rows =
             Rect::from_min_size(Pos2::new(0.0, 0.0), eframe::egui::vec2(400.0, height * 4.0));
 
         let rows: Vec<String> = where_each_row_falls(
-            r#"{"header":false,"lines":["una","dos","tres","cuatro","cinco","seis"]}"#,
+            r#"{"header":false,"lines":["one","two","three","four","five","six"]}"#,
             four_rows,
         )
         .into_iter()
         .map(|(_, text)| text)
         .collect();
 
-        assert_eq!(rows.len(), 4, "cuatro renglones, cuatro filas");
+        assert_eq!(rows.len(), 4, "four lines, four rows");
         assert_eq!(
-            rows.last().expect("hay filas"),
-            "… 3 más",
-            "y la última las cuenta, incluida la que el propio aviso desplaza"
+            rows.last().expect("there are rows"),
+            "… 3 more",
+            "and the last one counts them, including the one the warning itself displaces"
         );
     }
 
-    /// La maqueta se recuerda mientras el fichero y el ancho no cambien: mientras la consola de al lado
-    /// vuelca, la ventana repinta sesenta veces por segundo y envolver el panel no puede pagarse cada
-    /// vez.
+    /// The layout is remembered as long as the file and the width do not change: while the console beside
+    /// it dumps, the window repaints sixty times per second and wrapping the panel cannot be paid each
+    /// time.
     #[test]
-    fn la_maqueta_se_recuerda_y_se_tira_cuando_cambia_el_ancho() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, r#"{"header":false,"lines":["algo que envolver"]}"#);
+    fn the_layout_is_remembered_and_thrown_away_when_the_width_changes() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"header":false,"lines":["something to wrap"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
         let theme = Theme::default();
 
         let first = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
-            .expect("hay panel")
+            .expect("there is a panel")
             .to_vec();
         let repeated = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
-            .expect("hay panel")
+            .expect("there is a panel")
             .to_vec();
-        assert_eq!(first, repeated, "el mismo ancho da la misma maqueta");
+        assert_eq!(first, repeated, "the same width gives the same layout");
 
         let narrow = state
             .lay_out_if_needed("a1b2", 12, &theme, None, None)
-            .expect("hay panel")
+            .expect("there is a panel")
             .to_vec();
-        assert_ne!(first, narrow, "con otro ancho hay que volver a envolver");
+        assert_ne!(
+            first, narrow,
+            "with another width it has to be wrapped again"
+        );
     }
 
-    /// Y se tira al publicar: una maqueta que sobrevive a su fichero enseña lo de antes para siempre.
+    /// And it is thrown away on publishing: a layout that survives its file shows the previous forever.
     #[test]
-    fn la_maqueta_se_tira_cuando_el_productor_publica() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, r#"{"header":false,"lines":["lo viejo"]}"#);
+    fn the_layout_is_thrown_away_when_the_producer_publishes() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"header":false,"lines":["the old"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
         let theme = Theme::default();
         state.lay_out_if_needed("a1b2", 40, &theme, None, None);
 
-        publish(&dir, r#"{"header":false,"lines":["lo nuevo"]}"#);
+        publish(&dir, r#"{"header":false,"lines":["the new"]}"#);
         age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         let rows = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
-            .expect("hay panel");
+            .expect("there is a panel");
         assert!(
-            rows.iter().any(|row| row.text.contains("lo nuevo")),
-            "la maqueta se quedó con lo viejo: {rows:?}"
+            rows.iter().any(|row| row.text.contains("the new")),
+            "the layout kept the old: {rows:?}"
         );
     }
 
-    /// La referencia es cadena ajena igual que el texto, y desde este PR se pinta: un `\n` dentro
-    /// descuadraría la columna entera.
+    /// The reference is an outside string like the text, and since this PR is painted: a `\n` inside would
+    /// knock the whole column out of square.
     #[test]
-    fn la_referencia_pasa_por_el_mismo_saneo_que_el_texto() {
+    fn the_reference_goes_through_the_same_sanitizing_as_the_text() {
         let rows = what_gets_painted(r#"{"header":false,"lines":[{"ref":"a\nb","text":"t"}]}"#);
 
         assert_eq!(rows[0].0, "  a b t");
     }
 
-    /// **Nada de lo que venga de fuera puede colgar ni reventar la envoltura**, y este es el sitio con
-    /// más aritmética de índices de todo el panel: hay un corte por bytes sobre un índice que sale de
-    /// recorrer caracteres, y un bucle con dos salidas.
+    /// **Nothing that comes from outside can hang or blow up the wrapping**, and this is the place with
+    /// the most index arithmetic in the whole panel: there is a cut by bytes over an index that comes from
+    /// walking characters, and a loop with two exits.
     #[test]
-    fn la_envoltura_aguanta_cualquier_cosa_sin_panico_ni_cuelgue() {
+    fn the_wrapping_withstands_anything_without_panic_or_hang() {
         let many_tildes = "ñ".repeat(300);
         let cases = [
             "",
@@ -1976,8 +2007,8 @@ mod tests {
             many_tildes.as_str(),
             "🙂🙂🙂🙂🙂🙂🙂🙂🙂🙂",
             "e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}",
-            "palabra corta",
-            "unapalabramuylargasinespaciosquenocabeenningunhueco",
+            "a short word",
+            "averylongwordwithnospacesthatfitsinnogap",
             "मानक हिन्दी",
             "\u{200b}\u{200b}\u{200b}",
         ];
@@ -1995,22 +2026,22 @@ mod tests {
                 );
                 assert!(
                     rows.len() < 5_000,
-                    "con ancho {width} y «{case}» salieron {} filas: la envoltura no progresa",
+                    "with width {width} and «{case}» {} rows came out: the wrapping does not progress",
                     rows.len()
                 );
             }
         }
     }
 
-    /// **Una sangría legal del contrato no puede pintar fuera del panel.** El contrato admite hasta 64
-    /// celdas y el panel mide 36: sin acotarla contra el ancho, la continuación se pintaba a 42 celdas
-    /// del borde —recortada, o sea invisible— y **`clip` la contaba como fila visible**, así que se
-    /// comía renglones y el «… N más» mentía. Una referencia larga llega al mismo sitio.
+    /// **A legal contract indent cannot paint outside the panel.** The contract admits up to 64 cells and
+    /// the panel measures 36: without bounding it against the width, the continuation was painted 42 cells
+    /// from the border —clipped, i.e. invisible— and **`clip` counted it as a visible row**, so it ate
+    /// rows and the «… N more» lied. A long reference reaches the same place.
     #[test]
-    fn una_sangria_legal_del_contrato_no_saca_el_texto_del_panel() {
+    fn a_legal_contract_indent_does_not_take_the_text_out_of_the_panel() {
         let width = 36;
         let file =
-            r#"{"lines":[{"indent":40,"text":"una frase larga que no cabe de ninguna manera"}]}"#;
+            r#"{"lines":[{"indent":40,"text":"a long phrase that does not fit in any way"}]}"#;
 
         let rows = lay_out(
             Some(&panel_with(file)),
@@ -2024,7 +2055,7 @@ mod tests {
         for row in &rows {
             assert!(
                 row.column + row.text.chars().count() <= width,
-                "«{}» empieza en {} y mide {}: se sale de un panel de {width}",
+                "«{}» starts at {} and measures {}: it runs off a panel of {width}",
                 row.text,
                 row.column,
                 row.text.chars().count()
@@ -2032,12 +2063,12 @@ mod tests {
         }
     }
 
-    /// Y por el otro camino: una referencia larguísima empuja la cabeza igual que la sangría.
+    /// And by the other path: a very long reference pushes the head just like the indent.
     #[test]
-    fn una_referencia_larguisima_tampoco_saca_el_texto_del_panel() {
+    fn a_very_long_reference_does_not_take_the_text_out_of_the_panel_either() {
         let width = 36;
         let long = "R".repeat(50);
-        let file = format!(r##"{{"lines":[{{"ref":"{long}","text":"algo que decir"}}]}}"##);
+        let file = format!(r##"{{"lines":[{{"ref":"{long}","text":"something to say"}}]}}"##);
 
         let rows = lay_out(
             Some(&panel_with(&file)),
@@ -2051,23 +2082,23 @@ mod tests {
         for row in &rows {
             assert!(
                 row.column <= width,
-                "una continuación arrancó en la columna {} de un panel de {width}",
+                "a continuation started at column {} of a panel of {width}",
                 row.column
             );
         }
     }
 
-    /// **Una línea con marca y sin texto es forma legal, y salía desplazada por su propio símbolo.**
-    /// La rama de texto vacío de la envoltura devuelve su sangría —correcto para una continuación, no
-    /// para la fila que lleva la cabeza pegada—, así que el símbolo y la referencia aparecían cinco
-    /// celdas a la derecha de los de la línea de arriba, en el mismo bloque. Rompía la columna, que es
-    /// justo lo que este PR entrega.
+    /// **A line with a mark and no text is legal form, and came out displaced by its own symbol.** The
+    /// empty-text branch of the wrapping returns its indent —correct for a continuation, not for the row
+    /// that carries the head stuck to it—, so the symbol and the reference appeared five cells to the
+    /// right of those of the line above, in the same block. It broke the column, which is exactly what
+    /// this PR delivers.
     #[test]
-    fn una_linea_con_marca_y_sin_texto_no_se_desplaza() {
+    fn a_line_with_a_mark_and_no_text_is_not_displaced() {
         let rows = lay_out(
             Some(&panel_with(
                 r##"{"header":false,"lines":[
-                    {"mark":"done","ref":"#1","text":"con texto"},
+                    {"mark":"done","ref":"#1","text":"with text"},
                     {"mark":"block","ref":"#2","text":""}
                 ]}"##,
             )),
@@ -2080,22 +2111,22 @@ mod tests {
 
         assert_eq!(
             rows[0].column, rows[1].column,
-            "las dos empiezan en la misma columna o la columna no significa nada: {rows:?}"
+            "the two start in the same column or the column means nothing: {rows:?}"
         );
         assert_eq!(rows[0].column, 0);
     }
 
-    /// **La cabeza no pasa por la envoltura, así que hay que acotarla aparte.** Una referencia más
-    /// larga que el panel —el contrato no le pone techo— sacaba la primera fila entera fuera del
-    /// rectángulo, y con ella todas sus continuaciones: se pintaban encima de la consola.
+    /// **The head does not go through the wrapping, so it has to be bounded separately.** A reference
+    /// longer than the panel —the contract puts no ceiling on it— pulled the whole first row outside the
+    /// rectangle, and with it all its continuations: they were painted over the console.
     #[test]
-    fn una_referencia_mas_larga_que_el_panel_no_desborda_la_primera_fila() {
+    fn a_reference_longer_than_the_panel_does_not_overflow_the_first_row() {
         let width = 36;
         let long = "R".repeat(48);
 
         let rows = lay_out(
             Some(&panel_with(&format!(
-                r##"{{"header":false,"lines":[{{"ref":"{long}","text":"un texto cualquiera"}}]}}"##
+                r##"{{"header":false,"lines":[{{"ref":"{long}","text":"any old text"}}]}}"##
             ))),
             "a1b2",
             width,
@@ -2107,7 +2138,7 @@ mod tests {
         for row in &rows {
             assert!(
                 row.column + row.text.chars().count() <= width,
-                "«{}» empieza en {} y mide {}: se sale de un panel de {width}",
+                "«{}» starts at {} and measures {}: it runs off a panel of {width}",
                 row.text,
                 row.column,
                 row.text.chars().count()
@@ -2115,14 +2146,14 @@ mod tests {
         }
     }
 
-    /// **La sangría del contrato se respeta**, y nada lo ataba: ignorarla del todo dejaba la suite
-    /// verde. Es un campo que el productor escribe para agrupar visualmente, así que perderlo en
-    /// silencio le quita una herramienta sin decírselo.
+    /// **The contract's indent is respected**, and nothing tied it down: ignoring it entirely left the
+    /// suite green. It is a field the producer writes to group visually, so losing it in silence takes a
+    /// tool from it without saying so.
     #[test]
-    fn la_sangria_que_pide_el_productor_desplaza_su_linea() {
+    fn the_indent_the_producer_asks_for_displaces_its_line() {
         let rows = lay_out(
             Some(&panel_with(
-                r#"{"header":false,"lines":[{"text":"pegada"},{"indent":4,"text":"sangrada"}]}"#,
+                r#"{"header":false,"lines":[{"text":"flush"},{"indent":4,"text":"indented"}]}"#,
             )),
             "a1b2",
             36,
@@ -2131,20 +2162,20 @@ mod tests {
             None,
         );
 
-        let flush = rows[0].text.find("pegada").expect("está");
-        let indented = rows[1].text.find("sangrada").expect("está");
+        let flush = rows[0].text.find("flush").expect("it is there");
+        let indented = rows[1].text.find("indented").expect("it is there");
         assert_eq!(
             indented - flush,
             4,
-            "la segunda tiene que arrancar cuatro celdas más a la derecha: {rows:?}"
+            "the second has to start four cells further right: {rows:?}"
         );
     }
 
-    /// **Se corta por palabras, no por caracteres.** Cortando siempre por caracteres el panel sigue
-    /// cabiendo y ninguna prueba caía, pero las palabras quedan partidas por la mitad y el panel deja
-    /// de leerse de un vistazo, que es de lo que va este PR.
+    /// **It cuts by words, not by characters.** Cutting always by characters the panel still fits and no
+    /// test fell, but the words end up split in half and the panel stops being readable at a glance, which
+    /// is what this PR is about.
     #[test]
-    fn la_envoltura_parte_por_palabras_mientras_pueda() {
+    fn the_wrapping_splits_by_words_while_it_can() {
         let rows = lay_out(
             Some(&panel_with(
                 r#"{"header":false,"lines":["alfa beta gamma delta epsilon zeta"]}"#,
@@ -2162,78 +2193,79 @@ mod tests {
                 text.split_whitespace().all(|word| {
                     ["alfa", "beta", "gamma", "delta", "epsilon", "zeta"].contains(&word)
                 }),
-                "«{text}» trae una palabra partida: {rows:?}"
+                "«{text}» carries a split word: {rows:?}"
             );
         }
     }
 
-    /// **El titular del PR, atado.** La prueba de al lado compara dos maquetas iguales, y eso se cumple
-    /// igual recalculando desde cero. Lo que hay que afirmar es que **no se recalcula**, y se ve en la
-    /// identidad del préstamo: si se remaquetara, la dirección del vector cambiaría.
+    /// **The PR's headline, tied down.** The test next door compares two equal layouts, and that holds
+    /// just the same recalculating from scratch. What has to be asserted is that **it is not
+    /// recalculated**, and it is seen in the identity of the borrow: if it were re-laid-out, the vector's
+    /// address would change.
     #[test]
-    fn la_maqueta_no_se_recalcula_cuando_ya_vale() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, r#"{"header":false,"lines":["algo que envolver"]}"#);
+    fn the_layout_is_not_recalculated_when_it_is_already_good() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"header":false,"lines":["something to wrap"]}"#);
         let mut state = PanelState::default();
         state.refresh(dir.path());
         let theme = Theme::default();
 
         let first = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
-            .expect("hay panel")
+            .expect("there is a panel")
             .as_ptr();
         let second = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
-            .expect("hay panel")
+            .expect("there is a panel")
             .as_ptr();
 
         assert_eq!(
             first, second,
-            "se volvió a maquetar sin que cambiara ni el fichero ni el ancho"
+            "it was laid out again without either the file or the width changing"
         );
     }
 
-    /// El aviso de lo que falta va **debajo** de lo que sí cabe, no encima de la primera fila.
+    /// The warning of what is missing goes **below** what does fit, not over the first row.
     #[test]
-    fn el_aviso_de_lo_que_falta_va_al_final_y_con_su_margen() {
+    fn the_warning_of_what_is_missing_goes_at_the_end_and_with_its_margin() {
         let (cell_width, height) = cell();
         let three_rows =
             Rect::from_min_size(Pos2::new(0.0, 0.0), eframe::egui::vec2(400.0, height * 3.0));
 
         let rows = where_each_row_falls(
-            r#"{"header":false,"lines":["una","dos","tres","cuatro"]}"#,
+            r#"{"header":false,"lines":["one","two","three","four"]}"#,
             three_rows,
         );
 
-        let (where_at, text) = rows.last().expect("hay filas");
-        assert_eq!(text, "… 2 más");
+        let (where_at, text) = rows.last().expect("there are rows");
+        assert_eq!(text, "… 2 more");
         assert!(
             where_at.y > rows[0].0.y,
-            "el aviso se pintó encima de la primera fila"
+            "the warning was painted over the first row"
         );
         assert!(
             (where_at.x - (three_rows.left() + cell_width)).abs() < 0.01,
-            "el aviso arrancó en {} y el margen deja el texto en {}",
+            "the warning started at {} and the margin leaves the text at {}",
             where_at.x,
             three_rows.left() + cell_width
         );
     }
 
-    /// **Lo que cierra un bloque es un hueco de verdad, no «una línea sin texto».** Una línea con marca
-    /// y referencia pero sin texto es forma legal, y tratarla como hueco parte el bloque en dos: su
-    /// referencia deja de contar para el ancho de la columna, y la de arriba se queda con una columna
-    /// más estrecha de la que necesita su vecina. Rompe justo lo que este PR entrega.
+    /// **What closes a block is a real gap, not «a line without text».** A line with a mark and a
+    /// reference but no text is legal form, and treating it as a gap splits the block in two: its
+    /// reference stops counting for the column's width, and the one above is left with a column narrower
+    /// than its neighbor needs. It breaks exactly what this PR delivers.
     #[test]
-    fn una_linea_con_marca_y_sin_texto_no_cierra_el_bloque() {
-        // Hacen falta **tres** líneas para que se note: la de sin texto entra en el bloque antes de
-        // cerrarlo, así que con dos el ancho sale igual de las dos maneras. Con una tercera detrás, si
-        // la de en medio cerrara bloque, su referencia larga no llegaría a la primera.
+    fn a_line_with_a_mark_and_no_text_does_not_close_the_block() {
+        // **Three** lines are needed for it to show: the one without text enters the block before closing
+        // it, so with two the width comes out the same either way. With a third behind, if the middle one
+        // closed the block, its long reference would not reach the first.
         let rows = lay_out(
             Some(&panel_with(
                 r##"{"header":false,"lines":[
-                    {"mark":"done","ref":"#1","text":"arriba"},
+                    {"mark":"done","ref":"#1","text":"above"},
                     {"mark":"block","ref":"#22222"},
-                    {"mark":"info","ref":"#3","text":"abajo"}
+                    {"mark":"info","ref":"#3","text":"below"}
                 ]}"##,
             )),
             "a1b2",
@@ -2248,27 +2280,27 @@ mod tests {
                 - row
                     .text
                     .split_once(word)
-                    .expect("lleva su texto")
+                    .expect("carries its text")
                     .1
                     .chars()
                     .count()
                 - word.chars().count()
         };
         assert_eq!(
-            column_of(&rows[0], "arriba"),
-            column_of(&rows[2], "abajo"),
-            "las tres son un solo bloque: la de en medio no cierra nada, {rows:?}"
+            column_of(&rows[0], "above"),
+            column_of(&rows[2], "below"),
+            "the three are a single block: the middle one closes nothing, {rows:?}"
         );
         assert_eq!(
-            column_of(&rows[0], "arriba"),
+            column_of(&rows[0], "above"),
             "● #22222 ".chars().count(),
-            "y el ancho lo fija la referencia más larga de las tres"
+            "and the width is fixed by the longest reference of the three"
         );
     }
 
     #[test]
-    fn sin_fichero_no_hay_panel_que_pintar() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn with_no_file_there_is_no_panel_to_paint() {
+        let dir = PanelDir::create().expect("create the directory");
         let mut state = PanelState::default();
 
         state.refresh(dir.path());
@@ -2277,172 +2309,176 @@ mod tests {
     }
 
     #[test]
-    fn lo_publicado_se_lee_y_queda_listo_para_pintar() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn what_is_published_is_read_and_left_ready_to_paint() {
+        let dir = PanelDir::create().expect("create the directory");
         let mut state = PanelState::default();
-        publish(&dir, r#"{"phase":"build","lines":["una","otra"]}"#);
+        publish(&dir, r#"{"phase":"build","lines":["one","another"]}"#);
 
         state.refresh(dir.path());
 
-        let panel = state.last_understood().expect("hay panel");
+        let panel = state.last_understood().expect("there is a panel");
         assert_eq!(panel.lines.len(), 2);
         assert_eq!(panel.phase.as_deref(), Some("build"));
     }
 
-    /// **El freno, comprobado por el efecto y no por un contador.** Se publica algo nuevo dejando la
-    /// fecha del fichero donde estaba: si se releyera igual, el panel cambiaría. Como no se relee, se
-    /// queda el de antes — que es lo que se pide, porque la señal de que hay algo nuevo es la fecha y
-    /// esa no se movió.
+    /// **The brake, checked by the effect and not by a counter.** Something new is published leaving the
+    /// file's date where it was: if it were re-read all the same, the panel would change. Since it is not
+    /// re-read, the one from before stays — which is what is wanted, because the signal that there is
+    /// something new is the date and that did not move.
     #[test]
-    fn no_se_vuelve_a_leer_si_la_fecha_del_fichero_no_ha_cambiado() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn it_does_not_read_again_if_the_files_date_has_not_changed() {
+        let dir = PanelDir::create().expect("create the directory");
         let mut state = PanelState::default();
-        publish(&dir, r#"{"lines":["la primera"]}"#);
+        publish(&dir, r#"{"lines":["the first"]}"#);
         state.refresh(dir.path());
         let date = state
             .last_understood()
             .and_then(|panel| panel.written_at)
-            .expect("la lectura trae la fecha del fichero");
+            .expect("the read brings the file's date");
 
-        publish(&dir, r#"{"lines":["la segunda"]}"#);
+        publish(&dir, r#"{"lines":["the second"]}"#);
         std::fs::File::open(dir.path().join(PANEL_FILE))
-            .expect("abrir")
+            .expect("open")
             .set_modified(date)
-            .expect("devolver la fecha a donde estaba");
+            .expect("restore the date to where it was");
         state.refresh(dir.path());
 
         assert_eq!(
-            state.last_understood().expect("sigue habiendo panel").lines[0].text,
-            "la primera",
-            "releyó un fichero cuya fecha no había cambiado"
+            state
+                .last_understood()
+                .expect("there is still a panel")
+                .lines[0]
+                .text,
+            "the first",
+            "it re-read a file whose date had not changed"
         );
     }
 
     #[test]
-    fn con_la_fecha_movida_si_se_relee() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn with_the_date_moved_it_does_read_again() {
+        let dir = PanelDir::create().expect("create the directory");
         let mut state = PanelState::default();
-        publish(&dir, r#"{"lines":["la primera"]}"#);
+        publish(&dir, r#"{"lines":["the first"]}"#);
         state.refresh(dir.path());
 
-        publish(&dir, r#"{"lines":["la segunda"]}"#);
+        publish(&dir, r#"{"lines":["the second"]}"#);
         age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         assert_eq!(
-            state.last_understood().expect("hay panel").lines[0].text,
-            "la segunda"
+            state.last_understood().expect("there is a panel").lines[0].text,
+            "the second"
         );
     }
 
-    /// El productor machaca el fichero entero, así que una lectura puede caer justo en medio. Sin
-    /// conservar el último bueno, el panel parpadearía a vacío en **cada** publicación.
+    /// The producer clobbers the whole file, so a read can land right in the middle. Without keeping the
+    /// last good one, the panel would flicker to empty on **every** publication.
     #[test]
-    fn una_escritura_a_medias_no_borra_el_ultimo_panel_bueno() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_half_written_write_does_not_erase_the_last_good_panel() {
+        let dir = PanelDir::create().expect("create the directory");
         let mut state = PanelState::default();
-        publish(&dir, r#"{"lines":["lo bueno"]}"#);
+        publish(&dir, r#"{"lines":["the good one"]}"#);
         state.refresh(dir.path());
 
-        publish(&dir, r#"{"lines":[{"text":"a med"#);
+        publish(&dir, r#"{"lines":[{"text":"half wr"#);
         age_the_file(&dir, 1);
         state.refresh(dir.path());
 
         assert_eq!(
             state
                 .last_understood()
-                .expect("el último bueno sigue ahí")
+                .expect("the last good one is still there")
                 .lines[0]
                 .text,
-            "lo bueno"
+            "the good one"
         );
     }
 
-    /// **Un salto de línea dentro de una cadena ajena pinta varias filas encima de las siguientes.**
-    /// Está medido en la fuente de epaint, no supuesto: `break_on_newline` viene puesto por omisión.
-    /// Sin sanear, un `panel.json` con un `\n` en su texto tapa el resto del panel.
+    /// **A line break inside an outside string paints several rows over the following ones.** It is
+    /// measured in epaint's source, not assumed: `break_on_newline` comes set by default. Without
+    /// sanitizing, a `panel.json` with a `\n` in its text covers the rest of the panel.
     #[test]
-    fn un_salto_de_linea_en_el_texto_no_puede_pintar_dos_filas() {
-        let sanitized = sanitize("primera\nsegunda");
+    fn a_line_break_in_the_text_cannot_paint_two_rows() {
+        let sanitized = sanitize("first\nsecond");
 
-        assert_eq!(sanitized, "primera segunda");
+        assert_eq!(sanitized, "first second");
         assert!(!sanitized.contains('\n'));
     }
 
-    /// El tabulador es el otro caso: avanza el ancho de varias celdas mientras la medida de anchura lo
-    /// cuenta como cero, así que la columna se descuadra sin que nada lo anuncie.
+    /// The tab is the other case: it advances the width of several cells while the width measure counts it
+    /// as zero, so the column is knocked out of square without anything announcing it.
     #[test]
-    fn los_tabuladores_y_el_retorno_tampoco_sobreviven() {
-        assert_eq!(sanitize("uno\tdos\r\ntres"), "uno dos  tres");
+    fn tabs_and_the_carriage_return_do_not_survive_either() {
+        assert_eq!(sanitize("one\ttwo\r\nthree"), "one two  three");
         assert_eq!(
-            sanitize("\u{1b}[31mrojo"),
-            " [31mrojo",
-            "y las secuencias de escape"
+            sanitize("\u{1b}[31mred"),
+            " [31mred",
+            "and the escape sequences"
         );
     }
 
-    /// Se sustituyen por un espacio y no se borran: dos palabras separadas por un salto de línea
-    /// pegadas se leerían como una sola palabra que el productor nunca escribió.
+    /// They are replaced with a space and not deleted: two words separated by a line break stuck together
+    /// would read as one word the producer never wrote.
     #[test]
-    fn lo_saneado_no_pega_palabras_que_estaban_separadas() {
-        assert_eq!(sanitize("hola\nmundo"), "hola mundo");
+    fn what_is_sanitized_does_not_glue_words_that_were_separate() {
+        assert_eq!(sanitize("hello\nworld"), "hello world");
     }
 
     #[test]
-    fn el_texto_normal_pasa_intacto() {
-        let as_is = "F1.6: el panel · 35.392 tokens — 18 %";
+    fn normal_text_passes_through_intact() {
+        let as_is = "F1.6: the panel · 35,392 tokens — 18 %";
         assert_eq!(sanitize(as_is), as_is);
     }
 
-    /// **Lo que el gesto de estrechar el panel vuelve alcanzable.** Antes de que su frontera se pudiera
-    /// arrastrar, un panel de una o dos celdas solo aparecía en una ventana absurdamente estrecha; ahora
-    /// se llega ahí con un gesto, y el suelo del arrastre deja exactamente ese caso.
+    /// **What the gesture of narrowing the panel makes reachable.** Before its border could be dragged, a
+    /// panel of one or two cells only appeared in an absurdly narrow window; now you reach there with a
+    /// gesture, and the drag's floor leaves exactly that case.
     ///
-    /// **Medido, y el número es el que decide:** la cabeza de una fila —el hueco del símbolo, la columna
-    /// de la referencia y su separador— ocupa **siete columnas que no se pueden comprimir**, así que con
-    /// el panel por debajo de eso no hay texto legible que quepa. Lo que esta prueba ata es que ese caso
-    /// **no rompe nada**: se maqueta y se recorta sin pánico. Que además no se pinte fuera del panel lo
-    /// garantiza el recortador del pintor, que es de quien llama.
+    /// **Measured, and the number is what decides:** a row's head —the symbol's slot, the column of the
+    /// reference and its separator— takes **seven columns that cannot be compressed**, so with the panel
+    /// below that there is no legible text that fits. What this test ties down is that that case **breaks
+    /// nothing**: it lays out and clips without panic. That it also is not painted outside the panel is
+    /// guaranteed by the painter's clipper, which belongs to the caller.
     ///
-    /// Lo que **no** se arregla aquí, y queda dicho: entre una y siete celdas el panel es una franja sin
-    /// información. Es la pregunta que D10 dejó abierta —qué se deja de pintar en un panel muy estrecho—
-    /// y su respuesta cambia con el plegado, no con esto.
+    /// What is **not** fixed here, and is said: between one and seven cells the panel is a strip with no
+    /// information. It is the question D10 left open —what stops being painted in a very narrow panel— and
+    /// its answer changes with folding, not with this.
     ///
-    /// **Y lo que esta prueba NO afirma, para que nadie la lea como más fuerte de lo que es.** Llevaba una
-    /// comprobación de que la cuenta del aviso cuadraba y se quitó al mutarla: `visible + leftover` es
-    /// igual al total con el recorte bueno **y con el roto**, porque las dos versiones reparten las mismas
-    /// filas entre los dos números. El recorte lo atan sus propias pruebas; aquí lo que se demuestra es
-    /// que el camino se recorre entero sin romperse.
+    /// **And what this test does NOT assert, so that nobody reads it as stronger than it is.** It carried a
+    /// check that the warning's count added up and it was removed on mutating it: `visible + leftover` is
+    /// equal to the total with the good clip **and with the broken one**, because the two versions spread
+    /// the same rows between the two numbers. The clip is tied down by its own tests; here what is proven
+    /// is that the path is walked whole without breaking.
     #[test]
-    fn con_el_panel_al_minimo_se_maqueta_y_se_recorta_sin_panico() {
+    fn with_the_panel_at_the_minimum_it_lays_out_and_clips_without_panic() {
         let theme = Theme::default();
-        let dir = PanelDir::create().expect("crear el directorio");
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r##"{"lines":[{"ref":"#12","text":"una linea larga que no cabe de ninguna manera","mark":"current","indent":8},{"text":"otra"},{"text":"y otra"}]}"##,
+            r##"{"lines":[{"ref":"#12","text":"a long line that does not fit in any way","mark":"current","indent":8},{"text":"another"},{"text":"and another"}]}"##,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
 
         for width in [0usize, 1, 2, 3] {
             let rows = state
-                .lay_out_if_needed("sonda", width, &theme, None, None)
-                .expect("hay panel que maquetar");
+                .lay_out_if_needed("probe", width, &theme, None, None)
+                .expect("there is a panel to lay out");
             assert!(
                 !rows.is_empty(),
-                "con un panel de {width} celdas no se maquetó ninguna fila"
+                "with a panel of {width} cells no row was laid out"
             );
             clip(rows, 1);
         }
     }
 
-    /// **Los tres símbolos del reclamo, preguntándoselos a la fuente y no a la memoria**, con el mismo
-    /// criterio que los del cuerpo: lo que mide una `M`. Un glifo que la cara monoespaciada no tiene
-    /// mide cero y sale como un cuadro; uno que viene de las fuentes de emoji mide casi el doble y
-    /// **descuadra la columna**, que se lee peor todavía porque no parece un fallo de fuente sino un
-    /// panel mal alineado. Los candidatos obvios de este vocabulario ya cayeron por ahí.
+    /// **The three claim symbols, asking them of the font and not of memory**, with the same criterion as
+    /// those of the body: what an `M` measures. A glyph the monospaced face does not have measures zero
+    /// and comes out as a box; one that comes from the emoji fonts measures almost double and **knocks the
+    /// column out of square**, which reads worse still because it does not look like a font failure but
+    /// like a badly aligned panel. The obvious candidates of this vocabulary already fell that way.
     #[test]
-    fn los_tres_simbolos_del_reclamo_miden_una_celda() {
+    fn the_three_claim_symbols_measure_one_cell() {
         let ctx = eframe::egui::Context::default();
         let mut widths = Vec::new();
         let mut cell = 0.0;
@@ -2464,22 +2500,22 @@ mod tests {
         for (symbol, width) in widths {
             assert!(
                 (width - cell).abs() < 0.01,
-                "«{symbol}» mide {width} y una celda mide {cell}: {}",
+                "«{symbol}» measures {width} and a cell measures {cell}: {}",
                 if width == 0.0 {
-                    "no está en la fuente"
+                    "it is not in the font"
                 } else {
-                    "viene de la de emoji y descuadraría la columna"
+                    "it comes from the emoji one and would knock the column out of square"
                 }
             );
         }
     }
 
-    /// **Ninguno de los tres es el de una marca del cuerpo**, y no es cosmética: el mismo signo en los
-    /// dos sitios invita a leer que la aplicación dedujo el uno del otro, que es exactamente lo que el
-    /// contrato le prohíbe. Con el juego repetido, un panel con `mark: block` en una línea y sin
-    /// reclamo se vería igual que uno que reclama.
+    /// **None of the three is that of a body mark**, and it is not cosmetic: the same sign in the two
+    /// places invites reading that the application deduced one from the other, which is exactly what the
+    /// contract forbids. With the set repeated, a panel with `mark: block` in a line and no claim would
+    /// look the same as one that claims.
     #[test]
-    fn cada_reclamo_lleva_su_simbolo_y_ninguno_se_repite_con_los_del_cuerpo() {
+    fn each_claim_carries_its_symbol_and_none_is_repeated_with_the_bodys() {
         assert_eq!(
             [
                 attention_symbol(Attention::Wait),
@@ -2502,21 +2538,20 @@ mod tests {
             let its_own = attention_symbol(class);
             assert!(
                 !of_the_body.contains(&its_own),
-                "«{its_own}» ya lo usa una marca del cuerpo: el panel diría dos cosas con un solo signo"
+                "«{its_own}» is already used by a body mark: the panel would say two things with a single sign"
             );
         }
     }
 
-    /// **La bandera del productor no esconde el reclamo.** `header: false` quita la línea de identidad
-    /// —la que es suya— y el reclamo sigue, porque la respuesta a «¿tengo que ir ahí?» es de la
-    /// aplicación. Pintándolo en la línea de identidad, un productor la apagaría y la división
-    /// desaparecería del radar sin que nadie lo notara.
+    /// **The producer's flag does not hide the claim.** `header: false` removes the identity line —the one
+    /// that is its own— and the claim carries on, because the answer to «do I have to go there?» is the
+    /// application's. Painting it in the identity line, a producer would turn it off and the pane would
+    /// disappear from the radar without anyone noticing.
     #[test]
-    fn el_reclamo_se_pinta_aunque_el_productor_apague_su_cabecera() {
+    fn the_claim_is_painted_even_if_the_producer_turns_off_its_header() {
         let theme = Theme::default();
 
-        let rows =
-            what_gets_painted(r#"{"header":false,"attention":"wait","lines":["lo que sea"]}"#);
+        let rows = what_gets_painted(r#"{"header":false,"attention":"wait","lines":["whatever"]}"#);
 
         assert_eq!(
             rows,
@@ -2525,17 +2560,17 @@ mod tests {
                     "? te espera a ti".to_owned(),
                     theme.attention_color(Attention::Wait, true)
                 ),
-                ("  lo que sea".to_owned(), theme.panel_color(None, None)),
+                ("  whatever".to_owned(), theme.panel_color(None, None)),
             ]
         );
     }
 
-    /// Y con la cabecera puesta, el reclamo va **debajo de la identidad y encima del cuerpo**: arriba,
-    /// que es donde el recorte no llega.
+    /// And with the header in place, the claim goes **below the identity and above the body**: on top,
+    /// which is where the clip does not reach.
     #[test]
-    fn el_reclamo_va_arriba_del_todo_con_la_identidad_puesta() {
+    fn the_claim_goes_at_the_very_top_with_the_identity_in_place() {
         let rows =
-            what_gets_painted(r#"{"phase":"build","attention":"done","lines":["el cuerpo"]}"#);
+            what_gets_painted(r#"{"phase":"build","attention":"done","lines":["the body"]}"#);
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
@@ -2543,34 +2578,34 @@ mod tests {
             [
                 "a1b2 · build",
                 "∎ terminó y nadie lo ha mirado",
-                "  el cuerpo"
+                "  the body"
             ]
         );
     }
 
-    /// **Una marca del cuerpo no es un reclamo de la división**, y esta prueba entra por el pintado
-    /// para decirlo donde se ve: un `mark: block` es contenido del resumen —«esperé aprobación el
-    /// martes»— y deducir de él que la división reclama la dejaría marcada para siempre.
+    /// **A body mark is not a claim of the pane**, and this test comes in through the painting to say it
+    /// where it is seen: a `mark: block` is summary content —«I waited for approval on Tuesday»— and
+    /// deducing from it that the pane claims would leave it marked forever.
     #[test]
-    fn una_marca_del_cuerpo_no_pinta_reclamo_en_la_fila_de_la_aplicacion() {
+    fn a_body_mark_does_not_paint_a_claim_in_the_application_row() {
         let rows = what_gets_painted(
-            r#"{"header":false,"lines":[{"text":"esperé aprobación el martes","mark":"block"}]}"#,
+            r#"{"header":false,"lines":[{"text":"I waited for approval on Tuesday","mark":"block"}]}"#,
         );
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["× esperé aprobación el martes"]);
+        assert_eq!(texts, ["× I waited for approval on Tuesday"]);
     }
 
-    /// **Un reclamo que nadie sostiene se atenúa, y no se apaga.** El idioma de este panel es confesar
-    /// y no esconder —por eso un productor rancio sigue teniendo panel—, así que su reclamo sigue
-    /// pintándose: lo que cambia es el color, que dice «reclama, y no hay nadie detrás». El detalle
-    /// —desde cuándo— lo sigue diciendo el aviso, en su propia línea.
+    /// **A claim nobody holds dims, and does not go out.** The language of this panel is to confess and
+    /// not to hide —that is why a stale producer still has a panel—, so its claim keeps being painted: what
+    /// changes is the color, which says «it claims, and there is no one behind it». The detail —since when—
+    /// is still said by the warning, in its own line.
     #[test]
-    fn un_reclamo_que_nadie_sostiene_se_atenua_y_el_panel_lo_confiesa_aparte() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn a_claim_nobody_holds_dims_and_the_panel_confesses_it_separately() {
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+            r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["whatever"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
@@ -2592,22 +2627,22 @@ mod tests {
         assert_ne!(
             rows[0].1,
             theme.attention_color(Attention::Block, true),
-            "sin nadie que lo sostenga tiene que verse distinto, o el atenuado no dice nada"
+            "with no one holding it it has to look different, or the dimming says nothing"
         );
         assert!(
             rows[1].0.contains("sin noticias"),
-            "el reclamo no sustituye a la confesión, van los dos: {rows:?}"
+            "the claim does not replace the confession, both go: {rows:?}"
         );
     }
 
-    /// Y mientras el productor lo sostiene, el mismo panel se pinta con el color entero: sin esta
-    /// mitad, atenuarlo siempre pasaría por bueno.
+    /// And while the producer holds it, the same panel is painted with the full color: without this half,
+    /// dimming it always would pass for good.
     #[test]
-    fn el_mismo_reclamo_se_pinta_entero_mientras_su_productor_lo_sostiene() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_same_claim_is_painted_full_while_its_producer_holds_it() {
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+            r#"{"header":false,"attention":"block","stale_after_minutes":1,"lines":["whatever"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
@@ -2618,59 +2653,59 @@ mod tests {
         assert_eq!(
             rows[0].1,
             theme.attention_color(Attention::Block, true),
-            "recién publicado, nadie tiene nada que confesar: {rows:?}"
+            "just published, nobody has anything to confess: {rows:?}"
         );
     }
 
-    /// **Sin panel bueno no hay reclamo**, aunque la aplicación tenga mucho que confesar: lo que
-    /// confiesa entonces es que no hay panel. Un documento que nunca se pudo leer no dijo nada que
-    /// reclamar, y marcar la división por él sería inventarse la señal.
+    /// **With no good panel there is no claim**, even if the application has a lot to confess: what it
+    /// confesses then is that there is no panel. A document that could never be read said nothing to
+    /// claim, and marking the pane by it would be inventing the signal.
     #[test]
-    fn un_panel_que_nunca_se_pudo_leer_no_reclama_nada() {
-        let dir = PanelDir::create().expect("crear el directorio");
-        publish(&dir, "esto no es json");
+    fn a_panel_that_could_never_be_read_claims_nothing() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, "this is not json");
         let mut state = PanelState::default();
         state.refresh(dir.path());
         let now = SystemTime::now();
 
         assert!(
             state.warning(now).is_some(),
-            "la aplicación tenía que tener algo que confesar aquí"
+            "the application had to have something to confess here"
         );
         assert_eq!(state.attention(now), None);
     }
 
-    /// El reclamo se va cuando su productor lo quita, y no se queda pegado a la maqueta de antes.
+    /// The claim goes away when its producer removes it, and does not stay stuck to the previous layout.
     #[test]
-    fn el_reclamo_desaparece_cuando_el_productor_deja_de_reclamar() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_claim_disappears_when_the_producer_stops_claiming() {
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r#"{"header":false,"attention":"wait","lines":["lo que sea"]}"#,
+            r#"{"header":false,"attention":"wait","lines":["whatever"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
         paint_the_state(&mut state, PLACE, SystemTime::now());
 
-        publish(&dir, r#"{"header":false,"lines":["lo que sea"]}"#);
+        publish(&dir, r#"{"header":false,"lines":["whatever"]}"#);
         age_the_file(&dir, 1);
         state.refresh(dir.path());
         let rows = texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["  lo que sea"]);
+        assert_eq!(texts, ["  whatever"]);
     }
 
-    /// **La fila del reclamo se envuelve como cualquier otra.** Sus frases son las del contrato, y la
-    /// del bloqueo mide treinta y tres celdas: en un panel estrecho —que es un ancho que el usuario
-    /// elige arrastrando— tiene que partirse, no salirse. Sin esta prueba, pasarle a su envoltura un
-    /// ancho equivocado dejaba la suite entera en verde, porque el sitio de las demás pruebas es ancho.
+    /// **The claim's row wraps like any other.** Its phrases are the contract's, and the block one
+    /// measures thirty-three cells: in a narrow panel —which is a width the user chooses by dragging— it
+    /// has to split, not run off. Without this test, passing its wrapping a wrong width left the whole
+    /// suite green, because the place of the other tests is wide.
     #[test]
-    fn la_fila_del_reclamo_no_se_sale_de_un_panel_estrecho() {
+    fn the_claim_row_does_not_run_off_a_narrow_panel() {
         let width = 12;
 
         let rows = lay_out(
-            Some(&panel_with(r#"{"header":false,"lines":["lo que sea"]}"#)),
+            Some(&panel_with(r#"{"header":false,"lines":["whatever"]}"#)),
             "a1b2",
             width,
             &Theme::default(),
@@ -2683,12 +2718,12 @@ mod tests {
 
         assert!(
             rows.len() > 2,
-            "con este ancho la frase tenía que partirse en varias filas: {rows:?}"
+            "with this width the phrase had to split across several rows: {rows:?}"
         );
         for row in &rows {
             assert!(
                 row.column + row.text.chars().count() <= width,
-                "«{}» empieza en {} y mide {}: se sale de un panel de {width}",
+                "«{}» starts at {} and measures {}: it runs off a panel of {width}",
                 row.text,
                 row.column,
                 row.text.chars().count()
@@ -2696,17 +2731,17 @@ mod tests {
         }
     }
 
-    /// **Cuando solo cabe una fila, la que sobrevive es la del reclamo.** De las dos que pone la
-    /// aplicación, la del reclamo es la que contesta «¿tengo que ir ahí?» y el aviso es el que matiza
-    /// «y no es fresco», así que el orden es ése y no el contrario. Queda atado aquí porque el recorte
-    /// es silencioso: se lleva las últimas filas sin que nada falle.
+    /// **When only one row fits, the one that survives is the claim's.** Of the two the application puts,
+    /// the claim's is the one that answers «do I have to go there?» and the warning is the one that
+    /// qualifies «and it is not fresh», so the order is that one and not the reverse. It is tied down here
+    /// because the clip is silent: it takes the last rows without anything failing.
     #[test]
-    fn en_un_panel_de_un_solo_renglon_lo_que_queda_es_el_reclamo() {
+    fn in_a_single_line_panel_what_remains_is_the_claim() {
         let (_, height) = cell();
-        let dir = PanelDir::create().expect("crear el directorio");
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+            r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["whatever"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
@@ -2720,24 +2755,25 @@ mod tests {
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             texts,
-            ["? te espera a ti", "… 3 más"],
-            "el reclamo tiene que ser lo primero que se pinta, y lo que falta tiene que decirse"
+            ["? te espera a ti", "… 3 more"],
+            "the claim has to be the first thing painted, and what is missing has to be said"
         );
     }
 
-    /// **Lo terminado no se apaga por callar.** Quien acabó deja de publicar por definición, así que el
-    /// silencio no desmiente su «terminó y nadie lo ha mirado»: es su estado normal. Sin esta
-    /// excepción, media hora después de acabar —el plazo de serie— todo lo terminado se pintaría
-    /// apagado, y encontrar por la mañana lo que acabó de noche es justo para lo que sirve.
+    /// **The finished does not go out by falling silent.** Whoever finished stops publishing by
+    /// definition, so the silence does not belie its «terminó y nadie lo ha mirado»: it is its
+    /// normal state. Without this exception, half an hour after finishing —the default deadline— everything
+    /// finished would be painted dimmed, and finding in the morning what finished at night is exactly what
+    /// it is for.
     ///
-    /// **Y la aplicación sigue confesando el silencio en su línea**: lo que la excepción cambia es el
-    /// color del reclamo, no lo que el panel cuenta.
+    /// **And the application keeps confessing the silence in its line**: what the exception changes is the
+    /// color of the claim, not what the panel tells.
     #[test]
-    fn lo_terminado_se_sigue_viendo_entero_por_mucho_que_calle() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_finished_keeps_being_seen_whole_however_much_it_falls_silent() {
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r#"{"header":false,"attention":"done","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+            r#"{"header":false,"attention":"done","stale_after_minutes":1,"lines":["whatever"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
@@ -2752,30 +2788,30 @@ mod tests {
         assert_eq!(
             rows[0].1,
             theme.attention_color(Attention::Done, true),
-            "una hora callado, y lo terminado sigue entero: {rows:?}"
+            "an hour quiet, and the finished is still whole: {rows:?}"
         );
         assert!(
             rows[1].0.contains("sin noticias"),
-            "el silencio se sigue confesando, que es otra cosa: {rows:?}"
+            "the silence is still confessed, which is another thing: {rows:?}"
         );
     }
 
-    /// **Pero sí se apaga cuando su fichero deja de leerse**, que es lo único que de verdad desmiente
-    /// lo que se está enseñando: sin poder leerlo, lo que hay en pantalla es lo último que llegó y nada
-    /// dice que siga siendo verdad. Sin esta mitad, la excepción de arriba sería «lo terminado no se
-    /// apaga nunca», que es esconder.
+    /// **But it does go out when its file stops being read**, which is the only thing that really belies
+    /// what is being shown: without being able to read it, what is on screen is the last thing that
+    /// arrived and nothing says it is still true. Without this half, the exception above would be «the
+    /// finished does not go out ever», which is hiding.
     #[test]
-    fn lo_terminado_si_se_apaga_cuando_su_fichero_deja_de_leerse() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn the_finished_does_go_out_when_its_file_stops_being_read() {
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r#"{"header":false,"attention":"done","lines":["lo que sea"]}"#,
+            r#"{"header":false,"attention":"done","lines":["whatever"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
         let theme = Theme::default();
 
-        publish(&dir, "esto ya no es json");
+        publish(&dir, "this is no longer json");
         age_the_file(&dir, 1);
         state.refresh(dir.path());
         let rows = texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()));
@@ -2783,18 +2819,18 @@ mod tests {
         assert_eq!(
             rows[0].1,
             theme.attention_color(Attention::Done, false),
-            "sin poder leer su fichero, nadie sostiene lo que se ve: {rows:?}"
+            "without being able to read its file, nobody holds what is shown: {rows:?}"
         );
     }
 
-    /// Y la excepción es **solo de lo terminado**: lo que te espera y lo que está atascado siguen
-    /// apagándose al quedarse sin nadie detrás, porque ahí el silencio sí desmiente lo que dicen.
+    /// And the exception is **only for the finished**: what waits for you and what is stuck keep going out
+    /// on being left with no one behind, because there the silence does belie what they say.
     #[test]
-    fn la_excepcion_de_lo_terminado_no_alcanza_a_las_otras_dos_clases() {
+    fn the_exception_for_the_finished_does_not_reach_the_other_two_classes() {
         let theme = Theme::default();
 
         for (class, value) in [(Attention::Wait, "wait"), (Attention::Block, "block")] {
-            let dir = PanelDir::create().expect("crear el directorio");
+            let dir = PanelDir::create().expect("create the directory");
             publish(
                 &dir,
                 &format!(
@@ -2813,43 +2849,42 @@ mod tests {
             assert_eq!(
                 rows[0].1,
                 theme.attention_color(class, false),
-                "{class:?} tenía que apagarse tras una hora callada: {rows:?}"
+                "{class:?} had to go out after an hour quiet: {rows:?}"
             );
         }
     }
 
-    /// **Una palabra que no existe no marca nada, y no se lleva por delante el resto del panel.** El
-    /// campo lo escribe un tercero a mano, así que `waiting` por `wait` es cuestión de tiempo: la
-    /// aplicación no puede adivinar cuál de los tres quiso decir —adivinarlo sería deducir— ni
-    /// castigar al resto del documento por una palabra suelta.
+    /// **A word that does not exist marks nothing, and does not take the rest of the panel with it.** The
+    /// field is written by a third party by hand, so `waiting` for `wait` is a matter of time: the
+    /// application cannot guess which of the three it meant —guessing it would be deducing— nor punish the
+    /// rest of the document for a loose word.
     ///
-    /// **Entra por el pintado porque es ahí donde se ve.** La caja del contrato ya afirma que ese campo
-    /// se lee vacío, pero no que la identidad y el cuerpo sigan pintándose: son dos cosas distintas y
-    /// esta es la de este hito.
+    /// **It comes in through the painting because that is where it is seen.** The contract crate already
+    /// asserts that field is read empty, but not that the identity and the body keep being painted: they
+    /// are two distinct things and this is the one for this milestone.
     #[test]
-    fn un_reclamo_que_no_existe_no_marca_y_el_resto_del_panel_se_pinta_entero() {
-        let rows = what_gets_painted(
-            r#"{"attention":"waiting","phase":"validate","lines":["el cuerpo"]}"#,
-        );
+    fn a_claim_that_does_not_exist_does_not_mark_and_the_rest_of_the_panel_is_painted_whole() {
+        let rows =
+            what_gets_painted(r#"{"attention":"waiting","phase":"validate","lines":["the body"]}"#);
 
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(texts, ["a1b2 · validate", "  el cuerpo"]);
+        assert_eq!(texts, ["a1b2 · validate", "  the body"]);
     }
 
-    /// **Lo que [`PanelState::attention`] contesta desde fuera es lo mismo que el panel pinta.** Son dos
-    /// caminos: el pintado ya tiene el aviso en la mano y pregunta por dentro; el de fuera —la puerta
-    /// por la que preguntará quien acumule los reclamos de una pestaña— tiene que calcularlo él.
+    /// **What [`PanelState::attention`] answers from outside is the same as what the panel paints.** They
+    /// are two paths: the painting already has the warning in hand and asks inside; the outside one —the
+    /// door through which whoever accumulates a tab's claims will ask— has to compute it itself.
     ///
-    /// **Sin esta prueba el de fuera no lo mira nadie**: comprobado invirtiendo ahí la pregunta del
-    /// aviso —dar por sostenido justo lo que no lo está y al revés— con la suite entera en verde. Lo
-    /// que se afirma es el valor, no que las dos puertas coincidan, porque coincidir en lo falso
-    /// también coincide.
+    /// **Without this test nobody looks at the outside one**: checked by inverting there the warning's
+    /// question —taking as backed exactly what is not and the reverse— with the whole suite green. What is
+    /// asserted is the value, not that the two doors coincide, because coinciding in the false also
+    /// coincides.
     #[test]
-    fn lo_que_reclamo_contesta_desde_fuera_es_lo_que_el_panel_pinta() {
-        let dir = PanelDir::create().expect("crear el directorio");
+    fn what_the_claim_answers_from_outside_is_what_the_panel_paints() {
+        let dir = PanelDir::create().expect("create the directory");
         publish(
             &dir,
-            r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["lo que sea"]}"#,
+            r#"{"header":false,"attention":"wait","stale_after_minutes":1,"lines":["whatever"]}"#,
         );
         let mut state = PanelState::default();
         state.refresh(dir.path());
@@ -2863,7 +2898,7 @@ mod tests {
                 class: Attention::Wait,
                 backed: true
             }),
-            "recién publicado no hay nada que confesar de este panel"
+            "just published there is nothing to confess about this panel"
         );
         assert_eq!(
             state.attention(gone_quiet),
@@ -2871,35 +2906,35 @@ mod tests {
                 class: Attention::Wait,
                 backed: false
             }),
-            "tras una hora callado ya no hay nadie detrás de lo que se enseña"
+            "after an hour quiet there is no longer anyone behind what is shown"
         );
 
         for when in [just_now, gone_quiet] {
-            let answer = state.attention(when).expect("reclama");
+            let answer = state.attention(when).expect("it claims");
             let rows = texts_and_colors(paint_the_state(&mut state, PLACE, when));
             assert_eq!(
                 rows[0].1,
                 theme.attention_color(answer.class, answer.backed),
-                "lo que se pinta no es lo que se contesta desde fuera: {rows:?}"
+                "what is painted is not what is answered from outside: {rows:?}"
             );
         }
     }
 
-    /// **Las tres frases viven dos veces**: en el código que las pinta y en el documento del
-    /// contrato, palabra por palabra en los dos sitios. Su propio comentario dice que son «las del
-    /// contrato, palabra por palabra» — y nada lo comprobaba.
+    /// **The three phrases live twice**: in the code that paints them and in the contract document, word
+    /// for word in both places. Its own comment says they are «the contract's, word for word» — and
+    /// nothing checked it.
     ///
-    /// Es la misma clase de acoplamiento que el del guion de medida con el informe: dos ficheros que
-    /// tienen que decir lo mismo y ningún sitio donde eso se afirme.
+    /// It is the same kind of coupling as that of the measurement script with the report: two files that
+    /// have to say the same thing and no place where that is asserted.
     #[test]
-    fn las_tres_frases_del_reclamo_son_las_que_el_contrato_publica() {
+    fn the_three_claim_phrases_are_the_ones_the_contract_publishes() {
         const CONTRACT: &str = include_str!("../../../docs/04-contrato-panel.md");
 
-        // **Se busca en la fila de SU clave, no en el fichero.** Un `contains` sobre el documento
-        // entero pasa con las tres frases **rotadas entre clases** —comprobado midiéndolo— y con
-        // cualquier trozo suelto: «a ti» está dentro de «te espera a ti». Eso es exactamente lo que
-        // el mensaje de abajo dice impedir, así que el `contains` suelto no cubría su propia
-        // promesa. La fila la identifica la clave del contrato, que va en la primera columna.
+        // **It is searched in the row of ITS key, not in the file.** A `contains` over the whole document
+        // passes with the three phrases **rotated among classes** —checked by measuring it— and with any
+        // loose fragment: «a ti» is inside «te espera a ti». That is exactly what the message
+        // below says it prevents, so the loose `contains` did not cover its own promise. The row is
+        // identified by the contract's key, which goes in the first column.
         for (class, key) in [
             (Attention::Wait, "wait"),
             (Attention::Block, "block"),
@@ -2911,25 +2946,25 @@ mod tests {
                 .find(|line| line.starts_with(&format!("| `{key}`")))
                 .unwrap_or_else(|| {
                     panic!(
-                        "el documento del contrato no tiene fila para «{key}»: o cambió de forma, \
-                         o dejó de publicar un valor que la aplicación sí pinta"
+                        "the contract document has no row for «{key}»: either it changed shape, \
+                         or it stopped publishing a value the application does paint"
                     )
                 });
-            // **Y se compara la frase ENTERA, no si está dentro.** Un `contains` sobre la fila pasa
-            // con la frase truncada —«te espera» está dentro de «te espera a ti»—, y la frase larga
-            // es justo lo que su comentario defiende: el «a ti» es lo que la separa de la segunda.
-            // Así que se saca lo que la fila publica como frase y se comparan por igualdad.
+            // **And the WHOLE phrase is compared, not whether it is inside.** A `contains` over the row
+            // passes with the phrase truncated —«te espera» is inside «te espera a ti»—, and the
+            // long phrase is exactly what its comment defends: the «a ti» is what separates it from the
+            // second. So what the row publishes as a phrase is taken out and they are compared by equality.
             let published = row
                 .split('|')
                 .nth(2)
-                .expect("la fila del contrato tiene tres columnas")
+                .expect("the contract row has three columns")
                 .trim()
                 .replace("**", "");
             let published = published.split(':').next().unwrap_or(&published).trim();
             assert_eq!(
                 published, phrase,
-                "el panel pinta «{phrase}» para {class:?} y la fila de «{key}» del contrato publica \
-                 «{published}»: el productor que lea el contrato espera un texto y ve otro"
+                "the panel paints «{phrase}» for {class:?} and the «{key}» row of the contract publishes \
+                 «{published}»: the producer that reads the contract expects one text and sees another"
             );
         }
     }

@@ -1,23 +1,23 @@
-//! Reproductor del fallo: la salida que no se drena no tiene techo.
+//! Reproducer of the failure: output that is not drained has no ceiling.
 //!
-//! Recorre la cadena **real** —el pseudoterminal, el hilo puente y la recogida con el presupuesto
-//! por fotograma— sin abrir ventana, y publica cuánta memoria residente ocupa el proceso mientras
-//! tanto. Sin interfaz de por medio, lo que se ve es solo el almacenamiento; si crece aquí, no lo
-//! provoca el pintado.
+//! It walks the **real** chain —the pseudoterminal, the bridge thread and the collection with the
+//! per-frame budget— without opening a window, and publishes how much resident memory the process
+//! occupies meanwhile. With no UI in between, what is seen is only the storage; if it grows here, the
+//! painting does not cause it.
 //!
-//! **Tiene tope de seguridad a propósito.** El caso que reproduce agota la memoria de la máquina si
-//! se le deja: el pseudoterminal entrega dos órdenes de magnitud más deprisa de lo que se recoge.
-//! Al llegar al tope se para y se declara reproducido — dejarlo correr hasta el final no añadiría
-//! ninguna información y sí un cuelgue del sistema.
+//! **It has a safety cap on purpose.** The case it reproduces exhausts the machine's memory if left to
+//! it: the pseudoterminal delivers two orders of magnitude faster than it is collected. On reaching the
+//! cap it stops and declares itself reproduced — letting it run to the end would add no information and
+//! would add a system hang.
 //!
-//! Solo Linux: la medida sale de `/proc/self/status`.
+//! Linux only: the measurement comes from `/proc/self/status`.
 //!
 //! ```text
-//! cargo run --release --example leak -p app -- urandom     # bytes crudos sin fin
-//! cargo run --release --example leak -p app -- ceros       # lo mismo, sin coste de generarlos
-//! cargo run --release --example leak -p app -- yes         # líneas de dos bytes, sin fin
-//! cargo run --release --example leak -p app -- acotado     # ~10 MiB: termina
-//! cargo run --release --example leak -p app -- sin-puente  # urandom, consumiendo el canal a pelo
+//! cargo run --release --example leak -p app -- urandom     # raw bytes without end
+//! cargo run --release --example leak -p app -- zeros       # the same, without the cost of generating them
+//! cargo run --release --example leak -p app -- yes         # two-byte lines, without end
+//! cargo run --release --example leak -p app -- bounded     # ~10 MiB: it terminates
+//! cargo run --release --example leak -p app -- no-bridge   # urandom, consuming the channel bare
 //! ```
 
 use std::sync::mpsc::Receiver;
@@ -26,41 +26,42 @@ use std::time::{Duration, Instant};
 use app::pty_output::PtyOutput;
 use term_core::{Pty, Size};
 
-/// Copiado de `app::PUMP_BUDGET`, que es privado. Si allí cambia, aquí deja de medir lo mismo.
+/// Copied from `app::PUMP_BUDGET`, which is private. If it changes there, here it stops measuring the
+/// same thing.
 const BUDGET: usize = 128 * 1024;
 
-/// El hueco entre recogidas: lo que dura un fotograma a 60 por segundo.
+/// The gap between collections: what a frame lasts at 60 per second.
 const FRAME: Duration = Duration::from_millis(16);
 
-/// Cuánta memoria residente se tolera antes de declarar el fallo reproducido y parar.
+/// How much resident memory is tolerated before declaring the failure reproduced and stopping.
 ///
-/// No es un umbral fino: es un cortafuegos. Con la cadena sana la ocupación se queda en unos pocos
-/// megabytes, así que rebasar esto ya solo puede significar que nada frena al productor.
+/// It is not a fine threshold: it is a firewall. With the chain healthy the occupancy stays at a few
+/// megabytes, so overrunning this can only mean that nothing is holding back the producer.
 const CEILING: u64 = 512 * 1024;
 
-/// Cuándo rendirse esperando a que crezca, en un escenario que sí debería terminar.
+/// When to give up waiting for it to grow, in a scenario that should terminate.
 const DEADLINE: Duration = Duration::from_secs(30);
 
-/// Cada cuánto se anota una fila de la tabla.
+/// How often a row of the table is noted.
 const SAMPLING: Duration = Duration::from_millis(500);
 
 fn main() {
     let scenario = std::env::args().nth(1).unwrap_or_else(|| "urandom".into());
 
     let (program, args): (&str, &[&str]) = match scenario.as_str() {
-        // Bytes crudos y sin fin, en bloques grandes: la carga que de verdad entrega más deprisa de
-        // lo que se recoge. Es el caso del issue.
-        "urandom" | "sin-puente" => ("cat", &["/dev/urandom"]),
-        // Lo mismo sin el coste de generar azar, por si la máquina lo tuviera caro y el que
-        // estuviera midiendo el límite fuese el generador y no la cadena.
-        "ceros" => ("cat", &["/dev/zero"]),
-        // `yes` escribe sin parar, pero en líneas de dos bytes: cada salto lo procesa la disciplina
-        // de línea del pseudoterminal, y eso lo frena muy por debajo de un volcado en bloques. Está
-        // aquí porque el issue lo nombra y porque el resultado no es el que se espera.
+        // Raw bytes and endless, in big blocks: the load that really delivers faster than it is
+        // collected. It is the issue's case.
+        "urandom" | "no-bridge" => ("cat", &["/dev/urandom"]),
+        // The same without the cost of generating randomness, in case the machine had it expensive and
+        // what was measuring the limit were the generator and not the chain.
+        "zeros" => ("cat", &["/dev/zero"]),
+        // `yes` writes without stopping, but in two-byte lines: each break is processed by the
+        // pseudoterminal's line discipline, and that slows it far below a block dump. It is here because
+        // the issue names it and because the result is not the one expected.
         "yes" => ("yes", &[]),
-        // La misma forma de carga pero acabada: ~10 MiB y fin de fichero. Es el caso que F1.3 midió
-        // y aceptó, y está aquí para que la comparación no dependa de recordarlo.
-        "acotado" => (
+        // The same shape of load but finished: ~10 MiB and end of file. It is the case F1.3 measured
+        // and accepted, and it is here so the comparison does not depend on remembering it.
+        "bounded" => (
             "sh",
             &[
                 "-c",
@@ -68,40 +69,40 @@ fn main() {
             ],
         ),
         other => {
-            eprintln!("escenario desconocido: {other}");
-            eprintln!("usa: urandom | ceros | yes | acotado | sin-puente");
+            eprintln!("unknown scenario: {other}");
+            eprintln!("use: urandom | zeros | yes | bounded | no-bridge");
             std::process::exit(2);
         }
     };
 
-    let resident_at_start = resident_kib().expect("/proc/self/status legible: esto es Linux");
-    println!("escenario: {scenario}");
-    println!("residente al empezar: {resident_at_start} KiB");
+    let resident_at_start = resident_kib().expect("/proc/self/status readable: this is Linux");
+    println!("scenario: {scenario}");
+    println!("resident at start: {resident_at_start} KiB");
     println!();
-    println!("  t (s)   residente (KiB)   crecimiento (KiB)   recogido (MiB)");
+    println!("  t (s)   resident (KiB)   growth (KiB)   collected (MiB)");
 
     let (pty, output) = Pty::spawn(program, args, Size { rows: 24, cols: 80 })
-        .expect("el pseudoterminal se abre y el programa se lanza");
+        .expect("the pseudoterminal opens and the program launches");
 
     let verdict = match scenario.as_str() {
-        "sin-puente" => pump_direct(output, resident_at_start),
+        "no-bridge" => pump_direct(output, resident_at_start),
         _ => pump_through_bridge(output, resident_at_start),
     };
 
-    // Destruir el pseudoterminal mata al hijo y cierra el canal. Explícito y antes de imprimir el
-    // veredicto: con `yes` dentro, dejarlo para el final del `main` sería seguir alimentando la cola
-    // mientras se escribe la conclusión.
+    // Destroying the pseudoterminal kills the child and closes the channel. Explicit and before
+    // printing the verdict: with `yes` inside, leaving it for the end of `main` would be to keep feeding
+    // the queue while the conclusion is written.
     drop(pty);
 
     println!();
     match verdict {
         Verdict::Reproduced { seconds, growth } => {
             println!(
-                "REPRODUCIDO: la memoria residente creció {growth} KiB en {seconds:.1} s y \
-                 pasó el tope de {CEILING} KiB sin estabilizarse."
+                "REPRODUCED: resident memory grew {growth} KiB in {seconds:.1} s and \
+                 passed the {CEILING} KiB cap without stabilizing."
             );
             println!(
-                "Nadie frenó al programa de dentro. Sin el tope, esto sigue hasta agotar la máquina."
+                "Nobody held back the program inside. Without the cap, this continues until the machine is exhausted."
             );
         }
         Verdict::Terminated {
@@ -110,16 +111,18 @@ fn main() {
             collected,
         } => {
             println!(
-                "TERMINADO: el programa cerró su salida a los {seconds:.1} s tras entregar \
-                 {:.1} MiB; el crecimiento máximo fue de {growth} KiB.",
+                "TERMINATED: the program closed its output at {seconds:.1} s after delivering \
+                 {:.1} MiB; the maximum growth was {growth} KiB.",
                 collected as f64 / (1024.0 * 1024.0)
             );
-            println!("Este caso acaba solo: es el que F1.3 midió y aceptó, y no es el del issue.");
+            println!(
+                "This case ends on its own: it is the one F1.3 measured and accepted, and it is not the issue's."
+            );
         }
         Verdict::Deadline { growth } => {
             println!(
-                "SIN VEREDICTO: se agotó el plazo de {} s sin cerrar ni pasar el tope \
-                 (crecimiento {growth} KiB).",
+                "NO VERDICT: the {} s deadline ran out without closing or passing the cap \
+                 (growth {growth} KiB).",
                 DEADLINE.as_secs()
             );
         }
@@ -127,22 +130,22 @@ fn main() {
 }
 
 enum Verdict {
-    /// Pasó el tope de memoria sin estabilizarse: el fallo está reproducido.
+    /// Passed the memory cap without stabilizing: the failure is reproduced.
     Reproduced { seconds: f64, growth: u64 },
-    /// El programa cerró su salida por su cuenta.
+    /// The program closed its output on its own.
     Terminated {
         seconds: f64,
         growth: u64,
         collected: u64,
     },
-    /// Ni una cosa ni la otra dentro del plazo.
+    /// Neither one thing nor the other within the deadline.
     Deadline { growth: u64 },
 }
 
-/// La cadena completa: hilo puente encolando, y una recogida por fotograma con el presupuesto.
+/// The complete chain: bridge thread enqueuing, and one collection per frame with the budget.
 ///
-/// Es lo que hace la aplicación de verdad, con el pintado quitado. Que el pintado no esté es
-/// justamente lo que hace concluyente la medida: lo que crezca aquí no lo puede haber causado.
+/// It is what the application really does, with the painting removed. That the painting is not there is
+/// precisely what makes the measurement conclusive: whatever grows here cannot have been caused by it.
 fn pump_through_bridge(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Verdict {
     let bridge = PtyOutput::new(output, || {});
     let mut received = Vec::with_capacity(BUDGET);
@@ -172,7 +175,7 @@ fn pump_through_bridge(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Ver
                 growth,
             };
         }
-        // El programa ha muerto y ya no queda nada por recoger: la única salida limpia.
+        // The program has died and there is nothing left to collect: the only clean exit.
         if !bridge.is_alive() && received.is_empty() {
             return Verdict::Terminated {
                 seconds: started.elapsed().as_secs_f64(),
@@ -188,10 +191,10 @@ fn pump_through_bridge(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Ver
     }
 }
 
-/// Sin puente: se consume el canal del pseudoterminal directamente, al mismo ritmo.
+/// No bridge: the pseudoterminal's channel is consumed directly, at the same rate.
 ///
-/// Sirve para separar las dos colas del camino. Aquí no existe la del puente, así que lo que crezca
-/// solo puede ser la del canal que `Pty::spawn` devuelve.
+/// It serves to separate the two queues on the path. Here the bridge's does not exist, so whatever
+/// grows can only be the channel's that `Pty::spawn` returns.
 fn pump_direct(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Verdict {
     let mut collected: u64 = 0;
     let started = Instant::now();
@@ -199,7 +202,7 @@ fn pump_direct(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Verdict {
     let mut max_growth = 0;
 
     loop {
-        // El mismo presupuesto que aplica el fotograma, contado en bytes y no en trozos.
+        // The same budget the frame applies, counted in bytes and not in chunks.
         let mut of_this_frame = 0;
         while of_this_frame < BUDGET {
             match output.try_recv() {
@@ -242,10 +245,10 @@ fn row(elapsed: Duration, resident: u64, growth: u64, collected: u64) {
     );
 }
 
-/// Memoria residente del proceso, en KiB, leída de `/proc/self/status`.
+/// Resident memory of the process, in KiB, read from `/proc/self/status`.
 ///
-/// Es la única de las medidas de memoria que responde a la pregunta del issue: no cuánta se ha
-/// reservado, sino cuánta está ocupando la máquina de verdad.
+/// It is the only one of the memory measurements that answers the issue's question: not how much has
+/// been reserved, but how much is really occupying the machine.
 fn resident_kib() -> Option<u64> {
     let status = std::fs::read_to_string("/proc/self/status").ok()?;
     status

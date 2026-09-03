@@ -1,4 +1,4 @@
-//! Arranque. Todo el trabajo vive en la librería, que es lo que el banco de barrido consume.
+//! Startup. All the work lives in the library, which is what the sweep bench consumes.
 
 fn main() -> eframe::Result {
     app::run()

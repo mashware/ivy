@@ -1,15 +1,16 @@
-//! El hilo que trae lo que el programa escribe, y la señal de que ha muerto.
+//! The thread that brings what the program writes, and the signal that it has died.
 //!
-//! Existe por una razón concreta: leer del pseudoterminal **bloquea** hasta que hay algo que leer,
-//! y una espera bloqueante dentro del fotograma congelaría la ventana. El hilo espera por su
-//! cuenta, deja lo leído en una cola y **despierta a la ventana**. Ese despertar es lo único que
-//! permite que un agente escriba solo y se le vea avanzar sin tocar el teclado.
+//! It exists for a concrete reason: reading from the pseudoterminal **blocks** until there is
+//! something to read, and a blocking wait inside the frame would freeze the window. The thread
+//! waits on its own, leaves what it read in a queue and **wakes the window**. That waking is the
+//! only thing that lets an agent write by itself and be seen to advance without touching the
+//! keyboard.
 //!
-//! **Y hay una señal que se rompería en silencio si nadie la sostuviera.** La única forma de saber
-//! que el programa ha muerto es que su canal de salida se cierre. Al ceder ese canal a otro hilo,
-//! quien pinta deja de verlo. Aquí se retransmite: el hilo se lleva un emisor que no envía nada
-//! nunca y lo suelta al terminar, así que el cierre llega al otro lado **por construcción**, no
-//! porque alguien se acuerde de levantar una bandera.
+//! **And there is a signal that would break in silence if no one held it up.** The only way to
+//! know that the program has died is for its output channel to close. By handing that channel to
+//! another thread, whoever paints stops seeing it. Here it is relayed: the thread takes along a
+//! sender that never sends anything and drops it on finishing, so the closure reaches the other
+//! side **by construction**, not because someone remembers to raise a flag.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,91 +18,94 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-/// Cuánto se guarda por adelantado antes de dejar de recoger del canal.
+/// How much is stored ahead before we stop picking up from the channel.
 ///
-/// **Es la otra mitad del freno**, y sin ella la de abajo no sirve de nada: el canal de
-/// `term-core` tiene techo, pero un hilo que lo vacíe en cuanto llega algo hace que ese techo no
-/// se alcance nunca, y entonces nada frena al programa. Medido: acotar solo el canal deja el
-/// consumo de memoria exactamente igual que antes.
+/// **It is the other half of the brake**, and without it the one below is worth nothing: the
+/// `term-core` channel has a ceiling, but a thread that empties it the moment something arrives
+/// makes that ceiling never be reached, and then nothing brakes the program. Measured: bounding
+/// only the channel leaves memory consumption exactly the same as before.
 ///
-/// Un megabyte son ocho fotogramas de trabajo por delante con el presupuesto actual: suficiente
-/// para que el pintado nunca se quede esperando bytes, y poco para que retenerlo dé igual. Lo que
-/// no cabe no se pierde: se queda en el programa que lo escribió, que espera.
+/// One megabyte is eight frames of work ahead with the current budget: enough for the painting to
+/// never end up waiting for bytes, and little enough that holding it makes no difference. What
+/// does not fit is not lost: it stays in the program that wrote it, which waits.
 const QUEUE_CEILING: usize = 1024 * 1024;
 
-/// Cada cuánto se despierta el hilo a comprobar por su cuenta si ya hay sitio.
+/// How often the thread wakes to check on its own whether there is room already.
 ///
-/// La señal de quien recoge es lo que despierta normalmente; este plazo solo existe para que una
-/// señal perdida cueste un milisegundo y no un cuelgue.
+/// The signal from whoever picks up is what normally wakes it; this deadline only exists so that a
+/// lost signal costs a millisecond and not a hang.
 const RECHECK: Duration = Duration::from_millis(1);
 
-/// Lo que hay en la cola: los bytes y cuándo llegó cada tanda.
+/// What is in the queue: the bytes and when each batch arrived.
 #[derive(Default)]
 struct Queue {
     bytes: VecDeque<u8>,
-    /// Cuándo llegó cada tanda y hasta qué byte llega, contando desde el principio de todo lo que
-    /// ha pasado por aquí. Existe para poder responder **cuánto lleva esperando** lo que se recoge:
-    /// en un volcado esa espera es el tramo que domina el retraso visual —más de un segundo, frente
-    /// a los microsegundos de todo lo demás— y sin sellarla el número diría que la aplicación es
-    /// instantánea justo cuando no lo es.
+    /// When each batch arrived and up to which byte it reaches, counting from the beginning of
+    /// everything that has passed through here. It exists to be able to answer **how long what is
+    /// picked up has been waiting**: in a dump that wait is the stretch that dominates the visual
+    /// delay —more than a second, against the microseconds of everything else— and without
+    /// stamping it the number would say the application is instantaneous exactly when it is not.
     arrivals: VecDeque<(u64, Instant)>,
-    /// Cuántos bytes se han recogido ya en total. Es el origen contra el que se leen las llegadas.
+    /// How many bytes have been picked up in total. It is the origin against which arrivals are read.
     bytes_picked_up: u64,
 }
 
-/// El resultado de una recogida: si queda cola, y desde cuándo esperaba lo que se ha llevado.
+/// The result of a pickup: whether a queue is left, and since when what was taken away was waiting.
 pub struct Pickup {
-    /// El presupuesto cortó el bombeo y queda cola por tragar.
+    /// The budget cut off the pumping and there is a queue left to swallow.
     pub left_a_queue: bool,
-    /// Cuándo llegó el más antiguo de los bytes recogidos, o nada si no se recogió ninguno. Es el
-    /// principio del tramo que el usuario ve como retraso.
+    /// When the oldest of the picked-up bytes arrived, or nothing if none was picked up. It is the
+    /// beginning of the stretch the user sees as delay.
     pub waiting_since: Option<Instant>,
 }
 
-/// Lo que el programa ha escrito y todavía no se ha recogido, más la señal de si sigue vivo.
+/// What the program has written and has not been picked up yet, plus the signal of whether it is
+/// still alive.
 pub struct PtyOutput {
-    /// Una cola por los dos extremos y no un vector: se añade por el final y se saca por el
-    /// principio, y sacar del principio de un vector copia todo lo que queda detrás. Con un
-    /// volcado en marcha eso serían megabytes copiados en cada fotograma, y ese coste acabaría
-    /// dentro del número que este hito existe para medir.
+    /// A double-ended queue and not a vector: it is appended at the end and taken from the
+    /// beginning, and taking from the beginning of a vector copies everything left behind it. With
+    /// a dump in progress that would be megabytes copied on each frame, and that cost would end up
+    /// inside the number this milestone exists to measure.
     queue: Arc<Mutex<Queue>>,
-    /// Avisa al hilo de que se ha hecho sitio en la cola y puede volver a recoger del canal.
+    /// Tells the thread that room has been made in the queue and it can pick up from the channel again.
     ///
-    /// Va aparte del candado y no dentro de `Queue` porque quien espera y quien avisa son hilos
-    /// distintos y ninguno de los dos es dueño del otro.
+    /// It goes apart from the lock and not inside `Queue` because whoever waits and whoever
+    /// notifies are different threads and neither of the two owns the other.
     room: Arc<Condvar>,
-    /// Saca al hilo de la espera por sitio cuando este objeto deja de existir.
+    /// Takes the thread out of the wait for room when this object stops existing.
     ///
-    /// Esperar sitio es lo único que el hilo hace **sin** mirar el canal, así que ahí no se entera
-    /// de que el programa ha muerto ni de que ya nadie va a recoger. Sin esta bandera, un puente
-    /// destruido con la cola en el techo deja su hilo girando para siempre.
+    /// Waiting for room is the only thing the thread does **without** looking at the channel, so
+    /// there it does not find out that the program has died nor that no one is going to pick up any
+    /// more. Without this flag, a destroyed bridge with the queue at the ceiling leaves its thread
+    /// spinning forever.
     stop: Arc<AtomicBool>,
-    /// No transporta nada: lo que importa es **cuándo se cierra**, que es cuando el hilo termina.
-    /// El tipo vacío deja escrito en la firma que por aquí no va a llegar ningún valor.
+    /// It carries nothing: what matters is **when it closes**, which is when the thread finishes.
+    /// The empty type leaves it written in the signature that no value is going to arrive through here.
     death: Receiver<std::convert::Infallible>,
 }
 
 impl PtyOutput {
-    /// Arranca el hilo que se queda con la salida del programa.
+    /// Starts the thread that keeps the program's output.
     ///
-    /// `wake` es lo que hay que hacer para que la ventana se entere de que hay algo nuevo; en
-    /// la aplicación es pedirle un repintado. Se recibe como una función en vez de recibir la
-    /// ventana entera por dos razones: así este módulo no depende del framework de interfaz —que
-    /// es lo que se va a reescribir— y así **el despertar se puede comprobar en un test**, que es
-    /// la única forma de demostrar la parte del hito que dice que la ventana se despierta sola.
+    /// `wake` is what has to be done for the window to find out that there is something new; in the
+    /// application it is asking it for a repaint. It is received as a function instead of receiving
+    /// the whole window for two reasons: so this module does not depend on the interface framework
+    /// —which is what is going to be rewritten— and so **the waking can be checked in a test**,
+    /// which is the only way to prove the part of the milestone that says the window wakes on its own.
     ///
-    /// Pedir el repintado de más no cuesta —se agrupan solos— y pedirlo de menos es una ventana
-    /// quieta con trabajo por mostrar.
+    /// Asking for the repaint too much costs nothing —they group themselves— and asking for it too
+    /// little is a still window with work to show.
     ///
-    /// **`wake` no puede entrar en pánico.** Si lo hiciera, el hilo moriría, se publicaría una
-    /// muerte que no ha ocurrido, y de paso se destruiría el canal de salida: el lector de la caja
-    /// de debajo rompería al enviar, dejaría de vaciar el pseudoterminal y el programa acabaría
-    /// bloqueado al escribir.
+    /// **`wake` cannot panic.** If it did, the thread would die, a death that has not happened
+    /// would be published, and along the way the output channel would be destroyed: the reader of
+    /// the crate below would break on sending, would stop draining the pseudoterminal and the
+    /// program would end up blocked on writing.
     ///
-    /// **El hilo termina con lo que ocurra primero:** que se cierre el canal de salida —o sea, que
-    /// muera el programa— o que se destruya este objeto. Lo segundo hace falta porque esperar sitio
-    /// es lo único que el hilo hace sin mirar el canal, y ahí no se enteraría de ninguna de las dos
-    /// cosas. Aun así conviene tenerlo junto al `Pty`: separarlos deja una cola sin dueño.
+    /// **The thread finishes with whatever happens first:** the output channel closing —that is,
+    /// the program dying— or this object being destroyed. The second is needed because waiting for
+    /// room is the only thing the thread does without looking at the channel, and there it would
+    /// not find out about either of the two things. Even so it is worth keeping it next to the
+    /// `Pty`: separating them leaves a queue without an owner.
     pub fn new(output: Receiver<Vec<u8>>, wake: impl Fn() + Send + 'static) -> Self {
         let queue = Arc::new(Mutex::new(Queue::default()));
         let thread_queue = Arc::clone(&queue);
@@ -112,33 +116,34 @@ impl PtyOutput {
         let (death_sender, death) = channel();
 
         std::thread::spawn(move || {
-            // El emisor viaja al hilo sin usarse: soltarlo **es** la señal de que el programa ha
-            // muerto. Se suelta a mano más abajo, y el orden con el aviso final no es un detalle:
-            // ver el comentario de ahí.
+            // The sender travels to the thread without being used: dropping it **is** the signal
+            // that the program has died. It is dropped by hand further below, and the order with
+            // the final notification is not a detail: see the comment there.
             let death_sender = death_sender;
-            // `for` sobre el canal termina exactamente cuando el otro extremo se cierra, que es
-            // cuando el programa muere. La etiqueta es para la otra salida, la de más abajo.
+            // `for` over the channel finishes exactly when the other end closes, which is when the
+            // program dies. The label is for the other exit, the one further below.
             'pickup: for chunk in output {
-                // El sello se toma **antes** de pedir el candado: si el fotograma lo tuviera
-                // tomado, esperar por él se contaría como tiempo de llegada y la espera que se
-                // publica saldría inflada por la contención, que no es lo que se quiere medir.
+                // The stamp is taken **before** asking for the lock: if the frame held it, waiting
+                // for it would be counted as arrival time and the wait that is published would come
+                // out inflated by the contention, which is not what we want to measure.
                 let arrival = Instant::now();
-                // El candado se toma y se suelta en cada trozo: el fotograma también lo quiere, y
-                // retenerlo mientras se espera al siguiente trozo sería bloquear el pintado
-                // justamente durante la espera que este hilo existe para evitar.
-                // Si el candado está envenenado, el dato de dentro sigue siendo válido: lo que
-                // hubo fue un pánico en otro sitio. Recuperarlo es lo correcto; descartar en
-                // silencio dejaría la ventana congelada sin que nada lo explicara.
+                // The lock is taken and released on each chunk: the frame also wants it, and
+                // holding it while waiting for the next chunk would be blocking the painting
+                // exactly during the wait this thread exists to avoid.
+                // If the lock is poisoned, the data inside is still valid: what happened was a
+                // panic somewhere else. Recovering it is the right thing; discarding it in silence
+                // would leave the window frozen without anything explaining it.
                 let mut queue = thread_queue.lock().unwrap_or_else(PoisonError::into_inner);
-                // **Aquí es donde este hilo deja de recoger, y por eso el programa se frena.**
-                // Mientras se espera, el canal de la caja de abajo se llena, su hilo lector deja de
-                // vaciar el pseudoterminal, el búfer del núcleo se llena y el programa se bloquea al
-                // escribir. Se espera con el trozo ya en la mano —recibido pero sin encolar—, que es
-                // lo que hace que el canal note el atasco.
+                // **This is where this thread stops picking up, and that is why the program
+                // brakes.** While it waits, the channel of the crate below fills up, its reader
+                // thread stops draining the pseudoterminal, the kernel buffer fills up and the
+                // program blocks on writing. It waits with the chunk already in hand —received but
+                // not enqueued—, which is what makes the channel notice the jam.
                 while queue.bytes.len() >= QUEUE_CEILING {
-                    // Quien recoge es quien hace sitio, así que si este objeto ya no existe, el
-                    // sitio no va a llegar nunca. Se sale por el epílogo de abajo y no con un
-                    // `return` para no saltarse el orden entre publicar la muerte y avisar.
+                    // Whoever picks up is whoever makes room, so if this object no longer exists,
+                    // the room is never going to arrive. It exits through the epilogue below and
+                    // not with a `return` so as not to skip the order between publishing the death
+                    // and notifying.
                     if thread_stop.load(Ordering::Relaxed) {
                         break 'pickup;
                     }
@@ -153,11 +158,11 @@ impl PtyOutput {
                 drop(queue);
                 wake();
             }
-            // **Primero se publica la muerte y después se avisa.** Al revés hay una carrera con
-            // final silencioso: el fotograma que despierta ese último aviso puede llegar antes de
-            // que la señal esté publicada, ver el programa como vivo, y no recibir ningún aviso
-            // más nunca — la ventana se quedaría enseñando como vivo algo que ya murió, que es
-            // justo lo que este módulo existe para impedir.
+            // **First the death is published and then the notification is sent.** The other way
+            // round there is a race with a silent ending: the frame that wakes on that last
+            // notification may arrive before the signal is published, see the program as alive, and
+            // never receive any more notifications — the window would stay showing as alive
+            // something that already died, which is exactly what this module exists to prevent.
             drop(death_sender);
             wake();
         });
@@ -170,26 +175,26 @@ impl PtyOutput {
         }
     }
 
-    /// Se lleva hasta `max` bytes de lo acumulado. Devuelve si ha quedado algo sin recoger.
+    /// Takes away up to `max` bytes of what is accumulated. Returns whether anything was left unpicked.
     ///
-    /// **El máximo no es un adorno y llevárselo todo no era una opción.** Un volcado entrega dos
-    /// órdenes de magnitud más rápido de lo que la rejilla interpreta, así que vaciar la cola
-    /// entera en el búfer de quien llama solo mueve el montón de sitio y lo duplica mientras dura.
-    /// Con el tope, el búfer de quien llama no crece nunca más allá de lo que va a interpretar.
+    /// **The maximum is not an ornament and taking everything away was not an option.** A dump
+    /// delivers two orders of magnitude faster than the grid interprets, so emptying the whole
+    /// queue into the caller's buffer just moves the pile elsewhere and duplicates it while it
+    /// lasts. With the cap, the caller's buffer never grows beyond what it is going to interpret.
     ///
-    /// **El máximo no es el techo de la cola**, y conviene no confundirlos: este acota el trabajo
-    /// de un fotograma, y el techo ([`QUEUE_CEILING`]) acota la memoria. Recoger es además lo que hace
-    /// sitio, así que dejar de llamar a esto acaba frenando al programa de dentro — que es
-    /// justamente lo que se quiere cuando el pintado no da abasto.
+    /// **The maximum is not the queue's ceiling**, and it is worth not confusing them: this one
+    /// bounds the work of a frame, and the ceiling ([`QUEUE_CEILING`]) bounds the memory. Picking
+    /// up is also what makes room, so ceasing to call this ends up braking the program inside —
+    /// which is exactly what is wanted when the painting cannot keep up.
     ///
-    /// Recibe el destino en vez de devolver uno nuevo para que el fotograma pueda reutilizar
-    /// siempre el mismo y no reservar memoria una vez por fotograma.
+    /// It receives the destination instead of returning a new one so that the frame can always
+    /// reuse the same one and not allocate memory once per frame.
     pub fn pick_up(&self, destination: &mut Vec<u8>, max: usize) -> Pickup {
         let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
 
-        // La cola guarda sus bytes en dos tramos —da la vuelta al llegar al final—, así que hay
-        // que copiar de los dos. Copiar de las rebanadas y no del iterador es lo que hace que esto
-        // cueste lo que se lleva y no lo que se queda.
+        // The queue keeps its bytes in two stretches —it wraps around on reaching the end—, so we
+        // have to copy from both. Copying from the slices and not from the iterator is what makes
+        // this cost what it takes away and not what it leaves behind.
         let to_take = queue.bytes.len().min(max);
         let (first, second) = queue.bytes.as_slices();
         let from_first = first.len().min(to_take);
@@ -197,9 +202,9 @@ impl PtyOutput {
         destination.extend_from_slice(&second[..to_take - from_first]);
         queue.bytes.drain(..to_take);
 
-        // Cuándo llegó el primero de los bytes que se acaban de llevar: la tanda cuyo último byte
-        // cae más allá de lo ya recogido. Es el más antiguo de los que van en esta entrega, así que
-        // la espera que mide es la peor de las que se resuelven en este fotograma — la que se ve.
+        // When the first of the bytes just taken arrived: the batch whose last byte falls beyond
+        // what has already been picked up. It is the oldest of those going in this delivery, so the
+        // wait it measures is the worst of those resolved in this frame — the one that is seen.
         let waiting_since = queue
             .arrivals
             .iter()
@@ -207,8 +212,8 @@ impl PtyOutput {
             .map(|(_, when)| *when);
 
         queue.bytes_picked_up += to_take as u64;
-        // Las tandas ya servidas enteras dejan de importar. Sin esta purga la lista crecería para
-        // siempre durante un volcado, que es justo cuando no puede permitírselo.
+        // The batches already served whole stop mattering. Without this purge the list would grow
+        // forever during a dump, which is exactly when it cannot afford it.
         let bytes_picked_up = queue.bytes_picked_up;
         queue.arrivals.retain(|(up_to, _)| *up_to > bytes_picked_up);
 
@@ -216,16 +221,16 @@ impl PtyOutput {
             left_a_queue: !queue.bytes.is_empty(),
             waiting_since,
         };
-        // Se suelta el candado **antes** de avisar: si no, el hilo despierta y lo primero que hace
-        // es esperar a que lo soltemos.
+        // The lock is released **before** notifying: otherwise, the thread wakes and the first
+        // thing it does is wait for us to release it.
         drop(queue);
         self.room.notify_one();
         pickup
     }
 
-    /// Si el programa de dentro sigue vivo.
+    /// Whether the program inside is still alive.
     ///
-    /// Deja de serlo en cuanto el hilo termina, que es cuando su canal de salida se cierra.
+    /// It stops being so the moment the thread finishes, which is when its output channel closes.
     pub fn is_alive(&self) -> bool {
         !matches!(self.death.try_recv(), Err(TryRecvError::Disconnected))
     }
@@ -233,10 +238,10 @@ impl PtyOutput {
 
 impl Drop for PtyOutput {
     fn drop(&mut self) {
-        // No se espera al hilo: puede estar dentro de una lectura del canal que tarde lo que tarde
-        // el programa en escribir, y bloquear el cierre de la ventana por eso sería cambiar un
-        // cuelgue por otro. Basta con que deje de esperar sitio, que es lo único de lo que no
-        // saldría solo.
+        // The thread is not waited on: it may be inside a read of the channel that takes as long as
+        // the program takes to write, and blocking the window's closing for that would be swapping
+        // one hang for another. It is enough for it to stop waiting for room, which is the only
+        // thing it would not get out of on its own.
         self.stop.store(true, Ordering::Relaxed);
         self.room.notify_all();
     }
@@ -249,8 +254,8 @@ mod tests {
     use std::time::{Duration, Instant};
     use term_core::{Pty, Size};
 
-    /// Espera a que se cumpla algo, con un tope para que un fallo salga como fallo y no como un
-    /// test colgado para siempre.
+    /// Waits for something to hold, with a cap so a failure comes out as a failure and not as a
+    /// test hung forever.
     fn wait_for(mut condition: impl FnMut() -> bool) -> bool {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -263,9 +268,9 @@ mod tests {
     }
 
     #[test]
-    fn lo_que_el_programa_escribe_llega_a_la_cola() {
+    fn what_the_program_writes_reaches_the_queue() {
         let (_pty, output) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
         let mut received = Vec::new();
@@ -276,39 +281,39 @@ mod tests {
 
         assert!(
             arrived,
-            "no llegó lo que el programa escribió: {received:?}"
+            "what the program wrote did not arrive: {received:?}"
         );
     }
 
     #[test]
-    fn la_muerte_del_programa_sobrevive_a_haber_cedido_el_canal() {
-        // Este es el contrato que se rompe en silencio meses después: ceder el canal a otro hilo
-        // se lleva consigo la única señal de que el programa ha muerto. Si este test se pone rojo,
-        // la ventana se quedaría abierta y viva delante de un programa que ya no existe.
+    fn the_death_of_the_program_survives_having_handed_off_the_channel() {
+        // This is the contract that breaks in silence months later: handing the channel to another
+        // thread takes with it the only signal that the program has died. If this test goes red,
+        // the window would stay open and alive in front of a program that no longer exists.
         let (_pty, output) = Pty::spawn("sh", &["-c", "exit 0"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
         assert!(
             wait_for(|| !pty_output.is_alive()),
-            "el programa terminó y el puente sigue diciendo que está vivo"
+            "the program finished and the bridge still says it is alive"
         );
     }
 
     #[test]
-    fn cuando_llega_el_aviso_final_la_muerte_ya_esta_publicada() {
-        // El orden entre publicar la muerte y dar el último aviso decide si el fallo es visible o
-        // silencioso: si se avisara primero, el fotograma que ese aviso despierta podría ver el
-        // programa como vivo, y después no habría ningún aviso más — la ventana se quedaría
-        // enseñando como vivo algo ya muerto, para siempre.
+    fn when_the_final_notification_arrives_the_death_is_already_published() {
+        // The order between publishing the death and giving the final notification decides whether
+        // the failure is visible or silent: if it notified first, the frame that notification wakes
+        // could see the program as alive, and afterwards there would be no more notifications — the
+        // window would stay showing as alive something already dead, forever.
         //
-        // Se caza así: el programa no escribe nada, con lo que el único aviso es el final; y el
-        // despertador se entretiene dentro, de modo que el test puede mirar el estado **mientras**
-        // el hilo sigue dentro de esa llamada. Con el orden equivocado, aquí se leería «vivo».
+        // It is caught like this: the program writes nothing, so the only notification is the final
+        // one; and the waker dawdles inside, so that the test can look at the state **while** the
+        // thread is still inside that call. With the wrong order, here it would read "alive".
         let wakeups = Arc::new(AtomicUsize::new(0));
         let thread_wakeups = Arc::clone(&wakeups);
         let (_pty, output) = Pty::spawn("sh", &["-c", "exit 0"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, move || {
             thread_wakeups.fetch_add(1, Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(300));
@@ -316,36 +321,36 @@ mod tests {
 
         assert!(
             wait_for(|| wakeups.load(Ordering::SeqCst) > 0),
-            "no llegó el aviso de que el programa terminó"
+            "the notification that the program finished did not arrive"
         );
         assert!(
             !pty_output.is_alive(),
-            "el aviso final llegó antes de que la muerte estuviera publicada"
+            "the final notification arrived before the death was published"
         );
     }
 
     #[test]
-    fn mientras_el_programa_vive_el_puente_lo_dice() {
+    fn while_the_program_lives_the_bridge_says_so() {
         let (_pty, output) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
-        // Sin esta comprobación, un puente que dijera «muerto» desde el primer instante pasaría el
-        // test de la defunción sin haber retransmitido nada.
+        // Without this check, a bridge that said "dead" from the first instant would pass the death
+        // test without having relayed anything.
         std::thread::sleep(Duration::from_millis(100));
-        assert!(pty_output.is_alive(), "el programa sigue corriendo");
+        assert!(pty_output.is_alive(), "the program is still running");
     }
 
     #[test]
-    fn la_llegada_de_bytes_despierta_a_la_ventana() {
-        // Es la pieza que hace posible ver a un agente trabajar sin tocar el teclado. Sin este
-        // aviso los bytes llegarían a la cola y **la ventana seguiría dormida**, mostrando algo
-        // viejo hasta que el usuario moviera el ratón. Que la cola se llene no lo demuestra: hay
-        // que comprobar que se pidió el repintado.
-        // El programa escribe y **se queda vivo** a propósito: si terminara, el aviso que el hilo
-        // manda al despedirse taparía el que aquí se prueba, y el test pasaría aunque nadie
-        // despertara al llegar los bytes. Comprobado mutando el código: sin el aviso del bucle,
-        // este test se pone rojo.
+    fn the_arrival_of_bytes_wakes_the_window() {
+        // It is the piece that makes it possible to see an agent working without touching the
+        // keyboard. Without this notification the bytes would reach the queue and **the window
+        // would stay asleep**, showing something old until the user moved the mouse. That the queue
+        // fills does not prove it: we have to check that the repaint was asked for.
+        // The program writes and **stays alive** on purpose: if it finished, the notification the
+        // thread sends on saying goodbye would cover the one tested here, and the test would pass
+        // even if no one woke on the bytes arriving. Checked by mutating the code: without the
+        // loop's notification, this test goes red.
         let wakeups = Arc::new(AtomicUsize::new(0));
         let thread_wakeups = Arc::clone(&wakeups);
         let (_pty, output) = Pty::spawn(
@@ -353,7 +358,7 @@ mod tests {
             &["-c", "printf algo; sleep 30"],
             Size { rows: 24, cols: 80 },
         )
-        .expect("no se pudo abrir el pseudoterminal");
+        .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, move || {
             thread_wakeups.fetch_add(1, Ordering::SeqCst);
         });
@@ -365,90 +370,99 @@ mod tests {
         }));
         assert!(
             wakeups.load(Ordering::SeqCst) > 0,
-            "llegaron bytes y nadie despertó a la ventana"
+            "bytes arrived and no one woke the window"
         );
     }
 
     #[test]
-    fn recoger_deja_la_cola_vacia() {
+    fn picking_up_leaves_the_queue_empty() {
         let (_pty, output) = Pty::spawn("sh", &["-c", "printf uno"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
-        // Se espera a que el programa termine antes de recoger. Con un programa vivo, el
-        // pseudoterminal podría partir «uno» en dos entregas y el test fallaría un día de cada
-        // muchos por una razón que no tiene que ver con lo que prueba.
+        // We wait for the program to finish before picking up. With a live program, the
+        // pseudoterminal could split "uno" into two deliveries and the test would fail one day out
+        // of many for a reason that has nothing to do with what it tests.
         assert!(wait_for(|| !pty_output.is_alive()));
 
         let mut first = Vec::new();
         pty_output.pick_up(&mut first, usize::MAX);
-        assert!(!first.is_empty(), "no llegó nada que recoger");
+        assert!(!first.is_empty(), "nothing arrived to pick up");
 
-        // Lo ya recogido no se vuelve a entregar: si se repitiera, la pantalla mostraría el mismo
-        // texto dos veces sin que el programa lo hubiera escrito dos veces.
+        // What is already picked up is not delivered again: if it repeated, the screen would show
+        // the same text twice without the program having written it twice.
         let mut second = Vec::new();
         pty_output.pick_up(&mut second, usize::MAX);
-        assert!(second.is_empty(), "la cola devolvió lo mismo dos veces");
+        assert!(second.is_empty(), "the queue returned the same thing twice");
     }
 
     #[test]
-    fn el_maximo_se_respeta_y_lo_que_sobra_se_queda_para_la_proxima() {
-        // Sin el máximo, quien recoge se lleva la cola entera: en un volcado eso es duplicar
-        // megabytes en el búfer de quien pinta, y el presupuesto por fotograma no acota nada
-        // porque el gasto ya se hizo antes de llegar a él.
+    fn the_maximum_is_respected_and_what_is_left_over_stays_for_next_time() {
+        // Without the maximum, whoever picks up takes the whole queue: in a dump that is
+        // duplicating megabytes in the buffer of whoever paints, and the per-frame budget bounds
+        // nothing because the spending already happened before reaching it.
         let (_pty, output) = Pty::spawn(
             "sh",
             &["-c", "printf 0123456789"],
             Size { rows: 24, cols: 80 },
         )
-        .expect("no se pudo abrir el pseudoterminal");
+        .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
         assert!(wait_for(|| !pty_output.is_alive()));
 
         let mut first = Vec::new();
         let pickup = pty_output.pick_up(&mut first, 4);
-        assert_eq!(first, b"0123", "no se respetó el máximo");
-        assert!(pickup.left_a_queue, "quedaban bytes y dijo que no");
+        assert_eq!(first, b"0123", "the maximum was not respected");
+        assert!(pickup.left_a_queue, "bytes were left and it said no");
 
-        // Y lo que sobró sigue ahí, en su orden, sin haberse perdido ni repetido: es lo que hace
-        // que un volcado se vea entero aunque tarde varios fotogramas.
+        // And what was left over is still there, in its order, without having been lost or
+        // repeated: it is what makes a dump be seen whole even if it takes several frames.
         let mut rest = Vec::new();
         let pickup = pty_output.pick_up(&mut rest, usize::MAX);
-        assert_eq!(rest, b"456789", "lo que sobró no salió entero ni en orden");
-        assert!(!pickup.left_a_queue, "la cola quedó vacía y dijo que no");
+        assert_eq!(
+            rest, b"456789",
+            "what was left over did not come out whole nor in order"
+        );
+        assert!(
+            !pickup.left_a_queue,
+            "the queue was left empty and it said no"
+        );
     }
 
-    /// Deja una cola cuyo contenido está **partido en dos tramos**: el anillo da la vuelta y sus
-    /// dos rebanadas son las dos mitades de `content`, con `in_first` bytes en la de
-    /// delante.
+    /// Leaves a queue whose content is **split into two stretches**: the ring wraps around and its
+    /// two slices are the two halves of `content`, with `in_first` bytes in the front one.
     ///
-    /// Se monta a mano, y no llenando el puente por su canal, porque desde fuera no hay forma de
-    /// forzarlo: la cola solo da la vuelta si le queda hueco libre detrás de la cabeza, y en cuanto
-    /// no le queda crece y se recoloca de una pieza. Un test que lo intentara desde el canal
-    /// pasaría casi siempre **sin haber probado nunca el caso**, que es peor que no tenerlo. Por
-    /// eso las dos comprobaciones del final: si un día la biblioteca cambia de política y esto deja
-    /// de dar la vuelta, el test falla aquí en vez de volverse verde para siempre.
+    /// It is assembled by hand, and not by filling the bridge through its channel, because from
+    /// outside there is no way to force it: the queue only wraps around if it has free space left
+    /// behind the head, and the moment it has none it grows and relocates in one piece. A test that
+    /// tried it from the channel would pass almost always **without ever having tested the case**,
+    /// which is worse than not having it. That is why the two checks at the end: if one day the
+    /// library changes policy and this stops wrapping around, the test fails here instead of
+    /// turning green forever.
     fn queue_split_in_two(content: &[u8], in_first: usize) -> VecDeque<u8> {
         let mut queue: VecDeque<u8> = VecDeque::with_capacity(content.len() * 2);
         let capacity = queue.capacity();
 
-        // Se llena hasta el borde y se vacía todo menos el primer tramo: la cabeza queda pegada al
-        // final del anillo, así que lo siguiente que entre tiene que dar la vuelta.
+        // It is filled to the brim and everything but the first stretch is emptied: the head ends
+        // up stuck to the end of the ring, so the next thing that enters has to wrap around.
         let filler = capacity - in_first;
         queue.extend(std::iter::repeat_n(b'.', filler));
         queue.extend(&content[..in_first]);
         queue.drain(..filler);
         queue.extend(&content[in_first..]);
 
-        assert_eq!(queue.capacity(), capacity, "la cola creció y se recolocó");
-        assert!(!queue.as_slices().1.is_empty(), "la cola no dio la vuelta");
+        assert_eq!(queue.capacity(), capacity, "the queue grew and relocated");
+        assert!(
+            !queue.as_slices().1.is_empty(),
+            "the queue did not wrap around"
+        );
         queue
     }
 
-    /// Un puente sin programa detrás, con la cola puesta a mano.
+    /// A bridge with no program behind it, with the queue set by hand.
     ///
-    /// El emisor se devuelve y hay que conservarlo vivo: soltarlo cierra el canal, y eso el puente
-    /// lo lee como que el programa ha muerto.
+    /// The sender is returned and has to be kept alive: dropping it closes the channel, and the
+    /// bridge reads that as the program having died.
     fn pty_output_with_queue(bytes: VecDeque<u8>) -> (std::sync::mpsc::Sender<Vec<u8>>, PtyOutput) {
         let (sender, output) = channel();
         let pty_output = PtyOutput::new(output, || {});
@@ -456,8 +470,9 @@ mod tests {
             .queue
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        // Una sola llegada que cubre todo lo puesto a mano: sin ella, recoger no sabría desde
-        // cuándo esperaba y devolvería que no hay nada que esperar, que es distinto de cero.
+        // A single arrival that covers everything set by hand: without it, picking up would not
+        // know since when it was waiting and would return that there is nothing to wait for, which
+        // is different from zero.
         queue
             .arrivals
             .push_back((bytes.len() as u64, Instant::now()));
@@ -467,10 +482,10 @@ mod tests {
     }
 
     #[test]
-    fn recoger_junta_los_dos_tramos_cuando_la_cola_ha_dado_la_vuelta() {
-        // La cola guarda sus bytes en dos trozos en cuanto da la vuelta. Quien copie solo el
-        // primero se deja la mitad del volcado en silencio, y quien los junte al revés escribe en
-        // la pantalla lo que el programa mandó después antes que lo que mandó primero.
+    fn picking_up_joins_the_two_stretches_when_the_queue_has_wrapped_around() {
+        // The queue keeps its bytes in two chunks the moment it wraps around. Whoever copies only
+        // the first one leaves half the dump in silence, and whoever joins them the wrong way round
+        // writes on the screen what the program sent later before what it sent first.
         let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
         let mut destination = Vec::new();
@@ -478,43 +493,43 @@ mod tests {
 
         assert_eq!(
             destination, b"0123456789",
-            "los dos tramos no salieron en orden"
+            "the two stretches did not come out in order"
         );
         assert!(
             !pickup.left_a_queue,
-            "se llevó la cola entera y dijo que quedaba algo"
+            "it took the whole queue and said something was left"
         );
     }
 
     #[test]
-    fn el_maximo_que_cae_dentro_del_primer_tramo_no_toca_el_segundo() {
+    fn the_maximum_that_falls_within_the_first_stretch_does_not_touch_the_second() {
         let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
         let mut destination = Vec::new();
         assert!(
             pty_output.pick_up(&mut destination, 4).left_a_queue,
-            "quedaban seis bytes"
+            "six bytes were left"
         );
-        assert_eq!(destination, b"0123", "no se respetó el máximo");
+        assert_eq!(destination, b"0123", "the maximum was not respected");
 
-        // Y lo que quedó sigue estando a caballo de la vuelta, entero y en su orden.
+        // And what was left is still astride the wrap, whole and in its order.
         let mut rest = Vec::new();
         assert!(!pty_output.pick_up(&mut rest, usize::MAX).left_a_queue);
         assert_eq!(rest, b"456789");
     }
 
     #[test]
-    fn el_maximo_que_cae_pasada_la_vuelta_se_lleva_de_los_dos_tramos() {
+    fn the_maximum_that_falls_past_the_wrap_takes_from_both_stretches() {
         let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
         let mut destination = Vec::new();
         assert!(
             pty_output.pick_up(&mut destination, 8).left_a_queue,
-            "quedaban dos bytes"
+            "two bytes were left"
         );
 
-        // Seis del primer tramo y dos del segundo: el corte cae dentro del segundo, que es donde
-        // una cuenta mal hecha se sale de rango o se deja bytes por el camino.
+        // Six from the first stretch and two from the second: the cut falls inside the second,
+        // which is where a badly done count goes out of range or leaves bytes behind.
         assert_eq!(destination, b"01234567");
 
         let mut rest = Vec::new();
@@ -523,13 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn lo_recogido_dice_desde_cuando_esperaba() {
-        // Es el sello del que cuelga el número que este hito publica como retraso visual. Sin él,
-        // la espera —que en un volcado es más de un segundo— no se puede medir, y el resto de
-        // tramos son microsegundos: el número diría que la aplicación va instantánea justo cuando
-        // se la ve ir por detrás.
+    fn what_is_picked_up_says_since_when_it_was_waiting() {
+        // It is the stamp from which hangs the number this milestone publishes as visual delay.
+        // Without it, the wait —which in a dump is more than a second— cannot be measured, and the
+        // rest of the stretches are microseconds: the number would say the application goes
+        // instantaneous exactly when it is seen lagging behind.
         let (_pty, output) = Pty::spawn("sh", &["-c", "printf hola"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
         assert!(wait_for(|| !pty_output.is_alive()));
 
@@ -539,20 +554,20 @@ mod tests {
 
         let waiting_since = pickup
             .waiting_since
-            .expect("se recogieron bytes y no dijo desde cuándo esperaban");
+            .expect("bytes were picked up and it did not say since when they were waiting");
         assert!(
             waiting_since.elapsed() >= Duration::from_millis(50),
-            "la espera salió más corta de lo que el test durmió"
+            "the wait came out shorter than the test slept"
         );
     }
 
     #[test]
-    fn una_recogida_en_vacio_no_inventa_una_espera_de_cero() {
-        // Un fotograma sin salida no es una espera instantánea: es que no hubo nada que esperar.
-        // Devolver cero metería un cero en la serie y bajaría la media publicada por fotogramas en
-        // los que no pasó nada.
+    fn a_pickup_on_empty_does_not_invent_a_wait_of_zero() {
+        // A frame with no output is not an instantaneous wait: it is that there was nothing to wait
+        // for. Returning zero would put a zero in the series and would lower the published average
+        // with frames in which nothing happened.
         let (_pty, output) = Pty::spawn("sh", &["-c", "sleep 30"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
         let mut destination = Vec::new();
@@ -563,13 +578,15 @@ mod tests {
     }
 
     #[test]
-    fn las_llegadas_ya_servidas_no_se_acumulan() {
-        // Durante un volcado entran miles de tandas. Si las marcas no se purgaran al servirlas, la
-        // lista crecería sin parar y buscar en ella se haría más caro cada fotograma — dentro del
-        // candado que el hilo del programa también necesita.
+    fn arrivals_already_served_do_not_accumulate() {
+        // During a dump thousands of batches come in. If the marks were not purged on serving them,
+        // the list would grow non-stop and searching it would get more expensive each frame —
+        // inside the lock that the program's thread also needs.
         let (sender, pty_output) = pty_output_with_queue(VecDeque::new());
         for _ in 0..50 {
-            sender.send(b"abcd".to_vec()).expect("el puente sigue vivo");
+            sender
+                .send(b"abcd".to_vec())
+                .expect("the bridge is still alive");
         }
 
         let mut destination = Vec::new();
@@ -584,17 +601,17 @@ mod tests {
             .unwrap_or_else(PoisonError::into_inner);
         assert!(
             queue.arrivals.is_empty(),
-            "quedaron {} marcas de tandas ya servidas",
+            "{} marks of already-served batches were left",
             queue.arrivals.len()
         );
     }
 
     #[test]
-    fn el_destino_conserva_lo_que_ya_tenia() {
-        // El fotograma reutiliza su búfer y puede llamar con restos de la pasada anterior todavía
-        // sin procesar. Si recoger los pisara, se perderían bytes ya leídos del programa.
+    fn the_destination_keeps_what_it_already_had() {
+        // The frame reuses its buffer and may call with remnants of the previous pass still
+        // unprocessed. If picking up overwrote them, bytes already read from the program would be lost.
         let (_pty, output) = Pty::spawn("sh", &["-c", "printf dos"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
         let mut destination = b"antes".to_vec();
@@ -604,31 +621,30 @@ mod tests {
         }));
         assert!(
             destination.starts_with(b"antes"),
-            "se perdió lo que ya había"
+            "what was already there was lost"
         );
     }
 
     #[test]
-    fn la_cola_del_puente_no_crece_sin_limite() {
-        // Antes del arreglo, un programa que escribe sin parar y al que nadie recoge hacía
-        // crecer esta cola sin freno: con `cat /dev/zero` se midieron cientos de MiB por
-        // segundo en el diagnóstico. Aquí se deja el programa escribiendo y **no se llama a
-        // `pick_up` en ningún momento** durante la espera: llamarlo aunque fuera una vez le
-        // haría sitio al hilo y este seguiría recogiendo, con lo que se mediría el drenaje y no
-        // el techo.
+    fn the_bridge_queue_does_not_grow_without_limit() {
+        // Before the fix, a program that writes non-stop and that no one picks up made this queue
+        // grow without a brake: with `cat /dev/zero` hundreds of MiB per second were measured in
+        // the diagnosis. Here the program is left writing and **`pick_up` is not called at any
+        // moment** during the wait: calling it even once would make room for the thread and it
+        // would keep picking up, with which the drainage would be measured and not the ceiling.
         let (pty, output) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, || {});
 
-        // A los cientos de MiB/s medidos, medio segundo de margen basta de sobra para que la
-        // cola alcance el techo si el freno funciona, y para que se dispare muy por encima de
-        // la cota si no lo hace.
+        // At the hundreds of MiB/s measured, half a second of margin is more than enough for the
+        // queue to reach the ceiling if the brake works, and for it to shoot far above the bound if
+        // it does not.
         std::thread::sleep(Duration::from_millis(500));
 
-        // Se mira el tamaño de la cola con el candado, directamente, y no con `pick_up`:
-        // `pick_up(destination, usize::MAX)` se llevaría la cola entera y le haría sitio al hilo,
-        // así que solo serviría para medir una vez — y esta comprobación necesita ver la cola
-        // mientras el hilo sigue bloqueado esperando, no después de haberla vaciado.
+        // The queue size is looked at with the lock, directly, and not with `pick_up`:
+        // `pick_up(destination, usize::MAX)` would take the whole queue and make room for the
+        // thread, so it would only serve to measure once — and this check needs to see the queue
+        // while the thread is still blocked waiting, not after having emptied it.
         let accumulated = pty_output
             .queue
             .lock()
@@ -636,35 +652,35 @@ mod tests {
             .bytes
             .len();
 
-        // Cota superior: por encima del techo del puente (1 MiB) hay margen que el freno de
-        // aquí no controla directamente, y hay que contar con él para no perseguir un número
-        // exacto. De más cerca a más lejos en la cadena: el trozo que este mismo hilo tiene «en
-        // la mano» mientras espera, sin encolar todavía (hasta 8 KiB, el tamaño de una lectura
-        // de `term-core`); el `sync_channel(8)` de la caja de abajo, con hasta ocho lecturas de
-        // 8 KiB en tránsito (64 KiB); el trozo que el hilo lector de `term-core` tiene a su vez
-        // en la mano intentando entregarlo (otros 8 KiB); y el búfer del núcleo del
-        // pseudoterminal, del orden de 20 KiB según lo medido en la investigación de este fallo.
-        // Sumado, algo por encima de 1,1 MiB. Se deja hasta 4 MiB para no depender de
-        // temporización fina, y con eso de sobra: a los ritmos medidos en el diagnóstico, sin
-        // freno los mismos 500 ms habrían acumulado varias decenas de MiB, no unos pocos.
+        // Upper bound: above the bridge's ceiling (1 MiB) there is margin that the brake here does
+        // not control directly, and it has to be accounted for so as not to chase an exact number.
+        // From nearest to farthest in the chain: the chunk that this very thread has "in hand"
+        // while it waits, not enqueued yet (up to 8 KiB, the size of a `term-core` read); the
+        // `sync_channel(8)` of the crate below, with up to eight 8 KiB reads in transit (64 KiB);
+        // the chunk that the `term-core` reader thread in turn has in hand trying to deliver it
+        // (another 8 KiB); and the pseudoterminal's kernel buffer, on the order of 20 KiB according
+        // to what was measured in the investigation of this failure. Summed, something above
+        // 1.1 MiB. It is left at up to 4 MiB so as not to depend on fine timing, and with that to
+        // spare: at the rates measured in the diagnosis, without a brake the same 500 ms would have
+        // accumulated several tens of MiB, not a few.
         const UPPER_BOUND: usize = 4 * 1024 * 1024;
 
         assert!(
             accumulated >= QUEUE_CEILING,
-            "la cola no llegó ni al techo ({QUEUE_CEILING} bytes) en 500 ms: solo {accumulated} bytes; \
-             la prueba no está sometiendo el puente a presión de verdad"
+            "the queue did not even reach the ceiling ({QUEUE_CEILING} bytes) in 500 ms: only {accumulated} bytes; \
+             the test is not subjecting the bridge to real pressure"
         );
         assert!(
             accumulated <= UPPER_BOUND,
-            "la cola creció muy por encima del techo y su margen: {accumulated} bytes \
-             acumulados en 500 ms, cota {UPPER_BOUND} bytes — el freno que impide que esta \
-             cola crezca sin límite no está actuando"
+            "the queue grew far above the ceiling and its margin: {accumulated} bytes \
+             accumulated in 500 ms, bound {UPPER_BOUND} bytes — the brake that prevents this \
+             queue from growing without limit is not acting"
         );
 
-        // Se cierra el pseudoterminal para que el programa deje de escribir, y se sigue recogiendo
-        // hasta que el hilo lo note y termine: así la comprobación de la muerte, que es de lo que
-        // vive el resto del módulo, se hace sobre un puente que ha salido de la espera por las
-        // buenas y no por la parada de emergencia del test siguiente.
+        // The pseudoterminal is closed so the program stops writing, and picking up continues until
+        // the thread notices and finishes: this way the death check, which is what the rest of the
+        // module lives off, is done on a bridge that has come out of the wait properly and not by
+        // the emergency stop of the next test.
         drop(pty);
         let mut rest = Vec::new();
         assert!(wait_for(|| {
@@ -673,31 +689,32 @@ mod tests {
         }));
     }
 
-    /// El hilo de este módulo tiene **dos** formas de quedarse quieto, y solo una la resuelve el
-    /// canal: leyendo, se entera de que el programa ha muerto porque el canal se cierra; esperando
-    /// sitio, no mira el canal en absoluto. Como el sitio solo lo hace quien recoge, un puente
-    /// destruido con la cola en el techo dejaría su hilo girando para siempre — una fuga por cada
-    /// división que se cierre en ese instante, invisible hoy solo porque el proceso muere entero
-    /// detrás.
+    /// The thread of this module has **two** ways of going still, and only one is resolved by the
+    /// channel: reading, it finds out the program has died because the channel closes; waiting for
+    /// room, it does not look at the channel at all. As room is only made by whoever picks up, a
+    /// destroyed bridge with the queue at the ceiling would leave its thread spinning forever — a
+    /// leak for each pane that is closed at that instant, invisible today only because the process
+    /// dies whole behind it.
     ///
-    /// Se observa con un testigo capturado por el despertador en vez de contando hilos: el
-    /// despertador se destruye **con** el hilo, así que su cuenta de referencias bajando a uno
-    /// demuestra que el hilo terminó de verdad. Contar hilos del proceso mediría de rebote los del
-    /// resto de la suite.
+    /// It is observed with a witness captured by the waker instead of by counting threads: the
+    /// waker is destroyed **with** the thread, so its reference count dropping to one proves that
+    /// the thread finished for real. Counting the process's threads would measure, by rebound,
+    /// those of the rest of the suite.
     #[test]
-    fn destruir_el_puente_con_la_cola_llena_termina_su_hilo() {
+    fn destroying_the_bridge_with_the_queue_full_ends_its_thread() {
         let witness = Arc::new(());
         let thread_witness = Arc::clone(&witness);
 
-        // El `Pty` se mantiene vivo a propósito durante toda la prueba: si se cerrara, el hilo
-        // saldría por el camino de siempre y esto pasaría aunque la parada no existiera.
+        // The `Pty` is kept alive on purpose throughout the test: if it closed, the thread would
+        // exit through the usual path and this would pass even if the stop did not exist.
         let (_pty, output) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
-            .expect("no se pudo abrir el pseudoterminal");
+            .expect("could not open the pseudoterminal");
         let pty_output = PtyOutput::new(output, move || {
             let _ = &thread_witness;
         });
 
-        // Sin recoger ni una vez: la cola llega al techo y el hilo se queda esperando sitio.
+        // Without picking up even once: the queue reaches the ceiling and the thread stays waiting
+        // for room.
         assert!(
             wait_for(|| {
                 pty_output
@@ -708,15 +725,15 @@ mod tests {
                     .len()
                     >= QUEUE_CEILING
             }),
-            "la cola no llegó al techo: la prueba no está dejando al hilo donde tiene que estar"
+            "the queue did not reach the ceiling: the test is not leaving the thread where it has to be"
         );
 
         drop(pty_output);
 
         assert!(
             wait_for(|| Arc::strong_count(&witness) == 1),
-            "el hilo sigue vivo después de destruir el puente: se quedó esperando un sitio que ya \
-             nadie le va a hacer"
+            "the thread is still alive after destroying the bridge: it stayed waiting for a room \
+             that no one is going to make for it any more"
         );
     }
 }

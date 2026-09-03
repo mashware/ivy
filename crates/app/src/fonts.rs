@@ -1,15 +1,15 @@
-//! Qué fuente pinta cada carácter, y **con qué presentación**.
+//! What font paints each character, and **with what presentation**.
 //!
-//! Dos mitades de la misma pregunta, y por eso viven juntas: **qué cara cubre un carácter** y **con qué
-//! presentación hay que pintarlo**. Rasterizar el glifo de color llega después, en este mismo módulo.
+//! Two halves of the same question, and that is why they live together: **what face covers a character** and **with what
+//! presentation it has to be painted**. Rasterizing the color glyph comes later, in this same module.
 //!
-//! ## El descubrimiento es PEREZOSO, y eso lo decidió una medida
+//! ## Discovery is LAZY, and a measurement decided that
 //!
-//! El terminal **no enumera las fuentes de la máquina al abrir la ventana**. Las busca la primera vez que
-//! aparece un carácter que ninguna cara registrada cubre. Enumerar y registrar al arrancar costaría entre
-//! **23,5 y 31,0 ms** —más de cuatro veces el único tramo del arranque que este proyecto tiene medido— y
-//! se pagarían **siempre**; buscar cuando hace falta cuesta entre **4,0 y 5,7 ms** y solo se paga si el
-//! carácter aparece de verdad. Los números y la resta entera están en **D24**.
+//! The terminal **does not enumerate the machine's fonts when opening the window**. It looks for them the first time
+//! a character appears that no registered face covers. Enumerating and registering at startup would cost between
+//! **23.5 and 31.0 ms** —more than four times the only stretch of startup this project has measured— and
+//! would be paid **always**; looking when needed costs between **4.0 and 5.7 ms** and is only paid if the
+//! character actually appears. The numbers and the full subtraction are in **D24**.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -21,42 +21,42 @@ use unicode_properties::emoji::{
     EmojiStatus, UnicodeEmoji, is_emoji_presentation_selector, is_text_presentation_selector,
 };
 
-/// Cómo hay que pintar un carácter.
+/// How a character has to be painted.
 ///
-/// **Existe porque `☁` y `☁️` son el mismo carácter.** El segundo lleva detrás el selector de emoji, y
-/// pintar los dos igual es incorrecto en un sentido o en el otro: o se pierde el emoji que el programa
-/// pidió, o se pinta un dibujo a color donde había un símbolo de texto.
+/// **It exists because `☁` and `☁️` are the same character.** The second carries the emoji selector behind it, and
+/// painting the two the same is wrong in one direction or the other: either the emoji the program
+/// asked for is lost, or a color drawing is painted where there was a text symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Presentation {
-    /// Por el camino de texto de siempre, con el color que diga el tema.
+    /// By the usual text path, with the color the theme says.
     Text,
-    /// Como un dibujo con sus propios colores, que la fuente trae dentro.
+    /// As a drawing with its own colors, which the font carries inside.
     Color,
 }
 
-/// Qué presentación le toca a un carácter, dado lo que lleve pegado.
+/// What presentation a character gets, given what it carries attached.
 ///
-/// **La regla, y es la de Ghostty:** va a color **si y solo si** le sigue el selector de emoji
-/// (`U+FE0F`) **y el carácter admite ese selector**, **o** su presentación por defecto ya es de emoji y
-/// **no** le sigue el selector de texto (`U+FE0E`). Todo lo demás va monocromo.
+/// **The rule, and it is Ghostty's:** it goes color **if and only if** the emoji selector
+/// (`U+FE0F`) follows it **and the character admits that selector**, **or** its default presentation is already emoji and
+/// the text selector (`U+FE0E`) does **not** follow it. Everything else goes monochrome.
 ///
-/// **Lo de «y el carácter admite ese selector» es la mitad que se olvida.** Unicode solo define
-/// secuencias de variación para caracteres con `Emoji=Yes`; detrás de cualquier otro, el selector no
-/// significa nada y honrarlo manda a la fuente de color una `a` o un espacio en blanco. Y no es un caso
-/// rebuscado: un selector suelto —una cadena cortada por la mitad de un emoji— el motor lo pega a la
-/// celda que tenga delante, **aunque esté vacía**.
+/// **The "and the character admits that selector" is the half that gets forgotten.** Unicode only defines
+/// variation sequences for characters with `Emoji=Yes`; behind any other, the selector means
+/// nothing and honoring it sends the color font an `a` or a blank space. And it is not a
+/// far-fetched case: a loose selector —a string cut in half through an emoji— the engine attaches to the
+/// cell in front of it, **even if it is empty**.
 ///
-/// `attached` son los caracteres de anchura cero de la celda, tal y como los da la vista. Solo se mira
-/// **el primero**: un selector de variación aplica al carácter que tiene justo delante, así que uno que
-/// apareciera más adentro de la secuencia no habla de este carácter.
+/// `attached` are the zero-width characters of the cell, just as the view gives them. Only
+/// **the first** is looked at: a variation selector applies to the character right in front of it, so one that
+/// appeared deeper in the sequence does not speak about this character.
 ///
-/// **Lo que esta regla NO alcanza, y hay que decirlo:** los modificadores de tono de piel
-/// (`U+1F3FB`–`U+1F3FF`) son **anchos**, así que el motor les da **su propia celda** en vez de pegarlos.
-/// En `☝🏽` la base `U+261D` llega con **nada pegado**, y como su presentación por defecto es de texto,
-/// esta regla la manda a monocromo — mientras el modificador, en la celda de al lado, iría a color.
-/// Unicode y Ghostty tratan la secuencia entera como presentación de emoji. **Resolverlo exige mirar la
-/// celda siguiente, que es información que esta función no tiene por firma**, y hoy no se ve porque nadie
-/// pinta color todavía: es trabajo de la entrega que lo traiga. Lo encontró una revisión.
+/// **What this rule does NOT reach, and it has to be said:** the skin-tone modifiers
+/// (`U+1F3FB`–`U+1F3FF`) are **wide**, so the engine gives them **their own cell** instead of attaching them.
+/// In `☝🏽` the base `U+261D` arrives with **nothing attached**, and since its default presentation is text,
+/// this rule sends it to monochrome — while the modifier, in the cell next to it, would go color.
+/// Unicode and Ghostty treat the whole sequence as emoji presentation. **Resolving it demands looking at the
+/// next cell, which is information this function does not have by signature**, and today it does not show because nobody
+/// paints color yet: it is work for the delivery that brings it. A review found it.
 pub fn presentation_of(c: char, attached: &[char]) -> Presentation {
     match attached.first().copied() {
         Some(selector) if is_emoji_presentation_selector(selector) && c.is_emoji_char() => {
@@ -68,19 +68,19 @@ pub fn presentation_of(c: char, attached: &[char]) -> Presentation {
     }
 }
 
-/// Si la presentación **por defecto** del carácter es de emoji, o sea `Emoji_Presentation=Yes`.
+/// Whether the **default** presentation of the character is emoji, that is `Emoji_Presentation=Yes`.
 ///
-/// **Se enumeran las variantes en vez de preguntarlo con un método**, porque la caja de propiedades no
-/// trae ninguno: expone `Emoji`, `Emoji_Component` y la combinación de las dos, pero
-/// `Emoji_Presentation` solo aparece **dentro** de los nombres de su enumerado. Las cuatro de abajo son
-/// exactamente aquellas cuya documentación declara `Emoji_Presentation=YES`; se comprobó leyendo su
-/// tabla, no deduciéndolo de los nombres. **Dos que el nombre delata mal**: `EmojiModifierBase` y
-/// `EmojiOtherAndEmojiComponent` parecen candidatas y no lo son.
+/// **The variants are enumerated instead of asking with a method**, because the properties crate does not
+/// carry one: it exposes `Emoji`, `Emoji_Component` and the combination of the two, but
+/// `Emoji_Presentation` only appears **inside** the names of its enum. The four below are
+/// exactly those whose documentation declares `Emoji_Presentation=YES`; it was checked by reading its
+/// table, not by deducing it from the names. **Two the name gives away wrongly**: `EmojiModifierBase` and
+/// `EmojiOtherAndEmojiComponent` look like candidates and are not.
 ///
-/// **Su enumerado es abierto (`#[non_exhaustive]`), así que una categoría que añadan mañana cae en el
-/// caso de abajo y se pinta monocromo**, sin que la compilación diga nada. Se deja así a sabiendas: ese
-/// carácter saldría **como sale hoy**, que es el peor caso aceptable — inventarle color a una categoría
-/// que no conocemos sería lo contrario de la regla de que lo que no está no se inventa.
+/// **Its enum is open (`#[non_exhaustive]`), so a category they add tomorrow falls into the
+/// case below and is painted monochrome**, without the compilation saying anything. It is left this way knowingly: that
+/// character would come out **as it comes out today**, which is the worst acceptable case — inventing color for a category
+/// we do not know would be the opposite of the rule that what is not there is not invented.
 fn goes_to_color_by_default(c: char) -> bool {
     matches!(
         c.emoji_status(),
@@ -91,195 +91,195 @@ fn goes_to_color_by_default(c: char) -> bool {
     )
 }
 
-// ── El descubrimiento de fuentes ─────────────────────────────────────────────────────────────────
+// ── Font discovery ───────────────────────────────────────────────────────────────────────────────
 
-/// El carácter con el que se reconoce el cuadro de reemplazo.
+/// The character by which the replacement box is recognized.
 ///
-/// **`U+0378` no está asignado en Unicode y está FUERA de las zonas de uso privado.** Las dos cosas
-/// importan: sin asignar, ninguna fuente lo cubre nunca —así que su dibujo **es** el del cuadro—; y fuera
-/// del uso privado, se le pregunta siempre a la misma familia que al carácter con el que se compara. Un
-/// referente del uso privado se preguntaría a la familia de iconos en cuanto hubiera una, y estaría
-/// comparando peras con manzanas. Lo segundo lo señaló una revisión.
+/// **`U+0378` is unassigned in Unicode and is OUTSIDE the private-use areas.** Both things
+/// matter: unassigned, no font ever covers it —so its drawing **is** that of the box—; and outside
+/// private use, it is always asked of the same family as the character it is compared with. A
+/// referent from private use would be asked of the icon family as soon as there were one, and would be
+/// comparing apples to oranges. A review pointed out the second.
 const REPLACEMENT_BOX: char = '\u{0378}';
 
-/// Cuánto tiempo se dedica a buscar fuentes en una misma vuelta.
+/// How much time is spent looking for fonts in a single round.
 ///
-/// **Se acota el TIEMPO y no el número de búsquedas, porque el tiempo es lo que se nota.** Lo que cuesta
-/// una búsqueda depende de lo que pese la fuente ganadora y de cuántas familias haya que abrir antes: el
-/// rango medido va de **94 µs a 18 ms** (**D24**). Un techo de «cuatro búsquedas» acota cuatro cosas que
-/// pueden costar 0,4 ms o 72; un techo de tiempo acota lo único que importa.
+/// **The TIME is bounded and not the number of searches, because time is what is noticed.** What a
+/// search costs depends on how much the winning font weighs and on how many families have to be opened first: the
+/// measured range goes from **94 µs to 18 ms** (**D24**). A ceiling of "four searches" bounds four things that
+/// can cost 0.4 ms or 72; a time ceiling bounds the only thing that matters.
 ///
-/// Dos milisegundos son un tercio del fotograma (5,78 ms, **D3**) y se pagan **solo cuando hay algo nuevo
-/// que buscar**. Lo que no cabe espera al fotograma siguiente, que es para lo que existe la cola.
+/// Two milliseconds are a third of the frame (5.78 ms, **D3**) and are paid **only when there is something new
+/// to look for**. What does not fit waits for the next frame, which is what the queue exists for.
 ///
-/// **La primera versión ponía el techo en la cola de espera y no en el trabajo**, y con eso un `cat` de un
-/// binario costaba **6,0–6,6 ms sostenidos en cada fotograma** —más que el fotograma entero—. Medido por
-/// una revisión, en release, y confirmado aquí antes de cambiarlo.
+/// **The first version put the ceiling on the waiting queue and not on the work**, and with that a `cat` of a
+/// binary cost **6.0–6.6 ms sustained on every frame** —more than the whole frame—. Measured by
+/// a review, in release, and confirmed here before changing it.
 const BUDGET_PER_ROUND: std::time::Duration = std::time::Duration::from_millis(2);
 
-/// Cuántas búsquedas seguidas sin encontrar nada hacen que se deje de buscar.
+/// How many searches in a row finding nothing make it stop looking.
 ///
-/// **Es el freno de un programa roto, y sin él no hay ninguno.** Un `cat` de un binario produce caracteres
-/// que **ninguna** fuente cubre, así que ninguna búsqueda registra nada y ningún otro techo llega a
-/// dispararse: se seguiría buscando mientras siga saliendo basura. Con esto, tras un puñado de fallos
-/// seguidos el terminal deja de intentarlo — y esos caracteres salen como cuadro, que es lo que salían
-/// igualmente.
+/// **It is the brake for a broken program, and without it there is none.** A `cat` of a binary produces characters
+/// that **no** font covers, so no search registers anything and no other ceiling gets
+/// triggered: it would keep looking as long as garbage keeps coming out. With this, after a handful of failures
+/// in a row the terminal stops trying — and those characters come out as a box, which is what they came out as
+/// anyway.
 ///
-/// **Se reinicia en cuanto una búsqueda acierta**, así que una sesión normal nunca lo alcanza.
+/// **It resets as soon as a search succeeds**, so a normal session never reaches it.
 const MAX_FAILURES_IN_A_ROW: usize = 12;
 
-/// Cuántos caracteres sin resolver se guardan mientras esperan a la vuelta siguiente.
+/// How many unresolved characters are kept while they wait for the next round.
 ///
-/// **El techo es contra un programa roto, no contra un usuario.** Quien escupe basura binaria produce
-/// caracteres distintos a cientos por fotograma, y cada uno cuesta una búsqueda entera. Con el techo, una
-/// pantalla de basura gasta lo que gastan cuarenta caracteres y el resto sale como cuadro — que es lo que
-/// habría salido igualmente. Sin él, la ventana se queda buscando fuentes para caracteres que nadie va a
-/// leer.
+/// **The ceiling is against a broken program, not against a user.** Whoever spits binary garbage produces
+/// distinct characters by the hundreds per frame, and each one costs a whole search. With the ceiling, a
+/// screen of garbage spends what forty characters spend and the rest comes out as a box — which is what
+/// would have come out anyway. Without it, the window stays looking for fonts for characters nobody is going to
+/// read.
 const MAX_PENDING: usize = 40;
 
-/// Cuántas familias del sistema se le llegan a registrar al motor de texto.
+/// How many system families end up being registered with the text engine.
 ///
-/// **El techo existe porque no hay forma de preguntar qué cubre ya el motor.** `Fonts::has_glyph` no
-/// sirve —ver `Discoverer::resolve`—, así que se busca para todo lo no-ASCII y a veces se registra una
-/// cara que no hacía falta: va detrás de las de fábrica y no cambia lo que se ve, pero **cada una engorda
-/// el atlas de glifos y alarga la cadena de reserva** que se recorre por carácter.
+/// **The ceiling exists because there is no way to ask what the engine already covers.** `Fonts::has_glyph` is no
+/// use —see `Discoverer::resolve`—, so it looks for everything non-ASCII and sometimes registers a
+/// face that was not needed: it goes behind the factory ones and does not change what is seen, but **each one fattens
+/// the glyph atlas and lengthens the fallback chain** that is traversed per character.
 ///
-/// **Ocho, y no es un número redondo por gusto:** cubre los casos que este hito persigue —CJK, hangul,
-/// iconos, emoji— con margen de sobra, y deja el peor caso acotado. Al llegar al techo se deja de
-/// registrar: lo que aparezca después sale como cuadro, que es exactamente lo que salía antes del hito.
+/// **Eight, and it is not a round number for taste:** it covers the cases this milestone pursues —CJK, hangul,
+/// icons, emoji— with plenty of margin, and leaves the worst case bounded. On reaching the ceiling it stops
+/// registering: whatever appears afterward comes out as a box, which is exactly what came out before the milestone.
 const MAX_FAMILIES: usize = 8;
 
-/// El nombre de la familia por la que se piden los iconos de las zonas de uso privado.
+/// The name of the family by which the icons of the private-use areas are requested.
 ///
-/// **Existe porque egui ordena la cadena de reserva por familia entera y no por rango**, así que la única
-/// forma de que una fuente gane en unas zonas y no en otras es darle su propia familia y que quien pinta
-/// elija cuál pedir. Ver [`Discoverer::hand_over_the_faces`].
+/// **It exists because egui orders the fallback chain by whole family and not by range**, so the only
+/// way for a font to win in some areas and not in others is to give it its own family and let the painter
+/// choose which to request. See [`Discoverer::hand_over_the_faces`].
 pub const ICON_FAMILY: &str = "iconos-del-sistema";
 
-/// Si ese carácter vive en una de las tres zonas que Unicode deja **para uso privado**.
+/// Whether that character lives in one of the three areas Unicode leaves **for private use**.
 ///
-/// **Ahí es donde viven los iconos de una `Nerd Font` y los separadores de Powerline**, y por eso hace
-/// falta distinguirlas: Unicode no le asigna significado a esas zonas, así que **dos fuentes distintas
-/// ponen dibujos distintos en el mismo hueco** y no hay forma de decir cuál es «la correcta» mirando el
-/// carácter. Solo la puede decir quien instaló la fuente.
+/// **That is where the icons of a `Nerd Font` and the Powerline separators live**, and that is why they
+/// need to be distinguished: Unicode assigns no meaning to those areas, so **two different fonts
+/// put different drawings in the same slot** and there is no way to say which is "the correct one" by looking at the
+/// character. Only whoever installed the font can say.
 fn is_private_use(c: char) -> bool {
     matches!(c, '\u{E000}'..='\u{F8FF}' | '\u{F0000}'..='\u{FFFFD}' | '\u{100000}'..='\u{10FFFD}')
 }
 
-/// Lo que se le antepone al nombre de una familia del sistema para nombrarla ante el motor de texto.
+/// What is prepended to a system family's name to name it before the text engine.
 ///
-/// **Sin él, una fuente del sistema que se llame igual que una de fábrica la SUSTITUYE.** Las claves de
-/// egui son nombres corrientes —`Hack`, `Ubuntu-Light`, `NotoEmoji-Regular`— y `Hack` está instalada en
-/// muchas máquinas de desarrollo: registrarla cambiaría **los bytes** de la de fábrica conservando **su
-/// posición** al frente de la cadena, así que el terminal cambiaría de fuente entera de golpe, sin que
-/// ningún carácter fuera de uso privado y sin pasar siquiera por el reparto de familias. Lo encontró una
-/// revisión, buscando caminos en vez de leyendo el feliz.
+/// **Without it, a system font named the same as a factory one REPLACES it.** egui's keys
+/// are ordinary names —`Hack`, `Ubuntu-Light`, `NotoEmoji-Regular`— and `Hack` is installed on
+/// many development machines: registering it would change **the bytes** of the factory one while keeping **its
+/// position** at the front of the chain, so the terminal would switch its whole font at once, without
+/// any character outside private use and without even passing through the family tiling. A
+/// review found it, searching for paths instead of reading the happy one.
 const SYSTEM_PREFIX: &str = "sistema:";
 
-/// Una cara del sistema, y si va en la familia de iconos.
+/// A system face, and whether it goes in the icon family.
 struct SystemFace {
-    /// **Ya prefijada**: es el nombre con el que el motor de texto la conoce, no el que le da el sistema.
+    /// **Already prefixed**: it is the name the text engine knows it by, not the one the system gives it.
     family: String,
     data: Arc<egui::FontData>,
-    /// **Solo las de iconos van delante**, y es una excepción con nombre a la regla de que las de fábrica
-    /// mandan. Ver `Discoverer::hand_over_the_faces`.
+    /// **Only the icon ones go in front**, and it is a named exception to the rule that the factory ones
+    /// rule. See `Discoverer::hand_over_the_faces`.
     for_icons: bool,
 }
 
-/// Busca en la máquina la cara que cubre un carácter, y la registra en el motor de texto.
+/// Looks in the machine for the face that covers a character, and registers it in the text engine.
 ///
-/// **Recuerda también los fallos, y no es un detalle.** Un carácter cubierto se busca una vez y su cara
-/// queda registrada, así que el siguiente ya no busca. Pero uno que **ninguna** fuente de la máquina
-/// tenga **no deja nada registrado**: sin recordar el fallo volvería a recorrer las candidatas cada vez
-/// que apareciera — y ése es justo el carácter que un programa roto escupe en bucle. Sale de **D24**.
+/// **It also remembers the failures, and that is not a detail.** A covered character is looked for once and its face
+/// is registered, so the next one no longer looks. But one that **no** font on the machine
+/// has **leaves nothing registered**: without remembering the failure it would traverse the candidates again every time
+/// it appeared — and that is exactly the character a broken program spits in a loop. It comes from **D24**.
 #[derive(Default)]
 pub struct Discoverer {
-    /// Los que ya se intentaron: cubiertos **y** no cubiertos.
+    /// The ones already tried: covered **and** not covered.
     settled: std::collections::HashSet<char>,
-    /// Los que el pintor ha visto y todavía no se han buscado. Ordenado para que dos corridas con la
-    /// misma pantalla hagan el mismo trabajo en el mismo orden.
+    /// The ones the painter has seen and not yet looked for. Ordered so that two runs with the
+    /// same screen do the same work in the same order.
     pending: BTreeSet<char>,
-    /// Las caras que ya se le dieron al motor, en el orden en que se le dieron.
+    /// The faces already given to the engine, in the order they were given.
     ///
-    /// **Hace falta guardarlas** porque registrar en egui no es añadir: es entregarle la configuración
-    /// **entera** otra vez. Sin esta lista, cada cara nueva borraría la anterior.
+    /// **They need to be kept** because registering in egui is not adding: it is handing it the **whole**
+    /// configuration again. Without this list, each new face would erase the previous one.
     faces: Vec<SystemFace>,
-    /// La colección del sistema, **creada la primera vez que hace falta y no antes**. Es lo que hace
-    /// perezoso el descubrimiento: mientras solo aparezcan caracteres que las fuentes de fábrica cubren,
-    /// esto nunca se construye y no se paga nada.
+    /// The system collection, **created the first time it is needed and not before**. It is what makes
+    /// discovery lazy: as long as only characters that the factory fonts cover appear,
+    /// this is never built and nothing is paid.
     collection: Option<Collection>,
     sources: SourceCache,
-    /// Si enumerar ya falló. Sin esto se reintentaría en cada vuelta en una máquina sin fontconfig.
+    /// Whether enumerating already failed. Without this it would be retried on every round on a machine without fontconfig.
     no_system_fonts: bool,
-    /// Si ya se dijo que se llegó al techo de familias. Decirlo una vez informa; decirlo en cada carácter
-    /// llena la salida de error de un programa que no ha hecho nada malo.
+    /// Whether it was already said that the family ceiling was reached. Saying it once informs; saying it on every character
+    /// fills the error output of a program that has done nothing wrong.
     said_the_ceiling: bool,
-    /// Cuántas búsquedas seguidas han acabado sin encontrar nada. Ver [`MAX_FAILURES_IN_A_ROW`].
+    /// How many searches in a row have ended finding nothing. See [`MAX_FAILURES_IN_A_ROW`].
     failures_in_a_row: usize,
-    /// Si el motor de texto **ya conoce** la familia de iconos, o sea si hubo una vuelta posterior a la
-    /// que la declaró.
+    /// Whether the text engine **already knows** the icon family, that is whether there was a round after the
+    /// one that declared it.
     ///
-    /// **Va un paso por detrás de `faces` a propósito, y sin eso la aplicación SE CAE.** `set_fonts`
-    /// guarda la configuración y el motor se rehace **en la pasada siguiente**; pero el descubrimiento
-    /// corre **antes de pintar, en la misma pasada**, así que entre registrar la cara y pintar la celda no
-    /// hay ninguna pasada de por medio. Ofrecer la familia ahí es pedirle a epaint una familia con nombre
-    /// que todavía no existe, y eso **es un pánico**, no un aviso: «is not bound to any fonts».
-    /// Comprobado ejecutándolo. Lo encontró una revisión sondeando ese camino exacto.
+    /// **It goes one step behind `faces` on purpose, and without that the application CRASHES.** `set_fonts`
+    /// saves the configuration and the engine is remade **on the next pass**; but discovery
+    /// runs **before painting, on the same pass**, so between registering the face and painting the cell there
+    /// is no pass in between. Offering the family there is asking epaint for a named family
+    /// that does not yet exist, and that **is a panic**, not a warning: "is not bound to any fonts".
+    /// Checked by running it. A review found it probing that exact path.
     icon_family_ready: bool,
-    /// Los glifos de color ya rasterizados.
+    /// The color glyphs already rasterized.
     ///
-    /// **Va aquí y no en un tipo aparte porque viaja siempre con el descubridor**: quien pinta un
-    /// carácter necesita las dos cosas a la vez —qué familia le toca y, si va a color, qué textura— y
-    /// separarlas obligaría a pasar dos referencias mutables por todas las firmas del pintor. El estado
-    /// nuevo sí queda en su propia caja: [`Glyphs`] se prueba y se vacía sola.
+    /// **It goes here and not in a separate type because it always travels with the discoverer**: whoever paints a
+    /// character needs both things at once —what family it gets and, if it goes color, what texture— and
+    /// separating them would force passing two mutable references through all the painter's signatures. The
+    /// new state does live in its own box: [`Glyphs`] is tested and clears itself.
     glyphs: Glyphs,
-    /// Lo que se ha gastado rasterizando glifos de color, y cuántos van.
+    /// What has been spent rasterizing color glyphs, and how many there are.
     ///
-    /// **Se cronometra porque corre DENTRO del pintado, al revés que el descubrimiento de caras.**
-    /// Registrar una cara rehace el atlas y por eso se hace fuera; rasterizar un emoji no invalida nada,
-    /// así que se hace donde hace falta. Pero entonces su coste caería dentro del tramo «encolando el
-    /// pintado» —que dejaría de significar lo que su nombre dice— y de ahí, por resta, en la cifra con la
-    /// que **D3** juzga a egui. Un número mal etiquetado es peor que ningún número.
+    /// **It is timed because it runs INSIDE painting, unlike face discovery.**
+    /// Registering a face remakes the atlas and that is why it is done outside; rasterizing an emoji invalidates nothing,
+    /// so it is done where needed. But then its cost would fall inside the "enqueuing the
+    /// painting" stretch —which would stop meaning what its name says— and from there, by subtraction, into the figure
+    /// **D3** judges egui with. A mislabeled number is worse than no number.
     color: ColorCost,
 }
 
-/// Lo que ha costado el camino del color, para que el informe lo declare.
+/// What the color path has cost, so the report declares it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ColorCost {
-    /// Cuánto tiempo se ha gastado en total.
+    /// How much time has been spent in total.
     pub spent: std::time::Duration,
-    /// Cuántos glifos se han rasterizado de verdad —los que ya estaban recordados no cuentan.
+    /// How many glyphs have actually been rasterized —the ones already remembered do not count.
     pub rasterized: usize,
-    /// Cuántas veces se pidió un glifo de color que la máquina no pinta así.
+    /// How many times a color glyph was requested that the machine does not paint that way.
     pub failed: usize,
 }
 
-/// Lo que costó una vuelta del descubrimiento, para que el informe lo pueda declarar.
+/// What a discovery round cost, so the report can declare it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Round {
-    /// Cuántos caracteres se buscaron.
+    /// How many characters were looked for.
     pub searched: usize,
-    /// Cuántas caras nuevas se le dieron al motor de texto.
+    /// How many new faces were given to the text engine.
     pub registered: usize,
 }
 
 impl Round {
-    /// Si esta vuelta hizo algo. Una que no busca nada no cuesta nada y no merece salir en el informe.
+    /// Whether this round did anything. One that looks for nothing costs nothing and does not deserve to appear in the report.
     pub fn did_work(self) -> bool {
         self.searched > 0
     }
 }
 
 impl Discoverer {
-    /// Qué familia hay que pedirle al motor de texto para pintar ese carácter.
+    /// What family the text engine has to be asked for to paint that character.
     ///
-    /// Los caracteres de las zonas de uso privado van por la familia de iconos, donde manda la fuente que
-    /// el usuario instaló; todo lo demás por la monoespaciada de siempre, donde mandan las de fábrica.
+    /// The characters of the private-use areas go by the icon family, where the font the user
+    /// installed rules; everything else by the usual monospaced one, where the factory ones rule.
     ///
-    /// **Y se pregunta aquí, no en una función suelta, porque la familia de iconos NO EXISTE hasta que el
-    /// motor se rehace**: epaint entra en pánico —«is not bound to any fonts»— si se le pide una familia
-    /// con nombre que nadie ha declarado. Ver `icon_family_ready` por qué no basta con mirar si hay
-    /// caras registradas.
+    /// **And it is asked here, not in a loose function, because the icon family DOES NOT EXIST until the
+    /// engine is remade**: epaint panics —"is not bound to any fonts"— if asked for a named
+    /// family nobody has declared. See `icon_family_ready` for why it is not enough to look at whether there are
+    /// registered faces.
     pub fn family_of(&self, c: char) -> egui::FontFamily {
         if is_private_use(c) && self.icon_family_ready {
             egui::FontFamily::Name(ICON_FAMILY.into())
@@ -288,11 +288,11 @@ impl Discoverer {
         }
     }
 
-    /// La textura del glifo de color de ese carácter, rasterizándolo si hace falta.
+    /// The texture of that character's color glyph, rasterizing it if needed.
     ///
-    /// Devuelve `None` cuando la máquina no tiene ninguna fuente que lo pinte a color: quien llama
-    /// **tiene que caer al camino de texto**, que es el Contrato 5 del diseño —lo que no está, no se
-    /// inventa—.
+    /// Returns `None` when the machine has no font that paints it in color: the caller
+    /// **has to fall to the text path**, which is Contract 5 of the design —what is not there is not
+    /// invented—.
     pub fn color_glyph(
         &mut self,
         ctx: &egui::Context,
@@ -300,14 +300,14 @@ impl Discoverer {
         height: u32,
         max_width: u32,
     ) -> Option<(egui::TextureId, egui::Rect, egui::Vec2)> {
-        // **Se asegura la colección ANTES de partir `self`**, porque construirla toca dos campos más y
-        // no se puede hacer con la mitad prestada.
+        // **The collection is ensured BEFORE splitting `self`**, because building it touches two more fields and
+        // cannot be done with half of it borrowed.
         if !self.ensure_the_collection() {
             return None;
         }
-        // **Y aquí se parte en préstamos disjuntos**: la caché de glifos, la colección y el caché de
-        // ficheros son campos distintos, así que el compilador deja tener los tres a la vez. Es lo que
-        // permite que `color_glyph_of` sea una función libre en vez de un método que pediría el todo.
+        // **And here it is split into disjoint borrows**: the glyph cache, the collection and the file
+        // cache are distinct fields, so the compiler lets all three be held at once. It is what
+        // allows `color_glyph_of` to be a free function instead of a method that would ask for the whole thing.
         let Self {
             glyphs,
             collection,
@@ -316,9 +316,9 @@ impl Discoverer {
             ..
         } = self;
         let collection = collection.as_mut()?;
-        // **Solo se cronometra el camino que hace trabajo.** Un glifo ya recordado se devuelve con una
-        // consulta a un mapa, y meter esa consulta en el tramo lo diluiría hasta que el número dejara de
-        // describir lo que cuesta rasterizar — que es lo que el informe tiene que declarar.
+        // **Only the path that does work is timed.** A glyph already remembered is returned with a
+        // map lookup, and putting that lookup in the stretch would dilute it until the number stopped
+        // describing what rasterizing costs — which is what the report has to declare.
         let was_already_there = glyphs.remembers(which_char, height);
         let started = (!was_already_there).then(std::time::Instant::now);
         let measurements = glyphs.texture(ctx, collection, sources, which_char, height, max_width);
@@ -333,25 +333,25 @@ impl Discoverer {
         measurements
     }
 
-    /// Lo que ha costado el camino del color desde la última vez que se preguntó, y se pone a cero.
+    /// What the color path has cost since it was last asked, reset to zero.
     ///
-    /// **Se vacía al leerlo porque el informe cuenta por fotograma**, igual que el resto de sus tramos:
-    /// devolver el acumulado de la sesión daría una media que crece sola y no describe ningún fotograma.
+    /// **It is emptied on reading because the report counts per frame**, like the rest of its stretches:
+    /// returning the session accumulation would give an average that grows on its own and describes no frame.
     pub fn color_cost(&mut self) -> ColorCost {
         std::mem::take(&mut self.color)
     }
 
-    /// Cuántos glifos de color hay recordados. Para que el informe de medida lo pueda declarar.
+    /// How many color glyphs are remembered. So the measurement report can declare it.
     pub fn glyphs_remembered(&self) -> usize {
         self.glyphs.how_many()
     }
 
-    /// Llena el atlas de glifos de color hasta que no cabe uno más, a esa altura de celda.
+    /// Fills the color glyph atlas until not one more fits, at that cell height.
     ///
-    /// **Existe para que el pintor pueda probar qué se ve cuando el atlas se llena**, que es lo que el
-    /// Contrato 5 promete: se cae al camino de texto y el emoji sale igual, en monocromo. El atlas y su
-    /// altura son de este módulo, así que desde el pintor no hay forma de dejarlo en ese estado — y
-    /// llenarlo con emojis de verdad exige que la máquina tenga ochocientos distintos instalados.
+    /// **It exists so the painter can test what is seen when the atlas fills**, which is what
+    /// Contract 5 promises: it falls to the text path and the emoji comes out the same, in monochrome. The atlas and its
+    /// height belong to this module, so from the painter there is no way to leave it in that state — and
+    /// filling it with real emojis demands that the machine have eight hundred distinct ones installed.
     #[cfg(test)]
     pub fn fill_the_atlas(&mut self, ctx: &egui::Context, height: u32) {
         self.glyphs.height = height;
@@ -366,14 +366,14 @@ impl Discoverer {
         {}
     }
 
-    /// Apunta un carácter que quien pinta se ha encontrado.
+    /// Notes a character the painter has run into.
     ///
-    /// **Es lo único que corre por celda, y por eso es lo único que tiene que ser barato**: un carácter ya
-    /// resuelto se descarta con una consulta a un conjunto. Buscar y registrar ocurren fuera del pintado.
+    /// **It is the only thing that runs per cell, and that is why it is the only thing that has to be cheap**: a character already
+    /// resolved is discarded with a set lookup. Looking and registering happen outside painting.
     pub fn note(&mut self, which_char: char) {
-        // **El ASCII no se mira nunca.** Las fuentes de fábrica de egui lo cubren entero, y es la inmensa
-        // mayoría de lo que pasa por una pantalla de terminal: preguntarlo sería pagar una consulta por
-        // celda para obtener siempre lo mismo.
+        // **ASCII is never looked at.** egui's factory fonts cover it whole, and it is the vast
+        // majority of what passes through a terminal screen: asking it would be paying a lookup per
+        // cell to always get the same thing.
         if which_char.is_ascii() || self.settled.contains(&which_char) || self.no_system_fonts {
             return;
         }
@@ -382,28 +382,28 @@ impl Discoverer {
         }
     }
 
-    /// Apunta todos los caracteres de un texto.
+    /// Notes all the characters of a text.
     ///
-    /// **Existe porque no solo la rejilla de la consola pinta texto.** El panel de estado enseña lo que
-    /// publica su productor, que es texto libre y puede venir en cualquier idioma: sin esto, un resumen
-    /// en japonés salía en cuadros **para siempre**, porque nada disparaba la búsqueda. Y eso en el hito
-    /// cuyo objeto es justamente que se vea. Lo encontró una revisión.
+    /// **It exists because it is not only the console grid that paints text.** The status panel shows what
+    /// its producer publishes, which is free text and can come in any language: without this, a summary
+    /// in Japanese came out as boxes **forever**, because nothing triggered the search. And that in the milestone
+    /// whose very object is that it be seen. A review found it.
     pub fn note_text(&mut self, text: &str) {
         for which_char in text.chars() {
             self.note(which_char);
         }
     }
 
-    /// Busca las caras de lo apuntado y se las da al motor de texto. Devuelve lo que hizo.
+    /// Looks for the faces of what was noted and gives them to the text engine. Returns what it did.
     ///
-    /// **Corre FUERA del pintado**, y por dos razones: preguntarle al motor de texto si cubre un carácter
-    /// necesita acceso exclusivo al contexto —pedirlo a mitad de una pasada de interfaz es reentrar en lo
-    /// que ya está prestado—, y registrar una cara **rehace el atlas de glifos entero**, que son
-    /// milisegundos y no microsegundos.
+    /// **It runs OUTSIDE painting**, and for two reasons: asking the text engine whether it covers a character
+    /// needs exclusive access to the context —asking for it in the middle of an interface pass is re-entering what
+    /// is already borrowed—, and registering a face **remakes the whole glyph atlas**, which is
+    /// milliseconds and not microseconds.
     pub fn resolve(&mut self, ctx: &egui::Context) -> Round {
-        // **Lo primero de todo: la familia declarada en la vuelta ANTERIOR ya la conoce el motor.** Entre
-        // aquella vuelta y ésta ha pasado un fotograma entero, que es lo que `set_fonts` necesita para
-        // surtir efecto. Va aquí y no al final para que no se adelante a sí misma.
+        // **First of all: the family declared in the PREVIOUS round is already known to the engine.** Between
+        // that round and this one a whole frame has passed, which is what `set_fonts` needs to
+        // take effect. It goes here and not at the end so it does not get ahead of itself.
         self.icon_family_ready = self.faces.iter().any(|face| face.for_icons);
 
         if self.pending.is_empty() {
@@ -411,23 +411,23 @@ impl Discoverer {
         }
         let pending = std::mem::take(&mut self.pending);
 
-        // **Lo que ya se ve bien se descarta ANTES de tocar el sistema, y eso cuesta 165 ns.**
+        // **What already shows fine is discarded BEFORE touching the system, and that costs 165 ns.**
         //
-        // `Fonts::has_glyph` no vale para esto: promete «¿podemos mostrar este glifo?» y lo que hace es
-        // `resolve_face(c) != replacement_face_key`, o sea **devuelve `false` para la `'a'`** —comprobado
-        // ejecutándolo contra epaint 0.36.1—. La primera versión de este módulo, al quedarse sin oráculo,
-        // buscaba para **todo** lo no-ASCII: un acento español costaba 18 ms y registraba una cara que no
-        // cambiaba nada, gastando además uno de los pocos huecos de familias. Lo midió una revisión.
+        // `Fonts::has_glyph` is no use for this: it promises "can we show this glyph?" and what it does is
+        // `resolve_face(c) != replacement_face_key`, that is **it returns `false` for the `'a'`** —checked
+        // by running it against epaint 0.36.1—. The first version of this module, left without an oracle,
+        // looked for **everything** non-ASCII: a Spanish accent cost 18 ms and registered a face that
+        // changed nothing, spending on top of that one of the few family slots. A review measured it.
         //
-        // **El oráculo que sí funciona es el que usan las pruebas**: maquetar el carácter y comparar su
-        // dibujo con el del cuadro de reemplazo. Dice la verdad y cuesta **cuatro órdenes de magnitud
-        // menos** que recorrer las familias de la máquina.
+        // **The oracle that does work is the one the tests use**: laying out the character and comparing its
+        // drawing with that of the replacement box. It tells the truth and costs **four orders of magnitude
+        // less** than traversing the machine's families.
         let to_look_for = ctx.fonts_mut(|fonts| {
             let the_box = drawing_of(fonts, REPLACEMENT_BOX, egui::FontFamily::Monospace);
             let mut to_look_for = Vec::new();
             for which_char in pending {
                 if drawing_of(fonts, which_char, self.family_of(which_char)) != the_box {
-                    // Ya se ve: no hay nada que buscar, y no se vuelve a mirar.
+                    // Already shows: there is nothing to look for, and it is not looked at again.
                     self.settled.insert(which_char);
                 } else {
                     to_look_for.push(which_char);
@@ -437,23 +437,23 @@ impl Discoverer {
         });
 
         let mut round = Round::default();
-        // **Se gasta presupuesto, no un número de vueltas.** Y se comprueba ANTES de cada búsqueda: una
-        // que empiece dentro del presupuesto puede acabar fuera —el peor caso son 18 ms— y eso es
-        // aceptable; empezar la siguiente ya fuera, no.
+        // **Budget is spent, not a number of rounds.** And it is checked BEFORE each search: one
+        // that starts within budget can end outside it —the worst case is 18 ms— and that is
+        // acceptable; starting the next one already outside is not.
         let started = std::time::Instant::now();
         for which_char in to_look_for {
             let out_of_budget = started.elapsed() >= BUDGET_PER_ROUND;
             let gave_up = self.failures_in_a_row >= MAX_FAILURES_IN_A_ROW;
             if gave_up {
-                // La máquina ya ha dicho doce veces seguidas que no tiene con qué. Se dan por resueltos
-                // sin buscar: seguir preguntando cuesta hasta 18 ms cada uno para el mismo «no».
+                // The machine has already said twelve times in a row that it has nothing to do it with. They are given as resolved
+                // without looking: keeping on asking costs up to 18 ms each for the same "no".
                 self.settled.insert(which_char);
                 continue;
             }
             if out_of_budget {
-                // **Se quedan SIN marcar como resueltos**, así que el pintor los vuelve a apuntar y se
-                // buscan en el fotograma siguiente. Marcarlos aquí los condenaría a salir como cuadro
-                // para siempre solo por haber llegado tarde a esta vuelta.
+                // **They are left NOT marked as resolved**, so the painter notes them again and they are
+                // looked for on the next frame. Marking them here would condemn them to come out as a box
+                // forever just for having arrived late to this round.
                 continue;
             }
             self.settled.insert(which_char);
@@ -465,49 +465,49 @@ impl Discoverer {
                 self.failures_in_a_row += 1;
             }
         }
-        // **El caché de ficheros se vacía en cuanto la vuelta termina, y no es opcional.** Guarda un
-        // `Blob` vivo por **cada** fichero de fuente que la búsqueda llegó a abrir, y una búsqueda fallida
-        // los abre **todos** los de la máquina: sin podar, una sesión que vea un carácter raro se queda
-        // con cientos de megas residentes para siempre. Lo que de verdad hace falta ya está copiado en
-        // `faces`. Lo midió una revisión.
+        // **The file cache is emptied as soon as the round finishes, and it is not optional.** It keeps a
+        // live `Blob` for **each** font file the search got to open, and a failed search
+        // opens **all** of the machine's: without pruning, a session that sees a rare character ends up
+        // with hundreds of megs resident forever. What is really needed is already copied into
+        // `faces`. A review measured it.
         self.sources.prune(0, true);
 
         if round.registered > 0 {
             self.hand_over_the_faces(ctx);
-            // **Sin esto el glifo descubierto puede quedarse en cuadro indefinidamente.** Hacen falta dos
-            // pasadas más —una para que `set_fonts` surta efecto y otra para repintar— y nada las provoca:
-            // los repintados se piden por salida pendiente o por entrada. `echo 日本語` y parar dejaba el
-            // kanji en cuadro **hasta que alguien tocara algo**. Lo encontró una revisión.
+            // **Without this the discovered glyph can stay a box indefinitely.** Two more
+            // passes are needed —one for `set_fonts` to take effect and another to repaint— and nothing triggers them:
+            // repaints are requested by pending output or by input. `echo 日本語` and stopping left the
+            // kanji a box **until someone touched something**. A review found it.
             ctx.request_repaint();
         }
         round
     }
 
-    /// Busca quién cubre ese carácter y añade su cara a la lista. `true` si añadió una.
+    /// Looks for who covers that character and adds its face to the list. `true` if it added one.
     fn record_who_covers(&mut self, which_char: char) -> bool {
         if self.faces.len() >= MAX_FAMILIES {
-            // **Se dice, y una sola vez.** Un techo que se traga lo que descarta es indistinguible de un
-            // fallo: quien vea un cuadro después de instalar la fuente adecuada no tendría forma de saber
-            // que el terminal encontró la fuente y decidió no usarla. Es la misma regla con la que el
-            // resto del proyecto declara sus límites en vez de callarlos.
+            // **It is said, and only once.** A ceiling that swallows what it discards is indistinguishable from a
+            // failure: whoever sees a box after installing the right font would have no way to know
+            // that the terminal found the font and decided not to use it. It is the same rule the
+            // rest of the project declares its limits with instead of keeping them quiet.
             if !self.said_the_ceiling {
                 eprintln!(
-                    "agent-terminal: ya hay {MAX_FAMILIES} fuentes del sistema registradas, que es el \
-                     techo. Los caracteres que las de fábrica no cubran seguirán saliendo como cuadros."
+                    "agent-terminal: there are already {MAX_FAMILIES} system fonts registered, which is the \
+                     ceiling. Characters the factory ones do not cover will keep coming out as boxes."
                 );
                 self.said_the_ceiling = true;
             }
             return false;
         }
         let Some(face) = self.look_for(which_char) else {
-            // **Y aquí acaba el intento: lo que no está, no se inventa.** El carácter se pinta con lo que
-            // dé el motor —su cuadro— y no se intenta nada más. Ya está en `settled`, así que no se
-            // vuelve a buscar.
+            // **And here the attempt ends: what is not there is not invented.** The character is painted with whatever
+            // the engine gives —its box— and nothing else is attempted. It is already in `settled`, so it is not
+            // looked for again.
             return false;
         };
         let name = format!("{SYSTEM_PREFIX}{}", face.0);
         if self.faces.iter().any(|ours| ours.family == name) {
-            // Otra cara de la misma familia ya está registrada: cubre esto también.
+            // Another face of the same family is already registered: it covers this too.
             return false;
         }
         self.faces.push(SystemFace {
@@ -518,29 +518,29 @@ impl Discoverer {
         true
     }
 
-    /// La primera cara de la máquina que cubre ese carácter, con el nombre de su familia.
+    /// The first face on the machine that covers that character, with the name of its family.
     fn look_for(&mut self, which_char: char) -> Option<(String, Arc<egui::FontData>)> {
-        // **Se comprueba aquí ADEMÁS de en `note`, y no es redundante:** los caracteres que ya estaban
-        // en la cola cuando enumerar falló llegan igual hasta aquí, y sin esta línea cada uno volvería a
-        // construir la colección entera para volver a encontrarla vacía.
+        // **It is checked here IN ADDITION to in `note`, and it is not redundant:** the characters that were already
+        // in the queue when enumerating failed reach here anyway, and without this line each one would
+        // build the whole collection again only to find it empty again.
         if !self.ensure_the_collection() {
             return None;
         }
         let collection = self.collection.as_mut()?;
-        // **Los dos campos se prestan por separado a propósito**: pedirlos a través de un método que
-        // devuelva la colección prestaría `self` entero y el segundo préstamo no compilaría.
+        // **The two fields are borrowed separately on purpose**: asking for them through a method that
+        // returned the collection would borrow the whole `self` and the second borrow would not compile.
         let sources = &mut self.sources;
-        // **Dos vías, y en este orden.** Las familias monoespaciadas que el sistema declara son pocas y
-        // son las adecuadas para un terminal, así que se preguntan primero; recorrerlas todas es la red
-        // de debajo y el peor caso medido —de 94 µs a 18,2 ms según lo que pese la ganadora, no según
-        // dónde caiga en el orden (**D24**)—.
+        // **Two routes, and in this order.** The monospaced families the system declares are few and
+        // are the right ones for a terminal, so they are asked first; traversing them all is the net
+        // underneath and the measured worst case —from 94 µs to 18.2 ms depending on how much the winner weighs, not on
+        // where it falls in the order (**D24**)—.
         let generic_ones: Vec<_> = collection
             .generic_families(GenericFamily::Monospace)
             .collect();
         let mut all_names: Vec<String> = collection.family_names().map(str::to_owned).collect();
-        // **Por nombre, para que la respuesta no cambie entre arranques.** El orden en que el sistema las
-        // entrega no es estable: dos corridas del banco dieron familias distintas para el mismo carácter
-        // hasta que se ordenó.
+        // **By name, so the answer does not change between startups.** The order in which the system
+        // delivers them is not stable: two bench runs gave different families for the same character
+        // until it was sorted.
         all_names.sort();
         let of_the_rest: Vec<_> = all_names
             .iter()
@@ -555,11 +555,11 @@ impl Discoverer {
         None
     }
 
-    /// Construye la colección del sistema si todavía no existe. Devuelve si hay con qué buscar.
+    /// Builds the system collection if it does not yet exist. Returns whether there is anything to search with.
     ///
-    /// **Sale de `look_for` para que las dos búsquedas —la de cobertura y la de color— compartan una sola
-    /// colección.** Enumerar cuesta entre 15,9 y 31,0 ms (**D24**): hacerlo dos veces por tener dos
-    /// funciones sería pagar el tramo más caro del módulo por duplicado.
+    /// **It comes out of `look_for` so the two searches —the coverage one and the color one— share a single
+    /// collection.** Enumerating costs between 15.9 and 31.0 ms (**D24**): doing it twice for having two
+    /// functions would be paying the module's most expensive stretch twice over.
     fn ensure_the_collection(&mut self) -> bool {
         if self.no_system_fonts {
             return false;
@@ -567,19 +567,19 @@ impl Discoverer {
         if self.collection.is_some() {
             return true;
         }
-        // **Se construye aquí y no en el arranque: eso es lo que hace perezoso el descubrimiento.**
-        // Mientras solo aparezcan caracteres que las fuentes de fábrica cubren, esta línea no corre nunca.
+        // **It is built here and not at startup: that is what makes discovery lazy.**
+        // As long as only characters that the factory fonts cover appear, this line never runs.
         let mut collection = Collection::new(CollectionOptions {
             system_fonts: true,
             ..Default::default()
         });
-        // **Una máquina sin fontconfig devuelve una colección vacía en vez de caerse**, y ése es el caso
-        // que **AC9** obliga a aguantar. Se dice por la salida de error y se deja de intentar: sin esto se
-        // volvería a enumerar en cada vuelta, gastando el coste entero para nada.
+        // **A machine without fontconfig returns an empty collection instead of crashing**, and that is the case
+        // **AC9** requires enduring. It is said through the error output and it stops trying: without this it
+        // would enumerate again on every round, spending the whole cost for nothing.
         if collection.family_names().next().is_none() {
             eprintln!(
-                "agent-terminal: no se encontró ninguna fuente del sistema. Los caracteres que las \
-                 fuentes de fábrica no cubran seguirán saliendo como cuadros."
+                "agent-terminal: no system font was found. Characters the \
+                 factory fonts do not cover will keep coming out as boxes."
             );
             self.no_system_fonts = true;
             return false;
@@ -588,22 +588,22 @@ impl Discoverer {
         true
     }
 
-    /// Le da al motor de texto **todas** las caras descubiertas hasta ahora.
+    /// Gives the text engine **all** the faces discovered so far.
     ///
-    /// **Detrás de las de fábrica, y ése es el Contrato 2 del diseño**: la cadena de reserva se recorre en
-    /// orden, así que una cara del sistema puesta delante le robaría glifos a la fuente del terminal —y el
-    /// terminal dejaría de verse como se ve hoy en lo que hoy ya funciona—.
+    /// **Behind the factory ones, and that is Contract 2 of the design**: the fallback chain is traversed in
+    /// order, so a system face placed in front would steal glyphs from the terminal font —and the
+    /// terminal would stop looking as it looks today in what already works today—.
     ///
-    /// **Y las de iconos van a una FAMILIA APARTE, no delante de las de fábrica.** Esa fue la primera
-    /// versión y estaba mal: egui ordena la cadena de reserva **por familia entera**, no por rango de
-    /// caracteres, así que poner delante una fuente de iconos —que casi siempre es una `Nerd Font`, y esas
-    /// **traen el latino completo**— le quita las letras a la fuente del terminal. Medido antes de
-    /// cambiarlo: descubrir un solo icono **le cambiaba el dibujo a tres de cada cinco letras**, que es
-    /// exactamente lo que el Contrato 2 existe para impedir.
+    /// **And the icon ones go to a SEPARATE FAMILY, not in front of the factory ones.** That was the first
+    /// version and it was wrong: egui orders the fallback chain **by whole family**, not by range of
+    /// characters, so placing an icon font in front —which is almost always a `Nerd Font`, and those
+    /// **carry the full Latin set**— takes the letters away from the terminal font. Measured before
+    /// changing it: discovering a single icon **changed the drawing of three out of every five letters**, which is
+    /// exactly what Contract 2 exists to prevent.
     ///
-    /// Con familia propia, quien pinta pide [`ICON_FAMILY`] **solo para los caracteres de uso
-    /// privado** y la monoespaciada para todo lo demás. El orden por carácter que egui no da, lo da el
-    /// pintor, que ya recorre celda a celda.
+    /// With its own family, the painter asks for [`ICON_FAMILY`] **only for the private-use
+    /// characters** and the monospaced one for everything else. The per-character order egui does not give, the
+    /// painter gives, since it already traverses cell by cell.
     fn hand_over_the_faces(&self, ctx: &egui::Context) {
         let mut definitions = egui::FontDefinitions::default();
         let factory = definitions
@@ -627,12 +627,12 @@ impl Discoverer {
         ctx.set_fonts(definitions);
     }
 
-    /// La familia monoespaciada: **las de fábrica primero y las del sistema detrás**, sin excepciones.
+    /// The monospaced family: **the factory ones first and the system ones behind**, no exceptions.
     ///
-    /// **Está aparte para poder afirmar sobre ella**, y no es un rodeo: esta lista **es** lo que egui
-    /// consume. Afirmar en su lugar sobre el dibujo que sale no distingue los casos — registrar una cara
-    /// rehace el atlas y **todos** los glifos cambian de sitio, así que la comparación pasa igual con el
-    /// defecto puesto y quitado. Lo destapó mutarla.
+    /// **It is set apart so it can be asserted on**, and it is not a detour: this list **is** what egui
+    /// consumes. Asserting instead on the drawing that comes out does not distinguish the cases — registering a face
+    /// remakes the atlas and **all** the glyphs change place, so the comparison passes the same with the
+    /// defect in and out. Mutating it exposed it.
     fn monospaced(&self, factory: &[String]) -> Vec<String> {
         factory
             .iter()
@@ -641,10 +641,10 @@ impl Discoverer {
             .collect()
     }
 
-    /// La familia de iconos: **las del sistema primero, y las de fábrica detrás como red**.
+    /// The icon family: **the system ones first, and the factory ones behind as a net**.
     ///
-    /// Solo entran las caras que se descubrieron **buscando un carácter de uso privado**: una encontrada
-    /// por un kanji no se cuela aquí aunque además traiga iconos.
+    /// Only the faces discovered **looking for a private-use character** enter: one found
+    /// by a kanji does not sneak in here even if it also carries icons.
     fn icon_ones(&self, factory: &[String]) -> Vec<String> {
         self.faces
             .iter()
@@ -655,10 +655,10 @@ impl Discoverer {
     }
 }
 
-/// Lo que mide el glifo de ese carácter en el atlas, o `None` si no llega a haber glifo.
+/// What that character's glyph measures in the atlas, or `None` if there ends up being no glyph.
 ///
-/// **Es el oráculo de «¿esto ya se ve?»**: comparado con el del cuadro de reemplazo dice la verdad, al
-/// contrario que `Fonts::has_glyph`. Cuesta **165 ns**, medido en release.
+/// **It is the oracle for "does this already show?"**: compared with the replacement box's it tells the truth,
+/// unlike `Fonts::has_glyph`. It costs **165 ns**, measured in release.
 fn drawing_of(
     fonts: &mut egui::epaint::text::FontsView<'_>,
     which_char: char,
@@ -673,13 +673,13 @@ fn drawing_of(
     Some((uv.max[0] - uv.min[0], uv.max[1] - uv.min[1]))
 }
 
-/// El cuerpo con el que se le pregunta al motor si un carácter se ve.
+/// The size the engine is asked with whether a character shows.
 ///
-/// **Da igual cuál sea mientras sea el mismo para los dos lados de la comparación**: lo que se compara es
-/// si dos caracteres pintan el mismo dibujo, no cuánto miden.
+/// **It does not matter which it is as long as it is the same for both sides of the comparison**: what is compared is
+/// whether two characters paint the same drawing, not how much they measure.
 const SIZE_TO_ASK_WITH: f32 = 14.0;
 
-/// La primera de esas familias que trae el glifo de ese carácter.
+/// The first of those families that brings that character's glyph.
 fn first_that_covers(
     collection: &mut Collection,
     sources: &mut SourceCache,
@@ -687,19 +687,19 @@ fn first_that_covers(
     which_char: char,
 ) -> Option<(String, Arc<egui::FontData>)> {
     for &id in ids {
-        // **Se copian el nombre y las caras antes de seguir**: la familia presta de la colección, y la
-        // colección hace falta en la vuelta siguiente.
+        // **The name and the faces are copied before continuing**: the family borrows from the collection, and the
+        // collection is needed on the next round.
         let Some((name, faces)) = collection
             .family(id)
             .map(|family| (family.name().to_owned(), family.fonts().to_vec()))
         else {
             continue;
         };
-        // **Se prefiere la cara Regular, no la primera que enumere el sistema.** Medido por una revisión:
-        // `日` salía de la cara **índice 5** de su familia, elegida porque le tocó ir primero. En una
-        // familia cuya Negrita o Fina se enumere antes, **todo el CJK del terminal saldría en negrita**,
-        // permanentemente y sin forma de corregirlo. El desempate por índice deja el orden estable, así
-        // que la respuesta tampoco cambia entre arranques.
+        // **The Regular face is preferred, not the first the system enumerates.** Measured by a review:
+        // `日` came out of face **index 5** of its family, chosen because it happened to go first. In a
+        // family whose Bold or Thin is enumerated first, **all the terminal's CJK would come out bold**,
+        // permanently and with no way to fix it. The tiebreak by index leaves the order stable, so
+        // the answer does not change between startups either.
         let mut faces = faces;
         faces.sort_by_key(|face| {
             (
@@ -722,24 +722,24 @@ fn first_that_covers(
                         .is_some_and(|glyph| glyph != 0)
                 });
             if covers {
-                // **Y se comprueba que el motor de texto va a poder abrirla, ANTES de dársela.** El
-                // único modo de fallo que epaint tiene para unos bytes que no entiende es
-                // `panic!("Error parsing … TTF/OTF font file")`, y ocurre **dentro de su pasada**: un
-                // fichero cuyo `cmap` se lee pero cuyo directorio de tablas no —una actualización de
-                // paquete a medias, un fichero truncado, unos desplazamientos viejos de fontconfig—
-                // **mataría el proceso** en el fotograma siguiente. Y son ficheros de fuera: no se
-                // controla lo que traen. Lo señaló una revisión.
+                // **And it is checked that the text engine is going to be able to open it, BEFORE giving it.** The
+                // only failure mode epaint has for bytes it does not understand is
+                // `panic!("Error parsing … TTF/OTF font file")`, and it happens **inside its pass**: a
+                // file whose `cmap` is read but whose table directory is not —a half-finished
+                // package update, a truncated file, some old fontconfig offsets—
+                // **would kill the process** on the next frame. And they are files from outside: what
+                // they carry is not controlled. A review pointed it out.
                 //
-                // Se valida con la misma caja que epaint usa por debajo, así que lo que aquí se abra,
-                // allí se abre.
+                // It is validated with the same crate epaint uses underneath, so what opens here,
+                // opens there.
                 if skrifa::FontRef::from_index(blob.data(), face.index()).is_err() {
                     continue;
                 }
-                // **Con SU índice de cara, no con el cero.** Un fichero de fuente puede llevar varias
-                // caras dentro —una colección `.ttc`— y `FontData::from_owned` se queda con la primera:
-                // registrar el fichero sin decir cuál se buscaba deja al motor con una cara que **no**
-                // cubre el carácter, y el terminal sigue pintando el cuadro después de haber pagado la
-                // búsqueda entera. Comprobado: es lo que pasaba con los iconos del Área de Uso Privado.
+                // **With ITS face index, not with zero.** A font file can carry several
+                // faces inside —a `.ttc` collection— and `FontData::from_owned` keeps the first:
+                // registering the file without saying which was being looked for leaves the engine with a face that does **not**
+                // cover the character, and the terminal keeps painting the box after having paid for the
+                // whole search. Checked: it is what happened with the Private-Use Area icons.
                 let mut data = egui::FontData::from_owned(blob.data().to_vec());
                 data.index = face.index();
                 return Some((name, Arc::new(data)));
@@ -750,82 +750,82 @@ fn first_that_covers(
 }
 
 // ---------------------------------------------------------------------------------------------
-// El glifo de color
+// The color glyph
 // ---------------------------------------------------------------------------------------------
 
-/// Lo que mide de lado el atlas de glifos de color, en píxeles.
+/// What the color glyph atlas measures on a side, in pixels.
 ///
-/// **El techo de este hito es una textura de tamaño FIJO, no un contador**, y eso es mejor de lo que el
-/// diseño pedía: la memoria que la tarjeta gráfica dedica a los emojis es **1 MiB y no cambia**, aparezcan
-/// uno o mil. A la altura de celda de esta máquina caben unos ochocientos glifos —17 px de alto, 18 de
-/// ancho—, muchos más de los que una persona ve en una sesión; cuando se llena se sigue pintando, pero en
-/// monocromo por el camino de texto de siempre.
+/// **The ceiling of this milestone is a FIXED-size texture, not a counter**, and that is better than what the
+/// design asked for: the memory the graphics card dedicates to the emojis is **1 MiB and does not change**, whether
+/// one or a thousand appear. At this machine's cell height about eight hundred glyphs fit —17 px tall, 18
+/// wide—, many more than a person sees in a session; when it fills, painting continues, but in
+/// monochrome by the usual text path.
 ///
-/// Es el mismo criterio con el que **D8** acotó la cola de salida y **D21** el historial: una entrada que
-/// llega de fuera y no la controla nadie de dentro lleva techo, y el techo se dice.
+/// It is the same criterion **D8** bounded the output queue with and **D21** the history: an entry that
+/// arrives from outside and nobody inside controls carries a ceiling, and the ceiling is said.
 const ATLAS_SIDE: usize = 512;
 
-/// El cuerpo con el que se le pide el mapa de bits a la fuente.
+/// The size the bitmap is asked of the font with.
 ///
-/// **No es la altura de la celda a propósito.** `Noto Color Emoji` trae **una sola tirada** de 136×128
-/// píxeles —comprobado ejecutándolo, no leyendo la especificación— así que pedirle un tamaño u otro
-/// devuelve exactamente la misma imagen. Pedir el mayor de los razonables es lo único que cambia algo en
-/// una fuente que sí traiga varias: se coge la más grande y se reduce, que pierde menos que ampliar una
-/// pequeña.
+/// **It is not the cell height on purpose.** `Noto Color Emoji` brings **a single run** of 136×128
+/// pixels —checked by running it, not by reading the specification— so asking it for one size or another
+/// returns exactly the same image. Asking for the largest of the reasonable ones is the only thing that changes anything in
+/// a font that does bring several: the largest is taken and reduced, which loses less than enlarging a
+/// small one.
 const SIZE_TO_RASTERIZE_WITH: f32 = 128.0;
 
-/// Dónde está un glifo dentro del atlas y cuánto mide.
+/// Where a glyph is within the atlas and how much it measures.
 #[derive(Debug, Clone, Copy)]
 struct InAtlas {
-    /// El trozo del atlas que ocupa, en coordenadas de 0 a 1 — que es como se pide al pintar.
+    /// The piece of the atlas it occupies, in coordinates from 0 to 1 — which is how it is asked for when painting.
     uv: egui::Rect,
-    /// Lo que mide de verdad, en píxeles. Quien pinta lo necesita para centrarlo sin deformarlo.
+    /// What it actually measures, in pixels. The painter needs it to center it without deforming it.
     measurements: egui::Vec2,
 }
 
-/// Los glifos de color ya rasterizados, **todos dentro de una sola textura**.
+/// The color glyphs already rasterized, **all within a single texture**.
 ///
-/// **Una textura y no una por glifo, y la diferencia se mide.** Con una textura por emoji, el motor no
-/// puede juntar dos en el mismo lote de dibujo —lo dice su teselador: mezclar identificadores de textura
-/// en la misma malla es un error— así que cada emoji de la pantalla parte el lote. Medido con las dos
-/// consolas volcando emojis contra su control en ASCII: **el resto del fotograma pasaba de 275 µs a
-/// 743 µs**, es decir la cifra con
-/// la que **D3** juzga al framework casi triplicada, y por trabajo que no es del framework. Con atlas,
-/// todos los emojis de la pantalla se dibujan juntos. Es lo que hacen los terminales que son el listón.
+/// **One texture and not one per glyph, and the difference is measured.** With one texture per emoji, the engine
+/// cannot join two in the same drawing batch —its tessellator says so: mixing texture identifiers
+/// in the same mesh is an error— so each emoji on the screen splits the batch. Measured with the two
+/// consoles dumping emojis against their control in ASCII: **the rest of the frame went from 275 µs to
+/// 743 µs**, that is the figure
+/// **D3** judges the framework with almost tripled, and for work that is not the framework's. With an atlas,
+/// all the emojis on the screen are drawn together. It is what the terminals that are the bar do.
 ///
-/// **La altura es un campo y no parte de la clave, y eso es una decisión con consecuencia.** Toda la
-/// ventana comparte una sola métrica —se mide una vez por pasada, con el mismo cuerpo para todas las
-/// divisiones—, así que dos alturas distintas no coexisten nunca: solo se suceden, cuando cambia el zoom
-/// del escritorio. Guardar la altura en la clave dejaría las entradas viejas ocupando sitio para siempre;
-/// tenerla aquí permite **vaciar entero** el atlas en cuanto cambia, que es lo que el contrato del diseño
-/// exige y lo que impide pintar un emoji del tamaño anterior en una celda del nuevo.
+/// **The height is a field and not part of the key, and that is a decision with a consequence.** The whole
+/// window shares a single metric —it is measured once per pass, with the same size for all the
+/// panes—, so two different heights never coexist: they only follow one another, when the desktop zoom
+/// changes. Keeping the height in the key would leave the old entries taking up space forever;
+/// having it here allows **emptying the atlas whole** as soon as it changes, which is what the design contract
+/// requires and what prevents painting an emoji of the previous size in a cell of the new one.
 #[derive(Default)]
 struct Glyphs {
-    /// La textura donde viven todos. **No existe hasta que hace falta el primero**: una sesión sin
-    /// emojis no le pide ni un byte a la tarjeta gráfica.
+    /// The texture where they all live. **It does not exist until the first one is needed**: a session without
+    /// emojis does not ask the graphics card for a single byte.
     atlas: Option<egui::TextureHandle>,
-    /// Lo recordado, incluidos los fallos: un `None` es «éste no lo pinta a color nadie de esta máquina».
+    /// What is remembered, failures included: a `None` is "nobody on this machine paints this in color".
     ///
-    /// **Recordar el fallo no es un detalle.** Sin él, un carácter que ninguna fuente de color cubre
-    /// recorrería las familias de emoji **en cada fotograma** — y es justo el carácter que un programa
-    /// roto escupe en bucle. Es la misma razón por la que [`Discoverer`] recuerda los suyos.
+    /// **Remembering the failure is not a detail.** Without it, a character that no color font covers
+    /// would traverse the emoji families **on every frame** — and it is exactly the character a broken program
+    /// spits in a loop. It is the same reason [`Discoverer`] remembers its own.
     saved_ones: std::collections::HashMap<char, Option<InAtlas>>,
-    /// Dónde empieza el hueco libre de la fila que se está llenando.
+    /// Where the free slot of the row being filled starts.
     next_spot: [usize; 2],
-    /// Lo que mide de alto la fila que se está llenando. Al saltar de fila se avanza esto.
+    /// How tall the row being filled measures. On jumping rows this is advanced.
     row_height: usize,
-    /// La altura de celda a la que están rasterizados los de arriba, en píxeles físicos.
+    /// The cell height the ones above are rasterized at, in physical pixels.
     height: u32,
-    /// Si ya se dijo que el atlas se llenó.
+    /// Whether it was already said that the atlas filled.
     said_the_ceiling: bool,
 }
 
 impl Glyphs {
-    /// Dónde está el glifo de color de ese carácter dentro del atlas, rasterizándolo si hace falta.
+    /// Where that character's color glyph is within the atlas, rasterizing it if needed.
     ///
-    /// Devuelve `None` cuando la máquina no tiene ninguna fuente que lo pinte a color, o cuando el atlas
-    /// se llenó: quien llama **tiene que caer al camino de texto**, que es el Contrato 5 del diseño —lo
-    /// que no está, no se inventa—.
+    /// Returns `None` when the machine has no font that paints it in color, or when the atlas
+    /// filled: the caller **has to fall to the text path**, which is Contract 5 of the design —what
+    /// is not there is not invented—.
     fn texture(
         &mut self,
         ctx: &egui::Context,
@@ -838,9 +838,9 @@ impl Glyphs {
         if height == 0 || max_width == 0 {
             return None;
         }
-        // **Cambió la altura de la celda: lo recordado ya no vale.** Sin esto, subir el zoom del
-        // escritorio dejaría los emojis del tamaño anterior pintados en celdas del nuevo — y como el
-        // atlas nunca se vacía, para el resto de la vida del proceso.
+        // **The cell height changed: what is remembered is no longer valid.** Without this, raising the desktop
+        // zoom would leave the emojis of the previous size painted in cells of the new one — and since the
+        // atlas is never emptied, for the rest of the process's life.
         if self.height != height {
             self.saved_ones.clear();
             self.next_spot = [0, 0];
@@ -856,34 +856,34 @@ impl Glyphs {
             self.saved_ones.insert(which_char, spot);
             spot
         };
-        // **El atlas existe siempre que haya un sitio guardado**: se crea al pegar el primer glifo, y lo
-        // que se guarda es justamente el resultado de haberlo pegado.
+        // **The atlas exists whenever there is a saved spot**: it is created on pasting the first glyph, and what
+        // is saved is precisely the result of having pasted it.
         let spot = spot?;
         Some((self.atlas.as_ref()?.id(), spot.uv, spot.measurements))
     }
 
-    /// Mete una imagen en el primer hueco libre del atlas. `None` si ya no cabe.
+    /// Puts an image in the first free slot of the atlas. `None` if it no longer fits.
     fn blit(&mut self, ctx: &egui::Context, image: egui::ColorImage) -> Option<InAtlas> {
         let [width, height] = [image.width(), image.height()];
         if width > ATLAS_SIDE || height > ATLAS_SIDE {
             return None;
         }
-        // Colocación por filas: se llena la fila de izquierda a derecha y se salta a la siguiente cuando
-        // no cabe. **Deja huecos y da igual**: los glifos de una sesión miden todos casi lo mismo —los
-        // rasteriza la misma altura de celda— así que las filas salen parejas.
+        // Placement by rows: the row is filled left to right and it jumps to the next when
+        // it does not fit. **It leaves gaps and it does not matter**: the glyphs of a session all measure almost the same —the
+        // same cell height rasterizes them— so the rows come out even.
         if self.next_spot[0] + width > ATLAS_SIDE {
             self.next_spot = [0, self.next_spot[1] + self.row_height];
             self.row_height = 0;
         }
         if self.next_spot[1] + height > ATLAS_SIDE {
-            // **Se dice, y una sola vez.** Un techo callado es indistinguible de un fallo: quien vea sus
-            // emojis en monocromo de golpe no tendría forma de saber que el terminal sabe pintarlos y se
-            // ha quedado sin sitio donde guardarlos.
+            // **It is said, and only once.** A silent ceiling is indistinguishable from a failure: whoever sees their
+            // emojis go monochrome all at once would have no way to know that the terminal knows how to paint them and has
+            // run out of room to store them.
             if !self.said_the_ceiling {
                 eprintln!(
-                    "agent-terminal: el atlas de glifos de color ({ATLAS_SIDE}x{ATLAS_SIDE} \
-                     píxeles) se ha llenado. Los emojis que no estén ya en él seguirán saliendo en \
-                     monocromo."
+                    "agent-terminal: the color glyph atlas ({ATLAS_SIDE}x{ATLAS_SIDE} \
+                     pixels) has filled. Emojis not already in it will keep coming out in \
+                     monochrome."
                 );
                 self.said_the_ceiling = true;
             }
@@ -894,16 +894,16 @@ impl Glyphs {
             ctx.load_texture(
                 "glifos-de-color",
                 egui::ColorImage::filled([ATLAS_SIDE, ATLAS_SIDE], egui::Color32::TRANSPARENT),
-                // **Lineal y no `NEAREST`**: el mapa de bits viene a 136×128 y la celda mide una fracción
-                // de eso, así que la reducción la hace el remuestreo de la CPU; lo que la tarjeta hace
-                // aquí es solo el ajuste final a píxeles físicos. Con `NEAREST` ese ajuste se ve como
-                // dientes de sierra en el borde del dibujo.
+                // **Linear and not `NEAREST`**: the bitmap comes at 136×128 and the cell measures a fraction
+                // of that, so the reduction is done by the CPU resampling; what the card does
+                // here is only the final adjustment to physical pixels. With `NEAREST` that adjustment shows as
+                // sawtooth on the edge of the drawing.
                 egui::TextureOptions::LINEAR,
             )
         });
-        // **Solo el rectángulo del glifo nuevo, no el atlas entero.** Re-subir el megabyte completo por
-        // cada emoji descubierto sería medio giga de tráfico a la tarjeta en una sesión que llegue al
-        // techo, para cambiar unos cientos de bytes.
+        // **Only the rectangle of the new glyph, not the whole atlas.** Re-uploading the complete megabyte for
+        // each discovered emoji would be half a gig of traffic to the card in a session that reaches the
+        // ceiling, to change a few hundred bytes.
         atlas.set_partial(spot, image, egui::TextureOptions::LINEAR);
         self.next_spot[0] = spot[0] + width;
         self.row_height = self.row_height.max(height);
@@ -920,32 +920,32 @@ impl Glyphs {
         })
     }
 
-    /// Si ese carácter ya está recordado —incluido el recuerdo de que no se pinta a color.
+    /// Whether that character is already remembered —including the memory that it is not painted in color.
     ///
-    /// **Mira también la altura**, porque un cambio de altura vacía el atlas entero: sin eso, el primer
-    /// glifo tras un cambio de zoom se rasterizaría **sin** que su coste entrara en el tramo.
+    /// **It looks at the height too**, because a change of height empties the whole atlas: without that, the first
+    /// glyph after a zoom change would be rasterized **without** its cost entering the stretch.
     fn remembers(&self, which_char: char, height: u32) -> bool {
         self.height == height && self.saved_ones.contains_key(&which_char)
     }
 
-    /// Cuántos glifos hay recordados.
+    /// How many glyphs are remembered.
     fn how_many(&self) -> usize {
         self.saved_ones.len()
     }
 }
 
-/// La imagen a color de ese carácter, ya reescalada, si alguna fuente de la máquina lo pinta así.
+/// The color image of that character, already rescaled, if any font on the machine paints it that way.
 ///
-/// **Es una función libre y no un método, y eso resuelve un problema real.** Necesita la colección del
-/// sistema y el caché de ficheros, que son **dos campos** del descubridor; como método pediría prestado el
-/// descubridor entero, y quien la llama —la caché de glifos, que vive **dentro** de él— ya tiene prestada
-/// su parte. La primera versión lo salvaba sacando la caché con `mem::take` y devolviéndola después, lo
-/// que dejaba una trampa: una segunda entrada por ese camino habría visto una caché vacía y la primera le
-/// habría sobrescrito al volver lo que la segunda guardara. Nadie reentra hoy, y nada lo impedía.
+/// **It is a free function and not a method, and that solves a real problem.** It needs the system
+/// collection and the file cache, which are **two fields** of the discoverer; as a method it would borrow the
+/// whole discoverer, and its caller —the glyph cache, which lives **inside** it— already has its
+/// part borrowed. The first version got around it by taking the cache out with `mem::take` and returning it afterward, which
+/// left a trap: a second entry by that path would have seen an empty cache and the first would have
+/// overwritten on return whatever the second saved. Nobody re-enters today, and nothing prevented it.
 ///
-/// **Devuelve la imagen y no la cara**: quien llama guarda texturas, no fuentes. Prestarle la cara abierta
-/// le obligaría a cargar con los veinte megas del fichero mientras la usa, y a hablar el modelo de fuente
-/// de una caja de terceros para nada.
+/// **It returns the image and not the face**: the caller stores textures, not fonts. Lending it the open face
+/// would force it to carry the file's twenty megs while it uses it, and to speak the font model
+/// of a third-party crate for nothing.
 fn color_glyph_of(
     collection: &mut Collection,
     sources: &mut SourceCache,
@@ -953,10 +953,10 @@ fn color_glyph_of(
     height: u32,
     max_width: u32,
 ) -> Option<egui::ColorImage> {
-    // **Solo las familias que el sistema declara de emoji, y ahí acaba la búsqueda.** No se cae a
-    // recorrerlas todas como hace `look_for`: una familia que no es de emoji y aun así cubre un emoji lo
-    // pinta **en monocromo** —en esta máquina `DejaVu Sans` se lleva el 😀 teniendo `Noto Color Emoji`
-    // instalada—, así que la red de debajo daría exactamente lo que esta función existe para evitar.
+    // **Only the families the system declares as emoji, and there the search ends.** It does not fall to
+    // traversing them all as `look_for` does: a family that is not emoji and still covers an emoji
+    // paints it **in monochrome** —on this machine `DejaVu Sans` takes the 😀 with `Noto Color Emoji`
+    // installed—, so the net underneath would give exactly what this function exists to avoid.
     let generic_ones: Vec<_> = collection.generic_families(GenericFamily::Emoji).collect();
     for id in generic_ones {
         let Some(faces) = collection.family(id).map(|family| family.fonts().to_vec()) else {
@@ -972,11 +972,11 @@ fn color_glyph_of(
             let Some(glyph) = font.charmap().map(which_char) else {
                 continue;
             };
-            // **Que la cubra no basta: tiene que traerla a color.** Las familias que el sistema
-            // declara de emoji en esta máquina son decenas —casi todas las `Noto` de símbolos— y la
-            // mayoría son monocromas. Sin esta comprobación ganaría la primera que enumere el
-            // sistema, que es el defecto que este proyecto tiene documentado desde **D24** y el que
-            // Alacritty arrastra.
+            // **Covering it is not enough: it has to bring it in color.** The families the system
+            // declares as emoji on this machine are dozens —almost all the symbol `Noto`s— and
+            // most are monochrome. Without this check the first the system enumerates would win,
+            // which is the defect this project has documented since **D24** and the one
+            // Alacritty carries.
             if let Some(image) = rasterize(&font, glyph, height, max_width) {
                 return Some(image);
             }
@@ -985,15 +985,15 @@ fn color_glyph_of(
     None
 }
 
-/// Los píxeles de un mapa de bits, en RGBA y con **el alfa ya premultiplicado**. `None` si lo que trae
-/// no es un dibujo a color.
+/// The pixels of a bitmap, in RGBA and with **the alpha already premultiplied**. `None` if what it brings
+/// is not a color drawing.
 ///
-/// **Está aparte de `rasterize` para poder afirmar sobre ella, y no es un rodeo.** Cuál de los tres
-/// caminos recorre un emoji **no lo decide este proyecto: lo decide la fuente que la máquina tenga
-/// instalada**. En ésta manda `Noto Color Emoji`, que trae PNG, así que los otros dos se entregarían sin
-/// que ninguna prueba los hubiera ejecutado nunca — y son los dos que llegan por delante en **F2.7**.
-/// Comprobado mutándolos con el cuerpo dentro de `rasterize`: quitar la vuelta de BGRA a RGBA, que pinta
-/// de azul lo que el emoji tiene de rojo, dejaba las 647 pruebas en verde.
+/// **It is apart from `rasterize` so it can be asserted on, and it is not a detour.** Which of the three
+/// paths an emoji travels **is not decided by this project: it is decided by the font the machine has
+/// installed**. On this one `Noto Color Emoji` rules, which brings PNG, so the other two would be delivered without
+/// any test ever having run them — and they are the two that come first in **F2.7**.
+/// Checked by mutating them with the body inside `rasterize`: removing the BGRA-to-RGBA swap, which paints
+/// blue what the emoji has as red, left the 647 tests green.
 fn pixels_of(
     bitmap: &skrifa::bitmap::BitmapData<'_>,
     width: u32,
@@ -1004,10 +1004,10 @@ fn pixels_of(
             let mut pixels = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
                 .ok()?
                 .into_rgba8();
-            // **Se premultiplica ANTES de reescalar, y ésa es toda la diferencia entre un emoji limpio y
-            // uno con halo.** Promediar píxeles transparentes con opacos sin premultiplicar mezcla el
-            // color de los transparentes en el borde del dibujo. Es el defecto clásico del reescalado con
-            // alfa, y aquí ocurriría en todos: un emoji es un dibujo redondo dentro de un cuadro vacío.
+            // **It is premultiplied BEFORE rescaling, and that is the whole difference between a clean emoji and
+            // one with a halo.** Averaging transparent pixels with opaque ones without premultiplying mixes the
+            // color of the transparent ones into the edge of the drawing. It is the classic defect of rescaling with
+            // alpha, and here it would happen in all of them: an emoji is a round drawing inside an empty box.
             for pixel in pixels.pixels_mut() {
                 let alpha = u32::from(pixel.0[3]);
                 for channel in &mut pixel.0[..3] {
@@ -1018,28 +1018,28 @@ fn pixels_of(
         }
         skrifa::bitmap::BitmapData::Bgra(bytes) => {
             let mut raw = bytes.to_vec();
-            // De BGRA a RGBA. Ya viene con el alfa premultiplicado, que es lo que hace falta arriba.
+            // From BGRA to RGBA. It already comes with the alpha premultiplied, which is what is needed above.
             for pixel in raw.chunks_exact_mut(4) {
                 pixel.swap(0, 2);
             }
             image::RgbaImage::from_raw(width, height, raw)
         }
-        // Una máscara de alfa es un dibujo **monocromo**: no es un glifo de color y no se pinta por aquí.
+        // An alpha mask is a **monochrome** drawing: it is not a color glyph and it is not painted here.
         skrifa::bitmap::BitmapData::Mask(_) => None,
     }
 }
 
-/// El mapa de bits de color de un glifo, reescalado para que quepa en el hueco que se le da.
+/// The color bitmap of a glyph, rescaled to fit in the slot it is given.
 ///
-/// Devuelve `None` cuando esa cara **no** trae el glifo a color: o no tiene tabla de mapas de bits, o la
-/// tiene y para ese glifo guarda una **máscara de alfa**, que es un dibujo monocromo y por tanto no es
-/// esto. Quien llame cae al camino de texto.
+/// Returns `None` when that face does **not** bring the glyph in color: either it has no bitmap table, or it
+/// has one and for that glyph it stores an **alpha mask**, which is a monochrome drawing and therefore not
+/// this. The caller falls to the text path.
 ///
-/// **Los contornos de color —`COLR`— quedan fuera, y no por olvido.** Pintarlos exige rasterizar
-/// contornos a mano, que es el rasterizador propio que este hito descartó a propósito por invalidar el
-/// histórico de medida entero. En Linux no se nota —las fuentes de emoji del sistema son de mapa de
-/// bits— pero en Windows sí, porque `Segoe UI Emoji` es `COLR`: queda declarado como lo que le falta a
-/// **F2.7**, no como algo que aquí funcione.
+/// **The color outlines —`COLR`— are left out, and not by oversight.** Painting them demands rasterizing
+/// outlines by hand, which is the custom rasterizer this milestone discarded on purpose for invalidating the
+/// whole measurement history. On Linux it is not noticed —the system emoji fonts are bitmap—
+/// but on Windows it is, because `Segoe UI Emoji` is `COLR`: it is declared as what
+/// **F2.7** lacks, not as something that works here.
 fn rasterize(
     font: &skrifa::FontRef<'_>,
     glyph: skrifa::GlyphId,
@@ -1052,11 +1052,11 @@ fn rasterize(
     if pixels.width() == 0 || pixels.height() == 0 {
         return None;
     }
-    // **El factor es el MENOR de los dos y no el de la altura, aunque el contrato hable de la altura.**
-    // Los dos a la vez —«a la altura de la celda» y «sin invadir la de al lado»— solo se cumplen así: el
-    // mapa de bits de `Noto Color Emoji` es más ancho que alto (136×128), así que escalarlo por la altura
-    // lo deja **más ancho que las dos columnas** que el motor le reservó, y el emoji se comería el borde
-    // de su vecina. Medido: 18 px de ancho para una celda de 17 px de alto.
+    // **The factor is the SMALLER of the two and not the height's, even though the contract speaks of the height.**
+    // The two at once —"at the cell height" and "without invading the one next to it"— are only met this way: the
+    // bitmap of `Noto Color Emoji` is wider than it is tall (136×128), so scaling it by the height
+    // leaves it **wider than the two columns** the engine reserved for it, and the emoji would eat the edge
+    // of its neighbor. Measured: 18 px wide for a cell 17 px tall.
     let factor =
         (height as f32 / pixels.height() as f32).min(max_width as f32 / pixels.width() as f32);
     let final_width = ((pixels.width() as f32 * factor).round() as u32).clamp(1, max_width);
@@ -1065,9 +1065,9 @@ fn rasterize(
         &pixels,
         final_width,
         final_height,
-        // **Triangular y no Lanczos.** Se reduce de 136 px a diecisiete: a esa escala los dos dan un
-        // resultado que no se distingue mirándolo, y el triangular cuesta la mitad. El coste se paga una
-        // vez por carácter, pero se paga **dentro de un fotograma**.
+        // **Triangular and not Lanczos.** It is reduced from 136 px to seventeen: at that scale the two give a
+        // result that cannot be told apart by looking, and the triangular one costs half. The cost is paid once
+        // per character, but it is paid **inside a frame**.
         image::imageops::FilterType::Triangle,
     );
     Some(egui::ColorImage::from_rgba_premultiplied(
@@ -1080,28 +1080,28 @@ fn rasterize(
 mod tests {
     use super::*;
 
-    /// El selector de emoji: `U+FE0F`.
+    /// The emoji selector: `U+FE0F`.
     const EMOJI_PRESENTATION_SELECTOR: char = '\u{FE0F}';
-    /// El selector de texto: `U+FE0E`.
+    /// The text selector: `U+FE0E`.
     const TEXT_PRESENTATION_SELECTOR: char = '\u{FE0E}';
 
     #[test]
-    fn un_emoji_de_los_de_toda_la_vida_va_a_color_sin_que_nadie_lo_pida() {
-        // `Emoji_Presentation=Yes`. Exigir el selector aquí dejaría en gris la inmensa mayoría de los
-        // emojis que un programa escribe, que es como se ven hoy.
+    fn an_everyday_emoji_goes_color_without_anyone_asking() {
+        // `Emoji_Presentation=Yes`. Requiring the selector here would leave gray the vast majority of the
+        // emojis a program writes, which is how they are seen today.
         assert_eq!(presentation_of('😀', &[]), Presentation::Color);
     }
 
     #[test]
-    fn un_simbolo_de_texto_se_queda_en_texto_aunque_exista_su_version_emoji() {
-        // `☁` U+2601 tiene `Emoji=Yes` pero `Emoji_Presentation=No`. Mirar solo «es emoji» lo pintaría
-        // a color, y es exactamente el caso que separa esta regla de la ingenua.
+    fn a_text_symbol_stays_text_even_though_its_emoji_version_exists() {
+        // `☁` U+2601 has `Emoji=Yes` but `Emoji_Presentation=No`. Looking only at "is emoji" would paint it
+        // color, and it is exactly the case that separates this rule from the naive one.
         assert_eq!(presentation_of('☁', &[]), Presentation::Text);
     }
 
     #[test]
-    fn el_selector_de_emoji_lleva_a_color_un_simbolo_que_por_defecto_es_texto() {
-        // Es `☁️` — la razón de ser de toda esta entrega.
+    fn the_emoji_selector_takes_to_color_a_symbol_that_is_text_by_default() {
+        // It is `☁️` — the whole reason for being of this delivery.
         assert_eq!(
             presentation_of('☁', &[EMOJI_PRESENTATION_SELECTOR]),
             Presentation::Color
@@ -1109,9 +1109,9 @@ mod tests {
     }
 
     #[test]
-    fn el_selector_de_texto_devuelve_a_monocromo_un_emoji_que_por_defecto_va_a_color() {
-        // La mitad que se olvida: la regla tiene que funcionar **en los dos sentidos**. Con solo la
-        // mitad de arriba, este caso pasaría igual y la prueba no ataría nada.
+    fn the_text_selector_returns_to_monochrome_an_emoji_that_goes_color_by_default() {
+        // The half that gets forgotten: the rule has to work **in both directions**. With only the
+        // top half, this case would pass the same and the test would tie nothing down.
         assert_eq!(
             presentation_of('😀', &[TEXT_PRESENTATION_SELECTOR]),
             Presentation::Text
@@ -1119,10 +1119,10 @@ mod tests {
     }
 
     #[test]
-    fn un_selector_que_no_va_el_primero_no_habla_de_este_caracter() {
-        // Un selector de variación aplica al carácter que tiene justo delante. Si aparece más adentro
-        // de la secuencia, se refiere a otro — mirarlo sería atribuirle a esta celda una presentación
-        // que se pidió para otra cosa.
+    fn a_selector_that_is_not_first_does_not_speak_about_this_character() {
+        // A variation selector applies to the character right in front of it. If it appears deeper
+        // in the sequence, it refers to another — looking at it would attribute to this cell a presentation
+        // that was asked for something else.
         assert_eq!(
             presentation_of('☁', &['\u{200D}', EMOJI_PRESENTATION_SELECTOR]),
             Presentation::Text
@@ -1130,16 +1130,16 @@ mod tests {
     }
 
     #[test]
-    fn una_letra_corriente_no_es_emoji_por_mucho_que_lleve_cosas_pegadas() {
-        // Una `a` con una tilde combinante pegada. Sin este caso, una regla que devolviera Color en
-        // cuanto hubiera algo pegado pasaría todas las demás pruebas.
+    fn an_ordinary_letter_is_not_an_emoji_however_much_it_carries_attached() {
+        // An `a` with a combining accent attached. Without this case, a rule that returned Color as
+        // soon as there was something attached would pass all the other tests.
         assert_eq!(presentation_of('a', &['\u{0301}']), Presentation::Text);
     }
     #[test]
-    fn el_selector_de_emoji_sobre_un_emoji_lo_deja_a_color() {
-        // **El caso donde un orden de ramas equivocado se cae.** El resultado coincide con el que daría
-        // ignorar el selector, así que sin este caso la tabla del contrato queda con un hueco justo donde
-        // las dos condiciones se solapan.
+    fn the_emoji_selector_over_an_emoji_leaves_it_color() {
+        // **The case where a wrong branch order falls.** The result coincides with the one that ignoring
+        // the selector would give, so without this case the contract table is left with a hole right where
+        // the two conditions overlap.
         assert_eq!(
             presentation_of('😀', &[EMOJI_PRESENTATION_SELECTOR]),
             Presentation::Color
@@ -1147,21 +1147,21 @@ mod tests {
     }
 
     #[test]
-    fn el_selector_de_texto_sobre_un_simbolo_de_texto_lo_deja_en_texto() {
-        // La otra esquina del solape, por la misma razón: las dos condiciones apuntan al mismo lado.
+    fn the_text_selector_over_a_text_symbol_leaves_it_text() {
+        // The other corner of the overlap, for the same reason: the two conditions point to the same side.
         assert_eq!(
             presentation_of('☁', &[TEXT_PRESENTATION_SELECTOR]),
             Presentation::Text
         );
     }
     #[test]
-    fn un_caracter_que_no_es_emoji_no_se_va_a_color_por_llevar_el_selector_detras() {
-        // **Un selector de emoji detrás de una `a` no hace de la `a` un emoji.** Unicode solo define
-        // secuencias de variación para caracteres con `Emoji=Yes`; detrás de cualquier otro, el
-        // selector no significa nada. Y `a\u{FE0F}` no es un caso rebuscado: sale de cualquier
-        // programa que corte una cadena por la mitad de un emoji, y hasta de un salto de línea —el
-        // motor pega un selector suelto a la celda VACÍA que tenga delante—, así que sin esta regla
-        // un espacio en blanco se manda a la fuente de color.
+    fn a_character_that_is_not_an_emoji_does_not_go_color_for_carrying_the_selector_behind() {
+        // **An emoji selector behind an `a` does not make the `a` an emoji.** Unicode only defines
+        // variation sequences for characters with `Emoji=Yes`; behind any other, the
+        // selector means nothing. And `a\u{FE0F}` is not a far-fetched case: it comes from any
+        // program that cuts a string in half through an emoji, and even from a line break —the
+        // engine attaches a loose selector to the EMPTY cell in front of it—, so without this rule
+        // a blank space is sent to the color font.
         assert_eq!(
             presentation_of('a', &[EMOJI_PRESENTATION_SELECTOR]),
             Presentation::Text
@@ -1171,29 +1171,29 @@ mod tests {
             Presentation::Text
         );
     }
-    // ── El descubrimiento ────────────────────────────────────────────────────────────────────────
+    // ── Discovery ────────────────────────────────────────────────────────────────────────────────
 
     use eframe::egui;
 
-    /// Un contexto de egui con su motor de texto ya montado.
+    /// An egui context with its text engine already assembled.
     fn context() -> egui::Context {
         let ctx = egui::Context::default();
         pass(&ctx);
         ctx
     }
 
-    /// **`set_fonts` no surte efecto hasta la pasada siguiente**: guarda la configuración y el motor de
-    /// texto se rehace después. Sin esto, cualquier comprobación mira el estado de antes.
+    /// **`set_fonts` does not take effect until the next pass**: it saves the configuration and the text
+    /// engine is remade afterward. Without this, any check looks at the state from before.
     fn pass(ctx: &egui::Context) {
         ctx.run_ui(egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
     }
 
-    /// Lo que mide el glifo de ese carácter en el atlas, en píxeles.
+    /// What that character's glyph measures in the atlas, in pixels.
     ///
-    /// **Es el único oráculo fiable que hay, y por eso las pruebas de aquí lo usan en vez de preguntar.**
-    /// `Fonts::has_glyph` devuelve `false` para la `'a'` —ver `Discoverer::resolve`—, así que afirmar
-    /// sobre él sería afirmar sobre un dato falso. El dibujo que sale al atlas no miente.
+    /// **It is the only reliable oracle there is, and that is why the tests here use it instead of asking.**
+    /// `Fonts::has_glyph` returns `false` for the `'a'` —see `Discoverer::resolve`—, so asserting
+    /// on it would be asserting on false data. The drawing that comes out to the atlas does not lie.
     fn glyph_size(ctx: &egui::Context, c: char) -> Option<(u16, u16)> {
         ctx.fonts_mut(|f| {
             let galley = f.layout_no_wrap(
@@ -1206,12 +1206,12 @@ mod tests {
         })
     }
 
-    /// Si ese carácter se está pintando con **el cuadro de reemplazo**.
+    /// Whether that character is being painted with **the replacement box**.
     ///
-    /// Se compara contra `U+10FFFD`, que vive en un plano de uso privado que ninguna fuente normal cubre.
-    /// **Medido en el mismo estado que el carácter**: el atlas se rehace al registrar una cara, así que un
-    /// tamaño de antes no es comparable con uno de después.
-    /// Lo que mide el glifo **pidiendo la familia que el pintor pediría** para ese carácter.
+    /// It is compared against `U+10FFFD`, which lives in a private-use plane no normal font covers.
+    /// **Measured in the same state as the character**: the atlas is remade on registering a face, so a
+    /// size from before is not comparable with one from after.
+    /// What the glyph measures **asking for the family the painter would ask for** for that character.
     fn with_its_family(
         ctx: &egui::Context,
         discoverer: &Discoverer,
@@ -1236,9 +1236,9 @@ mod tests {
     }
 
     #[test]
-    fn el_ascii_no_se_apunta_nunca() {
-        // **Es lo único que corre por celda**, así que descartar el caso corriente sin tocar nada es la
-        // mitad de que el hito no cueste. Las fuentes de fábrica cubren el ASCII entero.
+    fn ascii_is_never_noted() {
+        // **It is the only thing that runs per cell**, so discarding the ordinary case without touching anything is
+        // half of the milestone not costing anything. The factory fonts cover ASCII whole.
         let mut discoverer = Discoverer::default();
         for c in ' '..='~' {
             discoverer.note(c);
@@ -1247,30 +1247,30 @@ mod tests {
         assert_eq!(
             discoverer.pending.len(),
             0,
-            "el ASCII acabó en la cola de lo que hay que buscar"
+            "the ASCII ended up in the queue of what has to be looked for"
         );
     }
 
     #[test]
-    fn una_pantalla_de_basura_no_se_come_el_fotograma_buscando_fuentes() {
-        // **Ésta es la prueba que faltaba, y su primera versión no probaba nada.** Afirmaba sobre
-        // `pending.len()` —el campo donde se apunta el valor— y pasaba igual tanto si el trabajo estaba
-        // acotado como si no, que es exactamente el disfraz que las reglas del proyecto nombran. Lo que
-        // hay que acotar es **el tiempo que se gasta buscando**, y es sobre eso que se afirma aquí.
+    fn a_screen_of_garbage_does_not_eat_the_frame_looking_for_fonts() {
+        // **This is the test that was missing, and its first version proved nothing.** It asserted on
+        // `pending.len()` —the field where the value is recorded— and passed the same whether the work was
+        // bounded or not, which is exactly the disguise the project rules name. What
+        // has to be bounded is **the time spent looking**, and it is on that that this asserts.
         //
-        // El escenario es real: un `cat` de un binario produce **decenas de miles** de caracteres
-        // distintos, ninguno cubierto por nada. Medido antes de acotarlo: **6,0–6,6 ms sostenidos en cada
-        // fotograma**, más que el fotograma entero.
+        // The scenario is real: a `cat` of a binary produces **tens of thousands** of distinct
+        // characters, none covered by anything. Measured before bounding it: **6.0–6.6 ms sustained on every
+        // frame**, more than the whole frame.
         let ctx = context();
         let mut discoverer = Discoverer::default();
 
-        // **Se afirma sobre las BÚSQUEDAS, no sobre milisegundos, y eso no es rodear el problema.** Las
-        // pruebas corren en depuración, donde todo cuesta un orden de magnitud más que en el binario que
-        // se publica: un techo en milisegundos mediría el perfil de compilación tanto como el código, y
-        // sería verde o rojo según dónde se corriera. Lo que el presupuesto acota de verdad es **cuántas
-        // búsquedas caben en una vuelta**, y eso sí es el mismo número aquí y en release.
+        // **It asserts on the SEARCHES, not on milliseconds, and that is not dodging the problem.** The
+        // tests run in debug, where everything costs an order of magnitude more than in the binary that
+        // is published: a ceiling in milliseconds would measure the compilation profile as much as the code, and
+        // would be green or red depending on where it was run. What the budget really bounds is **how many
+        // searches fit in a round**, and that is indeed the same number here and in release.
         //
-        // Diez fotogramas con **dos mil caracteres nuevos cada uno**, como los que produce un volcado.
+        // Ten frames with **two thousand new characters each**, like the ones a dump produces.
         let mut most_wanted = 0;
         for frame in 0..10u32 {
             for i in 0..2000u32 {
@@ -1282,51 +1282,51 @@ mod tests {
             pass(&ctx);
         }
 
-        // **La clave es que NO crece con la cola.** Sin frenos se buscaría la cola entera —cuarenta por
-        // fotograma, indefinidamente—, que es lo que costaba 6,0–6,6 ms sostenidos.
+        // **The key is that it does NOT grow with the queue.** Without brakes the whole queue would be looked for —forty per
+        // frame, indefinitely—, which is what cost 6.0–6.6 ms sustained.
         //
-        // **Y hacen falta los dos frenos: quitar uno solo no tumba esta prueba, quitar los dos sí.**
-        // Comprobado mutándolos. No es redundancia: protegen escenarios distintos. El presupuesto acota
-        // el caso en que las búsquedas **aciertan** y son caras —una fuente CJK pesa 20 MB—; el freno de
-        // fallos acota el caso en que **ninguna** acierta, donde el presupuesto se repone cada fotograma
-        // y nunca llegaría a cortar nada.
+        // **And both brakes are needed: removing one alone does not bring this test down, removing both does.**
+        // Checked by mutating them. It is not redundancy: they protect distinct scenarios. The budget bounds
+        // the case where the searches **succeed** and are expensive —a CJK font weighs 20 MB—; the failure
+        // brake bounds the case where **none** succeeds, where the budget is replenished every frame
+        // and would never get to cut anything.
         assert!(
             most_wanted < MAX_PENDING,
-            "se buscaron {most_wanted} caracteres en una sola vuelta, que es la cola entera: el trabajo \
-             de buscar fuentes no está acotado y crece con lo que escupa el programa"
+            "{most_wanted} characters were looked for in a single round, which is the whole queue: the work \
+             of looking for fonts is not bounded and grows with whatever the program spits"
         );
     }
 
     #[test]
-    fn un_caracter_que_ya_se_busco_no_se_vuelve_a_buscar() {
-        // **Hay que recordar también los FALLOS**, y ésa es la mitad que se olvida: un carácter cubierto
-        // deja su cara registrada, así que el siguiente ya no busca; pero uno que NADIE cubre no deja
-        // nada, y sin recordarlo se recorrerían las candidatas cada vez que apareciera — que es justo lo
-        // que un programa roto escupe en bucle. Sale de **D24**.
+    fn a_character_already_looked_for_is_not_looked_for_again() {
+        // **The FAILURES have to be remembered too**, and that is the half that gets forgotten: a covered character
+        // leaves its face registered, so the next one no longer looks; but one that NOBODY covers leaves
+        // nothing, and without remembering it the candidates would be traversed every time it appeared — which is exactly what
+        // a broken program spits in a loop. It comes from **D24**.
         let ctx = context();
         let mut discoverer = Discoverer::default();
-        // Un plano de uso privado que ninguna fuente normal cubre: la búsqueda va a fallar seguro.
+        // A private-use plane no normal font covers: the search is going to fail for sure.
         discoverer.note('\u{10FFFD}');
         let first = discoverer.resolve(&ctx);
 
         discoverer.note('\u{10FFFD}');
         let second = discoverer.resolve(&ctx);
 
-        assert_eq!(first.searched, 1, "la primera vuelta no llegó a buscar");
+        assert_eq!(first.searched, 1, "the first round did not get to look");
         assert_eq!(
             first.registered, 0,
-            "registró una cara para algo que nadie cubre"
+            "it registered a face for something nobody covers"
         );
         assert_eq!(
             second.searched, 0,
-            "volvió a buscar un carácter que ya había dado por imposible"
+            "it looked again for a character it had already given up as impossible"
         );
     }
 
     #[test]
-    fn un_caracter_que_nadie_cubre_deja_la_ventana_en_pie_y_sale_como_cuadro() {
-        // **AC6.** Lo que no está, no se inventa: se pinta con lo que dé el motor y no se intenta nada
-        // más. Lo que esta prueba defiende es que ese camino **no se cae** ni deja el motor a medias.
+    fn a_character_nobody_covers_leaves_the_window_standing_and_comes_out_as_a_box() {
+        // **AC6.** What is not there is not invented: it is painted with whatever the engine gives and nothing
+        // else is attempted. What this test defends is that that path **does not crash** or leave the engine half-done.
         let ctx = context();
         let mut discoverer = Discoverer::default();
         discoverer.note('\u{10FFFD}');
@@ -1335,26 +1335,26 @@ mod tests {
 
         assert!(
             comes_out_as_a_box(&ctx, '\u{10FFFD}'),
-            "un carácter que nadie cubre dejó de salir como cuadro, así que algo se lo inventó"
+            "a character nobody covers stopped coming out as a box, so something invented it"
         );
         assert!(
             !comes_out_as_a_box(&ctx, 'a'),
-            "buscar un carácter imposible se llevó por delante el resto de la fuente"
+            "looking for an impossible character took the rest of the font down with it"
         );
     }
     #[test]
-    fn el_japones_deja_de_salir_como_cuadro_cuando_la_maquina_tiene_con_que() {
-        // **AC1, y es el motivo del hito entero.** Un terminal que enseña una fila de cuadros donde hay
-        // japonés está descalificado frente a los que son el listón (**D19**).
+    fn japanese_stops_coming_out_as_a_box_when_the_machine_has_the_means() {
+        // **AC1, and it is the reason for the whole milestone.** A terminal that shows a row of boxes where there is
+        // Japanese is disqualified against the ones that are the bar (**D19**).
         //
-        // **La prueba afirma en los DOS escenarios y por eso no se salta sola**: si la máquina tiene una
-        // fuente CJK, el kanji tiene que dejar de ser el cuadro; si no la tiene, tiene que seguir siéndolo
-        // y la ventana tiene que quedar en pie — que es **AC6** y **AC9**. Saltarla en una máquina pelada
-        // dejaría el camino de la escasez sin cubrir, que es justo donde se cae una implementación.
+        // **The test asserts in BOTH scenarios and that is why it does not skip itself**: if the machine has a
+        // CJK font, the kanji has to stop being the box; if it does not have one, it has to keep being it
+        // and the window has to stay standing — which is **AC6** and **AC9**. Skipping it on a bare machine
+        // would leave the scarcity path uncovered, which is exactly where an implementation crashes.
         let ctx = context();
         assert!(
             comes_out_as_a_box(&ctx, '日'),
-            "el japonés ya se veía antes de descubrir nada: esta prueba no estaría probando el hito"
+            "Japanese already showed before discovering anything: this test would not be proving the milestone"
         );
 
         let mut discoverer = Discoverer::default();
@@ -1365,22 +1365,22 @@ mod tests {
         if round.registered > 0 {
             assert!(
                 !comes_out_as_a_box(&ctx, '日'),
-                "se registró una cara para el japonés y sigue saliendo el cuadro"
+                "a face was registered for the Japanese and the box keeps coming out"
             );
         } else {
             assert!(
                 comes_out_as_a_box(&ctx, '日'),
-                "no se registró ninguna cara y aun así el japonés cambió: algo se lo inventó"
+                "no face was registered and yet the Japanese changed: something invented it"
             );
         }
-        assert_eq!(round.searched, 1, "no llegó a buscarlo");
+        assert_eq!(round.searched, 1, "it did not get to look for it");
     }
 
     #[test]
-    fn la_fuente_del_sistema_no_le_roba_el_glifo_a_la_del_terminal() {
-        // **Contrato 2, y es lo que impide que este hito estropee lo que ya funcionaba.** La cadena de
-        // reserva se recorre en orden: una cara del sistema puesta delante le quitaría las letras a la
-        // fuente del terminal, y el terminal cambiaría de aspecto por descubrir un kanji.
+    fn the_system_font_does_not_steal_the_glyph_from_the_terminals() {
+        // **Contract 2, and it is what prevents this milestone from breaking what already worked.** The
+        // fallback chain is traversed in order: a system face placed in front would take the letters away from the
+        // terminal font, and the terminal would change appearance for discovering a kanji.
         let ctx = context();
         let before = glyph_size(&ctx, 'a');
 
@@ -1392,19 +1392,19 @@ mod tests {
         assert_eq!(
             glyph_size(&ctx, 'a'),
             before,
-            "registrar una cara del sistema le cambió el dibujo a una letra corriente"
+            "registering a system face changed the drawing of an ordinary letter"
         );
     }
 
     #[test]
-    fn un_icono_del_area_de_uso_privado_lo_gana_la_fuente_instalada() {
-        // **AC2, y la excepción al contrato de arriba.** egui embarca de fábrica una fuente de iconos que
-        // ocupa esas zonas, así que sin la excepción **no sale un cuadro: sale el icono equivocado** —y la
-        // fuente que el usuario instaló no llega a usarse nunca—. Unicode no le da significado a esas
-        // zonas: quién tiene razón ahí lo decide quien instaló la fuente.
+    fn an_icon_of_the_private_use_area_is_won_by_the_installed_font() {
+        // **AC2, and the exception to the contract above.** egui ships a factory icon font that
+        // occupies those areas, so without the exception **no box comes out: the wrong icon comes out** —and the
+        // font the user installed never gets used—. Unicode gives no meaning to those
+        // areas: who is right there is decided by whoever installed the font.
         //
-        // **Se afirma sobre el dibujo, no sobre el orden de una lista.** Afirmar que la cara quedó la
-        // primera pasaría igual aunque el motor la ignorara después.
+        // **It asserts on the drawing, not on the order of a list.** Asserting that the face ended up
+        // first would pass the same even if the engine ignored it afterward.
         let ctx = context();
         let icon = '\u{F015}';
         let before = glyph_size(&ctx, icon);
@@ -1419,35 +1419,35 @@ mod tests {
         if round.registered > 0 {
             assert!(
                 before.is_some() && before == glyph_size(&ctx, '\u{10FFFD}'),
-                "el icono ya se veía antes: esta prueba no estaría probando nada"
+                "the icon already showed before: this test would not be proving anything"
             );
             assert_eq!(
                 discoverer.icon_ones(&factory).first().map(String::as_str),
                 Some(discoverer.faces[0].family.as_str()),
-                "la cara descubierta para un icono no quedó la primera de la familia de iconos, así que \
-                 la fuente de fábrica le seguirá ganando el glifo"
+                "the face discovered for an icon did not end up first in the icon family, so \
+                 the factory font will keep winning the glyph from it"
             );
-            // **Y la monoespaciada NO se toca: es la otra mitad y sin ella el arreglo no vale.**
+            // **And the monospaced one is NOT touched: it is the other half and without it the fix is worthless.**
             assert_eq!(
                 discoverer.monospaced(&factory)[..factory.len()],
                 factory,
-                "la cara de iconos se coló en la familia monoespaciada, donde le robaría las letras a la \
-                 fuente del terminal"
+                "the icon face sneaked into the monospaced family, where it would steal the letters from the \
+                 terminal font"
             );
         } else {
             assert_eq!(
                 discoverer.icon_ones(&factory),
                 factory,
-                "no se registró ninguna cara y aun así la familia de iconos cambió"
+                "no face was registered and yet the icon family changed"
             );
         }
     }
 
     #[test]
-    fn una_cara_que_no_es_de_iconos_se_queda_detras_de_las_de_fabrica() {
-        // **La otra mitad de la excepción, y sin ella «poner todo delante» pasaría igual.** Es el error
-        // simétrico y el más caro: una cara encontrada buscando un kanji, puesta delante, le quitaría las
-        // letras a la fuente del terminal.
+    fn a_face_that_is_not_for_icons_stays_behind_the_factory_ones() {
+        // **The other half of the exception, and without it "put everything in front" would pass the same.** It is the
+        // symmetric error and the most expensive: a face found looking for a kanji, placed in front, would take the
+        // letters away from the terminal font.
         let ctx = context();
         let mut discoverer = Discoverer::default();
         discoverer.note('日');
@@ -1459,25 +1459,25 @@ mod tests {
             assert_eq!(
                 mono.first().map(String::as_str),
                 Some("Hack"),
-                "una cara descubierta por un kanji se coló delante de la fuente del terminal"
+                "a face discovered by a kanji sneaked in front of the terminal font"
             );
-            assert_eq!(mono.len(), 2, "no se añadió la cara descubierta");
+            assert_eq!(mono.len(), 2, "the discovered face was not added");
             assert_eq!(
                 discoverer.icon_ones(&factory),
                 factory,
-                "una cara descubierta por un kanji se coló en la familia de iconos"
+                "a face discovered by a kanji sneaked into the icon family"
             );
         }
     }
     #[test]
-    fn sin_fuentes_en_la_maquina_no_se_reintenta_enumerar_por_cada_caracter() {
-        // **AC9.** Enumerar es lo más caro de todo el camino —entre 17 y 23 ms, **D24**—, así que en una
-        // máquina sin fontconfig reintentarlo por cada carácter raro que pase por pantalla congelaría la
-        // ventana a cambio de nada. Se dice una vez por la salida de error y se deja de intentar.
+    fn without_fonts_on_the_machine_enumerating_is_not_retried_per_character() {
+        // **AC9.** Enumerating is the most expensive of the whole path —between 17 and 23 ms, **D24**—, so on a
+        // machine without fontconfig retrying it for every rare character that passes across the screen would freeze the
+        // window in exchange for nothing. It is said once through the error output and it stops trying.
         //
-        // **La prueba fuerza el estado en vez de desinstalar fontconfig**, y se dice: no hay forma de
-        // quitarle las fuentes a la máquina desde dentro de una prueba. Lo que sí se ata es que, una vez
-        // en ese estado, no se vuelve a tocar el sistema.
+        // **The test forces the state instead of uninstalling fontconfig**, and it is said: there is no way to
+        // take the fonts away from the machine from within a test. What is tied down is that, once
+        // in that state, the system is not touched again.
         let ctx = context();
         let mut discoverer = Discoverer {
             no_system_fonts: true,
@@ -1489,24 +1489,24 @@ mod tests {
 
         assert_eq!(
             round.registered, 0,
-            "con la máquina dada por vacía se registró una cara"
+            "with the machine taken as empty a face was registered"
         );
         assert!(
             discoverer.collection.is_none(),
-            "se volvió a enumerar las fuentes del sistema después de saber que no hay ninguna"
+            "the system fonts were enumerated again after knowing there are none"
         );
     }
     #[test]
-    fn descubrir_un_icono_no_le_cambia_el_dibujo_a_las_letras() {
-        // **Ésta es la prueba que faltaba, y su ausencia dejó pasar un defecto grave.** La primera versión
-        // colaba la cara de iconos DELANTE de las de fábrica en la familia monoespaciada, y como una
-        // `Nerd Font` trae el latino completo, **le cambiaba el dibujo a tres de cada cinco letras**: el
-        // terminal cambiaba de aspecto por haber visto un icono. La prueba que había solo miraba el caso
-        // del kanji, que va detrás y nunca lo habría destapado.
+    fn discovering_an_icon_does_not_change_the_drawing_of_the_letters() {
+        // **This is the test that was missing, and its absence let a serious defect through.** The first version
+        // sneaked the icon face IN FRONT of the factory ones in the monospaced family, and since a
+        // `Nerd Font` carries the full Latin set, **it changed the drawing of three out of every five letters**: the
+        // terminal changed appearance for having seen an icon. The test that existed only looked at the kanji
+        // case, which goes behind and would never have exposed it.
         //
-        // **Se mide con la familia que el pintor pediría para cada carácter**, que es lo único que
-        // describe lo que se ve: preguntar siempre por la monoespaciada escondería precisamente el
-        // mecanismo que se está probando.
+        // **It is measured with the family the painter would ask for for each character**, which is the only thing that
+        // describes what is seen: always asking for the monospaced one would hide precisely the
+        // mechanism being tested.
         let ctx = context();
         let mut discoverer = Discoverer::default();
         let letters: Vec<(char, Option<(u16, u16)>)> = "aWgñ0"
@@ -1522,36 +1522,36 @@ mod tests {
             assert_eq!(
                 with_its_family(&ctx, &discoverer, c),
                 before,
-                "descubrir un icono le cambió el dibujo a {c:?}: la fuente de iconos se coló en la \
-                 familia monoespaciada y le está robando las letras a la fuente del terminal"
+                "discovering an icon changed the drawing of {c:?}: the icon font sneaked into the \
+                 monospaced family and is stealing the letters from the terminal font"
             );
         }
     }
 
     #[test]
-    fn la_familia_de_iconos_no_se_pide_hasta_que_existe() {
-        // **Pedirle a epaint una familia con nombre que nadie ha declarado es un PÁNICO**, no un aviso:
-        // «is not bound to any fonts». Y quien pinta pide familia en cada celda desde el primer fotograma,
-        // mucho antes de que se haya descubierto nada. Comprobado: caía.
+    fn the_icon_family_is_not_asked_for_until_it_exists() {
+        // **Asking epaint for a named family nobody has declared is a PANIC**, not a warning:
+        // "is not bound to any fonts". And the painter asks for a family on every cell from the first frame,
+        // long before anything has been discovered. Checked: it crashed.
         let discoverer = Discoverer::default();
 
         assert_eq!(
             discoverer.family_of('\u{F015}'),
             egui::FontFamily::Monospace,
-            "se pidió la familia de iconos sin haber registrado ninguna cara de iconos"
+            "the icon family was asked for without having registered any icon face"
         );
     }
 
     #[test]
-    fn la_familia_de_iconos_tampoco_se_pide_en_el_fotograma_que_la_registra() {
-        // **Y ésta es la mitad que se cae de verdad, porque es el camino que la aplicación recorre.**
-        // `set_fonts` guarda la configuración y el motor se rehace **en la pasada siguiente**; pero el
-        // descubrimiento corre **antes de pintar, en la misma pasada**, así que entre registrar la cara y
-        // pintar la celda no hay ninguna pasada de por medio. Pedir ahí la familia **hace caer la
-        // aplicación**. Comprobado ejecutándolo: `is not bound to any fonts`.
+    fn the_icon_family_is_not_asked_for_in_the_frame_that_registers_it_either() {
+        // **And this is the half that really crashes, because it is the path the application travels.**
+        // `set_fonts` saves the configuration and the engine is remade **on the next pass**; but
+        // discovery runs **before painting, on the same pass**, so between registering the face and
+        // painting the cell there is no pass in between. Asking there for the family **crashes the
+        // application**. Checked by running it: `is not bound to any fonts`.
         //
-        // La prueba de arriba no lo cubre: aquella mira el estado inicial, y este defecto solo aparece
-        // **después** de un registro con éxito.
+        // The test above does not cover it: that one looks at the initial state, and this defect only appears
+        // **after** a successful registration.
         let ctx = context();
         let mut discoverer = Discoverer::default();
         discoverer.note('\u{F015}');
@@ -1561,29 +1561,29 @@ mod tests {
             assert_eq!(
                 discoverer.family_of('\u{F015}'),
                 egui::FontFamily::Monospace,
-                "se ofreció la familia de iconos en el mismo fotograma que la declaró, cuando el motor \
-                 todavía no la conoce: pedirla ahí es un pánico"
+                "the icon family was offered in the same frame that declared it, when the engine \
+                 does not yet know it: asking for it there is a panic"
             );
-            // Y en la vuelta siguiente sí, que es la otra mitad: sin ella, «nunca ofrecerla» pasaría.
+            // And on the next round yes, which is the other half: without it, "never offer it" would pass.
             discoverer.resolve(&ctx);
             assert_eq!(
                 discoverer.family_of('\u{F015}'),
                 egui::FontFamily::Name(ICON_FAMILY.into()),
-                "la familia de iconos no se llegó a ofrecer nunca"
+                "the icon family never got to be offered"
             );
         }
     }
     #[test]
-    fn una_fuente_del_sistema_que_se_llame_como_una_de_fabrica_no_la_sustituye() {
-        // **Las claves de egui son nombres corrientes** —`Hack`, `Ubuntu-Light`, `NotoEmoji-Regular`— y
-        // `Hack` está instalada en muchísimas máquinas de desarrollo. Sin prefijo, registrarla cambiaría
-        // **los bytes** de la de fábrica conservando **su posición al frente de la cadena**: el terminal
-        // cambiaría de fuente entera de golpe, sin que ningún carácter fuera de uso privado y sin pasar
-        // siquiera por el reparto de familias.
+    fn a_system_font_named_like_a_factory_one_does_not_replace_it() {
+        // **egui's keys are ordinary names** —`Hack`, `Ubuntu-Light`, `NotoEmoji-Regular`— and
+        // `Hack` is installed on very many development machines. Without a prefix, registering it would change
+        // **the bytes** of the factory one while keeping **its position at the front of the chain**: the terminal
+        // would switch its whole font at once, without any character outside private use and without even passing
+        // through the family tiling.
         //
-        // **Se fabrica la colisión en vez de esperar a tenerla**: esta máquina no tiene ninguna familia
-        // llamada `Hack`, así que una prueba que dependiera de lo instalado no probaría nada aquí y
-        // fallaría en la máquina de otro.
+        // **The collision is manufactured instead of waiting to have it**: this machine has no family
+        // named `Hack`, so a test that depended on what is installed would prove nothing here and
+        // would fail on someone else's machine.
         let ctx = context();
         let mut discoverer = Discoverer::default();
         discoverer.faces.push(SystemFace {
@@ -1598,20 +1598,20 @@ mod tests {
         assert_eq!(
             mono.iter().filter(|n| *n == "Hack").count(),
             1,
-            "la fuente del sistema llamada Hack ocupó el sitio de la Hack de fábrica"
+            "the system font named Hack took the place of the factory Hack"
         );
         assert_eq!(
             mono.first().map(String::as_str),
             Some("Hack"),
-            "la de fábrica dejó de ser la primera de la cadena"
+            "the factory one stopped being the first of the chain"
         );
         assert!(
             mono.iter().any(|n| n == "sistema:Hack"),
-            "la del sistema no llegó a añadirse con su nombre propio"
+            "the system one did not get added with its own name"
         );
         let _ = ctx;
     }
-    /// Si esta máquina tiene con qué pintar emojis a color.
+    /// Whether this machine has the means to paint emojis in color.
     fn has_color(ctx: &egui::Context) -> bool {
         Discoverer::default()
             .color_glyph(ctx, '\u{1F600}', 20, 20)
@@ -1619,47 +1619,47 @@ mod tests {
     }
 
     #[test]
-    fn un_ascii_sin_nada_pegado_no_va_nunca_a_color() {
-        // **Ata un atajo que vive en el pintor**: la pasada del color descarta el ASCII suelto con dos
-        // comparaciones, sin consultar estas tablas, porque es la inmensa mayoría de lo que pasa por una
-        // pantalla de terminal. Ese atajo duplica una regla
-        // que vive aquí, y duplicar una regla solo es aceptable si algo avisa cuando las dos dejan de
-        // decir lo mismo. Esto es ese algo.
+    fn an_ascii_with_nothing_attached_never_goes_color() {
+        // **It ties down a shortcut that lives in the painter**: the color pass discards loose ASCII with two
+        // comparisons, without consulting these tables, because it is the vast majority of what passes across a
+        // terminal screen. That shortcut duplicates a rule
+        // that lives here, and duplicating a rule is only acceptable if something warns when the two stop
+        // saying the same thing. This is that something.
         for n in 0..=127u8 {
             assert_eq!(
                 presentation_of(char::from(n), &[]),
                 Presentation::Text,
-                "el carácter ASCII U+{n:04X} suelto pide color, y quien pinta lo descarta sin \
-                 preguntar: no saldría"
+                "the loose ASCII character U+{n:04X} asks for color, and the painter discards it without \
+                 asking: it would not come out"
             );
         }
     }
 
     #[test]
-    fn una_tecla_de_ascii_con_su_selector_si_va_a_color() {
-        // **La otra mitad, y la que destapó un defecto de verdad.** La primera versión del atajo del
-        // pintor descartaba **todo** el ASCII de la pasada del color, y se comía `#️⃣` `*️⃣` y `0️⃣`–`9️⃣`:
-        // Unicode le da `Emoji=Yes` a la almohadilla, al asterisco y a los diez dígitos, así que con el
-        // selector detrás son emojis de pleno derecho. Lo encontró la prueba de arriba al correrla.
+    fn an_ascii_key_with_its_selector_does_go_color() {
+        // **The other half, and the one that exposed a real defect.** The first version of the painter's
+        // shortcut discarded **all** ASCII in the color pass, and ate `#️⃣` `*️⃣` and `0️⃣`–`9️⃣`:
+        // Unicode gives `Emoji=Yes` to the hash, the asterisk and the ten digits, so with the
+        // selector behind they are full-fledged emojis. The test above found it on running it.
         for c in "#*0123456789".chars() {
             assert_eq!(
                 presentation_of(c, &['\u{FE0F}']),
                 Presentation::Color,
-                "«{c}» con el selector de emoji detrás se quedó en texto: es la base de una tecla y \
-                 tiene que salir a color"
+                "\"{c}\" with the emoji selector behind stayed text: it is the base of a key and \
+                 has to come out color"
             );
         }
     }
 
     #[test]
-    fn el_glifo_de_color_se_rasteriza_una_vez_y_luego_se_recuerda() {
-        // **La caché no es una optimización opcional: sin ella se rasteriza en CADA fotograma.** Son 45 a
-        // 80 µs por emoji y por fotograma —medido—, o sea que una pantalla con veinte emojis se comería
-        // más de un milisegundo en repetir un trabajo idéntico sesenta veces por segundo.
+    fn the_color_glyph_is_rasterized_once_and_then_remembered() {
+        // **The cache is not an optional optimization: without it, rasterizing happens on EVERY frame.** It is 45 to
+        // 80 µs per emoji and per frame —measured—, that is a screen with twenty emojis would eat
+        // more than a millisecond repeating identical work sixty times a second.
         //
-        // **Se afirma sobre el CONTADOR de rasterizados y no sobre el tamaño del mapa**, porque el mapa
-        // guarda también los fallos: una implementación que buscara siempre y no guardara nada dejaría el
-        // mapa igual de grande.
+        // **It asserts on the COUNTER of rasterized ones and not on the size of the map**, because the map
+        // also keeps the failures: an implementation that always looked and saved nothing would leave the
+        // map just as large.
         let ctx = context();
         let mut discoverer = Discoverer::default();
 
@@ -1668,7 +1668,7 @@ mod tests {
         assert_eq!(
             first.rasterized + first.failed,
             1,
-            "la primera vez no llegó a intentar rasterizar nada"
+            "the first time it did not get to try to rasterize anything"
         );
 
         for _ in 0..10 {
@@ -1678,24 +1678,24 @@ mod tests {
         assert_eq!(
             (after.rasterized, after.failed),
             (0, 0),
-            "diez peticiones más del mismo emoji volvieron a hacer trabajo: no se está recordando nada"
+            "ten more requests for the same emoji did work again: nothing is being remembered"
         );
         assert_eq!(
             after.spent,
             std::time::Duration::ZERO,
-            "se contó tiempo por consultar algo ya recordado: el tramo del informe dejaría de describir \
-             lo que cuesta rasterizar"
+            "time was counted for consulting something already remembered: the report stretch would stop describing \
+             what rasterizing costs"
         );
     }
 
     #[test]
-    fn cambiar_la_altura_de_la_celda_tira_lo_recordado() {
-        // **Sin esto, subir el zoom del escritorio deja los emojis del tamaño anterior pintados en celdas
-        // del nuevo** — y como la caché no se vacía nunca, para el resto de la vida del proceso.
+    fn changing_the_cell_height_throws_away_what_is_remembered() {
+        // **Without this, raising the desktop zoom leaves the emojis of the previous size painted in cells
+        // of the new one** — and since the cache is never emptied, for the rest of the process's life.
         //
-        // **Se afirma sobre el TAMAÑO de la textura devuelta, no sobre que se haya vaciado el mapa.** Una
-        // caché que se vacíe y vuelva a rasterizar al tamaño viejo cumpliría lo segundo y seguiría
-        // pintando mal, que es el defecto que esto existe para impedir.
+        // **It asserts on the SIZE of the returned texture, not on the map having been emptied.** A
+        // cache that empties and rasterizes again at the old size would meet the second and would keep
+        // painting wrong, which is the defect this exists to prevent.
         let ctx = context();
         if !has_color(&ctx) {
             return;
@@ -1703,37 +1703,37 @@ mod tests {
         let mut discoverer = Discoverer::default();
         let (_, _, small) = discoverer
             .color_glyph(&ctx, '\u{1F600}', 20, 20)
-            .expect("la máquina tiene fuente de color y no dio glifo");
+            .expect("the machine has a color font and gave no glyph");
         let (_, _, big) = discoverer
             .color_glyph(&ctx, '\u{1F600}', 40, 40)
-            .expect("no dio glifo a la altura nueva");
+            .expect("it gave no glyph at the new height");
 
         assert!(
             big.y > small.y,
-            "con la celda al doble de alto el emoji salió de {small:?}, el tamaño de la celda \
-             anterior: la caché está devolviendo lo viejo"
+            "with the cell at double the height the emoji came out at {small:?}, the size of the previous \
+             cell: the cache is returning the old one"
         );
         assert_eq!(
             discoverer.glyphs_remembered(),
             1,
-            "quedaron guardadas las dos alturas: la caché no se vació y la memoria crece con cada zoom"
+            "both heights were left saved: the cache did not empty and the memory grows with each zoom"
         );
     }
 
     #[test]
-    fn al_llenarse_el_atlas_se_deja_de_recordar_y_se_dice() {
-        // **AC8.** El techo de este hito es una textura de tamaño fijo: la memoria que la tarjeta gráfica
-        // dedica a los emojis es 1 MiB y no cambia, aparezcan uno o mil. Quién decide cuántos caracteres
-        // distintos aparecen es el programa de dentro —un `cat` de un fichero de emojis los recorrería
-        // todos—, así que sin techo la textura tendría que crecer sin límite.
+    fn on_the_atlas_filling_remembering_stops_and_it_is_said() {
+        // **AC8.** The ceiling of this milestone is a fixed-size texture: the memory the graphics card
+        // dedicates to the emojis is 1 MiB and does not change, whether one or a thousand appear. Who decides how many distinct
+        // characters appear is the program inside —a `cat` of an emoji file would traverse
+        // them all—, so without a ceiling the texture would have to grow without limit.
         //
-        // **Se atan las DOS mitades**: que deje de aceptar al llenarse, y que lo diga. Un techo callado es
-        // indistinguible de un fallo — quien vea sus emojis en monocromo de golpe no tendría forma de
-        // saber que el terminal sabe pintarlos y se ha quedado sin sitio.
+        // **BOTH halves are tied down**: that it stops accepting on filling, and that it says so. A silent ceiling is
+        // indistinguishable from a failure — whoever sees their emojis go monochrome all at once would have no way to
+        // know that the terminal knows how to paint them and has run out of room.
         //
-        // **Se llena con imágenes sintéticas y no con emojis de verdad**, y se dice: llenarlo de verdad
-        // exige que la máquina tenga ochocientos emojis distintos instalados, que es una condición de la
-        // máquina y no del código.
+        // **It is filled with synthetic images and not with real emojis**, and it is said: filling it for real
+        // demands that the machine have eight hundred distinct emojis installed, which is a condition of the
+        // machine and not of the code.
         let ctx = context();
         let mut glyphs = Glyphs::default();
         let side = ATLAS_SIDE / 8;
@@ -1742,33 +1742,33 @@ mod tests {
         let mut pasted = 0;
         while glyphs.blit(&ctx, square()).is_some() {
             pasted += 1;
-            assert!(pasted <= 8 * 8, "el atlas aceptó más de lo que cabe en él");
+            assert!(pasted <= 8 * 8, "the atlas accepted more than fits in it");
         }
         assert_eq!(
             pasted,
             8 * 8,
-            "el atlas no aprovechó su superficie: caben {} cuadrados de {side} píxeles y entraron {pasted}",
+            "the atlas did not use its surface: {} squares of {side} pixels fit and {pasted} entered",
             8 * 8
         );
         assert!(
             glyphs.said_the_ceiling,
-            "el atlas se llenó y no se dijo por la salida de error: un techo callado se lee como un fallo"
+            "the atlas filled and it was not said through the error output: a silent ceiling reads as a failure"
         );
     }
 
     #[test]
-    fn dos_glifos_distintos_no_se_pisan_dentro_del_atlas() {
-        // **Es el modo de fallo propio de meterlos todos en una textura**, y no lo cubre ninguna prueba de
-        // arriba: colocar mal uno lo pinta encima de otro, y entonces dos emojis distintos salen iguales.
-        // Con una textura por glifo esto no podía pasar; con atlas, sí.
+    fn two_distinct_glyphs_do_not_overlap_within_the_atlas() {
+        // **It is the failure mode particular to putting them all in one texture**, and no test above
+        // covers it: placing one wrong paints it on top of another, and then two distinct emojis come out the same.
+        // With one texture per glyph this could not happen; with an atlas, it can.
         //
-        // **Se comprueban todos los pares de una tanda larga y no solo los dos primeros**, porque el sitio
-        // donde se pisan es el **salto de fila**: dos glifos seguidos caen bien casi con cualquier cuenta,
-        // y el que estrena fila es el que se coloca encima del de arriba.
+        // **All the pairs of a long batch are checked and not just the first two**, because the place
+        // where they overlap is the **row jump**: two glyphs in a row fall fine with almost any count,
+        // and the one that starts a row is the one that gets placed on top of the one above.
         let ctx = context();
         let mut glyphs = Glyphs::default();
-        // Anchos distintos a propósito: con todos iguales, una cuenta que ignorase el ancho real y
-        // avanzara un paso fijo colocaría bien igualmente.
+        // Distinct widths on purpose: with all equal, a count that ignored the real width and
+        // advanced a fixed step would place them fine anyway.
         let spots: Vec<_> = (0..80)
             .filter_map(|n| {
                 let width = 15 + n % 7;
@@ -1780,8 +1780,8 @@ mod tests {
             .collect();
         assert!(
             spots.len() > 60,
-            "solo cupieron {} glifos de 17 píxeles de alto en un atlas de {ATLAS_SIDE}: la prueba no \
-             llega a saltar de fila varias veces",
+            "only {} glyphs 17 pixels tall fit in an atlas of {ATLAS_SIDE}: the test does not \
+             get to jump rows several times",
             spots.len()
         );
 
@@ -1789,12 +1789,12 @@ mod tests {
         for (n, one) in spots.iter().enumerate() {
             for other in &spots[n + 1..] {
                 let overlap = one.uv.intersect(other.uv);
-                // **Menos de medio píxel de solape, no cero exacto**: dos glifos pegados comparten su
-                // borde, y en coma flotante ese borde no da una anchura de cero limpia.
+                // **Less than half a pixel of overlap, not exact zero**: two adjacent glyphs share their
+                // edge, and in floating point that edge does not give a clean width of zero.
                 assert!(
                     overlap.width() * side < 0.5 || overlap.height() * side < 0.5,
-                    "dos glifos se solapan dentro del atlas ({:?} y {:?}): uno se pinta encima del otro \
-                     y los dos emojis salen iguales",
+                    "two glyphs overlap within the atlas ({:?} and {:?}): one is painted on top of the other \
+                     and the two emojis come out the same",
                     one.uv,
                     other.uv
                 );
@@ -1803,50 +1803,50 @@ mod tests {
     }
 
     #[test]
-    fn un_dibujo_monocromo_no_se_pinta_por_el_camino_del_color() {
-        // **Es el hallazgo de la primera entrega, y aquí es donde se resuelve.** Una fuente puede *cubrir*
-        // un emoji y pintarlo en blanco y negro —en esta máquina `DejaVu Sans` se lleva el 😀 teniendo
-        // `Noto Color Emoji` instalada—, así que «la primera que lo cubra» es la regla equivocada.
+    fn a_monochrome_drawing_is_not_painted_by_the_color_path() {
+        // **It is the finding of the first delivery, and here is where it is resolved.** A font can *cover*
+        // an emoji and paint it in black and white —on this machine `DejaVu Sans` takes the 😀 with
+        // `Noto Color Emoji` installed—, so "the first that covers it" is the wrong rule.
         //
-        // Lo que ata esta prueba es la mitad comprobable sin depender de qué fuentes haya: **una máscara
-        // de alfa nunca sale por aquí**, y una máscara de alfa es exactamente un dibujo monocromo.
+        // What this test ties down is the half checkable without depending on what fonts there are: **an alpha
+        // mask never comes out here**, and an alpha mask is exactly a monochrome drawing.
         let ctx = context();
         let mut discoverer = Discoverer::default();
-        // La 'a' no es emoji y ninguna fuente de emoji la trae a color: tiene que salir sin glifo.
+        // The 'a' is not an emoji and no emoji font brings it in color: it has to come out without a glyph.
         assert!(
             discoverer.color_glyph(&ctx, 'a', 20, 20).is_none(),
-            "una letra corriente salió por el camino del color"
+            "an ordinary letter came out by the color path"
         );
         let cost = discoverer.color_cost();
         assert_eq!(
             cost.rasterized, 0,
-            "se rasterizó una letra corriente como si fuera un emoji"
+            "an ordinary letter was rasterized as if it were an emoji"
         );
         assert_eq!(
             cost.failed, 1,
-            "el intento fallido no se contó, así que el informe no lo declara"
+            "the failed attempt was not counted, so the report does not declare it"
         );
     }
 
     #[test]
-    fn un_caracter_sin_glifo_de_color_no_se_vuelve_a_buscar() {
-        // **Recordar el fallo no es un detalle.** Sin él, un carácter que ninguna fuente de color cubre
-        // recorrería las familias de emoji **en cada fotograma** — y es justo el carácter que un programa
-        // roto escupe en bucle.
+    fn a_character_without_a_color_glyph_is_not_looked_for_again() {
+        // **Remembering the failure is not a detail.** Without it, a character that no color font covers
+        // would traverse the emoji families **on every frame** — and it is exactly the character a broken program
+        // spits in a loop.
         let ctx = context();
         let mut discoverer = Discoverer::default();
-        // **Un carácter que NINGUNA fuente pinta a color, y por eso es el sin asignar de Unicode.** La
-        // primera versión de esta prueba usaba un muñeco de nieve y no probaba nada: `Noto Color Emoji`
-        // lo trae, así que se recordaba por el camino del éxito y quitar el recuerdo del **fallo** la
-        // dejaba pasando igual. Lo destapó mutarla.
+        // **A character that NO font paints in color, and that is why it is Unicode's unassigned one.** The
+        // first version of this test used a snowman and proved nothing: `Noto Color Emoji`
+        // brings it, so it was remembered by the success path and removing the memory of the **failure**
+        // left it passing the same. Mutating it exposed it.
         assert!(
             discoverer
                 .color_glyph(&ctx, REPLACEMENT_BOX, 20, 20)
                 .is_none(),
-            "el carácter sin asignar salió a color: la prueba no está midiendo el camino del fallo"
+            "the unassigned character came out color: the test is not measuring the failure path"
         );
         let first = discoverer.color_cost();
-        assert_eq!(first.failed, 1, "el intento fallido no se contó");
+        assert_eq!(first.failed, 1, "the failed attempt was not counted");
 
         for _ in 0..5 {
             discoverer.color_glyph(&ctx, REPLACEMENT_BOX, 20, 20);
@@ -1855,23 +1855,23 @@ mod tests {
         assert_eq!(
             after.rasterized + after.failed,
             0,
-            "se volvió a buscar un carácter que ya se había buscado: se paga el recorrido entero por \
-             fotograma mientras esté en pantalla"
+            "a character already looked for was looked for again: the whole traversal is paid per \
+             frame while it is on screen"
         );
     }
 
     #[test]
-    fn un_emoji_de_una_sola_columna_se_queda_dentro_de_ella() {
-        // **El caso que el criterio obliga y que se ve raro, así que conviene que esté escrito.** El motor
-        // de terminal le da **una sola celda** a `☁️`, `❤️` y `✔️` —comprobado ejecutándolo: llegan como
-        // `Single` con el selector pegado, mientras que `😀` llega como cabeza de un carácter ancho—, y el
-        // criterio dice que un emoji no invade a su vecina más allá de lo que su anchura declara.
+    fn a_single_column_emoji_stays_within_it() {
+        // **The case the criterion forces and that looks odd, so it is worth having it written down.** The terminal
+        // engine gives **a single cell** to `☁️`, `❤️` and `✔️` —checked by running it: they arrive as
+        // `Single` with the selector attached, while `😀` arrives as the head of a wide character—, and the
+        // criterion says an emoji does not invade its neighbor beyond what its width declares.
         //
-        // **Consecuencia, dicha con su número**: en una celda de 13×20 puntos, que es la de esta máquina
-        // con dos divisiones, ese emoji sale de 13×12 — un 60 % del alto de la línea, centrado. Se ve
-        // pequeño y **es lo correcto**: pintarlo a la altura de la línea taparía lo que el programa
-        // escribió en la celda de al lado, y quién decide la anchura de un carácter es el motor, no este
-        // proyecto.
+        // **Consequence, said with its number**: in a cell of 13×20 points, which is this machine's
+        // with two panes, that emoji comes out at 13×12 — 60% of the line height, centered. It looks
+        // small and **it is the correct thing**: painting it at the line height would cover what the program
+        // wrote in the cell next to it, and who decides a character's width is the engine, not this
+        // project.
         let ctx = context();
         if !has_color(&ctx) {
             return;
@@ -1879,24 +1879,24 @@ mod tests {
         let mut discoverer = Discoverer::default();
         let (_, _, measurements) = discoverer
             .color_glyph(&ctx, '\u{2601}', 20, 13)
-            .expect("la máquina tiene fuente de color y no dio glifo");
+            .expect("the machine has a color font and gave no glyph");
         assert!(
             measurements.x <= 13.0,
-            "el emoji de una columna salió de {measurements:?} en una celda de 13 de ancho: se come la vecina \
-             y tapa lo que el programa escribió ahí"
+            "the single-column emoji came out at {measurements:?} in a cell 13 wide: it eats the neighbor \
+             and covers what the program wrote there"
         );
         assert!(
             measurements.x as u32 == 13,
-            "el emoji de una columna salió de {measurements:?} sin llenar los 13 de ancho que tiene: se ve \
-             más pequeño de lo que le cabe"
+            "the single-column emoji came out at {measurements:?} without filling the 13 of width it has: it looks \
+             smaller than it fits"
         );
     }
 
     #[test]
-    fn el_emoji_se_reescala_para_caber_en_el_hueco_que_se_le_da() {
-        // **AC5, por el lado de quien rasteriza.** El pintor comprueba el rectángulo que sale a pantalla;
-        // aquí se comprueba que la imagen que se le entrega ya viene acotada, que es lo que hace que ese
-        // rectángulo quepa.
+    fn the_emoji_is_rescaled_to_fit_in_the_slot_it_is_given() {
+        // **AC5, from the side of whoever rasterizes.** The painter checks the rectangle that comes out to screen;
+        // here it is checked that the image handed to it already comes bounded, which is what makes that
+        // rectangle fit.
         let ctx = context();
         if !has_color(&ctx) {
             return;
@@ -1905,36 +1905,36 @@ mod tests {
         for (height, width) in [(20u32, 40u32), (40, 20), (17, 17)] {
             let (_, _, measurements) = discoverer
                 .color_glyph(&ctx, '\u{1F600}', height, width)
-                .expect("la máquina tiene fuente de color y no dio glifo");
+                .expect("the machine has a color font and gave no glyph");
             assert!(
                 measurements.y <= height as f32 && measurements.x <= width as f32,
-                "para un hueco de {width}x{height} el emoji salió de {measurements:?}: se sale de su sitio"
+                "for a slot of {width}x{height} the emoji came out at {measurements:?}: it goes out of its place"
             );
-            // Y que quepa no basta: tiene que **llenar** uno de los dos ejes, o estaría desperdiciando
-            // sitio y saldría más pequeño de lo que la celda da.
+            // And fitting is not enough: it has to **fill** one of the two axes, or it would be wasting
+            // space and would come out smaller than the cell gives.
             assert!(
                 measurements.y as u32 == height || measurements.x as u32 == width,
-                "para un hueco de {width}x{height} el emoji salió de {measurements:?}: no llena ningún eje, \
-                 así que se ve más pequeño de lo que cabe"
+                "for a slot of {width}x{height} the emoji came out at {measurements:?}: it fills no axis, \
+                 so it looks smaller than it fits"
             );
         }
     }
 
     #[test]
-    fn al_llegar_al_techo_de_familias_se_deja_de_registrar_y_se_dice() {
-        // **Un techo que se traga lo que descarta es indistinguible de un fallo.** Quien vea un cuadro
-        // después de instalar la fuente adecuada no tendría forma de saber que el terminal la encontró y
-        // decidió no usarla. Y el caso ocurre: sin oráculo perfecto se registran caras de más, y una
-        // sesión que gaste sus huecos en caras redundantes dejará en cuadros un idioma de verdad.
+    fn on_reaching_the_family_ceiling_registering_stops_and_it_is_said() {
+        // **A ceiling that swallows what it discards is indistinguishable from a failure.** Whoever sees a box
+        // after installing the right font would have no way to know that the terminal found it and
+        // decided not to use it. And the case happens: without a perfect oracle extra faces are registered, and a
+        // session that spends its slots on redundant faces will leave a real language in boxes.
         //
-        // **Se fuerza el estado en vez de esperar a llenarlo de verdad**, y se dice: llenar ocho huecos
-        // con fuentes reales exige que la máquina tenga ocho familias que cubran ocho scripts distintos,
-        // que es una condición de la máquina y no del código.
+        // **The state is forced instead of waiting to fill it for real**, and it is said: filling eight slots
+        // with real fonts demands that the machine have eight families covering eight distinct scripts,
+        // which is a condition of the machine and not of the code.
         let ctx = context();
         let mut discoverer = Discoverer::default();
         for n in 0..MAX_FAMILIES {
             discoverer.faces.push(SystemFace {
-                family: format!("{SYSTEM_PREFIX}relleno{n}"),
+                family: format!("{SYSTEM_PREFIX}filler{n}"),
                 data: Arc::new(egui::FontData::from_static(&[])),
                 for_icons: false,
             });
@@ -1945,34 +1945,34 @@ mod tests {
 
         assert_eq!(
             round.searched, 1,
-            "con el techo lleno ni siquiera se llegó a mirar el carácter"
+            "with the ceiling full the character was not even looked at"
         );
         assert_eq!(
             round.registered, 0,
-            "se registró una cara por encima del techo"
+            "a face was registered above the ceiling"
         );
         assert_eq!(
             discoverer.faces.len(),
             MAX_FAMILIES,
-            "la lista de caras pasó de su techo"
+            "the face list went past its ceiling"
         );
         assert!(
             discoverer.said_the_ceiling,
-            "se llegó al techo y no se dijo por la salida de error: un techo callado se lee como un fallo"
+            "the ceiling was reached and it was not said through the error output: a silent ceiling reads as a failure"
         );
     }
 
     #[test]
-    fn un_mapa_de_bits_que_es_una_mascara_monocroma_no_sale_por_el_camino_del_color() {
-        // **Una máscara de alfa es un dibujo en blanco y negro, y por el camino del color saldría teñido
-        // de lo que hubiera en el canal.** Es el mismo hallazgo que la entrega ya tiene escrito —una
-        // fuente puede *cubrir* un emoji sin traerlo a color— pero por el otro camino: aquí la fuente sí
-        // es de emoji y sí trae mapa de bits para ese glifo, solo que monocromo. Quien lo pida tiene que
-        // caer al camino de texto, que es el Contrato 5.
+    fn a_bitmap_that_is_a_monochrome_mask_does_not_come_out_by_the_color_path() {
+        // **An alpha mask is a black-and-white drawing, and by the color path it would come out tinted
+        // with whatever was in the channel.** It is the same finding the delivery already has written —a
+        // font can *cover* an emoji without bringing it in color— but by the other path: here the font is
+        // an emoji one and does bring a bitmap for that glyph, only monochrome. Whoever asks for it has to
+        // fall to the text path, which is Contract 5.
         //
-        // **Se construye la máscara a mano y se dice por qué**: en esta máquina manda `Noto Color Emoji`,
-        // que trae PNG, así que ninguna fuente instalada recorre esta rama. Se comprobó mutándola:
-        // convertir la máscara en imagen dejaba las 647 pruebas en verde.
+        // **The mask is built by hand and it is said why**: on this machine `Noto Color Emoji` rules,
+        // which brings PNG, so no installed font travels this branch. It was checked by mutating it:
+        // turning the mask into an image left the 647 tests green.
         let mask = skrifa::bitmap::BitmapData::Mask(skrifa::bitmap::MaskData {
             bpp: 8,
             is_packed: false,
@@ -1981,100 +1981,100 @@ mod tests {
 
         assert!(
             pixels_of(&mask, 2, 2).is_none(),
-            "un dibujo monocromo salió por el camino del color: se pinta como imagen y sale teñido de lo \
-             que traiga el canal, en vez de con el color que el programa pidió para esa celda"
+            "a monochrome drawing came out by the color path: it is painted as an image and comes out tinted with \
+             whatever the channel carries, instead of with the color the program asked for that cell"
         );
     }
 
     #[test]
-    fn un_mapa_de_bits_en_bgra_conserva_los_colores_que_el_emoji_tiene() {
-        // **La fuente entrega los canales al revés y hay que darles la vuelta.** Sin eso un emoji rojo
-        // sale azul y uno azul sale rojo — un defecto que **no se ve en esta máquina**, porque aquí gana
-        // una fuente que trae PNG, y que sí se vería con las que entregan el mapa de bits sin comprimir.
-        // Se comprobó mutándolo: quitar el intercambio no rompía ninguna prueba.
+    fn a_bitmap_in_bgra_keeps_the_colors_the_emoji_has() {
+        // **The font delivers the channels backwards and they have to be swapped.** Without that a red emoji
+        // comes out blue and a blue one comes out red — a defect that **does not show on this machine**, because here a
+        // font that brings PNG wins, and that would show with the ones that deliver the bitmap uncompressed.
+        // It was checked by mutating it: removing the swap broke no test.
         //
-        // Un píxel rojo opaco, escrito como lo escribe la fuente: azul, verde, rojo, alfa.
+        // An opaque red pixel, written as the font writes it: blue, green, red, alpha.
         let bgra = skrifa::bitmap::BitmapData::Bgra(&[0, 0, 255, 255]);
 
-        let pixels = pixels_of(&bgra, 1, 1).expect("un píxel en BGRA no dio imagen");
+        let pixels = pixels_of(&bgra, 1, 1).expect("a pixel in BGRA gave no image");
 
         assert_eq!(
             pixels.get_pixel(0, 0).0,
             [255, 0, 0, 255],
-            "el emoji salió con el rojo y el azul cambiados"
+            "the emoji came out with red and blue swapped"
         );
     }
 
     #[test]
-    fn un_pixel_transparente_no_se_lleva_su_color_al_borde_del_emoji() {
-        // **Es el halo, y es el defecto clásico de reducir un dibujo con alfa.** Un emoji es una figura
-        // dentro de un cuadro vacío, y el vacío de un PNG lleva color aunque no se vea: promediado sin
-        // premultiplicar, ese color invisible se mezcla en el borde de la figura y le deja una orla. Se
-        // vería en **todos** los emojis, no en un caso raro, porque todos se reducen de 128 píxeles a
-        // diecisiete.
+    fn a_transparent_pixel_does_not_carry_its_color_to_the_edge_of_the_emoji() {
+        // **It is the halo, and it is the classic defect of reducing a drawing with alpha.** An emoji is a figure
+        // inside an empty box, and the empty part of a PNG carries color even if it is not seen: averaged without
+        // premultiplying, that invisible color mixes into the edge of the figure and leaves it a fringe. It
+        // would show in **all** the emojis, not in a rare case, because all of them are reduced from 128 pixels to
+        // seventeen.
         //
-        // **Se afirma sobre el píxel transparente y no sobre el borde ya reducido**, porque es donde el
-        // defecto se ve sin depender de qué dibujo traiga la fuente instalada: premultiplicado, lo que no
-        // se ve no tiene color que aportar. Se comprobó mutándolo: sin premultiplicar, la suite pasaba
-        // entera.
+        // **It asserts on the transparent pixel and not on the already-reduced edge**, because it is where the
+        // defect shows without depending on what drawing the installed font brings: premultiplied, what is not
+        // seen has no color to contribute. It was checked by mutating it: without premultiplying, the suite passed
+        // whole.
         let mut original = image::RgbaImage::new(2, 1);
         original.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
-        // Blanco del todo transparente: no se ve, pero su color está escrito en el fichero.
+        // Fully transparent white: it is not seen, but its color is written in the file.
         original.put_pixel(1, 0, image::Rgba([255, 255, 255, 0]));
         let mut png = Vec::new();
         image::DynamicImage::ImageRgba8(original)
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-            .expect("no se pudo escribir el PNG de la prueba");
+            .expect("the test PNG could not be written");
 
         let pixels = pixels_of(&skrifa::bitmap::BitmapData::Png(&png), 2, 1)
-            .expect("el PNG de la prueba no dio imagen");
+            .expect("the test PNG gave no image");
 
         assert_eq!(
             pixels.get_pixel(1, 0).0,
             [0, 0, 0, 0],
-            "un píxel invisible conservó su color: al reducir el emoji ese color se promedia con el del \
-             dibujo y le deja un halo alrededor"
+            "an invisible pixel kept its color: on reducing the emoji that color is averaged with the \
+             drawing's and leaves a halo around it"
         );
         assert_eq!(
             pixels.get_pixel(0, 0).0,
             [255, 0, 0, 255],
-            "el píxel opaco perdió color al premultiplicar: el emoji entero saldría apagado"
+            "the opaque pixel lost color on premultiplying: the whole emoji would come out muted"
         );
     }
 
     #[test]
-    fn una_celda_sin_alto_o_sin_ancho_no_tumba_la_ventana() {
-        // **Es un pánico, no un dibujo raro.** El reescalado acota el tamaño final entre uno y lo que la
-        // celda da, y con una celda de cero ese acotado pide un mínimo mayor que su máximo — la
-        // biblioteca estándar entra en pánico ahí, así que se cae la ventana entera. Y la celda llega a
-        // valer cero: el alto y el ancho salen de multiplicar su rectángulo por los píxeles físicos y
-        // redondear, y el de una consola aplastada contra el borde mide una fracción de punto.
+    fn a_cell_without_height_or_without_width_does_not_bring_down_the_window() {
+        // **It is a panic, not an odd drawing.** The rescaling bounds the final size between one and what the
+        // cell gives, and with a cell of zero that bound asks for a minimum greater than its maximum — the
+        // standard library panics there, so the whole window crashes. And the cell does get to
+        // be worth zero: the height and the width come from multiplying its rectangle by the physical pixels and
+        // rounding, and that of a console crushed against the edge measures a fraction of a point.
         //
-        // Se comprobó mutándola: sin la guarda, esta prueba no falla — revienta.
+        // It was checked by mutating it: without the guard, this test does not fail — it blows up.
         let ctx = context();
         let mut discoverer = Discoverer::default();
 
         assert!(
             discoverer.color_glyph(&ctx, '\u{1F600}', 0, 20).is_none(),
-            "una celda sin alto dio glifo"
+            "a cell without height gave a glyph"
         );
         assert!(
             discoverer.color_glyph(&ctx, '\u{1F600}', 20, 0).is_none(),
-            "una celda sin ancho dio glifo"
+            "a cell without width gave a glyph"
         );
     }
 
     #[test]
-    fn con_el_atlas_lleno_no_se_inventa_ninguna_textura() {
-        // **AC8 por el lado de quien pide, que es el que decide lo que se ve.** Que el atlas deje de
-        // aceptar ya está probado arriba; lo que aquí se ata es que un emoji pedido con el atlas lleno
-        // **no devuelve nada** en vez de un trozo cualquiera de la textura. Sin esto, la forma natural de
-        // «arreglar» el techo —devolver el último sitio, o un rectángulo por defecto— pinta en cada emoji
-        // nuevo el dibujo de otro, y quien mire verá la cara equivocada.
+    fn with_the_atlas_full_no_texture_is_invented() {
+        // **AC8 from the side of whoever asks, which is the one that decides what is seen.** That the atlas stops
+        // accepting is already tested above; what is tied down here is that an emoji asked for with the atlas full
+        // **returns nothing** instead of any old piece of the texture. Without this, the natural way to
+        // "fix" the ceiling —returning the last spot, or a default rectangle— paints in each new emoji
+        // the drawing of another, and whoever looks will see the wrong face.
         //
-        // **Se llena con imágenes sintéticas y se le fija antes la altura**, porque una altura distinta de
-        // la que el atlas tiene dentro lo vacía entero: sin fijarla, la petición de abajo encontraría
-        // sitio de sobra y esto no probaría nada.
+        // **It is filled with synthetic images and the height is fixed on it first**, because a height different from
+        // the one the atlas has inside empties it whole: without fixing it, the request below would find
+        // plenty of room and this would prove nothing.
         let ctx = context();
         let mut discoverer = Discoverer::default();
         discoverer.glyphs.height = 20;
@@ -2090,8 +2090,8 @@ mod tests {
 
         assert!(
             discoverer.color_glyph(&ctx, '\u{1F600}', 20, 20).is_none(),
-            "con el atlas lleno se devolvió una textura igualmente: es el trozo que ocupa otro glifo, así \
-             que el emoji sale con el dibujo de otro"
+            "with the atlas full a texture was returned anyway: it is the piece another glyph occupies, so \
+             the emoji comes out with another's drawing"
         );
     }
 }

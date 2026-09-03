@@ -1,33 +1,34 @@
-//! Quién se entera de que un productor ha publicado, y cómo se lo dice a la ventana.
+//! Who finds out that a producer has published, and how it tells the window.
 //!
-//! **Un solo vigilante para todas las consolas.** Cada uno crea un hilo, y el aviso trae la ruta que
-//! cambió, que es cuanto hace falta para saber a quién despierta. Cuatro divisiones cuestan un hilo.
+//! **A single watcher for all consoles.** Each one creates a thread, and the notice carries the path
+//! that changed, which is all it takes to know who it wakes. Four panes cost one thread.
 //!
-//! **Se vigila el directorio de cada consola, no su `panel.json`.** Leído en la fuente de `notify`: el
-//! seguimiento de una ruta que no es directorio se pone sobre el inodo, se elimina cuando ese inodo
-//! desaparece y **no se vuelve a registrar nunca**. Como el contrato recomienda publicar escribiendo a
-//! un temporal y renombrándolo encima, vigilar el fichero dejaría el panel congelado en silencio la
-//! primera vez que alguien siguiera la recomendación. Vigilando el directorio llega además el aviso
-//! del primer fichero, que con la otra forma ni siquiera se puede armar: seguir una ruta que todavía
-//! no existe falla.
+//! **Each console's directory is watched, not its `panel.json`.** Read at the source of `notify`: the
+//! tracking of a path that is not a directory is placed on the inode, is removed when that inode
+//! disappears and **is never registered again**. Since the contract recommends publishing by writing to
+//! a temporary and renaming it over, watching the file would leave the panel silently frozen the first
+//! time someone followed the recommendation. By watching the directory the notice of the first file
+//! also arrives, which with the other form cannot even be armed: tracking a path that does not yet
+//! exist fails.
 //!
-//! **Y el aviso solo significa «mira otra vez».** El crate no agrupa ni deduplica —una escritura
-//! produce varios avisos, y cuántos no es determinable— así que lo que se consume tiene que ser
-//! idempotente. Una bandera lo es, y con eso el antirrebote sale gratis: dos avisos y veinte dan
-//! exactamente el mismo trabajo, que es una lectura en el fotograma siguiente.
+//! **And the notice only means «look again».** The crate neither groups nor deduplicates —one write
+//! produces several notices, and how many is not determinable— so what is consumed has to be
+//! idempotent. A flag is, and with that the debounce comes for free: two notices and twenty give
+//! exactly the same work, which is one read in the next frame.
 //!
-//! **Este módulo no sabe de ventanas.** Recibe cómo despertar, igual que el puente, y por la misma
-//! razón: lo que se va a reescribir es el framework de interfaz, y despertar a alguien no necesita
-//! ninguno.
+//! **This module knows nothing of windows.** It receives how to wake, just like the bridge, and for the
+//! same reason: what is going to be rewritten is the interface framework, and waking someone needs
+//! none.
 //!
-//! Dos límites conocidos, escritos aquí porque el que los pise no va a leer el diseño:
-//! - **Las rutas se fijan al armarlo.** Con las dos divisiones de este hito basta, pero el día en que
-//!   se puedan abrir y cerrar divisiones (Fase 2) hay que rearmarlo, o la nueva no se enteraría nunca.
-//!   Rearmar cuesta unos 300 µs, y lo que importa no es eso: **entre soltar el viejo y armar el nuevo
-//!   no llega nada**, así que una publicación que caiga justo ahí se pierde para siempre.
-//! - **La comparación de rutas es textual**, y eso vale porque el respaldo de Linux guarda la ruta tal
-//!   cual se le da. El de macOS entrega rutas resueltas (`/var/…` → `/private/var/…`), así que ahí no
-//!   casaría con nada, en silencio. Es cosa del hito que compile por primera vez en macOS.
+//! Two known limits, written here because whoever runs into them is not going to read the design:
+//! - **The paths are fixed when it is armed.** With this milestone's two panes it is enough, but the
+//!   day panes can be opened and closed (Phase 2) it has to be rearmed, or the new one would never find
+//!   out. Rearming costs about 300 µs, and that is not what matters: **between releasing the old one and
+//!   arming the new one nothing arrives**, so a publication that falls right there is lost forever.
+//! - **The path comparison is textual**, and that works because the Linux backend keeps the path just
+//!   as it is given. The macOS one delivers resolved paths (`/var/…` → `/private/var/…`), so there it
+//!   would match nothing, silently. It is a matter for the milestone that compiles for the first time on
+//!   macOS.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -36,86 +37,88 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use notify::event::{AccessKind, AccessMode, ModifyKind, RenameMode};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode};
-// **El *trait* entra sin nombre**, y hace falta: `backend.watch(..)` es suyo, y su nombre choca con el
-// tipo de este módulo desde que dejó de llamarse en español.
+// **The *trait* comes in unnamed**, and it is needed: `backend.watch(..)` is its, and its name clashes
+// with this module's type now that it stopped being named in Spanish.
 use notify::Watcher as _;
 
-/// «El directorio de esta consola ha cambiado: mira otra vez.»
+/// «This console's directory has changed: look again.»
 ///
-/// La comparte el hilo del vigilante, que la levanta, con el fotograma, que la recoge. No lleva el
-/// evento ni cuántos hubo a propósito: lo único que la ventana necesita saber es si tiene que releer.
+/// It is shared by the watcher thread, which raises it, with the frame, which collects it. It carries
+/// neither the event nor how many there were, on purpose: the only thing the window needs to know is
+/// whether it has to reread.
 ///
-/// **El orden de memoria es el relajado y no es un descuido**: por esta bandera no se publica ningún
-/// dato. Lo que hay que leer viaja por el sistema de ficheros y lo escribe otro proceso, así que no
-/// hay nada que adquirir ni que liberar — pedir un orden más fuerte afirmaría una sincronización que
-/// no existe.
+/// **The memory order is relaxed and it is not an oversight**: no data is published through this flag.
+/// What has to be read travels through the file system and is written by another process, so there is
+/// nothing to acquire or release — asking for a stronger order would assert a synchronization that does
+/// not exist.
 #[derive(Clone)]
 pub struct Flag(Arc<AtomicBool>);
 
 impl Flag {
-    /// Una bandera ya levantada, que es como nacen.
+    /// A flag already raised, which is how they are born.
     ///
-    /// **Y no es `Default`**: un `Default` que vale `true` se lee al revés en el sitio donde se usa.
-    /// Nacer levantada cubre un hueco real —el vigilante se arma cuando la ventana ya tiene sus
-    /// consolas abiertas, así que un productor rapidísimo puede haber publicado antes de que nadie
-    /// mirara su directorio— y cuesta una lectura en el primer fotograma.
+    /// **And it is not `Default`**: a `Default` that is `true` reads backwards at the place where it is
+    /// used. Being born raised covers a real gap —the watcher is armed when the window already has its
+    /// consoles open, so a lightning-fast producer may have published before anyone looked at its
+    /// directory— and it costs one read in the first frame.
     pub fn raised() -> Self {
         Self(Arc::new(AtomicBool::new(true)))
     }
 
-    /// La levanta. Que ya lo estuviera no es un caso raro: es el normal.
+    /// Raises it. That it already was is not a rare case: it is the normal one.
     pub fn raise(&self) {
         self.0.store(true, Ordering::Relaxed);
     }
 
-    /// La recoge: dice si estaba levantada y la deja bajada.
+    /// Collects it: says whether it was raised and leaves it lowered.
     ///
-    /// **Bajarla antes de leer y no después** es lo que hace que un aviso llegado *durante* la lectura
-    /// no se pierda: levanta la bandera otra vez y el fotograma siguiente vuelve. Al revés se leería
-    /// el fichero a medio escribir y se bajaría la bandera que avisaba de la otra mitad.
+    /// **Lowering it before reading and not after** is what keeps a notice that arrived *during* the
+    /// read from being lost: it raises the flag again and the next frame comes back. The other way
+    /// around, the half-written file would be read and the flag warning about the other half would be
+    /// lowered.
     pub fn take(&self) -> bool {
         self.0.swap(false, Ordering::Relaxed)
     }
 }
 
-/// Una consola vigilada: dónde publica y a quién hay que avisar.
+/// A watched console: where it publishes and who has to be notified.
 struct Watched {
-    /// El directorio, que es lo que se sigue de verdad. Se guarda para reconocer el aviso de que ha
-    /// dejado de existir, que llega con **su** ruta y no con la del fichero.
+    /// The directory, which is what is really tracked. It is kept to recognize the notice that it has
+    /// stopped existing, which arrives with **its** path and not with the file's.
     dir: PathBuf,
-    /// La ruta exacta del `panel.json`. Se guarda hecha porque se compara en cada aviso, y los avisos
-    /// llegan de a varios por escritura.
+    /// The exact path of the `panel.json`. It is kept ready-made because it is compared on every notice,
+    /// and the notices arrive several at a time per write.
     file: PathBuf,
     flag: Flag,
 }
 
-/// El vigilante de la ventana.
+/// The window's watcher.
 pub struct Watcher {
-    /// **Se guarda por su vida, no por su interfaz**: soltarlo termina su hilo y deja de llegar nada.
-    /// `None` significa que no hay nada que vigilar o que no se pudo armar; cuál de las dos cosas lo
-    /// dice [`Watcher::is_blind`], que no es lo mismo.
+    /// **It is kept for its lifetime, not for its interface**: dropping it ends its thread and nothing
+    /// more arrives. `None` means there is nothing to watch or that it could not be armed; which of the
+    /// two is told by [`Watcher::is_blind`], which is not the same.
     _backend: Option<RecommendedWatcher>,
-    /// Si el vigilante ha dejado de ser de fiar. Lo comparte con su hilo, porque **casi todas las
-    /// formas de quedarse ciego ocurren después de armarlo** y solo el hilo las ve.
+    /// Whether the watcher has stopped being trustworthy. It shares it with its thread, because **almost
+    /// all the ways of going blind happen after arming it** and only the thread sees them.
     blind: Arc<AtomicBool>,
 }
 
 impl Watcher {
-    /// Arma el vigilante sobre el directorio de cada consola.
+    /// Arms the watcher over each console's directory.
     ///
-    /// `wake` es cómo se saca a la ventana del reposo, y llega como función por lo mismo que al
-    /// puente: **este módulo no depende del framework de interfaz**, que es justo lo que se va a
-    /// reescribir. Se llama desde el hilo del vigilante, así que no puede entrar en pánico.
+    /// `wake` is how the window is brought out of rest, and it arrives as a function for the same reason
+    /// as with the bridge: **this module does not depend on the interface framework**, which is exactly
+    /// what is going to be rewritten. It is called from the watcher thread, so it cannot panic.
     ///
-    /// **No poder armarlo no impide abrir la ventana**, igual que no poder crear el directorio de una
-    /// consola no impide abrirla: se dice por la salida de errores y se sigue en el modo degradado que
-    /// describe [`Watcher::is_blind`].
+    /// **Not being able to arm it does not prevent opening the window**, just as not being able to
+    /// create a console's directory does not prevent opening it: it is said through the error output and
+    /// it carries on in the degraded mode that [`Watcher::is_blind`] describes.
     pub fn new(wake: impl Fn() + Send + 'static, consoles: &[(&Path, Flag)]) -> Self {
         let blind = Arc::new(AtomicBool::new(false));
 
-        // Sin consolas con directorio no hay nada que seguir, y montar una instancia del vigilante
-        // del sistema y su hilo para no mirar nada sería pagar por no hacer nada. **Y no es estar
-        // ciego**: no hay ningún panel que se pueda quedar viejo.
+        // With no consoles with a directory there is nothing to track, and setting up an instance of the
+        // system watcher and its thread to look at nothing would be paying for doing nothing. **And it is
+        // not being blind**: there is no panel that can go stale.
         if consoles.is_empty() {
             return Self {
                 _backend: None,
@@ -136,7 +139,7 @@ impl Watcher {
         let mut backend = match notify::recommended_watcher(handler) {
             Ok(backend) => backend,
             Err(failure) => {
-                eprintln!("no se pudo armar el vigilante de los paneles ({failure})");
+                eprintln!("could not arm the panel watcher ({failure})");
                 blind.store(true, Ordering::Relaxed);
                 return Self {
                     _backend: None,
@@ -147,10 +150,10 @@ impl Watcher {
 
         for (dir, _) in consoles {
             if let Err(failure) = backend.watch(dir, RecursiveMode::NonRecursive) {
-                // Se renuncia al vigilante **entero** y no solo a esta consola. Un vigilante a medias
-                // sería una ventana en la que un panel se entera y el de al lado no, sin nada que lo
-                // distinga al mirarla; el respaldo de releer es correcto para todas.
-                eprintln!("no se pudo vigilar {} ({failure})", dir.display());
+                // The **whole** watcher is given up on and not just this console. A half watcher would be
+                // a window in which one panel finds out and the one next to it does not, with nothing to
+                // tell them apart on looking at it; the reread fallback is correct for all of them.
+                eprintln!("could not watch {} ({failure})", dir.display());
                 blind.store(true, Ordering::Relaxed);
                 return Self {
                     _backend: None,
@@ -165,28 +168,28 @@ impl Watcher {
         }
     }
 
-    /// Si ya no hay quien avise, y por tanto hay que mirar los ficheros como se hacía antes de que
-    /// este vigilante existiera.
+    /// Whether there is no longer anyone to notify, and therefore the files have to be looked at as was
+    /// done before this watcher existed.
     ///
-    /// **Casi todas las formas de quedarse ciego ocurren con la ventana ya abierta**, no al armarla:
-    /// que el usuario borre desde su propia consola el directorio que se estaba vigilando —el
-    /// seguimiento se pierde con el inodo y no se re-registra—, o que el vigilante entregue un fallo,
-    /// después del cual su estado es desconocido. Al armar solo falla lo que el sistema no da: el
-    /// núcleo limita cuántos vigilantes puede tener un usuario a la vez
-    /// (`fs.inotify.max_user_instances`), y ahí ya no hay nada que hacer.
+    /// **Almost all the ways of going blind happen with the window already open**, not on arming it:
+    /// that the user deletes from their own console the directory that was being watched —the tracking
+    /// is lost with the inode and is not re-registered—, or that the watcher delivers a failure, after
+    /// which its state is unknown. On arming, only what the system does not give fails: the kernel limits
+    /// how many watchers a user can have at once (`fs.inotify.max_user_instances`), and there is nothing
+    /// to be done about that.
     ///
-    /// Sin este respaldo el panel se quedaría **congelado para siempre y en silencio**, enseñando algo
-    /// plausible de hace una hora, que es exactamente lo que este hito viene a evitar.
+    /// Without this fallback the panel would stay **frozen forever and silently**, showing something
+    /// plausible from an hour ago, which is exactly what this milestone comes to avoid.
     pub fn is_blind(&self) -> bool {
         self.blind.load(Ordering::Relaxed)
     }
 }
 
-/// Lo que corre en el hilo del vigilante cada vez que llega un aviso.
+/// What runs on the watcher thread each time a notice arrives.
 ///
-/// Está aparte y devuelve la función **para poder invocarla desde una prueba con un aviso puesto a
-/// mano**: que el aviso llegue de verdad desde el sistema de ficheros se puede probar, pero es lento y
-/// depende del núcleo. Lo que aquí importa —a quién despierta cada aviso— no necesita al núcleo.
+/// It is separate and returns the function **so that it can be invoked from a test with a notice put in
+/// by hand**: that the notice really arrives from the file system can be tested, but it is slow and
+/// depends on the kernel. What matters here —who each notice wakes— does not need the kernel.
 fn handler(
     wake: impl Fn() + Send + 'static,
     watchlist: Vec<Watched>,
@@ -195,16 +198,16 @@ fn handler(
     move |notice| {
         let event = match notice {
             Ok(event) => event,
-            // Después de un fallo **el estado del vigilante es desconocido**, así que se pasa al
-            // respaldo en vez de seguir confiando en unos avisos que quizá ya no lleguen.
+            // After a failure **the watcher's state is unknown**, so it switches to the fallback instead
+            // of going on trusting notices that may no longer arrive.
             Err(failure) => {
-                return go_blind(&blind, &wake, &format!("el vigilante falló ({failure})"));
+                return go_blind(&blind, &wake, &format!("the watcher failed ({failure})"));
             }
         };
 
-        // El único aviso que significa «te has perdido cosas», y viene **sin rutas**: no hay a quién
-        // repartirlo, así que se mira todo. No deja ciego a nadie —la cola desbordada es de un
-        // instante, no una avería— pero el aviso que se perdió detrás no vuelve.
+        // The only notice that means «you have missed things», and it comes **with no paths**: there is
+        // no one to hand it to, so everything is looked at. It leaves no one blind —the overflowed queue
+        // is of an instant, not a breakdown— but the notice that was lost behind it does not come back.
         if event.need_rescan() {
             for watched in &watchlist {
                 watched.flag.raise();
@@ -213,15 +216,15 @@ fn handler(
             return;
         }
 
-        // El directorio vigilado ha dejado de existir, y con él el seguimiento: `notify` lo borra de
-        // sus mapas y **no lo vuelve a registrar nunca**. Aquí no llega la ruta del `panel.json`, sino
-        // la del directorio, así que sin esto el aviso se descartaría y nadie se enteraría de que a
-        // partir de ahora no llega nada.
+        // The watched directory has stopped existing, and with it the tracking: `notify` deletes it from
+        // its maps and **never registers it again**. Here the `panel.json`'s path does not arrive, but
+        // the directory's, so without this the notice would be discarded and no one would find out that
+        // from now on nothing arrives.
         if lost_a_watched_dir(&event, &watchlist) {
             return go_blind(
                 &blind,
                 &wake,
-                "el directorio que se vigilaba ha dejado de existir",
+                "the directory that was being watched has stopped existing",
             );
         }
 
@@ -230,34 +233,35 @@ fn handler(
         }
 
         if raise_matching(&event.paths, &watchlist) {
-            // **Pedir el fotograma es la pieza central de este hito, no una precaución.** La ventana
-            // repinta solo cuando se lo piden, y la única petición que había estaba atada a que el
-            // pseudoterminal produjera: con la ventana en reposo la bandera se levantaría y el
-            // fotograma siguiente no llegaría nunca.
+            // **Requesting the frame is the central piece of this milestone, not a precaution.** The
+            // window repaints only when asked to, and the only request there was, was tied to the
+            // pseudoterminal producing: with the window at rest the flag would be raised and the next
+            // frame would never arrive.
             wake();
         }
     }
 }
 
-/// Pasa al modo degradado, y lo dice **una sola vez**.
+/// Switches to the degraded mode, and says it **just once**.
 ///
-/// Una vez es lo correcto y no es tacañería: el bucle de lectura del vigilante entrega el fallo y
-/// sigue, así que un fallo que persista sería un chorro sin techo de líneas por la salida de errores.
-/// Y se escribe sin poder entrar en pánico, porque esto corre en el hilo del vigilante: con la salida
-/// de errores por una tubería sin lector, un `eprintln!` mataría el hilo y no llegaría nada más.
+/// Once is the right thing and it is not stinginess: the watcher's read loop delivers the failure and
+/// carries on, so a failure that persists would be an unbounded stream of lines through the error
+/// output. And it is written without being able to panic, because this runs on the watcher thread: with
+/// the error output through a pipe with no reader, an `eprintln!` would kill the thread and nothing more
+/// would arrive.
 fn go_blind(blind: &AtomicBool, wake: &impl Fn(), reason: &str) {
     if !blind.swap(true, Ordering::Relaxed) {
         let _ = writeln!(
             std::io::stderr(),
-            "los paneles se releerán en cada fotograma: {reason}"
+            "the panels will be reread on every frame: {reason}"
         );
         wake();
     }
 }
 
-/// Si el aviso dice que un directorio vigilado ya no está donde estaba.
+/// Whether the notice says that a watched directory is no longer where it was.
 ///
-/// Las dos formas de perderlo —borrarlo y moverlo— llegan con la ruta del propio directorio.
+/// The two ways of losing it —deleting it and moving it— arrive with the directory's own path.
 fn lost_a_watched_dir(event: &notify::Event, watchlist: &[Watched]) -> bool {
     let lost = matches!(
         event.kind,
@@ -269,35 +273,36 @@ fn lost_a_watched_dir(event: &notify::Event, watchlist: &[Watched]) -> bool {
         .any(|watched| event.paths.contains(&watched.dir))
 }
 
-/// Los dos avisos que **no** cuentan como una publicación nueva.
+/// The two notices that do **not** count as a new publication.
 ///
-/// Descartarlos no se nota en lo que se ve; se nota en cuántos fotogramas cuesta publicar, que es lo
-/// que este hito paga por enterarse.
+/// Discarding them makes no difference in what is seen; it makes a difference in how many frames
+/// publishing costs, which is what this milestone pays to find out.
 fn is_nothing_new(kind: &EventKind) -> bool {
     match kind {
-        // **Cerrar tras escribir sí es publicar**: no puede ser nuestro, porque aquí solo se lee, y es
-        // la única señal que llega cuando el productor ya ha terminado de escribir.
+        // **Closing after writing is publishing**: it cannot be ours, because here it is only read, and
+        // it is the only signal that arrives when the producer has already finished writing.
         EventKind::Access(AccessKind::Close(AccessMode::Write)) => false,
-        // **Abrir el fichero para leerlo también produce aviso**, y quien lo abre es esta misma
-        // aplicación: sin filtrarlo, cada lectura pide un fotograma que vuelve a leer. No es teórico —
-        // con un `panel.json` que no se entiende, y que por eso se reabre en cada intento, la ventana
-        // no se dormiría nunca: **medido, 123 lecturas en dos segundos frente a 2**.
+        // **Opening the file to read it also produces a notice**, and whoever opens it is this very
+        // application: without filtering it, every read requests a frame that reads again. It is not
+        // theoretical — with a `panel.json` that is not understood, and which is therefore reopened on
+        // every attempt, the window would never fall asleep: **measured, 123 reads in two seconds versus
+        // 2**.
         EventKind::Access(_) => true,
-        // **El eco de un renombrado.** Un renombre encima —lo que el contrato recomienda— entrega el
-        // destino y **acto seguido** un segundo aviso con origen y destino juntos, que trae la misma
-        // ruta y no dice nada que el primero no dijera. Leído en la fuente: ese segundo nunca llega sin
-        // el primero delante. Descartarlo baja de **1,88 a 1 los fotogramas por publicación** en el
-        // camino que el contrato recomienda.
+        // **The echo of a rename.** A rename over —what the contract recommends— delivers the
+        // destination and **right after** a second notice with origin and destination together, which
+        // carries the same path and says nothing the first did not. Read at the source: that second one
+        // never arrives without the first ahead of it. Discarding it brings the **frames per publication
+        // down from 1.88 to 1** on the path the contract recommends.
         EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => true,
         _ => false,
     }
 }
 
-/// Levanta la bandera de cada consola cuyo `panel.json` aparece en el aviso, y dice si alguna se
-/// levantó.
+/// Raises the flag of each console whose `panel.json` appears in the notice, and says whether any was
+/// raised.
 ///
-/// Un aviso trae varias rutas y una sola escritura provoca varios avisos. Lo que **no** se mira es qué
-/// clase de evento es: crear, escribir y renombrar encima acaban todos en la misma lectura.
+/// A notice carries several paths and a single write causes several notices. What is **not** looked at
+/// is what kind of event it is: creating, writing and renaming over all end in the same read.
 fn raise_matching(paths: &[PathBuf], watchlist: &[Watched]) -> bool {
     let mut any_raised = false;
 
@@ -318,12 +323,12 @@ mod tests {
     use notify::event::{CreateKind, DataChange, RemoveKind};
     use std::sync::atomic::AtomicUsize;
 
-    /// Cuántas veces se ha despertado a la ventana.
+    /// How many times the window has been woken.
     ///
-    /// **Contar es más fuerte que preguntarle al framework si tiene un repintado pendiente**, que es
-    /// lo que hacía la primera versión de estas pruebas: aquello obligaba a dejar el contexto en
-    /// reposo primero —cuatro pasadas en vacío— y afirmaba sobre la contabilidad interna de egui en
-    /// vez de sobre lo que este módulo hace.
+    /// **Counting is stronger than asking the framework whether it has a repaint pending**, which is
+    /// what the first version of these tests did: that forced leaving the context at rest first —four
+    /// empty passes— and asserted over egui's internal bookkeeping instead of over what this module
+    /// does.
     #[derive(Clone, Default)]
     struct Wakeups(Arc<AtomicUsize>);
 
@@ -340,11 +345,11 @@ mod tests {
         }
     }
 
-    /// Dos consolas con su directorio, y el manejador de verdad montado sobre ellas.
+    /// Two consoles with their directory, and the real handler mounted over them.
     ///
-    /// Se devuelve el manejador y no las piezas sueltas **a propósito**: lo que hay que atar es lo que
-    /// corre en el hilo del vigilante. Una prueba sobre el repartidor a solas demostraría que el
-    /// repartidor funciona, no que alguien lo llame ni que se despierte a nadie.
+    /// The handler is returned and not the loose pieces **on purpose**: what has to be pinned down is
+    /// what runs on the watcher thread. A test over the dispatcher alone would prove that the dispatcher
+    /// works, not that anyone calls it nor that anyone is woken.
     struct Harness {
         handler: Box<dyn FnMut(notify::Result<Event>)>,
         consoles: [Console; 2],
@@ -366,11 +371,11 @@ mod tests {
     fn two_consoles() -> Harness {
         let consoles = [
             Console {
-                dir: PathBuf::from("/no-importa/una"),
+                dir: PathBuf::from("/does-not-matter/one"),
                 flag: Flag::raised(),
             },
             Console {
-                dir: PathBuf::from("/no-importa/otra"),
+                dir: PathBuf::from("/does-not-matter/other"),
                 flag: Flag::raised(),
             },
         ];
@@ -390,8 +395,8 @@ mod tests {
             Arc::clone(&blind),
         );
 
-        // Las banderas nacen levantadas para que el primer fotograma mire; lo que estas pruebas miden
-        // es lo que pasa **a partir de ahí**, así que se recogen antes de empezar.
+        // The flags are born raised so that the first frame looks; what these tests measure is what
+        // happens **from there on**, so they are collected before starting.
         for console in &consoles {
             console.flag.take();
         }
@@ -404,29 +409,29 @@ mod tests {
         }
     }
 
-    /// El aviso de que se ha escrito algo en una ruta.
+    /// The notice that something has been written to a path.
     fn written_to(path: PathBuf) -> notify::Result<Event> {
         Ok(Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Any))).add_path(path))
     }
 
     #[test]
-    fn un_aviso_levanta_la_bandera_de_su_consola_y_no_la_de_la_otra() {
+    fn a_notice_raises_the_flag_of_its_console_and_not_that_of_the_other() {
         let mut harness = two_consoles();
 
         (harness.handler)(written_to(harness.consoles[0].panel()));
 
         assert!(
             harness.consoles[0].flag.take(),
-            "la consola cuyo panel cambió no se ha enterado"
+            "the console whose panel changed has not found out"
         );
         assert!(
             !harness.consoles[1].flag.take(),
-            "la consola de al lado releerá su fichero sin que nadie lo haya tocado"
+            "the console next to it will reread its file without anyone having touched it"
         );
     }
 
     #[test]
-    fn un_aviso_despierta_a_la_ventana() {
+    fn a_notice_wakes_the_window() {
         let mut harness = two_consoles();
 
         (harness.handler)(written_to(harness.consoles[0].panel()));
@@ -434,14 +439,14 @@ mod tests {
         assert_eq!(
             harness.wakeups.count(),
             1,
-            "se levantó la bandera y nadie despertó a la ventana: el panel no se movería"
+            "the flag was raised and no one woke the window: the panel would not move"
         );
     }
 
-    /// **El fichero temporal del propio contrato es el caso a filtrar, no una rareza.** Quien publica
-    /// como el contrato recomienda escribe `panel.json.tmp` en ese mismo directorio y lo renombra
-    /// encima: sin filtrar, cada publicación provocaría una lectura de más del fichero que todavía no
-    /// es el bueno.
+    /// **The contract's own temporary file is the case to filter, not an oddity.** Whoever publishes as
+    /// the contract recommends writes `panel.json.tmp` in that same directory and renames it over:
+    /// without filtering, every publication would cause an extra read of the file that is not yet the
+    /// good one.
     fn a_neighbor_raises_nothing(neighbor: &str) {
         let mut harness = two_consoles();
 
@@ -449,33 +454,33 @@ mod tests {
 
         assert!(
             !harness.consoles[0].flag.take(),
-            "«{neighbor}» hizo releer el panel de su consola"
+            "«{neighbor}» made its console's panel reread"
         );
         assert!(
             !harness.consoles[1].flag.take(),
-            "«{neighbor}» despertó a la de al lado"
+            "«{neighbor}» woke the one next to it"
         );
         assert_eq!(
             harness.wakeups.count(),
             0,
-            "«{neighbor}» sacó a la ventana del reposo para no hacer nada"
+            "«{neighbor}» brought the window out of rest to do nothing"
         );
     }
 
     #[test]
-    fn el_temporal_de_la_escritura_atomica_no_levanta_nada() {
+    fn the_atomic_write_temporary_raises_nothing() {
         a_neighbor_raises_nothing("panel.json.tmp");
     }
 
     #[test]
-    fn un_fichero_cualquiera_del_directorio_no_levanta_nada() {
-        a_neighbor_raises_nothing("notas.txt");
+    fn any_file_of_the_directory_raises_nothing() {
+        a_neighbor_raises_nothing("notes.txt");
     }
 
-    /// **Un aviso trae varias rutas**, y el crate no promete cuáles: si solo se mirara la primera, una
-    /// publicación se perdería según en qué orden llegue.
+    /// **A notice carries several paths**, and the crate does not promise which: if only the first were
+    /// looked at, a publication would be lost depending on which order it arrives in.
     #[test]
-    fn un_aviso_con_varias_rutas_mira_todas() {
+    fn a_notice_with_several_paths_looks_at_all_of_them() {
         let mut harness = two_consoles();
 
         (harness.handler)(Ok(Event::new(EventKind::Create(CreateKind::File))
@@ -484,23 +489,23 @@ mod tests {
 
         assert!(
             harness.consoles[0].flag.take(),
-            "el panel.json venía en el aviso y nadie lo vio"
+            "the panel.json came in the notice and no one saw it"
         );
     }
 
-    /// **Publicar bien no puede costar dos fotogramas.** Un renombre encima —lo que el contrato
-    /// recomienda— entrega el destino y **acto seguido** un segundo aviso con origen y destino juntos:
-    /// la misma ruta otra vez, y nada nuevo que decir. Sin descartarlo, cada publicación bien hecha
-    /// pide **1,88 fotogramas** en vez de uno, medido en la aplicación de verdad.
+    /// **Publishing well cannot cost two frames.** A rename over —what the contract recommends—
+    /// delivers the destination and **right after** a second notice with origin and destination
+    /// together: the same path again, and nothing new to say. Without discarding it, every
+    /// well-made publication asks for **1.88 frames** instead of one, measured in the real application.
     #[test]
-    fn el_eco_de_un_renombrado_no_pide_un_segundo_fotograma() {
+    fn the_echo_of_a_rename_does_not_ask_for_a_second_frame() {
         let mut harness = two_consoles();
         let (temp, panel) = (
             harness.consoles[0].dir.join("panel.json.tmp"),
             harness.consoles[0].panel(),
         );
 
-        // Los dos avisos del renombre, en el orden en que llegan.
+        // The two notices of the rename, in the order in which they arrive.
         (harness.handler)(Ok(Event::new(EventKind::Modify(ModifyKind::Name(
             RenameMode::To,
         )))
@@ -513,22 +518,22 @@ mod tests {
 
         assert!(
             harness.consoles[0].flag.take(),
-            "el renombre encima es una publicación y no se ha visto"
+            "the rename over is a publication and it has not been seen"
         );
         assert_eq!(
             harness.wakeups.count(),
             1,
-            "una sola publicación pidió dos fotogramas"
+            "a single publication asked for two frames"
         );
     }
 
-    /// **La aplicación no puede oírse a sí misma leer.** El vigilante del sistema avisa también de que
-    /// alguien ha abierto el fichero, y quien lo abre es esta misma aplicación: sin filtrarlo, leer
-    /// levanta la bandera, la bandera pide un fotograma y el fotograma vuelve a leer. Con un
-    /// `panel.json` que no se entiende —que por eso se reabre cada vez— eso es una ventana que no se
-    /// duerme nunca, con su lectura de disco por fotograma y sin nada en pantalla que lo explique.
+    /// **The application cannot hear itself read.** The system watcher also notifies that someone has
+    /// opened the file, and whoever opens it is this very application: without filtering it, reading
+    /// raises the flag, the flag asks for a frame and the frame reads again. With a `panel.json` that is
+    /// not understood —which is why it is reopened every time— that is a window that never falls asleep,
+    /// with its disk read per frame and nothing on screen to explain it.
     #[test]
-    fn abrir_el_fichero_para_leerlo_no_levanta_ninguna_bandera() {
+    fn opening_the_file_to_read_it_raises_no_flag() {
         let mut harness = two_consoles();
 
         for ours in [
@@ -540,18 +545,19 @@ mod tests {
 
             assert!(
                 !harness.consoles[0].flag.take(),
-                "{ours:?}: leer el fichero se cuenta como una publicación y la lectura se realimenta"
+                "{ours:?}: reading the file is counted as a publication and the read feeds itself back"
             );
         }
 
         assert_eq!(harness.wakeups.count(), 0);
     }
 
-    /// Y la otra mitad, que es la que impide arreglar lo de arriba de más: **cerrar tras escribir sí
-    /// es publicar**. Es la única señal que llega cuando el productor que no renombra ya ha terminado,
-    /// y sin ella el panel se quedaría con lo que se leyó a medio escribir.
+    /// And the other half, which is the one that keeps the above from being fixed too far: **closing
+    /// after writing is publishing**. It is the only signal that arrives when the producer that does not
+    /// rename has already finished, and without it the panel would be left with what was read
+    /// half-written.
     #[test]
-    fn cerrar_tras_escribir_si_levanta_la_bandera() {
+    fn closing_after_writing_does_raise_the_flag() {
         let mut harness = two_consoles();
 
         (harness.handler)(Ok(Event::new(EventKind::Access(AccessKind::Close(
@@ -561,15 +567,15 @@ mod tests {
 
         assert!(
             harness.consoles[0].flag.take(),
-            "el productor terminó de escribir y el panel no se entera"
+            "the producer finished writing and the panel does not find out"
         );
     }
 
-    /// **El único aviso que significa «te has perdido cosas» venía sin rutas y se tiraba.** Es lo que
-    /// manda el sistema cuando desborda su cola de avisos: detrás de él va un cambio real que ya nunca
-    /// llegará, así que hay que volver a mirarlo todo.
+    /// **The only notice that means «you have missed things» came with no paths and was thrown away.**
+    /// It is what the system sends when it overflows its notice queue: behind it goes a real change that
+    /// will now never arrive, so everything has to be looked at again.
     #[test]
-    fn el_aviso_de_que_se_han_perdido_avisos_hace_mirar_a_todas() {
+    fn the_notice_that_notices_have_been_lost_makes_all_of_them_look() {
         let mut harness = two_consoles();
 
         (harness.handler)(Ok(
@@ -578,21 +584,25 @@ mod tests {
 
         assert!(
             harness.consoles[0].flag.take() && harness.consoles[1].flag.take(),
-            "se perdieron avisos y ninguna consola vuelve a mirar su fichero"
+            "notices were lost and no console looks at its file again"
         );
-        assert_eq!(harness.wakeups.count(), 1, "y hay que ir a mirarlos");
+        assert_eq!(
+            harness.wakeups.count(),
+            1,
+            "and they have to be gone and looked at"
+        );
         assert!(
             !harness.blind.load(Ordering::Relaxed),
-            "una cola desbordada es de un instante, no una avería: no hay que degradarse por ella"
+            "an overflowed queue is of an instant, not a breakdown: there is no need to degrade over it"
         );
     }
 
-    /// **Que el usuario borre el directorio desde su propia consola es un escenario del proyecto**, no
-    /// una hipótesis: tiene un shell dentro. El seguimiento se pierde con el inodo y no se re-registra
-    /// nunca, y el aviso llega con la ruta del directorio, no con la del panel — así que sin mirarlo
-    /// se descartaría y nadie sabría que a partir de ahí no llega nada.
+    /// **That the user deletes the directory from their own console is a project scenario**, not a
+    /// hypothesis: it has a shell inside. The tracking is lost with the inode and is never re-registered,
+    /// and the notice arrives with the directory's path, not with the panel's — so without looking at it
+    /// it would be discarded and no one would know that from there on nothing arrives.
     #[test]
-    fn perder_el_directorio_vigilado_deja_ciego_al_vigilante() {
+    fn losing_the_watched_directory_leaves_the_watcher_blind() {
         let mut harness = two_consoles();
 
         (harness.handler)(Ok(Event::new(EventKind::Remove(RemoveKind::Folder))
@@ -600,19 +610,20 @@ mod tests {
 
         assert!(
             harness.blind.load(Ordering::Relaxed),
-            "se perdió el seguimiento y la ventana seguirá creyendo que alguien la avisa"
+            "the tracking was lost and the window will go on believing that someone notifies it"
         );
         assert_eq!(
             harness.wakeups.count(),
             1,
-            "hay que despertar para que el respaldo arranque, o no arranca hasta que pase otra cosa"
+            "a wake is needed for the fallback to start, or it does not start until something else happens"
         );
     }
 
-    /// Borrar el `panel.json` **no** deja ciego a nadie: el directorio sigue vigilado y el productor
-    /// puede volver a publicar. Es la mitad que distingue el hallazgo de arriba de tirar la toalla.
+    /// Deleting the `panel.json` leaves no one blind: the directory is still watched and the producer
+    /// can publish again. It is the half that distinguishes the finding above from throwing in the
+    /// towel.
     #[test]
-    fn borrar_el_panel_no_deja_ciego_pero_si_hace_mirar() {
+    fn deleting_the_panel_leaves_no_one_blind_but_does_make_it_look() {
         let mut harness = two_consoles();
 
         (harness.handler)(Ok(
@@ -621,90 +632,87 @@ mod tests {
 
         assert!(
             !harness.blind.load(Ordering::Relaxed),
-            "el directorio sigue ahí y el vigilante se ha dado por muerto"
+            "the directory is still there and the watcher gave itself up for dead"
         );
         assert!(
             harness.consoles[0].flag.take(),
-            "el panel desapareció y su consola no vuelve a mirar"
+            "the panel disappeared and its console does not look again"
         );
     }
 
-    /// Un fallo del vigilante **no puede tumbar su hilo**, y deja su estado en desconocido: a partir de
-    /// ahí no se puede seguir confiando en unos avisos que quizá ya no lleguen.
+    /// A watcher failure **cannot bring down its thread**, and it leaves its state unknown: from there
+    /// on one cannot go on trusting notices that may no longer arrive.
     #[test]
-    fn un_fallo_deja_ciego_al_vigilante_sin_entrar_en_panico() {
+    fn a_failure_leaves_the_watcher_blind_without_panicking() {
         let mut harness = two_consoles();
 
-        (harness.handler)(Err(notify::Error::generic("se acabaron los avisos")));
+        (harness.handler)(Err(notify::Error::generic("the notices ran out")));
 
         assert!(
             harness.blind.load(Ordering::Relaxed),
-            "el vigilante falló y la ventana seguirá esperando avisos suyos"
+            "the watcher failed and the window will go on waiting for notices from it"
         );
     }
 
-    /// Y el fallo que se repite **no puede convertirse en un chorro por la salida de errores**: el
-    /// bucle de lectura del vigilante entrega el fallo y sigue, así que uno persistente llegaría en
-    /// cada vuelta.
+    /// And the failure that repeats **cannot turn into a stream through the error output**: the
+    /// watcher's read loop delivers the failure and carries on, so a persistent one would arrive on
+    /// every round.
     #[test]
-    fn un_fallo_que_se_repite_solo_despierta_una_vez() {
+    fn a_failure_that_repeats_wakes_only_once() {
         let mut harness = two_consoles();
 
         for _ in 0..10 {
-            (harness.handler)(Err(notify::Error::generic("y van diez")));
+            (harness.handler)(Err(notify::Error::generic("that's ten now")));
         }
 
         assert_eq!(
             harness.wakeups.count(),
             1,
-            "un fallo que se repite despierta a la ventana en cada vuelta"
+            "a failure that repeats wakes the window on every round"
         );
     }
 
-    /// **Sin vigilante, la ventana tiene que saberlo.** Es lo que dispara el respaldo de releer en cada
-    /// fotograma, y sin eso el hito empeoraría lo que había en vez de mejorarlo.
+    /// **Without a watcher, the window has to know it.** It is what triggers the fallback of rereading on
+    /// every frame, and without that the milestone would worsen what there was instead of improving it.
     #[test]
-    fn un_vigilante_armado_no_esta_ciego() {
-        let dir = panel_contract::PanelDir::create().expect("crear el directorio");
+    fn an_armed_watcher_is_not_blind() {
+        let dir = panel_contract::PanelDir::create().expect("create the directory");
 
         let watcher = Watcher::new(|| {}, &[(dir.path(), Flag::raised())]);
 
         assert!(
             !watcher.is_blind(),
-            "el vigilante se armó sobre un directorio que existe y se declara ciego"
+            "the watcher armed over a directory that exists and declares itself blind"
         );
     }
 
-    /// Y al revés: un directorio que no existe **no** se puede vigilar, y eso no es una excusa para
-    /// dejar de decir que se está ciego.
+    /// And the other way around: a directory that does not exist **cannot** be watched, and that is no
+    /// excuse to stop saying that it is blind.
     ///
-    /// La ruta que no existe cuelga de un directorio recién creado **a propósito**: una ruta fija
-    /// dentro del temporal del sistema sería una apuesta a que nadie la haya creado nunca en esta
-    /// máquina, y el día que alguien lo hiciera esta prueba fallaría para siempre señalando al código.
+    /// The path that does not exist hangs off a freshly created directory **on purpose**: a fixed path
+    /// inside the system's temporary would be a bet that no one has ever created it on this machine, and
+    /// the day someone did this test would fail forever pointing at the code.
     #[test]
-    fn un_directorio_que_no_existe_deja_al_vigilante_ciego() {
-        let dir = panel_contract::PanelDir::create().expect("crear el directorio");
-        let missing = dir.path().join("no-existe");
+    fn a_directory_that_does_not_exist_leaves_the_watcher_blind() {
+        let dir = panel_contract::PanelDir::create().expect("create the directory");
+        let missing = dir.path().join("does-not-exist");
 
         let watcher = Watcher::new(|| {}, &[(missing.as_path(), Flag::raised())]);
 
         assert!(
             watcher.is_blind(),
-            "no se pudo vigilar nada y la ventana creerá que alguien la avisa"
+            "nothing could be watched and the window will believe that someone notifies it"
         );
     }
 
-    /// **Sin consolas con directorio no hay nada que vigilar, y eso no es estar ciego.** Armar el
-    /// vigilante del sistema y su hilo para no mirar nada sería pagar por no hacer nada, y declararse
-    /// ciego haría que la ventana releyera en cada fotograma unos ficheros que no existen.
+    /// **With no consoles with a directory there is nothing to watch, and that is not being blind.**
+    /// Arming the system watcher and its thread to look at nothing would be paying for doing nothing, and
+    /// declaring oneself blind would make the window reread on every frame some files that do not exist.
     #[test]
-    fn sin_consolas_no_se_arma_nada_y_no_se_esta_ciego() {
+    fn with_no_consoles_nothing_is_armed_and_it_is_not_blind() {
         let watcher = Watcher::new(|| {}, &[]);
 
-        assert!(watcher._backend.is_none(), "se armó para no mirar nada");
-        assert!(
-            !watcher.is_blind(),
-            "no hay ningún panel que se quede viejo"
-        );
+        assert!(watcher._backend.is_none(), "it armed to look at nothing");
+        assert!(!watcher.is_blind(), "there is no panel that goes stale");
     }
 }

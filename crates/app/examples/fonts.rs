@@ -1,109 +1,105 @@
-//! Mide **lo que cuesta darle al terminal las fuentes de la máquina**, que es lo que decide cómo se
-//! hace el resto del hito.
+//! Measures **what it costs to hand the terminal the machine's fonts**, which is what decides how
+//! the rest of the milestone is built.
 //!
 //! ```text
 //! cargo run --release --example fonts -p app
 //! ```
 //!
-//! **No toca producción.** Igual que el banco del historial midió el motor por debajo de la fachada de
-//! `term-core`, aquí se mide `fontique` y `skrifa` **antes** de que ninguna entre en la aplicación:
-//! primero el número, y el número decide qué código hace falta.
+//! **It does not touch production.** Just as the history bench measured the engine beneath the facade
+//! of `term-core`, here `fontique` and `skrifa` are measured **before** either one enters the
+//! application: the number first, and the number decides what code is needed.
 //!
-//! **En depuración los números salen varias veces peores.** El que vale es el de `--release`.
+//! **In debug the numbers come out several times worse.** The one that counts is the `--release` one.
 //!
-//! ## Tres cosas que la primera versión de este banco hacía mal, y por qué importan
+//! ## Three things the first version of this bench did wrong, and why they matter
 //!
-//! 1. **Publicaba la primera familia que encontraba, y el orden no es estable.** Dos corridas seguidas
-//!    dieron `Noto Sans Mono CJK JP` y `Noto Sans Mono CJK HK` para el mismo carácter, y `Noto Color
-//!    Emoji` y `DejaVu Sans` para el mismo emoji. Un banco cuyo resultado cambia entre corridas no
-//!    mide: **aquí se ordenan las familias por nombre** para que la respuesta sea reproducible.
-//! 2. **Una sola muestra por punto no es una medida.** Enumerar dio 13,6 ms y 24,3 ms en dos corridas
-//!    del mismo binario. Se toman varias y se publica la **mediana de las calientes**, como hizo el
-//!    banco del historial después de que su revisión lo obligara.
+//! 1. **It published the first family it found, and the order is not stable.** Two runs in a row
+//!    gave `Noto Sans Mono CJK JP` and `Noto Sans Mono CJK HK` for the same character, and `Noto Color
+//!    Emoji` and `DejaVu Sans` for the same emoji. A bench whose result changes between runs does not
+//!    measure: **here the families are ordered by name** so the answer is reproducible.
+//! 2. **A single sample per point is not a measurement.** Enumerating gave 13.6 ms and 24.3 ms in two
+//!    runs of the same binary. Several are taken and the **median of the warm ones** is published, as
+//!    the history bench did after its review forced it to.
 //!
-//!    **Pero eso no alcanza a la columna fría, y es el límite de este banco.** El frío **ocurre una vez
-//!    por corrida** —la muestra 1 llena las cachés y las otras cuatro ya las encuentran llenas—, así que
-//!    en frío no hay cinco muestras que promediar: hay **una**. Y es justo la que la vía perezosa paga.
-//!    Su dispersión solo se ve **repitiendo la corrida**: tres seguidas con la máquina en reposo movieron
-//!    el número que decide de 3,4 a 4,8 ms. Por eso **D24** publica la columna fría como **rango de
-//!    corridas** y no como un valor, y por eso quien repita esta medida tiene que correrlo **más de una
-//!    vez**.
-//! 3. **«Cubre el carácter» no es «lo pinta a color».** `DejaVu Sans` mapea 😀 a un glifo **monocromo**
-//!    y gana por orden alfabético. Es exactamente el defecto que Alacritty tiene documentado —coge el
-//!    glifo de DejaVu y solo recurre a Noto Emoji si aquél no lo trae—, así que aquí se pregunta
-//!    **además** si esa cara tiene tablas de color.
+//!    **But that does not reach the cold column, and it is the limit of this bench.** The cold one
+//!    **happens once per run** —sample 1 fills the caches and the other four already find them full—, so
+//!    in cold there are not five samples to average: there is **one**. And it is exactly the one the lazy
+//!    path pays. Its spread is only seen **by repeating the run**: three in a row with the machine at
+//!    rest moved the deciding number from 3.4 to 4.8 ms. That is why **D24** publishes the cold column as
+//!    a **range of runs** and not as a single value, and why whoever repeats this measurement has to run
+//!    it **more than once**.
+//! 3. **"Covers the character" is not "paints it in color".** `DejaVu Sans` maps 😀 to a **monochrome**
+//!    glyph and wins by alphabetical order. It is exactly the defect Alacritty has documented —it takes
+//!    the DejaVu glyph and only falls back to Noto Emoji if that one does not carry it—, so here we
+//!    **also** ask whether that face has color tables.
 //!
-//! ## Las cuatro preguntas que contesta
+//! ## The four questions it answers
 //!
-//! 1. **Cuánto tarda enumerar las fuentes de la máquina.** Decide si el descubrimiento se paga **al
-//!    arrancar** —donde ya hay 5,42 ms medidos de restaurar la disposición— o solo cuando aparece un
-//!    carácter que nadie cubre.
-//! 2. **Cuánto cuesta encontrar quién cubre un carácter**, por las dos vías: recorriéndolo todo y
-//!    preguntando por script o por familia genérica.
-//! 3. **Cuánto cuesta registrar las caras en el motor de texto, y cuánta memoria se lleva.** Es lo que
-//!    se pagaría al abrir la ventana, y va aparte de enumerar porque son dos costes distintos.
-//! 4. **Cuánto ocupa un glifo de color y de qué forma viene.** Decide el techo de la caché y si el
-//!    emoji se reescala desde un mapa de bits o se dibuja al tamaño que se pida.
+//! 1. **How long it takes to enumerate the machine's fonts.** Decides whether discovery is paid **at
+//!    startup** —where there are already 5.42 ms measured for restoring the layout— or only when a
+//!    character appears that nobody covers.
+//! 2. **What it costs to find who covers a character**, by the two paths: going through everything and
+//!    asking by script or by generic family.
+//! 3. **What it costs to register the faces in the text engine, and how much memory it takes.** It is
+//!    what would be paid when opening the window, and it goes separately from enumerating because they
+//!    are two distinct costs.
+//! 4. **How much a color glyph takes up and in what form it comes.** Decides the cache ceiling and
+//!    whether the emoji is rescaled from a bitmap or drawn at the requested size.
 //!
-//! **Lo que este banco NO contesta, y hay que decirlo:** qué cuesta *pintar* el glifo ya rasterizado.
-//! Eso vive en el fotograma y se mide con una tanda, no aquí.
+//! **What this bench does NOT answer, and it has to be said:** what it costs to *paint* the already
+//! rasterized glyph. That lives in the frame and is measured with a batch, not here.
 
 use std::time::{Duration, Instant};
 
 use eframe::egui;
 use fontique::{Collection, CollectionOptions, GenericFamily, Script, SourceCache};
 
-/// Cuántas veces se repite cada medida dentro de una corrida. Repetir en vez de medir una vez es lo que
-/// el banco del historial acabó haciendo después de que su revisión tumbara la muestra única.
+/// How many times each measurement is repeated within a run. Repeating instead of measuring once is
+/// what the history bench ended up doing after its review knocked down the single sample.
 ///
-/// **Cinco muestras dan una mediana caliente de cuatro y un frío de uno.** Subir esta constante no mejora
-/// el frío: sigue habiendo una sola muestra fría por corrida, porque la segunda ya encuentra las cachés
-/// llenas. Lo que mejora el frío es **repetir la corrida**.
+/// **Five samples give a warm median of four and a cold of one.** Raising this constant does not
+/// improve the cold: there is still a single cold sample per run, because the second one already finds
+/// the caches full. What improves the cold is **repeating the run**.
 const SAMPLES: usize = 5;
 
-/// El cuerpo de la fuente con la que este terminal pinta hoy, copiado de la aplicación.
+/// The body size of the font this terminal paints with today, copied from the application.
 ///
-/// **La altura de la celda NO se inventa: se le pregunta al motor de texto**, que es la regla que el
-/// pintor tiene escrita —«la medida de la celda se pregunta, no se inventa»—. La primera versión de este
-/// banco puso un 17 a ojo, y encima lo trataba como píxeles cuando es **puntos**: con el escritorio al
-/// 200 % la celda son el doble de píxeles y la caché **cuatro veces** más grande, que es justo el número
-/// del que saldría su techo. Lo destapó la revisión.
+/// **The cell height is NOT invented: it is asked of the text engine**, which is the rule the painter
+/// has written down —"the cell measurement is asked, not invented"—. The first version of this bench
+/// put a 17 by eye, and on top of that treated it as pixels when it is **points**: with the desktop at
+/// 200 % the cell is twice as many pixels and the cache **four times** bigger, which is exactly the
+/// number its ceiling would come from. The review uncovered it.
 const BODY: f32 = 14.0;
 
-/// Los aumentos de escritorio con los que se publica el tamaño de la caché.
+/// The desktop scale factors the cache size is published with.
 ///
-/// **Dos y no uno**, porque el techo se dimensiona en píxeles y el escritorio decide cuántos hay por
-/// punto. **D10** ya estableció que el zoom no puede cambiar estas cifras en silencio.
+/// **Two and not one**, because the ceiling is sized in pixels and the desktop decides how many there
+/// are per point. **D10** already established that zoom cannot change these figures silently.
 const SCALES: [f32; 2] = [1.0, 2.0];
 
-/// Los caracteres con los que se pregunta cobertura, y por qué cada uno.
+/// The characters coverage is asked about, and why each one.
 ///
-/// **Ninguno es decorativo:** cada uno representa una de las cosas que hoy salen como cuadro.
+/// **None is decorative:** each one represents one of the things that today come out as a box.
 const SAMPLE: [(char, &str); 5] = [
-    ('日', "CJK — el caso de D3"),
-    ('한', "hangul — otra cobertura, otra fuente"),
-    (
-        '\u{e0b0}',
-        "Área de Uso Privado — el icono de un `ls` moderno",
-    ),
-    ('😀', "emoji con presentación de color por defecto"),
-    ('☁', "emoji con presentación de TEXTO por defecto"),
+    ('日', "CJK — the D3 case"),
+    ('한', "hangul — another coverage, another font"),
+    ('\u{e0b0}', "Private Use Area — the icon of a modern `ls`"),
+    ('😀', "emoji with default color presentation"),
+    ('☁', "emoji with default TEXT presentation"),
 ];
 
 fn main() {
-    println!("── qué cuesta darle al terminal las fuentes de la máquina ──");
+    println!("── what it costs to hand the terminal the machine's fonts ──");
     println!(
-        "en frío: LA muestra 1, una sola — en caliente: la mediana de las {} restantes",
+        "cold: THE sample 1, just one — warm: the median of the remaining {}",
         SAMPLES - 1
     );
-    println!(
-        "el frío ocurre una vez por corrida: para saber cuánto se mueve, repite esta corrida\n"
-    );
+    println!("the cold happens once per run: to know how much it moves, repeat this run\n");
 
-    // ── 1. Enumerar ────────────────────────────────────────────────────────────────────────────
+    // ── 1. Enumerate ───────────────────────────────────────────────────────────────────────────
     //
-    // **Se cronometra la construcción entera**, que es lo que un arranque haría: medir por dentro daría
-    // un número que nadie paga.
+    // **The whole construction is timed**, which is what a startup would do: measuring from inside
+    // would give a number nobody pays.
     let mut times = Vec::new();
     let mut count = 0;
     for _ in 0..SAMPLES {
@@ -115,11 +111,15 @@ fn main() {
         count = collection.family_names().count();
         times.push(started.elapsed());
     }
-    println!("1. enumerar las fuentes del sistema");
-    println!("   {}  ·  {count} familias", summary(&times));
+    println!("1. enumerate the system fonts");
+    println!("   {}  ·  {count} families", summary(&times));
     if count == 0 {
-        println!("   ⚠ NINGUNA familia: o no hay fontconfig en ejecución, o no hay fuentes.");
-        println!("     Es el caso que AC9 obliga a aguantar, y este banco acaba de reproducirlo.");
+        println!(
+            "   ⚠ NO family at all: either there is no fontconfig running, or there are no fonts."
+        );
+        println!(
+            "     It is the case AC9 forces us to withstand, and this bench has just reproduced it."
+        );
         return;
     }
 
@@ -127,13 +127,13 @@ fn main() {
         system_fonts: true,
         ..Default::default()
     });
-    // **Ordenadas por nombre**, que es lo que hace la respuesta reproducible entre corridas.
+    // **Ordered by name**, which is what makes the answer reproducible across runs.
     let mut families: Vec<String> = collection.family_names().map(str::to_owned).collect();
     families.sort();
     let mut cache = SourceCache::default();
 
-    // ── 2. Quién cubre qué, recorriéndolo todo ─────────────────────────────────────────────────
-    println!("\n2. quién cubre qué, abriendo las {count} familias en orden (el peor caso)");
+    // ── 2. Who covers what, going through everything ───────────────────────────────────────────
+    println!("\n2. who covers what, opening the {count} families in order (the worst case)");
     for (which, reason) in SAMPLE {
         let mut times = Vec::new();
         let mut found = None;
@@ -142,16 +142,16 @@ fn main() {
             found = who_covers(&mut collection, &mut cache, &families, which);
             times.push(started.elapsed());
         }
-        // **Y si la ganadora lo pinta a color, porque ahí estaba el hallazgo.** Sin esta columna, el
-        // banco decía «cubierto» y callaba que quien gana el emoji en esta máquina lo pinta en blanco y
-        // negro teniendo una fuente de color instalada.
+        // **And whether the winner paints it in color, because that is where the finding was.** Without
+        // this column, the bench said "covered" and kept quiet that whoever wins the emoji on this
+        // machine paints it in black and white while having a color font installed.
         let winner = found.as_ref().map_or_else(
-            || "(nadie lo cubre)".to_owned(),
+            || "(nobody covers it)".to_owned(),
             |q| {
                 let color = if q.renders_color(which) {
-                    " [a color]"
+                    " [in color]"
                 } else {
-                    " [monocromo]"
+                    " [monochrome]"
                 };
                 format!("{}{color}", q.family)
             },
@@ -159,11 +159,12 @@ fn main() {
         println!("   {which}  {}  {winner}   ({reason})", summary(&times));
     }
 
-    // ── 3. Las dos vías rápidas ────────────────────────────────────────────────────────────────
+    // ── 3. The two fast paths ──────────────────────────────────────────────────────────────────
     //
-    // **Recorrerlo todo es el peor caso a propósito; esto es lo que la aplicación usaría.** La
-    // diferencia entre los dos números decide cómo se escribe la entrega que hace que CJK se vea.
-    println!("\n3. las vías rápidas: candidatas por script y por familia genérica");
+    // **Going through everything is the worst case on purpose; this is what the application would
+    // use.** The difference between the two numbers decides how the delivery that makes CJK visible is
+    // written.
+    println!("\n3. the fast paths: candidates by script and by generic family");
     for (which, script) in [('日', "Hani"), ('한', "Hang")] {
         let mut times = Vec::new();
         let mut candidates = 0;
@@ -171,23 +172,23 @@ fn main() {
         for _ in 0..SAMPLES {
             let started = Instant::now();
             let ids: Vec<_> = collection
-                .fallback_families(Script::parse(script).expect("código de script válido"))
+                .fallback_families(Script::parse(script).expect("valid script code"))
                 .collect();
             candidates = ids.len();
             found = first_that_covers(&mut collection, &mut cache, &ids, which);
             times.push(started.elapsed());
         }
         let winner = found.as_ref().map_or_else(
-            || "(ninguna candidata lo cubre)".to_owned(),
+            || "(no candidate covers it)".to_owned(),
             |q| q.family.clone(),
         );
         println!(
-            "   {which}  {}  {winner}   ({candidates} candidatas por script)",
+            "   {which}  {}  {winner}   ({candidates} candidates by script)",
             summary(&times)
         );
     }
-    // **El emoji NO sale por script**: `Zsym` no lo cubre en esta máquina. La vía que sí es la familia
-    // genérica que el sistema declara para eso.
+    // **The emoji does NOT come out by script**: `Zsym` does not cover it on this machine. The path
+    // that does is the generic family the system declares for that.
     let mut times = Vec::new();
     let mut candidates = 0;
     let mut found = None;
@@ -195,59 +196,59 @@ fn main() {
         let started = Instant::now();
         let ids: Vec<_> = collection.generic_families(GenericFamily::Emoji).collect();
         candidates = ids.len();
-        // **Con la regla que la decisión concluye, no con «la primera que cubra».** Y eso fue una
-        // corrección de revisión: midiendo solo la cobertura, el número no incluía seguir buscando
-        // cuando la primera candidata resulta ser monocroma — que es exactamente el caso que este banco
-        // descubrió recorriendo en orden. Aquí funcionaba por suerte, porque en esta máquina la de color
-        // está la primera; en otra no lo estaría, y el número publicado sería el de un camino más corto
-        // que el real.
+        // **With the rule the decision concludes, not with "the first one that covers".** And that was
+        // a review correction: measuring only the coverage, the number did not include continuing to
+        // search when the first candidate turns out to be monochrome — which is exactly the case this
+        // bench discovered by going through in order. Here it worked by luck, because on this machine
+        // the color one is first; on another it would not be, and the published number would be that of
+        // a shorter path than the real one.
         found = first_in_color(&mut collection, &mut cache, &ids, '😀');
         times.push(started.elapsed());
     }
     let winner = found
         .as_ref()
-        .map_or_else(|| "(ninguna lo cubre)".to_owned(), |q| q.family.clone());
+        .map_or_else(|| "(none covers it)".to_owned(), |q| q.family.clone());
     println!(
-        "   😀  {}  {winner}   ({candidates} candidatas por familia genérica)",
+        "   😀  {}  {winner}   ({candidates} candidates by generic family)",
         summary(&times)
     );
 
-    // ── 4. Registrar las caras en el motor de texto ────────────────────────────────────────────
+    // ── 4. Register the faces in the text engine ───────────────────────────────────────────────
     //
-    // **Es lo que se pagaría al abrir la ventana**, y va aparte de enumerar porque son dos costes
-    // distintos: uno lo cobra el sistema y el otro el framework.
-    println!("\n4. registrar las caras en el motor de texto");
+    // **It is what would be paid when opening the window**, and it goes separately from enumerating
+    // because they are two distinct costs: one is charged by the system and the other by the framework.
+    println!("\n4. register the faces in the text engine");
     register(&mut collection, &mut cache, &families);
 
-    // ── 4bis. Registrar una cara EN CALIENTE ───────────────────────────────────────────────────
+    // ── 4bis. Register a face HOT ──────────────────────────────────────────────────────────────
     //
-    // **Éste es el número que decide entre las dos vías**, y sin él la decisión sería una preferencia.
-    // Si el descubrimiento es perezoso, la cara nueva se registra con la ventana ya abierta: el motor
-    // de texto se rehace y ese coste **cae dentro de un fotograma**, no antes del primero. Un fotograma
-    // son 16,7 ms a 60 Hz, así que lo que salga aquí dice si se nota como un tirón o no.
-    println!("\n4bis. registrar UNA cara más con la ventana ya abierta (la vía perezosa)");
+    // **This is the number that decides between the two paths**, and without it the decision would be
+    // a preference. If discovery is lazy, the new face is registered with the window already open: the
+    // text engine is rebuilt and that cost **falls within a frame**, not before the first one. A frame
+    // is 16.7 ms at 60 Hz, so whatever comes out here says whether it is noticed as a jolt or not.
+    println!("\n4bis. register ONE more face with the window already open (the lazy path)");
     register_hot(&mut collection, &mut cache);
 
-    // ── 5. El glifo de color ───────────────────────────────────────────────────────────────────
-    println!("\n5. de qué forma viene un glifo de color, y cuánto ocupa");
+    // ── 5. The color glyph ─────────────────────────────────────────────────────────────────────
+    println!("\n5. in what form a color glyph comes, and how much it takes up");
     match found {
         Some(face) => measure_color(&face),
-        None => println!("   ninguna familia de emoji cubre 😀 en esta máquina"),
+        None => println!("   no emoji family covers 😀 on this machine"),
     }
 
-    println!("\n── lo que este banco NO dice ──");
+    println!("\n── what this bench does NOT say ──");
     println!(
-        "qué cuesta PINTAR el glifo ya rasterizado: eso vive en el fotograma y lo mide una tanda."
+        "what it costs to PAINT the already rasterized glyph: that lives in the frame and a batch measures it."
     );
 }
 
-/// Una cara concreta de una fuente, con lo que hace falta para preguntarle cosas.
+/// A specific face of a font, with what is needed to ask it things.
 ///
-/// **Lleva el `Blob` prestado y no una copia de los bytes**, y eso fue un hallazgo de revisión: copiar
-/// el fichero de fuente **dentro del cronómetro** hacía que los tiempos midieran el asignador de memoria
-/// y no la búsqueda. Con `Noto Sans CJK HK` —19,5 MiB— la copia costaba 5 ms y el número publicado
-/// seguía el **tamaño del fichero**, no cuántas familias se habían recorrido. Un `Blob` es un puntero
-/// contado, que es lo que la aplicación tendría.
+/// **It carries the borrowed `Blob` and not a copy of the bytes**, and that was a review finding:
+/// copying the font file **inside the stopwatch** made the timings measure the memory allocator and
+/// not the search. With `Noto Sans CJK HK` —19.5 MiB— the copy cost 5 ms and the published number
+/// followed the **file size**, not how many families had been gone through. A `Blob` is a
+/// reference-counted pointer, which is what the application would have.
 struct Face {
     family: String,
     blob: fontique::Blob<u8>,
@@ -255,10 +256,11 @@ struct Face {
 }
 
 impl Face {
-    /// Si esa cara trae el glifo de ese carácter **a color**.
+    /// Whether that face brings the glyph of that character **in color**.
     ///
-    /// **Se pregunta FUERA del cronómetro**, por lo mismo que la copia: sondear las tablas de color es
-    /// abrir la fuente entera con `skrifa`, y dentro del reloj inflaba todas las medidas de búsqueda.
+    /// **It is asked OUTSIDE the stopwatch**, for the same reason as the copy: probing the color tables
+    /// is opening the whole font with `skrifa`, and inside the clock it inflated all the search
+    /// measurements.
     fn renders_color(&self, which: char) -> bool {
         use skrifa::MetadataProvider as _;
         skrifa::FontRef::from_index(self.blob.data(), self.index).is_ok_and(|font| {
@@ -274,7 +276,7 @@ impl Face {
     }
 }
 
-/// La primera familia, en orden, cuya cara cubre ese carácter.
+/// The first family, in order, whose face covers that character.
 fn who_covers(
     collection: &mut Collection,
     cache: &mut SourceCache,
@@ -288,12 +290,12 @@ fn who_covers(
     first_that_covers(collection, cache, &ids, which)
 }
 
-/// La primera de esas familias cuya cara cubre el carácter **y lo pinta a color**.
+/// The first of those families whose face covers the character **and paints it in color**.
 ///
-/// **Es la regla que la decisión concluye, y por eso se mide así**: «la primera que cubra» se lleva el
-/// glifo aunque sea monocroma, que es el defecto que este banco encontró y que Alacritty tiene
-/// documentado. Sondear el color cuesta abrir la fuente con `skrifa`, así que este camino es **más caro**
-/// que el de solo cobertura — y ése es justo el número que hace falta.
+/// **It is the rule the decision concludes, and that is why it is measured this way**: "the first one
+/// that covers" takes the glyph even if it is monochrome, which is the defect this bench found and that
+/// Alacritty has documented. Probing the color costs opening the font with `skrifa`, so this path is
+/// **more expensive** than the coverage-only one — and that is exactly the number needed.
 fn first_in_color(
     collection: &mut Collection,
     cache: &mut SourceCache,
@@ -324,7 +326,7 @@ fn first_in_color(
     None
 }
 
-/// La primera de esas familias cuya cara cubre el carácter.
+/// The first of those families whose face covers the character.
 fn first_that_covers(
     collection: &mut Collection,
     cache: &mut SourceCache,
@@ -332,8 +334,8 @@ fn first_that_covers(
     which: char,
 ) -> Option<Face> {
     for &id in ids {
-        // **Se clonan las caras antes de seguir**: la familia presta de la colección, y la colección
-        // hace falta en la vuelta siguiente.
+        // **The faces are cloned before continuing**: the family borrows from the collection, and the
+        // collection is needed on the next round.
         let Some((name, faces)) = collection
             .family(id)
             .map(|family| (family.name().to_owned(), family.fonts().to_vec()))
@@ -360,7 +362,7 @@ fn first_that_covers(
     None
 }
 
-/// Qué cuesta registrar en el motor de texto las caras que hacen falta, y cuánto pesan.
+/// What it costs to register in the text engine the faces that are needed, and how much they weigh.
 fn register(collection: &mut Collection, cache: &mut SourceCache, families: &[String]) {
     let needed: Vec<Face> = SAMPLE
         .iter()
@@ -387,16 +389,16 @@ fn register(collection: &mut Collection, cache: &mut SourceCache, families: &[St
         registered += 1;
     }
 
-    // **Varias muestras, como todo lo demás.** La primera versión publicaba una sola bajo el cartel de
-    // «mediana de cinco», que es la misma regla que este módulo prohíbe en su punto 2 — y se movía un
-    // 16 % entre corridas.
+    // **Several samples, like everything else.** The first version published a single one under the
+    // label "median of five", which is the same rule this module forbids in its point 2 — and it moved
+    // by 16 % between runs.
     let mut times = Vec::new();
     for _ in 0..SAMPLES {
         let ctx = egui::Context::default();
         let started = Instant::now();
         ctx.set_fonts(definitions.clone());
-        // **Se fuerza una pasada**: `set_fonts` guarda la configuración y el motor de texto se rehace en
-        // el fotograma siguiente. Cronometrar solo la llamada publicaría un cero que no paga nadie.
+        // **A pass is forced**: `set_fonts` stores the configuration and the text engine is rebuilt on
+        // the next frame. Timing only the call would publish a zero that nobody pays.
         ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.label("日本語 ☁ 😀");
         })
@@ -404,27 +406,26 @@ fn register(collection: &mut Collection, cache: &mut SourceCache, families: &[St
         times.push(started.elapsed());
     }
     println!(
-        "   {}  ·  {registered} caras  ·  {:.1} MiB de fuente en memoria",
+        "   {}  ·  {registered} faces  ·  {:.1} MiB of font in memory",
         summary(&times),
         total_bytes as f64 / (1024.0 * 1024.0)
     );
     println!(
-        "   y esa memoria es el fichero de fuente ENTERO por cara, no solo los glifos que se usan"
+        "   and that memory is the WHOLE font file per face, not just the glyphs that are used"
     );
 }
 
-/// Qué cuesta añadir una cara al motor de texto **con la ventana ya andando**.
+/// What it costs to add a face to the text engine **with the window already running**.
 fn register_hot(collection: &mut Collection, cache: &mut SourceCache) {
-    // **La cara que devuelve LA VÍA ELEGIDA, no la del recorrido alfabético**, y ésa fue una corrección
-    // de revisión. Las dos vías dan fuentes distintas —`Droid Sans Fallback` de 3,8 MiB contra
-    // `Noto Sans CJK JP` de 19,5 MiB— así que sumar «buscar por script» con «registrar lo que encontró
-    // el recorrido» era sumar dos mitades de gestos distintos, y la segunda con una fuente cinco veces
-    // más pequeña.
+    // **The face that THE CHOSEN PATH returns, not the one from the alphabetical sweep**, and that was
+    // a review correction. The two paths give different fonts —`Droid Sans Fallback` of 3.8 MiB against
+    // `Noto Sans CJK JP` of 19.5 MiB— so adding "search by script" with "register what the sweep found"
+    // was adding two halves of different gestures, and the second with a font five times smaller.
     let ids: Vec<_> = collection
-        .fallback_families(Script::parse("Hani").expect("código de script válido"))
+        .fallback_families(Script::parse("Hani").expect("valid script code"))
         .collect();
     let Some(face) = first_that_covers(collection, cache, &ids, '日') else {
-        println!("   no hay ninguna cara que cubra 日 por la vía elegida en esta máquina");
+        println!("   there is no face that covers 日 by the chosen path on this machine");
         return;
     };
 
@@ -443,20 +444,20 @@ fn register_hot(collection: &mut Collection, cache: &mut SourceCache) {
     for _ in 0..SAMPLES {
         let ctx = egui::Context::default();
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            ui.label("hola");
+            ui.label("hello");
         })
         .drop_without_applying_deltas();
         let started = Instant::now();
         ctx.set_fonts(definitions.clone());
-        // El fotograma en el que el motor de texto se rehace **y** se pinta algo que usa la cara nueva:
-        // eso es lo que el usuario vería como un tirón, si lo hubiera.
+        // The frame in which the text engine is rebuilt **and** something that uses the new face is
+        // painted: that is what the user would see as a jolt, if there were one.
         ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.label("日本語");
         })
         .drop_without_applying_deltas();
         times.push(started.elapsed());
     }
-    let how_long = *times.iter().max().expect("hay muestras");
+    let how_long = *times.iter().max().expect("there are samples");
 
     println!(
         "   {}  ·  {} ({:.1} MiB)",
@@ -464,23 +465,23 @@ fn register_hot(collection: &mut Collection, cache: &mut SourceCache) {
         face.family,
         face.blob.data().len() as f64 / (1024.0 * 1024.0)
     );
-    // **Se juzga contra el PEOR de los tiempos, no contra el mejor.** Lo que decide si se ve como un
-    // tirón es el fotograma malo, no el bueno.
+    // **It is judged against the WORST of the times, not the best.** What decides whether it is seen as
+    // a jolt is the bad frame, not the good one.
     let budget = Duration::from_micros(16_667);
     if how_long > budget {
         println!(
-            "   ⚠ pasa del presupuesto de un fotograma a 60 Hz ({:.1}×): se vería como un tirón",
+            "   ⚠ exceeds the budget of one frame at 60 Hz ({:.1}×): it would be seen as a jolt",
             how_long.as_secs_f64() / budget.as_secs_f64()
         );
     } else {
         println!(
-            "   cabe en un fotograma a 60 Hz ({:.0} % de los 16,7 ms)",
+            "   fits in one frame at 60 Hz ({:.0} % of the 16.7 ms)",
             100.0 * how_long.as_secs_f64() / budget.as_secs_f64()
         );
     }
 }
 
-/// La altura de una celda, preguntada al motor de texto como hace el pintor.
+/// The height of a cell, asked of the text engine as the painter does.
 fn cell_height() -> f32 {
     let ctx = egui::Context::default();
     ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -490,18 +491,18 @@ fn cell_height() -> f32 {
     ctx.fonts_mut(|cache| cache.row_height(&egui::FontId::monospace(BODY)))
 }
 
-/// De qué forma viene el glifo de color y cuánto ocupa.
+/// In what form the color glyph comes and how much it takes up.
 fn measure_color(face: &Face) {
     use skrifa::MetadataProvider as _;
     use skrifa::instance::Size;
 
     println!(
-        "   {} · ¿trae color? {}",
+        "   {} · does it bring color? {}",
         face.family,
         yes_no(face.renders_color('😀'))
     );
     let Ok(font) = skrifa::FontRef::from_index(face.blob.data(), face.index) else {
-        println!("   no se pudo leer la fuente");
+        println!("   the font could not be read");
         return;
     };
     let Some(glyph) = font.charmap().map('😀') else {
@@ -517,50 +518,50 @@ fn measure_color(face: &Face) {
         Some(strike) => {
             let pixels = strike.width as usize * strike.height as usize;
             println!(
-                "   mapa de bits {}×{} px  ·  {} KiB una vez DESCODIFICADO a RGBA",
+                "   bitmap {}×{} px  ·  {} KiB once DECODED to RGBA",
                 strike.width,
                 strike.height,
                 pixels * 4 / 1024
             );
             println!(
-                "   (la fuente lo guarda comprimido: {:.1} MiB el fichero entero con todos sus glifos)",
+                "   (the font stores it compressed: {:.1} MiB the whole file with all its glyphs)",
                 face.blob.data().len() as f64 / (1024.0 * 1024.0)
             );
-            println!("   celda de {height:.1} pt de alto, preguntada al motor de texto:");
+            println!("   cell {height:.1} pt tall, asked of the text engine:");
             for scale in SCALES {
                 let side = (height * scale) as usize;
                 let bytes = side * side * 4;
                 println!(
-                    "     al {:>4.0} %: {side}×{side} px · {bytes} B por glifo · {} KiB mil glifos",
+                    "     at {:>4.0} %: {side}×{side} px · {bytes} B per glyph · {} KiB a thousand glyphs",
                     scale * 100.0,
                     bytes * 1000 / 1024
                 );
             }
         }
-        None => println!(
-            "   sin mapa de bits: su color viene por contornos y se dibuja al tamaño que se pida"
-        ),
+        None => {
+            println!("   no bitmap: its color comes by outlines and is drawn at the requested size")
+        }
     }
 }
 
 fn yes_no(which: bool) -> &'static str {
-    if which { "sí" } else { "no" }
+    if which { "yes" } else { "no" }
 }
 
-/// **La primera muestra aparte de la mediana de las demás**, y ésa fue una corrección de revisión.
+/// **The first sample apart from the median of the others**, and that was a review correction.
 ///
-/// `SourceCache` guarda los ficheros que abre y la búsqueda por script tiene su propia caché, así que la
-/// muestra 1 es **fría** y las demás **calientes**. Publicar la mediana de las cinco daba el número
-/// caliente bajo un cartel que decía «mediana de cinco», y **la vía perezosa paga la fría** — una vez por
-/// escritura nueva, que es exactamente lo que ocurre en producción. Medido: 875 µs en caliente contra
-/// 5,2 ms en frío para el mismo carácter. Publicar solo el primero subestimaba el número que sostiene la
-/// decisión **por cuatro**.
+/// `SourceCache` keeps the files it opens and the search by script has its own cache, so sample 1 is
+/// **cold** and the rest **warm**. Publishing the median of the five gave the warm number under a label
+/// that said "median of five", and **the lazy path pays the cold one** — once per new write, which is
+/// exactly what happens in production. Measured: 875 µs warm against 5.2 ms cold for the same
+/// character. Publishing only the first underestimated the number that holds up the decision **by
+/// four**.
 fn summary(times: &[Duration]) -> String {
     let cold = times[0];
     let mut warms: Vec<Duration> = times[1..].to_vec();
     warms.sort_unstable();
     let median = warms[warms.len() / 2];
-    format!("{cold:>11.3?} en frío · {median:>11.3?} en caliente")
+    format!("{cold:>11.3?} cold · {median:>11.3?} warm")
 }
 
 #[cfg(test)]
@@ -571,52 +572,53 @@ mod tests {
         Duration::from_millis(how_long)
     }
 
-    /// Cinco muestras como salen de una máquina cargada: **la fría no es la más lenta** —hay una
-    /// caliente que la dobla— y **no llegan ordenadas**. Con muestras ordenadas, o con la fría siendo
-    /// siempre el máximo, casi cualquier forma equivocada de resumirlas da el mismo número que la
-    /// correcta y la prueba no ata nada.
+    /// Five samples as they come out of a loaded machine: **the cold one is not the slowest** —there is
+    /// a warm one that doubles it— and **they do not arrive sorted**. With sorted samples, or with the
+    /// cold one always being the maximum, almost any wrong way of summarizing them gives the same number
+    /// as the correct one and the test ties nothing down.
     ///
-    /// Fría = 3 ms (la primera). Calientes = 12, 8, 5, 1 → ordenadas 1, 5, 8, 12 → mediana **8 ms**.
-    fn muestras() -> [Duration; 5] {
+    /// Cold = 3 ms (the first). Warm = 12, 8, 5, 1 → sorted 1, 5, 8, 12 → median **8 ms**.
+    fn samples() -> [Duration; 5] {
         [ms(3), ms(12), ms(8), ms(5), ms(1)]
     }
 
-    /// Los dos números que el banco publica, ya separados y sin el relleno del formato.
-    fn publicado(times: &[Duration]) -> (String, String) {
+    /// The two numbers the bench publishes, already separated and without the format padding.
+    fn published(times: &[Duration]) -> (String, String) {
         let line = summary(times);
         let (frio, caliente) = line
             .split_once(" · ")
-            .expect("el resumen publica los DOS números, el frío y el caliente");
+            .expect("the summary publishes BOTH numbers, the cold and the warm one");
         (frio.trim().to_owned(), caliente.trim().to_owned())
     }
 
     #[test]
-    fn la_muestra_en_frio_es_la_primera_y_no_la_mas_lenta() {
-        // **Frío es una posición, no una magnitud.** La caché de ficheros y la de búsqueda por script se
-        // llenan en la muestra 1, así que la fría es ésa por construcción; en una máquina cargada
-        // cualquier muestra caliente puede salir la más lenta de las cinco. Publicar «la peor» bajo el
-        // cartel de «en frío» le colgaría a la vía perezosa un coste que no paga, y ése es el número con
-        // el que **D24** decide entre descubrir al arrancar o descubrir cuando haga falta.
-        let (frio, _) = publicado(&muestras());
+    fn the_cold_sample_is_the_first_one_and_not_the_slowest() {
+        // **Cold is a position, not a magnitude.** The file cache and the search-by-script cache fill
+        // up on sample 1, so the cold one is that one by construction; on a loaded machine any warm
+        // sample can come out the slowest of the five. Publishing "the worst" under the label "cold"
+        // would hang on the lazy path a cost it does not pay, and that is the number **D24** uses to
+        // decide between discovering at startup or discovering when needed.
+        let (frio, _) = published(&samples());
 
         assert_eq!(
-            frio, "3.000ms en frío",
-            "lo publicado en frío no es la primera muestra"
+            frio, "3.000ms cold",
+            "what is published as cold is not the first sample"
         );
     }
 
     #[test]
-    fn la_mediana_caliente_ordena_las_muestras_y_deja_fuera_la_fria() {
-        // **Dos mitades, y las dos publican un número distinto si se caen.** Sin ordenar, «mediana» es la
-        // muestra que cayó en medio del vector —5 ms aquí— y el número se mueve con el orden de llegada,
-        // que es lo que la corrección 2 de este banco prohíbe. Y metiendo la fría en el montón, la
-        // mediana se contamina con la única muestra que paga las cachés vacías: los 5,2 ms contra 875 µs
-        // que este banco midió para el mismo carácter son la razón de que vayan separadas.
-        let (_, caliente) = publicado(&muestras());
+    fn the_warm_median_sorts_the_samples_and_leaves_out_the_cold_one() {
+        // **Two halves, and both publish a different number if they fall.** Without sorting, "median" is
+        // the sample that landed in the middle of the vector —5 ms here— and the number moves with the
+        // arrival order, which is what correction 2 of this bench forbids. And putting the cold one into
+        // the heap, the median gets contaminated with the only sample that pays for the empty caches:
+        // the 5.2 ms against 875 µs that this bench measured for the same character are the reason they
+        // go separately.
+        let (_, caliente) = published(&samples());
 
         assert_eq!(
-            caliente, "8.000ms en caliente",
-            "la mediana caliente no salió de ordenar las cuatro muestras que quedan al quitar la fría"
+            caliente, "8.000ms warm",
+            "the warm median did not come from sorting the four samples left after removing the cold one"
         );
     }
 }

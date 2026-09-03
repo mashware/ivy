@@ -1,75 +1,79 @@
-//! Los dos números que este hito tiene que publicar, y sus etiquetas.
+//! The two numbers this milestone has to publish, and their labels.
 //!
-//! **Un número mal etiquetado es peor que ningún número**, y aquí eso no es una frase: el hito
-//! existe para decidir si egui aguanta, y esa decisión se toma leyendo esto. Por eso cada número
-//! dice exactamente qué tramo mide y cuál no.
+//! **A mislabelled number is worse than no number**, and here that is not a figure of speech: the
+//! milestone exists to decide whether egui holds up, and that decision is made by reading this. That
+//! is why each number says exactly which span it measures and which it does not.
 //!
-//! **Lo que se mide de la ida:** desde que empieza la pasada de interfaz que lee la tecla hasta que
-//! sus bytes están escritos en el pseudoterminal. **Y lo que no**: el trecho entre pulsar la tecla y
-//! esa pasada. No es un descuido — no es medible desde dentro del proceso: los eventos de teclado
-//! de egui no traen sello propio, y el reloj de su entrada está documentado como «monótono,
-//! relativo a lo que sea». Un número llamado «tecla → píxel» sería un número inventado.
+//! **What is measured on the way out:** from when the interface pass that reads the key begins until
+//! its bytes are written to the pseudoterminal. **And what is not**: the stretch between pressing the
+//! key and that pass. It is not an oversight — it is not measurable from inside the process: egui's
+//! keyboard events carry no timestamp of their own, and the clock of its input is documented as
+//! "monotonic, relative to something unspecified". A number called "key → pixel" would be an invented
+//! number.
 //!
-//! **Lo que se mide de la vuelta:** desde que el byte estaba disponible para recogerlo hasta que el
-//! fotograma que lo muestra está pagado, en **cinco tramos que suman el total**:
+//! **What is measured on the way back:** from when the byte was available to be picked up until the
+//! frame that shows it is paid for, in **five spans that add up to the total**:
 //!
-//! 1. **Esperar** — en la cola, hasta que el bucle lo recoge. En un volcado es el tramo que domina,
-//!    y con diferencia: el presupuesto por fotograma deja pasar 128 KiB cada vez, así que lo que no
-//!    cabe espera su turno.
-//! 2. **Interpretar** — meterlo en la rejilla del terminal.
-//! 3. **Encolar** — la llamada al pintor. Se llama así porque eso es lo que hace: apila formas y
-//!    vuelve.
-//! 4. **El panel de estado** — mirar si su fichero cambió, leerlo e interpretarlo cuando cambia,
-//!    repartir cuánto ancho se lleva, **atender el arrastre de su frontera** y encolar su pintado. Va
-//!    aparte del tramo anterior aunque los dos sean trabajo del mismo fotograma: **agruparlos daría la
-//!    misma resta con una etiqueta falsa**, y aquí eso ya costó una medida entera.
-//! 5. **El resto del fotograma** — teselar esas formas —**las de las consolas y las de los
-//!    paneles**—, dibujarlas, y todo el armazón que egui monta alrededor: recoger la entrada del
-//!    escritorio, abrir y cerrar la pasada, medir la fuente, subir texturas. Es lo que queda del
-//!    coste total al quitarle los tramos anteriores, y **se llama «el resto» a propósito**: desde
-//!    dentro no hay forma de aislar la teselación, así que ponerle ese nombre sería publicar como
-//!    medido algo que no lo está. El tramo del panel cubre **encolar** su pintado, no teselarlo.
+//! 1. **Waiting** — in the queue, until the loop picks it up. In a dump it is the span that
+//!    dominates, and by far: the per-frame budget lets 128 KiB through each time, so what does not
+//!    fit waits its turn.
+//! 2. **Interpreting** — putting it into the terminal grid.
+//! 3. **Enqueuing** — the call to the painter. It is called that because that is what it does: it
+//!    stacks shapes and returns.
+//! 4. **The status panel** — checking whether its file changed, reading and interpreting it when it
+//!    does, splitting how much width it takes, **serving the drag of its border** and enqueuing its
+//!    paint. It goes apart from the previous span even though both are work of the same frame:
+//!    **grouping them would give the same subtraction with a false label**, and here that already
+//!    cost a whole measurement.
+//! 5. **The rest of the frame** — tessellating those shapes —**the consoles' and the panels'**—,
+//!    drawing them, and all the scaffolding egui builds around it: gathering the desktop's input,
+//!    opening and closing the pass, measuring the font, uploading textures. It is what is left of the
+//!    total cost once the previous spans are taken away, and **it is called "the rest" on purpose**:
+//!    from inside there is no way to isolate the tessellation, so naming it that would be publishing
+//!    as measured something that is not. The panel span covers **enqueuing** its paint, not
+//!    tessellating it.
 //!
-//! El total lo publica `eframe`, que es quien puede: cuando se tesela, la pasada ya ha terminado.
+//! The total is published by `eframe`, which is the one that can: by the time tessellation happens,
+//! the pass is already over.
 //!
-//! **Los cuatro primeros tramos son de una división; el quinto es de la ventana.** Esa frontera no es
-//! organizativa, la impone el instrumento: los cuatro se cronometran alrededor de
-//! *una* consola, y así siguen siendo comparables con las tablas de D3 haya una división o cuatro.
-//! El consumo de CPU, en cambio, lo publica el framework **una sola vez por pasada**: no viene
-//! separado por división y partirlo sería inventar un reparto que nadie ha medido. Por eso el resto
-//! se calcula una vez, restando al total la suma de lo cronometrado por **todas** las divisiones.
+//! **The first four spans belong to a pane; the fifth belongs to the window.** That boundary is not
+//! organizational, the instrument imposes it: the four are timed around *one* console, and so they
+//! stay comparable with the D3 tables whether there is one pane or four. The CPU consumption, by
+//! contrast, is published by the framework **only once per pass**: it does not come split by pane and
+//! splitting it would be inventing an allocation nobody has measured. That is why the rest is computed
+//! once, subtracting from the total the sum of what **all** the panes timed.
 //!
-//! Los cinco tramos se guardan **del mismo fotograma**. El coste total llega con uno de retraso
-//! —`eframe` lo publica del anterior—, así que se retienen los tramos hasta que su total aparece;
-//! restar tramos de un fotograma al total de otro daría un número que parece bueno y no lo es.
+//! The five spans are saved **from the same frame**. The total cost arrives one frame late —`eframe`
+//! publishes it from the previous one—, so the spans are held until their total appears; subtracting
+//! one frame's spans from another's total would give a number that looks good and is not.
 
 use std::collections::VecDeque;
 use std::fmt;
 use std::time::{Duration, Instant};
 
-/// Cuántas muestras se guardan de cada número.
+/// How many samples are kept of each number.
 ///
-/// Un tope, y no todas: una sesión larga acumularía millones de muestras y el informe mediría sobre
-/// todo el rato en que no pasaba nada. Con las últimas, lo que se publica describe cómo iba la cosa
-/// **mientras se usaba**, que es lo que interesa.
+/// A cap, and not all of them: a long session would accumulate millions of samples and the report
+/// would measure mostly the stretch when nothing was happening. With the latest ones, what is
+/// published describes how things were going **while it was being used**, which is what matters.
 const SAMPLES: usize = 4096;
 
-/// Una serie de tiempos, con lo que hace falta para resumirla.
+/// A series of times, with what is needed to summarize it.
 #[derive(Default)]
 struct Series {
     samples: VecDeque<Duration>,
-    /// Cuántas se han tomado en total, incluidas las que ya no se guardan. Sin esto, un informe de
-    /// 4 096 muestras sobre una sesión de un millón parecería la sesión entera.
+    /// How many have been taken in total, including the ones no longer kept. Without this, a report
+    /// of 4,096 samples over a session of a million would look like the whole session.
     total: usize,
 }
 
 impl Series {
     fn record(&mut self, how_long: Duration) {
         self.total += 1;
-        // Una cola por los dos extremos, y no un vector: sacar la muestra más vieja del principio de
-        // un vector desplaza las otras cuatro mil, **dentro del fotograma que el instrumento está
-        // midiendo**. El coste del instrumento acabaría dentro del tramo que el instrumento publica
-        // como «el resto», que es justo el que hay que poder explicar.
+        // A double-ended queue, and not a vector: pulling the oldest sample from the front of a
+        // vector shifts the other four thousand, **inside the frame the instrument is measuring**.
+        // The instrument's cost would end up inside the span the instrument publishes as "the rest",
+        // which is precisely the one that has to be explainable.
         if self.samples.len() == SAMPLES {
             self.samples.pop_front();
         }
@@ -81,11 +85,11 @@ impl Series {
         sum / self.samples.len().max(1) as u32
     }
 
-    /// El valor por debajo del cual queda el 95 % de las muestras.
+    /// The value below which 95% of the samples fall.
     ///
-    /// Se publica junto a la media porque **el peor de todos no es un dato útil aquí**: una sola
-    /// pausa del recolector del escritorio o un cambio de contexto lo dispara y tapa la forma de la
-    /// distribución. El 95 es el que se nota al usar.
+    /// It is published alongside the mean because **the worst of all is not a useful figure here**: a
+    /// single pause of the desktop's collector or a context switch spikes it and hides the shape of
+    /// the distribution. The 95th is the one you notice while using it.
     fn p95(&self) -> Duration {
         if self.samples.is_empty() {
             return Duration::ZERO;
@@ -107,51 +111,51 @@ impl fmt::Display for Series {
     }
 }
 
-/// Los tramos de un fotograma, a la espera de que llegue su coste total.
+/// The spans of a frame, waiting for their total cost to arrive.
 ///
-/// **Es público y se construye con nombres a propósito.** Cuando esto se pasaba como tres duraciones
-/// posicionales seguidas, intercambiar dos compilaba sin una queja y publicaba un informe mentiroso —
-/// justo el fallo que la separación de tramos existe para impedir. Un tramo que se puede confundir con
-/// otro en la llamada no está separado de nada.
+/// **It is public and built with named fields on purpose.** When this was passed as three positional
+/// durations in a row, swapping two compiled without a complaint and published a lying report — exactly
+/// the failure that separating the spans exists to prevent. A span that can be confused with another in
+/// the call is not separated from anything.
 #[derive(Clone, Copy)]
 pub struct Spans {
-    /// Cuánto esperó en la cola el byte más antiguo, o `None` si a esta consola no le llegó nada en
-    /// este fotograma.
+    /// How long the oldest byte waited in the queue, or `None` if nothing reached this console in this
+    /// frame.
     ///
-    /// **Que sea opcional es lo que separa dos cosas que no son la misma:** si no llegó salida, no hay
-    /// *vuelta* que medir —un fotograma en reposo no es una vuelta rapidísima—, pero la consola **sí se
-    /// pintó**, y ese trabajo hay que devolverlo para que la ventana lo descuente del total. Cuando esto
-    /// era un `Duration` a secas, el fotograma sin salida se descartaba entero y su pintado acababa
-    /// publicado como «el resto del fotograma».
+    /// **Being optional is what separates two things that are not the same:** if no output arrived,
+    /// there is no *way back* to measure —a frame at rest is not a lightning-fast round trip—, but the
+    /// console **did paint**, and that work has to be returned so the window subtracts it from the
+    /// total. When this was a bare `Duration`, the frame with no output was discarded whole and its
+    /// painting ended up published as "the rest of the frame".
     waited: Option<Duration>,
     interpreted: Duration,
     enqueued: Duration,
-    /// Lo que costó mirar si el `panel.json` de esta consola cambió, leerlo e interpretarlo si
-    /// cambió, repartir el ancho, **atender la frontera del panel** y **pintarlo**.
+    /// What it cost to check whether this console's `panel.json` changed, read and interpret it if it
+    /// did, split the width, **serve the panel's border** and **paint it**.
     ///
-    /// **Las seis cosas, y decirlo entero importa.** El número lo componen **dos tramos disjuntos** de
-    /// `crate::Window::paint_pane`, sumados: uno antes de pintar la consola —mirar la fecha, leer si
-    /// cambió, repartir el ancho, atender el arrastre de su frontera y volver a repartir si el ancho
-    /// cambió— y otro después —pintar el panel—. Lo que queda **en medio**, que es
-    /// encolar el pintado de la consola, tiene su propio campo y no entra aquí. Describir el conjunto
-    /// como «leer» dejaría el pintado del panel sin dueño declarado, y un tramo sin dueño se lo lleva
-    /// el que se calcula restando — que aquí es el framework de interfaz, o sea justo la cifra sobre
-    /// la que D3 tiene que decidir.
+    /// **All six things, and saying it in full matters.** The number is made up of **two disjoint
+    /// spans** of `crate::Window::paint_pane`, summed: one before painting the console —checking the
+    /// timestamp, reading whether it changed, splitting the width, serving the drag of its border and
+    /// splitting again if the width changed— and another after —painting the panel—. What is left **in
+    /// between**, which is enqueuing the console's paint, has its own field and does not enter here.
+    /// Describing the whole thing as "reading" would leave the panel's painting with no declared owner,
+    /// and a span with no owner is taken by the one computed by subtraction — which here is the
+    /// interface framework, that is, precisely the figure D3 has to decide about.
     ///
-    /// **Va aparte y no sumado a `enqueued`, y esa separación es el motivo de que exista el campo.**
-    /// Los dos ocurren dentro del fotograma y los dos hay que devolverlos, así que para la resta daría
-    /// igual. Pero un tramo llamado «encolando el pintado» que además incluyera leer un fichero de
-    /// disco sería un número con la etiqueta cambiada, y aquí eso ya costó una medida entera: el coste
-    /// que no se nombra bien acaba atribuido a quien no lo hizo.
+    /// **It goes apart and not summed into `enqueued`, and that separation is the reason the field
+    /// exists.** Both happen inside the frame and both have to be returned, so for the subtraction it
+    /// would make no difference. But a span called "enqueuing the paint" that also included reading a
+    /// file from disk would be a number with the label swapped, and here that already cost a whole
+    /// measurement: the cost that is not named well ends up attributed to whoever did not do it.
     panel: Duration,
 }
 
 impl Spans {
-    /// Los tramos de una vuelta, con cada duración puesta por su nombre.
+    /// The spans of a round trip, with each duration set by its name.
     ///
-    /// `waiting_since` es cuándo llegó el byte más antiguo de los recogidos; sin bytes en este
-    /// fotograma no hay nada que medir de la vuelta — un fotograma en reposo no es una vuelta
-    /// rapidísima, es una vuelta que no ocurrió.
+    /// `waiting_since` is when the oldest of the collected bytes arrived; with no bytes in this frame
+    /// there is nothing to measure of the round trip — a frame at rest is not a lightning-fast round
+    /// trip, it is a round trip that did not happen.
     pub fn of_a_round(
         waiting_since: Option<Instant>,
         collected_at: Instant,
@@ -167,20 +171,21 @@ impl Spans {
         }
     }
 
-    /// Junta los tramos de **otra pasada del mismo fotograma**.
+    /// Merges the spans of **another pass of the same frame**.
     ///
-    /// egui puede repetir la pasada sobre la misma entrada, y `eframe` llama a las dos mitades de la
-    /// aplicación dentro del cierre que se repite (`epi_integration.rs:288-303`), así que en un
-    /// fotograma repetido se vuelve a bombear y a pintar. **Los dos trabajos ocurrieron**, y los dos hay
-    /// que devolverlos a la resta del fotograma: sumarlos es lo que dice la verdad.
+    /// egui may repeat the pass over the same input, and `eframe` calls the two halves of the
+    /// application inside the closure that repeats (`epi_integration.rs:288-303`), so in a repeated
+    /// frame it pumps and paints again. **Both jobs happened**, and both have to be returned to the
+    /// frame's subtraction: summing them is what tells the truth.
     ///
-    /// **La espera se queda con la primera que hubo, y no se suman.** La espera no es trabajo de la
-    /// aplicación —es cuánto llevaba el byte más antiguo en la cola—, así que sumar dos esperas daría un
-    /// número que nadie esperó. La de la primera pasada es la del lote que de verdad esperó; la segunda
-    /// recoge una cola ya vacía.
-    /// Lo que hay que devolverle a la resta del fotograma: todo lo que la aplicación hizo de verdad.
+    /// **The wait keeps the first one there was, and they are not summed.** The wait is not the
+    /// application's work —it is how long the oldest byte had been in the queue—, so summing two waits
+    /// would give a number nobody waited. The first pass's is the one from the batch that really
+    /// waited; the second picks up an already-empty queue.
+    /// What has to be returned to the frame's subtraction: everything the application really did.
     ///
-    /// La espera no entra, y no es un olvido: **no es trabajo**, es cuánto llevaba el byte en la cola.
+    /// The wait does not enter, and it is not an oversight: **it is not work**, it is how long the byte
+    /// had been in the queue.
     fn declarable(&self) -> Duration {
         self.interpreted + self.enqueued + self.panel
     }
@@ -195,75 +200,77 @@ impl Spans {
     }
 }
 
-/// Los cronómetros **de una división** y lo que llevan medido.
+/// The stopwatches **of one pane** and what they have measured so far.
 ///
-/// Todo lo de aquí se cronometra alrededor de una consola concreta. El cuarto tramo no cabe aquí: ver
+/// Everything here is timed around a specific console. The fourth span does not fit here: see
 /// [`RestOfFrame`].
 ///
-/// **Comparar estos números con los de una medida anterior exige mirar la rejilla, no solo el tramo.**
-/// `enqueue` es proporcional al número de celdas y `interpret` depende de la anchura sobre la que
-/// envuelve el texto, así que una consola que ocupa media ventana los da más bajos que una a pantalla
-/// completa **sin que nada haya mejorado**. Por eso la cabecera del informe publica la rejilla de cada
-/// consola: leer «enqueueing the paint went down» como «el framework aguanta mejor» es el error que este aviso existe
-/// para evitar. El único tramo cuya definición no cambia con el reparto es `wait`.
+/// **Comparing these numbers with those of an earlier measurement requires looking at the grid, not
+/// just the span.** `enqueue` is proportional to the number of cells and `interpret` depends on the
+/// width over which the text wraps, so a console that takes up half the window gives them lower than
+/// one at full screen **without anything having improved**. That is why the report header publishes
+/// each console's grid: reading "enqueueing the paint went down" as "the framework holds up better" is
+/// the error this warning exists to avoid. The only span whose definition does not change with the
+/// pane is `wait`.
 #[derive(Default)]
 pub struct Timings {
     outbound: Series,
-    /// **Codificar** un gesto de ratón y escribirlo en el programa.
+    /// **Encoding** a mouse gesture and writing it to the program.
     ///
-    /// **La etiqueta dice exactamente lo que el reloj abarca, y eso costó una corrección.** La primera
-    /// versión lo publicaba como «del fotograma que ve el gesto al byte», que es lo que mide la serie de
-    /// la tecla; este reloj empieza **mucho después** —el recorrido del árbol, el reparto del puntero y
-    /// resolver la celda quedan fuera, dentro del reloj que ya cronometra atender el ratón entero— así
-    /// que bajo aquella etiqueta publicaba un tramo estrictamente más corto que el que nombraba. **No es
-    /// comparable con la ida de la tecla**, y por eso no comparten nombre.
+    /// **The label says exactly what the clock spans, and that cost a correction.** The first version
+    /// published it as "from the frame that sees the gesture to the byte", which is what the key series
+    /// measures; this clock starts **much later** —walking the tree, splitting the pointer and
+    /// resolving the cell stay outside, inside the clock that already times serving the whole mouse— so
+    /// under that label it published a span strictly shorter than the one it named. **It is not
+    /// comparable with the key's way out**, and that is why they do not share a name.
     ///
-    /// **Serie propia y no la de la tecla** también por lo que mide: un arrastre mete **decenas de
-    /// muestras por gesto** —una por celda recorrida— contra la única que mete una tecla, así que
-    /// promediarlas juntas dejaría la cifra que D3 publica describiendo sobre todo al ratón.
+    /// **Its own series and not the key's** also for what it measures: a drag drops **dozens of samples
+    /// per gesture** —one per cell crossed— against the single one a key drops, so averaging them
+    /// together would leave the figure D3 publishes describing mostly the mouse.
     mouse: Series,
     wait: Series,
     interpret: Series,
     enqueue: Series,
-    /// Mirar la fecha del `panel.json`, leerlo e interpretarlo cuando ha cambiado, repartir el ancho,
-    /// **atender el arrastre de su frontera** y **pintarlo**.
+    /// Checking the `panel.json` timestamp, reading and interpreting it when it has changed, splitting
+    /// the width, **serving the drag of its border** and **painting it**.
     panel: Series,
     round: Series,
-    /// Los tramos del fotograma anterior, esperando a que `eframe` publique lo que costó.
+    /// The previous frame's spans, waiting for `eframe` to publish what it cost.
     pending: Option<Spans>,
 }
 
 impl Timings {
-    /// Anota lo que ha tardado la ida: de empezar la pasada de interfaz a escribir en el programa.
+    /// Records how long the way out took: from starting the interface pass to writing to the program.
     pub fn record_outbound(&mut self, how_long: Duration) {
         self.outbound.record(how_long);
     }
 
-    /// Anota lo que ha tardado codificar un gesto de ratón y escribirlo en el programa.
+    /// Records how long it took to encode a mouse gesture and write it to the program.
     pub fn record_mouse_outbound(&mut self, how_long: Duration) {
         self.mouse.record(how_long);
     }
 
-    /// Anota los tramos de este fotograma. Quedan pendientes hasta que se sepa lo que costó entero.
+    /// Records the spans of this frame. They stay pending until what it cost as a whole is known.
     ///
-    /// **Se guarda siempre, también sin salida.** Lo que decide si hubo vuelta es que la espera sea
-    /// `Some`; el trabajo de pintar ocurrió en los dos casos y la ventana tiene que poder descontarlo.
+    /// **It is always saved, even with no output.** What decides whether there was a round trip is
+    /// that the wait is `Some`; the work of painting happened in both cases and the window has to be
+    /// able to subtract it.
     ///
-    /// **Se SUMA a lo que ya hubiera pendiente, y esto arregla un sesgo que estuvo vivo.** Antes
-    /// sustituía, y el fotograma con la pasada repetida —egui la repite cuando algo pide recomponerse—
-    /// llegaba aquí dos veces: la segunda anotación, con lo interpretado a casi cero porque la cola ya
-    /// estaba vacía, **machacaba la buena**. Lo que la consola había interpretado de verdad se publicaba
-    /// como coste del framework de interfaz, que es la cifra con la que D3 decide. Medido antes del
-    /// arreglo: **50 ns declarados donde interpretar había costado 20,158 µs**. Ver [`Spans::and_also`]
-    /// por qué la espera no se suma.
+    /// **It is ADDED to whatever was already pending, and this fixes a bias that was alive.** It used
+    /// to replace, and the frame with the repeated pass —egui repeats it when something asks to
+    /// recompose— reached here twice: the second recording, with the interpreted at almost zero because
+    /// the queue was already empty, **clobbered the good one**. What the console had really interpreted
+    /// was published as the interface framework's cost, which is the figure D3 decides with. Measured
+    /// before the fix: **50 ns declared where interpreting had cost 20.158 µs**. See
+    /// [`Spans::and_also`] for why the wait is not summed.
     ///
-    /// **Sumar solo es correcto porque el fotograma se cierra una vez, y las dos cosas van juntas.** Si
-    /// el cierre ocurriera por pasada, esto acumularía tramos de la primera pasada dentro del total de la
-    /// segunda; y si el cierre fuera por fotograma pero esto sustituyera, se perderían los de la primera.
-    /// Lo que hace que encaje: en la mitad lógica del fotograma **N** se cierra con los tramos del
-    /// **N-1** y el coste del **N-1** —`eframe` publica el total con un fotograma de retraso—, así que lo
-    /// que aquí se suma son siempre las pasadas **de un mismo fotograma**. Quien toque una de las dos
-    /// piezas tiene que mirar la otra.
+    /// **Summing is only correct because the frame is closed once, and the two things go together.** If
+    /// the close happened per pass, this would accumulate the first pass's spans inside the second's
+    /// total; and if the close were per frame but this replaced, the first pass's would be lost. What
+    /// makes it fit: in the logical half of frame **N** it is closed with the spans of **N-1** and the
+    /// cost of **N-1** —`eframe` publishes the total one frame late—, so what is summed here is always
+    /// the passes **of a single frame**. Whoever touches one of the two pieces has to look at the
+    /// other.
     pub fn record_round(&mut self, spans: Spans) {
         self.pending = Some(match self.pending.take() {
             Some(already_there) => already_there.and_also(spans),
@@ -271,17 +278,17 @@ impl Timings {
         });
     }
 
-    /// Cierra el fotograma anterior de esta división con lo que `eframe` dice que costó de CPU.
+    /// Closes this pane's previous frame with what `eframe` says it cost in CPU.
     ///
-    /// Devuelve **lo que esta división tenía cronometrado** —interpretar más encolar—, para que la
-    /// ventana pueda restar de una vez lo de todas y sacar el resto. Lo devuelve **haya habido salida o
-    /// no**: pintar ocurre en todos los fotogramas, y si esta consola no lo declarase, su pintado
-    /// aparecería publicado como «el resto del fotograma», que es el número que decide si el framework
-    /// de interfaz aguanta. `None` solo cuando no hubo ni pasada de interfaz que medir.
+    /// Returns **what this pane had timed** —interpreting plus enqueuing—, so the window can subtract
+    /// everyone's at once and get the rest. It returns it **whether there was output or not**: painting
+    /// happens in every frame, and if this console did not declare it, its painting would appear
+    /// published as "the rest of the frame", which is the number that decides whether the interface
+    /// framework holds up. `None` only when there was not even an interface pass to measure.
     ///
-    /// **Las cuatro series, en cambio, solo cuentan cuando llegó salida**: un fotograma en reposo no es
-    /// una vuelta rapidísima, es una vuelta que no ocurrió, y meterlo en la media diría que la
-    /// aplicación responde al instante justamente por no haber hecho nada.
+    /// **The four series, by contrast, only count when output arrived**: a frame at rest is not a
+    /// lightning-fast round trip, it is a round trip that did not happen, and putting it into the mean
+    /// would say the application responds instantly precisely for having done nothing.
     pub fn close_frame(&mut self, cpu_cost: Duration) -> Option<Duration> {
         let spans = self.pending.take()?;
 
@@ -296,35 +303,37 @@ impl Timings {
         Some(spans.declarable())
     }
 
-    /// Se lleva lo que quedaba pendiente **sin anotar ninguna media**, y devuelve lo que hay que restar.
+    /// Takes what was still pending **without recording any mean**, and returns what has to be
+    /// subtracted.
     ///
-    /// **Es para la división que se va con su pestaña.** Sus tramos ocurrieron y hay que declararlos, o el
-    /// resto del fotograma se queda con su trabajo. Pero sus medias no las va a publicar nadie —el informe
-    /// recorre las pestañas vivas—, y cerrarla por el camino normal exigiría inventarse un coste de
-    /// fotograma para la serie de la vuelta: con un cero, una vuelta artificialmente corta; con el de
-    /// verdad, una muestra de un fotograma que esta consola ya no va a terminar. Lo honesto es no anotar
-    /// nada y quedarse solo con lo que la resta necesita.
+    /// **It is for the pane that leaves with its tab.** Its spans happened and have to be declared, or
+    /// the rest of the frame keeps its work. But nobody is going to publish its means —the report walks
+    /// the live tabs—, and closing it by the normal path would require inventing a frame cost for the
+    /// round-trip series: with a zero, an artificially short round trip; with the real one, a sample of
+    /// a frame this console is no longer going to finish. The honest thing is to record nothing and keep
+    /// only what the subtraction needs.
     pub fn take_pending(&mut self) -> Duration {
         self.pending
             .take()
             .map_or(Duration::ZERO, |spans| spans.declarable())
     }
 
-    /// Lo que esta división lleva anotado del tramo del panel.
+    /// What this pane has recorded so far of the panel span.
     ///
-    /// Existe para que una prueba pueda afirmar que **el camino real declara ese tramo**, y no solo
-    /// que la anotación funciona cuando se la llama a mano. Sin esto, dejar el coste del panel en cero
-    /// dentro de la pasada de interfaz no rompía nada.
+    /// It exists so a test can assert that **the real path declares that span**, and not just that the
+    /// recording works when called by hand. Without this, leaving the panel cost at zero inside the
+    /// interface pass broke nothing.
     #[cfg(test)]
     pub fn recorded_panel(&self) -> Option<Duration> {
         self.panel.has_samples().then(|| self.panel.mean())
     }
 
-    /// Si alguna de las cuatro medias tiene muestras.
+    /// Whether any of the four means has samples.
     ///
-    /// Existe por lo mismo que [`Timings::recorded_panel`]: una prueba puede afirmar sobre el camino
-    /// real que una consola **que no se pintó** no ensucia ninguna media. Comprobarlo llamando a mano
-    /// a la anotación demuestra que la anotación funciona, no que quien la llama le pase lo correcto.
+    /// It exists for the same reason as [`Timings::recorded_panel`]: a test can assert over the real
+    /// path that a console **that did not paint** does not dirty any mean. Checking it by calling the
+    /// recording by hand proves that the recording works, not that the caller passes it the right
+    /// thing.
     #[cfg(test)]
     pub fn has_means(&self) -> bool {
         self.wait.has_samples()
@@ -333,31 +342,32 @@ impl Timings {
             || self.panel.has_samples()
     }
 
-    /// Si esta división llegó a medir algo, para no publicar el informe de una consola en blanco.
+    /// Whether this pane got to measure anything, so as not to publish a blank console's report.
     ///
-    /// **El ratón cuenta.** Una tanda que solo inyecta gestos y no teclea ni recibe salida tiene sus
-    /// muestras aquí y en ningún otro sitio; sin esta condición su informe saldría en blanco y la
-    /// corrida se leería como que el gesto no costó nada.
+    /// **The mouse counts.** A batch that only injects gestures and neither types nor receives output
+    /// has its samples here and nowhere else; without this condition its report would come out blank and
+    /// the run would read as if the gesture cost nothing.
     pub fn has_any(&self) -> bool {
         self.outbound.has_samples() || self.mouse.has_samples() || self.round.has_samples()
     }
 
-    /// Publica los números **de esta división** al destino que se le dé.
+    /// Publishes **this pane's** numbers to whatever destination it is given.
     ///
-    /// Se publica al cerrar y no durante: la ventana es el terminal, así que no hay sitio dentro
-    /// donde enseñar esto sin taparle la pantalla al programa.
+    /// It is published on close and not during: the window is the terminal, so there is no place inside
+    /// to show this without covering the program's screen.
     ///
-    /// **El destino se recibe, y no es una comodidad: es lo que hace la prueba honesta.** La propiedad
-    /// que hay que atar es que el texto publicado **mencione que el tramo del panel incluye pintarlo**,
-    /// porque de eso depende que quien copie el número a un documento no se lo atribuya a otro. Con un
-    /// `println!` dentro no hay forma de leer lo que sale, y la alternativa —afirmar sobre la constante—
-    /// demostraría que la constante está bien redactada, no que alguien la imprima.
+    /// **The destination is received, and it is not a convenience: it is what makes the test honest.**
+    /// The property that has to be tied down is that the published text **mentions that the panel span
+    /// includes painting it**, because whether whoever copies the number into a document attributes it
+    /// to someone else depends on that. With a `println!` inside there is no way to read what comes out,
+    /// and the alternative —asserting over the constant— would prove that the constant is well worded,
+    /// not that anyone prints it.
     ///
-    /// **Y por eso esto no tiene envoltorio.** La primera versión dejaba un `publish_spans()` sin
-    /// argumentos que llamaba a esta función con la salida estándar, y la prueba entraba por aquí:
-    /// vaciar el envoltorio dejaba la suite **verde**, que es la novena vez que este proyecto ata al
-    /// ayudante en vez de al camino real. Ahora la puerta de producción y la que se prueba son la
-    /// misma, y lo único que aporta quien llama es a dónde escribir.
+    /// **And that is why this has no wrapper.** The first version left a `publish_spans()` with no
+    /// arguments that called this function with standard output, and the test entered through here:
+    /// emptying the wrapper left the suite **green**, which is the ninth time this project ties down the
+    /// helper instead of the real path. Now the production door and the one that is tested are the same,
+    /// and the only thing the caller contributes is where to write.
     pub fn publish_spans(&self, a: &mut dyn std::io::Write) -> std::io::Result<()> {
         if self.outbound.has_samples() {
             writeln!(
@@ -405,15 +415,15 @@ impl Timings {
             writeln!(a, "  interpreting:           {}", self.interpret)?;
             writeln!(a, "  enqueueing the paint:   {}", self.enqueue)?;
             writeln!(a, "  the status panel:       {}", self.panel)?;
-            // **La media de este tramo mezcla dos poblaciones y hay que decirlo.** Casi todos los
-            // fotogramas solo miran la fecha del fichero y pintan lo ya maquetado; los pocos en que el
-            // productor ha publicado cuestan además leer, interpretar y rehacer la maqueta, que es
-            // tres órdenes de magnitud más. La media sale pegada al caso barato, así que el número que
-            // describe el caso caro es el 95, no ella.
+            // **This span's mean mixes two populations and it has to be said.** Almost every frame
+            // only checks the file timestamp and paints the already-laid-out text; the few in which
+            // the producer has published cost, on top of that, reading, interpreting and redoing the
+            // layout, which is three orders of magnitude more. The mean comes out stuck to the cheap
+            // case, so the number that describes the expensive case is the 95th, not it.
             //
-            // **Y el tramo incluye pintar**, no solo leer: el reloj va desde antes de mirar la fecha
-            // hasta después de pintar la última fila. Decirlo aquí es lo que impide que quien copie
-            // este número a un documento se lo atribuya a otro.
+            // **And the span includes painting**, not only reading: the clock runs from before
+            // checking the timestamp to after painting the last row. Saying it here is what keeps
+            // whoever copies this number into a document from attributing it to someone else.
             writeln!(a, "{PANEL_EXPLANATION}")?;
             writeln!(
                 a,
@@ -426,14 +436,15 @@ impl Timings {
     }
 }
 
-/// Lo que el informe dice debajo de la línea del tramo del panel.
+/// What the report says under the panel span's line.
 ///
-/// **Las dos frases están por razones distintas y ninguna es adorno.** La primera avisa de que la
-/// media y el 95 describen poblaciones distintas, así que quien cite «la media» estará citando el
-/// caso en que no hubo publicación. La segunda dice **qué abarca el tramo**, y existe porque durante
-/// todo el hito F1.6 este número se describió como «leer el panel» cuando el reloj incluye pintarlo:
-/// un tramo mal nombrado acaba atribuido a quien no lo hizo, y aquí el que se lleva lo que nadie
-/// declara es el framework de interfaz, que es justo la cifra que decide D3.
+/// **The two sentences are there for different reasons and neither is decoration.** The first warns
+/// that the mean and the 95th describe different populations, so whoever cites "the mean" will be
+/// citing the case in which there was no publishing. The second says **what the span spans**, and it
+/// exists because throughout the whole F1.6 milestone this number was described as "reading the panel"
+/// when the clock includes painting it: a mislabelled span ends up attributed to whoever did not do
+/// it, and here the one that takes what nobody declares is the interface framework, which is precisely
+/// the figure D3 decides.
 const PANEL_EXPLANATION: &str = "\
     \x20   mixes checking the timestamp and painting the already laid-out text (almost\n\
     \x20   every frame) with reading, interpreting and laying the text out again (the\n\
@@ -444,44 +455,43 @@ const PANEL_EXPLANATION: &str = "\
     \x20   changed: the gesture that narrows the panel is paid here, not in the rest of\n\
     \x20   the frame";
 
-/// El resto del fotograma: lo que costó la pasada y nadie cronometró.
+/// The rest of the frame: what the pass cost and nobody timed.
 ///
-/// **Vive en la ventana y no en la división, y no es una elección de estilo.** El framework publica
-/// un único consumo de CPU por pasada, sin separar por división; repartirlo entre las divisiones
-/// sería inventarse un reparto que nadie ha medido, y anotarlo una vez por división contaría el mismo
-/// coste tantas veces como consolas haya abiertas.
+/// **It lives in the window and not in the pane, and it is not a style choice.** The framework
+/// publishes a single CPU consumption per pass, without splitting by pane; splitting it among the
+/// panes would be inventing an allocation nobody has measured, and recording it once per pane would
+/// count the same cost as many times as there are consoles open.
 #[derive(Default)]
 pub struct RestOfFrame {
     series: Series,
 }
 
 impl RestOfFrame {
-    /// Anota el resto de este fotograma: lo que costó entero menos lo que cronometraron **todas** las
-    /// divisiones.
+    /// Records the rest of this frame: what it cost as a whole minus what **all** the panes timed.
     pub fn record(&mut self, cpu_cost: Duration, timed: Duration) {
-        // El total puede salir por debajo de los tramos medidos: son de fotogramas contiguos pero no
-        // idénticos, y el reloj de `eframe` no es el mismo que el de aquí. Cuando pasa, el resto es
-        // cero en vez de un número negativo con pinta de dato.
+        // The total may come out below the measured spans: they are from contiguous but not identical
+        // frames, and `eframe`'s clock is not the same as the one here. When that happens, the rest is
+        // zero instead of a negative number that looks like data.
         self.series.record(cpu_cost.saturating_sub(timed));
     }
 
-    /// Lo que se ha publicado como resto, de media.
+    /// What has been published as the rest, on average.
     ///
-    /// **Solo lo usan las pruebas, y por eso está detrás de su bandera.** Es lo que permite afirmar que
-    /// un trabajo declarado **se descuenta de verdad**: sin esto, una prueba solo puede comprobar que
-    /// alguien apuntó el número en un campo, que es atar al ayudante y no al camino — y ese hueco ya dejó
-    /// pasar una mutación en este mismo trabajo.
+    /// **Only the tests use it, and that is why it is behind its flag.** It is what makes it possible
+    /// to assert that a declared job **is really subtracted**: without this, a test can only check that
+    /// someone wrote the number into a field, which is tying down the helper and not the path — and
+    /// that gap already let a mutation through in this very work.
     #[cfg(test)]
     pub fn mean(&self) -> Duration {
         self.series.mean()
     }
 
-    /// Cuántas veces se ha anotado un resto, o sea **cuántos fotogramas se han cerrado**.
+    /// How many times a rest has been recorded, that is, **how many frames have been closed**.
     ///
-    /// **Solo lo usan las pruebas, y por eso está detrás de su bandera.** Es el único observable que
-    /// distingue un fotograma cerrado una vez de uno cerrado dos: las medias no lo delatan —dos cierres
-    /// del mismo fotograma anotan un valor parecido— y el informe tampoco. Es lo que hace falta para
-    /// atar la guarda que evita el doble cierre.
+    /// **Only the tests use it, and that is why it is behind its flag.** It is the only observable that
+    /// distinguishes a frame closed once from one closed twice: the means do not give it away —two
+    /// closes of the same frame record a similar value— and neither does the report. It is what is
+    /// needed to tie down the guard that prevents the double close.
     #[cfg(test)]
     pub fn closed_frames(&self) -> usize {
         self.series.total
@@ -511,45 +521,46 @@ impl RestOfFrame {
     }
 }
 
-/// Los dos tramos que **la ventana** paga por guardar su disposición: mirar si cambió, y escribirla.
+/// The two spans **the window** pays to save its layout: checking whether it changed, and writing it.
 ///
-/// **Vive aquí y no en la división por lo mismo que el resto del fotograma**: son de la ventana entera, no
-/// de una consola, así que no tienen el vehículo que llevan los tramos de una división.
+/// **It lives here and not in the pane for the same reason as the rest of the frame**: they belong to
+/// the whole window, not to a console, so they do not have the vehicle a pane's spans carry.
 ///
-/// **Y hacen falta las DOS cosas, que es el hallazgo que costó una revisión entera.** Una serie **solo
-/// guarda muestras para imprimirlas**: no descuenta nada. El resto del fotograma se calcula restándole al
-/// coste todo lo que se cronometró, y a ese saco hay que entrar aparte. Con serie y sin resta, estos dos
-/// tramos se publicarían con su fila **y a la vez** dentro de la cifra que D3 usa para juzgar al framework.
+/// **And BOTH things are needed, which is the finding that cost a whole review.** A series **only keeps
+/// samples to print them**: it subtracts nothing. The rest of the frame is computed by subtracting from
+/// the cost everything that was timed, and that pool has to be entered separately. With a series and no
+/// subtraction, these two spans would be published with their row **and at the same time** inside the
+/// figure D3 uses to judge the framework.
 #[derive(Default)]
 pub struct Saving {
     mirror: Series,
     write: Series,
-    /// Cuántas veces se ha escrito el fichero de disposición.
+    /// How many times the layout file has been written.
     ///
-    /// **Lo publica el informe y no lo puede saber el guion**, que es la misma partición que el proyecto ya
-    /// usa con los gestos inyectados: este número vive dentro del proceso. El guion invalida la corrida si es
-    /// cero, porque una tanda que dice medir el guardado y no guarda nada publicaría el coste de un camino
-    /// que no se recorrió.
+    /// **The report publishes it and the script cannot know it**, which is the same partition the
+    /// project already uses with the injected gestures: this number lives inside the process. The script
+    /// invalidates the run if it is zero, because a batch that says it measures the saving and saves
+    /// nothing would publish the cost of a path that was not walked.
     writes: usize,
 }
 
 impl Saving {
-    /// Anota lo que costó comparar el espejo en **un fotograma entero**.
+    /// Records what it cost to compare the mirror in **a whole frame**.
     ///
-    /// Quien llama acumula por pasada y anota **una vez al cerrar**: egui repite la pasada de interfaz, y
-    /// anotar por pasada haría que la media describiera «por pasada» en vez de «por fotograma» — el inverso
-    /// exacto del sesgo que este instrumento ya se comió una vez.
+    /// The caller accumulates per pass and records **once on close**: egui repeats the interface pass,
+    /// and recording per pass would make the mean describe "per pass" instead of "per frame" — the exact
+    /// inverse of the bias this instrument already swallowed once.
     pub fn record_mirror(&mut self, how_long: Duration) {
         self.mirror.record(how_long);
     }
 
-    /// Anota lo que costó **un intento** de escritura: desde resolver la ruta hasta que el renombrado
-    /// vuelve, o hasta que el temporal queda borrado si falló.
+    /// Records what **one attempt** at writing cost: from resolving the path until the rename returns,
+    /// or until the temporary is deleted if it failed.
     ///
-    /// **El tiempo se anota siempre y la cuenta solo cuando llegó al disco**, y la distinción no es
-    /// quisquillosa: el trabajo ocurrió dentro del fotograma en los dos casos y hay que descontarlo, pero
-    /// publicar los intentos fallidos como escrituras diría que la disposición está guardada cuando no lo
-    /// está. Un disco lleno publicaría «mil escrituras» sin haber escrito ninguna.
+    /// **The time is always recorded and the count only when it reached the disk**, and the distinction
+    /// is not fussy: the work happened inside the frame in both cases and has to be subtracted, but
+    /// publishing the failed attempts as writes would say the layout is saved when it is not. A full disk
+    /// would publish "a thousand writes" without having written any.
     pub fn record_write(&mut self, how_long: Duration, reached_disk: bool) {
         self.write.record(how_long);
         if reached_disk {
@@ -557,24 +568,25 @@ impl Saving {
         }
     }
 
-    /// Cuántas veces se escribió **de verdad**, para que el informe lo declare y el guion pueda invalidar
-    /// una corrida que dice medir el guardado y no guardó nada.
+    /// How many times it was **really** written, so the report declares it and the script can invalidate
+    /// a run that says it measures the saving and saved nothing.
     pub fn writes(&self) -> usize {
         self.writes
     }
 
-    /// Cuántas veces se **intentó** escribir en el disco, para pruebas.
+    /// How many times a write to disk was **attempted**, for tests.
     ///
-    /// Existe porque el contador de arriba solo cuenta las que llegaron, así que sin esto una prueba no
-    /// puede distinguir «se reintentó y volvió a fallar» de «no se reintentó» — que es exactamente el hueco
-    /// que una revisión encontró en la prueba del reintento.
+    /// It exists because the counter above only counts the ones that reached, so without this a test
+    /// cannot distinguish "it retried and failed again" from "it did not retry" — which is exactly the
+    /// gap a review found in the retry test.
     #[cfg(test)]
     pub fn attempts(&self) -> usize {
         self.write.total
     }
 
-    /// Lo que llevan anotado los dos tramos, **solo para pruebas**: es lo que permite afirmar que el camino
-    /// real los declara, y no solo que la anotación funciona cuando se la llama a mano.
+    /// What the two spans have recorded so far, **for tests only**: it is what makes it possible to
+    /// assert that the real path declares them, and not just that the recording works when called by
+    /// hand.
     #[cfg(test)]
     pub fn has_any(&self) -> bool {
         self.mirror.has_samples() || self.write.has_samples()
@@ -611,45 +623,47 @@ impl Saving {
     }
 }
 
-/// Lo que **la ventana** paga por buscar en la máquina las fuentes que le faltan.
+/// What **the window** pays to search the machine for the fonts it is missing.
 ///
-/// **Vive aquí y no en la división por la misma razón que el guardado**: las caras se le registran al
-/// motor de texto, que es de la ventana entera, no de una consola.
+/// **It lives here and not in the pane for the same reason as the saving**: the faces are registered
+/// with the text engine, which belongs to the whole window, not to a console.
 ///
-/// **Y hace falta la resta, no solo la serie.** El resto del fotograma se calcula restándole al coste todo
-/// lo que se cronometró: una serie sola imprimiría su fila **y a la vez** dejaría el número dentro de la
-/// cifra con la que **D3** juzga al framework. Es el hallazgo que costó una revisión entera en el tramo
-/// del guardado, y aquí muerde igual — este trabajo son **milisegundos**, no microsegundos.
+/// **And the subtraction is needed, not just the series.** The rest of the frame is computed by
+/// subtracting from the cost everything that was timed: a series alone would print its row **and at the
+/// same time** leave the number inside the figure **D3** judges the framework with. It is the finding
+/// that cost a whole review in the saving span, and here it bites the same — this work is
+/// **milliseconds**, not microseconds.
 #[derive(Default)]
 pub struct Discovery {
     search: Series,
-    /// Cuántos caracteres se han buscado en la máquina, en total.
+    /// How many characters have been searched for on the machine, in total.
     ///
-    /// **Lo publica el informe y no lo puede saber el guion**, igual que las escrituras de la disposición:
-    /// este número vive dentro del proceso. Una tanda que diga medir el descubrimiento y no busque nada
-    /// publicaría el coste de un camino que no se recorrió.
+    /// **The report publishes it and the script cannot know it**, just like the layout's writes: this
+    /// number lives inside the process. A batch that says it measures the discovery and searches for
+    /// nothing would publish the cost of a path that was not walked.
     searched: usize,
-    /// Cuántas caras del sistema se le han dado al motor de texto.
+    /// How many system faces have been given to the text engine.
     ///
-    /// **Va aparte de los buscados y no es redundante**: un carácter que ninguna fuente cubre se busca —y
-    /// se paga entero— **sin registrar nada**. Con un solo número, una máquina sin fuentes y una con todo
-    /// instalado publicarían informes indistinguibles.
+    /// **It goes apart from the searched ones and is not redundant**: a character no font covers is
+    /// searched for —and paid in full— **without registering anything**. With a single number, a machine
+    /// with no fonts and one with everything installed would publish indistinguishable reports.
     registered: usize,
 }
 
 impl Discovery {
-    /// Anota lo que costó **una vuelta** de descubrimiento: buscar las caras de lo apuntado y
-    /// registrarlas.
+    /// Records what **one round** of discovery cost: searching for the faces of what was noted and
+    /// registering them.
     pub fn record(&mut self, how_long: Duration, searched: usize, registered: usize) {
         self.search.record(how_long);
         self.searched += searched;
         self.registered += registered;
     }
 
-    /// Si se llegó a buscar algo, **para que una prueba pueda afirmar que el camino real lo anota** y no
-    /// solo que la anotación funciona cuando se la llama a mano.
+    /// Whether anything got searched for, **so a test can assert that the real path records it** and not
+    /// just that the recording works when called by hand.
     ///
-    /// Los dos contadores los lee el informe directamente; esto es lo único que hacía falta de fuera.
+    /// The two counters are read by the report directly; this is the only thing that was needed from
+    /// outside.
     #[cfg(test)]
     pub fn has_any(&self) -> bool {
         self.search.has_samples()
@@ -677,37 +691,38 @@ impl Discovery {
     }
 }
 
-/// Lo que cuesta **rasterizar un glifo de color**, que es lo único de este proyecto que hace trabajo caro
-/// dentro del pintado.
+/// What it costs to **rasterize a color glyph**, which is the only thing in this project that does
+/// expensive work inside the painting.
 ///
-/// **Se llama por lo que mide y no por su tema**: en este proyecto `Color` es un color —lo son `Color32`,
-/// `TermColor` y la tabla del tema—, y un tipo con ese nombre que en realidad mide microsegundos se lee
-/// mal en cada sitio donde aparece.
+/// **It is named for what it measures and not for its subject**: in this project `Color` is a color
+/// —so are `Color32`, `TermColor` and the theme table—, and a type with that name that actually
+/// measures microseconds reads wrong everywhere it appears.
 ///
-/// **Va aparte de la búsqueda de fuentes porque ocurre en otro sitio del fotograma, y eso cambia quién lo
-/// paga.** Registrar una cara rehace el atlas del motor, así que se hace **fuera** del pintado y su tramo
-/// se resta del resto; rasterizar un emoji no invalida nada, así que se hace donde hace falta — dentro de
-/// «encolando el pintado». Sin restarlo de ahí, ese tramo dejaría de significar lo que su nombre dice, y
-/// este proyecto ya tiene escrito que un número mal etiquetado es peor que ningún número.
+/// **It goes apart from the font search because it happens elsewhere in the frame, and that changes who
+/// pays for it.** Registering a face rebuilds the engine's atlas, so it is done **outside** the
+/// painting and its span is subtracted from the rest; rasterizing an emoji invalidates nothing, so it
+/// is done where it is needed — inside "enqueuing the paint". Without subtracting it from there, that
+/// span would stop meaning what its name says, and this project already has it written that a
+/// mislabelled number is worse than no number.
 #[derive(Default)]
 pub struct Rasterizing {
     rasterizing: Series,
-    /// Cuántos glifos de color se han rasterizado de verdad.
+    /// How many color glyphs have really been rasterized.
     ///
-    /// **Lo publica el informe y no lo puede saber el guion**, igual que los caracteres buscados: una
-    /// tanda que diga medir el color y no rasterice ninguno estaría publicando el coste de un camino que
-    /// no se recorrió.
+    /// **The report publishes it and the script cannot know it**, just like the searched characters: a
+    /// batch that says it measures the color and rasterizes none would be publishing the cost of a path
+    /// that was not walked.
     rasterized: usize,
-    /// Cuántas veces se pidió un glifo de color que la máquina no pinta así.
+    /// How many times a color glyph was requested that the machine does not paint that way.
     ///
-    /// **Va aparte y no es redundante**: un carácter cuya presentación pide color pero que ninguna fuente
-    /// instalada trae a color **se paga entero** y no devuelve nada. Con un solo número, una máquina con
-    /// fuente de emoji y otra sin ella publicarían informes indistinguibles.
+    /// **It goes apart and is not redundant**: a character whose presentation asks for color but that no
+    /// installed font carries in color **is paid in full** and returns nothing. With a single number, a
+    /// machine with an emoji font and one without would publish indistinguishable reports.
     failed: usize,
 }
 
 impl Rasterizing {
-    /// Anota lo que costó el camino del color **en el pintado de una división**.
+    /// Records what the color path cost **in a pane's painting**.
     pub fn record(&mut self, how_long: Duration, rasterized: usize, failed: usize) {
         self.rasterizing.record(how_long);
         self.rasterized += rasterized;
@@ -736,253 +751,256 @@ impl Rasterizing {
     }
 }
 
-/// Lo grande que es la ventana, en la unidad en la que se le pide que abra.
+/// How big the window is, in the unit it is asked to open with.
 ///
-/// **Dos campos con nombre y no una pareja de números**, por lo mismo que los tramos de la tabla llevan
-/// el suyo: dos `f32` seguidos se pueden intercambiar sin que el compilador diga nada, y el informe
-/// publicaría una ventana con el ancho y el alto cambiados sin que quien lo lea pueda notarlo.
+/// **Two named fields and not a pair of numbers**, for the same reason the table's spans carry theirs:
+/// two `f32` in a row can be swapped without the compiler saying anything, and the report would publish
+/// a window with the width and height swapped without whoever reads it being able to notice.
 pub struct SizeInPoints {
     pub width: f32,
     pub height: f32,
 }
 
-/// Lo que ha costado **recolocar el texto** de las consolas a lo largo de la sesión.
+/// What it has cost to **reflow the text** of the consoles over the course of the session.
 ///
-/// **Es la fuga que el historial abre, y por eso se declara desde el mismo hito que lo enciende.**
-/// Recolocar corre en la mitad lógica del fotograma —al aplicar el tamaño que midió el pase anterior—
-/// y hasta ahora **no lo cronometraba nadie**: con el historial apagado costaba 7 µs y se perdía en el
-/// ruido, así que la fuga era invisible. Con historial recorre **todas** las líneas guardadas: 984 µs
-/// por consola medidos con contenido que envuelve (**D21**), y una frontera mueve **dos**.
+/// **It is the leak the history opens, and that is why it is declared from the same milestone that
+/// turns it on.** Reflowing runs in the logical half of the frame —when applying the size the previous
+/// pass measured— and until now **nobody timed it**: with the history off it cost 7 µs and was lost in
+/// the noise, so the leak was invisible. With history it walks **all** the saved lines: 984 µs per
+/// console measured with wrapping content (**D21**), and one border moves **two**.
 ///
-/// Sin esto, ese trabajo se publicaría como coste del framework — la cifra con la que **D3** juzga a
-/// egui.
+/// Without this, that work would be published as the framework's cost — the figure **D3** judges egui
+/// with.
 #[derive(Clone, Copy, Default)]
 pub struct Reflow {
-    /// En cuántos fotogramas **se llegó a recolocar de verdad**.
+    /// In how many frames **a reflow actually happened**.
     ///
-    /// **Casi todos los fotogramas no recolocan nada**: solo los que cruzan un borde de celda mientras
-    /// se arrastra una frontera, o los que siguen a un cambio de tamaño de la ventana. Sin este número,
-    /// una media repartida entre miles de fotogramas quietos publica «recolocar no cuesta nada», que es
-    /// exactamente el disfraz que el resto del informe evita.
+    /// **Almost every frame reflows nothing**: only the ones that cross a cell boundary while a border
+    /// is dragged, or the ones that follow a resize of the window. Without this number, a mean spread
+    /// over thousands of still frames publishes "reflowing costs nothing", which is exactly the disguise
+    /// the rest of the report avoids.
     pub frames: usize,
-    /// Lo que costaron todos ellos juntos.
+    /// What all of them cost together.
     pub total: Duration,
 }
 
 impl Reflow {
-    /// Anota lo que costó recolocar en un fotograma. **Solo se llama cuando hubo recolocación**: un
-    /// cero apuntado como muestra hunde la media y hace decir a este tramo lo contrario de lo que vale.
+    /// Records what reflowing cost in a frame. **It is only called when there was a reflow**: a zero
+    /// noted as a sample sinks the mean and makes this span say the opposite of what it is worth.
     pub fn record(&mut self, how_long: Duration) {
         self.frames += 1;
         self.total += how_long;
     }
 
-    /// Lo que costó de media cada recolocación, o nada si no hubo ninguna.
+    /// What each reflow cost on average, or nothing if there was none.
     fn per_reflow(&self) -> Option<Duration> {
         self.total.checked_div(self.frames as u32)
     }
 }
 
-/// Lo que ha costado pintar la barra de pestañas a lo largo de la sesión.
+/// What it has cost to paint the tab bar over the course of the session.
 ///
-/// **Se declara porque el fotograma se reparte por resta**: lo que nadie nombra se publica como coste
-/// del framework, que es la cifra con la que D3 juzga a egui. La barra no es de ninguna consola —no
-/// tiene dónde caer salvo aquí— y desde que su ficha dice lo que reclaman las divisiones de cada
-/// pestaña, además **recorre**: no declararla sería regalarle ese recorrido al framework.
+/// **It is declared because the frame is split by subtraction**: what nobody names is published as the
+/// framework's cost, which is the figure D3 judges egui with. The bar belongs to no console —it has
+/// nowhere to fall except here— and ever since its tab says what each tab's panes claim, it also
+/// **walks**: not declaring it would be handing that walk to the framework.
 ///
-/// **El tramo es la barra entera —acumular y pintar—, y decirlo entero importa.** Declarar solo el
-/// recorrido dejaría el pintado de las fichas sin dueño, que es la misma frontera a medias que este
-/// proyecto ya pagó una vez.
+/// **The span is the whole bar —accumulating and painting—, and saying it in full matters.** Declaring
+/// only the walk would leave the tabs' painting with no owner, which is the same half-drawn boundary
+/// this project already paid once.
 #[derive(Clone, Copy, Default)]
 pub struct TabBar {
-    /// En cuántos fotogramas se llegó a pintar.
+    /// In how many frames it got painted.
     ///
-    /// **Cero no es «no costó nada», es «no hubo barra»** —con una sola pestaña no se pinta—, y son dos
-    /// cosas que un total a cero no distingue. Es también lo que hace comparable la tanda: sin este
-    /// número, una corrida de una sola pestaña publicaría «la barra no cuesta nada» con el código
-    /// quitado.
+    /// **Zero is not "it cost nothing", it is "there was no bar"** —with a single tab it is not
+    /// painted—, and those are two things a zero total does not distinguish. It is also what makes the
+    /// batch comparable: without this number, a run of a single tab would publish "the bar costs
+    /// nothing" with the code taken out.
     pub frames: usize,
-    /// Lo que costaron todos ellos juntos.
+    /// What all of them cost together.
     pub total: Duration,
-    /// Lo más que llegaron a marcarse fichas a la vez.
+    /// The most tabs that got marked at once.
     ///
-    /// **Cero significa que la barra recorrió y no marcó nada.** El recorrido ocurre haya reclamo o no,
-    /// así que sin este número una tanda cuyos productores no publicaran el campo publicaría el coste de
-    /// la barra **sin la mitad que hay que medir**, y se leería igual que una buena.
+    /// **Zero means the bar walked and marked nothing.** The walk happens whether there is a claim or
+    /// not, so without this number a batch whose producers did not publish the field would publish the
+    /// bar's cost **without the half that has to be measured**, and it would read just like a good one.
     pub marked_tabs: usize,
 }
 
 impl TabBar {
-    /// Anota lo que costó pintarla **en un fotograma**, ya sumadas sus pasadas.
+    /// Records what it cost to paint it **in a frame**, with its passes already summed.
     ///
-    /// Quien llama es el cierre del fotograma, no el pintado: egui repite la pasada sobre la misma
-    /// entrada y las dos pintan de verdad, así que anotar por pasada daría una media por pasada bajo
-    /// una etiqueta que dice «por fotograma».
+    /// The caller is the frame close, not the painting: egui repeats the pass over the same input and
+    /// both really paint, so recording per pass would give a mean per pass under a label that says "per
+    /// frame".
     pub fn record(&mut self, how_long: Duration) {
         self.frames += 1;
         self.total += how_long;
     }
 
-    /// Se queda con lo más que llegaron a marcarse fichas a la vez.
+    /// Keeps the most tabs that got marked at once.
     ///
-    /// **El máximo y no lo último**: en el último fotograma pueden haber caducado todas, y lo que hay
-    /// que poder decir es si llegó a marcarse alguna en toda la corrida.
+    /// **The maximum and not the last**: in the last frame they may all have expired, and what has to
+    /// be sayable is whether any got marked in the whole run.
     pub fn saw_marked(&mut self, how_many: usize) {
         self.marked_tabs = self.marked_tabs.max(how_many);
     }
 
-    /// Lo que costó de media, o nada si no llegó a pintarse.
+    /// What it cost on average, or nothing if it never got painted.
     fn per_frame(&self) -> Option<Duration> {
         self.total.checked_div(self.frames as u32)
     }
 }
 
-/// Lo que costó abrir la ventana con la disposición que había guardada.
+/// What it cost to open the window with the layout that had been saved.
 ///
-/// **Se publica fuera de la tabla de tramos y no se resta de ningún fotograma**, y eso es lo que hay que
-/// entender antes de leer sus números: restaurar ocurre **entero antes del primer fotograma** —el fichero
-/// se lee en `run` y las consolas se abren en el constructor—, así que no contamina el reparto por
-/// resta con el que este proyecto juzga a su framework. Es coste de **arranque**, que es otro camino y
-/// hasta este hito no lo declaraba nadie.
+/// **It is published outside the span table and is subtracted from no frame**, and that is what has to
+/// be understood before reading its numbers: restoring happens **entirely before the first frame** —the
+/// file is read in `run` and the consoles are opened in the constructor—, so it does not contaminate the
+/// subtraction split this project judges its framework with. It is a **startup** cost, which is another
+/// path and until this milestone nobody declared it.
 #[derive(Clone, Copy)]
 pub struct Restoring {
-    /// Cuántas consolas salieron del fichero. **Es el número que hace comparable la tanda**: sin él, una
-    /// corrida en la que el fichero no llegó a mandar publica la ventana de fábrica bajo etiqueta de
-    /// restaurada, que es el mismo disfraz que el informe ya evita con los paneles y con los gestos.
+    /// How many consoles came out of the file. **It is the number that makes the batch comparable**:
+    /// without it, a run in which the file never got to command publishes the factory window under a
+    /// restored label, which is the same disguise the report already avoids with the panels and with the
+    /// gestures.
     pub consoles: usize,
-    /// Leer el fichero del disco, interpretarlo y validarlo.
+    /// Reading the file from disk, interpreting it and validating it.
     ///
-    /// **Es opcional, y eso impide publicar un número que nadie tomó.** Con un `Duration` a secas, una
-    /// ventana construida con una persistencia que nunca leyó el disco publicaría `0ns en leer y
-    /// validar` — indistinguible de una lectura instantánea de verdad, y exactamente la clase de cifra
-    /// que este proyecto prohíbe. Sin medida, el informe lo dice con esas palabras.
+    /// **It is optional, and that keeps a number nobody took from being published.** With a bare
+    /// `Duration`, a window built with a persistence that never read the disk would publish `0ns to read
+    /// and validate` — indistinguishable from a truly instant read, and exactly the kind of figure this
+    /// project forbids. With no measurement, the report says so in those words.
     pub read: Option<Duration>,
-    /// Abrir la ventana con lo que el fichero pedía: un `fork` y un `exec` por hoja, **y todo lo que
-    /// viene detrás por cada consola** — armar el vigilante de su directorio y describir el árbol
-    /// entero para el primer espejo.
+    /// Opening the window with what the file asked for: a `fork` and an `exec` per leaf, **and
+    /// everything that comes behind it per console** — building its directory's watcher and describing
+    /// the whole tree for the first mirror.
     ///
-    /// **Va hasta que la ventana está construida, no hasta que los procesos existen**, y esa raya la
-    /// movió una revisión: parándola antes, dos trabajos que **crecen con N** quedaban fuera de un
-    /// número que dice medir justo eso, y se habrían publicado como coste del framework.
+    /// **It goes until the window is built, not until the processes exist**, and a review moved that
+    /// line: stopping it earlier, two jobs that **grow with N** were left out of a number that says it
+    /// measures precisely that, and they would have been published as the framework's cost.
     ///
-    /// **Es el que crece con N** y por eso va aparte del de arriba: leer un documento de cuatro hojas y
-    /// uno de doscientas cuesta casi lo mismo, y abrirlas no.
+    /// **It is the one that grows with N** and that is why it goes apart from the one above: reading a
+    /// four-leaf document and a two-hundred-leaf one costs almost the same, and opening them does not.
     pub opening: Duration,
 }
 
-/// Lo que costó mirar la configuración de quien usa el terminal, **y si se llegó a mirar**.
+/// What it cost to check the configuration of whoever uses the terminal, **and whether it got
+/// checked**.
 ///
-/// **Se llama por el acto y no por la cosa**, como sus hermanos: `Restoring`, `Discovery`,
-/// `Rasterizing` nombran el trabajo. Un tipo llamado `Configuracion` dentro del módulo de medida se lee
-/// como «la configuración de la medida», que es justo lo que no es.
+/// **It is named for the act and not for the thing**, like its siblings: `Restoring`, `Discovery`,
+/// `Rasterizing` name the work. A type called `Configuracion` inside the measurement module reads as
+/// "the measurement's configuration", which is exactly what it is not.
 ///
-/// **Un tramo de una sola vez, como el de restaurar**: ocurre entero antes del primer fotograma, así que no
-/// tiene serie ni media. Lo que hace falta es que **esté declarado**, o sus microsegundos caen dentro del
-/// arranque sin nombre.
+/// **A one-off span, like the restoring one**: it happens entirely before the first frame, so it has no
+/// series and no mean. What is needed is that it **be declared**, or its microseconds fall inside the
+/// nameless startup.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ReadingSettings {
-    /// No se miró: es una tanda de medida y el fichero está vetado.
+    /// It was not checked: it is a measurement batch and the file is vetoed.
     #[default]
     Vetoed,
-    /// Se miró y no había nada que aplicar — no hay fichero, o no se pudo usar.
+    /// It was checked and there was nothing to apply — there is no file, or it could not be used.
     Missing,
-    /// Se aplicó lo que el fichero pedía.
+    /// What the file asked for was applied.
     Applied {
-        /// Lo que costó leerlo e interpretarlo.
+        /// What it cost to read and interpret it.
         how_long: Duration,
-        /// Cuántas líneas no se pudieron aplicar.
+        /// How many lines could not be applied.
         warnings: usize,
     },
 }
 
-/// Los gestos de arrastre que una tanda de medida se inyectó a sí misma, tal como se declaran.
+/// The drag gestures a measurement batch injected into itself, as they are declared.
 #[derive(Clone, Copy)]
 pub struct Drags {
-    /// Gestos enteros que se inyectaron: los que llegaron a mandar su evento de soltar.
+    /// Whole gestures that were injected: the ones that got to send their release event.
     pub injected: usize,
-    /// Cuántas veces el gesto **cambió algo de verdad**: soltados que el árbol aceptó, o fotogramas en que
-    /// un arrastre le movió el ancho a un panel.
+    /// How many times the gesture **really changed something**: releases the tree accepted, or frames in
+    /// which a drag moved a panel's width.
     ///
-    /// **Puede ser MAYOR que los inyectados, y no es un error de cuenta.** Con el gesto del panel, un solo
-    /// arrastre cruza varias fronteras de celda y cada cruce cambia el ancho, así que un gesto produce
-    /// varios efectos —y con dos divisiones a la vista, los de las dos—. Por eso las dos cifras se publican
-    /// **una al lado de la otra y no como una fracción**: la primera dice cuántos gestos ocurrieron, la
-    /// segunda cuánto trabajo provocaron. La primera versión las imprimía como «N de M» y publicó
-    /// «423 de 211», que es un número imposible de leer bien.
+    /// **It can be GREATER than the injected ones, and it is not a counting error.** With the panel
+    /// gesture, a single drag crosses several cell boundaries and each crossing changes the width, so one
+    /// gesture produces several effects —and with two panes in view, both panes'—. That is why the two
+    /// figures are published **side by side and not as a fraction**: the first says how many gestures
+    /// happened, the second how much work they caused. The first version printed them as "N of M" and
+    /// published "423 of 211", which is a number impossible to read right.
     pub effective: usize,
-    /// En cuántos **fotogramas** el gesto dejó texto marcado en alguna consola.
+    /// In how many **frames** the gesture left text marked in some console.
     ///
-    /// **Fotogramas y no gestos, y decirlo importa**: un gesto extiende la selección una vez por cada
-    /// fotograma de arrastre, así que este número sale **mayor** que el de gestos inyectados. Publicarlo
-    /// bajo la palabra «gestos» daba una fila con el tercer número por encima del primero, que es
-    /// imposible de leer bien — lo mismo que ya pasó una vez publicando «423 de 211».
+    /// **Frames and not gestures, and saying it matters**: a gesture extends the selection once per drag
+    /// frame, so this number comes out **greater** than the injected gestures'. Publishing it under the
+    /// word "gestures" gave a row with the third number above the first, which is impossible to read
+    /// right — the same as already happened once publishing "423 of 211".
     ///
-    /// **Las tandas lo leen en los DOS sentidos.** La que mide marcar exige que haya **más de uno por
-    /// gesto**: si el gesto entrara por otro sitio —el asidero del panel, el divisor— la corrida se
-    /// inyectaría entera y publicaría el coste de otra cosa bajo su etiqueta. Y las que miden **otro**
-    /// gesto exigen que sea **cero**: desde **D20** el botón primario a secas dentro de una consola marca
-    /// texto, así que un gesto que perdiera su asidero se convertiría en una selección sin que nada más lo
-    /// delatara.
+    /// **The batches read it in BOTH directions.** The one that measures marking requires there to be
+    /// **more than one per gesture**: if the gesture entered by another route —the panel handle, the
+    /// divider— the run would inject itself whole and publish the cost of something else under its label.
+    /// And the ones that measure **another** gesture require it to be **zero**: since **D20** the bare
+    /// primary button inside a console marks text, so a gesture that lost its handle would turn into a
+    /// selection without anything else giving it away.
     ///
-    /// **En la tanda que marca coincide con los efectos, y es correcto**: el efecto de marcar **es** dejar
-    /// algo marcado. Los dos se publican igual porque en las demás tandas no coinciden — allí los efectos
-    /// son repartos y maquetados, y éste tiene que salir cero.
+    /// **In the batch that marks it coincides with the effects, and that is correct**: the effect of
+    /// marking **is** leaving something marked. The two are published the same because in the other
+    /// batches they do not coincide — there the effects are tilings and layouts, and this one has to come
+    /// out zero.
     pub marked: usize,
-    /// Cuántos **informes de ratón** salieron hacia el programa de dentro durante la corrida.
+    /// How many **mouse reports** went out to the program inside during the run.
     ///
-    /// **Se lee en los dos sentidos, igual que los marcados.** La tanda que mide el ratón exige que sea
-    /// **mayor que cero**: sin ese número, una corrida en la que el programa nunca llegara a pedir el
-    /// ratón publicaría los tramos de un gesto que se resolvió como selección, bajo la etiqueta del
-    /// ratón. Y las demás exigen que sea **cero**: un informe que se escapara metería una ida al
-    /// pseudoterminal dentro de la media de otra tanda.
+    /// **It is read in both directions, just like the marked ones.** The batch that measures the mouse
+    /// requires it to be **greater than zero**: without that number, a run in which the program never got
+    /// to ask for the mouse would publish the spans of a gesture that resolved as a selection, under the
+    /// mouse's label. And the others require it to be **zero**: a report that slipped out would put a way
+    /// out to the pseudoterminal inside another batch's mean.
     pub reported: usize,
-    /// Qué gesto se inyectó, tal como se publica. **Va en el informe** porque los tres gestos no cuestan lo
-    /// mismo y una tanda no se compara con otra de la otra clase.
+    /// Which gesture was injected, as it is published. **It goes in the report** because the three
+    /// gestures do not cost the same and one batch is not compared with another of a different class.
     pub gesture: &'static str,
 }
 
-/// La cabecera del informe: dónde y cómo se midió — cuántas pestañas había, cuál se veía y con qué
-/// rejilla cada consola.
+/// The report header: where and how it was measured — how many tabs there were, which one was visible
+/// and with what grid each console.
 ///
-/// **Este comentario llevaba el título dos veces y los dos párrafos pegados sin separación**, de antes de
-/// este hito; se arregló al pasar por aquí, porque un doc que se presenta dos veces se lee como si
-/// describiera dos cosas.
+/// **This comment carried the title twice and the two paragraphs stuck together with no separation**,
+/// from before this milestone; it was fixed while passing through here, because a doc that presents
+/// itself twice reads as if it described two things.
 ///
-/// Las rejillas van una por consola **y con su nombre**, porque el reparto del ancho las deja
-/// distintas y ningún tramo se entiende sin saber sobre cuántas celdas se tomó. Es el dato que hace
-/// falta para comparar con una medida antigua de una sola consola a pantalla completa: sin él, un
-/// «enqueueing the paint» más bajo se lee como que el framework va más rápido, cuando lo que pasa es que hay la
-/// mitad de columnas.
+/// The grids go one per console **and with its name**, because the width tiling leaves them different
+/// and no span is understood without knowing over how many cells it was taken. It is the datum that is
+/// needed to compare with an old measurement of a single full-screen console: without it, a lower
+/// "enqueueing the paint" reads as the framework going faster, when what is happening is that there are
+/// half the columns.
 ///
-/// **Cada pestaña llega con su nombre, no con su posición en la lista.** Al cerrar una, las de su
-/// derecha corren un puesto, así que numerar aquí por el orden del recorrido le pondría a una tabla de
-/// números el nombre de otra pestaña — y quien lea el informe no tiene forma de notarlo. `visible` es
-/// también un nombre, por lo mismo.
+/// **Each tab arrives with its name, not with its position in the list.** When one is closed, the ones
+/// to its right move up a place, so numbering here by the order of the walk would put another tab's name
+/// on a table of numbers — and whoever reads the report has no way to notice. `visible` is also a name,
+/// for the same reason.
 ///
-/// **Y cada división llega con el suyo, por lo mismo y en cuanto se puedan cerrar.** Hoy son dos y
-/// fijas, así que el nombre coincide con la posición; publicar ya el nombre es lo que hace que las
-/// tandas tomadas antes y después del árbol de divisiones se lean igual.
+/// **And each pane arrives with its own, for the same reason and as soon as they can be closed.** Today
+/// there are two and fixed, so the name coincides with the position; publishing the name already is what
+/// makes the batches taken before and after the pane tree read the same.
 ///
-/// **Una lista por pestaña y no un array de dos**: el número de divisiones deja de estar fijado por el
-/// tipo en cuanto llega el árbol, y una firma que siga prometiendo dos obligaría a recortar o rellenar
-/// justo aquí, que es donde el informe se convierte en el dato que alguien va a creerse.
-/// Lo que la sesión entera tiene que contar de sí misma, además de sus tramos por consola.
+/// **A list per tab and not an array of two**: the number of panes stops being fixed by the type as
+/// soon as the tree arrives, and a signature that kept promising two would force trimming or padding
+/// right here, which is where the report turns into the datum someone is going to believe.
+/// What the whole session has to tell about itself, on top of its per-console spans.
 ///
-/// **Es un struct con nombres y no cuatro parámetros seguidos**, por lo mismo que [`Spans`]: cuando
-/// esto eran argumentos posicionales, intercambiar dos compilaba sin una queja y publicaba un informe
-/// mentiroso. Y son cuatro cosas que crecen —cada hito que declara un tramo nuevo añade el suyo—, así
-/// que la firma tenía los días contados.
+/// **It is a struct with names and not four parameters in a row**, for the same reason as [`Spans`]:
+/// when these were positional arguments, swapping two compiled without a complaint and published a lying
+/// report. And they are four things that grow —every milestone that declares a new span adds its own—,
+/// so the signature's days were numbered.
 #[derive(Clone, Copy, Default)]
 pub struct SessionHeader {
-    /// Los gestos que una tanda se inyectó, si es que se inyectó alguno.
+    /// The gestures a batch injected, if it injected any.
     pub drags: Option<Drags>,
-    /// De dónde salieron las consolas, si salieron de un fichero.
+    /// Where the consoles came from, if they came from a file.
     pub restoring: Option<Restoring>,
-    /// Lo que costó leer la configuración, y si se leyó.
+    /// What it cost to read the configuration, and whether it was read.
     pub settings: ReadingSettings,
-    /// Lo que costó pintar la barra de pestañas.
+    /// What it cost to paint the tab bar.
     pub tab_bar: TabBar,
-    /// Lo que costó recolocar el texto al cambiar el ancho de una consola.
+    /// What it cost to reflow the text when a console's width changed.
     pub reflow: Reflow,
 }
 
@@ -1006,16 +1024,16 @@ pub fn header(
         "release"
     };
     writeln!(a, "\n── latency ──")?;
-    // **Lo grande que era la ventana, y es lo único de la cabecera que se puede volver a pedir.** La
-    // rejilla en celdas de cada consola sale de este tamaño y de la métrica de la fuente, así que leerla
-    // no dice con qué ventana se tomó la tanda: los anexos anteriores a esta línea se midieron con
-    // ventanas cuyo tamaño nadie apuntó, y por eso no se pueden reproducir. Se publica en puntos porque
-    // es la unidad en la que se pide.
+    // **How big the window was, and it is the only thing in the header that can be asked for again.**
+    // Each console's grid in cells comes out of this size and the font metric, so reading it does not
+    // say with what window the batch was taken: the annexes before this line were measured with windows
+    // whose size nobody noted, and that is why they cannot be reproduced. It is published in points
+    // because that is the unit it is asked for in.
     writeln!(a, "window:       {}×{} points", window.width, window.height)?;
-    // **Cuántas pestañas había, y no solo cuáles se pintaron.** Los tramos de abajo se tomaron con
-    // todas ellas bombeando, así que una tanda de dos pestañas y otra de una no se pueden comparar sin
-    // este dato — y sin él, el informe de las dos se lee como si fuera de una sola y con el fotograma
-    // inexplicablemente más caro.
+    // **How many tabs there were, and not only which ones were painted.** The spans below were taken
+    // with all of them pumping, so a batch of two tabs and one of one cannot be compared without this
+    // datum — and without it, the report of the two reads as if it were of a single one and with the
+    // frame inexplicably more expensive.
     writeln!(a, "tabs:         {}", grids.len())?;
     for (which_tab, grids) in grids {
         let seen_as = if *which_tab == visible {
@@ -1035,23 +1053,23 @@ pub fn header(
             )?;
         }
     }
-    // **Los gestos que la tanda se inyectó, y solo si pidió alguno.** Dos números, y los dos tienen señal:
-    // los **inyectados** dicen que el gesto ocurrió, y los que **surtieron efecto** dicen que llegó a
-    // cambiar algo. Hacen falta los dos porque no son lo mismo: el suelo geométrico rechaza el soltado cuando la
-    // consola de destino no puede darle su mínimo a las dos, y en una ventana estrecha eso pasa en todos —
-    // la tanda inyecta mil gestos y no reordena ni uno. Con un solo número, esa corrida se leería como «el
-    // gesto no cuesta nada» en vez de como «no pasó nada», que es el disfraz de declarar cero que este
-    // proyecto ya se ha comido una vez.
+    // **The gestures the batch injected, and only if it asked for any.** Two numbers, and both carry a
+    // signal: the **injected** ones say the gesture happened, and the ones that **took effect** say it
+    // got to change something. Both are needed because they are not the same: the geometric floor rejects
+    // the release when the destination console cannot give both their minimum, and in a narrow window
+    // that happens in all of them — the batch injects a thousand gestures and reorders not one. With a
+    // single number, that run would read as "the gesture costs nothing" instead of as "nothing
+    // happened", which is the disguise of declaring zero this project has already swallowed once.
     //
-    // **Los pedidos NO se publican, y eso lo corrigió la revisión.** La primera versión imprimía «pedidos» y
-    // decía que la diferencia con los hechos era el aviso; pero el guion pide un número deliberadamente
-    // altísimo para que el gesto dure toda la tanda, así que esa diferencia vale lo mismo en una corrida
-    // buena que en una rota. Un número que un lector va a intentar interpretar y no puede es peor que no
-    // publicarlo.
+    // **The requested ones are NOT published, and the review fixed that.** The first version printed
+    // "requested" and said the difference with the done ones was the warning; but the script asks for a
+    // deliberately sky-high number so the gesture lasts the whole batch, so that difference is worth the
+    // same in a good run as in a broken one. A number a reader is going to try to interpret and cannot is
+    // worse than not publishing it.
     //
-    // **La línea no sale cuando nadie pidió arrastres**, y eso es deliberado: las tandas del anexo
-    // anteriores a este hito se compararían con informes de forma distinta, y aquí lo que se compara son
-    // tandas entre sí.
+    // **The line does not come out when nobody asked for drags**, and that is deliberate: the annex
+    // batches before this milestone would be compared with reports of a different shape, and here what is
+    // compared is batches against each other.
     if let Some(drags) = drags {
         writeln!(
             a,
@@ -1059,14 +1077,15 @@ pub fn header(
             drags.injected, drags.effective, drags.marked, drags.reported, drags.gesture
         )?;
     }
-    // **De dónde salieron las consolas, y solo cuando salieron del fichero.** Sin esta línea, una tanda
-    // que dice medir el arranque restaurado y otra que abrió de fábrica producen informes **idénticos**:
-    // la cabecera publica cuántas consolas hay, no quién las pidió. Y con la misma cuenta de consolas
-    // ninguna de las guardas del guion salta — que es exactamente el disfraz que este proyecto ya se comió
-    // una vez con los paneles y otra con los gestos.
+    // **Where the consoles came from, and only when they came from the file.** Without this line, a
+    // batch that says it measures the restored startup and one that opened from factory produce
+    // **identical** reports: the header publishes how many consoles there are, not who asked for them.
+    // And with the same console count none of the script's guards fire — which is exactly the disguise
+    // this project already swallowed once with the panels and once with the gestures.
     //
-    // **Los dos tiempos van separados a propósito**: leer no crece con el número de consolas y abrirlas sí,
-    // así que sumarlos daría un número que no se puede extrapolar a una disposición más grande.
+    // **The two times go separate on purpose**: reading does not grow with the number of consoles and
+    // opening them does, so summing them would give a number that cannot be extrapolated to a larger
+    // layout.
     if let Some(restoring) = restoring {
         let read = match restoring.read {
             Some(how_long) => format!("{how_long:?}"),
@@ -1079,26 +1098,26 @@ pub fn header(
             restoring.consoles, restoring.opening
         )?;
     }
-    // **Se declara SIEMPRE, se haya leído o no**, y ésa es la mitad que importa. Una corrida que leyó la
-    // configuración de quien mide y otra que corrió de fábrica publican rejillas que pueden no tener nada
-    // que ver, y sin esta línea sus informes son indistinguibles. Toda tanda de medida tiene el fichero
-    // vetado, así que aquí debe leerse siempre «de fábrica»: si alguna vez dice otra cosa, esa corrida no
-    // se compara con ninguna.
+    // **It is ALWAYS declared, whether it was read or not**, and that is the half that matters. A run
+    // that read the configuration of whoever measures and one that ran from factory publish grids that
+    // may have nothing to do with each other, and without this line their reports are indistinguishable.
+    // Every measurement batch has the file vetoed, so here it must always read "factory": if it ever says
+    // otherwise, that run is compared with none.
     match settings {
-        // **Los tres estados se distinguen EN EL PRIMER SUSTANTIVO, no en el paréntesis**, y eso es lo
-        // que hace que el guion de medida pueda leerlos. Con «de fábrica» para el vetado y para el que
-        // miró y no encontró nada, un veto roto en una máquina sin fichero —que es **el caso real del
-        // banco**, porque el guion vacía el directorio de configuración— se leería como una corrida buena.
-        // Lo cazó una revisión.
+        // **The three states are distinguished BY THE FIRST NOUN, not by the parenthesis**, and that is
+        // what makes the measurement script able to read them. With "factory" for the vetoed one and for
+        // the one that checked and found nothing, a broken veto on a machine with no file —which is **the
+        // bench's real case**, because the script empties the configuration directory— would read as a
+        // good run. A review caught it.
         ReadingSettings::Vetoed => writeln!(
             a,
             "settings:     vetoed (not read under the measurement gate: the font size of whoever \
              measures would change the grid, and every published figure depends on the grid)"
         )?,
-        // **«Se miró y no había» NO es «del usuario», y confundirlos publica un número con la etiqueta
-        // cambiada.** Una máquina sin fichero y otra que aplicó un cuerpo de letra distinto tienen rejillas
-        // que pueden no tener nada que ver, y con un solo estado para las dos sus informes salían
-        // idénticos. Lo cazó una revisión.
+        // **"Checked and there was nothing" is NOT "the user's", and confusing them publishes a number
+        // with the label swapped.** A machine with no file and one that applied a different font size
+        // have grids that may have nothing to do with each other, and with a single state for the two
+        // their reports came out identical. A review caught it.
         ReadingSettings::Missing => writeln!(
             a,
             "settings:     factory (looked and there was nothing to apply)"
@@ -1109,8 +1128,8 @@ pub fn header(
              applied (before the first frame, subtracted from none)"
         )?,
     }
-    // **Solo cuando la hubo.** Con una sola pestaña no hay barra que pintar, y publicar «0 fotogramas»
-    // invita a leer que no cuesta nada.
+    // **Only when there was one.** With a single tab there is no bar to paint, and publishing "0 frames"
+    // invites reading that it costs nothing.
     if let Some(mean) = tab_bar.per_frame() {
         writeln!(
             a,
@@ -1120,8 +1139,8 @@ pub fn header(
             tab_bar.frames, tab_bar.total, tab_bar.marked_tabs
         )?;
     }
-    // **Solo cuando hubo.** En una tanda que no redimensiona nada no se recoloca ni una vez, y
-    // publicar «0 veces» invita a leer que no cuesta.
+    // **Only when there was one.** In a batch that resizes nothing there is not a single reflow, and
+    // publishing "0 times" invites reading that it costs nothing.
     if let Some(each) = reflow.per_reflow() {
         writeln!(
             a,
@@ -1135,24 +1154,24 @@ pub fn header(
     writeln!(a, "machine:      {}", machine())
 }
 
-/// Cómo se llama cada consola en el informe, por su sitio en la ventana.
+/// What each console is called in the report, by its place in the window.
 ///
-/// Un número suelto obliga a adivinar de qué lado es, y el reparto del ancho hace que el lado importe.
+/// A bare number forces guessing which side it is, and the width tiling makes the side matter.
 pub const CONSOLE_NAME: [&str; 2] = ["left", "right"];
 
-/// De qué lado cae una división, **si es que el lado significa algo**.
+/// Which side a pane falls on, **if the side means anything at all**.
 ///
-/// **«Izquierda» y «derecha» solo describen algo cuando hay exactamente dos**, así que con cualquier
-/// otro número esto no devuelve nada en vez de inventarse un lado. No es una guarda por si acaso: hasta
-/// que la cabecera dejó de recibir un array de dos, el número estaba fijado por el tipo, y al pasarlo a
-/// una lista —que es lo que el árbol de divisiones necesita— la garantía dejó de existir. Indexar el
-/// array por la posición se convertía en un pánico **dentro del informe que se publica al salir**, o sea
-/// perdiendo de golpe todo lo medido en la sesión.
+/// **"Left" and "right" only describe something when there are exactly two**, so with any other number
+/// this returns nothing instead of inventing a side. It is not a just-in-case guard: until the header
+/// stopped receiving an array of two, the number was fixed by the type, and passing it to a list —which
+/// is what the pane tree needs— the guarantee ceased to exist. Indexing the array by position turned
+/// into a panic **inside the report that is published on exit**, that is, losing at a stroke everything
+/// measured in the session.
 ///
-/// Lo usan los tres sitios del informe que nombran una división —la cabecera, el título de su tabla de
-/// tramos y la línea del foco—, cada uno con su propio adorno alrededor. Que la regla viva en un solo
-/// sitio es lo que evita que uno de los tres se quede indexando por su cuenta el día que partir una
-/// división deje de ser una rareza: desde que se puede partir, tres divisiones son un gesto.
+/// The three places in the report that name a pane use it —the header, the title of its span table and
+/// the focus line—, each with its own decoration around it. That the rule lives in a single place is
+/// what keeps one of the three from indexing on its own the day splitting a pane stops being a rarity:
+/// since it can be split, three panes are one gesture.
 pub fn side(how_many: usize, which: usize) -> Option<&'static str> {
     match CONSOLE_NAME.get(which) {
         Some(side_name) if how_many == CONSOLE_NAME.len() => Some(side_name),
@@ -1160,23 +1179,23 @@ pub fn side(how_many: usize, which: usize) -> Option<&'static str> {
     }
 }
 
-/// La pista de sitio tal y como la lleva la cabecera: entre paréntesis y con su sangría, o nada.
+/// The side hint as the header carries it: in parentheses and with its indentation, or nothing.
 fn where_it_falls(how_many: usize, which: usize) -> String {
     side(how_many, which).map_or_else(String::new, |side_name| format!("  ({side_name})"))
 }
 
-/// Cómo se llama esta máquina, o «desconocida» si no hay forma de saberlo.
+/// What this machine is called, or "unknown" if there is no way to know.
 ///
-/// **Nunca calla.** El criterio pide la máquina junto al número, y un informe al que le falta esa
-/// línea en silencio es un número que mañana no se sabe de dónde salió. `HOSTNAME` es variable de
-/// shell y no suele estar exportada, así que apoyarse solo en ella era exactamente ese fallo
-/// silencioso: en el primer volcado medido la línea no salió y nadie se enteró.
+/// **It never stays silent.** The criterion asks for the machine alongside the number, and a report
+/// missing that line silently is a number whose origin tomorrow is unknown. `HOSTNAME` is a shell
+/// variable and is not usually exported, so relying on it alone was exactly that silent failure: in the
+/// first measured dump the line did not come out and nobody noticed.
 fn machine() -> String {
     if let Ok(name) = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")) {
         return name;
     }
-    // El fichero es de Linux y de los BSD; en otros sistemas se cae al literal, que es la respuesta
-    // honesta y no una invención.
+    // The file is Linux's and the BSDs'; on other systems it falls back to the literal, which is the
+    // honest answer and not an invention.
     std::fs::read_to_string("/etc/hostname")
         .map(|name| name.trim().to_owned())
         .ok()
@@ -1192,19 +1211,19 @@ mod tests {
         Duration::from_millis(n)
     }
 
-    /// Lo que el informe publica de verdad, leído del mismo camino que escribe por pantalla.
+    /// What the report really publishes, read from the same path it writes to the screen with.
     fn report_of(timings: &Timings) -> String {
         let mut salida = Vec::new();
         timings
             .publish_spans(&mut salida)
-            .expect("escribir a memoria no falla");
-        String::from_utf8(salida).expect("el informe es texto")
+            .expect("writing to memory does not fail");
+        String::from_utf8(salida).expect("the report is text")
     }
 
-    /// La cabecera que se publica de verdad, por el mismo camino que la escribe al salir.
+    /// The header that is really published, by the same path it writes on exit.
     ///
-    /// El tamaño de ventana va fijo porque ninguna de las pruebas de aquí habla de él; la que sí lo hace
-    /// lo pasa por su cuenta.
+    /// The window size is fixed because none of the tests here talk about it; the one that does passes
+    /// it on its own.
     fn header_of(grids: &[(usize, Vec<(usize, term_core::Size)>)], visible: usize) -> String {
         header_with(
             SizeInPoints {
@@ -1230,10 +1249,10 @@ mod tests {
         visible: usize,
         drags: Option<Drags>,
     ) -> String {
-        cabecera_completa(window, grids, visible, drags, None)
+        full_header(window, grids, visible, drags, None)
     }
 
-    fn cabecera_completa(
+    fn full_header(
         window: SizeInPoints,
         grids: &[(usize, Vec<(usize, term_core::Size)>)],
         visible: usize,
@@ -1243,7 +1262,7 @@ mod tests {
         with_tab_bar(window, grids, visible, drags, restoring, TabBar::default())
     }
 
-    /// La cabecera con un estado de configuración concreto, que es lo que el guion de medida lee.
+    /// The header with a concrete configuration state, which is what the measurement script reads.
     fn with_settings(settings: ReadingSettings) -> String {
         let mut salida = Vec::new();
         header(
@@ -1262,39 +1281,40 @@ mod tests {
                 reflow: Reflow::default(),
             },
         )
-        .expect("escribir a memoria no falla");
-        String::from_utf8(salida).expect("el informe es texto")
+        .expect("writing to memory does not fail");
+        String::from_utf8(salida).expect("the report is text")
     }
 
     #[test]
-    fn los_tres_estados_de_la_configuracion_se_distinguen_donde_el_guion_mira() {
-        // **El guion invalida una corrida leyendo el PRIMER SUSTANTIVO de esta línea**, así que su forma
-        // es tan contrato como el nombre de un fichero. Cambiar el texto dejaba la suite entera en verde
-        // y **toda tanda de medida saldría inválida** — o, peor, pasaría por buena una que rompió el veto.
+    fn the_three_configuration_states_are_distinguished_where_the_script_looks() {
+        // **The script invalidates a run by reading the FIRST NOUN of this line**, so its shape is as
+        // much a contract as a file name. Changing the text left the whole suite green and **every
+        // measurement batch would come out invalid** — or, worse, one that broke the veto would pass as
+        // good.
         //
-        // **Y los tres tienen que empezar distinto.** El guion vacía el directorio de configuración, así
-        // que un veto roto en el banco produce «se miró y no había»: si eso empezara igual que el vetado,
-        // el veto roto se leería como una corrida buena. Lo cazó una revisión, después de que otra hubiera
-        // pedido separar los estados sin ver esta consecuencia.
+        // **And the three have to start differently.** The script empties the configuration directory,
+        // so a broken veto on the bench produces "checked and there was nothing": if that started the
+        // same as the vetoed one, the broken veto would read as a good run. A review caught it, after
+        // another had asked to separate the states without seeing this consequence.
         let vetada = with_settings(ReadingSettings::Vetoed);
         let line = vetada
             .lines()
             .find(|l| l.starts_with("settings:"))
-            .expect("no hay línea de configuración que el guion pueda leer");
+            .expect("there is no configuration line the script can read");
         assert!(
             line.starts_with("settings:     vetoed"),
-            "la línea de la configuración vetada ya no tiene la forma que el guion sabe leer: «{line}»"
+            "the vetoed configuration line no longer has the shape the script knows how to read: '{line}'"
         );
 
         let sin = with_settings(ReadingSettings::Missing);
         let line = sin
             .lines()
             .find(|l| l.starts_with("settings:"))
-            .expect("no hay línea de configuración");
+            .expect("there is no configuration line");
         assert!(
             !line.starts_with("settings:     vetoed"),
-            "«se miró y no había» empieza igual que «vetada», así que un veto roto en el banco —donde no \
-             hay fichero por construcción— pasaría por una corrida buena: «{line}»"
+            "'checked and there was nothing' starts the same as 'vetoed', so a broken veto on the bench \
+             —where there is no file by construction— would pass as a good run: '{line}'"
         );
 
         let con = with_settings(ReadingSettings::Applied {
@@ -1304,10 +1324,10 @@ mod tests {
         let line = con
             .lines()
             .find(|l| l.starts_with("settings:"))
-            .expect("no hay línea de configuración");
+            .expect("there is no configuration line");
         assert!(
             line.starts_with("settings:     the user's"),
-            "la línea de la configuración aplicada cambió de forma: «{line}»"
+            "the applied configuration line changed shape: '{line}'"
         );
     }
 
@@ -1333,18 +1353,18 @@ mod tests {
                 reflow: Reflow::default(),
             },
         )
-        .expect("escribir a memoria no falla");
-        String::from_utf8(salida).expect("la cabecera es texto")
+        .expect("writing to memory does not fail");
+        String::from_utf8(salida).expect("the header is text")
     }
 
     #[test]
-    fn la_cabecera_declara_de_donde_salieron_las_consolas_solo_cuando_salieron_del_fichero() {
-        // **Es la línea que distingue la tanda que restaura de la que pide.** Sin ella, una corrida que
-        // abrió de fábrica con cuatro consolas y otra que las sacó del fichero publican **el mismo
-        // informe**: la cabecera dice cuántas hay, no quién las pidió. Y el guion invalida la corrida
-        // leyendo justo esta línea, así que si deja de salir, la tanda L pasa a medir el arranque de
-        // siempre sin que nada lo diga.
-        let restaurada = cabecera_completa(
+    fn the_header_declares_where_the_consoles_came_from_only_when_they_came_from_the_file() {
+        // **It is the line that distinguishes the batch that restores from the one that asks.** Without
+        // it, a run that opened from factory with four consoles and one that took them out of the file
+        // publish **the same report**: the header says how many there are, not who asked for them. And
+        // the script invalidates the run by reading precisely this line, so if it stops coming out, batch
+        // L goes on to measure the usual startup without anything saying so.
+        let restaurada = full_header(
             SizeInPoints {
                 width: 1280.0,
                 height: 800.0,
@@ -1360,16 +1380,16 @@ mod tests {
         );
         assert!(
             restaurada.contains("restored:     4 consoles"),
-            "la cabecera no declaró las consolas que salieron del fichero:\n{restaurada}"
+            "the header did not declare the consoles that came out of the file:\n{restaurada}"
         );
-        // **Los dos tiempos, y por separado.** Publicar solo la suma daría un número que no se puede
-        // extrapolar: leer no crece con el número de consolas y abrirlas sí.
+        // **The two times, and separately.** Publishing only the sum would give a number that cannot be
+        // extrapolated: reading does not grow with the number of consoles and opening them does.
         assert!(
             restaurada.contains("310µs") && restaurada.contains("12ms"),
-            "la cabecera no declaró lo que costó leer y lo que costó abrirlas:\n{restaurada}"
+            "the header did not declare what it cost to read and what it cost to open them:\n{restaurada}"
         );
 
-        let from_factory = cabecera_completa(
+        let from_factory = full_header(
             SizeInPoints {
                 width: 1280.0,
                 height: 800.0,
@@ -1381,23 +1401,23 @@ mod tests {
         );
         assert!(
             !from_factory.contains("restored"),
-            "una ventana abierta de fábrica dice haber restaurado, que es el disfraz que esta línea \
-             existe para quitar:\n{from_factory}"
+            "a window opened from factory says it restored, which is the disguise this line exists to \
+             remove:\n{from_factory}"
         );
     }
 
     #[test]
-    fn una_lectura_que_nadie_tomo_se_publica_con_esas_palabras_y_no_como_un_cero() {
-        // **La rama que hace honesto al `Option`, y no la ejercía ninguna prueba.** El campo se volvió
-        // opcional justamente para que una ventana levantada sin tocar el disco no publicara `0ns en leer
-        // y validar` —indistinguible de una lectura instantánea de verdad—, y sin embargo el único caso
-        // que se pasaba por aquí traía número: cambiar el texto de la rama vacía por un cero, o por la
-        // suma de los dos tiempos, dejaba el fichero entero en verde.
+    fn a_read_nobody_took_is_published_with_those_words_and_not_as_a_zero() {
+        // **The branch that makes the `Option` honest, and no test exercised it.** The field became
+        // optional precisely so that a window raised without touching the disk would not publish `0ns to
+        // read and validate` —indistinguishable from a truly instant read—, and yet the only case that
+        // passed through here brought a number: changing the empty branch's text to a zero, or to the sum
+        // of the two times, left the whole file green.
         //
-        // **Lo que se afirma es lo que se lee, no que haya un `Option` dentro.** La cabecera es lo único
-        // que llega a quien interpreta la tanda, y ahí la diferencia entre «sin medir» y «0ns» es la
-        // diferencia entre saber que nadie midió y creerse un número.
-        let sin_medir = cabecera_completa(
+        // **What is asserted is what is read, not that there is an `Option` inside.** The header is the
+        // only thing that reaches whoever interprets the batch, and there the difference between "not
+        // measured" and "0ns" is the difference between knowing nobody measured and believing a number.
+        let sin_medir = full_header(
             SizeInPoints {
                 width: 1280.0,
                 height: 800.0,
@@ -1414,35 +1434,35 @@ mod tests {
 
         assert!(
             sin_medir.contains("not measured to read and validate"),
-            "una lectura que nadie tomó no se declara como tal:\n{sin_medir}"
+            "a read nobody took is not declared as such:\n{sin_medir}"
         );
         assert!(
             sin_medir.contains("7ms to open them"),
-            "la línea perdió lo que sí se midió:\n{sin_medir}"
+            "the line lost what was measured:\n{sin_medir}"
         );
-        // **Y con la forma que el guion sabe leer, incluso sin número de lectura.** La guarda de la tanda
-        // L saca la cuenta de consolas con `s/^restored: *\([0-9]*\) consoles .*$/\1/p`, y ese `.*`
-        // detrás de «consolas» **exige que siga habiendo algo**: una línea que se quedara en
-        // `restauradas:  2 consolas` no casaría, el guion no vería ninguna consola restaurada e
-        // invalidaría una corrida buena diciendo que la ventana abrió de fábrica.
+        // **And in the shape the script knows how to read, even without a read number.** Batch L's guard
+        // pulls the console count with `s/^restored: *\([0-9]*\) consoles .*$/\1/p`, and that `.*` after
+        // "consoles" **requires there to still be something**: a line that stopped at `restored: 2
+        // consoles` would not match, the script would see no restored console and would invalidate a good
+        // run by saying the window opened from factory.
         let line = sin_medir
             .lines()
             .find(|line| line.starts_with("restored:"))
-            .expect("no hay línea de restauradas que el guion pueda leer");
+            .expect("there is no restored line the script can read");
         assert!(
             line.starts_with("restored:     2 consoles ·"),
-            "la línea de restauradas ya no tiene la forma que el guion de medida sabe leer: «{line}»"
+            "the restored line no longer has the shape the measurement script knows how to read: '{line}'"
         );
     }
 
     #[test]
-    fn la_cabecera_declara_los_arrastres_solo_cuando_la_tanda_los_tuvo() {
-        // **Esta prueba existe porque el ayudante de aquí nunca llegaba a pasar `Some`.** La línea de
-        // arrastres solo la cubría una prueba de `lib.rs` que entra por el informe entero, así que vaciar
-        // este bloque dejaba **todas** las pruebas de este fichero en verde. Lo pilló la revisión.
+    fn the_header_declares_the_drags_only_when_the_batch_had_them() {
+        // **This test exists because the helper here never got to pass `Some`.** The drags line was only
+        // covered by a test in `lib.rs` that enters through the whole report, so emptying this block left
+        // **all** the tests in this file green. The review caught it.
         //
-        // Los dos números son distintos a propósito: iguales no distinguirían publicar uno de publicar el
-        // otro.
+        // The two numbers are different on purpose: equal ones would not distinguish publishing one from
+        // publishing the other.
         let with_gesture = header_of_a_run(
             SizeInPoints {
                 width: 1280.0,
@@ -1463,7 +1483,7 @@ mod tests {
                 "drags:        1720 injected · 1719 effective · 3 frames with marked text · \
                  7 reports to the program (moving consoles)"
             ),
-            "la cabecera no declaró los arrastres de la tanda:\n{with_gesture}"
+            "the header did not declare the batch's drags:\n{with_gesture}"
         );
 
         let without_gesture = header_of_a_run(
@@ -1477,8 +1497,8 @@ mod tests {
         );
         assert!(
             !without_gesture.contains("drags"),
-            "la cabecera habla de arrastres en una tanda que no los tuvo, así que las tandas de los anexos \
-             anteriores dejan de tener la misma forma y no se pueden comparar:\n{without_gesture}"
+            "the header talks about drags in a batch that did not have them, so the batches of the earlier \
+             annexes stop having the same shape and cannot be compared:\n{without_gesture}"
         );
     }
 
@@ -1487,18 +1507,18 @@ mod tests {
     }
 
     #[test]
-    fn el_tamaño_de_la_ventana_sale_en_una_linea_entera_y_sin_redondear() {
-        // **Esta línea es un contrato con `scripts/measure-frame.sh`**, que la lee con una expresión
-        // anclada por los dos extremos —`^window: *\(.*\) points$`— para comprobar que la ventana abrió con
-        // el tamaño que se le pidió y para decidir si dos corridas se pueden promediar. Cualquier cosa
-        // añadida **detrás** de «puntos» rompe el ancla del final sin romper el `contains` de la prueba de
-        // `lib.rs`, y lo que el guion se encuentra entonces no es un error: es un tamaño **vacío**, o sea la
-        // clase de número plausible por la que existen sus guardas. Se afirma la línea completa por eso.
+    fn the_window_size_comes_out_in_a_whole_line_and_unrounded() {
+        // **This line is a contract with `scripts/measure-frame.sh`**, which reads it with an expression
+        // anchored at both ends —`^window: *\(.*\) points$`— to check that the window opened at the size
+        // it was asked for and to decide whether two runs can be averaged. Anything added **after**
+        // "points" breaks the end anchor without breaking the `contains` of the `lib.rs` test, and what
+        // the script then finds is not an error: it is an **empty** size, that is, the kind of plausible
+        // number its guards exist for. The whole line is asserted for that reason.
         //
-        // **Y con fracción, que es lo que un compositor entrega de verdad** (1279,8125 puntos, medido):
-        // publicarla redondeada daría un número que no es el que hubo, y el guion compara con el mismo
-        // margen de la aplicación precisamente porque la fracción llega. Los dos ejes son distintos para que
-        // intercambiarlos no publique lo mismo.
+        // **And with a fraction, which is what a compositor really delivers** (1279.8125 points,
+        // measured): publishing it rounded would give a number that is not the one there was, and the
+        // script compares with the same margin as the application precisely because the fraction arrives.
+        // The two axes are different so that swapping them does not publish the same.
         let texto = header_with(
             SizeInPoints {
                 width: 1279.8125,
@@ -1512,35 +1532,35 @@ mod tests {
             texto
                 .lines()
                 .any(|line| line == "window:       1279.8125×800 points"),
-            "la línea del tamaño no es la que el guion de medida sabe leer:\n{texto}"
+            "the size line is not the one the measurement script knows how to read:\n{texto}"
         );
     }
 
     #[test]
-    fn con_dos_divisiones_la_cabecera_dice_de_qué_lado_cae_cada_una() {
+    fn with_two_panes_the_header_says_which_side_each_falls_on() {
         let texto = header_of(&[(0, vec![(0, grid(59, 57)), (1, grid(59, 21))])], 0);
 
         assert!(
             texto.contains("  pane 0:       59×57  (left)"),
-            "no publica la primera con su lado:\n{texto}"
+            "it does not publish the first with its side:\n{texto}"
         );
         assert!(
             texto.contains("  pane 1:       59×21  (right)"),
-            "no publica la segunda con su lado:\n{texto}"
+            "it does not publish the second with its side:\n{texto}"
         );
     }
 
     #[test]
-    fn con_tres_divisiones_la_cabecera_no_se_inventa_un_lado_ni_se_cae() {
-        // **El tipo ya no impide que lleguen tres.** Hasta este cambio la cabecera recibía un array de
-        // dos y el número estaba fijado por él; al pasarlo a una lista —lo que el árbol de divisiones
-        // necesita— indexar el array de lados por la posición pasó a ser un pánico posible **dentro del
-        // informe que se publica al salir**, o sea perdiendo de golpe todo lo medido en la sesión.
+    fn with_three_panes_the_header_neither_invents_a_side_nor_falls_over() {
+        // **The type no longer prevents three from arriving.** Until this change the header received an
+        // array of two and the number was fixed by it; passing it to a list —what the pane tree needs—
+        // indexing the array of sides by position became a possible panic **inside the report that is
+        // published on exit**, that is, losing at a stroke everything measured in the session.
         //
-        // Y no basta con que no reviente: «izquierda» y «derecha» solo describen algo cuando hay dos, así
-        // que con tres la pista tiene que **callarse**, no repartirse a las dos primeras. La aserción
-        // mira las dos cosas porque un `get` que devuelva `None` solo para la tercera pasaría la primera
-        // mitad y seguiría publicando una geometría falsa para las otras dos.
+        // And it is not enough that it does not blow up: "left" and "right" only describe something when
+        // there are two, so with three the hint has to **stay silent**, not be handed to the first two.
+        // The assertion looks at both things because a `get` that returns `None` only for the third would
+        // pass the first half and go on publishing a false geometry for the other two.
         let texto = header_of(
             &[(
                 0,
@@ -1552,18 +1572,18 @@ mod tests {
         for pane in [0, 1, 2] {
             assert!(
                 texto.contains(&format!("  pane {pane}:")),
-                "no publica la división {pane}:\n{texto}"
+                "it does not publish pane {pane}:\n{texto}"
             );
         }
         for side in CONSOLE_NAME {
             assert!(
                 !texto.contains(side),
-                "con tres divisiones sigue diciendo «{side}», que ya no describe nada:\n{texto}"
+                "with three panes it still says '{side}', which no longer describes anything:\n{texto}"
             );
         }
     }
 
-    /// Una medida con un fotograma anotado, que es lo mínimo para que el informe hable.
+    /// A measurement with one recorded frame, which is the minimum for the report to speak.
     fn with_one_frame() -> Timings {
         let mut timings = Timings::default();
         timings.record_round(Spans::of_a_round(
@@ -1578,16 +1598,16 @@ mod tests {
     }
 
     #[test]
-    fn dos_pasadas_del_mismo_fotograma_suman_su_trabajo_en_vez_de_pisarse() {
-        // **El sesgo que esto arregla estuvo vivo y medido:** con `record_round` sustituyendo, la
-        // segunda pasada de un fotograma —egui la repite cuando algo pide recomponerse— machacaba la
-        // vuelta buena de la primera. Y la segunda llega con lo interpretado a casi cero, porque la cola
-        // ya se vació en la primera, así que lo que la consola interpretó de verdad desaparecía de lo
-        // declarado y se publicaba como coste del framework de interfaz.
+    fn two_passes_of_the_same_frame_sum_their_work_instead_of_clobbering_each_other() {
+        // **The bias this fixes was alive and measured:** with `record_round` replacing, the second pass
+        // of a frame —egui repeats it when something asks to recompose— clobbered the first's good round
+        // trip. And the second arrives with the interpreted at almost zero, because the queue was already
+        // emptied in the first, so what the console really interpreted disappeared from the declared and
+        // was published as the interface framework's cost.
         let mut timings = Timings::default();
         let recogido = Instant::now();
 
-        // La primera pasada: la que trae la espera y el trabajo de verdad.
+        // The first pass: the one that brings the wait and the real work.
         timings.record_round(Spans::of_a_round(
             Some(recogido - ms(5)),
             recogido,
@@ -1595,27 +1615,28 @@ mod tests {
             ms(2),
             ms(1),
         ));
-        // La segunda: sin espera, porque no recogió nada, y con lo que costó repetir el trabajo.
+        // The second: with no wait, because it collected nothing, and with what it cost to repeat the
+        // work.
         //
-        // **Los tres tramos de la segunda van distintos de cero a propósito.** En producción apenas
-        // interpreta —la cola se vació en la primera—, pero un cero aquí deja de distinguir sumar de no
-        // sumar: comprobado mutándolo, con un cero en lo interpretado esta prueba pasaba **con la suma
-        // de ese tramo quitada**. Los tres tienen que poder fallar por separado.
+        // **The second's three spans are made different from zero on purpose.** In production it barely
+        // interprets —the queue was emptied in the first—, but a zero here stops distinguishing summing
+        // from not summing: checked by mutating it, with a zero in the interpreted this test passed **with
+        // the sum of that span removed**. The three have to be able to fail separately.
         timings.record_round(Spans::of_a_round(None, recogido, ms(3), ms(2), ms(1)));
 
         assert_eq!(
             timings.close_frame(ms(60)),
             Some(ms(29)),
-            "lo declarado no es la suma de lo que hicieron las dos pasadas: 20+2+1 de la primera y \
-             3+2+1 de la segunda"
+            "the declared is not the sum of what the two passes did: 20+2+1 from the first and 3+2+1 from \
+             the second"
         );
     }
 
     #[test]
-    fn de_dos_pasadas_la_espera_es_la_de_la_primera_y_no_la_suma() {
-        // La espera **no es trabajo de la aplicación**: es cuánto llevaba en la cola el byte más
-        // antiguo. Sumar las dos daría un número que nadie esperó, y ese número va a la media de
-        // «tecla → pantalla» que el informe publica. Se queda con la de la pasada que de verdad recogió.
+    fn of_two_passes_the_wait_is_the_first_ones_and_not_the_sum() {
+        // The wait **is not the application's work**: it is how long the oldest byte had been in the
+        // queue. Summing the two would give a number nobody waited, and that number goes into the "key →
+        // screen" mean the report publishes. It keeps the one from the pass that really collected.
         let mut timings = Timings::default();
         let recogido = Instant::now();
 
@@ -1635,58 +1656,58 @@ mod tests {
         ));
         timings.close_frame(ms(10));
 
-        // Se lee del informe, que es lo que un humano acaba viendo: la espera publicada tiene que ser
-        // la de la primera pasada —5 ms— y no los 14 de sumarlas.
+        // It is read from the report, which is what a human ends up seeing: the published wait has to be
+        // the first pass's —5 ms— and not the 14 from summing them.
         let informe = report_of(&timings);
         assert!(
             informe.contains("waiting in the queue:   5.000ms mean"),
-            "la espera declarada no es la de la primera pasada; el informe dice: {informe}"
+            "the declared wait is not the first pass's; the report says: {informe}"
         );
         assert!(
             !informe.contains("14.000ms"),
-            "la espera de las dos pasadas se sumó, y eso es un número que nadie esperó: {informe}"
+            "the wait of the two passes was summed, and that is a number nobody waited: {informe}"
         );
     }
 
     #[test]
-    fn el_informe_dice_que_el_tramo_del_panel_incluye_pintarlo() {
-        // **Durante todo el hito F1.6 este tramo se describió como «leer el panel»** —en sus dos
-        // campos y en el texto que el informe imprime— cuando el reloj que lo produce abarca desde
-        // antes de mirar la fecha hasta después de pintar la última fila. El anexo «Medido» de D3 se
-        // apoya en este número, así que un lector que lo copie creyendo que solo mide leer le
-        // atribuiría el pintado a quien se calcula restando: el framework de interfaz, o sea la cifra
-        // sobre la que D3 decide.
+    fn the_report_says_the_panel_span_includes_painting_it() {
+        // **Throughout the whole F1.6 milestone this span was described as "reading the panel"** —in its
+        // two fields and in the text the report prints— when the clock that produces it spans from before
+        // checking the timestamp to after painting the last row. The "Measured" annex of D3 leans on this
+        // number, so a reader who copies it believing it only measures reading would attribute the
+        // painting to the one computed by subtraction: the interface framework, that is, the figure D3
+        // decides about.
         //
-        // **Se afirma sobre lo que el informe escribe, no sobre la constante.** Comprobar la
-        // constante demostraría que la constante está bien redactada, no que alguien la imprima —
-        // que es el fallo que en este proyecto ha dejado pasar ocho cosas con la suite en verde.
+        // **It is asserted over what the report writes, not over the constant.** Checking the constant
+        // would prove that the constant is well worded, not that anyone prints it — which is the failure
+        // that in this project has let eight things through with the suite green.
         let informe = report_of(&with_one_frame());
 
         assert!(
             informe.contains("the status panel:"),
-            "el informe no publica el tramo del panel:\n{informe}"
+            "the report does not publish the panel span:\n{informe}"
         );
         assert!(
             informe.contains("serving the drag of its border"),
-            "el informe publica el tramo del panel sin decir que ahí dentro se paga el gesto de \
-             estrecharlo: quien lea la tanda creerá que ese coste está en el resto del fotograma, o sea \
-             atribuido al framework de interfaz:\n{informe}"
+            "the report publishes the panel span without saying that the gesture of narrowing it is paid \
+             inside it: whoever reads the batch will believe that cost is in the rest of the frame, that \
+             is, attributed to the interface framework:\n{informe}"
         );
         assert!(
             informe.contains("INCLUDES painting the panel"),
-            "el informe publica el tramo del panel sin decir que incluye pintarlo, que es lo que \
-             hace que el número se pueda copiar mal:\n{informe}"
+            "the report publishes the panel span without saying it includes painting it, which is what \
+             makes the number copyable wrong:\n{informe}"
         );
     }
 
     #[test]
-    fn los_cinco_tramos_suman_el_total_del_fotograma() {
-        // Es la propiedad que hace que el desglose sirva para atribuir: si los tramos no suman, el
-        // veredicto tendría que explicar un hueco, y quien lo lea no sabría a qué culpar.
+    fn the_five_spans_add_up_to_the_frame_total() {
+        // It is the property that makes the breakdown useful for attribution: if the spans do not add
+        // up, the verdict would have to explain a gap, and whoever reads it would not know what to blame.
         //
-        // **El quinto tramo es el panel**, y entró aquí en cuanto empezó a pintarse: un trabajo que
-        // ocurre dentro del fotograma y no se declara se lo lleva el resto, que es precisamente el
-        // número que decide si el framework de interfaz aguanta.
+        // **The fifth span is the panel**, and it entered here as soon as it started being painted: work
+        // that happens inside the frame and is not declared is taken by the rest, which is precisely the
+        // number that decides whether the interface framework holds up.
         let mut timings = Timings::default();
         let mut resto = RestOfFrame::default();
         let ahora = Instant::now();
@@ -1700,23 +1721,24 @@ mod tests {
         ));
         let timed = timings
             .close_frame(ms(10))
-            .expect("había tramos pendientes que cerrar");
+            .expect("there were pending spans to close");
         resto.record(ms(10), timed);
 
         assert_eq!(timings.wait.mean(), ms(100));
         assert_eq!(timings.interpret.mean(), ms(2));
         assert_eq!(timings.enqueue.mean(), ms(3));
         assert_eq!(timings.panel.mean(), ms(1));
-        assert_eq!(resto.series.mean(), ms(4), "10 menos 2, 3 y 1");
-        assert_eq!(timings.round.mean(), ms(110), "la espera más el fotograma");
+        assert_eq!(resto.series.mean(), ms(4), "10 minus 2, 3 and 1");
+        assert_eq!(timings.round.mean(), ms(110), "the wait plus the frame");
     }
 
-    /// **Lo que el panel le quita al resto, y por qué esta prueba existe aparte.** La de arriba pasaría
-    /// igual sumando el tramo del panel dentro de `enqueue`: los dos se descuentan y el resto sale el
-    /// mismo. Lo que se rompería es la *etiqueta* —«encolando el pintado» incluyendo leer un fichero de
-    /// disco—, y una etiqueta cambiada es el error que ya invalidó una medida entera en este proyecto.
+    /// **What the panel takes from the rest, and why this test exists apart.** The one above would pass
+    /// just the same summing the panel span into `enqueue`: both are subtracted and the rest comes out
+    /// the same. What would break is the *label* —"enqueuing the paint" including reading a file from
+    /// disk—, and a swapped label is the error that already invalidated a whole measurement in this
+    /// project.
     #[test]
-    fn el_tramo_del_panel_no_se_le_suma_al_del_pintado() {
+    fn the_panel_span_is_not_summed_into_the_painting_one() {
         let mut timings = Timings::default();
         let ahora = Instant::now();
 
@@ -1726,16 +1748,16 @@ mod tests {
         assert_eq!(
             timings.enqueue.mean(),
             ms(3),
-            "el coste del panel se coló en el tramo del pintado"
+            "the panel cost slipped into the painting span"
         );
         assert_eq!(timings.panel.mean(), ms(4));
     }
 
     #[test]
-    fn el_resto_descuenta_lo_cronometrado_por_todas_las_divisiones() {
-        // La razón de que el resto viva en la ventana: el consumo de CPU llega una sola vez por
-        // pasada. Descontándole solo los tramos de una división, la otra se contaría como resto —y el
-        // resto es justo el número que dice si el pintado aguanta.
+    fn the_rest_subtracts_what_all_the_panes_timed() {
+        // The reason the rest lives in the window: the CPU consumption arrives only once per pass.
+        // Subtracting only one pane's spans, the other would be counted as rest —and the rest is exactly
+        // the number that says whether the painting holds up.
         let mut izquierda = Timings::default();
         let mut derecha = Timings::default();
         let mut resto = RestOfFrame::default();
@@ -1763,14 +1785,14 @@ mod tests {
 
         resto.record(ms(10), timed);
 
-        assert_eq!(timed, ms(7), "2+1 de una y 3+1 de la otra");
-        assert_eq!(resto.series.mean(), ms(3), "10 menos las dos divisiones");
+        assert_eq!(timed, ms(7), "2+1 from one and 3+1 from the other");
+        assert_eq!(resto.series.mean(), ms(3), "10 minus the two panes");
     }
 
     #[test]
-    fn un_fotograma_sin_salida_no_cuenta_como_vuelta_rapidisima() {
-        // Sin este descarte, cada fotograma en reposo metería un cero en la serie y la media diría
-        // que la aplicación responde al instante justamente por no haber hecho nada.
+    fn a_frame_with_no_output_does_not_count_as_a_lightning_fast_round_trip() {
+        // Without this discard, every frame at rest would put a zero into the series and the mean would
+        // say the application responds instantly precisely for having done nothing.
         let mut timings = Timings::default();
 
         timings.record_round(Spans::of_a_round(None, Instant::now(), ms(2), ms(3), ms(1)));
@@ -1778,52 +1800,54 @@ mod tests {
 
         assert!(
             !timings.round.has_samples(),
-            "se anotó una vuelta que no ocurrió"
+            "a round trip that did not happen was recorded"
         );
         assert!(
             !timings.wait.has_samples(),
-            "se anotó una espera que no ocurrió"
+            "a wait that did not happen was recorded"
         );
-        assert!(!timings.panel.has_samples(), "tampoco el tramo del panel");
+        assert!(!timings.panel.has_samples(), "nor the panel span");
     }
 
     #[test]
-    fn una_consola_sin_salida_declara_igualmente_lo_que_costo_pintarla() {
-        // **El fallo que este test existe para cazar es de atribución, y era invisible.** Con dos
-        // consolas, el caso normal es una recibiendo salida y la otra quieta en su prompt. La quieta se
-        // pinta igual cada fotograma, así que su encolado es trabajo real; si no lo declarase, la
-        // ventana no lo restaría del total y ese tiempo saldría publicado como «el resto del fotograma»
-        // — el número que decide si el framework de interfaz aguanta varias consolas.
+    fn a_console_with_no_output_declares_all_the_same_what_it_cost_to_paint_it() {
+        // **The failure this test exists to catch is one of attribution, and it was invisible.** With two
+        // consoles, the normal case is one receiving output and the other still at its prompt. The still
+        // one paints all the same every frame, so its enqueuing is real work; if it did not declare it,
+        // the window would not subtract it from the total and that time would come out published as "the
+        // rest of the frame" — the number that decides whether the interface framework holds up several
+        // consoles.
         let mut timings = Timings::default();
         let mut resto = RestOfFrame::default();
 
-        // Y su panel también se mira cada fotograma, aunque su productor esté callado: el `ms(1)` es
-        // lo que cuesta preguntar la fecha del fichero, que se paga igual que el pintado.
+        // And its panel is also checked every frame, even if its producer is silent: the `ms(1)` is what
+        // it costs to ask the file timestamp, which is paid just like the painting.
         timings.record_round(Spans::of_a_round(None, Instant::now(), ms(0), ms(4), ms(1)));
         let timed = timings
             .close_frame(ms(10))
-            .expect("una consola pintada tiene que declarar lo que costó pintarla");
+            .expect("a painted console has to declare what it cost to paint it");
         resto.record(ms(10), timed);
 
         assert_eq!(
             timed,
             ms(5),
-            "el encolado de la consola quieta más el vistazo a su panel"
+            "the still console's enqueuing plus the glance at its panel"
         );
         assert_eq!(
             resto.series.mean(),
             ms(5),
-            "el resto se quedó con el pintado de la consola quieta"
+            "the rest kept the painting of the still console"
         );
     }
 
     #[test]
-    fn una_consola_que_interpreta_y_no_se_pinta_declara_lo_interpretado_sin_tocar_las_medias() {
-        // **El caso nuevo, y el más caro de los tres**: una consola que interpreta y no se pinta.
-        // Aquí se ata lo que hace que no haga falta ninguna serie para ello — **las cuatro medias no
-        // se mueven**, porque meter un cero de encolado en su media diría que pintar sale más barato
-        // justamente en los fotogramas en los que no se pintó nada— y que lo interpretado **sí** se
-        // devuelve para restarlo.
+    fn a_console_that_interprets_and_is_not_painted_declares_the_interpreted_without_touching_the_means()
+     {
+        // **The new case, and the most expensive of the three**: a console that interprets and is not
+        // painted. Here what makes no series necessary for it is tied down — **the four means do not
+        // move**, because putting a zero enqueuing into its mean would say that painting comes out cheaper
+        // precisely in the frames in which nothing was painted— and that the interpreted **is** returned
+        // to be subtracted.
         let mut timings = Timings::default();
         let mut resto = RestOfFrame::default();
 
@@ -1836,38 +1860,35 @@ mod tests {
         ));
         let timed = timings
             .close_frame(ms(10))
-            .expect("lo interpretado tiene que declararse aunque no se haya pintado");
+            .expect("the interpreted has to be declared even if it was not painted");
         resto.record(ms(10), timed);
 
-        assert_eq!(timed, ms(2), "lo que interpretó, y nada más");
+        assert_eq!(timed, ms(2), "what it interpreted, and nothing more");
         assert_eq!(
             resto.series.mean(),
             ms(8),
-            "el resto se quedó con lo que interpretó una consola que no se pintó"
+            "the rest kept what a console that was not painted interpreted"
         );
         assert!(
             !timings.enqueue.has_samples(),
-            "se ensució la media de encolar"
+            "the enqueuing mean was dirtied"
         );
         assert!(
             !timings.interpret.has_samples(),
-            "se ensució la media de interpretar"
+            "the interpreting mean was dirtied"
         );
         assert!(
             !timings.round.has_samples(),
-            "se anotó una vuelta que no ocurrió"
+            "a round trip that did not happen was recorded"
         );
-        assert!(
-            !timings.panel.has_samples(),
-            "se ensució el tramo del panel"
-        );
+        assert!(!timings.panel.has_samples(), "the panel span was dirtied");
     }
 
     #[test]
-    fn un_total_menor_que_sus_tramos_no_produce_un_negativo() {
-        // Los tramos y el total vienen de fotogramas contiguos y de relojes distintos, así que el
-        // total puede quedarse corto. Antes de restar sin más, un resto negativo saldría publicado
-        // como un número enorme y con toda la pinta de ser real.
+    fn a_total_smaller_than_its_spans_does_not_produce_a_negative() {
+        // The spans and the total come from contiguous frames and from different clocks, so the total may
+        // fall short. Before subtracting without more, a negative rest would come out published as a huge
+        // number with every look of being real.
         let mut resto = RestOfFrame::default();
 
         resto.record(ms(1), ms(16));
@@ -1876,21 +1897,21 @@ mod tests {
     }
 
     #[test]
-    fn el_95_por_ciento_no_lo_marca_el_peor_de_todos() {
-        // Una sola pausa del escritorio no puede decidir el número que se publica.
+    fn the_95th_percentile_is_not_set_by_the_worst_of_all() {
+        // A single pause of the desktop cannot decide the number that is published.
         let mut series = Series::default();
         for _ in 0..99 {
             series.record(ms(1));
         }
         series.record(ms(500));
 
-        assert_eq!(series.p95(), ms(1), "un valor suelto se llevó el percentil");
+        assert_eq!(series.p95(), ms(1), "a single value took the percentile");
     }
 
     #[test]
-    fn la_cuenta_total_sobrevive_al_tope_de_muestras() {
-        // El informe dice cuántas medidas hubo, no cuántas se guardaron: con el tope, las dos cifras
-        // dejan de coincidir y publicar la segunda haría parecer corta una sesión larga.
+    fn the_total_count_survives_the_sample_cap() {
+        // The report says how many measurements there were, not how many were kept: with the cap, the two
+        // figures stop coinciding and publishing the second would make a long session look short.
         let mut series = Series::default();
         for _ in 0..(SAMPLES + 10) {
             series.record(ms(1));
@@ -1900,12 +1921,13 @@ mod tests {
         assert_eq!(series.total, SAMPLES + 10);
     }
 
-    /// **La línea que dice lo que cuesta la barra, y que solo sale cuando la hubo.** Sin ella, lo que
-    /// cuesta pintar las fichas —y desde este hito, acumular lo que reclaman sus divisiones— solo se
-    /// podría averiguar restando dos tandas distintas, que es como se publican los números que no se
-    /// pueden defender. Y el guion invalida la corrida leyendo justo esta línea.
+    /// **The line that says what the bar costs, and that only comes out when there was one.** Without it,
+    /// what it costs to paint the tabs —and since this milestone, to accumulate what their panes claim—
+    /// could only be figured out by subtracting two different batches, which is how the numbers that
+    /// cannot be defended are published. And the script invalidates the run by reading precisely this
+    /// line.
     #[test]
-    fn la_cabecera_dice_lo_que_costo_la_barra_solo_cuando_hubo_barra() {
+    fn the_header_says_what_the_bar_cost_only_when_there_was_a_bar() {
         let window = SizeInPoints {
             width: 1280.0,
             height: 800.0,
@@ -1929,7 +1951,7 @@ mod tests {
         );
         assert!(
             con.contains("tab bar:      100 frames") && con.contains("36µs per frame"),
-            "la cabecera no declaró lo que costó la barra ni su media:\n{con}"
+            "the header did not declare what the bar cost nor its mean:\n{con}"
         );
 
         let sin = with_tab_bar(
@@ -1945,7 +1967,7 @@ mod tests {
         );
         assert!(
             !sin.contains("tab bar:"),
-            "sin barra que pintar, la cabecera publicó un tramo que nadie midió:\n{sin}"
+            "with no bar to paint, the header published a span nobody measured:\n{sin}"
         );
     }
 
@@ -1964,26 +1986,26 @@ mod tests {
                 ..Default::default()
             },
         )
-        .expect("escribir a memoria no falla");
-        String::from_utf8(salida).expect("la cabecera es texto")
+        .expect("writing to memory does not fail");
+        String::from_utf8(salida).expect("the header is text")
     }
 
-    /// **La línea que dice lo que cuesta recolocar el texto, y que solo sale cuando se recolocó.**
-    /// Recolocar corre en la mitad lógica del fotograma, donde no hay pintado que lo envuelva: lo que
-    /// no se nombre aquí se publica como coste del framework, que es la cifra con la que **D3** juzga a
-    /// egui. Con el historial encendido son casi mil microsegundos **por consola** y una frontera mueve
-    /// dos.
+    /// **The line that says what reflowing the text costs, and that only comes out when there was a
+    /// reflow.** Reflowing runs in the logical half of the frame, where there is no painting to wrap it:
+    /// what is not named here is published as the framework's cost, which is the figure **D3** judges
+    /// egui with. With the history on it is almost a thousand microseconds **per console** and one border
+    /// moves two.
     ///
-    /// **Y la forma de la línea es un contrato con `scripts/measure-frame.sh`**, que la lee para
-    /// invalidar una corrida de la tanda M. Su guarda saca el número con
-    /// `s/^reflow: *\([0-9]*\) times .*$/\1/p` y compara contra los gestos inyectados: si la línea
-    /// cambia de forma, el guion no ve **ninguna** recolocación e invalida corridas buenas — y si la
-    /// línea desaparece del todo, la guarda que dice cazar «la frontera se movió sin cruzar bordes de
-    /// celda» deja de cazar nada.
+    /// **And the shape of the line is a contract with `scripts/measure-frame.sh`**, which reads it to
+    /// invalidate a run of batch M. Its guard pulls the number with
+    /// `s/^reflow: *\([0-9]*\) times .*$/\1/p` and compares it against the injected gestures: if the line
+    /// changes shape, the script sees **no** reflow and invalidates good runs — and if the line
+    /// disappears entirely, the guard that claims to catch "the border moved without crossing cell
+    /// boundaries" stops catching anything.
     #[test]
-    fn la_cabecera_dice_lo_que_costo_recolocar_solo_cuando_se_recoloco() {
-        // Los números de una corrida publicada: 320 recolocaciones a los ~984 µs que cuesta recorrer el
-        // historial de una consola.
+    fn the_header_says_what_reflowing_cost_only_when_there_was_a_reflow() {
+        // The numbers of a published run: 320 reflows at the ~984 µs it costs to walk one console's
+        // history.
         let con = with_reflow(Reflow {
             frames: 320,
             total: Duration::from_micros(320 * 984),
@@ -1991,91 +2013,92 @@ mod tests {
 
         assert!(
             con.contains("314.88ms in total") && con.contains("984µs each"),
-            "la cabecera no declaró lo que costó recolocar ni lo que cuesta cada vez:\n{con}"
+            "the header did not declare what reflowing cost nor what it costs each time:\n{con}"
         );
 
-        // **La forma exacta que el guion sabe leer.** El `.*` que sigue a «veces» exige que detrás haya
-        // algo, igual que en la línea de restauradas: una línea recortada no casaría y el guion
-        // invalidaría una corrida buena.
+        // **The exact shape the script knows how to read.** The `.*` that follows "times" requires there
+        // to be something after it, just like in the restored line: a trimmed line would not match and the
+        // script would invalidate a good run.
         let line = con
             .lines()
             .find(|line| line.starts_with("reflow:"))
-            .expect("no hay línea de recolocar que el guion pueda leer");
+            .expect("there is no reflow line the script can read");
         let (etiqueta, resto) = line
             .split_once(" times ")
-            .expect("la línea de recolocar perdió las palabras que el guion busca");
+            .expect("the reflow line lost the words the script looks for");
         assert!(
             etiqueta
                 .strip_prefix("reflow:")
-                .expect("la línea empieza por su etiqueta")
+                .expect("the line starts with its label")
                 .trim_start()
                 .parse::<usize>()
                 == Ok(320),
-            "el guion no sacaría 320 recolocaciones de esta línea: «{line}»"
+            "the script would not pull 320 reflows out of this line: '{line}'"
         );
         assert!(
             !resto.is_empty(),
-            "detrás de «veces» no queda nada y el guion exige que quede algo: «{line}»"
+            "after 'times' there is nothing left and the script requires something to be left: '{line}'"
         );
 
-        // **Y en una tanda que no redimensiona nada, la línea no sale.** Publicar «0 veces» se lee como
-        // «recolocar no cuesta nada» en vez de como «no se recolocó», y además le daría a la guarda del
-        // guion un número que pasaría sus dos comprobaciones sin que nada se hubiera recolocado.
+        // **And in a batch that resizes nothing, the line does not come out.** Publishing "0 times" reads
+        // as "reflowing costs nothing" instead of as "there was no reflow", and it would also give the
+        // script's guard a number that would pass both its checks without anything having been reflowed.
         let sin = with_reflow(Reflow::default());
         assert!(
             !sin.contains("reflow:"),
-            "sin recolocar nada, la cabecera publicó un tramo que nadie midió:\n{sin}"
+            "with nothing reflowed, the header published a span nobody measured:\n{sin}"
         );
     }
 
-    // ── El acoplamiento con el guion de medida, atado ───────────────────────────────────────────
+    // ── The coupling with the measurement script, tied down ──────────────────────────────────────
     //
-    // **El guion invalida corridas por lo que este informe DICE**, y hasta aquí ese acoplamiento
-    // vivía en un comentario. Cuatro de sus patrones no los cubría ninguna prueba y uno estaba
-    // atado con una negación, que se cumple por vacío en cuanto el literal cambie de nombre.
+    // **The script invalidates runs by what this report SAYS**, and until here that coupling lived
+    // in a comment. Four of its patterns were covered by no test and one was tied with a negation,
+    // which is satisfied vacuously as soon as the literal is renamed.
     //
-    // **Lo que hace fuerte a lo que sigue es que no copia los patrones: los saca del guion y los
-    // ejecuta.** Una prueba que repitiera el literal a mano se arregla sola cuando alguien traduce
-    // el guion —cambia el `sed`, cambia la prueba, verde— y no habría atado nada.
+    // **What makes what follows strong is that it does not copy the patterns: it pulls them out of
+    // the script and runs them.** A test that repeated the literal by hand fixes itself when someone
+    // translates the script —the `sed` changes, the test changes, green— and would have tied nothing
+    // down.
 
-    /// El guion de medida, leído en tiempo de compilación para que no se pueda desincronizar.
+    /// The measurement script, read at compile time so it cannot desynchronize.
     const SCRIPT: &str = include_str!("../../../scripts/measure-frame.sh");
 
-    /// Un patrón que el guion aplica al informe, con la línea donde está para poder señalarlo.
+    /// A pattern the script applies to the report, with the line where it is so it can be pointed at.
     struct ScriptPattern {
         line: usize,
         order: &'static str,
         patron: String,
     }
 
-    /// Los patrones que el guion busca **en el informe**, sacados de sus `sed` y `grep`.
+    /// The patterns the script looks for **in the report**, pulled from its `sed` and `grep`.
     ///
-    /// Se queda solo con los que llevan un literal del informe: los anclados (`^`…`$`) y los dos
-    /// recuentos que el guion busca sin anclar. Un `grep` sobre otra cosa —el estado de salida, un
-    /// fichero testigo— no describe el informe y no tiene nada que atar aquí.
+    /// It keeps only the ones that carry a report literal: the anchored ones (`^`…`$`) and the two
+    /// counts the script looks for unanchored. A `grep` over something else —the exit status, a
+    /// witness file— does not describe the report and has nothing to tie down here.
     ///
-    /// **Y queda uno fuera que sí describe el informe**, dicho para no describir mal lo excluido: el
-    /// `grep -m1 '  división 0:'` con el que el guion compone su línea de rejilla al terminar. No
-    /// lleva ancla ni palabra clave, así que este criterio no lo ve. **No invalida ninguna corrida**
-    /// —solo alimenta un mensaje— y por eso se deja fuera en vez de ensanchar el criterio hasta que
-    /// empiece a recoger ruido; si algún día pasa a decidir algo, entra.
+    /// **And one is left out that does describe the report**, said so as not to misdescribe what is
+    /// excluded: the `grep -m1 '  pane 0:'` with which the script composes its grid line on finishing.
+    /// It carries neither anchor nor keyword, so this criterion does not see it. **It invalidates no
+    /// run** —it only feeds a message— and that is why it is left out instead of widening the criterion
+    /// until it starts picking up noise; if some day it comes to decide something, it goes in.
     fn script_patterns() -> Vec<ScriptPattern> {
         let mut encontrados = Vec::new();
-        // **La orden se arrastra entre líneas a propósito.** El guion parte sus `sed` largos con
-        // barra al final y pone cada `-e` en su propia línea, así que la línea que lleva el patrón
-        // muchas veces **no** contiene la palabra `sed`. La primera versión de este extractor no lo
-        // tuvo en cuenta y encontró 2 de 20 — lo cazó la guarda del recuento, que está justo debajo
-        // para esto.
+        // **The command is carried across lines on purpose.** The script splits its long `sed`s with a
+        // trailing backslash and puts each `-e` on its own line, so the line that carries the pattern
+        // many times does **not** contain the word `sed`. The first version of this extractor did not
+        // take that into account and found 2 of 20 — the count guard caught it, which is right below for
+        // this.
         let mut order_in_progress = "";
         let mut continuacion = false;
         for (numero, line) in SCRIPT.lines().enumerate() {
             if !continuacion {
                 order_in_progress = "";
             }
-            // **Un comentario no es una orden, y contarlo infló el recuento de 21 a 24.** El guion
-            // explica sus propias guardas citando los patrones que aplica, así que su prosa está
-            // llena de `grep` y de literales entrecomillados. Con los comentarios dentro, la guarda
-            // que existe para que esta prueba no pase por vacío **se satisfacía con prosa**.
+            // **A comment is not a command, and counting it inflated the count from 21 to 24.** The
+            // script explains its own guards by citing the patterns it applies, so its prose is full of
+            // `grep` and quoted literals. With the comments inside, the guard that exists to keep this
+            // test from passing vacuously **was satisfied with prose**.
             if line.trim_start().starts_with('#') {
                 continue;
             }
@@ -2088,8 +2111,8 @@ mod tests {
             if order_in_progress.is_empty() {
                 continue;
             }
-            // Los patrones del guion van entre comillas, y usa **las dos**: simples para los `sed`
-            // y dobles para los dos recuentos que busca sin anclar.
+            // The script's patterns go inside quotes, and it uses **both**: single ones for the `sed`s
+            // and double ones for the two counts it looks for unanchored.
             for comilla in ['\'', '"'] {
                 let mut resto = line;
                 while let Some(abre) = resto.find(comilla) {
@@ -2099,15 +2122,15 @@ mod tests {
                     };
                     let dentro = &tras[..cierra];
                     resto = &tras[cierra + 1..];
-                    // **Se busca el ancla en cualquier sitio, no al principio.** Los patrones de
-                    // `sed` vienen envueltos en `s/…/…/p`, así que el `^` va dentro y no delante:
-                    // pedirlo al principio encontraba 8 de 20.
+                    // **The anchor is looked for anywhere, not at the start.** The `sed` patterns come
+                    // wrapped in `s/…/…/p`, so the `^` goes inside and not in front: asking for it at
+                    // the start found 8 of 20.
                     //
-                    // **Y tiene que llevar alguna letra.** Un patrón hecho solo de anclas y clases
-                    // de caracteres —`^[0-9]+`, el segundo `grep` de una tubería— no lee el informe
-                    // sino la salida del anterior, y sobre todo **no tiene texto que pueda cambiar
-                    // de idioma**: no hay acoplamiento que atar ahí. Es un criterio y no una lista
-                    // de excepciones, así que sigue valiendo cuando el guion crezca.
+                    // **And it has to carry some letter.** A pattern made only of anchors and character
+                    // classes —`^[0-9]+`, the second `grep` of a pipe— does not read the report but the
+                    // previous one's output, and above all **it has no text that could change
+                    // language**: there is no coupling to tie down there. It is a criterion and not a
+                    // list of exceptions, so it keeps holding when the script grows.
                     let describes_the_report = (dentro.contains('^')
                         || dentro.contains("characters searched")
                         || dentro.contains("glyphs rasterized"))
@@ -2125,40 +2148,41 @@ mod tests {
         encontrados
     }
 
-    /// Lo que sale de aplicarle un patrón del guion a un texto.
+    /// What comes out of applying a script pattern to a text.
     ///
-    /// **Vacío y roto no son lo mismo, y por eso son dos variantes.** Los dos dan salida vacía, y
-    /// confundirlos hace que la prueba culpe al sitio equivocado: «el informe cambió de texto»
-    /// cuando lo que pasa es que el extractor de patrones cortó mal el que iba a aplicar. Uno señala
-    /// un defecto del proyecto, el otro un defecto de esta prueba.
+    /// **Empty and broken are not the same, and that is why they are two variants.** Both give empty
+    /// output, and confusing them makes the test blame the wrong place: "the report changed text" when
+    /// what is happening is that the pattern extractor cut wrong the one it was going to apply. One
+    /// points to a defect in the project, the other to a defect in this test.
     ///
-    /// **Y el punto ciego que esto NO cubre, dicho en vez de tapado.** La distinción se hace con el
-    /// estado de salida, así que solo separa los patrones que la orden **rechaza**. Un corte que deja
-    /// un patrón todavía válido pero que no imprime —quitarle la `p` final a un `sed`, por ejemplo—
-    /// sale con 0 y es **indistinguible** de «el informe cambió». Contra eso lo único que hay es la
-    /// guarda del recuento mínimo de ahí abajo: si el extractor se rompe de verdad, encuentra menos
-    /// patrones y la prueba lo dice. Comprobado con las dos mutaciones.
+    /// **And the blind spot this does NOT cover, said instead of hidden.** The distinction is made with
+    /// the exit status, so it only separates the patterns the command **rejects**. A cut that leaves a
+    /// pattern still valid but that does not print —removing the trailing `p` from a `sed`, for example—
+    /// exits with 0 and is **indistinguishable** from "the report changed". Against that the only thing
+    /// there is is the minimum-count guard down below: if the extractor really breaks, it finds fewer
+    /// patterns and the test says so. Checked with the two mutations.
     enum Salida {
-        /// El patrón se aplicó y extrajo algo.
+        /// The pattern was applied and extracted something.
         Extrajo,
-        /// El patrón se aplicó bien y no casó con nada.
+        /// The pattern was applied well and matched nothing.
         NoCaso,
-        /// La orden no pudo con el patrón: no es un fallo del informe, es de esta prueba.
+        /// The command could not handle the pattern: it is not a failure of the report, it is of this
+        /// test.
         PatronInvalido(i32),
     }
 
-    /// Aplica un patrón del guion a un texto **con la orden de verdad**, no con una imitación.
+    /// Applies a script pattern to a text **with the real command**, not with an imitation.
     ///
-    /// Reimplementar `sed` en Rust sería meter una segunda fuente de divergencia justo donde se
-    /// quiere quitar la primera.
+    /// Reimplementing `sed` in Rust would be introducing a second source of divergence right where the
+    /// first is meant to be removed.
     ///
-    /// **El precio, declarado: esto hace que `cargo test` dependa de `sed` y `grep`.** Aquí se acepta
-    /// porque lo que esta prueba protege es un guion de shell, así que donde no haya `sed` tampoco hay
-    /// nada que proteger. Si no están, revienta con su mensaje en vez de saltarse sola — un
-    /// `#[cfg(unix)]` la haría desaparecer en silencio, que es peor. **F2.7 lleva Windows**, y ahí
-    /// habrá que decidir: acotarla al sistema o dar por bueno que el banco no corre en esa
-    /// plataforma.
-    fn extrae(p: &ScriptPattern, informe: &str) -> Salida {
+    /// **The price, declared: this makes `cargo test` depend on `sed` and `grep`.** It is accepted here
+    /// because what this test protects is a shell script, so where there is no `sed` there is nothing to
+    /// protect either. If they are not there, it blows up with its message instead of skipping itself — a
+    /// `#[cfg(unix)]` would make it disappear silently, which is worse. **F2.7 brings Windows**, and
+    /// there a decision will have to be made: gate it to the system or accept that the bench does not run
+    /// on that platform.
+    fn extract(p: &ScriptPattern, informe: &str) -> Salida {
         use std::io::Write as _;
         use std::process::{Command, Stdio};
 
@@ -2178,22 +2202,23 @@ mod tests {
             .spawn()
             .unwrap_or_else(|e| {
                 panic!(
-                    "no se pudo lanzar «{}»: {e}. El banco tampoco funcionaría sin él",
+                    "could not launch '{}': {e}. The bench would not work without it either",
                     p.order
                 )
             });
         child
             .stdin
             .as_mut()
-            .expect("la entrada está abierta")
+            .expect("the input is open")
             .write_all(informe.as_bytes())
-            .expect("escribir a una tubería de memoria no falla");
-        let salida = child.wait_with_output().expect("recoger la salida");
+            .expect("writing to a memory pipe does not fail");
+        let salida = child.wait_with_output().expect("collect the output");
         let codigo = salida.status.code().unwrap_or(-1);
-        // **Cada orden dice «no he encontrado nada» de una forma distinta.** `grep` sale con 1
-        // cuando no casa y con 2 o más cuando el patrón no le sirve; `sed` sale con 0 aunque no
-        // sustituya nada, y solo se queja si el patrón está mal escrito. Sin esta distinción, un
-        // patrón mal extraído por esta prueba se publicaría como un acoplamiento roto del proyecto.
+        // **Each command says "I found nothing" in a different way.** `grep` exits with 1 when it does
+        // not match and with 2 or more when the pattern does not work for it; `sed` exits with 0 even if
+        // it substitutes nothing, and only complains if the pattern is badly written. Without this
+        // distinction, a pattern badly extracted by this test would be published as a broken coupling of
+        // the project.
         let patron_invalido = match p.order {
             "grep" => codigo >= 2,
             _ => codigo != 0,
@@ -2208,11 +2233,11 @@ mod tests {
         }
     }
 
-    /// Los informes que el productor sabe escribir, uno por cada variante que el guion distingue.
+    /// The reports the producer knows how to write, one for each variant the script distinguishes.
     ///
-    /// **Son varios y no uno porque los tres estados de la configuración son excluyentes**: un
-    /// informe no puede decir a la vez que la configuración está vetada y que se leyó la del
-    /// usuario. Cada patrón tiene que extraer de **alguno**; ninguno tiene que extraer de todos.
+    /// **They are several and not one because the three configuration states are mutually exclusive**: a
+    /// report cannot say at the same time that the configuration is vetoed and that the user's was read.
+    /// Each pattern has to extract from **some**; none has to extract from all.
     fn reference_reports() -> Vec<(&'static str, String)> {
         let grids = vec![
             (0, vec![(0, grid(49, 39)), (1, grid(49, 21))]),
@@ -2262,11 +2287,11 @@ mod tests {
                     reflow,
                 },
             )
-            .expect("escribir a memoria no falla");
-            String::from_utf8(salida).expect("el informe es texto")
+            .expect("writing to memory does not fail");
+            String::from_utf8(salida).expect("the report is text")
         };
 
-        // Los tramos de la ventana que el guion también lee, cada uno poblado.
+        // The window's spans the script also reads, each one populated.
         let mut saving = Saving::default();
         saving.record_mirror(ms(1));
         saving.record_write(ms(3), true);
@@ -2281,75 +2306,75 @@ mod tests {
         let mut window_spans = Vec::new();
         saving
             .publish(&mut window_spans)
-            .expect("escribir a memoria no falla");
+            .expect("writing to memory does not fail");
         discovery
             .publish(&mut window_spans)
-            .expect("escribir a memoria no falla");
+            .expect("writing to memory does not fail");
         rasterizing
             .publish(&mut window_spans)
-            .expect("escribir a memoria no falla");
+            .expect("writing to memory does not fail");
 
         vec![
             (
-                "cabecera con la configuración vetada",
+                "header with the configuration vetoed",
                 header_with_everything(ReadingSettings::Vetoed),
             ),
             (
-                "cabecera sin configuración que aplicar",
+                "header with no configuration to apply",
                 header_with_everything(ReadingSettings::Missing),
             ),
             (
-                "cabecera con la configuración del usuario",
+                "header with the user's configuration",
                 header_with_everything(ReadingSettings::Applied {
                     how_long: ms(1),
                     warnings: 2,
                 }),
             ),
             (
-                "los tramos de la ventana",
-                String::from_utf8(window_spans).expect("el informe es texto"),
+                "the window's spans",
+                String::from_utf8(window_spans).expect("the report is text"),
             ),
         ]
     }
 
-    /// **El guion se ejecuta, y hasta esta prueba nada lo comprobaba.**
+    /// **The script runs, and until this test nothing checked it.**
     ///
-    /// Todo lo que ata el guion —los patrones derivados, los literales, la siembra— lo lee **como
-    /// texto**. Eso caza que una expresión deje de extraer, y no caza nada de lo que hace que un
-    /// programa de `sh` funcione: una variable que se quedó con el nombre viejo dentro de un
-    /// `$(( ))`, una función a la que se llama por un nombre que ya no existe. `sh -n` tampoco: las
-    /// dos cosas son sintaxis válida.
+    /// Everything the script ties down —the derived patterns, the literals, the seeding— it reads **as
+    /// text**. That catches an expression ceasing to extract, and catches nothing of what makes an `sh`
+    /// program work: a variable that kept the old name inside a `$(( ))`, a function called by a name
+    /// that no longer exists. `sh -n` does not either: both things are valid syntax.
     ///
-    /// **Lo que se ejercita es el reparto de turnos**, que es el único mecanismo de concurrencia del
-    /// guion y el que decide qué consola vuelca y cuál se queda quieta — la tanda F entera cuelga de
-    /// él. Dos consolas contra el mismo directorio: la primera se queda el turno 1, la segunda el 2.
+    /// **What is exercised is the turn allocation**, which is the script's only concurrency mechanism and
+    /// the one that decides which console dumps and which stays still — the whole F batch hangs off it.
+    /// Two consoles against the same directory: the first keeps turn 1, the second turn 2.
     ///
-    /// **El fallo que esto caza no es hipotético**: la entrega que tradujo los identificadores del
-    /// guion dejó un `$((turno + 1))` con el nombre viejo. `sh` trata la variable sin definir como
-    /// cero, así que el contador se quedaba clavado en 1, la segunda consola no conseguía nunca su
-    /// turno y **el bucle no terminaba**. La suite entera seguía verde.
-    // **Solo en Linux, como el banco que ejercita.** El guion pide `/run/user/<uid>`, `pgrep -x` y
-    // `timeout`, que es de coreutils y no viene en macOS ni en los BSD. Sin esta condición, la caja
-    // que F2.7 va a compilar ahí fallaría en una prueba que no puede pasar, en vez de saltársela.
+    /// **The failure this catches is not hypothetical**: the delivery that translated the script's
+    /// identifiers left a `$((turno + 1))` with the old name. `sh` treats the undefined variable as zero,
+    /// so the counter stayed stuck at 1, the second console never got its turn and **the loop did not
+    /// end**. The whole suite stayed green.
+    // **Only on Linux, like the bench it exercises.** The script asks for `/run/user/<uid>`, `pgrep -x`
+    // and `timeout`, which is coreutils' and does not come on macOS or the BSDs. Without this condition,
+    // the crate F2.7 is going to compile there would fail on a test that cannot pass, instead of skipping
+    // it.
     #[cfg(target_os = "linux")]
     #[test]
-    fn dos_consolas_del_guion_se_reparten_turnos_distintos_sin_pisarse() {
+    fn two_consoles_of_the_script_take_different_turns_without_clobbering_each_other() {
         let root =
             std::env::temp_dir().join(format!("agent-terminal-turns-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).expect("crear el directorio de los turnos");
+        std::fs::create_dir_all(&root).expect("create the turns directory");
 
         let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scripts/measure-frame.sh")
             .canonicalize()
-            .expect("el guion vive dos niveles por encima de esta caja");
+            .expect("the script lives two levels above this crate");
 
-        // `MEASURE_TRIES=0` deja a la consola sin carga que volcar: coge su turno y termina, que es
-        // exactamente el camino que hay que ejercitar y nada más.
-        // **La llamada va acotada en el tiempo a propósito.** El fallo que esta guarda caza —el
-        // contador de turnos que no avanza— no hace que el guion falle: hace que **no termine**, y una
-        // prueba que se cuelga es peor que una que no existe. Con el reloj puesto, el mismo fallo sale
-        // como código 124 y con su mensaje.
+        // `MEASURE_TRIES=0` leaves the console with no load to dump: it takes its turn and finishes,
+        // which is exactly the path that has to be exercised and nothing more.
+        // **The call is time-bounded on purpose.** The failure this guard catches —the turn counter that
+        // does not advance— does not make the script fail: it makes it **not finish**, and a test that
+        // hangs is worse than one that does not exist. With the clock set, the same failure comes out as
+        // code 124 and with its message.
         let console = || {
             std::process::Command::new("timeout")
                 .arg("20")
@@ -2359,17 +2384,23 @@ mod tests {
                 .env("MEASURE_RUNS", &root)
                 .env("MEASURE_TRIES", "0")
                 .output()
-                .expect("lanzar el guion en modo consola")
+                .expect("launch the script in console mode")
         };
 
-        assert!(console().status.success(), "la primera consola no terminó");
-        assert!(console().status.success(), "la segunda consola no terminó");
+        assert!(
+            console().status.success(),
+            "the first console did not finish"
+        );
+        assert!(
+            console().status.success(),
+            "the second console did not finish"
+        );
 
-        // **Se afirma sobre los turnos que quedaron en disco, no sobre el código de salida.** Una
-        // consola que no consiguiera turno y saliera bien dejaría este directorio con un solo
-        // nombre, y el código de salida no lo diría.
+        // **It is asserted over the turns left on disk, not over the exit code.** A console that did not
+        // get a turn and exited fine would leave this directory with a single name, and the exit code
+        // would not say so.
         let mut turns: Vec<String> = std::fs::read_dir(&root)
-            .expect("leer los turnos")
+            .expect("read the turns")
             .flatten()
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();
@@ -2377,49 +2408,49 @@ mod tests {
         assert_eq!(
             turns,
             vec!["1".to_owned(), "2".to_owned()],
-            "las dos consolas no se repartieron un turno cada una: {turns:?}"
+            "the two consoles did not take one turn each: {turns:?}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **La otra mitad del guion que se ejecuta: el modo que decide si dos corridas se promedian.**
+    /// **The other half of the script that runs: the mode that decides whether two runs are averaged.**
     ///
-    /// Es un tercio del fichero y no lo tocaba ninguna prueba, aunque es el que **da el permiso** para
-    /// publicar una media en el registro de decisiones. Si se rompiera, no se rompería en rojo: diría
-    /// «se pueden promediar» de dos corridas que no lo son, o al revés, y el anexo publicaría un número
-    /// que no describe ninguna de las dos.
+    /// It is a third of the file and no test touched it, even though it is the one that **grants
+    /// permission** to publish a mean in the decisions record. If it broke, it would not break red: it
+    /// would say "they can be averaged" of two runs that cannot, or the other way around, and the annex
+    /// would publish a number that describes neither of the two.
     ///
-    /// Se le dan dos parejas por las dos puertas: una que solo difiere en la **fracción** con la que el
-    /// compositor entrega el tamaño —que es la que el margen existe para admitir— y otra con ventanas
-    /// distintas de verdad.
-    // **Solo en Linux, como el banco que ejercita.** El guion pide `/run/user/<uid>`, `pgrep -x` y
-    // `timeout`, que es de coreutils y no viene en macOS ni en los BSD. Sin esta condición, la caja
-    // que F2.7 va a compilar ahí fallaría en una prueba que no puede pasar, en vez de saltársela.
+    /// It is given two pairs through the two doors: one that only differs in the **fraction** with which
+    /// the compositor delivers the size —which is the one the margin exists to admit— and another with
+    /// genuinely different windows.
+    // **Only on Linux, like the bench it exercises.** The script asks for `/run/user/<uid>`, `pgrep -x`
+    // and `timeout`, which is coreutils' and does not come on macOS or the BSDs. Without this condition,
+    // the crate F2.7 is going to compile there would fail on a test that cannot pass, instead of skipping
+    // it.
     #[cfg(target_os = "linux")]
     #[test]
-    fn el_modo_compare_del_guion_admite_la_fraccion_y_rechaza_otra_ventana() {
+    fn the_scripts_compare_mode_admits_the_fraction_and_rejects_another_window() {
         let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../scripts/measure-frame.sh")
             .canonicalize()
-            .expect("el guion vive dos niveles por encima de esta caja");
+            .expect("the script lives two levels above this crate");
         let dir =
             std::env::temp_dir().join(format!("agent-terminal-compare-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("crear el directorio de la prueba");
+        std::fs::create_dir_all(&dir).expect("create the test directory");
 
         let write = |name: &str, body: &str| {
             let path = dir.join(name);
-            std::fs::write(&path, body).expect("escribir el informe de la prueba");
+            std::fs::write(&path, body).expect("write the test report");
             path
         };
-        // Lo mínimo que el comparador lee: la ventana, las pestañas y la rejilla de cada división.
+        // The minimum the comparator reads: the window, the tabs and each pane's grid.
         let exact = write(
             "exact.txt",
             "window: 1280x800 points\ntabs: 1\n  pane 0: 49x39\n",
         );
-        // **La misma ventana, entregada con fracción.** No es un caso inventado: es lo que el
-        // compositor devuelve, y comparar carácter a carácter tiraba corridas perfectamente
-        // promediables.
+        // **The same window, delivered with a fraction.** It is not an invented case: it is what the
+        // compositor returns, and comparing character by character threw out perfectly averageable runs.
         let fraction = write(
             "fraction.txt",
             "window: 1279.8125x799.8125 points\ntabs: 1\n  pane 0: 49x39\n",
@@ -2428,24 +2459,23 @@ mod tests {
             "other.txt",
             "window: 800x600 points\ntabs: 1\n  pane 0: 30x20\n",
         );
-        // **La misma ventana y OTRA rejilla, que es el caso que de verdad ata el comparador.** Sin
-        // él, el par que se rechaza difiere en las dos cosas a la vez y **la comparación de tamaños
-        // sola sostiene el rechazo**: medido, quitarle al comparador la línea que mira la rejilla de
-        // cada división dejaba esta prueba en verde. Es el segundo disfraz que este proyecto tiene
-        // fichado —elegir un caso con el que el defecto y el arreglo dan lo mismo— y lo cazó una
-        // revisión.
+        // **The same window and ANOTHER grid, which is the case that really ties the comparator down.**
+        // Without it, the pair that is rejected differs in both things at once and **the size comparison
+        // alone sustains the rejection**: measured, taking away from the comparator the line that looks
+        // at each pane's grid left this test green. It is the second disguise this project has on file
+        // —choosing a case with which the defect and the fix give the same— and a review caught it.
         let same_window_other_grid = write(
             "regrid.txt",
             "window: 1280x800 points\ntabs: 1\n  pane 0: 30x20\n",
         );
-        // Y la misma ventana y la misma rejilla, con las consolas venidas del fichero en vez de
-        // pedidas: es lo único que distingue la tanda que restaura de su control, y por construcción
-        // no se ve en la geometría.
-        // **Y la misma rejilla con OTRA ventana, que es el único caso que llega a preguntar por el
-        // tamaño.** El comparador cortocircuita —primero la geometría, y solo si coincide mira el
-        // tamaño—, así que un par que difiera en las dos cosas deja la comparación de tamaños sin
-        // ejercitar: medido, subir el margen a cien mil dejaba las demás afirmaciones en verde
-        // mientras el comparador daba por promediables una ventana de 1280×800 y otra de 800×600.
+        // And the same window and the same grid, with the consoles come from the file instead of asked
+        // for: it is the only thing that distinguishes the batch that restores from its control, and by
+        // construction it is not seen in the geometry.
+        // **And the same grid with ANOTHER window, which is the only case that gets to ask about the
+        // size.** The comparator short-circuits —geometry first, and only if it coincides does it look at
+        // the size—, so a pair that differs in both things leaves the size comparison unexercised:
+        // measured, raising the margin to a hundred thousand left the other assertions green while the
+        // comparator treated a 1280×800 window and an 800×600 one as averageable.
         let other_window_same_grid = write(
             "rewindow.txt",
             "window: 800x600 points\ntabs: 1\n  pane 0: 49x39\n",
@@ -2464,80 +2494,81 @@ mod tests {
                 .arg(a)
                 .arg(b)
                 .output()
-                .expect("lanzar el guion en modo compare")
+                .expect("launch the script in compare mode")
                 .status
                 .success()
         };
 
         assert!(
             compare(&exact, &fraction),
-            "el comparador rechaza dos corridas que solo difieren en la fracción del tamaño, que es \
-             justo lo que el margen existe para admitir"
+            "the comparator rejects two runs that only differ in the fraction of the size, which is \
+             exactly what the margin exists to admit"
         );
         assert!(
             !compare(&exact, &other),
-            "el comparador da por promediables dos corridas de ventanas distintas: su media no \
-             describiría ninguna de las dos"
+            "the comparator treats two runs of different windows as averageable: their mean would \
+             describe neither of the two"
         );
         assert!(
             !compare(&exact, &same_window_other_grid),
-            "el comparador da por promediables dos corridas con la MISMA ventana y distinta rejilla: \
-             es el caso que no puede cazar el margen del tamaño, y sin él la mitad que mira la \
-             rejilla no está atada por nada"
+            "the comparator treats two runs with the SAME window and a different grid as averageable: \
+             it is the case the size margin cannot catch, and without it the half that looks at the \
+             grid is tied by nothing"
         );
         assert!(
             !compare(&exact, &other_window_same_grid),
-            "el comparador da por promediables dos corridas con la misma rejilla y distinta ventana: \
-             es el único caso que llega a preguntar por el tamaño, así que sin él el margen no está \
-             atado por nada"
+            "the comparator treats two runs with the same grid and a different window as averageable: \
+             it is the only case that gets to ask about the size, so without it the margin is tied by \
+             nothing"
         );
         assert!(
             !compare(&exact, &restored),
-            "el comparador da por promediables una corrida pedida y una restaurada: son idénticas en \
-             ventana, pestañas y rejilla por construcción, así que la línea que declara de dónde \
-             salieron las consolas es lo único que las distingue"
+            "the comparator treats a requested run and a restored one as averageable: they are identical \
+             in window, tabs and grid by construction, so the line that declares where the consoles came \
+             from is the only thing that distinguishes them"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **El tercio del guion que decide qué tanda es cada letra, ejecutado.**
+    /// **The third of the script that decides which batch each letter is, executed.**
     ///
-    /// Las dos guardas de arriba corren el modo consola y el modo `compare`. El **modo tanda** —el
-    /// reparto que traduce una letra en pestañas, divisiones, cuántas vuelcan, cuántos arrastres y
-    /// qué gesto— no lo recorría nadie, y es el que lleva la aritmética que ya mordió una vez: un
-    /// nombre viejo dentro de un `$(( ))` o de un `${VAR%x*}`.
+    /// The two guards above run console mode and `compare` mode. The **batch mode** —the allocation that
+    /// translates a letter into tabs, panes, how many dump, how many drags and which gesture— was walked
+    /// by no one, and it is the one that carries the arithmetic that already bit once: an old name inside
+    /// a `$(( ))` or a `${VAR%x*}`.
     ///
-    /// **Se ejercita el trozo que no toca la máquina de quien mide**, que llega hasta la comprobación
-    /// de los binarios: de ahí en adelante el guion borra los directorios de panel de
-    /// `/run/user/<uid>` y le pregunta a `pgrep` si hay una ventana abierta, y una prueba no puede
-    /// hacer ni lo uno —le destrozaría la sesión a quien esté trabajando— ni lo otro sin volverse
-    /// dependiente de lo que haya corriendo. Antes de esa línea ya han pasado la cabecera, las dos
-    /// puertas de modo, el `case` entero y las dos multiplicaciones que sacan cuántas consolas hay.
+    /// **The part that does not touch the machine of whoever measures is exercised**, which reaches up to
+    /// the binaries check: from there on the script deletes the panel directories in `/run/user/<uid>`
+    /// and asks `pgrep` whether there is a window open, and a test can do neither —it would wreck the
+    /// session of whoever is working— nor the other without becoming dependent on what is running. Before
+    /// that line the header, the two mode doors, the whole `case` and the two multiplications that work
+    /// out how many consoles there are have all already passed.
     ///
-    /// **El guion se copia a un árbol propio**, y no es comodidad: `ROOT` sale de `dirname $0`, así
-    /// que corriendo el del repositorio el guion escribiría en `target/measurements` y **borraría el
-    /// directorio de turnos de una tanda en marcha**.
+    /// **The script is copied to a tree of its own**, and it is not a convenience: `ROOT` comes from
+    /// `dirname $0`, so running the repository's the script would write into `target/measurements` and
+    /// **delete the turns directory of a batch in progress**.
     ///
-    /// **Y las letras no se escriben aquí: se le piden al guion.** Una lista copiada sería un segundo
-    /// sitio que mantener, y el día que discrepara la equivocada sería esta. Se le da una letra que no
-    /// existe, se leen las que su propio mensaje ofrece y se comprueba que **cada una de ellas** llega
-    /// al final del reparto — que es lo que una letra caída del `case` deja de hacer, publicando
-    /// «tanda desconocida» donde el anexo espera una medida.
-    // **Solo en Linux, como el banco que ejercita.** El guion pide `/run/user/<uid>`, `pgrep -x` y
-    // `timeout`, que es de coreutils y no viene en macOS ni en los BSD. Sin esta condición, la caja
-    // que F2.7 va a compilar ahí fallaría en una prueba que no puede pasar, en vez de saltársela.
+    /// **And the letters are not written here: they are asked of the script.** A copied list would be a
+    /// second place to maintain, and the day it disagreed the wrong one would be this. It is given a
+    /// letter that does not exist, the ones its own message offers are read and it is checked that **each
+    /// one of them** reaches the end of the allocation — which is what a letter dropped from the `case`
+    /// stops doing, publishing "unknown batch" where the annex expects a measurement.
+    // **Only on Linux, like the bench it exercises.** The script asks for `/run/user/<uid>`, `pgrep -x`
+    // and `timeout`, which is coreutils' and does not come on macOS or the BSDs. Without this condition,
+    // the crate F2.7 is going to compile there would fail on a test that cannot pass, instead of skipping
+    // it.
     #[cfg(target_os = "linux")]
     #[test]
-    fn cada_letra_que_el_guion_ofrece_atraviesa_su_reparto_de_tandas() {
+    fn every_letter_the_script_offers_goes_through_its_batch_allocation() {
         let root =
             std::env::temp_dir().join(format!("agent-terminal-batches-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("scripts")).expect("crear el árbol de la prueba");
+        std::fs::create_dir_all(root.join("scripts")).expect("create the test tree");
         let script = root.join("scripts/measure-frame.sh");
-        std::fs::write(&script, SCRIPT).expect("copiar el guion al árbol de la prueba");
+        std::fs::write(&script, SCRIPT).expect("copy the script to the test tree");
 
-        // **Sin binarios a propósito.** Es lo que corta la corrida justo detrás del reparto, sin
-        // llegar a abrir ninguna ventana ni a tocar nada de la máquina.
+        // **With no binaries on purpose.** It is what cuts the run right after the allocation, without
+        // getting to open any window or touch anything on the machine.
         let batch = |letter: &str| {
             let out = std::process::Command::new("timeout")
                 .arg("20")
@@ -2545,26 +2576,26 @@ mod tests {
                 .arg(&script)
                 .arg(letter)
                 .output()
-                .expect("lanzar el guion en modo tanda");
+                .expect("launch the script in batch mode");
             (
                 out.status.code(),
                 String::from_utf8_lossy(&out.stderr).into_owned(),
             )
         };
 
-        // **La letra que no existe, primero**: es la que da la lista y la que demuestra que el `case`
-        // sigue rechazando. Sin ella, un reparto que aceptara cualquier cosa dejaría verde todo lo de
-        // abajo.
+        // **The letter that does not exist, first**: it is the one that gives the list and the one that
+        // proves the `case` still rejects. Without it, an allocation that accepted anything would leave
+        // everything below green.
         let (code, offered) = batch("Ñ");
         assert_eq!(
             code,
             Some(2),
-            "el guion ha aceptado una letra que no es ninguna tanda: {offered}"
+            "the script has accepted a letter that is no batch: {offered}"
         );
         assert!(
             offered.contains("unknown batch"),
-            "el guion no rechaza una letra desconocida por su nombre, así que esta prueba no puede \
-             leerle la lista: {offered}"
+            "the script does not reject an unknown letter by its name, so this test cannot read it the \
+             list: {offered}"
         );
 
         let letters: Vec<String> = offered
@@ -2575,66 +2606,67 @@ mod tests {
             .filter(|piece| piece.len() == 1)
             .map(str::to_owned)
             .collect();
-        // **Contar no es identificar**, que es el disfraz que este proyecto tiene fichado: un
-        // extractor que devolviera dieciséis letras cualesquiera dejaría contento un suelo a secas.
-        // Así que se piden por nombre tres de las que el anexo cita, una de cada familia: la de
-        // referencia, la que restaura del fichero y la que rasteriza color.
+        // **Counting is not identifying**, which is the disguise this project has on file: an extractor
+        // that returned any sixteen letters would satisfy a bare floor. So three of the ones the annex
+        // cites are asked for by name, one of each family: the reference one, the one that restores from
+        // the file and the one that rasterizes color.
         assert!(
             letters.len() >= 16,
-            "el guion ofrece {} letras y las tandas del anexo son dieciséis: o se ha caído una del \
-             reparto, o esta prueba no sabe leer su mensaje — y entonces no está mirando nada: {:?}",
+            "the script offers {} letters and the annex batches are sixteen: either one has dropped out \
+             of the allocation, or this test does not know how to read its message — and then it is \
+             looking at nothing: {:?}",
             letters.len(),
             letters
         );
         for known in ["A", "L", "Q"] {
             assert!(
                 letters.iter().any(|letter| letter == known),
-                "el guion ya no ofrece la tanda {known}, que el anexo cita: sus corridas anteriores \
-                 se quedan sin forma de repetirse"
+                "the script no longer offers batch {known}, which the annex cites: its earlier runs are \
+                 left with no way to be repeated"
             );
         }
 
-        // **Y cada letra ofrecida tiene que atravesar el reparto entero.** Que el mensaje la nombre
-        // no dice que el `case` la reconozca: son dos literales distintos, y el día que discrepen la
-        // tanda se rechaza con «desconocida» quince minutos después de lanzarla.
+        // **And every offered letter has to go through the whole allocation.** That the message names it
+        // does not say that the `case` recognizes it: they are two different literals, and the day they
+        // disagree the batch is rejected with "unknown" fifteen minutes after launching it.
         for letter in &letters {
             let (code, said) = batch(letter);
             assert!(
                 said.contains("is missing — build with"),
-                "la tanda {letter} no llega al final de su reparto: el guion dijo «{}» en vez de \
-                 pararse al no encontrar los binarios. O la letra no está en el `case`, o algo de su \
-                 fila —las pestañas, las divisiones, el gesto— quedó con un nombre que ya no existe",
+                "batch {letter} does not reach the end of its allocation: the script said '{}' instead of \
+                 stopping when it did not find the binaries. Either the letter is not in the `case`, or \
+                 something in its row —the tabs, the panes, the gesture— was left with a name that no \
+                 longer exists",
                 said.trim()
             );
             assert_eq!(
                 code,
                 Some(1),
-                "la tanda {letter} se paró al no encontrar los binarios y no salió con su código"
+                "batch {letter} stopped when it did not find the binaries and did not exit with its code"
             );
         }
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **Las variables de medida que el guion se manda a sí mismo, y la única que se rompe en
-    /// silencio.**
+    /// **The measurement variables the script sends to itself, and the only one that breaks silently.**
     ///
-    /// La guarda de abajo comprueba que el guion **menciona** las cinco que la aplicación lee. Las
-    /// otras siete no las lee la aplicación: se las manda el modo tanda al modo consola, que es el
-    /// mismo fichero invocado como si fuera el intérprete de órdenes del usuario. Renombrar una de
-    /// esas **a un solo lado** no lo caza ni el compilador, ni `sh -n`, ni `set -u` —el guion las lee
-    /// con `${… :-}`—, ni ninguna de las veinte guardas del final.
+    /// The guard below checks that the script **mentions** the five the application reads. The other
+    /// seven are not read by the application: batch mode sends them to console mode, which is the same
+    /// file invoked as if it were the user's command interpreter. Renaming one of those **on one side
+    /// only** is caught by neither the compiler, nor `sh -n`, nor `set -u` —the script reads them with
+    /// `${… :-}`—, nor any of the twenty guards at the end.
     ///
-    /// **Y lo que se pierde no es una corrida: es su significado.** `MEASURE_TRIES` es cuántas
-    /// consolas vuelcan, y se lee con dos por omisión. Exportada con otro nombre, las tandas F, G, H,
-    /// I y L —las de cuatro consolas— vuelcan **dos**, y el informe sale con sus cuatro divisiones,
-    /// su testigo, sus pestañas y su rejilla: idéntico al bueno. El anexo publicaría bajo la letra H
-    /// el coste de la mitad de la carga.
+    /// **And what is lost is not a run: it is its meaning.** `MEASURE_TRIES` is how many consoles dump,
+    /// and it is read with two by default. Exported under another name, batches F, G, H, I and L —the
+    /// four-console ones— dump **two**, and the report comes out with its four panes, its witness, its
+    /// tabs and its grid: identical to the good one. The annex would publish under the letter H the cost
+    /// of half the load.
     ///
-    /// Se comprueba en un solo sentido, que es el que hay: **todo lo que el guion lee lo tiene que
-    /// exportar él**. Al revés no, y a propósito — `MEASURE_SIZE`, `MEASURE_TABS`, `MEASURE_PANES` y
-    /// `MEASURE_DRAGS` las exporta para la aplicación y no las lee nunca.
+    /// It is checked in a single direction, which is the one there is: **everything the script reads it
+    /// has to export**. Not the other way around, and on purpose — `MEASURE_SIZE`, `MEASURE_TABS`,
+    /// `MEASURE_PANES` and `MEASURE_DRAGS` it exports for the application and never reads.
     #[test]
-    fn el_guion_exporta_todas_las_variables_de_medida_que_el_mismo_lee() {
+    fn the_script_exports_every_measurement_variable_it_reads_itself() {
         let mut read = std::collections::BTreeSet::new();
         let mut exported = std::collections::BTreeSet::new();
         for line in SCRIPT.lines() {
@@ -2648,8 +2680,8 @@ mod tests {
                     .collect();
                 let before = line[..at].chars().next_back();
                 let after = line[at + name.len()..].chars().next();
-                // `$MEASURE_X` y `${MEASURE_X:-…}` son lecturas; `MEASURE_X=` es lo que el guion
-                // pone en el entorno del hijo. Un `unset` no es ni lo uno ni lo otro.
+                // `$MEASURE_X` and `${MEASURE_X:-…}` are reads; `MEASURE_X=` is what the script puts into
+                // the child's environment. An `unset` is neither one nor the other.
                 if before == Some('$') || before == Some('{') {
                     read.insert(name);
                 } else if after == Some('=') {
@@ -2658,66 +2690,66 @@ mod tests {
             }
         }
 
-        // **Los dos suelos, porque un extractor que no reconociera nada pasaría por vacío.** Y con
-        // nombre, no solo con número: contar no es identificar.
+        // **The two floors, because an extractor that recognized nothing would pass vacuously.** And by
+        // name, not only by number: counting is not identifying.
         assert!(
             read.len() >= 6 && exported.len() >= 10,
-            "el extractor ha visto {} variables leídas y {} exportadas, y hay al menos 6 y 10: ha \
-             dejado de reconocer su forma, así que esta prueba estaría pasando sin mirar nada",
+            "the extractor has seen {} variables read and {} exported, and there are at least 6 and 10: \
+             it has stopped recognizing their shape, so this test would be passing without looking at \
+             anything",
             read.len(),
             exported.len()
         );
         for named in ["MEASURE_TRIES", "MEASURE_RUNS"] {
             assert!(
                 read.contains(named),
-                "el extractor no ve que el guion lea {named}, que es de las que se manda a sí mismo: \
-                 está encontrando el número de variables y no las variables"
+                "the extractor does not see the script read {named}, which is one of the ones it sends to \
+                 itself: it is finding the number of variables and not the variables"
             );
         }
 
         let orphans: Vec<&String> = read.difference(&exported).collect();
         assert!(
             orphans.is_empty(),
-            "el guion lee {:?} y no las exporta, así que el modo consola las recibe vacías: las que \
-             llevan valor por omisión —`MEASURE_TRIES` es cuántas consolas vuelcan— siguen midiendo, \
-             pero otra cosa, y el informe sale indistinguible del bueno",
+            "the script reads {:?} and does not export them, so console mode receives them empty: the \
+             ones that carry a default value —`MEASURE_TRIES` is how many consoles dump— keep measuring, \
+             but something else, and the report comes out indistinguishable from the good one",
             orphans
         );
     }
 
     #[test]
-    fn cada_patron_que_el_guion_busca_en_el_informe_sigue_extrayendo_algo() {
+    fn every_pattern_the_script_looks_for_in_the_report_still_extracts_something() {
         let patrones = script_patterns();
 
-        // **La guarda cuenta POR FORMA y no un total, y la diferencia la encontró una revisión
-        // mutándola.** Con un total —«al menos 20», habiendo 21— la guarda toleraba perder
-        // exactamente uno, y los dos que se reconocen por palabra clave son justo los que pueden
-        // caerse de uno en uno: traduciendo **solo** el de las fuentes, el conjunto bajaba a 20, la
-        // guarda pasaba, y su tanda quedaba invalidada para siempre sin que nada lo dijera. Era el
-        // segundo disfraz que este proyecto tiene fichado: un número con el que el defecto y el
-        // arreglo dan el mismo resultado.
+        // **The guard counts BY SHAPE and not a total, and a review found the difference by mutating
+        // it.** With a total —"at least 20", there being 21— the guard tolerated losing exactly one, and
+        // the two recognized by keyword are precisely the ones that can drop out one at a time:
+        // translating **only** the fonts one, the set went down to 20, the guard passed, and its batch
+        // was invalidated forever without anything saying so. It was the second disguise this project has
+        // on file: a number with which the defect and the fix give the same result.
         //
-        // Contando las dos familias por separado, perder **uno solo** de los dos por palabra clave ya
-        // cae. Y sigue siendo un criterio y no una lista, así que aguanta que el guion crezca.
+        // Counting the two families separately, losing **a single one** of the two by keyword already
+        // fails. And it is still a criterion and not a list, so it holds up as the script grows.
         let anclados = patrones.iter().filter(|p| p.patron.contains('^')).count();
         let by_keyword = patrones.len() - anclados;
         assert!(
             anclados >= 19 && by_keyword >= 2,
-            "el extractor ha encontrado {anclados} patrones anclados y {by_keyword} por \
-             palabra clave, y hay al menos 19 y 2: ha dejado de reconocer la forma de alguno, así \
-             que esta prueba estaría pasando por vacío justo donde menos se nota"
+            "the extractor has found {anclados} anchored patterns and {by_keyword} by keyword, and there \
+             are at least 19 and 2: it has stopped recognizing the shape of some, so this test would be \
+             passing vacuously right where it is least noticed"
         );
 
-        // **Y la guarda que de verdad sobrevive a que el guion crezca: cobertura POR USO.** Las dos
-        // de arriba son de forma —cuántos patrones y de qué tipo— y las dos se pueden satisfacer
-        // mientras se pierde una guarda real: basta con que el guion gane una línea que lea el
-        // informe con una forma que este extractor no reconozca. Se midió, y se perdía una guarda
-        // entera con las 23 pruebas en verde.
+        // **And the guard that really survives the script growing: coverage BY USE.** The two above are
+        // by shape —how many patterns and of what type— and both can be satisfied while a real guard is
+        // lost: it is enough for the script to gain a line that reads the report with a shape this
+        // extractor does not recognize. It was measured, and a whole guard was lost with the 23 tests
+        // green.
         //
-        // Así que se cuenta al revés: **cada línea del guion que le aplique `grep` o `sed` al
-        // informe tiene que haber aportado al menos un patrón**. Lo que quede exento se nombra aquí
-        // una por una, con su razón — una lista corta y explícita envejece mejor que un criterio que
-        // se ensancha hasta dejar de fallar.
+        // So it is counted the other way around: **every line of the script that applies `grep` or `sed`
+        // to the report has to have contributed at least one pattern**. Whatever is exempt is named here
+        // one by one, with its reason — a short, explicit list ages better than a criterion that widens
+        // until it stops failing.
         let mut sin_aportar = Vec::new();
         for (numero, line) in SCRIPT.lines().enumerate() {
             let numero = numero + 1;
@@ -2728,12 +2760,12 @@ mod tests {
             if !aplica_un_patron {
                 continue;
             }
-            // **Y su patrón tiene que llevar texto, por lo mismo que arriba.** El guion tiene una
-            // línea que cuenta las del fichero de errores con un patrón vacío: aplica un `grep` al
-            // informe y **no lee de él ninguna palabra**, así que no hay nada que se pueda quedar
-            // atrás al traducir. Es el mismo criterio que decide qué patrón se extrae, aplicado a
-            // qué línea tiene que aportar uno — y por ser el mismo, las dos mitades no se pueden
-            // desincronizar.
+            // **And its pattern has to carry text, for the same reason as above.** The script has a line
+            // that counts the ones in the error file with an empty pattern: it applies a `grep` to the
+            // report and **reads no word from it**, so there is nothing that could be left behind on
+            // translating. It is the same criterion that decides which pattern is extracted, applied to
+            // which line has to contribute one — and by being the same, the two halves cannot
+            // desynchronize.
             let some_pattern_with_text =
                 line.split(['\'', '"'])
                     .skip(1)
@@ -2745,15 +2777,15 @@ mod tests {
             if !some_pattern_with_text {
                 continue;
             }
-            // La única exenta: compone el mensaje de la rejilla al terminar y **no invalida ninguna
-            // corrida**. Su literal lo cubre de rebote el recuento de divisiones. Si algún día decide
-            // algo, deja de ser un `echo` y tiene que aportar.
+            // The only exempt one: it composes the grid message on finishing and **invalidates no run**.
+            // Its literal is covered incidentally by the pane count. If some day it decides something, it
+            // stops being an `echo` and has to contribute.
             //
-            // **Se exenta por lo que la línea ES y no por dónde está**, y eso lo pidió una revisión:
-            // iba anclada a un número de línea, y la entrega que tradujo el guion lo movió de 933 a
-            // 975 **sin que nada lo dijera** — la exención dejó de exentar y siguió pareciendo que
-            // protegía algo. Hoy hay exactamente una línea de esta forma entre las treinta y dos que
-            // llevan patrón.
+            // **It is exempted by what the line IS and not by where it is**, and a review asked for that:
+            // it was anchored to a line number, and the delivery that translated the script moved it from
+            // 933 to 975 **without anything saying so** — the exemption stopped exempting and went on
+            // seeming to protect something. Today there is exactly one line of this shape among the
+            // thirty-two that carry a pattern.
             if line.trim_start().starts_with("echo ") {
                 continue;
             }
@@ -2763,10 +2795,10 @@ mod tests {
         }
         assert!(
             sin_aportar.is_empty(),
-            "{} línea(s) del guion leen el informe con `grep` o `sed` y esta prueba no ha sacado \
-             ningún patrón de ellas, así que **no las está atando**. O el extractor no reconoce su \
-             forma, o son guardas nuevas que hay que cubrir — y mientras tanto pueden romperse en \
-             silencio:\n{}",
+            "{} line(s) of the script read the report with `grep` or `sed` and this test has pulled no \
+             pattern out of them, so it **is not tying them down**. Either the extractor does not \
+             recognize their shape, or they are new guards that have to be covered — and meanwhile they \
+             can break silently:\n{}",
             sin_aportar.len(),
             sin_aportar.join("\n")
         );
@@ -2777,14 +2809,14 @@ mod tests {
         for p in &patrones {
             let mut extracted_from_any = false;
             for (_, informe) in &informes {
-                match extrae(p, informe) {
+                match extract(p, informe) {
                     Salida::Extrajo => extracted_from_any = true,
                     Salida::NoCaso => {}
-                    // Una entrada por patrón y no por informe: el mismo corte mal hecho se veía
-                    // cuatro veces, una por informe de referencia.
+                    // One entry per pattern and not per report: the same badly-made cut was seen four
+                    // times, one per reference report.
                     Salida::PatronInvalido(codigo) => {
                         let entrada = format!(
-                            "  measure-frame.sh:{} ({}) {:?} → salió con {codigo}",
+                            "  measure-frame.sh:{} ({}) {:?} → exited with {codigo}",
                             p.line, p.order, p.patron
                         );
                         if !invalidos.contains(&entrada) {
@@ -2800,31 +2832,31 @@ mod tests {
                 ));
             }
         }
-        // **Esto se comprueba antes, y culpando a esta prueba y no al proyecto.** Un patrón que la
-        // orden rechaza no dice nada del informe: dice que el extractor de arriba lo cortó mal.
+        // **This is checked first, and blaming this test and not the project.** A pattern the command
+        // rejects says nothing about the report: it says the extractor above cut it wrong.
         assert!(
             invalidos.is_empty(),
-            "el extractor de esta prueba ha sacado {} patrones que su propia orden rechaza, así que \
-             los ha cortado mal. **No es un fallo del informe ni del guion, es de esta prueba** — \
-             arréglala antes de creerte lo que dice del resto:\n{}",
+            "this test's extractor has pulled {} patterns that its own command rejects, so it has cut \
+             them wrong. **It is not a failure of the report nor of the script, it is of this test** — \
+             fix it before believing what it says about the rest:\n{}",
             invalidos.len(),
             invalidos.join("\n")
         );
         assert!(
             huerfanos.is_empty(),
-            "{} de {} patrones del guion no extraen nada de ningún informe que el productor sepa \
-             escribir. O el informe cambió de texto sin el guion, o al revés — y en cuanto eso \
-             pasa el guion deja de invalidar corridas malas en vez de fallar:\n{}",
+            "{} of {} script patterns extract nothing from any report the producer knows how to write. \
+             Either the report changed text without the script, or the other way around — and as soon as \
+             that happens the script stops invalidating bad runs instead of failing:\n{}",
             huerfanos.len(),
             patrones.len(),
             huerfanos.join("\n")
         );
 
-        // **Y las cinco variables de entorno, que es la mitad del contrato que este test no ata.**
-        // Los `assert_eq!` de la ventana comparan cada constante consigo misma; lo que de verdad se
-        // pide es que el guion **exporte** ese nombre, porque la app lee estas variables para saber
-        // que la sesión la pidió la medida y decidir sus vetos. Sin este pin, renombrar a un solo
-        // lado solo estalla al medir, con la tanda ya en marcha.
+        // **And the five environment variables, which is the half of the contract this test does not tie
+        // down.** The window's `assert_eq!`s compare each constant with itself; what is really asked for
+        // is that the script **export** that name, because the app reads these variables to know that the
+        // session asked for the measurement and to decide its vetoes. Without this pin, renaming on one
+        // side only blows up only at measurement time, with the batch already running.
         use crate::{
             DRAGS_VARIABLE, GESTURE_VARIABLE, PANES_VARIABLE, SIZE_VARIABLE, TABS_VARIABLE,
         };
@@ -2837,23 +2869,22 @@ mod tests {
         ] {
             assert!(
                 SCRIPT.contains(variable),
-                "el guion no menciona {variable}: la app dejaría de reconocer la sesión como una \
-                 tanda de medida y sus vetos de arranque dejarían de aplicarse"
+                "the script does not mention {variable}: the app would stop recognizing the session as a \
+                 measurement batch and its startup vetoes would stop applying"
             );
         }
     }
 
     #[test]
-    fn el_guion_siembra_el_mismo_fichero_de_disposicion_que_la_aplicacion_escribe() {
-        // **La otra mitad del acoplamiento, y la que no se ve.** El guion escribe una disposición a
-        // mano para la tanda que restaura, con la ruta y las claves puestas en su propio texto. La
-        // prueba que había afirmaba que la constante del nombre valía un literal escrito **al
-        // lado**: se renombran las dos mitades a la vez, queda verde, y el guion sigue sembrando el
-        // nombre viejo.
+    fn the_script_seeds_the_same_layout_file_the_application_writes() {
+        // **The other half of the coupling, and the one that is not seen.** The script writes a layout by
+        // hand for the batch that restores, with the path and the keys put in its own text. The test
+        // there was asserted that the name constant equalled a literal written **right beside it**: the
+        // two halves are renamed at once, it stays green, and the script goes on seeding the old name.
         assert!(
             SCRIPT.contains(crate::session::FILE),
-            "el guion de medida no siembra «{}», que es el fichero que la aplicación lee: la tanda \
-             que restaura abriría de fábrica y su corrida se publicaría como buena",
+            "the measurement script does not seed '{}', which is the file the application reads: the \
+             batch that restores would open from factory and its run would be published as good",
             crate::session::FILE
         );
     }

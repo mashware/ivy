@@ -135,6 +135,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/examples/leak.rs", "app"),
     ("app/examples/screen_demo.rs", "app"),
     ("app/examples/sweep.rs", "app"),
+    ("app/tests/prose.rs", "app"),
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
@@ -553,10 +554,10 @@ fn segments(name: &str) -> Vec<String> {
 /// only one of them is the shape of hole this file keeps finding: a list that looks watched and is not.
 /// The label comes back with the files so a failure can name what was declared, not just the path.
 fn guarded_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
-    // **Un suelo por lista, y no uno sobre la suma.** Medido: vaciar `GLOSSARY_CLEAN_FILES` del todo
-    // dejaba las ocho pruebas verdes, porque las cajas terminadas seguían dando objetivos y la guarda
-    // de «esto no tiene ficheros» nunca se le pregunta a una lista sin elementos. Las dos listas solo
-    // crecen, así que un suelo aquí no estorba a nadie: sirve para notar que una se ha vaciado.
+    // **A floor per list, not one over the sum.** Measured: emptying `GLOSSARY_CLEAN_FILES` entirely
+    // left the eight tests green, because the finished crates still gave targets and the «this has no
+    // files» guard is never asked of a list with no entries. The two lists only ever grow, so a floor
+    // here gets in nobody's way: it is there to notice one of them being emptied.
     assert!(
         FINISHED_CRATES.len() >= 3 && GLOSSARY_CLEAN_FILES.len() >= 5,
         "the two lists this guard reads have {} crates and {} files: they only ever grow, so this is \
@@ -748,26 +749,26 @@ const POSITIVE_CASES: &[&str] = &[
 fn the_three_rules_answer_what_they_promise() {
     let glossary = glossary();
     let verdict = |name: &str| why_it_is_a_leftover(name, &glossary);
-    // **Esto va primero a propósito.** Cada nombre que este test usa como caso POSITIVO tiene que quedar
-    // fuera del atajo que sigue vivo: el lado inglés del glosario, que sale del anexo y que las entregas
-    // de prosa todavía editan. El día que una flecha adopte uno de estos nombres como inglés, su caso
-    // deja de comprobar su regla y sale por el atajo. Va antes que los casos para que el mensaje diga
-    // **la causa** y no el síntoma, que estaría treinta líneas más abajo.
-    // **Y un suelo, porque sin él este bucle pasa por estar vacío.** Medido: vaciar la lista deja el
-    // caso en verde sin comprobar un solo sujeto, que es la forma exacta en la que mueren las guardas de
-    // este fichero. Son veintiún sujetos y la lista solo crece.
+    // **This goes first on purpose.** Every name this test uses as a POSITIVE case has to stay outside
+    // the shortcut that is still live: the English side of the glossary, which comes from the annex and
+    // which the prose deliveries still edit. The day an arrow adopts one of these names as its English,
+    // its case stops checking its rule and leaves through the shortcut. It goes before the cases so the
+    // message names **the cause** and not the symptom, which would be thirty lines further down.
+    // **And a floor, because without it this loop passes by being empty.** Measured: emptying the list
+    // leaves the case green without checking a single subject, which is the exact way the guards of this
+    // file die. There are twenty-one subjects and the list only ever grows.
     assert!(
         POSITIVE_CASES.len() >= 21,
-        "la lista de sujetos positivos tiene {} entradas: alguien la vació o la recortó, y este caso \
-         dejó de mirar nada",
+        "the positive-subjects list has {} entries: someone emptied or trimmed it, and this case \
+         stopped looking at anything",
         POSITIVE_CASES.len()
     );
     for case in POSITIVE_CASES {
-        // **Cada sujeto tiene que seguir siendo un resto de verdad**, que es lo que lo hace un caso
-        // positivo. Una entrada que dejara de serlo estaría ahí sin defender ninguna regla.
+        // **Every subject has to stay a genuine leftover**, which is what makes it a positive case. An
+        // entry that stopped being one would sit here defending no rule at all.
         assert!(
             verdict(case).is_some(),
-            "«{case}» está en la lista de casos positivos y ya no lo caza ninguna regla"
+            "«{case}» is in the positive-cases list and no rule catches it any more"
         );
         let silenced = segments(case)
             .iter()
@@ -841,18 +842,18 @@ fn the_three_rules_answer_what_they_promise() {
         verdict("CONSOLA_MINIMA").is_some(),
         "a screaming-snake-case name carrying a retired noun"
     );
-    // **Y una constante numerada, porque «sin minúsculas» no es «todo mayúsculas».** Escrito con
-    // `chars().all(char::is_uppercase)` el dígito rompe la condición, la pieza se vuelve a partir en
-    // letras sueltas y el defecto que esto cierra queda reabierto para toda constante con un número.
-    // Medido: esa versión deja las ocho pruebas verdes sin este caso.
+    // **And a numbered constant, because «no lowercase letter» is not «every letter uppercase».** Written
+    // with `chars().all(char::is_uppercase)` the digit breaks the condition, the piece is split back into
+    // single letters, and the defect this closes is reopened for every constant with a number in it.
+    // Measured: that version leaves the eight tests green without this case.
     assert!(
         verdict("CONSOLA2_MINIMA").is_some(),
         "a numbered constant: «no lowercase letter» is not «every letter uppercase»"
     );
-    // **El suelo de dos caracteres, que hasta este PR no lo sostenía nada.** Medido: subirlo a 3 o a 5
-    // —o quitarlo— dejaba las ocho pruebas verdes, y con 5 el guardián deja de ver `celda`, `hueco`,
-    // `serie`, `nodo`, `fila` y `mitad` dentro de cualquier compuesto. Dos casos porque cada uno mata
-    // un valor distinto: un nombre de tres letras y uno de cinco.
+    // **The two-character floor, which nothing held up until this delivery.** Measured: raising it to 3 or 5
+    // —or removing it— left the eight tests green, and at 5 the guard stops seeing `celda`, `hueco`,
+    // `serie`, `nodo`, `fila` and `mitad` inside any compound. Two cases because each one kills a
+    // different value: a three-letter name and a five-letter one.
     assert!(
         verdict("USO_ALTO").is_some(),
         "a three-letter retired name, which a floor of three would skip"
@@ -1059,10 +1060,10 @@ const NOT_OURS: &[&str] = &[
     // and the ones the measurement script exports leave with the script, in a later delivery.
     "MEASURE_MIB",
     "MEASURE_BATCH",
-    // Y las cinco de la puerta de medida, que este fichero cita al explicar cuáles se manda el guion
-    // a sí mismo y cuáles exporta para la aplicación. Sus **constantes** —`TABS_VARIABLE` y las
-    // demás— sí son identificadores de esta caja y se comprueban solas; lo que va aquí es el nombre
-    // que viaja en el entorno.
+    // And the five of the measurement gate, which this file cites when explaining which ones the script
+    // sends to itself and which it exports for the application. Their **constants** —`TABS_VARIABLE` and
+    // the rest— are identifiers of this crate and are checked on their own; what goes here is the name
+    // that travels in the environment.
     "MEASURE_TRIES",
     "MEASURE_SIZE",
     "MEASURE_TABS",
@@ -1114,8 +1115,10 @@ const NOT_OURS: &[&str] = &[
     "none",
     "pgdn",
     "pgup",
-    // **Sigue viva, comprobada quitándola**: el informe de medida la publica como etiqueta y dos
-    // comentarios la citan. Un revisor la dio por muerta razonando; el guardián la resucitó en rojo.
+    // **Still live, checked by removing it**: one comment in `app/src/lib.rs` still cites the old
+    // Spanish name of the report line this delivery renamed to `restored:`, and the guard reads that
+    // backtick as a citation. It goes when that comment is translated. A reviewer declared it dead by
+    // reasoning; the guard brought it back in red.
     "restauradas",
     "stale_after_minutes",
     "version",
@@ -1129,19 +1132,19 @@ const NOT_OURS: &[&str] = &[
     "read",
     // Other programs, and the shell.
     "echo",
-    // De coreutils, y por eso las dos guardas que ejecutan el guion solo corren en Linux.
+    // From coreutils, which is why the two guards that run the script only run on Linux.
     "timeout",
     "grep",
     "sed",
-    // Del intérprete de órdenes y de procps, que es lo que el guion usa para saber si hay una ventana
-    // abierta: la guarda que lo ejecuta se para **antes** de esa línea, y su comentario dice por qué.
+    // From the shell and from procps, which is what the script uses to know whether a window is open:
+    // the guard that runs it stops **before** that line, and its comment says why.
     "pgrep",
     "unset",
     "VTE",
     // Items of the crates this one depends on.
     "break_on_newline",
-    // Los nombres con los que egui llama a las cuatro flechas, citados por el comentario que explica
-    // por qué este proyecto ya no necesita un alias para ellas.
+    // The names egui gives the four arrows, cited by the comment that explains why this project no
+    // longer needs an alias for them.
     "Down",
     "Up",
     "Fonts",
@@ -1333,10 +1336,10 @@ fn no_comment_cites_a_name_the_code_no_longer_has() {
         );
         jobs.push((files.clone(), files));
     }
-    // **«Todos los ficheros de la caja» se comprueba contra el árbol, no se cree.** Medido: quitar una
-    // entrada de la lista —incluida la que este PR añade— dejaba las ocho pruebas verdes, porque un
-    // fichero que sale de la lista simplemente deja de mirarse y nada echa de menos lo que no reporta.
-    // La única excepción es este fichero, y su razón está escrita arriba.
+    // **«Every file of the crate» is checked against the tree, not trusted.** Measured: removing one
+    // entry from the list —including the one this delivery adds— left the eight tests green, because a
+    // file that leaves the list simply stops being looked at and nothing misses what it does not report.
+    // The only exception is this file, and its reason is written above.
     let listed: HashSet<&str> = CITATIONS_CHECKED.iter().map(|(path, _)| *path).collect();
     for file in rust_files(&root.join("crates").join("app")) {
         let relative = file
@@ -1435,10 +1438,10 @@ fn no_retired_file_name_is_still_cited() {
          without them this test looks at every file and asks about nothing",
         stems.len()
     );
-    // **Contar no es identificar, y eso es el disfraz que este proyecto tiene en su ficha.** Medido:
-    // devolver los diecisiete tallos con un sufijo pegado —diecisiete nombres que no existen— deja el
-    // suelo de arriba contento y esta prueba pasa sin mirar nada. Así que se piden por nombre cuatro
-    // de los que el anexo lleva.
+    // **Counting is not identifying, and that is the disguise this project has on its record.** Measured:
+    // returning the seventeen stems with a suffix stuck on —seventeen names that do not exist— keeps the
+    // floor above happy and this test passes without looking at anything. So four of the ones the annex
+    // carries are asked for by name.
     for known in ["pantalla", "fuentes", "sesion", "vigilante"] {
         assert!(
             stems.iter().any(|stem| stem == known),

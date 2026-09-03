@@ -1,95 +1,95 @@
-//! Lo que quien usa el terminal puede cambiarle, y de dónde se lee.
+//! What whoever uses the terminal can change about it, and where it is read from.
 //!
-//! ## Este fichero lo escribe una persona, y eso decide casi todo lo de aquí
+//! ## This file is written by a person, and that decides almost everything here
 //!
-//! La disposición de la ventana la escribe la aplicación, así que un documento a medias solo puede venir
-//! de un error propio y **D16** decidió no abrirlo a medias: adivinar media disposición es peor que no
-//! restaurarla. Aquí es al revés. **Lo teclea una persona que se equivoca**, y para cada línea hay un
-//! repuesto exacto —el valor de fábrica—, así que **se tolera por línea**: la que no se entiende se
-//! ignora, se dice cuál es, y el resto se aplica.
+//! The window's layout is written by the application, so a half-baked document can only come
+//! from a fault of our own and **D16** decided not to open it half-baked: guessing half a layout is worse than not
+//! restoring it. Here it is the other way around. **A person who makes mistakes types it**, and for each line there is an
+//! exact replacement —the factory value—, so **it is tolerated per line**: the one that is not understood is
+//! ignored, which one it is gets said, and the rest is applied.
 //!
-//! No es una excepción a D16: es el lado que D16 ya contempla cuando contrapone el contrato del panel,
-//! *«que lo escribe un tercero a mano»*. Y coincide con lo que hacen los cuatro terminales contra los que
-//! este proyecto compite —WezTerm, Kitty, Alacritty y Ghostty avisan y siguen con lo de fábrica—, pero esa
-//! coincidencia es una confirmación, no la razón.
+//! It is not an exception to D16: it is the side D16 already contemplates when it contrasts the panel contract,
+//! *«which a third party writes by hand»*. And it coincides with what the four terminals this
+//! project competes against do —WezTerm, Kitty, Alacritty and Ghostty warn and carry on with the factory settings—, but that
+//! coincidence is a confirmation, not the reason.
 //!
-//! ## Y por eso el formato es texto plano y no JSON
+//! ## And that is why the format is plain text and not JSON
 //!
-//! La tolerancia por línea es el requisito, y **en JSON una coma olvidada impide construir el documento
-//! entero**. El contrato del panel es JSON y tolera por campo, pero puede permitírselo porque **lo genera
-//! un programa**; aquí la coma olvidada es el error más común que existe. En texto plano ese fallo global
-//! no puede ocurrir: el peor caso es una línea. Y admite comentarios, sin los cuales un fichero de
-//! configuración no se explica a sí mismo.
+//! Per-line tolerance is the requirement, and **in JSON a forgotten comma prevents building the whole
+//! document**. The panel contract is JSON and tolerates per field, but it can afford to because **a program
+//! generates it**; here the forgotten comma is the most common error there is. In plain text that global failure
+//! cannot happen: the worst case is one line. And it admits comments, without which a configuration
+//! file does not explain itself.
 
 use std::path::{Path, PathBuf};
 
 use eframe::egui::Color32;
 
-/// El nombre del fichero, al lado de la disposición y no dentro.
+/// The file's name, beside the layout and not inside it.
 pub const FILE: &str = "config";
 
-/// El valor que desata un atajo, **y el único que el terminal publica como palabra**.
+/// The value that unbinds a shortcut, **and the only one the terminal publishes as a word**.
 ///
-/// **Vive una vez porque estaba escrito tres**: las dos ramas que lo reconocen y el aviso que le dice a
-/// quien se equivoca qué escribir. Cambiar el token en el intérprete y olvidar el aviso deja al terminal
-/// recomendando una palabra que él mismo rechaza, y la prueba que cubre ese aviso afirma sobre otra parte
-/// de la frase, así que no lo vería.
+/// **It lives once because it was written three times**: the two branches that recognize it and the warning that tells
+/// whoever makes a mistake what to write. Changing the token in the parser and forgetting the warning leaves the terminal
+/// recommending a word it rejects itself, and the test that covers that warning asserts over another part
+/// of the sentence, so it would not see it.
 const OFF: &str = "none";
 
-/// El techo del fichero, aplicado **antes** de interpretar.
+/// The file's ceiling, applied **before** parsing.
 ///
-/// **Es literalmente el de la disposición, no una copia con el mismo número.** Un comentario que diga «el
-/// mismo que aquél» junto a una constante propia es una promesa que nada obliga a cumplir: el día que una
-/// de las dos cambie, el comentario miente y nadie se entera.
+/// **It is literally the layout's, not a copy with the same number.** A comment saying «the
+/// same as that one» next to a constant of its own is a promise nothing forces to keep: the day one
+/// of the two changes, the comment lies and no one notices.
 use crate::session::MAX_BYTES;
 
-/// Cuántas líneas malas se dicen antes de callar.
+/// How many bad lines get said before going silent.
 ///
-/// **El aviso aquí ES el producto, no una nota al margen.** La disposición avisa una vez por clase de
-/// problema porque la escribe la aplicación y el aviso solo informa; aquí, con dos colores mal escritos,
-/// oír solo uno hace que se arregle la mitad y se vuelva a abrir. Pero un fichero pegado del sitio
-/// equivocado tampoco debe llenar la salida de error, así que hay tope **y se dice cuántos quedaron**.
+/// **The warning here IS the product, not a marginal note.** The layout warns once per class of
+/// problem because the application writes it and the warning only informs; here, with two badly written colors,
+/// hearing only one makes half of it get fixed and reopened. But a file pasted from the wrong
+/// place must not fill the error output either, so there is a cap **and how many were left is said**.
 const MAX_WARNINGS: usize = 20;
 
-/// La versión del formato que este lector entiende.
+/// The format version this reader understands.
 ///
-/// **Es opcional, al contrario que en la disposición, y la razón es la que D16 da para exigirla allí.**
-/// Allí el fichero **congela la forma de un árbol**, así que un lector viejo malinterpretaría un fichero
-/// nuevo. Aquí el formato es plano: una clave que un lector no conoce **se ignora y se dice**, y una que
-/// falta toma su valor de fábrica. No hay forma que congelar, así que exigir una línea ritual a quien
-/// escribe el fichero no protegería de nada.
+/// **It is optional, unlike in the layout, and the reason is the one D16 gives for requiring it there.**
+/// There the file **freezes the shape of a tree**, so an old reader would misinterpret a new
+/// file. Here the format is flat: a key a reader does not know **is ignored and said**, and one that
+/// is missing takes its factory value. There is no shape to freeze, so requiring a ritual line from whoever
+/// writes the file would protect from nothing.
 ///
-/// Lo que sí hace falta es la mitad que sí protege: **una versión MAYOR que ésta no se aplica**, por si un
-/// día el formato cambia de manera incompatible. Sin fichero de por medio no hay nada que decidir.
+/// What is needed is the half that does protect: **a version GREATER than this one is not applied**, in case one
+/// day the format changes incompatibly. With no file in the way there is nothing to decide.
 const VERSION: u64 = 1;
 
-/// Lo que le pasa al fichero **entero**, cuando no hay nada que aplicar.
+/// What happens to the **whole** file, when there is nothing to apply.
 ///
-/// Una línea mala no está aquí: eso es un [`Warning`], y el resto del fichero se aplica igual.
+/// A bad line is not here: that is a [`Warning`], and the rest of the file is applied all the same.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigProblem {
-    /// No hay fichero. **Es el caso normal** y no se avisa de él.
+    /// There is no file. **It is the normal case** and it is not warned about.
     Absent,
-    /// Hay un enlace con ese nombre y no apunta a nada.
+    /// There is a link with that name and it points to nothing.
     BrokenLink,
-    /// Hay algo con ese nombre y no es un fichero.
+    /// There is something with that name and it is not a file.
     NotAFile,
-    /// No se pudo leer.
+    /// It could not be read.
     Unreadable(String),
-    /// Se pasa del techo.
+    /// It goes over the ceiling.
     TooBig,
-    /// No es texto.
+    /// It is not text.
     NotText,
-    /// Dice ser de una versión que este terminal no conoce.
+    /// It claims to be of a version this terminal does not know.
     Version(u64),
 }
 
 impl ConfigProblem {
-    /// Si vale la pena decirlo por la salida de error.
+    /// Whether it is worth saying through the error output.
     ///
-    /// **Que no haya fichero es el caso normal, no un problema**, y decirlo en cada arranque de quien no
-    /// configura nada sería ruido puro. La regla vive **en el tipo** y no en quien llama, igual que en el
-    /// módulo hermano: es la única forma de que dos sitios que lo usen no dejen de coincidir.
+    /// **That there is no file is the normal case, not a problem**, and saying it on every startup of someone who
+    /// configures nothing would be pure noise. The rule lives **in the type** and not in the caller, just as in the
+    /// sibling module: it is the only way two places that use it do not stop coinciding.
     pub fn warrants_warning(&self) -> bool {
         !matches!(self, Self::Absent)
     }
@@ -114,30 +114,30 @@ impl std::fmt::Display for ConfigProblem {
     }
 }
 
-/// Lo que le pasa a **una línea**, con dónde está.
+/// What happens to **one line**, with where it is.
 ///
-/// **Lleva el número de línea porque sin él el aviso no sirve**: «un color mal escrito» en un fichero de
-/// cuarenta líneas obliga a repasarlas todas.
+/// **It carries the line number because without it the warning is useless**: «a badly written color» in a file of
+/// forty lines forces going over all of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning {
     pub line: usize,
     pub missing: Missing,
 }
 
-/// Qué le falta a una línea para poder aplicarse.
+/// What a line is missing to be able to apply.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Missing {
-    /// No tiene la forma `key = value`.
+    /// It is not of the form `key = value`.
     NoEquals,
-    /// Tiene el igual pero le falta la clave o el valor.
+    /// It has the equals but the key or the value is missing.
     Incomplete,
-    /// La clave no es ninguna de las que este terminal entiende.
+    /// The key is none of the ones this terminal understands.
     UnknownKey(String),
-    /// El valor no vale para esa clave.
+    /// The value is not valid for that key.
     InvalidValue { key: String, value: String },
-    /// Esa clave ya estaba puesta más arriba; gana ésta.
+    /// That key was already set above; this one wins.
     Repeated(String),
-    /// El acorde de esa acción lo decide el escritorio: solo se puede apagar.
+    /// That action's chord is decided by the desktop: it can only be turned off.
     OnlyTurnsOff(String),
 }
 
@@ -161,12 +161,12 @@ impl std::fmt::Display for Warning {
     }
 }
 
-/// Lo que cabe de un valor en un aviso.
+/// How much of a value fits in a warning.
 ///
-/// **El valor sale tal cual del fichero, y un fichero puede traer una línea de cien mil caracteres o unos
-/// códigos de escape.** No es superficie de ataque —el fichero es de quien usa el terminal— pero las reglas
-/// duras de este proyecto contemplan el fichero **de origen ajeno**, que aquí es un `config` copiado de
-/// cualquier sitio. Recortar cuesta una línea y hace el aviso legible.
+/// **The value comes out of the file as is, and a file can bring a line of a hundred thousand characters or some
+/// escape codes.** It is not attack surface —the file belongs to whoever uses the terminal— but this project's
+/// hard rules contemplate the file **of foreign origin**, which here is a `config` copied from
+/// anywhere. Trimming costs one line and makes the warning legible.
 fn trimmed(value: &str) -> String {
     const FITS: usize = 60;
     if value.chars().count() <= FITS {
@@ -176,69 +176,69 @@ fn trimmed(value: &str) -> String {
     format!("{}…", short.escape_debug())
 }
 
-/// Los colores que el fichero pide, cada uno **solo si lo pide**.
+/// The colors the file requests, each one **only if it requests it**.
 ///
-/// Son **veintidós**: las dieciséis de la paleta y los seis propios.
+/// There are **twenty-two**: the sixteen of the palette and the six of our own.
 ///
-/// **Cada campo es opcional a propósito**: lo que el fichero no diga se queda como está de fábrica, que es
-/// lo que hace que un fichero con una sola línea funcione.
+/// **Each field is optional on purpose**: what the file does not say stays as it is by default, which is
+/// what makes a file with a single line work.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Colors {
-    /// Las dieciséis de la paleta que pide el programa de dentro.
+    /// The sixteen of the palette that the program inside requests.
     pub palette: [Option<Color32>; 16],
     pub background: Option<Color32>,
     pub foreground: Option<Color32>,
     pub cursor: Option<Color32>,
-    /// La línea que separa dos consolas.
+    /// The line that separates two consoles.
     pub divider: Option<Color32>,
-    /// Con qué se señala la consola a la que va el teclado.
+    /// What marks the console the keyboard goes to.
     pub focus: Option<Color32>,
-    /// El fondo del panel de estado.
+    /// The status panel's background.
     pub panel: Option<Color32>,
 }
 
-/// Lo que el fichero pide, ya entendido.
-// **`Copy` se cae aquí**: los atajos son una lista, y una lista no se copia sola. El tipo se pasa por
-// referencia, que es como ya lo pedían sus dos únicos consumidores.
+/// What the file requests, already understood.
+// **`Copy` falls away here**: the shortcuts are a list, and a list does not copy itself. The type is passed by
+// reference, which is how its only two consumers already asked for it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
     pub colors: Colors,
-    /// El cuerpo de la letra, en puntos. `None` si el fichero no lo pide.
+    /// The font body, in points. `None` if the file does not request it.
     ///
-    /// **Se llama igual que en la ventana y distinto que en el fichero, a propósito.** `size` es la clave
-    /// que la gente teclea y es contrato publicado; `font_size` es como el resto del código llama a este
-    /// número. La traducción ocurre **una vez**, donde se interpreta la clave, y no en cada salto.
+    /// **It is named the same as in the window and different from in the file, on purpose.** `size` is the key
+    /// people type and is published contract; `font_size` is what the rest of the code calls this
+    /// number. The translation happens **once**, where the key is parsed, and not on every jump.
     pub font_size: Option<f32>,
-    /// Los atajos que el fichero cambia: la acción y su acorde nuevo, o `None` para desatarla.
+    /// The shortcuts the file changes: the action and its new chord, or `None` to unbind it.
     ///
-    /// **Una lista y no una tabla ya resuelta**, porque el orden importa: «gana la última» solo se puede
-    /// decidir aplicándolas en el orden en que se escribieron.
+    /// **A list and not an already resolved table**, because order matters: «the last one wins» can only be
+    /// decided by applying them in the order they were written.
     pub shortcuts: Vec<(crate::keyboard::Action, Option<crate::keyboard::Chord>)>,
-    /// Si el fichero apagó el atajo de copiar.
+    /// Whether the file turned off the copy shortcut.
     ///
-    /// **Aparte de la lista, porque copiar no tiene acorde que mover.** Su acorde lo resuelve el
-    /// escritorio antes de que llegue aquí —y sin decir si había Mayúsculas—, así que lo único que se
-    /// puede hacer con él es dejar de atenderlo, que es lo que devuelve `Ctrl+Mayúsculas+C` a `vim`.
+    /// **Apart from the list, because copy has no chord to move.** Its chord is resolved by the
+    /// desktop before it arrives here —and without saying whether there was Shift—, so the only thing that
+    /// can be done with it is to stop attending it, which is what gives `Ctrl+Shift+C` back to `vim`.
     pub copy: Option<bool>,
 }
 
-/// Lo menos y lo más que se admite como cuerpo de letra.
+/// The least and the most admitted as a font body.
 ///
-/// **No es una manía: fuera de este rango la ventana deja de ser un terminal.** Con dos puntos no se lee
-/// nada y con doscientos caben tres columnas, y el reparto de las divisiones tiene mínimos que dejarían de
-/// poder cumplirse. Los extremos son generosos a propósito —hay quien trabaja a 8 y quien presenta a 40—:
-/// lo que se rechaza es lo que solo puede ser una errata.
+/// **It is not a fussiness: outside this range the window stops being a terminal.** At two points nothing
+/// is legible and at two hundred three columns fit, and the panes' tiling has minimums that would stop being
+/// possible to meet. The extremes are generous on purpose —some work at 8 and some present at 40—:
+/// what is rejected is what can only be a typo.
 const MIN_FONT_SIZE: f32 = 4.0;
 const MAX_FONT_SIZE: f32 = 96.0;
 
-/// Las líneas que no se pudieron aplicar: las que se guardan **y cuántas hubo**.
+/// The lines that could not be applied: the ones kept **and how many there were**.
 ///
-/// **Los dos números, y no solo la lista, porque el techo miente si se calla.** Guardar veinte y no decir
-/// que había cuarenta haría creer que el fichero está bien a partir del vigésimo.
+/// **Both numbers, and not just the list, because the cap lies if it keeps quiet.** Keeping twenty and not saying
+/// there were forty would make one believe the file is fine from the twentieth on.
 ///
-/// **No imprime: decide.** Quién lo dice por la salida de error es cosa de quien llama, igual que en el
-/// módulo hermano — imprimir no se puede observar desde dentro del proceso, así que lo único que una
-/// prueba puede atar es la decisión.
+/// **It does not print: it decides.** Who says it through the error output is the caller's business, just as in the
+/// sibling module — printing cannot be observed from inside the process, so the only thing a
+/// test can tie down is the decision.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Warnings {
     kept: Vec<Warning>,
@@ -253,27 +253,27 @@ impl Warnings {
         }
     }
 
-    /// Los que se guardaron, que son los primeros [`MAX_WARNINGS`].
+    /// The ones that were kept, which are the first [`MAX_WARNINGS`].
     pub fn kept(&self) -> &[Warning] {
         &self.kept
     }
 
-    /// Cuántas líneas dieron problema en total, contando las que no se guardaron.
+    /// How many lines gave a problem in total, counting the ones that were not kept.
     pub fn total(&self) -> usize {
         self.total
     }
 
-    /// Cuántas se quedaron sin listar por el techo.
+    /// How many were left unlisted by the cap.
     pub fn unlisted(&self) -> usize {
         self.total - self.kept.len()
     }
 }
 
-/// Dónde vive el fichero, leyendo el entorno.
+/// Where the file lives, reading the environment.
 ///
-/// Envoltura de una línea, con el trabajo en [`path_from`], que es el patrón del módulo hermano y por su
-/// misma razón: fijar estas variables desde una prueba es comportamiento indefinido en un proceso con
-/// hilos, así que la decisión tiene que poder probarse sin tocarlas.
+/// A one-line wrapper, with the work in [`path_from`], which is the sibling module's pattern and for its
+/// same reason: setting these variables from a test is undefined behavior in a process with
+/// threads, so the decision has to be testable without touching them.
 pub fn path() -> Option<PathBuf> {
     path_from(
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),
@@ -281,7 +281,7 @@ pub fn path() -> Option<PathBuf> {
     )
 }
 
-/// Dónde vive el fichero, con los dos valores dados.
+/// Where the file lives, with the two given values.
 pub fn path_from(
     config: Option<&std::ffi::OsStr>,
     home: Option<&std::ffi::OsStr>,
@@ -289,15 +289,15 @@ pub fn path_from(
     crate::session::directory_from(config, home).map(|directory| directory.join(FILE))
 }
 
-/// Lee el fichero de esa ruta. Devuelve lo que se entendió **y** lo que no.
+/// Reads the file at that path. Returns what was understood **and** what was not.
 ///
-/// **El orden es el del molde de la disposición**: pedir los datos, comprobar que es un fichero, **abrir y
-/// leer con el tope puesto**, aplicar el techo sobre los bytes leídos, y solo entonces mirar si es texto.
+/// **The order is the layout's mold**: ask for the metadata, check that it is a file, **open and
+/// read with the cap in place**, apply the ceiling over the read bytes, and only then look at whether it is text.
 pub fn read(path: &Path) -> Result<(Settings, Warnings), ConfigProblem> {
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
-        // **Un enlace roto NO es «no hay fichero», y la diferencia se nota.** Quien creó su configuración y
-        // la movió de sitio se merece que se lo digan; el silencio es para quien no ha escrito nada.
+        // **A broken link is NOT «there is no file», and the difference shows.** Whoever created their configuration and
+        // moved it deserves to be told; silence is for whoever has written nothing.
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Err(match std::fs::symlink_metadata(path) {
                 Ok(_) => ConfigProblem::BrokenLink,
@@ -312,11 +312,11 @@ pub fn read(path: &Path) -> Result<(Settings, Warnings), ConfigProblem> {
     let file = std::fs::File::open(path).map_err(|f| ConfigProblem::Unreadable(f.to_string()))?;
     let raw = crate::session::read_capped(file, metadata.len())
         .map_err(|error| ConfigProblem::Unreadable(error.to_string()))?;
-    // **El techo va sobre los bytes LEÍDOS, no sobre los que los datos del fichero declaran.** No son lo
-    // mismo: un fichero de `/proc` declara cero y entrega ciento setenta y cinco bytes, comprobado
-    // ejecutándolo. Una versión anterior leía entero con `fs::read` y comparaba después, con un comentario
-    // que decía «abrir» donde no se abría nada — el techo existía y **no acotaba la reserva**, que es
-    // exactamente lo que su propia razón dice evitar. Lo cazó una revisión.
+    // **The ceiling goes over the READ bytes, not over the ones the file's metadata declares.** They are not the
+    // same: a file in `/proc` declares zero and delivers a hundred and seventy-five bytes, checked
+    // by running it. An earlier version read the whole thing with `fs::read` and compared afterwards, with a comment
+    // that said «open» where nothing was opened — the ceiling existed and **did not bound the reservation**, which is
+    // exactly what its own reason says to avoid. A review caught it.
     if raw.len() > MAX_BYTES {
         return Err(ConfigProblem::TooBig);
     }
@@ -324,30 +324,30 @@ pub fn read(path: &Path) -> Result<(Settings, Warnings), ConfigProblem> {
     interpret(&text)
 }
 
-/// Lo que una línea resulta ser.
+/// What a line turns out to be.
 ///
-/// **Se clasifica UNA vez.** La primera versión devolvía «nada» tanto para una línea vacía como para una
-/// mal escrita, y quien llamaba tenía que volver a mirarla para saber de cuál de las dos se trataba: la
-/// misma decisión tomada dos veces, en dos sitios que podían dejar de coincidir.
+/// **It is classified ONCE.** The first version returned «nothing» both for an empty line and for a badly
+/// written one, and the caller had to look at it again to know which of the two it was: the
+/// same decision taken twice, in two places that could stop coinciding.
 enum ConfigLine<'a> {
-    /// Vacía, espacios, o un comentario.
+    /// Empty, spaces, or a comment.
     Blank,
-    /// Una clave y su valor, ya sin espacios.
+    /// A key and its value, already without spaces.
     Pair(&'a str, &'a str),
-    /// Dice algo, pero no con la forma que hace falta.
+    /// It says something, but not in the shape that is needed.
     Bad(Missing),
 }
 
-/// Interpreta el texto línea a línea.
+/// Parses the text line by line.
 pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
     let mut settings = Settings::default();
     let mut warnings = Warnings::default();
     let mut already_set: Vec<String> = Vec::new();
 
-    // **La marca de orden de bytes se quita, y es el fallo más cruel que este fichero podía tener.** La
-    // meten los editores de Windows y algunas páginas al copiar; queda pegada a la primera clave, y el
-    // aviso resultante señala algo que **en pantalla se ve exactamente igual** que la clave correcta:
-    // ««color.1» no es un ajuste conocido». Comprobado ejecutándolo.
+    // **The byte order mark is removed, and it is the cruelest bug this file could have.** It is put in
+    // by Windows editors and some pages when copying; it stays stuck to the first key, and the
+    // resulting warning points at something that **on screen looks exactly the same** as the correct key:
+    // ««color.1» is not a known setting». Checked by running it.
 
     let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
 
@@ -362,12 +362,12 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
             ConfigLine::Pair(key, value) => (key, value),
         };
 
-        // **La versión se mira aquí y no antes**, porque es una clave más: puede ir en cualquier línea, y
-        // que falte es lo normal.
-        // **La versión no entra en la contabilidad de repetidas, y no es un olvido.** «Gana ésta» significa
-        // que esta línea pisó el valor de otra; la versión **no guarda ningún valor**, es un veto que se
-        // comprueba y se olvida. Decir que gana algo sería mentir dos veces cuando además su valor no se
-        // entiende, que es lo que hacía la primera versión de este arreglo. Lo cazó una revisión.
+        // **The version is looked at here and not earlier**, because it is one more key: it can go on any line, and
+        // that it is missing is the normal thing.
+        // **The version does not enter the repeated accounting, and it is not an oversight.** «This one wins» means
+        // that this line stepped over another's value; the version **stores no value**, it is a veto that is
+        // checked and forgotten. Saying that something wins would be lying twice when its value is also not
+        // understood, which is what the first version of this fix did. A review caught it.
         if key == "version" {
             match value.parse::<u64>() {
                 Ok(which) if which > VERSION => return Err(ConfigProblem::Version(which)),
@@ -384,14 +384,14 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
         }
         if let Err(missing) = apply(&mut settings, key, value) {
             warnings.push(Warning { line, missing });
-            // **Una línea que no se aplica no cuenta como puesta**, así que no se avisa de repetida por
-            // ella: decir «gana ésta» de una línea que no gana nada es un aviso que miente, y encima
-            // contradice al de al lado. Comprobado ejecutándolo antes de arreglarlo.
+            // **A line that does not apply does not count as set**, so it is not warned as repeated for
+            // it: saying «this one wins» of a line that wins nothing is a warning that lies, and on top of that
+            // contradicts the one next to it. Checked by running it before fixing it.
             continue;
         }
 
-        // **El aviso de repetida va DESPUÉS de aplicar, y por eso dice la verdad.** Se emite solo cuando
-        // esta línea de verdad se ha quedado con el valor.
+        // **The repeated warning goes AFTER applying, and that is why it tells the truth.** It is emitted only when
+        // this line really has kept the value.
         if already_set.iter().any(|already| already == key) {
             warnings.push(Warning {
                 line,
@@ -405,12 +405,12 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
     Ok((settings, warnings))
 }
 
-/// Mete el valor donde le toque, si la clave y el valor valen.
+/// Puts the value where it belongs, if the key and the value are valid.
 fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing> {
     if let Some(name) = key.strip_prefix("key.") {
-        // **Copiar sigue teniendo su clave, y solo acepta `none`.** Es la clave que este terminal ya
-        // publicó, y quien la escribió para devolverle el acorde a `vim` no tiene por qué enterarse de
-        // que por dentro dejó de ser un acorde. Lo que no se puede es reasignarlo, y eso se dice.
+        // **Copy still has its key, and it only accepts `none`.** It is the key this terminal already
+        // published, and whoever wrote it to give the chord back to `vim` has no reason to find out
+        // that inside it stopped being a chord. What cannot be done is reassigning it, and that is said.
         if name.eq_ignore_ascii_case("copy") {
             if !value.eq_ignore_ascii_case(OFF) {
                 return Err(Missing::OnlyTurnsOff(key.to_owned()));
@@ -420,8 +420,8 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
         }
         let action = crate::keyboard::Action::from_written(name)
             .ok_or_else(|| Missing::UnknownKey(key.to_owned()))?;
-        // **`none` desata la acción, y es la mitad que hace útil todo esto**: es lo que devuelve un
-        // acorde al programa de dentro cuando `vim` o `tmux` lo quieren para ellos.
+        // **`none` unbinds the action, and it is the half that makes all this useful**: it is what gives a
+        // chord back to the program inside when `vim` or `tmux` want it for themselves.
         let chord = if value.eq_ignore_ascii_case(OFF) {
             None
         } else {
@@ -455,10 +455,10 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
         "divider" => &mut colors.divider,
         "focus" => &mut colors.focus,
         "panel" => &mut colors.panel,
-        // **El índice son dígitos y nada más.** Dejarlo en manos del intérprete de números admitía
-        // `color.007` y `color.+1` —los dos aplicaban un color— mientras `color.-1` se rechazaba: tres
-        // formas de escribir lo mismo con dos resultados distintos, ninguna documentada. Lo cazó una
-        // revisión ejecutándolas.
+        // **The index is digits and nothing else.** Leaving it to the number parser admitted
+        // `color.007` and `color.+1` —both applied a color— while `color.-1` was rejected: three
+        // ways of writing the same thing with two different results, none documented. A
+        // review caught it by running them.
         _ => match key.strip_prefix("color.") {
             Some(index)
                 if index.chars().all(|c| c.is_ascii_digit())
@@ -466,9 +466,9 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
                         .parse::<usize>()
                         .is_ok_and(|n| n < colors.palette.len()) =>
             {
-                // **Un índice fuera de la paleta es una clave desconocida, no un valor malo**: lo que
-                // está mal escrito es el nombre del ajuste, y decir «el valor no vale» mandaría a mirar
-                // el color.
+                // **An index outside the palette is an unknown key, not a bad value**: what
+                // is badly written is the setting's name, and saying «the value is not valid» would send one to look at
+                // the color.
                 &mut colors.palette[index.parse::<usize>().unwrap_or_default()]
             }
             _ => return Err(Missing::UnknownKey(key.to_owned())),
@@ -481,7 +481,7 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
     Ok(())
 }
 
-/// Un color escrito como `#rrggbb`, en mayúsculas o en minúsculas.
+/// A color written as `#rrggbb`, in uppercase or lowercase.
 fn color_from(value: &str) -> Option<Color32> {
     let digits = value.strip_prefix('#')?;
     if digits.len() != 6 || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -491,14 +491,14 @@ fn color_from(value: &str) -> Option<Color32> {
     Some(Color32::from_rgb(channel(0)?, channel(2)?, channel(4)?))
 }
 
-/// Qué es esta línea.
+/// What this line is.
 ///
-/// **El comentario es de línea completa, y no puede ir al final de un valor.** No es una simplificación:
-/// la almohadilla es **a la vez** el carácter de comentario y el prefijo de un color, así que un
-/// comentario al final del valor parte `color.1 = #ff0000` por la mitad y deja la clave sin valor.
-/// Comprobado escribiéndolo: la primera versión de este intérprete se comía todos los colores.
+/// **The comment is whole-line, and cannot go at the end of a value.** It is not a simplification:
+/// the hash is **at the same time** the comment character and a color's prefix, so a
+/// comment at the end of the value splits `color.1 = #ff0000` in half and leaves the key without a value.
+/// Checked by writing it: the first version of this parser ate all the colors.
 ///
-/// Es exactamente lo que hacen Kitty y Ghostty, que usan este mismo formato, y por la misma razón.
+/// It is exactly what Kitty and Ghostty do, which use this same format, and for the same reason.
 fn classify(line: &str) -> ConfigLine<'_> {
     let trimmed_line = line.trim();
     if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
@@ -509,8 +509,8 @@ fn classify(line: &str) -> ConfigLine<'_> {
     };
     let (key, value) = (key.trim(), value.trim());
     if key.is_empty() || value.is_empty() {
-        // **Se distingue de «no tiene igual» a propósito**: quien escribió `background =` no se olvidó del
-        // igual, se olvidó del color, y decirle lo primero le manda a mirar donde no es.
+        // **It is distinguished from «it has no equals» on purpose**: whoever wrote `background =` did not forget the
+        // equals, they forgot the color, and telling them the former sends them to look where it is not.
         return ConfigLine::Bad(Missing::Incomplete);
     }
     ConfigLine::Pair(key, value)
@@ -520,180 +520,184 @@ fn classify(line: &str) -> ConfigLine<'_> {
 mod tests {
     use super::*;
 
-    /// Lo que devuelve interpretar un texto que se entiende entero.
+    /// What parsing a text that is understood in full returns.
     fn parsed(text: &str) -> (Settings, Warnings) {
-        interpret(text).expect("el texto de la prueba no debería tumbar el fichero entero")
+        interpret(text).expect("the test text should not bring down the whole file")
     }
 
     #[test]
-    fn una_linea_mala_no_se_lleva_por_delante_las_buenas() {
-        // **Es la razón de ser del formato, y lo que separa este fichero del de la disposición.** Aquel lo
-        // escribe la aplicación y no se abre a medias; éste lo teclea una persona, y tumbar los veintidós
-        // colores porque uno está mal escrito la obligaría a encontrar el error a ciegas.
-        let (settings, _) = parsed("color.1 = #ff0000\ncolor.2 = azul celeste\ncolor.3 = #0000ff");
+    fn a_bad_line_does_not_take_the_good_ones_down_with_it() {
+        // **It is the format's reason for being, and what separates this file from the layout's.** That one is
+        // written by the application and does not open half-baked; this one is typed by a person, and taking down the twenty-two
+        // colors because one is badly written would force them to find the error blind.
+        let (settings, _) = parsed("color.1 = #ff0000\ncolor.2 = sky blue\ncolor.3 = #0000ff");
 
         assert_eq!(
             settings.colors.palette[1],
             Some(Color32::from_rgb(0xFF, 0, 0)),
-            "la línea BUENA de antes de la mala no se aplicó"
+            "the GOOD line before the bad one was not applied"
         );
         assert_eq!(
             settings.colors.palette[3],
             Some(Color32::from_rgb(0, 0, 0xFF)),
-            "la línea buena de DESPUÉS de la mala no se aplicó: el intérprete se paró en el error"
+            "the good line AFTER the bad one was not applied: the parser stopped at the error"
         );
         assert_eq!(
             settings.colors.palette[2], None,
-            "el color mal escrito se aplicó igualmente"
+            "the badly written color was applied all the same"
         );
     }
 
     #[test]
-    fn la_linea_mala_se_dice_con_su_numero() {
-        // **Sin el número, el aviso no sirve**: «un color mal escrito» en un fichero de cuarenta líneas
-        // obliga a repasarlas todas. Y sin aviso ninguno, quien escribió la línea creerá que el terminal
-        // ignora lo que le pide.
-        let (_, warnings) = parsed("# un comentario\n\ncolor.1 = morado\n");
+    fn the_bad_line_is_said_with_its_number() {
+        // **Without the number, the warning is useless**: «a badly written color» in a file of forty lines
+        // forces going over all of them. And with no warning at all, whoever wrote the line will believe the terminal
+        // ignores what they ask of it.
+        let (_, warnings) = parsed("# a comment\n\ncolor.1 = purple\n");
 
-        assert_eq!(warnings.kept().len(), 1, "no se avisó de la línea mala");
+        assert_eq!(
+            warnings.kept().len(),
+            1,
+            "the bad line was not warned about"
+        );
         assert_eq!(
             warnings.kept()[0].line,
             3,
-            "el aviso señala la línea equivocada: se cuentan también las vacías y los comentarios, \
-             porque el número tiene que coincidir con lo que se ve en el editor"
+            "the warning points at the wrong line: the empty ones and the comments are counted too, \
+             because the number has to match what is seen in the editor"
         );
         assert!(
-            warnings.kept()[0].to_string().contains("morado"),
-            "el aviso no dice qué valor no se entendió: «{}»",
+            warnings.kept()[0].to_string().contains("purple"),
+            "the warning does not say which value was not understood: «{}»",
             warnings.kept()[0]
         );
     }
 
     #[test]
-    fn un_fichero_sin_nada_configurado_deja_el_tema_de_fabrica() {
-        // **AC5 por su lado más barato**, y el que sostiene que este hito no rompe a nadie: lo que el
-        // fichero no diga se queda como está.
-        let (settings, warnings) = parsed("# solo comentarios\n\n   \n");
+    fn a_file_with_nothing_configured_leaves_the_factory_theme() {
+        // **AC5 by its cheapest side**, and the one that upholds that this milestone breaks no one: what the
+        // file does not say stays as it is.
+        let (settings, warnings) = parsed("# only comments\n\n   \n");
 
         assert_eq!(
             settings,
             Settings::default(),
-            "un fichero sin ajustes cambió algo"
+            "a file with no settings changed something"
         );
         assert_eq!(
             warnings.total(),
             0,
-            "una línea vacía o de comentario se contó como problema"
+            "an empty or comment line was counted as a problem"
         );
         assert_eq!(
             crate::theme::Theme::from_colors(&settings.colors)
                 .color(term_core::TermColor::Indexed(1)),
             crate::theme::Theme::default().color(term_core::TermColor::Indexed(1)),
-            "sin nada configurado el tema dejó de ser el de fábrica"
+            "with nothing configured the theme stopped being the factory one"
         );
     }
 
     #[test]
-    fn un_color_no_se_confunde_con_un_comentario() {
-        // **La almohadilla es a la vez el comentario y el prefijo de un color**, y la primera versión de
-        // este intérprete admitía comentarios al final de la línea: se comía TODOS los colores, porque
-        // cortaba `color.4 = #123456` justo antes del valor. Lo destapó esta suite al primer intento.
+    fn a_color_is_not_mistaken_for_a_comment() {
+        // **The hash is at the same time the comment and a color's prefix**, and the first version of
+        // this parser admitted comments at the end of the line: it ate ALL the colors, because
+        // it cut `color.4 = #123456` right before the value. This suite uncovered it on the first try.
         //
-        // Por eso el comentario es de línea completa, como en Kitty y en Ghostty.
-        let (settings, warnings) = parsed("# el azul de siempre\ncolor.4 = #123456");
+        // That is why the comment is whole-line, as in Kitty and in Ghostty.
+        let (settings, warnings) = parsed("# the usual blue\ncolor.4 = #123456");
 
         assert_eq!(
             settings.colors.palette[4],
             Some(Color32::from_rgb(0x12, 0x34, 0x56)),
-            "el valor de un color se perdió por empezar con almohadilla"
+            "a color's value was lost for starting with a hash"
         );
         assert_eq!(
             warnings.total(),
             0,
-            "la línea de comentario o la del color se contaron como problema"
+            "the comment line or the color's line were counted as a problem"
         );
     }
 
     #[test]
-    fn una_clave_repetida_gana_la_ultima_y_se_dice() {
-        // **Las dos mitades.** Que gane la última es lo que hace que pegar un tema encima de otro funcione
-        // como se espera; decirlo es lo que impide que alguien pase media hora cambiando una línea que otra
-        // de más abajo está pisando.
+    fn a_repeated_key_lets_the_last_one_win_and_it_is_said() {
+        // **The two halves.** That the last one wins is what makes pasting one theme on top of another work
+        // as expected; saying it is what prevents someone from spending half an hour changing a line that another
+        // further down is stepping on.
         let (settings, warnings) = parsed("color.1 = #ff0000\ncolor.1 = #00ff00");
 
         assert_eq!(
             settings.colors.palette[1],
             Some(Color32::from_rgb(0, 0xFF, 0)),
-            "ganó la primera: pegar un tema encima de otro no haría lo que se espera"
+            "the first one won: pasting one theme on top of another would not do what is expected"
         );
-        assert_eq!(warnings.kept().len(), 1, "la clave repetida no se dijo");
+        assert_eq!(warnings.kept().len(), 1, "the repeated key was not said");
         assert!(
             warnings.kept()[0].to_string().contains("color.1"),
-            "el aviso no dice qué clave estaba repetida: «{}»",
+            "the warning does not say which key was repeated: «{}»",
             warnings.kept()[0]
         );
     }
 
     #[test]
-    fn un_color_de_la_paleta_fuera_de_rango_no_se_traga_ni_desborda() {
-        // La paleta tiene dieciséis huecos y el índice lo escribe una persona. Un `color.99` tiene que
-        // avisar, no aplicarse en otro sitio ni salirse del vector.
+    fn a_palette_color_out_of_range_is_neither_swallowed_nor_overflows() {
+        // The palette has sixteen slots and the index is written by a person. A `color.99` has to
+        // warn, not apply somewhere else nor go out of the vector.
         let (settings, warnings) =
             parsed("color.16 = #ffffff\ncolor.999 = #ffffff\ncolor.-1 = #ffffff");
 
         assert_eq!(
             settings,
             Settings::default(),
-            "un índice fuera de la paleta cambió algo"
+            "an index outside the palette changed something"
         );
         assert_eq!(
             warnings.total(),
             3,
-            "no se avisó de los tres índices imposibles"
+            "the three impossible indices were not warned about"
         );
     }
 
     #[test]
-    fn un_color_mal_escrito_no_cuela_por_parecerse() {
-        // Los cuatro errores que de verdad se cometen al escribir un color a mano.
+    fn a_badly_written_color_does_not_slip_through_by_looking_similar() {
+        // The four errors that are really made when writing a color by hand.
         for value in ["ff0000", "#ff00", "#ffgg00", "#ff00000"] {
             let (settings, warnings) = parsed(&format!("background = {value}"));
             assert_eq!(
                 settings.colors.background, None,
-                "«{value}» se aceptó como color y no lo es"
+                "«{value}» was accepted as a color and it is not one"
             );
-            assert_eq!(warnings.total(), 1, "«{value}» no dio aviso");
+            assert_eq!(warnings.total(), 1, "«{value}» gave no warning");
         }
     }
 
     #[test]
-    fn una_version_mas_nueva_no_se_aplica_a_medias() {
-        // **Es la única mitad de la versión que protege de algo**, y por eso es la única que existe: un
-        // fichero de un formato futuro podría querer decir con una clave conocida algo distinto, así que
-        // aplicar las que se entienden sería peor que no aplicar nada.
+    fn a_newer_version_is_not_applied_halfway() {
+        // **It is the only half of the version that protects from anything**, and that is why it is the only one that exists: a
+        // file of a future format could want to mean something different with a known key, so
+        // applying the ones that are understood would be worse than applying nothing.
         assert_eq!(
             interpret("version = 99\ncolor.1 = #ff0000"),
             Err(ConfigProblem::Version(99)),
-            "un fichero de una versión futura se aplicó igualmente"
+            "a file of a future version was applied all the same"
         );
         let (settings, warnings) = parsed("version = 1\ncolor.1 = #ff0000");
         assert_eq!(
             settings.colors.palette[1],
             Some(Color32::from_rgb(0xFF, 0, 0)),
-            "la versión conocida impidió aplicar el resto"
+            "the known version prevented applying the rest"
         );
         assert_eq!(
             warnings.total(),
             0,
-            "declarar la versión conocida dio un aviso"
+            "declaring the known version gave a warning"
         );
     }
 
     #[test]
-    fn sin_declarar_version_el_fichero_se_lee_igual() {
-        // **Es lo que separa este formato del de la disposición**: allí la versión es obligatoria porque el
-        // fichero congela la forma de un árbol. Aquí es plano, y exigirle una línea ritual a quien lo
-        // escribe no protegería de nada. Todos los demás casos de esta suite lo dan por hecho; éste lo ata.
+    fn without_declaring_a_version_the_file_is_read_all_the_same() {
+        // **It is what separates this format from the layout's**: there the version is mandatory because the
+        // file freezes the shape of a tree. Here it is flat, and requiring a ritual line from whoever
+        // writes it would protect from nothing. Every other case in this suite takes it for granted; this one ties it down.
         let (settings, warnings) = parsed("color.1 = #ff0000");
 
         assert_eq!(
@@ -703,91 +707,91 @@ mod tests {
         assert_eq!(
             warnings.total(),
             0,
-            "no declarar la versión se contó como problema"
+            "not declaring the version was counted as a problem"
         );
     }
 
     #[test]
-    fn los_avisos_tienen_techo_y_se_dice_cuantos_quedaron_fuera() {
-        // **Un fichero pegado del sitio equivocado no debe llenar la salida de error**, pero callar los de
-        // más sin decir cuántos eran haría creer que a partir del vigésimo el fichero está bien.
+    fn the_warnings_have_a_cap_and_how_many_were_left_out_is_said() {
+        // **A file pasted from the wrong place must not fill the error output**, but keeping quiet about the
+        // extra ones without saying how many they were would make one believe that from the twentieth on the file is fine.
         let text: String = (0..MAX_WARNINGS + 7)
-            .map(|n| format!("desconocida{n} = 1\n"))
+            .map(|n| format!("unknown{n} = 1\n"))
             .collect();
         let (_, warnings) = parsed(&text);
 
         assert_eq!(
             warnings.kept().len(),
             MAX_WARNINGS,
-            "se guardaron más avisos que el techo"
+            "more warnings were kept than the cap"
         );
         assert_eq!(
             warnings.total(),
             MAX_WARNINGS + 7,
-            "la cuenta se quedó en los guardados, así que el resto desaparece sin rastro"
+            "the count stayed at the kept ones, so the rest disappear without a trace"
         );
         assert_eq!(
             warnings.unlisted(),
             7,
-            "no se sabe cuántas quedaron sin listar"
+            "it is not known how many were left unlisted"
         );
     }
 
     #[test]
-    fn una_linea_con_contenido_y_sin_igual_avisa_y_una_vacia_no() {
-        let (_, warnings) = parsed("esto no es un ajuste\n\n   \n# ni esto");
+    fn a_line_with_content_and_without_an_equals_warns_and_an_empty_one_does_not() {
+        let (_, warnings) = parsed("this is not a setting\n\n   \n# nor this");
 
         assert_eq!(
             warnings.total(),
             1,
-            "o no se avisó de la línea sin «=», o se avisó de las vacías y los comentarios"
+            "either the line without «=» was not warned about, or the empty ones and the comments were"
         );
     }
 
     #[test]
-    fn no_se_dice_que_gana_una_linea_que_no_gana_nada() {
-        // **El aviso mentía, y lo destapó una revisión ejecutándolo.** Con la clave repetida y el segundo
-        // valor mal escrito salían DOS avisos contradictorios en la misma línea: «gana ésta» y, justo
-        // debajo, que ese valor no vale. O sea que no gana: se queda la primera.
-        let (settings, warnings) = parsed("color.1 = #ff0000\ncolor.1 = morado");
+    fn it_is_not_said_that_a_line_that_wins_nothing_wins() {
+        // **The warning was lying, and a review uncovered it by running it.** With the key repeated and the second
+        // value badly written, TWO contradictory warnings came out on the same line: «this one wins» and, right
+        // below, that that value is not valid. Which means it does not win: the first one stays.
+        let (settings, warnings) = parsed("color.1 = #ff0000\ncolor.1 = purple");
 
         assert_eq!(
             settings.colors.palette[1],
             Some(Color32::from_rgb(0xFF, 0, 0)),
-            "una línea con el valor mal escrito borró el valor bueno de antes"
+            "a line with the value badly written erased the good value from before"
         );
         assert_eq!(
             warnings.total(),
             1,
-            "se avisó dos veces de la misma línea, y una de las dos dice lo contrario que la otra: {:?}",
+            "the same line was warned about twice, and one of the two says the opposite of the other: {:?}",
             warnings.kept()
         );
         assert!(
-            warnings.kept()[0].to_string().contains("morado"),
-            "el aviso que quedó no es el que explica qué pasa: «{}»",
+            warnings.kept()[0].to_string().contains("purple"),
+            "the warning that remained is not the one that explains what happens: «{}»",
             warnings.kept()[0]
         );
     }
 
     #[test]
-    fn de_la_version_no_se_dice_que_gane_porque_no_gana_nada() {
-        // **«Gana ésta» significa que esta línea pisó el valor de otra, y la versión no guarda ningún
-        // valor**: es un veto que se comprueba y se olvida. Un arreglo anterior la metió en esa
-        // contabilidad y produjo el aviso más absurdo posible — «gana ésta» sobre una línea cuyo valor
-        // tampoco se entendía, o sea que ni ganaba ni se aplicaba. Lo cazó una revisión ejecutándolo.
+    fn of_the_version_it_is_not_said_to_win_because_it_wins_nothing() {
+        // **«This one wins» means that this line stepped over another's value, and the version stores no
+        // value**: it is a veto that is checked and forgotten. An earlier fix put it into that
+        // accounting and produced the most absurd warning possible — «this one wins» over a line whose value
+        // was not understood either, meaning it neither won nor applied. A review caught it by running it.
         let (_, warnings) = parsed("version = 1\nversion = 1");
         assert_eq!(
             warnings.total(),
             0,
-            "se dijo que una versión repetida «gana», y no gana nada: {:?}",
+            "it was said that a repeated version «wins», and it wins nothing: {:?}",
             warnings.kept()
         );
 
-        let (_, warnings) = parsed("version = uno\nversion = uno");
+        let (_, warnings) = parsed("version = one\nversion = one");
         assert_eq!(
             warnings.total(),
             2,
-            "cada versión ilegible tiene que avisar una vez y solo una: {:?}",
+            "each illegible version has to warn once and only once: {:?}",
             warnings.kept()
         );
         assert!(
@@ -795,300 +799,310 @@ mod tests {
                 .kept()
                 .iter()
                 .all(|a| !matches!(a.missing, Missing::Repeated(_))),
-            "se dijo «gana ésta» de una línea cuyo valor ni siquiera se entendió: {:?}",
+            "«this one wins» was said of a line whose value was not even understood: {:?}",
             warnings.kept()
         );
     }
 
     #[test]
-    fn el_tamano_de_letra_se_lee_y_la_clave_vieja_ya_no_vale() {
+    fn the_font_size_is_read_and_the_old_key_is_no_longer_valid() {
         let (settings, warnings) = parsed("size = 18");
-        assert_eq!(settings.font_size, Some(18.0), "«size» no se entendió");
-        assert_eq!(warnings.total(), 0, "«size» dio aviso");
+        assert_eq!(settings.font_size, Some(18.0), "«size» was not understood");
+        assert_eq!(warnings.total(), 0, "«size» gave a warning");
 
         let (settings, _) = parsed("size = 12.5");
         assert_eq!(
             settings.font_size,
             Some(12.5),
-            "un tamaño con decimales no se entendió"
+            "a size with decimals was not understood"
         );
 
-        // **No hay tabla de alias, y esto es lo único que lo ata.** D27 decide que las claves pasan a
-        // inglés sin compatibilidad porque nadie tiene el terminal instalado; sin esta afirmación, dejar
-        // colada una rama que siga aceptando la clave vieja no lo nota nadie, y la deuda que la decisión
-        // se ahorró vuelve por la puerta de atrás.
+        // **There is no alias table, and this is the only thing that ties it down.** D27 decides that the keys move to
+        // English with no compatibility because no one has the terminal installed; without this assertion, letting
+        // a branch slip through that keeps accepting the old key goes unnoticed, and the debt the decision
+        // saved comes back through the back door.
         for old in ["tamaño", "tamano"] {
             let (settings, warnings) = parsed(&format!("{old} = 18"));
             assert_eq!(
                 settings.font_size, None,
-                "«{old}» se sigue aceptando: hay tabla de alias donde D27 dice que no la hay"
+                "«{old}» is still accepted: there is an alias table where D27 says there is none"
             );
-            assert_eq!(
-                warnings.total(),
-                1,
-                "«{old}» no dio aviso de clave desconocida"
-            );
+            assert_eq!(warnings.total(), 1, "«{old}» gave no unknown-key warning");
         }
     }
 
     #[test]
-    fn un_tamano_imposible_no_deja_la_ventana_sin_rejilla() {
-        // **Fuera de rango la ventana deja de ser un terminal**: con dos puntos no se lee nada, con
-        // doscientos caben tres columnas, y el reparto de las divisiones tiene mínimos que dejarían de
-        // poder cumplirse. Un cero o un negativo son peores: la celda mediría cero y la rejilla saldría
-        // de dividir por él.
-        for value in ["0", "-14", "1", "500", "nan", "inf", "grande"] {
+    fn an_impossible_size_does_not_leave_the_window_without_a_grid() {
+        // **Out of range the window stops being a terminal**: at two points nothing is legible, at
+        // two hundred three columns fit, and the panes' tiling has minimums that would stop being
+        // possible to meet. A zero or a negative are worse: the cell would measure zero and the grid would come
+        // from dividing by it.
+        for value in ["0", "-14", "1", "500", "nan", "inf", "big"] {
             let (settings, warnings) = parsed(&format!("size = {value}"));
             assert_eq!(
                 settings.font_size, None,
-                "«{value}» se aceptó como cuerpo de letra"
+                "«{value}» was accepted as a font body"
             );
-            assert_eq!(warnings.total(), 1, "«{value}» no dio aviso");
+            assert_eq!(warnings.total(), 1, "«{value}» gave no warning");
         }
-        // Y los extremos que sí valen, para que el rango no se cierre de más: hay quien trabaja a 8 y
-        // quien presenta a 40.
+        // And the extremes that are valid, so the range does not close too much: some work at 8 and
+        // some present at 40.
         for value in ["4", "8", "40", "96"] {
             let (settings, _) = parsed(&format!("size = {value}"));
             assert!(
                 settings.font_size.is_some(),
-                "«{value}» se rechazó y es un tamaño de trabajo"
+                "«{value}» was rejected and it is a working size"
             );
         }
     }
 
     #[test]
-    fn el_indice_de_la_paleta_son_digitos_y_nada_mas() {
-        // **La asimetría que había no se podía explicar**: `color.+1` aplicaba un color y `color.-1` se
-        // rechazaba, las dos por dejarle la decisión al intérprete de números. Lo cazó una revisión
-        // ejecutándolas.
-        for key in ["color.+1", "color.-1", "color. 1", "color.uno", "color."] {
+    fn the_palette_index_is_digits_and_nothing_else() {
+        // **The asymmetry there was could not be explained**: `color.+1` applied a color and `color.-1` was
+        // rejected, both by leaving the decision to the number parser. A review caught it
+        // by running them.
+        for key in ["color.+1", "color.-1", "color. 1", "color.one", "color."] {
             let (settings, warnings) = parsed(&format!("{key} = #ff0000"));
             assert_eq!(
                 settings,
                 Settings::default(),
-                "«{key}» aplicó un color, y no es una forma que nadie haya documentado"
+                "«{key}» applied a color, and it is not a form anyone has documented"
             );
-            assert_eq!(warnings.total(), 1, "«{key}» no dio aviso");
+            assert_eq!(warnings.total(), 1, "«{key}» gave no warning");
         }
 
-        // **Los ceros a la izquierda SÍ valen, y eso es una decisión, no un descuido**: quien escribe
-        // `color.07` quiere el siete y no hay otra lectura posible. Rechazarlo sería hostil por gusto.
+        // **Leading zeros ARE valid, and that is a decision, not an oversight**: whoever writes
+        // `color.07` wants the seven and there is no other possible reading. Rejecting it would be hostile for the sake of it.
         let (settings, warnings) = parsed("color.07 = #ff0000");
         assert_eq!(
             settings.colors.palette[7],
             Some(Color32::from_rgb(0xFF, 0, 0)),
-            "«color.07» no aplicó el color siete"
+            "«color.07» did not apply color seven"
         );
         assert_eq!(warnings.total(), 0);
     }
 
     #[test]
-    fn un_valor_larguisimo_no_se_vuelca_entero_en_el_aviso() {
-        // **El valor sale del fichero tal cual**, y un `config` copiado de cualquier sitio puede traer una
-        // línea de cien mil caracteres o unos códigos de escape que le hablen al terminal que lanzó la
-        // aplicación. Lo cazó una revisión.
+    fn a_very_long_value_is_not_dumped_whole_into_the_warning() {
+        // **The value comes out of the file as is**, and a `config` copied from anywhere can bring a
+        // line of a hundred thousand characters or some escape codes that talk to the terminal that launched the
+        // application. A review caught it.
         let long = "x".repeat(100_000);
         let (_, warnings) = parsed(&format!("background = {long}"));
         let said = warnings.kept()[0].to_string();
         assert!(
             said.chars().count() < 200,
-            "el aviso salió con {} caracteres: se está volcando el valor entero",
+            "the warning came out with {} characters: the whole value is being dumped",
             said.chars().count()
         );
 
         let (_, warnings) = parsed("background = \u{1b}[31mRED\u{1b}[0m");
         assert!(
             !warnings.kept()[0].to_string().contains('\u{1b}'),
-            "el aviso deja pasar códigos de escape al terminal que lanzó la aplicación"
+            "the warning lets escape codes through to the terminal that launched the application"
         );
     }
 
     #[test]
-    fn a_quien_se_le_olvida_el_valor_se_le_dice_eso_y_no_otra_cosa() {
-        // **Decirle «no tiene la forma clave = valor» a quien escribió `background =` le manda a mirar donde no
-        // es**: el igual está puesto, lo que falta es el color.
+    fn whoever_forgets_the_value_is_told_that_and_not_something_else() {
+        // **Telling «it is not of the form key = value» to whoever wrote `background =` sends them to look where it is
+        // not**: the equals is in place, what is missing is the color.
         let (_, warnings) = parsed("background =");
-        assert_eq!(warnings.total(), 1, "no se avisó de la línea a medias");
+        assert_eq!(
+            warnings.total(),
+            1,
+            "the half-baked line was not warned about"
+        );
         let said = warnings.kept()[0].to_string();
         assert!(
             said.contains("the key or the value is missing"),
-            "el aviso describe mal el fallo: «{said}»"
+            "the warning describes the fault badly: «{said}»"
         );
 
-        let (_, warnings) = parsed("esto no lleva igual");
+        let (_, warnings) = parsed("this has no equals");
         assert!(
             warnings.kept()[0].to_string().contains("'key = value'"),
-            "una línea sin igual tiene que decir eso, y dijo: «{}»",
+            "a line without an equals has to say that, and it said: «{}»",
             warnings.kept()[0]
         );
     }
 
     #[test]
-    fn la_marca_de_orden_de_bytes_no_se_come_la_primera_linea() {
-        // **Es el fallo más cruel que este fichero podía tener**, y lo destapó probar en vez de leer: la
-        // marca la meten los editores de Windows y algunas páginas al copiar, se queda pegada a la primera
-        // clave, y el aviso señala algo que **en pantalla se ve idéntico** a la clave correcta. Quien lo
-        // sufra no tiene forma de ver la diferencia.
+    fn the_byte_order_mark_does_not_eat_the_first_line() {
+        // **It is the cruelest bug this file could have**, and testing instead of reading uncovered it: the
+        // mark is put in by Windows editors and some pages when copying, it stays stuck to the first
+        // key, and the warning points at something that **on screen looks identical** to the correct key. Whoever
+        // suffers it has no way to see the difference.
         let (settings, warnings) = parsed("\u{FEFF}color.1 = #ff0000\nbackground = #010203");
 
         assert_eq!(
             settings.colors.palette[1],
             Some(Color32::from_rgb(0xFF, 0, 0)),
-            "la marca de orden de bytes se comió la primera línea"
+            "the byte order mark ate the first line"
         );
         assert_eq!(
             warnings.total(),
             0,
-            "se avisó de una línea que está bien escrita"
+            "a line that is correctly written was warned about"
         );
     }
 
     #[test]
-    fn un_fichero_de_windows_se_lee_igual() {
-        // **Los saltos de línea de Windows llegan solos**: un tema copiado de una página web, un fichero
-        // editado en otra máquina. Si el retorno de carro se quedara pegado al valor, ningún color
-        // funcionaría y el aviso hablaría de un valor que en pantalla se ve bien escrito.
+    fn a_windows_file_is_read_all_the_same() {
+        // **Windows line breaks arrive on their own**: a theme copied from a web page, a file
+        // edited on another machine. If the carriage return stayed stuck to the value, no color
+        // would work and the warning would talk about a value that on screen looks correctly written.
         //
-        // **Quien lo resuelve es `str::lines`, no este módulo, y se dice porque cambia lo que la prueba
-        // ata**: mutar el recorte de espacios de este fichero **no** la tumba. Lo que ata es el contrato
-        // con esa función — el día que alguien parta el texto de otra manera, esto cae.
+        // **The one that resolves it is `str::lines`, not this module, and it is said because it changes what the test
+        // ties down**: mutating this file's space trimming does **not** take it down. What it ties down is the contract
+        // with that function — the day someone splits the text another way, this falls.
         let (settings, warnings) =
-            parsed("# un tema\r\ncolor.1 = #ff0000\r\nbackground = #010203\r\n");
+            parsed("# a theme\r\ncolor.1 = #ff0000\r\nbackground = #010203\r\n");
 
         assert_eq!(
             settings.colors.palette[1],
             Some(Color32::from_rgb(0xFF, 0, 0)),
-            "el retorno de carro se quedó pegado al valor"
+            "the carriage return stayed stuck to the value"
         );
         assert_eq!(settings.colors.background, Some(Color32::from_rgb(1, 2, 3)));
         assert_eq!(
             warnings.total(),
             0,
-            "un fichero con saltos de Windows dio avisos"
+            "a file with Windows breaks gave warnings"
         );
     }
 
     #[test]
-    fn el_color_se_escribe_en_mayusculas_o_en_minusculas() {
-        // Se copian de páginas que los escriben de las dos formas, así que rechazar una sería un fallo
-        // que quien lo sufre no puede ni ver.
+    fn the_color_is_written_in_uppercase_or_lowercase() {
+        // They are copied from pages that write them both ways, so rejecting one would be a fault
+        // that whoever suffers it cannot even see.
         let (settings, warnings) = parsed("color.1 = #AABBCC\ncolor.2 = #aabbcc");
 
         assert_eq!(settings.colors.palette[1], settings.colors.palette[2]);
-        assert_eq!(warnings.total(), 0, "una de las dos formas se rechazó");
+        assert_eq!(warnings.total(), 0, "one of the two forms was rejected");
     }
 
     #[test]
-    fn un_valor_con_igual_dentro_no_se_parte_por_el_segundo() {
-        // Hoy ningún ajuste lleva un igual en el valor, pero la fuente de la entrega siguiente puede
-        // llevarlo en su nombre. Partir por el **primer** igual es lo que hace que eso no muerda después.
+    fn a_value_with_an_equals_inside_is_not_split_on_the_second() {
+        // Today no setting carries an equals in the value, but the font of the next delivery may
+        // carry it in its name. Splitting on the **first** equals is what makes that not bite later.
         let (_, warnings) = parsed("font = Iosevka Term = Extended");
 
         assert_eq!(
             warnings.total(),
             1,
-            "se avisó más de una vez, así que la línea se partió por más de un igual"
+            "it warned more than once, so the line was split on more than one equals"
         );
-        // **La clave tiene que ser EXACTAMENTE «font».** Comprobar solo que el aviso «contiene font»
-        // no ata nada: partiendo por el último igual, la clave sale como «font = Iosevka Term», que
-        // también lo contiene. Se comprobó mutándolo.
+        // **The key has to be EXACTLY «font».** Checking only that the warning «contains font»
+        // ties nothing down: splitting on the last equals, the key comes out as «font = Iosevka Term», which
+        // also contains it. It was checked by mutating it.
         assert_eq!(
             warnings.kept()[0].missing,
             Missing::UnknownKey("font".to_owned()),
-            "la línea se partió por un igual que no es el primero"
+            "the line was split on an equals that is not the first"
         );
     }
 
     #[test]
-    fn los_atajos_se_leen_del_fichero_en_el_orden_en_que_se_escriben() {
-        // **El orden importa y por eso llegan como lista**: «gana la última» solo se puede decidir
-        // aplicándolas en el orden en que están escritas.
+    fn the_shortcuts_are_read_from_the_file_in_the_order_they_are_written() {
+        // **Order matters and that is why they arrive as a list**: «the last one wins» can only be decided
+        // by applying them in the order they are written.
         let (settings, warnings) = parsed(
             "key.split-right = ctrl+shift+e\n             key.close-pane = none\n             key.new-tab = ctrl+alt+t",
         );
         assert_eq!(
             warnings.total(),
             0,
-            "alguna de las tres líneas no se entendió"
+            "one of the three lines was not understood"
         );
-        assert_eq!(settings.shortcuts.len(), 3, "no llegaron los tres atajos");
+        assert_eq!(
+            settings.shortcuts.len(),
+            3,
+            "the three shortcuts did not arrive"
+        );
         assert_eq!(
             settings.shortcuts[0].0,
             crate::keyboard::Action::SplitRight,
-            "el orden de lectura no se conserva, y «gana la última» deja de poder decidirse"
+            "the read order is not preserved, and «the last one wins» can no longer be decided"
         );
-        assert_eq!(settings.shortcuts[1].1, None, "«none» no desató la acción");
+        assert_eq!(
+            settings.shortcuts[1].1, None,
+            "«none» did not unbind the action"
+        );
     }
 
     #[test]
-    fn el_atajo_de_copiar_solo_se_puede_apagar() {
-        // **Su acorde lo decide el escritorio**, que se lo queda antes de que llegue aquí y ni siquiera
-        // dice si había Mayúsculas. Aceptar `key.copy = ctrl+shift+e` sería prometer un acorde que
-        // no se dispararía nunca y que quien lo escribió no tendría forma de depurar.
+    fn the_copy_shortcut_can_only_be_turned_off() {
+        // **Its chord is decided by the desktop**, which keeps it before it arrives here and does not even
+        // say whether there was Shift. Accepting `key.copy = ctrl+shift+e` would be promising a chord that
+        // would never fire and that whoever wrote it would have no way to debug.
         let (settings, warnings) = parsed("key.copy = none");
-        assert_eq!(warnings.total(), 0, "«none» no se entendió");
-        assert_eq!(settings.copy, Some(false), "«none» no apagó el copiar");
+        assert_eq!(warnings.total(), 0, "«none» was not understood");
+        assert_eq!(settings.copy, Some(false), "«none» did not turn off copy");
         assert!(
             settings.shortcuts.is_empty(),
-            "copiar se coló en la lista de acordes, donde no tiene ninguno que mover"
+            "copy slipped into the chord list, where it has none to move"
         );
 
         let (settings, warnings) = parsed("key.copy = ctrl+shift+e");
-        assert_eq!(warnings.total(), 1, "reasignarlo no se avisó");
-        assert_eq!(settings.copy, None, "reasignarlo tocó el interruptor");
+        assert_eq!(warnings.total(), 1, "reassigning it was not warned about");
+        assert_eq!(settings.copy, None, "reassigning it touched the switch");
         assert!(
             format!("{}", warnings.kept()[0]).contains("turn it off"),
-            "el aviso no dice lo único que se puede hacer con ese acorde: {}",
+            "the warning does not say the only thing that can be done with that chord: {}",
             warnings.kept()[0]
         );
 
-        // Y **no se apaga sin pedirlo**: un fichero que no lo nombra lo deja como estaba.
+        // And **it is not turned off without asking**: a file that does not name it leaves it as it was.
         let (settings, _) = parsed("background = #101010");
         assert_eq!(
             settings.copy, None,
-            "un fichero que no habla de copiar lo dejó dicho igualmente"
+            "a file that does not talk about copy left it stated all the same"
         );
     }
 
     #[test]
-    fn un_atajo_mal_escrito_avisa_y_no_se_lleva_a_los_demas() {
-        // La misma regla que el resto del fichero, en la superficie que más se teclea a mano.
+    fn a_badly_written_shortcut_warns_and_does_not_take_the_others_with_it() {
+        // The same rule as the rest of the file, on the surface most typed by hand.
         for (line, what) in [
-            ("key.made-up = ctrl+shift+e", "una acción que no existe"),
+            (
+                "key.made-up = ctrl+shift+e",
+                "an action that does not exist",
+            ),
             (
                 "key.close-pane = ctrl+shift+doesnotexist",
-                "una tecla que no existe",
+                "a key that does not exist",
             ),
-            ("key.close-pane = e", "un acorde sin tecla de mando"),
-            ("key.close-pane = ", "sin valor"),
+            ("key.close-pane = e", "a chord without a modifier key"),
+            ("key.close-pane = ", "without a value"),
         ] {
             let (settings, warnings) =
                 parsed(&format!("color.1 = #ff0000\n{line}\ncolor.2 = #00ff00"));
             assert!(
                 settings.shortcuts.is_empty(),
-                "{what} se aplicó igualmente: «{line}»"
+                "{what} was applied all the same: «{line}»"
             );
-            assert_eq!(warnings.total(), 1, "{what} no dio aviso: «{line}»");
+            assert_eq!(warnings.total(), 1, "{what} gave no warning: «{line}»");
             assert!(
                 settings.colors.palette[1].is_some() && settings.colors.palette[2].is_some(),
-                "{what} se llevó por delante las líneas buenas de al lado"
+                "{what} took the good lines next to it down with it"
             );
         }
     }
 
     #[test]
-    fn los_veintidos_colores_llegan_al_tema() {
-        // **Se afirma sobre el color que el tema devuelve, con el valor literal escrito en la prueba.**
-        // Compararlo contra `Theme::from_colors(...)` otra vez mediría que el código es consistente consigo mismo:
-        // cruzar dos colores dejaría los dos lados de la igualdad cambiados y la prueba en verde. Este
-        // proyecto ya tiene fichado ese disfraz, con 525 pruebas sobreviviendo a un cruce de colores.
+    fn the_twenty_two_colors_reach_the_theme() {
+        // **It asserts over the color the theme returns, with the literal value written in the test.**
+        // Comparing it against `Theme::from_colors(...)` again would measure that the code is consistent with itself:
+        // crossing two colors would leave both sides of the equality changed and the test green. This
+        // project already has that disguise on record, with 525 tests surviving a crossing of colors.
         let text = "color.0 = #010101\ncolor.15 = #0f0f0f\nbackground = #020202\nforeground = #030303\n\
                      cursor = #040404\ndivider = #050505\nfocus = #060606\npanel = #070707";
         let (settings, warnings) = parsed(text);
         assert_eq!(
             warnings.total(),
             0,
-            "alguna de las ocho líneas no se entendió"
+            "one of the eight lines was not understood"
         );
 
         let theme = crate::theme::Theme::from_colors(&settings.colors);
@@ -1096,74 +1110,74 @@ mod tests {
         assert_eq!(
             theme.color(term_core::TermColor::Indexed(0)),
             Color32::from_rgb(1, 1, 1),
-            "el color 0 de la paleta no llegó al tema"
+            "color 0 of the palette did not reach the theme"
         );
         assert_eq!(
             theme.color(term_core::TermColor::Indexed(15)),
             Color32::from_rgb(0x0F, 0x0F, 0x0F),
-            "el color 15 no llegó: la paleta se está copiando a medias"
+            "color 15 did not reach: the palette is being copied halfway"
         );
         assert_eq!(
             theme.background(),
             Color32::from_rgb(2, 2, 2),
-            "el fondo no llegó"
+            "the background did not reach"
         );
         assert_eq!(
             theme.foreground(),
             Color32::from_rgb(3, 3, 3),
-            "el texto no llegó"
+            "the text did not reach"
         );
         assert_eq!(
             theme.divider(),
             Color32::from_rgb(5, 5, 5),
-            "el divisor no llegó"
+            "the divider did not reach"
         );
         assert_eq!(
             theme.focus(),
             Color32::from_rgb(6, 6, 6),
-            "el foco no llegó"
+            "the focus did not reach"
         );
         assert_eq!(
             theme.panel_background(),
             Color32::from_rgb(7, 7, 7),
-            "el fondo del panel no llegó"
+            "the panel's background did not reach"
         );
-        // **El cursor se afirma por donde el pintor lo lee, y era el único de los seis que nadie
-        // comprobaba.** Medido: cambiar su asignación por la del foco dejaba las 718 pruebas de `app`
-        // en verde, así que el defecto y el arreglo daban el mismo resultado. Y va por `TermColor`
-        // porque es la puerta por la que el pintor pide ese color, no por un campo: afirmar sobre el
-        // campo comprobaría que el valor está apuntado, no que se usa.
+        // **The cursor is asserted through where the painter reads it, and it was the only one of the six that no one
+        // checked.** Measured: changing its assignment to the focus's left the 718 tests of `app`
+        // green, so the defect and the fix gave the same result. And it goes through `TermColor`
+        // because it is the door the painter asks for that color through, not through a field: asserting over the
+        // field would check that the value is noted down, not that it is used.
         assert_eq!(
             theme.color(term_core::TermColor::Cursor),
             Color32::from_rgb(4, 4, 4),
-            "el color del cursor no llegó"
+            "the cursor's color did not reach"
         );
     }
 
     #[test]
-    fn pedir_un_solo_color_no_borra_los_otros_quince() {
-        // **Es lo que permite cambiar un color sin escribir los veintidós**, y el modo de fallo es que la
-        // paleta se sustituya entera en vez de hueco a hueco: quedarían quince negros.
+    fn requesting_a_single_color_does_not_erase_the_other_fifteen() {
+        // **It is what allows changing one color without writing the twenty-two**, and the failure mode is that the
+        // palette is replaced whole instead of slot by slot: fifteen blacks would remain.
         let (settings, _) = parsed("color.1 = #ff0000");
         let theme = crate::theme::Theme::from_colors(&settings.colors);
 
         assert_eq!(
             theme.color(term_core::TermColor::Indexed(1)),
             Color32::from_rgb(0xFF, 0, 0),
-            "el color pedido no se aplicó"
+            "the requested color was not applied"
         );
         assert_eq!(
             theme.color(term_core::TermColor::Indexed(2)),
             crate::theme::Theme::default().color(term_core::TermColor::Indexed(2)),
-            "pedir un color cambió otro: la paleta se está sustituyendo entera"
+            "requesting one color changed another: the palette is being replaced whole"
         );
     }
 
-    /// Un directorio propio por prueba, con el número de proceso.
+    /// A directory of its own per test, with the process number.
     ///
-    /// **La suite corre en paralelo y el nombre del fichero es fijo**, así que dos pruebas que
-    /// compartieran directorio se leerían la configuración la una a la otra y fallarían solo a veces. Es
-    /// el mismo molde que usa el módulo hermano, y por la misma razón.
+    /// **The suite runs in parallel and the file's name is fixed**, so two tests that
+    /// shared a directory would read each other's configuration and would fail only sometimes. It is
+    /// the same mold the sibling module uses, and for the same reason.
     struct TestDir(PathBuf);
 
     impl TestDir {
@@ -1173,13 +1187,13 @@ mod tests {
                 std::process::id()
             ));
             let _ = std::fs::remove_dir_all(&path);
-            std::fs::create_dir_all(&path).expect("crear el directorio de la prueba");
+            std::fs::create_dir_all(&path).expect("create the test directory");
             Self(path)
         }
 
         fn with(&self, contents: &[u8]) -> PathBuf {
             let path = self.0.join(FILE);
-            std::fs::write(&path, contents).expect("escribir el fichero de la prueba");
+            std::fs::write(&path, contents).expect("write the test file");
             path
         }
     }
@@ -1191,48 +1205,51 @@ mod tests {
     }
 
     #[test]
-    fn un_fichero_que_se_pasa_del_techo_no_se_lee() {
-        // **El techo existe porque el fichero tiene tamaño arbitrario**, y leerlo sin tope es reservar sin
-        // tope en el arranque. Sin esta prueba, el techo se podía bajar a un byte con la suite entera en
-        // verde — comprobado por una revisión con siete mutaciones vivas en este camino.
-        let dir = TestDir::new("techo");
+    fn a_file_that_goes_over_the_ceiling_is_not_read() {
+        // **The ceiling exists because the file has arbitrary size**, and reading it without a cap is reserving without
+        // a cap at startup. Without this test, the ceiling could be lowered to one byte with the whole suite
+        // green — checked by a review with seven live mutations on this path.
+        let dir = TestDir::new("ceiling");
         let exact = dir.with(&vec![b'#'; MAX_BYTES]);
         assert!(
             read(&exact).is_ok(),
-            "un fichero de exactamente el techo tiene que leerse"
+            "a file of exactly the ceiling has to be read"
         );
 
         let over = dir.with(&vec![b'#'; MAX_BYTES + 1]);
         assert_eq!(
             read(&over),
             Err(ConfigProblem::TooBig),
-            "un fichero de un byte por encima del techo se leyó igualmente"
+            "a file one byte over the ceiling was read all the same"
         );
     }
 
     #[test]
-    fn el_techo_y_el_tope_de_avisos_son_los_que_dice_el_documento() {
-        // **Las dos constantes están publicadas en `docs/08-configuracion.md`**, y las pruebas que las usan
-        // se parametrizan **con ellas mismas**: mover el número no tumbaba nada mientras el documento
-        // seguía prometiendo el viejo. Es el disfraz que este proyecto tiene fichado —elegir un número con
-        // el que el defecto y el arreglo dan lo mismo— y hace falta escribirlos literales una vez.
-        assert_eq!(MAX_BYTES, 64 * 1024, "el documento promete 64 KiB");
-        assert_eq!(MAX_WARNINGS, 20, "el documento promete hasta veinte avisos");
+    fn the_ceiling_and_the_warning_cap_are_the_ones_the_document_says() {
+        // **Both constants are published in `docs/08-configuracion.md`**, and the tests that use them
+        // are parameterized **with themselves**: moving the number took nothing down while the document
+        // kept promising the old one. It is the disguise this project has on record —choosing a number with
+        // which the defect and the fix give the same— and they need to be written literal once.
+        assert_eq!(MAX_BYTES, 64 * 1024, "the document promises 64 KiB");
+        assert_eq!(
+            MAX_WARNINGS, 20,
+            "the document promises up to twenty warnings"
+        );
     }
 
-    /// **Las claves de color y de tamaño viven dos veces**: en el `match` de [`apply`] y en la tabla del
-    /// documento, escritas a mano en los dos sitios y sin nada que las enfrentara. Los once atajos ya
-    /// tenían sus dos guardas; estas ocho no tenían ninguna, así que renombrarlas en un lado dejaba
-    /// publicado un fichero de configuración que la aplicación rechaza — que es exactamente el fallo que
-    /// el documento del contrato describe para los atajos, en la lista de al lado.
+    /// **The color and size keys live twice**: in the `match` of [`apply`] and in the document's
+    /// table, written by hand in both places and with nothing to confront them. The eleven shortcuts already
+    /// had their two guards; these eight had none, so renaming them on one side left
+    /// a configuration file published that the application rejects — which is exactly the failure that
+    /// the contract's document describes for the shortcuts, in the list next to it.
     ///
-    /// **Se lee el documento, no se copia la tabla.** Una prueba que repitiera las ocho claves se arregla
-    /// sola cuando alguien las traduce en el código y en la prueba y se olvida del documento, que es el
-    /// caso que hay que cazar. La dirección contraria —una clave que el código acepta y el documento
-    /// calla— no se puede derivar: el `match` no se puede recorrer, y copiarlo aquí sería volver a tener
-    /// la lista dos veces.
+    /// **The document is read, the table is not copied.** A test that repeated the eight keys fixes
+    /// itself when someone translates them in the code and in the test and forgets the document, which is the
+    /// case that has to be caught. The opposite direction —a key the code accepts and the document
+    /// keeps quiet about— cannot be derived: the `match` cannot be iterated, and copying it here would be having
+    /// the list twice again.
     #[test]
-    fn el_documento_publica_claves_que_la_aplicacion_acepta() {
+    fn the_document_publishes_keys_the_application_accepts() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
         let published: Vec<&str> = DOCUMENT
@@ -1242,20 +1259,20 @@ mod tests {
             .take_while(|line| line.starts_with('|'))
             .filter_map(|line| line.split('`').nth(1))
             .collect();
-        // **Sin suelo esta prueba pasa por estar vacía**, que es como muere una guarda que lee otro
-        // fichero: alguien le cambia el encabezado a la tabla, el recorrido no engancha, y no queda nada
-        // que comprobar. Ocho es lo que la tabla publica hoy.
+        // **Without a floor this test passes by being empty**, which is how a guard that reads another
+        // file dies: someone changes the table's header, the walk does not hook, and nothing is
+        // left to check. Eight is what the table publishes today.
         assert_eq!(
             published.len(),
             8,
-            "la tabla de claves del documento dio {} filas: o el documento cambió de forma, o este \
-             recorrido dejó de encontrarla y la prueba no está mirando nada — {published:?}",
+            "the document's key table gave {} rows: either the document changed shape, or this \
+             walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()
         );
 
         for key in published {
-            // Cada clave se prueba con los dos valores que el documento admite, porque la forma del valor
-            // depende de la clave y lo que se afirma es solo que la clave existe.
+            // Each key is tested with the two values the document admits, because the value's shape
+            // depends on the key and what is asserted is only that the key exists.
             let known = ["#ff0000", "14"].iter().any(|value| {
                 !matches!(
                     apply(&mut Settings::default(), key, value),
@@ -1264,26 +1281,26 @@ mod tests {
             });
             assert!(
                 known,
-                "el documento publica «{key}» y la aplicación la rechaza por desconocida: quien siga el \
-                 documento escribiría una línea que no hace nada"
+                "the document publishes «{key}» and the application rejects it as unknown: whoever follows the \
+                 document would write a line that does nothing"
             );
         }
     }
 
-    /// **Y los ejemplos que el documento da a copiar se interpretan de verdad**, no solo sus claves.
+    /// **And the examples the document gives to copy are really interpreted**, not just their keys.
     ///
-    /// La guarda de al lado lee **la tabla**, así que deja fuera lo que más se copia: los bloques de
-    /// ejemplo. Medido antes de escribir esto: cambiarle al documento el prefijo `key.` por otro, o el
-    /// valor `none` por el que fuese, dejaba las 873 pruebas en verde — y son las dos mitades que esta
-    /// entrega acaba de renombrar. Aquí se le pasa cada línea `clave = valor` de cada bloque **al
-    /// intérprete de verdad**, que es lo que hará el terminal con el fichero que alguien pegue.
+    /// The guard next to it reads **the table**, so it leaves out what is most copied: the example
+    /// blocks. Measured before writing this: changing the document's `key.` prefix to another, or the
+    /// value `none` to whatever, left the 873 tests green — and they are the two halves this
+    /// delivery just renamed. Here each `key = value` line of each block is passed **to
+    /// the real parser**, which is what the terminal will do with the file someone pastes.
     ///
-    /// **Va por bloques de ejemplo y no por comillas invertidas, y eso evita una lista de excepciones.**
-    /// La prosa nombra `clave = valor` como forma, que no es ninguna clave; un bloque de ejemplo, en
-    /// cambio, es literalmente lo que alguien copia y pega, así que ahí no hay marcadores de posición
-    /// que exentar.
+    /// **It goes by example blocks and not by backticks, and that avoids a list of exceptions.**
+    /// The prose names `key = value` as a form, which is no key; an example block, on the
+    /// other hand, is literally what someone copies and pastes, so there are no placeholders
+    /// to exempt.
     #[test]
-    fn los_ejemplos_del_documento_se_interpretan_sin_un_solo_aviso() {
+    fn the_document_examples_are_interpreted_without_a_single_warning() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
         let mut inside = false;
@@ -1294,73 +1311,117 @@ mod tests {
                     inside = !inside;
                     return false;
                 }
-                // Las líneas de los bloques que no son `clave = valor` —los mensajes por pantalla— no
-                // son ejemplos de configuración y no se le pasan al intérprete.
+                // The lines of the blocks that are not `key = value` —the on-screen messages— are not
+                // configuration examples and are not passed to the parser.
                 inside && line.contains(" = ") && !line.starts_with("agent-terminal:")
             })
             .collect();
-        // Mismo suelo y por la misma razón que su guarda hermana: si el recorrido deja de enganchar los
-        // bloques, esta prueba pasa por estar vacía.
+        // Same floor and for the same reason as its sibling guard: if the walk stops hooking the
+        // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
             8,
-            "los bloques de ejemplo del documento dieron {} líneas de configuración: o el documento \
-             cambió de forma, o este recorrido dejó de encontrarlas — {examples:?}",
+            "the document's example blocks gave {} configuration lines: either the document \
+             changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()
         );
 
         for example in examples {
             let (settings, warnings) =
-                interpret(example).expect("una línea suelta no puede tumbar el fichero entero");
+                interpret(example).expect("a single line cannot bring down the whole file");
             assert_eq!(
                 warnings.total(),
                 0,
-                "el documento da «{example}» como ejemplo y el terminal lo rechaza: {}",
+                "the document gives «{example}» as an example and the terminal rejects it: {}",
                 warnings.kept()[0]
             );
-            // **Y se afirma que hizo algo**, no solo que no se quejó: una clave desconocida que dejara
-            // de avisar pasaría esta prueba sin aplicar nada, que es como una guarda se queda en verde
-            // sin comprobar nada. La excepción es `version`, que **no guarda ningún valor** a propósito:
-            // es un veto que se comprueba y se olvida, y por eso su ejemplo no puede cambiar nada.
+            // **And it asserts that it did something**, not just that it did not complain: an unknown key that stopped
+            // warning would pass this test without applying anything, which is how a guard stays green
+            // without checking anything. The exception is `version`, which **stores no value** on purpose:
+            // it is a veto that is checked and forgotten, and that is why its example cannot change anything.
             if !example.starts_with("version") {
                 assert_ne!(
                     settings,
                     Settings::default(),
-                    "el documento da «{example}» como ejemplo y no cambia ningún ajuste"
+                    "the document gives «{example}» as an example and it changes no setting"
                 );
             }
         }
     }
 
-    /// Palabras de función españolas, para juzgar una frase que se ve por pantalla.
+    /// Spanish function words, to judge a sentence that appears on screen.
     ///
-    /// **Es el mismo criterio con el que la guarda del glosario elige las suyas**, y por su misma
-    /// razón: son cortas, la lista es cerrada, y ninguna es además una palabra inglesa. Por eso quedan
-    /// fuera «no» y «sin», que lo son. Se comparan como palabra entera, así que `none` no es «no».
+    /// **It is the same criterion the glossary guard picks its own with**, and for its same
+    /// reason: they are short, the list is closed, and none of them is also an English word. That is why
+    /// «no» and «sin» are left out, which are. They are compared as a whole word, so `none` is not «no».
+    /// **The second half is content words, and it was added because the first half was shown to be
+    /// evadable.** «no lleva ninguna pestana», «no tiene texto UTF-8 valido» and «no cabe» carry not one
+    /// function word from the list: a negation plus content words walks straight through, and «no» and
+    /// «sin» cannot join because they are English words too. The criterion is unchanged — closed, short,
+    /// and no entry is also an English word — only widened past function words.
     const SPANISH_FUNCTION_WORDS: &[&str] = &[
-        "de", "del", "la", "el", "los", "las", "lo", "que", "con", "por", "para", "una", "uno",
-        "al", "mas", "ya", "se", "es", "hay",
+        "de",
+        "del",
+        "la",
+        "el",
+        "los",
+        "las",
+        "lo",
+        "que",
+        "con",
+        "por",
+        "para",
+        "una",
+        "uno",
+        "al",
+        "mas",
+        "ya",
+        "se",
+        "es",
+        "hay",
+        "ninguna",
+        "ninguno",
+        "lleva",
+        "tiene",
+        "cabe",
+        "texto",
+        "valido",
+        "pestana",
+        "fichero",
+        "disposicion",
+        "guardar",
+        "pudo",
+        "puede",
+        "son",
+        "esta",
+        "estan",
+        "sido",
+        "textos",
+        "invalido",
+        "pestanas",
+        "ficheros",
+        "disposiciones",
     ];
 
-    /// La primera palabra española de ese texto, si la hay.
+    /// The first Spanish word in that text, if there is one.
     fn spanish_word_in(text: &str) -> Option<&str> {
         text.split(|c: char| !c.is_ascii_alphabetic())
             .find(|word| SPANISH_FUNCTION_WORDS.contains(&word.to_ascii_lowercase().as_str()))
     }
 
-    /// **El documento publica tres mensajes por pantalla, palabra por palabra, y nada los enfrentaba
-    /// con el código.** Son lo que alguien pega en un buscador cuando su fichero no hace lo que
-    /// esperaba, así que traducirlos en el código y no en el documento —o al revés— deja publicada una
-    /// frase que el terminal no dice nunca. Es el mismo acoplamiento que el de la tabla de claves de
-    /// más arriba, en la mitad que aquélla deja fuera **a propósito**: su recorrido descarta las líneas
-    /// que empiezan por `agent-terminal:`, y hasta aquí nadie las recogía.
+    /// **The document publishes three on-screen messages, word for word, and nothing confronted them
+    /// with the code.** They are what someone pastes into a search engine when their file does not do what
+    /// they expected, so translating them in the code and not in the document —or the other way around— leaves published a
+    /// sentence the terminal never says. It is the same coupling as the key table
+    /// above, in the half that one leaves out **on purpose**: its walk discards the lines
+    /// that start with `agent-terminal:`, and until here no one picked them up.
     ///
-    /// **Los dos avisos de línea se reproducen por el intérprete de verdad**, escribiendo en la línea
-    /// que el documento señala lo que el documento cuenta que pasó ahí. El tercero no lo produce este
-    /// módulo sino la ventana, y como imprimir no se puede observar desde dentro del proceso, lo único
-    /// que se puede enfrentar sin volver a copiarlo es **su plantilla en el fuente**.
+    /// **The two line warnings are reproduced by the real parser**, writing on the line
+    /// the document points to what the document tells happened there. The third is not produced by this
+    /// module but by the window, and since printing cannot be observed from inside the process, the only thing
+    /// that can be confronted without copying it again is **its template in the source**.
     #[test]
-    fn los_mensajes_que_el_documento_publica_son_los_que_el_terminal_escribe() {
+    fn the_messages_the_document_publishes_are_the_ones_the_terminal_writes() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
         const WINDOW: &str = include_str!("lib.rs");
 
@@ -1375,41 +1436,41 @@ mod tests {
                 inside && line.starts_with("agent-terminal: ")
             })
             .collect();
-        // Mismo suelo y por la misma razón que las dos guardas hermanas de arriba: sin él, un documento
-        // que dejara de publicar mensajes deja esta prueba pasando por no mirar nada.
+        // Same floor and for the same reason as the two sibling guards above: without it, a document
+        // that stopped publishing messages leaves this test passing by looking at nothing.
         assert_eq!(
             published.len(),
             3,
-            "el documento publica {} mensajes por pantalla: o cambió de forma, o este recorrido dejó \
-             de encontrarlos y la prueba no está mirando nada — {published:?}",
+            "the document publishes {} on-screen messages: either it changed shape, or this walk stopped \
+             finding them and the test is not looking at anything — {published:?}",
             published.len()
         );
 
-        // **Y las tres tienen que estar en inglés, aquí y no solo en el código.** Sin esto, devolver al
-        // español el mensaje Y su línea en el documento pasa las dos guardas: las frases seguirían
-        // coincidiendo entre sí, que es lo único que el resto de esta prueba comprueba.
+        // **And the three have to be in English, here and not only in the code.** Without this, returning the
+        // message AND its line in the document to Spanish passes both guards: the sentences would keep
+        // coinciding with each other, which is the only thing the rest of this test checks.
         for line in &published {
             assert!(
                 line.is_ascii(),
-                "el documento publica «{line}» con un carácter que no es ASCII: las comillas \
-                 angulares y los acentos solo salen de la versión española de ese mensaje"
+                "the document publishes «{line}» with a character that is not ASCII: the angle \
+                 quotes and the accents only come from the Spanish version of that message"
             );
             assert_eq!(
                 spanish_word_in(line),
                 None,
-                "el documento publica «{line}», que sigue en español"
+                "the document publishes «{line}», which is still in Spanish"
             );
         }
 
-        // Un aviso de línea se reproduce poniendo su línea donde el documento dice que estaba: el
-        // número forma parte del mensaje, así que sembrarlo en otra línea ya no lo reproduce.
+        // A line warning is reproduced by putting its line where the document says it was: the
+        // number is part of the message, so seeding it on another line no longer reproduces it.
         let written_by_the_terminal = |at: usize, text: &str| {
             let file = format!("{}{text}", "\n".repeat(at - 1));
             let (_, warnings) = parsed(&file);
             assert_eq!(
                 warnings.kept().len(),
                 1,
-                "«{text}» tenía que dar exactamente un aviso y dio {}",
+                "«{text}» had to give exactly one warning and gave {}",
                 warnings.kept().len()
             );
             format!("agent-terminal: {}", warnings.kept()[0])
@@ -1422,32 +1483,32 @@ mod tests {
         for said in &ours {
             assert!(
                 published.contains(&said.as_str()),
-                "el terminal escribe «{said}» y el documento no publica esa frase: quien la busque \
-                 tal como sale por pantalla no encontrará el documento — {published:?}"
+                "the terminal writes «{said}» and the document does not publish that sentence: whoever searches for it \
+                 just as it appears on screen will not find the document — {published:?}"
             );
         }
-        // **Y la dirección contraria**, que es la que caza un mensaje nuevo publicado sin guarda: todo
-        // aviso de línea que el documento enseñe tiene que ser uno de los que se acaban de reproducir.
+        // **And the opposite direction**, which is the one that catches a new message published without a guard: every
+        // line warning the document shows has to be one of the ones just reproduced.
         for line in published.iter().filter(|line| line.contains(": line ")) {
             assert!(
                 ours.iter().any(|said| said == line),
-                "el documento publica «{line}» y ningún aviso del terminal sale así"
+                "the document publishes «{line}» and no terminal warning comes out like that"
             );
         }
 
         let clash = published
             .iter()
             .find(|line| !line.contains(": line "))
-            .expect("el documento publica el aviso de los dos atajos que se pisan");
-        // Las dos mitades que el aviso interpola son nombres de acción, y tienen que serlo de verdad.
+            .expect("the document publishes the warning about the two shortcuts that clash");
+        // The two halves the warning interpolates are action names, and they have to really be so.
         for name in clash.split('\'').skip(1).step_by(2) {
             assert!(
                 crate::keyboard::Action::from_written(name).is_some(),
-                "el documento enseña «{name}» en ese aviso y no es ninguna acción que se pueda atar"
+                "the document shows «{name}» in that warning and it is no action that can be bound"
             );
         }
-        // De vuelta a la plantilla: lo entrecomillado es lo que la ventana interpola, y el resto es la
-        // frase fija que tiene que estar escrita igual en los dos sitios.
+        // Back to the template: what is quoted is what the window interpolates, and the rest is the
+        // fixed sentence that has to be written the same in both places.
         let template = clash
             .split('\'')
             .enumerate()
@@ -1460,9 +1521,9 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("'");
-        // **Una cadena partida en el fuente lleva `\` al final de la línea**, que se traga el salto y la
-        // sangría de la siguiente. Deshacerlo aquí es lo que hace que esta guarda sobreviva a que
-        // `cargo fmt` reajuste esa línea, en vez de caerse por ello.
+        // **A string split in the source carries `\` at the end of the line**, which swallows the break and the
+        // indentation of the next one. Undoing it here is what makes this guard survive
+        // `cargo fmt` readjusting that line, instead of falling because of it.
         let mut source = String::with_capacity(WINDOW.len());
         let mut rest = WINDOW;
         while let Some(cut) = rest.find("\\\n") {
@@ -1472,25 +1533,25 @@ mod tests {
         source.push_str(rest);
         assert!(
             source.contains(&template),
-            "el documento publica «{clash}» y la ventana no escribe esa frase: se buscó la plantilla \
-             «{template}»"
+            "the document publishes «{clash}» and the window does not write that sentence: the template \
+             «{template}» was searched for"
         );
     }
 
-    /// **La frase fija de cada mensaje es la mitad de AC6 que ninguna prueba miraba.** Las guardas de
-    /// esta suite afirman sobre lo que el aviso **interpola** —la clave, el valor, el número de
-    /// línea—, y donde citan la frase citan un trozo. Devolver al español los trece mensajes de los
-    /// dos tipos dejaba la suite entera en verde: comprobado antes de escribir esto.
+    /// **The fixed sentence of each message is the half of AC6 that no test looked at.** The guards of
+    /// this suite assert over what the warning **interpolates** —the key, the value, the line
+    /// number—, and where they quote the sentence they quote a fragment. Returning the thirteen messages of the
+    /// two types to Spanish left the whole suite green: checked before writing this.
     ///
-    /// **Palabras de función y no un léxico ancho**, que es el mismo criterio con el que la guarda del
-    /// glosario elige las suyas: son cortas, la lista es cerrada y ninguna de ellas es además una
-    /// palabra inglesa. Por eso quedan fuera «no» y «sin», que lo son, aunque las trece frases españolas
-    /// las llevaran.
+    /// **Function words and not a wide lexicon**, which is the same criterion the glossary
+    /// guard picks its own with: they are short, the list is closed and none of them is also an
+    /// English word. That is why «no» and «sin» are left out, which are, even though the thirteen Spanish sentences
+    /// carried them.
     ///
-    /// El oráculo no-ASCII va al lado porque las comillas angulares y los acentos son gratis de
-    /// comprobar, no porque baste: cuatro de los mensajes españoles eran ASCII puro.
+    /// The non-ASCII oracle goes alongside because the angle quotes and the accents are free to
+    /// check, not because it suffices: four of the Spanish messages were pure ASCII.
     #[test]
-    fn ninguna_frase_de_las_que_se_ven_por_pantalla_se_quedo_en_espanol() {
+    fn no_settings_message_was_left_in_spanish() {
         let problems = [
             ConfigProblem::Absent,
             ConfigProblem::BrokenLink,
@@ -1511,9 +1572,9 @@ mod tests {
             Missing::Repeated("size".to_owned()),
             Missing::OnlyTurnsOff("key.copy".to_owned()),
         ];
-        // **Los dos `match` son exhaustivos y sin comodín, y no sobran.** Son lo único que obliga a que
-        // una variante nueva pase por esta guarda: las dos listas de arriba son literales, así que sin
-        // ellos añadir un mensaje se le escaparía en silencio y la prueba seguiría verde.
+        // **The two `match` are exhaustive and without a wildcard, and they are not redundant.** They are the only thing that forces
+        // a new variant to pass through this guard: the two lists above are literals, so without
+        // them adding a message would slip through silently and the test would stay green.
         for problem in &problems {
             match problem {
                 ConfigProblem::Absent
@@ -1548,93 +1609,286 @@ mod tests {
         assert_eq!(
             said.len(),
             13,
-            "no se recorrieron los trece mensajes que se ven por pantalla: {said:?}"
+            "the thirteen on-screen messages were not walked: {said:?}"
         );
 
         for message in said {
             assert!(
                 message.is_ascii(),
-                "«{message}» lleva un carácter que no es ASCII: las comillas angulares y los acentos \
-                 solo salen de la versión española de este mensaje"
+                "«{message}» carries a character that is not ASCII: the angle quotes and the accents \
+                 only come from the Spanish version of this message"
             );
             assert_eq!(
                 spanish_word_in(&message),
                 None,
-                "el mensaje «{message}» sigue en español, y es lo que se ve por pantalla"
+                "the message «{message}» is still in Spanish, and it is what appears on screen"
+            );
+        }
+    }
+
+    /// **The sibling above walks the thirteen settings messages, and until here nothing walked the rest.**
+    /// Measured: replacing every on-screen sentence of `session` and `watcher` with a placeholder left the
+    /// whole suite green — they are what someone reads when their layout file is corrupt or the watcher
+    /// cannot arm, and no test asserted one word of them.
+    ///
+    /// **Two halves, because one alone does not cover it.**
+    ///
+    /// The first walks the two enums and **the `match` produces the index**, which is the half a
+    /// wildcard-free `match` looks like it gives and does not: arms enumerated beside a hand-written array
+    /// are satisfied by adding an arm and leaving the variant out of the array. Checked by doing exactly
+    /// that — a duplicate variant in the array kept the count at its number and the suite green. Producing
+    /// the index and demanding the set be whole is what makes the array's omission fail.
+    ///
+    /// The second walks **every sentence-shaped literal of both files, from the source**, and not the
+    /// arguments of `eprintln!`. Checked: scraping that one macro missed `go_blind`'s template, its two
+    /// reasons and the five prefixes of `session`, and reverting any of them to Spanish left the test
+    /// green. Reading the literals instead cannot be evaded by moving a sentence to `writeln!` or
+    /// `format!`.
+    ///
+    /// **What it does not reach, named rather than left implicit**: `SaveFailure::WontOverwrite`
+    /// renders `"what is saved is not overwritten: {reason}"`, and that template is checked — but the
+    /// `reason` itself is a `&'static str` handed in by `lib.rs` (`forbid_overwrite`), so the sentence
+    /// the user actually reads is half here and half in a file this delivery does not touch. When
+    /// `lib.rs` comes around, add it to `SOURCES`.
+    ///
+    /// **What the oracle cannot do, with the sentences that prove it.** It was attacked deliberately and
+    /// three ASCII-folded Spanish sentences walked through: «cero pestanas abiertas» — a **plural** of a
+    /// listed word, since the comparison is whole-word, and that class is closed now — plus «formato
+    /// desconocido» and «ruta inalcanzable», which carry **no word from the list at all**. Those two
+    /// still pass, and no closed list catches them: one long enough would stop being closed and would
+    /// start colliding with English.
+    ///
+    /// So what a green here means, exactly: no accented or `ñ`-carrying Spanish, and none built with the
+    /// common function words. What it does **not** mean is that the sentence is English. Real Spanish
+    /// carries accents —«pestañas», «válido»— and the non-ASCII half catches those on its own; folding
+    /// them to ASCII on purpose to slip past a test is not an accident anybody has. «no» and «sin»
+    /// cannot join the list, being English words too.
+    #[test]
+    fn no_layout_or_watcher_message_was_left_in_spanish() {
+        use crate::session::{LayoutProblem, SaveFailure};
+        use std::collections::BTreeSet;
+
+        let io = || std::io::Error::other("io");
+        let problems = [
+            LayoutProblem::Absent,
+            LayoutProblem::NotAFile,
+            LayoutProblem::Unreadable("io".to_owned()),
+            LayoutProblem::NotText,
+            LayoutProblem::Unintelligible("json".to_owned()),
+            LayoutProblem::Version { found: 9 },
+            LayoutProblem::NoTabs,
+            LayoutProblem::SingleChildBranch { tab: 0 },
+            LayoutProblem::NestedBranches { tab: 0 },
+            LayoutProblem::InvalidWeight { tab: 0 },
+            LayoutProblem::NonFiniteSum { tab: 0 },
+            LayoutProblem::TooManyLeaves { count: 999 },
+            LayoutProblem::TooLarge { bytes: 1 },
+        ];
+        let failures = [
+            SaveFailure::NoPlace,
+            SaveFailure::Vetoed { found: 9 },
+            SaveFailure::NotSerializable,
+            SaveFailure::Directory(io()),
+            SaveFailure::TempFile(io()),
+            SaveFailure::Writing(io()),
+            SaveFailure::Renaming(io()),
+            SaveFailure::WontOverwrite("name"),
+            SaveFailure::DoesntFit,
+        ];
+
+        // **The index comes out of the `match`, and that is the whole point.** Numbering by hand here
+        // would let the array and the arms drift apart in silence; taking the number from the variant
+        // means an array that skips one leaves a hole in the set below.
+        let problem_index = |problem: &LayoutProblem| match problem {
+            LayoutProblem::Absent => 0,
+            LayoutProblem::NotAFile => 1,
+            LayoutProblem::Unreadable(_) => 2,
+            LayoutProblem::NotText => 3,
+            LayoutProblem::Unintelligible(_) => 4,
+            LayoutProblem::Version { .. } => 5,
+            LayoutProblem::NoTabs => 6,
+            LayoutProblem::SingleChildBranch { .. } => 7,
+            LayoutProblem::NestedBranches { .. } => 8,
+            LayoutProblem::InvalidWeight { .. } => 9,
+            LayoutProblem::NonFiniteSum { .. } => 10,
+            LayoutProblem::TooManyLeaves { .. } => 11,
+            LayoutProblem::TooLarge { .. } => 12,
+        };
+        let failure_index = |failure: &SaveFailure| match failure {
+            SaveFailure::NoPlace => 0,
+            SaveFailure::Vetoed { .. } => 1,
+            SaveFailure::NotSerializable => 2,
+            SaveFailure::Directory(_) => 3,
+            SaveFailure::TempFile(_) => 4,
+            SaveFailure::Writing(_) => 5,
+            SaveFailure::Renaming(_) => 6,
+            SaveFailure::WontOverwrite(_) => 7,
+            SaveFailure::DoesntFit => 8,
+        };
+
+        let seen: BTreeSet<usize> = problems.iter().map(problem_index).collect();
+        assert_eq!(
+            seen,
+            (0..13).collect::<BTreeSet<usize>>(),
+            "a layout problem is missing from the list above, so its sentence is not being looked at"
+        );
+        let seen: BTreeSet<usize> = failures.iter().map(failure_index).collect();
+        assert_eq!(
+            seen,
+            (0..9).collect::<BTreeSet<usize>>(),
+            "a save failure is missing from the list above, so its sentence is not being looked at"
+        );
+
+        // **Every sentence-shaped literal of the two files, taken from the source.** A sentence is a
+        // literal with a space in it: that is what a person reads and what a translation forgets.
+        //
+        // **It stops at `mod tests`, and that boundary is the oracle's and not laziness.** A test
+        // message is prose but it is not on screen, and it uses the project's angle quotes for
+        // emphasis — which the non-ASCII half would report as Spanish. Checked: without the cut, the
+        // walk failed on an English assertion message quoting «not measured».
+        const SOURCES: [(&str, &str); 2] = [
+            ("session.rs", include_str!("session.rs")),
+            ("watcher.rs", include_str!("watcher.rs")),
+        ];
+        let mut sentences: Vec<(&str, String)> = Vec::new();
+        for (name, source) in SOURCES {
+            // **The continuations are rejoined before walking, and that is not tidiness.** A literal
+            // that rustfmt wrapped with a trailing `\\` leaves its second half between an odd pair of
+            // quotes, where a per-line walk reads it as code and skips it. `session.rs` carries three
+            // today —the two long cut messages and the version veto— and only their first halves were
+            // being looked at.
+            let rejoined = source.replace("\\\n", "");
+            for line in rejoined.lines() {
+                let code = line.trim_start();
+                if code.starts_with("mod tests") || code.starts_with("pub mod tests") {
+                    break;
+                }
+                if code.starts_with("//") || code.starts_with("*") {
+                    continue;
+                }
+                for piece in line.split('"').skip(1).step_by(2) {
+                    if piece.contains(' ') && piece.len() >= 12 {
+                        sentences.push((name, piece.to_owned()));
+                    }
+                }
+            }
+        }
+        // Same floor and for the same reason as its siblings: without it a walk that stopped finding
+        // literals leaves this test passing by looking at nothing. The two files hold **32** today —
+        // 27 and 5 — so the floor is set just below, tight enough that a broken walk cannot hide behind
+        // it and loose enough that deleting a message is not a failure.
+        //
+        // **The cut at `mod tests` rests on there being nothing after it**, and there is not: neither
+        // file declares a top-level item below its test module. If one ever does, its sentences leave
+        // this walk in silence — which is why the floor is stated as a number and not as «some».
+        assert!(
+            sentences.len() >= 30,
+            "only {} sentence-shaped literals were found before `mod tests` in the two files: the walk \
+             stopped working",
+            sentences.len()
+        );
+
+        let said: Vec<String> = problems
+            .iter()
+            .map(ToString::to_string)
+            .chain(failures.iter().map(ToString::to_string))
+            .collect();
+        assert_eq!(
+            said.len(),
+            22,
+            "the twenty-two rendered sentences were not walked: {said:?}"
+        );
+
+        for message in said
+            .iter()
+            .map(|rendered| ("rendered", rendered.clone()))
+            .chain(sentences)
+        {
+            let (where_from, message) = message;
+            assert!(
+                message.is_ascii(),
+                "«{message}» ({where_from}) carries a character that is not ASCII: the angle quotes and \\
+                 the accents only come from the Spanish version of this message"
+            );
+            assert_eq!(
+                spanish_word_in(&message),
+                None,
+                "the message «{message}» ({where_from}) is still in Spanish, and it is what appears on \\
+                 screen"
             );
         }
     }
 
     #[test]
-    fn lo_que_no_es_un_fichero_no_se_intenta_leer() {
-        let dir = TestDir::new("no-fichero");
+    fn what_is_not_a_file_is_not_attempted_to_be_read() {
+        let dir = TestDir::new("no-file");
         let as_directory = dir.0.join(FILE);
-        std::fs::create_dir_all(&as_directory)
-            .expect("crear el directorio con el nombre del fichero");
+        std::fs::create_dir_all(&as_directory).expect("create the directory with the file's name");
 
         assert_eq!(
             read(&as_directory),
             Err(ConfigProblem::NotAFile),
-            "un directorio con el nombre del fichero se intentó leer como configuración"
+            "a directory with the file's name was attempted to be read as configuration"
         );
     }
 
     #[test]
-    fn un_fichero_que_no_es_texto_deja_el_terminal_de_fabrica() {
-        // Está prometido por escrito en el documento que se le da a quien escribe el fichero.
-        let dir = TestDir::new("no-texto");
+    fn a_file_that_is_not_text_leaves_the_terminal_at_factory() {
+        // It is promised in writing in the document given to whoever writes the file.
+        let dir = TestDir::new("no-text");
         let path = dir.with(&[0xFF, 0xFE, 0x00, 0x80]);
 
         assert_eq!(
             read(&path),
             Err(ConfigProblem::NotText),
-            "unos bytes que no son texto se interpretaron igualmente"
+            "some bytes that are not text were parsed all the same"
         );
     }
 
     #[test]
-    fn el_fichero_que_no_esta_se_calla_y_el_enlace_roto_no() {
-        // **La diferencia importa y no la veía nadie.** Quien no ha escrito configuración no debe oír nada
-        // en cada arranque; quien la escribió y se la movieron **tiene que enterarse**, y antes salía por
-        // el mismo camino silencioso. Lo cazó una revisión.
-        let dir = TestDir::new("ausente");
+    fn the_file_that_is_not_there_keeps_quiet_and_the_broken_link_does_not() {
+        // **The difference matters and no one saw it.** Whoever has not written configuration must not hear anything
+        // on every startup; whoever wrote it and had it moved **has to find out**, and before it came out through
+        // the same silent path. A review caught it.
+        let dir = TestDir::new("absent");
         let never = dir.0.join(FILE);
         assert_eq!(read(&never), Err(ConfigProblem::Absent));
         assert!(
             !ConfigProblem::Absent.warrants_warning(),
-            "se avisaría en cada arranque a quien no ha configurado nada"
+            "whoever has configured nothing would be warned on every startup"
         );
 
         #[cfg(unix)]
         {
-            let link = dir.0.join("enlace");
-            std::os::unix::fs::symlink(dir.0.join("no-existe"), &link).expect("crear el enlace");
+            let link = dir.0.join("link");
+            std::os::unix::fs::symlink(dir.0.join("does-not-exist"), &link)
+                .expect("create the link");
             assert_eq!(
                 read(&link),
                 Err(ConfigProblem::BrokenLink),
-                "un enlace roto se confundió con «no hay fichero»"
+                "a broken link was mistaken for «there is no file»"
             );
             assert!(
                 ConfigProblem::BrokenLink.warrants_warning(),
-                "un enlace roto se calla, y quien lo creó no se entera de que su configuración no se aplica"
+                "a broken link keeps quiet, and whoever created it does not find out that their configuration is not applied"
             );
         }
     }
 
     #[test]
-    fn un_fichero_de_verdad_se_lee_de_verdad() {
-        // **Ninguna de las veinte pruebas anteriores llamaba a `read`**: todas entraban por el intérprete,
-        // así que el camino de disco entero se podía borrar con la suite en verde. Lo cazó una revisión con
-        // siete mutaciones vivas.
-        let dir = TestDir::new("de-verdad");
+    fn a_real_file_is_really_read() {
+        // **None of the twenty previous tests called `read`**: they all entered through the parser,
+        // so the whole disk path could be deleted with the suite green. A review caught it with
+        // seven live mutations.
+        let dir = TestDir::new("for-real");
         let path = dir.with(
-            b"# un tema
+            b"# a theme
 color.1 = #ff0000
-malo
+bad
 ",
         );
 
-        let (settings, warnings) = read(&path).expect("el fichero de la prueba tenía que leerse");
+        let (settings, warnings) = read(&path).expect("the test file had to be read");
         assert_eq!(
             settings.colors.palette[1],
             Some(Color32::from_rgb(0xFF, 0, 0))
@@ -1642,31 +1896,31 @@ malo
         assert_eq!(
             warnings.total(),
             1,
-            "la línea mala no avisó al leer del disco"
+            "the bad line did not warn when reading from disk"
         );
     }
 
     #[test]
-    fn el_fichero_se_busca_donde_dice_el_documento() {
-        // **`path_from` se sacó aparte explícitamente «para poder probarla sin tocar el entorno», y no se
-        // probaba**: apuntarla al fichero de la disposición dejaba la suite en verde. Lo cazó una revisión.
-        let path = path_from(Some(std::ffi::OsStr::new("/casa/config")), None)
-            .expect("una ruta absoluta tiene que dar sitio");
+    fn the_file_is_looked_for_where_the_document_says() {
+        // **`path_from` was pulled out explicitly «to be able to test it without touching the environment», and it was not
+        // tested**: pointing it at the layout file left the suite green. A review caught it.
+        let path = path_from(Some(std::ffi::OsStr::new("/home/config")), None)
+            .expect("an absolute path has to give a location");
         assert_eq!(
             path,
-            PathBuf::from("/casa/config/agent-terminal/config"),
-            "el fichero no se busca donde el documento dice"
+            PathBuf::from("/home/config/agent-terminal/config"),
+            "the file is not looked for where the document says"
         );
 
         assert_eq!(
-            path_from(None, Some(std::ffi::OsStr::new("/casa"))),
-            Some(PathBuf::from("/casa/.config/agent-terminal/config")),
-            "sin la variable propia no se cae a «.config» de la casa"
+            path_from(None, Some(std::ffi::OsStr::new("/home"))),
+            Some(PathBuf::from("/home/.config/agent-terminal/config")),
+            "without the dedicated variable it does not fall back to the home's «.config»"
         );
         assert_eq!(
-            path_from(None, Some(std::ffi::OsStr::new("relativa"))),
+            path_from(None, Some(std::ffi::OsStr::new("relative"))),
             None,
-            "una ruta relativa se aceptó: el fichero acabaría dentro del directorio de trabajo"
+            "a relative path was accepted: the file would end up inside the working directory"
         );
     }
 }

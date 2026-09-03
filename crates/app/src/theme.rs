@@ -1,113 +1,110 @@
-//! La tabla de color y las dos políticas de atributos que son gusto y no especificación.
+//! The color table and the two attribute policies that are taste and not specification.
 //!
-//! Vive aquí y no en el motor del terminal por una razón que no es de estilo: una tabla de colores
-//! *es* el tema, y el motor tiene que sobrevivir intacto a una reescritura de la interfaz. Tampoco
-//! se puede pedirle la paleta al parser: la suya está vacía salvo lo que el programa fije por
-//! secuencias de escape, y una aplicación que resuelva por ahí sale en negro.
+//! It lives here and not in the terminal engine for a reason that is not stylistic: a color table
+//! *is* the theme, and the engine has to survive a rewrite of the interface intact. Nor can the
+//! palette be asked of the parser: its own is empty save for what the program sets through escape
+//! sequences, and an application that resolves there comes out black.
 
 use eframe::egui::Color32;
 use panel_contract::{Attention, Mark, Style};
 use term_core::TermColor;
 
-/// Cuánto se acerca al fondo un color atenuado.
+/// How close to the background a dimmed color moves.
 ///
-/// Es gusto puro: la especificación dice «menos intenso» y no cuánto. La mitad se lee como
-/// claramente apagado sin llegar a desaparecer sobre este fondo, que es lo que se pierde al pasar
-/// de dos tercios.
+/// It is pure taste: the specification says "less intense" and not how much. Half reads as clearly
+/// muted without disappearing over this background, which is what is lost past two thirds.
 const DIM_FACTOR: f32 = 0.5;
 
-/// Los seis niveles por canal del cubo de color de la paleta de 256.
+/// The six per-channel levels of the color cube of the 256-color palette.
 ///
-/// No son equidistantes, y no es un capricho: es la tabla que fija `xterm` y que todo el ecosistema
-/// da por supuesta. Repartirlos a intervalos regulares daría colores que no coinciden con los que
-/// el programa espera ver.
+/// They are not equidistant, and that is not a whim: it is the table `xterm` fixes and that the
+/// whole ecosystem takes for granted. Spreading them at regular intervals would give colors that do
+/// not match the ones the program expects to see.
 const CUBE_LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
-/// Cuánto tapa el velo que señala la consola sobre la que se soltaría la que se arrastra, de 0 a 255.
+/// How much the veil that marks the console the dragged one would drop onto covers, from 0 to 255.
 ///
-/// Es gusto, pero acotado por los dos lados: tiene que verse sobre una consola llena de texto y tiene que
-/// dejar leer lo que hay debajo, porque lo que hay debajo es lo que el usuario está mirando para decidir
-/// si suelta ahí. Una sexta parte cumple las dos.
+/// It is taste, but bounded on both sides: it has to be visible over a console full of text and it has to
+/// let what is underneath be read, because what is underneath is what the user is looking at to decide
+/// whether to drop there. A sixth part meets both.
 const DROP_TARGET_ALPHA: u8 = 40;
 
-/// El tema: qué color de pantalla le corresponde a cada color que pide un programa.
+/// The theme: what screen color corresponds to each color a program asks for.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
-    /// Las dieciséis entradas con nombre. De la 0 a la 7 las normales, de la 8 a la 15 las
-    /// brillantes.
+    /// The sixteen named entries. From 0 to 7 the normal ones, from 8 to 15 the bright ones.
     palette: [Color32; 16],
     background: Color32,
     foreground: Color32,
     cursor: Color32,
-    /// La línea que separa dos consolas.
+    /// The line that separates two consoles.
     divider: Color32,
-    /// Con qué se señala la consola a la que va el teclado.
+    /// What marks the console the keyboard goes to.
     ///
-    /// **Es un color de la aplicación, no de la paleta del terminal**, y esa distinción importa: la
-    /// paleta la pide el programa de dentro y describe *su* contenido. Esto describe el estado de la
-    /// aplicación, así que un programa no puede reclamarlo ni cambiarlo.
+    /// **It is a color of the application, not of the terminal palette**, and that distinction matters: the
+    /// palette is asked for by the program inside and describes *its* content. This describes the state of the
+    /// application, so a program cannot claim it or change it.
     focus: Color32,
-    /// El fondo del panel de estado, que es lo que lo separa visualmente de su consola sin una línea.
+    /// The background of the status panel, which is what separates it visually from its console without a line.
     panel_background: Color32,
 }
 
 impl Default for Theme {
-    /// La estética del proyecto.
+    /// The aesthetics of the project.
     ///
-    /// El prototipo aporta **nueve** colores, y ninguno de ellos es rojo, cian, magenta ni un
-    /// brillante: sirve de base estética, no de paleta. Los que faltaban se han escrito para que
-    /// pertenezcan a la misma familia —desaturados, de contraste medio— y no para reproducir
-    /// ninguna paleta canónica.
+    /// The prototype contributes **nine** colors, and none of them is red, cyan, magenta or a
+    /// bright one: it serves as an aesthetic base, not a palette. The missing ones have been written so they
+    /// belong to the same family —desaturated, medium-contrast— and not to reproduce any canonical palette.
     ///
-    /// Las brillantes salen de acercar su color normal a blanco una cuarta parte, con dos
-    /// excepciones que vienen del prototipo y no de esa regla: el negro brillante es su gris
-    /// apagado y el blanco brillante es blanco puro.
+    /// The bright ones come from moving their normal color a quarter of the way toward white, with two
+    /// exceptions that come from the prototype and not from that rule: bright black is its muted gray
+    /// and bright white is pure white.
     fn default() -> Self {
         Self {
             palette: [
-                Color32::from_rgb(0x1E, 0x1E, 0x1E), // 0  negro — el mismo del fondo
-                Color32::from_rgb(0xCF, 0x6A, 0x4C), // 1  rojo
-                Color32::from_rgb(0x8F, 0x9D, 0x6A), // 2  verde
-                Color32::from_rgb(0xF9, 0xEE, 0x98), // 3  amarillo
-                Color32::from_rgb(0x75, 0x87, 0xA6), // 4  azul
+                Color32::from_rgb(0x1E, 0x1E, 0x1E), // 0  black — the same as the background
+                Color32::from_rgb(0xCF, 0x6A, 0x4C), // 1  red
+                Color32::from_rgb(0x8F, 0x9D, 0x6A), // 2  green
+                Color32::from_rgb(0xF9, 0xEE, 0x98), // 3  yellow
+                Color32::from_rgb(0x75, 0x87, 0xA6), // 4  blue
                 Color32::from_rgb(0x9B, 0x85, 0x9D), // 5  magenta
-                Color32::from_rgb(0x7F, 0xA5, 0xA0), // 6  cian — escrito, no estaba
-                Color32::from_rgb(0xA7, 0xA7, 0xA7), // 7  blanco
-                Color32::from_rgb(0x5F, 0x5A, 0x60), // 8  negro brillante — el gris del prototipo
-                Color32::from_rgb(0xDB, 0x8F, 0x79), // 9  rojo brillante
-                Color32::from_rgb(0xAB, 0xB6, 0x8F), // 10 verde brillante
-                Color32::from_rgb(0xFB, 0xF2, 0xB2), // 11 amarillo brillante
-                Color32::from_rgb(0x98, 0xA5, 0xBC), // 12 azul brillante
-                Color32::from_rgb(0xB4, 0xA4, 0xB6), // 13 magenta brillante
-                Color32::from_rgb(0x9F, 0xBC, 0xB8), // 14 cian brillante
-                Color32::from_rgb(0xFF, 0xFF, 0xFF), // 15 blanco brillante — blanco puro
+                Color32::from_rgb(0x7F, 0xA5, 0xA0), // 6  cyan — written, was not there
+                Color32::from_rgb(0xA7, 0xA7, 0xA7), // 7  white
+                Color32::from_rgb(0x5F, 0x5A, 0x60), // 8  bright black — the gray from the prototype
+                Color32::from_rgb(0xDB, 0x8F, 0x79), // 9  bright red
+                Color32::from_rgb(0xAB, 0xB6, 0x8F), // 10 bright green
+                Color32::from_rgb(0xFB, 0xF2, 0xB2), // 11 bright yellow
+                Color32::from_rgb(0x98, 0xA5, 0xBC), // 12 bright blue
+                Color32::from_rgb(0xB4, 0xA4, 0xB6), // 13 bright magenta
+                Color32::from_rgb(0x9F, 0xBC, 0xB8), // 14 bright cyan
+                Color32::from_rgb(0xFF, 0xFF, 0xFF), // 15 bright white — pure white
             ],
             background: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             foreground: Color32::from_rgb(0xA7, 0xA7, 0xA7),
             cursor: Color32::from_rgb(0xA7, 0xA7, 0xA7),
-            // El gris apagado del prototipo, que es el negro brillante de la paleta: se ve contra el
-            // fondo sin llamar la atención. Un divisor no es contenido, así que competir con las letras
-            // sería exactamente lo que no debe hacer.
+            // The muted gray from the prototype, which is the bright black of the palette: it shows against the
+            // background without drawing attention. A divider is not content, so competing with the letters
+            // would be exactly what it must not do.
             divider: Color32::from_rgb(0x5F, 0x5A, 0x60),
-            // El azul de la familia, un paso por encima del divisor en presencia. Tiene que
-            // distinguirse **del divisor** a simple vista, porque los dos se pintan pegados y si se
-            // parecieran no habría forma de saber qué consola escucha el teclado.
+            // The blue of the family, one step above the divider in presence. It has to be
+            // told apart **from the divider** at a glance, because the two are painted next to each other and if they
+            // looked alike there would be no way to tell which console listens to the keyboard.
             focus: Color32::from_rgb(0x75, 0x87, 0xA6),
-            // Un paso por debajo del fondo de la consola, no por encima: el panel es el margen y la
-            // consola es el contenido, así que lo que tiene que retroceder es el panel. Subirlo —hacerlo
-            // más claro— convertiría cada división en dos bloques compitiendo, y con dos divisiones
-            // serían cuatro.
+            // One step below the console background, not above: the panel is the margin and the
+            // console is the content, so what has to recede is the panel. Raising it —making it
+            // lighter— would turn each pane into two competing blocks, and with two panes
+            // they would be four.
             panel_background: Color32::from_rgb(0x18, 0x18, 0x18),
         }
     }
 }
 
 impl Theme {
-    /// El tema de fábrica con los colores que el fichero de configuración pida encima.
+    /// The factory theme with the colors the configuration file asks for on top.
     ///
-    /// **Lo que el fichero no diga se queda de fábrica**, que es lo que permite cambiar un solo color sin
-    /// escribir los veintidós. Y la paleta se sobrescribe hueco a hueco por lo mismo: pedir el color 1 no
-    /// debe borrar los otros quince.
+    /// **What the file does not say stays factory**, which is what allows changing a single color without
+    /// writing all twenty-two. And the palette is overwritten slot by slot for the same reason: asking for color 1 must
+    /// not erase the other fifteen.
     pub fn from_colors(colors: &crate::settings::Colors) -> Self {
         let mut theme = Self::default();
         for (slot, asked_for) in theme.palette.iter_mut().zip(colors.palette.iter()) {
@@ -131,26 +128,26 @@ impl Theme {
     }
 }
 
-/// Los colores con los que se pinta el panel de estado.
+/// The colors the status panel is painted with.
 ///
-/// **Salen de la paleta del terminal a propósito, no de una segunda familia.** Los dos se ven a la vez
-/// y a un palmo el uno del otro; con dos juegos de verdes o de rojos distintos, la pantalla se leería
-/// como dos aplicaciones pegadas. Lo que cambia respecto a la consola es *quién* elige el color: aquí
-/// lo elige el vocabulario del contrato, no el programa de dentro.
+/// **They come from the terminal palette on purpose, not from a second family.** The two are seen at once
+/// and a hand's width from each other; with two different sets of greens or reds, the screen would read
+/// as two applications stuck together. What changes with respect to the console is *who* chooses the color: here
+/// the contract vocabulary chooses it, not the program inside.
 impl Theme {
-    /// El fondo del panel de estado.
+    /// The background of the status panel.
     pub fn panel_background(&self) -> Color32 {
         self.panel_background
     }
 
-    /// El color de una línea del panel, según lo que el productor haya dicho de ella.
+    /// The color of a panel line, according to what the producer has said about it.
     ///
-    /// **`style` manda sobre `mark` cuando vienen los dos**, y esa precedencia es del contrato: dos de
-    /// los nueve ficheros reales del repo los combinan a propósito, para decir «esta línea es
-    /// información, y su color *es* el dato». Si `mark` ganara, ese color se perdería.
+    /// **`style` rules over `mark` when both come**, and that precedence is the contract's: two of
+    /// the nine real files in the repo combine them on purpose, to say "this line is
+    /// information, and its color *is* the data". If `mark` won, that color would be lost.
     ///
-    /// Sin ninguno de los dos, el color del texto normal de la consola: una línea sin adjetivos no es
-    /// una línea apagada.
+    /// Without either of the two, the color of the console's normal text: a line without adjectives is not
+    /// a muted line.
     pub fn panel_color(&self, mark: Option<Mark>, style: Option<Style>) -> Color32 {
         match (style, mark) {
             (Some(style), _) => self.by_style(style),
@@ -159,15 +156,15 @@ impl Theme {
         }
     }
 
-    /// Los siete estilos del contrato.
+    /// The seven styles of the contract.
     fn by_style(&self, style: Style) -> Color32 {
         match style {
             Style::Normal => self.foreground,
-            // Apagado es «esto está aquí por si acaso»: el mismo gesto que el atenuado del terminal,
-            // que ya significa eso mismo para el programa de dentro.
+            // Muted is "this is here just in case": the same gesture as the terminal's dim,
+            // which already means that same thing to the program inside.
             Style::Dim => self.toward_background(self.foreground),
-            // El título es lo único que se pinta más claro que el texto normal. No lleva color propio:
-            // un título de color competiría con las marcas, que sí lo usan para decir algo.
+            // The title is the only thing painted lighter than normal text. It carries no color of its own:
+            // a colored title would compete with the marks, which do use it to say something.
             Style::Title => self.palette[15],
             Style::Accent => self.palette[4],
             Style::Ok => self.palette[2],
@@ -176,11 +173,11 @@ impl Theme {
         }
     }
 
-    /// Las seis marcas del contrato.
+    /// The six marks of the contract.
     ///
-    /// **`done` y `pending` van apagadas, y las dos por la misma razón**: lo terminado y lo que ni ha
-    /// empezado son los dos estados en los que no hay nada que hacer. Lo que tiene que saltar a la vista
-    /// es `current` —dónde va la cosa— y `block` —qué la para—.
+    /// **`done` and `pending` go muted, and both for the same reason**: what is finished and what has not even
+    /// started are the two states in which there is nothing to do. What has to jump out
+    /// is `current` —where the thing is going— and `block` —what stops it—.
     fn by_mark(&self, mark: Mark) -> Color32 {
         match mark {
             Mark::Done => self.toward_background(self.palette[2]),
@@ -192,16 +189,16 @@ impl Theme {
         }
     }
 
-    /// El color con el que se pinta un reclamo de una división.
+    /// The color a pane's attention claim is painted with.
     ///
-    /// **Tabla propia, y no la de las marcas del cuerpo, aunque las dos vengan de la misma paleta.** La
-    /// de las marcas apaga `done` porque lo terminado es donde no queda nada que hacer; aquí `done`
-    /// dice lo contrario —terminó y **nadie lo ha mirado**—, así que reutilizarla apagaría justo lo que
-    /// reclama. Es la copia peligrosa de este hito y por eso está dicha.
+    /// **Its own table, and not the one for the body marks, even though both come from the same palette.** The
+    /// marks' table mutes `done` because what is finished is where nothing is left to do; here `done`
+    /// says the opposite —it finished and **nobody has looked at it**—, so reusing it would mute exactly what it
+    /// claims. It is the dangerous copy of this milestone and that is why it is said.
     ///
-    /// **Sin sostener es lo mismo atenuado**: el reclamo sigue ahí —la aplicación no esconde lo que su
-    /// productor dijo— pero nadie lo está sosteniendo, y eso se ve antes de leer nada. El detalle
-    /// —desde cuándo, o qué falló— lo dice la línea del aviso, que va justo debajo.
+    /// **Unbacked it is the same one dimmed**: the claim is still there —the application does not hide what its
+    /// producer said— but nobody is backing it, and that shows before reading anything. The detail
+    /// —since when, or what failed— is said by the notice line, which goes right below.
     pub fn attention_color(&self, class: Attention, backed: bool) -> Color32 {
         let color = match class {
             Attention::Wait => self.palette[3],
@@ -217,9 +214,9 @@ impl Theme {
 }
 
 impl Theme {
-    /// El color de pantalla que le toca a un color pedido por un programa.
+    /// The screen color that corresponds to a color asked for by a program.
     ///
-    /// No aplica las políticas de negrita ni de atenuado: para eso está [`Theme::with_attributes`].
+    /// It does not apply the bold or dim policies: that is what [`Theme::with_attributes`] is for.
     pub fn color(&self, c: TermColor) -> Color32 {
         match c {
             TermColor::Indexed(i) => self.indexed(i),
@@ -227,15 +224,12 @@ impl Theme {
             TermColor::Foreground => self.foreground,
             TermColor::Background => self.background,
             TermColor::Cursor => self.cursor,
-            // La variante atenuada solo la producen las ocho primeras entradas. Se enmascara en vez
-            // de indexar a pelo porque esta función la llama el pintor una vez por celda y un
-            // índice fuera de rango sería un pánico en mitad de un frame; la afirmación de
-            // depuración está para que ese error salga en los tests en vez de disfrazarse de negro.
+            // The dim variant is only produced by the first eight entries. It is masked instead
+            // of indexed raw because this function is called by the painter once per cell and an
+            // out-of-range index would be a panic in the middle of a frame; the debug
+            // assertion is there so that error surfaces in the tests instead of disguising itself as black.
             TermColor::Dim(i) => {
-                debug_assert!(
-                    i < 8,
-                    "la variante atenuada solo cubre las ocho primeras entradas"
-                );
+                debug_assert!(i < 8, "the dim variant only covers the first eight entries");
                 self.toward_background(self.palette[(i & 0b111) as usize])
             }
             TermColor::BrightForeground => self.palette[15],
@@ -243,17 +237,17 @@ impl Theme {
         }
     }
 
-    /// El color, ya con las dos políticas aplicadas.
+    /// The color, now with both policies applied.
     ///
-    /// **Quién decide a cuál de los dos colores de la celda se le aplican no es asunto de aquí.**
-    /// Con vídeo inverso, el color que el programa declaró como primer plano —y que es el que la
-    /// negrita y el atenuado describen— viaja en el campo del fondo. Quien pinta sabe eso; el tema
-    /// solo sabe en qué consisten las dos políticas.
+    /// **Which of the cell's two colors they apply to is not this place's business.**
+    /// With reverse video, the color the program declared as foreground —and which is the one
+    /// bold and dim describe— travels in the background field. The painter knows that; the theme
+    /// only knows what the two policies consist of.
     pub fn with_attributes(&self, c: TermColor, bold: bool, dim: bool) -> Color32 {
-        // La atenuación llega por dos caminos —como color propio y como atributo de la celda— y
-        // aquí se juntan, así que primero se normaliza a uno solo. Sin esto, un color que ya viene
-        // atenuado y además trae el atributo se apagaría dos veces, y la negrita no lo alcanzaría
-        // por quedar escondido tras una variante que ella no reconoce.
+        // Dimming arrives by two paths —as a color of its own and as a cell attribute— and
+        // here they meet, so it is first normalized to a single one. Without this, a color that already comes
+        // dimmed and also carries the attribute would be muted twice, and bold would not reach it
+        // because it would be hidden behind a variant it does not recognize.
         let (base, dim) = match c {
             TermColor::Dim(i) => (TermColor::Indexed(i & 0b111), true),
             TermColor::DimForeground => (TermColor::Foreground, true),
@@ -268,40 +262,40 @@ impl Theme {
         }
     }
 
-    /// El fondo por defecto, que es también el de la ventana entera.
+    /// The default background, which is also that of the whole window.
     pub fn background(&self) -> Color32 {
         self.background
     }
 
-    /// El color de las letras por defecto, para el texto que pinta la aplicación y no el programa.
+    /// The default color of the letters, for the text the application paints and not the program.
     pub fn foreground(&self) -> Color32 {
         self.foreground
     }
 
-    /// El color de la línea que separa dos consolas.
+    /// The color of the line that separates two consoles.
     pub fn divider(&self) -> Color32 {
         self.divider
     }
 
-    /// El color con el que se señala la consola a la que va el teclado.
+    /// The color that marks the console the keyboard goes to.
     pub fn focus(&self) -> Color32 {
         self.focus
     }
 
-    /// El color con el que se señala la consola sobre la que se soltaría la que se arrastra.
+    /// The color that marks the console the dragged one would be dropped onto.
     ///
-    /// **Sale del color del foco y no es un color nuevo**, porque dice lo mismo en otro tiempo verbal:
-    /// «aquí va a ir el teclado». Un color propio obligaría a elegirlo en los dos temas y a explicar en
-    /// qué se diferencia de éste, y la respuesta sería «en nada».
+    /// **It comes from the focus color and is not a new color**, because it says the same thing in another verb tense:
+    /// "the keyboard is going to go here". A color of its own would force choosing it in both themes and explaining
+    /// how it differs from this one, and the answer would be "in nothing".
     ///
-    /// Traslúcido porque se pinta **encima** de lo que la consola esté escribiendo: opaco taparía el
-    /// contenido justo cuando el usuario está decidiendo si soltar ahí.
+    /// Translucent because it is painted **on top of** whatever the console is writing: opaque would cover the
+    /// content just when the user is deciding whether to drop there.
     pub fn drop_target(&self) -> Color32 {
         let focus = self.focus;
         Color32::from_rgba_unmultiplied(focus.r(), focus.g(), focus.b(), DROP_TARGET_ALPHA)
     }
 
-    /// Acerca un color al fondo. Es lo que aquí significa «atenuado».
+    /// Moves a color toward the background. It is what "dimmed" means here.
     fn toward_background(&self, c: Color32) -> Color32 {
         mix(c, self.background, DIM_FACTOR)
     }
@@ -317,8 +311,8 @@ impl Theme {
                     CUBE_LEVELS[(n % 6) as usize],
                 )
             }
-            // Los veinticuatro grises, de casi negro a casi blanco. Ninguno de los dos extremos
-            // llega a serlo: para eso están las entradas 0 y 15.
+            // The twenty-four grays, from almost black to almost white. Neither of the two extremes
+            // reaches it: entries 0 and 15 are there for that.
             232..=255 => {
                 let v = 8 + (i - 232) * 10;
                 Color32::from_rgb(v, v, v)
@@ -327,11 +321,11 @@ impl Theme {
     }
 }
 
-/// **La negrita significa brillante.**
+/// **Bold means bright.**
 ///
-/// Es la convención que dan por supuesta los programas que usan negrita para destacar, y que hace
-/// legible un `ls` en color. Solo sube las ocho primeras entradas con nombre: un color exacto o una
-/// entrada del cubo ya es el color que el programa quiso, y aclararlo sería desobedecerle.
+/// It is the convention taken for granted by programs that use bold to stand out, and that makes
+/// a color `ls` legible. It only raises the first eight named entries: an exact color or a
+/// cube entry is already the color the program wanted, and lightening it would be disobeying it.
 fn brighten(c: TermColor) -> TermColor {
     match c {
         TermColor::Indexed(i) if i < 8 => TermColor::Indexed(i + 8),
@@ -340,7 +334,7 @@ fn brighten(c: TermColor) -> TermColor {
     }
 }
 
-/// Mezcla dos colores, con `p` como la parte que se lleva el segundo.
+/// Mixes two colors, with `p` as the share the second takes.
 fn mix(a: Color32, b: Color32, p: f32) -> Color32 {
     let channel = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * p).round() as u8;
     Color32::from_rgb(
@@ -358,35 +352,35 @@ mod tests {
         Theme::default()
     }
 
-    /// **La regla del contrato que es fácil leer al revés.** Su tabla describe `style` como algo «para
-    /// líneas sin `mark`», pero dos de los nueve ficheros reales del repo los combinan a propósito: la
-    /// marca dice qué **es** la línea y el estilo dice que su color *es* el dato. Si la marca ganara,
-    /// ese color se perdería sin que nadie se enterase.
+    /// **The contract rule that is easy to read backwards.** Its table describes `style` as something "for
+    /// lines without `mark`", but two of the nine real files in the repo combine them on purpose: the
+    /// mark says what the line **is** and the style says that its color *is* the data. If the mark won,
+    /// that color would be lost without anyone noticing.
     #[test]
-    fn el_estilo_manda_sobre_la_marca_cuando_vienen_los_dos() {
+    fn the_style_rules_over_the_mark_when_both_come() {
         let t = theme();
 
         assert_eq!(
             t.panel_color(Some(Mark::Info), Some(Style::Ok)),
             t.panel_color(None, Some(Style::Ok)),
-            "el color tiene que salir del estilo, no de la marca"
+            "the color has to come from the style, not from the mark"
         );
         assert_ne!(
             t.panel_color(Some(Mark::Info), Some(Style::Ok)),
             t.panel_color(Some(Mark::Info), None),
-            "con estilo y sin él no puede verse igual"
+            "with style and without it it cannot look the same"
         );
     }
 
     #[test]
-    fn una_linea_sin_marca_ni_estilo_se_pinta_como_el_texto_normal() {
+    fn a_line_without_mark_or_style_is_painted_like_normal_text() {
         assert_eq!(theme().panel_color(None, None), theme().foreground);
     }
 
-    /// Los trece nombres del contrato, cada uno con su color. Sin esto, devolver el mismo para todos
-    /// dejaría la suite verde y el panel en un solo tono.
+    /// The thirteen names of the contract, each with its color. Without this, returning the same one for all
+    /// would leave the suite green and the panel in a single tone.
     #[test]
-    fn las_seis_marcas_y_los_siete_estilos_no_se_pintan_todos_igual() {
+    fn the_six_marks_and_the_seven_styles_are_not_all_painted_the_same() {
         let t = theme();
         let marks = [
             Mark::Done,
@@ -406,9 +400,9 @@ mod tests {
             Style::Error,
         ];
 
-        // Se cuentan los colores **distintos** dentro de cada juego, y no se comparan entre juegos:
-        // `normal` y `info` valen el mismo a propósito —los dos son «texto sin adjetivos»— y exigir
-        // trece colores obligaría a inventar una diferencia que no significa nada.
+        // The **distinct** colors within each set are counted, and they are not compared across sets:
+        // `normal` and `info` are worth the same on purpose —both are "text without adjectives"— and requiring
+        // thirteen colors would force inventing a difference that means nothing.
         let from_marks: std::collections::HashSet<_> =
             marks.iter().map(|m| t.by_mark(*m)).collect();
         let from_styles: std::collections::HashSet<_> =
@@ -417,24 +411,24 @@ mod tests {
         assert_eq!(
             from_marks.len(),
             6,
-            "las seis marcas son distintas entre sí"
+            "the six marks are distinct from each other"
         );
-        assert_eq!(from_styles.len(), 7, "los siete estilos son distintos");
+        assert_eq!(from_styles.len(), 7, "the seven styles are distinct");
         assert_ne!(
             t.by_mark(Mark::Current),
             t.by_mark(Mark::Block),
-            "«en marcha» y «bloqueado» son lo que hay que distinguir de un vistazo"
+            "'in progress' and 'blocked' are what has to be told apart at a glance"
         );
     }
 
     #[test]
-    fn el_fondo_del_panel_se_distingue_del_de_la_consola() {
+    fn the_panel_background_is_told_apart_from_the_console_one() {
         let t = theme();
         assert_ne!(t.panel_background(), t.background());
     }
 
     #[test]
-    fn los_tres_colores_por_defecto_son_los_del_proyecto() {
+    fn the_three_default_colors_are_the_project_ones() {
         let t = theme();
         assert_eq!(
             t.color(TermColor::Background),
@@ -451,26 +445,30 @@ mod tests {
     }
 
     #[test]
-    fn el_divisor_y_el_foco_se_ven_y_se_distinguen_entre_si() {
+    fn the_divider_and_the_focus_show_and_are_told_apart_from_each_other() {
         let t = theme();
-        // Tres desigualdades, y cada una cubre una forma distinta de que esto quede inservible sin que
-        // nada falle: un divisor del color del fondo es un divisor invisible —dos consolas pegadas que
-        // se leen como una—, y un realce igual al divisor deja la ventana sin decir a cuál de las dos
-        // va el teclado, que es justo lo que el realce existe para decir.
-        assert_ne!(t.divider(), t.background(), "el divisor no se vería");
-        assert_ne!(t.focus(), t.background(), "el realce del foco no se vería");
+        // Three inequalities, and each covers a distinct way this becomes useless without
+        // anything failing: a divider the color of the background is an invisible divider —two consoles next to each other that
+        // read as one—, and a highlight equal to the divider leaves the window without saying which of the two
+        // the keyboard goes to, which is exactly what the highlight exists to say.
+        assert_ne!(t.divider(), t.background(), "the divider would not show");
+        assert_ne!(
+            t.focus(),
+            t.background(),
+            "the focus highlight would not show"
+        );
         assert_ne!(
             t.focus(),
             t.divider(),
-            "el realce no se distingue del divisor y van pegados"
+            "the highlight is not told apart from the divider and they go next to each other"
         );
     }
 
     #[test]
-    fn el_borde_entre_los_nombrados_y_el_cubo() {
+    fn the_border_between_the_named_ones_and_the_cube() {
         let t = theme();
-        // 15 es la última entrada con nombre; 16 es la primera del cubo, y es negro puro —no el
-        // fondo del tema—. Confundir estos dos es el error que este test existe para cazar.
+        // 15 is the last named entry; 16 is the first of the cube, and it is pure black —not the
+        // theme's background—. Confusing these two is the error this test exists to catch.
         assert_eq!(
             t.color(TermColor::Indexed(15)),
             Color32::from_rgb(0xFF, 0xFF, 0xFF)
@@ -482,9 +480,9 @@ mod tests {
     }
 
     #[test]
-    fn el_borde_entre_el_cubo_y_los_grises() {
+    fn the_border_between_the_cube_and_the_grays() {
         let t = theme();
-        // 231 es la última del cubo y es blanco puro; 232 es el primer gris y **no** es negro.
+        // 231 is the last of the cube and is pure white; 232 is the first gray and is **not** black.
         assert_eq!(
             t.color(TermColor::Indexed(231)),
             Color32::from_rgb(0xFF, 0xFF, 0xFF)
@@ -500,15 +498,15 @@ mod tests {
     }
 
     #[test]
-    fn el_cubo_reparte_los_canales_en_el_orden_correcto() {
+    fn the_cube_spreads_the_channels_in_the_correct_order() {
         let t = theme();
-        // 196 es el rojo puro del cubo: 196-16 = 180 = 5*36, así que rojo al máximo y los otros a
-        // cero. Si alguien invierte el orden de los canales, este es el test que se pone rojo.
+        // 196 is the pure red of the cube: 196-16 = 180 = 5*36, so red at maximum and the others at
+        // zero. If someone inverts the order of the channels, this is the test that goes red.
         assert_eq!(
             t.color(TermColor::Indexed(196)),
             Color32::from_rgb(0xFF, 0x00, 0x00)
         );
-        // 21 es azul puro: 21-16 = 5, el último nivel del canal de menor peso.
+        // 21 is pure blue: 21-16 = 5, the last level of the lowest-weight channel.
         assert_eq!(
             t.color(TermColor::Indexed(21)),
             Color32::from_rgb(0x00, 0x00, 0xFF)
@@ -516,34 +514,34 @@ mod tests {
     }
 
     #[test]
-    fn las_brillantes_cumplen_la_regla_con_la_que_se_escribieron() {
+    fn the_bright_ones_meet_the_rule_they_were_written_with() {
         let t = theme();
-        // El doc de la paleta afirma que las brillantes salen de acercar su color normal a blanco
-        // una cuarta parte. Una afirmación escrita y no comprobada se convierte en mentira en
-        // cuanto alguien retoca una entrada, así que aquí se comprueba.
-        // Quedan fuera las dos excepciones que el propio doc declara: el negro y el blanco
-        // brillantes vienen del prototipo, no de la regla.
+        // The palette doc claims that the bright ones come from moving their normal color a quarter of the way
+        // toward white. A claim written and not checked becomes a lie as
+        // soon as someone tweaks an entry, so here it is checked.
+        // The two exceptions the doc itself declares are left out: bright black and bright white
+        // come from the prototype, not from the rule.
         for i in 1..=6u8 {
             let normal = t.color(TermColor::Indexed(i));
             let bright = t.color(TermColor::Indexed(i + 8));
             assert_eq!(
                 bright,
                 mix(normal, Color32::WHITE, 0.25),
-                "la entrada brillante {} no sale de la regla",
+                "the bright entry {} does not come from the rule",
                 i + 8
             );
         }
     }
 
     #[test]
-    fn un_color_exacto_pasa_sin_tocarse() {
+    fn an_exact_color_passes_untouched() {
         let t = theme();
         let c = TermColor::Rgb { r: 1, g: 2, b: 3 };
         assert_eq!(t.color(c), Color32::from_rgb(1, 2, 3));
     }
 
     #[test]
-    fn la_negrita_sube_a_la_variante_brillante() {
+    fn bold_raises_to_the_bright_variant() {
         let t = theme();
         let red = TermColor::Indexed(1);
         assert_eq!(
@@ -561,9 +559,9 @@ mod tests {
     }
 
     #[test]
-    fn la_negrita_no_toca_lo_que_el_programa_eligio_a_mano() {
+    fn bold_does_not_touch_what_the_program_chose_by_hand() {
         let t = theme();
-        // Ni un color exacto ni una entrada del cubo se aclaran: ya son el color que se pidió.
+        // Neither an exact color nor a cube entry is lightened: they are already the color that was asked for.
         let exact = TermColor::Rgb {
             r: 10,
             g: 20,
@@ -578,7 +576,7 @@ mod tests {
             t.with_attributes(from_the_cube, true, false),
             Color32::from_rgb(0xFF, 0x00, 0x00)
         );
-        // Y una entrada que ya es brillante no vuelve a subir: la 9 no se convierte en la 17.
+        // And an entry that is already bright does not rise again: 9 does not become 17.
         assert_eq!(
             t.with_attributes(TermColor::Indexed(9), true, false),
             t.color(TermColor::Indexed(9))
@@ -586,14 +584,14 @@ mod tests {
     }
 
     #[test]
-    fn el_atenuado_acerca_el_color_al_fondo() {
+    fn dimming_moves_the_color_toward_the_background() {
         let t = theme();
-        // El rojo a medio camino de #1E1E1E.
+        // Red halfway to #1E1E1E.
         assert_eq!(
             t.with_attributes(TermColor::Indexed(1), false, true),
             Color32::from_rgb(0x77, 0x44, 0x35)
         );
-        // Y el fondo atenuado sigue siendo el fondo: no hay a dónde acercarse.
+        // And the dimmed background is still the background: there is nowhere to move toward.
         assert_eq!(
             t.with_attributes(TermColor::Background, false, true),
             t.color(TermColor::Background)
@@ -601,32 +599,32 @@ mod tests {
     }
 
     #[test]
-    fn la_variante_atenuada_de_la_libreria_da_lo_mismo_que_el_atributo() {
+    fn the_librarys_dim_variant_gives_the_same_as_the_attribute() {
         let t = theme();
-        // Son los dos caminos por los que llega lo mismo: el color `Dim(n)` que entrega el motor y
-        // el atributo de atenuado sobre el color normal. Si divergieran, la misma secuencia de
-        // escape se vería de dos colores distintos según por dónde entrara.
+        // They are the two paths the same thing arrives by: the `Dim(n)` color the engine delivers and
+        // the dim attribute on the normal color. If they diverged, the same escape
+        // sequence would look two different colors depending on which way it came in.
         for n in 0..8u8 {
             assert_eq!(
                 t.color(TermColor::Dim(n)),
                 t.with_attributes(TermColor::Indexed(n), false, true),
-                "el índice {n} no coincide por los dos caminos"
+                "index {n} does not match by the two paths"
             );
         }
     }
 
     #[test]
-    fn un_color_ya_atenuado_no_se_apaga_dos_veces() {
+    fn an_already_dimmed_color_is_not_muted_twice() {
         let t = theme();
-        // Quien pinte va a llamar a `with_attributes` con el color y los atributos de la celda tal
-        // como vienen, sin mirar si el color ya es de los atenuados. Si no se normalizara, el
-        // atenuado se aplicaría dos veces y el color quedaría a un cuarto del recorrido al fondo en
-        // vez de a la mitad — más apagado por haber entrado por la puerta de al lado.
+        // Whoever paints is going to call `with_attributes` with the color and the cell attributes just
+        // as they come, without looking at whether the color is already one of the dimmed ones. If it were not normalized, the
+        // dimming would be applied twice and the color would end up a quarter of the way to the background
+        // instead of halfway — more muted for having come in through the side door.
         for n in 0..8u8 {
             assert_eq!(
                 t.with_attributes(TermColor::Dim(n), false, true),
                 t.color(TermColor::Dim(n)),
-                "el índice {n} se apaga dos veces"
+                "index {n} is muted twice"
             );
         }
         assert_eq!(
@@ -636,11 +634,11 @@ mod tests {
     }
 
     #[test]
-    fn la_negrita_alcanza_a_un_color_que_ya_venia_atenuado() {
+    fn bold_reaches_a_color_that_already_came_dimmed() {
         let t = theme();
-        // Un rojo atenuado y en negrita sube a rojo brillante y luego se apaga, igual que si la
-        // atenuación hubiera llegado por el atributo. Sin normalizar, la negrita no lo tocaría: la
-        // variante atenuada no es una de las que sabe subir.
+        // A dimmed and bold red rises to bright red and then is muted, just as if the
+        // dimming had come through the attribute. Without normalizing, bold would not touch it: the
+        // dim variant is not one of the ones it knows how to raise.
         assert_eq!(
             t.with_attributes(TermColor::Dim(1), true, false),
             t.with_attributes(TermColor::Indexed(1), true, true)
@@ -652,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn el_primer_plano_tiene_sus_dos_variantes() {
+    fn the_foreground_has_its_two_variants() {
         let t = theme();
         assert_eq!(
             t.color(TermColor::BrightForeground),
@@ -662,8 +660,8 @@ mod tests {
             t.color(TermColor::DimForeground),
             Color32::from_rgb(0x63, 0x63, 0x63)
         );
-        // La negrita sobre el primer plano por defecto lleva a su variante brillante, no a la
-        // entrada 8 de la paleta, que es el gris apagado.
+        // Bold on the default foreground leads to its bright variant, not to
+        // entry 8 of the palette, which is the muted gray.
         assert_eq!(
             t.with_attributes(TermColor::Foreground, true, false),
             t.color(TermColor::BrightForeground)
@@ -671,10 +669,10 @@ mod tests {
     }
 
     #[test]
-    fn negrita_y_atenuado_a_la_vez_aclaran_y_luego_apagan() {
+    fn bold_and_dim_at_once_lighten_and_then_mute() {
         let t = theme();
-        // El orden importa y está fijado: primero se sube a brillante, luego se apaga. Al revés
-        // daría otro color, y dos capas que lo hicieran en distinto orden no coincidirían.
+        // The order matters and is fixed: first it rises to bright, then it is muted. The other way around
+        // would give another color, and two layers that did it in a different order would not match.
         let expected = mix(
             Color32::from_rgb(0xDB, 0x8F, 0x79),
             Color32::from_rgb(0x1E, 0x1E, 0x1E),
@@ -687,60 +685,60 @@ mod tests {
     }
 
     #[test]
-    fn ningun_indice_de_la_paleta_de_256_hace_estallar_la_tabla() {
+    fn no_index_of_the_256_palette_blows_up_the_table() {
         let t = theme();
         for i in 0..=255u8 {
             let _ = t.color(TermColor::Indexed(i));
         }
-        // La variante atenuada solo recorre su rango válido: pedirla fuera de las ocho primeras
-        // entradas es un error de programación, y por eso lo caza una afirmación de depuración en
-        // vez de devolver un color cualquiera.
+        // The dim variant only runs over its valid range: asking for it outside the first eight
+        // entries is a programming error, and that is why a debug assertion catches it
+        // instead of returning any old color.
         for n in 0..8u8 {
             let _ = t.color(TermColor::Dim(n));
         }
     }
 
-    /// Los tres con color propio. Devolviendo el mismo para todos, la fila del reclamo diría «reclama»
-    /// y callaría **cuál**, que es lo único que decide si hay que ir corriendo o no.
+    /// The three with a color of their own. Returning the same one for all, the attention row would say "it claims"
+    /// and keep silent about **which**, which is the only thing that decides whether one has to go running or not.
     #[test]
-    fn los_tres_reclamos_no_se_pintan_todos_igual() {
+    fn the_three_attention_claims_are_not_all_painted_the_same() {
         let t = theme();
         let colors = Attention::ALL.map(|class| t.attention_color(class, true));
 
         for (i, one) in colors.iter().enumerate() {
             for other in &colors[i + 1..] {
-                assert_ne!(one, other, "dos reclamos comparten color: {colors:?}");
+                assert_ne!(one, other, "two attention claims share color: {colors:?}");
             }
         }
     }
 
-    /// **La copia peligrosa de este hito, atada donde se nota.** La tabla de las marcas del cuerpo
-    /// apaga `done` porque lo terminado es donde ya no queda nada que hacer; aquí `done` dice lo
-    /// contrario —terminó y **nadie lo ha mirado**—, así que reutilizarla apagaría justo lo que
-    /// reclama. Con `by_mark` de por medio esta prueba cae, y sin ella la suite seguiría verde con el
-    /// reclamo más silencioso de los tres pintado de gris.
+    /// **The dangerous copy of this milestone, tied down where it shows.** The body marks' table
+    /// mutes `done` because what is finished is where nothing is left to do; here `done` says the
+    /// opposite —it finished and **nobody has looked at it**—, so reusing it would mute exactly what it
+    /// claims. With `by_mark` in the middle this test falls, and without it the suite would stay green with the
+    /// quietest attention claim of the three painted gray.
     #[test]
-    fn el_reclamo_terminado_no_se_pinta_apagado_como_su_marca_del_cuerpo() {
+    fn the_finished_attention_claim_is_not_painted_muted_like_its_body_mark() {
         let t = theme();
 
         assert_ne!(
             t.attention_color(Attention::Done, true),
             t.panel_color(Some(Mark::Done), None),
-            "el reclamo terminado se está pintando con la tabla del cuerpo, que lo apaga"
+            "the finished attention claim is being painted with the body table, which mutes it"
         );
         assert_eq!(
             t.attention_color(Attention::Done, true),
             t.palette[2],
-            "sostenido se pinta con el color entero, sin atenuar"
+            "backed it is painted with the whole color, undimmed"
         );
     }
 
-    /// **Cada clase clavada a su color, y no solo «los tres son distintos».** Las pruebas del pintado
-    /// comparan contra esta misma función, así que cruzar el ámbar de `wait` con el rojo de `block` —o
-    /// pintar `wait` con el gris del texto normal, que es dejar de alarmar— pasaba entera la suite. Es
-    /// el disfraz de siempre: afirmar sobre el sitio donde se apunta el valor en vez de sobre el valor.
+    /// **Each class nailed to its color, and not just "the three are distinct".** The painting tests
+    /// compare against this very function, so crossing the amber of `wait` with the red of `block` —or
+    /// painting `wait` with the gray of normal text, which is to stop alarming— passed the whole suite. It is
+    /// the usual disguise: asserting on the place where the value is recorded instead of on the value.
     #[test]
-    fn cada_reclamo_lleva_el_color_que_la_decision_le_asigno() {
+    fn each_attention_claim_carries_the_color_the_decision_assigned_it() {
         let t = theme();
 
         assert_eq!(t.attention_color(Attention::Wait, true), t.palette[3]);
@@ -748,31 +746,31 @@ mod tests {
         assert_eq!(t.attention_color(Attention::Done, true), t.palette[2]);
     }
 
-    /// Y sin sostener es **ese mismo color atenuado**, no otro: el atenuado dice «nadie lo sostiene»,
-    /// no «es otra cosa». Con un color propio para el rancio, la clase dejaría de leerse.
+    /// And unbacked it is **that same color dimmed**, not another: dimming says "nobody backs it",
+    /// not "it is something else". With a color of its own for the stale one, the class would stop being read.
     #[test]
-    fn un_reclamo_sin_sostener_es_su_propio_color_atenuado() {
+    fn an_unbacked_attention_claim_is_its_own_color_dimmed() {
         let t = theme();
 
         for class in Attention::ALL {
             assert_eq!(
                 t.attention_color(class, false),
                 t.toward_background(t.attention_color(class, true)),
-                "{class:?} sin sostener no es su color apagado"
+                "{class:?} unbacked is not its muted color"
             );
         }
     }
 
-    /// Sostenido y sin sostener no pueden verse igual: el atenuado **es** lo que dice que no hay nadie
-    /// detrás, y con los dos colores iguales la ficha mentiría sobre lo fresco que es el reclamo.
+    /// Backed and unbacked cannot look the same: dimming **is** what says nobody is
+    /// behind it, and with the two colors equal the tab would lie about how fresh the attention claim is.
     #[test]
-    fn un_reclamo_sin_sostener_se_ve_distinto_del_mismo_sostenido() {
+    fn an_unbacked_attention_claim_looks_different_from_the_same_one_backed() {
         let t = theme();
         for class in Attention::ALL {
             assert_ne!(
                 t.attention_color(class, true),
                 t.attention_color(class, false),
-                "{class:?} se ve igual lo sostenga alguien o no"
+                "{class:?} looks the same whether someone backs it or not"
             );
         }
     }

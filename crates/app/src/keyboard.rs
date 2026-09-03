@@ -1,53 +1,53 @@
-//! Qué bytes manda al programa cada tecla.
+//! Which bytes each key sends to the program.
 //!
-//! Es una función pura de un evento de la ventana a los bytes que un terminal enviaría. No escribe
-//! en ningún sitio: quien los mande es el bucle, y por dónde los mande es el puente.
+//! It is a pure function from a window event to the bytes a terminal would send. It writes
+//! nowhere: the one that sends them is the loop, and where it sends them through is the bridge.
 //!
-//! **Dónde se corta este hito, y por qué.** Quedan fuera Alt, las teclas de función y el teclado
-//! numérico. Ninguna hace falta para escribir órdenes en un shell ni para moverse por un editor,
-//! que es lo que el hito tiene que poder demostrar; y las tres arrastran una decisión que aquí no
-//! toca tomar —Alt antepone un escape a lo que envía la tecla, y las otras dos cambian de bytes
-//! según el modo en que esté el programa—. Meterlas sin poder verlas funcionando sería escribir
-//! tablas a ciegas. Lo que queda fuera devuelve silencio, nunca un byte aproximado: un byte
-//! equivocado el programa de dentro lo entiende como otra tecla, y eso es peor que no recibir nada.
+//! **Where this milestone stops, and why.** Alt, the function keys and the numeric
+//! keypad are left out. None of them is needed to type commands in a shell or to move around an editor,
+//! which is what the milestone has to be able to demonstrate; and the three of them drag along a decision that is not
+//! the one to make here —Alt prepends an escape to what the key sends, and the other two change their bytes
+//! depending on the mode the program is in—. Adding them without being able to see them working would be writing
+//! tables blind. What is left out returns silence, never an approximate byte: a wrong
+//! byte is understood by the program inside as a different key, and that is worse than receiving nothing.
 
 use eframe::egui::{Event, Key, Modifiers};
 use std::borrow::Cow;
 
-/// Los bytes que le corresponden a un evento, o nada si ese evento no se traduce.
+/// The bytes that correspond to an event, or nothing if that event does not translate.
 pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
     match event {
-        // El texto ya viene resuelto por el sistema: acentos, teclas muertas y métodos de entrada
-        // incluidos. Traducirlo desde la tecla física en vez de desde aquí sería rehacer mal el
-        // trabajo del escritorio.
+        // The text already comes resolved by the system: accents, dead keys and input methods
+        // included. Translating it from the physical key instead of from here would be badly redoing
+        // the desktop's work.
         Event::Text(text) if !text.is_empty() => Some(Cow::Owned(text.as_bytes().to_vec())),
 
-        // **Estas tres teclas no llegan como teclas.** La capa que traduce los eventos del sistema
-        // operativo mira Ctrl+C, Ctrl+X y Ctrl+V *antes* de emitir nada y las convierte en copiar,
-        // cortar y pegar, sin emitir el evento de tecla. En un escritorio normal eso es lo que se
-        // espera; en un terminal, Ctrl+C es la forma de interrumpir un programa colgado, así que
-        // hay que recogerlas por esta puerta o no interrumpen nada.
+        // **These three keys do not arrive as keys.** The layer that translates the operating
+        // system's events looks at Ctrl+C, Ctrl+X and Ctrl+V *before* emitting anything and turns them
+        // into copy, cut and paste, without emitting the key event. On a normal desktop that is what is
+        // expected; in a terminal, Ctrl+C is the way to interrupt a hung program, so
+        // they have to be caught through this door or nothing gets interrupted.
         //
-        // **Lo que esto cuesta, dicho claro:** mientras el portapapeles no exista, en esta ventana
-        // no se puede copiar. Estos eventos no traen los modificadores, así que desde aquí no hay
-        // forma de distinguir Ctrl+C de Ctrl+Mayúsculas+C —que es como se copia en un terminal—, y
-        // las dos acaban interrumpiendo. Quien traiga el portapapeles tendrá que decidirlo antes,
-        // en el bucle, donde el estado de los modificadores sí está disponible.
+        // **What this costs, said plainly:** as long as the clipboard does not exist, in this window
+        // you cannot copy. These events do not carry the modifiers, so from here there is no
+        // way to tell Ctrl+C from Ctrl+Shift+C —which is how you copy in a terminal—, and
+        // both end up interrupting. Whoever brings the clipboard will have to decide it earlier,
+        // in the loop, where the modifier state is indeed available.
         Event::Copy => Some(Cow::Borrowed(&[3])),
         Event::Cut => Some(Cow::Borrowed(&[24])),
-        // **Aquí llegan los dos atajos, y por esta puerta son indistinguibles.** El escritorio emite
-        // el mismo `Paste` para Ctrl+V y para Ctrl+Mayúsculas+V, sin modificadores. Quien decide cuál
-        // es cuál es el bucle, que reconstruye los modificadores recorriendo los eventos en orden y
-        // llama a [`paste`] cuando toca; lo que llegue hasta aquí es el caso sin Mayúsculas.
+        // **The two shortcuts arrive here, and through this door they are indistinguishable.** The desktop emits
+        // the same `Paste` for Ctrl+V and for Ctrl+Shift+V, with no modifiers. The one that decides which
+        // is which is the loop, which reconstructs the modifiers by walking the events in order and
+        // calls [`paste`] when appropriate; what reaches here is the case without Shift.
         //
-        // Y ese caso **no pega**: Ctrl+V vale en un terminal lo que vale el byte de control, que es
-        // «lo siguiente, literal» para un shell y el bloque visual para vim. Robárselo para pegar
-        // sería quitar dos cosas que se usan a diario. Que un programa de dentro decida que para él
-        // ese byte significa pegar —Claude lo hace— es asunto suyo, y así sigue funcionando.
+        // And that case **does not paste**: Ctrl+V is worth in a terminal what the control byte is worth, which is
+        // «the next thing, literal» for a shell and the visual block for vim. Stealing it to paste
+        // would be removing two things that are used daily. That a program inside decides that for it
+        // that byte means paste —Claude does— is its own business, and it keeps working that way.
         Event::Paste(_) => Some(Cow::Borrowed(&[22])),
 
-        // Soltar una tecla no manda nada. La repetición de mantenerla pulsada sí: es lo que hace
-        // que dejar apretada una flecha mueva el cursor.
+        // Releasing a key sends nothing. The repeat of holding it down does: it is what makes
+        // holding an arrow down move the cursor.
         Event::Key {
             key,
             pressed: true,
@@ -59,76 +59,76 @@ pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
     }
 }
 
-/// Lo que se le manda al programa cuando se pega texto de verdad.
+/// What is sent to the program when text is really pasted.
 ///
-/// `bracketed` es lo que el programa de dentro haya pedido: con él, el texto va rodeado de las dos
-/// secuencias que dicen «esto viene pegado», y un shell que las entiende lo deja escrito en vez de
-/// ejecutarlo línea a línea.
+/// `bracketed` is what the program inside has requested: with it, the text goes surrounded by the two
+/// sequences that say «this comes pasted», and a shell that understands them leaves it written instead of
+/// executing it line by line.
 ///
-/// **Los saltos de línea salen como retorno de carro**, igual que la tecla Enter y por la misma
-/// razón: es lo que un terminal envía. Pegar «a⏎b» tiene que hacer exactamente lo que teclear a,
-/// Enter, b. Aquí solo hay `\n` que convertir, porque el escritorio ya normaliza `\r\n` antes de
-/// entregarlo.
+/// **Line breaks come out as carriage return**, just like the Enter key and for the same
+/// reason: it is what a terminal sends. Pasting «a⏎b» has to do exactly what typing a,
+/// Enter, b does. Here there is only `\n` to convert, because the desktop already normalizes `\r\n` before
+/// delivering it.
 ///
-/// **Del texto se quitan todos los caracteres de control menos el tabulador y los saltos de línea**,
-/// y hacen falta las dos mitades de esa frase.
+/// **All control characters except the tab and line breaks are removed from the text**,
+/// and both halves of that sentence are needed.
 ///
-/// La primera razón es el envoltorio. Un portapapeles copiado de cualquier sitio puede traer su
-/// secuencia de cierre escondida; si se colase, cerraría la marca por su cuenta y lo que viniera
-/// detrás llegaría como si lo hubiera tecleado el usuario — **ejecutándose sin Enter**, que es justo
-/// lo que la marca existe para impedir. El motor de terminal no filtra nada: se comprobó, y no hay
-/// una sola mención de estas secuencias en toda la caja.
+/// The first reason is the wrapper. A clipboard copied from anywhere can bring its
+/// closing sequence hidden; if it slipped through, it would close the mark on its own and whatever came
+/// behind would arrive as if the user had typed it — **executing without Enter**, which is exactly
+/// what the mark exists to prevent. The terminal engine filters nothing: it was checked, and there is not
+/// a single mention of these sequences in the whole crate.
 ///
-/// **Y quitar solo esa secuencia no basta, comprobado con un ataque que funcionaba.** Buscar y borrar
-/// hace una pasada sobre el original y no vuelve a mirar lo que deja: con `ESC[2` + el cierre + `01~`,
-/// la única aparición está en medio, y al borrarla **los trozos de los lados se pegan y forman un
-/// cierre nuevo** que ya nadie ve.
+/// **And removing only that sequence is not enough, checked with an attack that worked.** Search-and-delete
+/// makes one pass over the original and does not look again at what it leaves: with `ESC[2` + the closing + `01~`,
+/// the only occurrence is in the middle, and on deleting it **the pieces on the sides join and form a
+/// new closing** that no one sees any more.
 ///
-/// **La segunda razón es peor, y el envoltorio no protege de ella en absoluto.** Los caracteres de
-/// control los procesa **la disciplina de línea del núcleo**, que ve los bytes *antes* que el
-/// programa: un `0x03` en el portapapeles manda una interrupción al proceso en primer plano, un
-/// `0x1a` suspende el shell y deja la división con pinta de muerta, un `0x1c` provoca un volcado, y
-/// un `0x04` cierra la entrada — y si se cierran las dos consolas, la ventana entera. Marcar el
-/// pegado no cambia nada de eso, porque el envoltorio es cosa de la aplicación de dentro y el núcleo
-/// actúa primero. Es por esto que `xterm` y `VTE` filtran los controles del pegado desde hace años.
+/// **The second reason is worse, and the wrapper protects from it not at all.** Control characters
+/// are processed by **the kernel's line discipline**, which sees the bytes *before* the
+/// program: a `0x03` in the clipboard sends an interrupt to the foreground process, a
+/// `0x1a` suspends the shell and leaves the pane looking dead, a `0x1c` triggers a dump, and
+/// a `0x04` closes the input — and if the two consoles get closed, the whole window. Marking the
+/// paste changes none of that, because the wrapper is a matter for the application inside and the kernel
+/// acts first. It is for this that `xterm` and `VTE` have filtered paste's controls for years.
 ///
-/// **Lo que cuesta, dicho claro:** un texto con secuencias de color pierde sus escapes y el resto se
-/// queda como texto corriente — pegar un volcado coloreado deja `[32mok[0m` en la línea. Es lo mismo
-/// que hace `xterm` con su comportamiento por defecto, y se acepta por la misma razón: desde aquí no
-/// hay forma de distinguir el control que el usuario quería del que le colaron, y un terminal cuyo
-/// pegado puede ejecutar o suspender es peor que uno que pega en texto plano.
+/// **What it costs, said plainly:** a text with color sequences loses its escapes and the rest
+/// stays as plain text — pasting a colored dump leaves `[32mok[0m` on the line. It is the same
+/// that `xterm` does with its default behavior, and it is accepted for the same reason: from here there is no
+/// way to tell the control the user wanted from the one slipped in, and a terminal whose
+/// paste can execute or suspend is worse than one that pastes as plain text.
 ///
-/// Se filtra **también cuando no se envuelve**: el modo se consulta al componer y el programa puede
-/// haberlo cambiado justo después; y el peligro del núcleo no depende del envoltorio.
+/// It is filtered **also when it is not wrapped**: the mode is consulted when composing and the program may
+/// have changed it right after; and the kernel's danger does not depend on the wrapper.
 pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
     const OPENS: &[u8] = b"\x1b[200~";
     const CLOSES: &[u8] = b"\x1b[201~";
 
-    // Se compone de una pasada y con la reserva hecha: el portapapeles puede ser de megabytes y esto
-    // corre en el hilo que pinta.
+    // It is composed in one pass and with the reservation made: the clipboard can be megabytes and this
+    // runs on the thread that paints.
     let mut body = Vec::with_capacity(text.len() + OPENS.len() + CLOSES.len());
     if bracketed {
         body.extend_from_slice(OPENS);
     }
     let before = body.len();
 
-    // **Cómo sale un salto de línea depende de si hay marca, y meter la pata aquí se ve en pantalla.**
+    // **How a line break comes out depends on whether there is a mark, and slipping up here shows on screen.**
     //
-    // *Sin marca*, el programa no puede distinguir lo pegado de lo tecleado, así que hay que imitar la
-    // tecla: Enter manda **retorno de carro**, y pegar «a, salto, b» tiene que hacer lo mismo que
-    // teclear a, Enter, b.
+    // *Without a mark*, the program cannot tell the pasted from the typed, so the key has to be
+    // imitated: Enter sends **carriage return**, and pasting «a, break, b» has to do the same as
+    // typing a, Enter, b.
     //
-    // *Con marca*, el texto va **tal cual**: el programa sabe que es un pegado y decide él qué hacer
-    // con los saltos —un shell moderno deja las dos líneas escritas sin ejecutar ninguna—. Mandarle
-    // ahí un retorno de carro es mandarle **un carácter de control dentro de un texto**, y lo que hace
-    // es insertarlo literal: aparece un cuadro en medio de la orden y `echo` lo imprime. Comprobado en
-    // pantalla, que es como se descubrió.
+    // *With a mark*, the text goes **as is**: the program knows it is a paste and it decides what to do
+    // with the breaks —a modern shell leaves the two lines written without executing either—. Sending it
+    // there a carriage return is sending it **a control character inside a text**, and what it does
+    // is insert it literally: a box appears in the middle of the command and `echo` prints it. Checked on
+    // screen, which is how it was discovered.
     let newline = if bracketed { b'\n' } else { b'\r' };
 
     for byte in text.bytes() {
         match byte {
-            // El escritorio ya normaliza los pares antes de entregarlo, así que un retorno suelto que
-            // llegue aquí venía solo y vale lo mismo que un salto.
+            // The desktop already normalizes the pairs before delivering it, so a lone carriage return that
+            // arrives here came alone and is worth the same as a break.
             b'\n' | b'\r' => body.push(newline),
             b'\t' => body.push(b'\t'),
             0x00..=0x1f | 0x7f => {}
@@ -136,8 +136,8 @@ pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
         }
     }
 
-    // Sin nada que mandar no se manda ni la marca: un envoltorio vacío es ruido que el programa de
-    // dentro tiene que interpretar para nada.
+    // With nothing to send not even the mark is sent: an empty wrapper is noise that the program
+    // inside has to interpret for nothing.
     if body.len() == before {
         return Vec::new();
     }
@@ -149,9 +149,9 @@ pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
 }
 
 fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
-    // Alt y la tecla de comando de macOS quedan fuera del hito, y «fuera» significa silencio: Alt
-    // antepone un escape, así que mandar el byte pelado no sería una aproximación, sería otra
-    // tecla. Mayúsculas sí pasa, porque no cambia el código de control — es lo que hace `xterm`.
+    // Alt and the macOS command key are left out of the milestone, and «out» means silence: Alt
+    // prepends an escape, so sending the bare byte would not be an approximation, it would be a different
+    // key. Shift does pass, because it does not change the control code — it is what `xterm` does.
     if modifiers.alt || modifiers.mac_cmd {
         return None;
     }
@@ -160,23 +160,23 @@ fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
     {
         return Some(Cow::Owned(vec![control_byte]));
     }
-    // Si Ctrl acompaña a algo que no es una letra, se cae a la tabla de siempre en vez de callar:
-    // Ctrl+Enter manda retorno igual que Enter, y quedarse mudo sería una tecla muerta.
+    // If Ctrl accompanies something that is not a letter, it falls to the usual table instead of going silent:
+    // Ctrl+Enter sends carriage return just like Enter, and staying mute would be a dead key.
     let bytes_out: &'static [u8] = match key {
-        // Retorno de carro, no salto de línea: es lo que envía un terminal, y lo que el programa
-        // de dentro traduce según le convenga.
+        // Carriage return, not line break: it is what a terminal sends, and what the program
+        // inside translates as suits it.
         Key::Enter => b"\r",
-        // Con Mayúsculas, Tab es otra tecla: retrocede la tabulación en vez de avanzarla, y tiene
-        // su propia secuencia. Mandar el tabulador de siempre movería el foco al revés de como el
-        // programa lo pidió.
+        // With Shift, Tab is a different key: it backtabs instead of advancing, and it has
+        // its own sequence. Sending the usual tab would move the focus the opposite of how the
+        // program asked.
         Key::Tab if modifiers.shift => b"\x1b[Z",
         Key::Tab => b"\t",
-        // Los terminales modernos mandan borrar, no retroceso. Con el otro byte, el shell borra
-        // pero muchos editores no.
+        // Modern terminals send delete, not backspace. With the other byte, the shell deletes
+        // but many editors do not.
         Key::Backspace => &[0x7F],
         Key::Escape => &[0x1B],
-        // Las cuatro flechas en modo normal. Un programa puede pedir el modo de aplicación, en el
-        // que cambian de forma; eso queda fuera de este hito y está escrito arriba.
+        // The four arrows in normal mode. A program can request application mode, in which
+        // they change form; that is out of this milestone and is written above.
         Key::ArrowUp => b"\x1b[A",
         Key::ArrowDown => b"\x1b[B",
         Key::ArrowRight => b"\x1b[C",
@@ -186,15 +186,15 @@ fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
     Some(Cow::Borrowed(bytes_out))
 }
 
-/// Ctrl con una letra da los códigos de control del 1 al 26.
+/// Ctrl with a letter gives the control codes from 1 to 26.
 ///
-/// Es la regla de siempre —la letra menos sesenta y cuatro— y es la que hace que Ctrl+D cierre la
-/// entrada y Ctrl+Z suspenda.
+/// It is the usual rule —the letter minus sixty-four— and it is the one that makes Ctrl+D close the
+/// input and Ctrl+Z suspend.
 ///
-/// Las veintiséis van escritas una a una, y no sacadas del nombre de la tecla, aunque ese nombre
-/// resulte ser hoy la propia letra: ese texto está pensado para enseñárselo a una persona en un
-/// menú de atajos, no es un contrato. Si mañana cambia, un byte de control cambiaría con él sin
-/// que nada dejara de compilar.
+/// The twenty-six are written one by one, and not taken from the key's name, even though that name
+/// happens to be the letter itself today: that text is meant to be shown to a person in a
+/// shortcut menu, it is not a contract. If it changes tomorrow, a control byte would change with it without
+/// anything failing to compile.
 fn with_ctrl(key: Key) -> Option<u8> {
     let control_byte = match key {
         Key::A => 1,
@@ -256,31 +256,31 @@ mod tests {
     }
 
     #[test]
-    fn el_texto_viaja_tal_cual_en_utf8() {
+    fn the_text_travels_as_is_in_utf8() {
         assert_eq!(text("ls"), Some(b"ls".to_vec()));
-        // Un carácter que no es ASCII ocupa varios bytes y tiene que salir entero.
-        assert_eq!(text("ñ"), Some(vec![0xC3, 0xB1]), "la eñe son dos bytes");
+        // A character that is not ASCII takes several bytes and has to come out whole.
+        assert_eq!(text("ñ"), Some(vec![0xC3, 0xB1]), "the ñ is two bytes");
     }
 
     #[test]
-    fn el_texto_vacio_es_nada_que_mandar_y_no_una_lista_vacia() {
-        // Devolver algo vacío obligaría a quien llame a distinguir «no hay nada que mandar» de «no
-        // se traduce», que son la misma decisión para él.
+    fn the_empty_text_is_nothing_to_send_and_not_an_empty_list() {
+        // Returning something empty would force the caller to tell «there is nothing to send» from «it
+        // does not translate», which are the same decision for it.
         assert_eq!(text(""), None);
     }
 
     #[test]
-    fn las_cuatro_teclas_de_control_basicas() {
-        // Retorno de carro, no salto de línea.
+    fn the_four_basic_control_keys() {
+        // Carriage return, not line break.
         assert_eq!(press(Key::Enter), Some(vec![0x0D]));
         assert_eq!(press(Key::Tab), Some(vec![0x09]));
-        // Borrar, no retroceso: con 0x08 el shell borra pero muchos editores no.
+        // Delete, not backspace: with 0x08 the shell deletes but many editors do not.
         assert_eq!(press(Key::Backspace), Some(vec![0x7F]));
         assert_eq!(press(Key::Escape), Some(vec![0x1B]));
     }
 
     #[test]
-    fn las_flechas_van_como_secuencia_de_escape() {
+    fn the_arrows_go_as_an_escape_sequence() {
         assert_eq!(press(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
         assert_eq!(press(Key::ArrowDown), Some(b"\x1b[B".to_vec()));
         assert_eq!(press(Key::ArrowRight), Some(b"\x1b[C".to_vec()));
@@ -288,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn las_veintiseis_letras_caen_en_su_sitio_y_ninguna_se_sale() {
+    fn the_twenty_six_letters_land_in_their_place_and_none_strays() {
         let letters = [
             Key::A,
             Key::B,
@@ -322,53 +322,53 @@ mod tests {
             assert_eq!(
                 press_with_ctrl(*key),
                 Some(vec![expected]),
-                "la letra en la posición {i} no da su código de control"
+                "the letter at position {i} does not give its control code"
             );
         }
-        // Los dos que se usan a diario, nombrados para que se lea qué está en juego.
-        assert_eq!(press_with_ctrl(Key::D), Some(vec![4]), "cierra la entrada");
-        assert_eq!(press_with_ctrl(Key::Z), Some(vec![26]), "suspende");
+        // The two used daily, named so what is at stake reads clearly.
+        assert_eq!(press_with_ctrl(Key::D), Some(vec![4]), "closes the input");
+        assert_eq!(press_with_ctrl(Key::Z), Some(vec![26]), "suspends");
     }
 
     #[test]
-    fn interrumpir_cortar_y_pegar_llegan_por_su_propia_puerta() {
-        // La capa de debajo se queda con Ctrl+C, Ctrl+X y Ctrl+V y las convierte en copiar, cortar
-        // y pegar antes de emitir tecla ninguna. Si este caso desapareciera, **Ctrl+C dejaría de
-        // interrumpir** y ningún test de teclas lo notaría.
+    fn interrupt_cut_and_paste_arrive_through_their_own_door() {
+        // The layer below keeps Ctrl+C, Ctrl+X and Ctrl+V and turns them into copy, cut
+        // and paste before emitting any key. If this case disappeared, **Ctrl+C would stop
+        // interrupting** and no key test would notice.
         assert_eq!(
             bytes(&Event::Copy).map(|b| b.into_owned()),
             Some(vec![3]),
-            "Ctrl+C tiene que seguir interrumpiendo"
+            "Ctrl+C has to keep interrupting"
         );
         assert_eq!(bytes(&Event::Cut).map(|b| b.into_owned()), Some(vec![24]));
         assert_eq!(
-            bytes(&Event::Paste("lo que hubiera".into())).map(|b| b.into_owned()),
+            bytes(&Event::Paste("whatever there was".into())).map(|b| b.into_owned()),
             Some(vec![22]),
-            "pegar de verdad es de otro hito; aquí vale lo que vale en un terminal"
+            "real pasting is for another milestone; here it is worth what it is worth in a terminal"
         );
     }
 
     #[test]
-    fn una_tecla_de_letra_por_si_sola_no_manda_nada() {
-        // La capa de debajo emite **dos** eventos por cada pulsación normal: la tecla y el texto
-        // que produce. Si la tabla de teclas contestara también a las letras, cada carácter que
-        // escribiera el usuario llegaría por duplicado al programa de dentro. El texto es el que
-        // manda, y la tecla tiene que callar.
+    fn a_letter_key_on_its_own_sends_nothing() {
+        // The layer below emits **two** events for each normal keypress: the key and the text
+        // it produces. If the key table also answered the letters, every character the
+        // user typed would arrive doubled at the program inside. The text is the one that
+        // rules, and the key has to stay silent.
         assert_eq!(press(Key::A), None);
         assert_eq!(press(Key::Z), None);
         assert_eq!(press(Key::Space), None);
         assert_eq!(press(Key::Num0), None);
-        // Y con mayúsculas igual: la «A» también viaja como texto.
+        // And with shift the same: the «A» also travels as text.
         assert_eq!(chord_of(Key::A, Modifiers::SHIFT), None);
     }
 
     #[test]
-    fn el_control_de_linux_y_windows_viaja_ademas_en_command() {
-        // Fuera de macOS, Ctrl llega marcado en los dos sitios a la vez. Confundir ese `command`
-        // con la tecla de comando de macOS **dejaría a Linux y Windows sin ningún Ctrl**.
+    fn the_ctrl_of_linux_and_windows_also_travels_in_command() {
+        // Outside macOS, Ctrl arrives marked in both places at once. Confusing that `command`
+        // with the macOS command key **would leave Linux and Windows without any Ctrl**.
         //
-        // Se prueba con la D y no con la C, la X o la V: esas tres nunca llegan como tecla porque
-        // la capa de debajo las convierte antes en copiar, cortar y pegar.
+        // It is tested with D and not with C, X or V: those three never arrive as a key because
+        // the layer below turns them first into copy, cut and paste.
         let linux_ctrl = Modifiers {
             ctrl: true,
             command: true,
@@ -378,10 +378,10 @@ mod tests {
     }
 
     #[test]
-    fn la_tecla_de_comando_de_macos_no_manda_bytes_de_control() {
-        // En macOS ⌘ llega sin `ctrl` y con `mac_cmd`. Si se tratara como un Ctrl cualquiera,
-        // ⌘+Q pediría salir de la aplicación y además mandaría el byte que cuelga la salida del
-        // terminal.
+    fn the_macos_command_key_sends_no_control_bytes() {
+        // On macOS ⌘ arrives without `ctrl` and with `mac_cmd`. If it were treated as any Ctrl,
+        // ⌘+Q would ask to quit the application and would also send the byte that hangs the terminal's
+        // output.
         let macos_command = Modifiers {
             mac_cmd: true,
             command: true,
@@ -392,17 +392,17 @@ mod tests {
     }
 
     #[test]
-    fn mayusculas_con_enter_sigue_siendo_retorno() {
-        // Mayúsculas sola no pasa por la tabla de códigos de control, así que necesita su propia
-        // prueba: si se filtrara como se filtra Alt, **Mayúsculas+Enter sería una tecla muerta**.
+    fn shift_with_enter_is_still_carriage_return() {
+        // Shift alone does not go through the control-code table, so it needs its own
+        // test: if it were filtered the way Alt is filtered, **Shift+Enter would be a dead key**.
         assert_eq!(chord_of(Key::Enter, Modifiers::SHIFT), Some(vec![0x0D]));
     }
 
     #[test]
-    fn mayusculas_con_tabulador_retrocede_en_vez_de_avanzar() {
-        // Es la única tecla a la que Mayúsculas le cambia el significado: con ella el programa
-        // retrocede el foco en vez de avanzarlo. Si esto mandara el tabulador de siempre,
-        // **moverse hacia atrás por un formulario iría hacia delante**.
+    fn shift_with_tab_backtabs_instead_of_advancing() {
+        // It is the only key whose meaning Shift changes: with it the program
+        // moves the focus back instead of forward. If this sent the usual tab,
+        // **moving backward through a form would go forward**.
         assert_eq!(
             chord_of(Key::Tab, Modifiers::SHIFT),
             Some(b"\x1b[Z".to_vec())
@@ -410,15 +410,15 @@ mod tests {
         assert_eq!(
             press(Key::Tab),
             Some(vec![0x09]),
-            "y sin Mayúsculas, avanza"
+            "and without Shift, it advances"
         );
     }
 
     #[test]
-    fn el_byte_lo_decide_la_tecla_logica_y_no_la_fisica() {
-        // La capa de debajo manda las dos: la que dice la distribución del teclado y la posición
-        // física. En una distribución que no sea la inglesa no coinciden, y hacer caso a la
-        // posición mandaría el byte de control **de otra letra**.
+    fn the_byte_is_decided_by_the_logical_key_and_not_the_physical_one() {
+        // The layer below sends both: the one the keyboard layout says and the physical
+        // position. In a layout that is not the English one they do not match, and heeding the
+        // position would send the control byte **of a different letter**.
         let in_another_layout = Event::Key {
             key: Key::D,
             physical_key: Some(Key::H),
@@ -429,13 +429,13 @@ mod tests {
         assert_eq!(
             bytes(&in_another_layout).map(|b| b.into_owned()),
             Some(vec![4]),
-            "cierra la entrada, no borra"
+            "closes the input, does not delete"
         );
     }
 
     #[test]
-    fn mayusculas_no_cambia_el_codigo_de_control() {
-        // Es lo que hace un terminal de verdad: Ctrl+Shift+C manda lo mismo que Ctrl+C.
+    fn shift_does_not_change_the_control_code() {
+        // It is what a real terminal does: Ctrl+Shift+C sends the same as Ctrl+C.
         let ctrl_shift = Modifiers {
             ctrl: true,
             shift: true,
@@ -446,9 +446,9 @@ mod tests {
     }
 
     #[test]
-    fn alt_no_manda_un_byte_aproximado() {
-        // Alt antepone un escape a lo que envía la tecla. Mandar el byte pelado no sería una
-        // aproximación: el programa de dentro lo entendería como otra pulsación.
+    fn alt_does_not_send_an_approximate_byte() {
+        // Alt prepends an escape to what the key sends. Sending the bare byte would not be an
+        // approximation: the program inside would understand it as a different keypress.
         let ctrl_alt = Modifiers {
             ctrl: true,
             alt: true,
@@ -460,18 +460,18 @@ mod tests {
     }
 
     #[test]
-    fn control_con_una_tecla_que_no_es_letra_cae_en_la_tabla_de_siempre() {
-        // Quedarse mudo aquí convertiría a Ctrl+Enter en una tecla muerta, cuando lo que manda un
-        // terminal es exactamente lo mismo que sin Ctrl.
+    fn ctrl_with_a_key_that_is_not_a_letter_falls_to_the_usual_table() {
+        // Staying mute here would turn Ctrl+Enter into a dead key, when what a
+        // terminal sends is exactly the same as without Ctrl.
         assert_eq!(press_with_ctrl(Key::Enter), Some(vec![0x0D]));
         assert_eq!(press_with_ctrl(Key::Backspace), Some(vec![0x7F]));
         assert_eq!(press_with_ctrl(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
-        // Y lo que no está en ninguna de las dos tablas sigue sin mandar nada.
+        // And what is in neither of the two tables still sends nothing.
         assert_eq!(press_with_ctrl(Key::F1), None);
     }
 
     #[test]
-    fn soltar_una_tecla_no_manda_nada() {
+    fn releasing_a_key_sends_nothing() {
         let release = Event::Key {
             key: Key::Enter,
             physical_key: None,
@@ -483,9 +483,9 @@ mod tests {
     }
 
     #[test]
-    fn mantener_una_tecla_pulsada_sigue_mandando() {
-        // La repetición es lo que hace que dejar apretada una flecha mueva el cursor. Filtrarla
-        // sería romper algo que se nota a la primera.
+    fn holding_a_key_down_keeps_sending() {
+        // The repeat is what makes holding an arrow down move the cursor. Filtering it
+        // would break something that shows immediately.
         let repeated = Event::Key {
             key: Key::ArrowDown,
             physical_key: None,
@@ -500,9 +500,9 @@ mod tests {
     }
 
     #[test]
-    fn las_teclas_que_este_hito_deja_fuera_no_inventan_bytes() {
-        // Están fuera a propósito, y lo que importa es que se note como silencio y no como un byte
-        // equivocado que el programa de dentro interpretaría como otra cosa.
+    fn the_keys_this_milestone_leaves_out_do_not_invent_bytes() {
+        // They are out on purpose, and what matters is that it shows as silence and not as a wrong
+        // byte that the program inside would interpret as something else.
         assert_eq!(press(Key::F1), None);
         assert_eq!(press(Key::Home), None);
         assert_eq!(press(Key::PageUp), None);
@@ -510,79 +510,79 @@ mod tests {
     }
 
     #[test]
-    fn sin_marca_los_saltos_imitan_la_tecla_enter() {
-        // Sin marca el programa no distingue lo pegado de lo tecleado, así que hay que imitar la
-        // tecla: Enter manda retorno de carro. Mandar 0x0A sería otra tecla.
+    fn without_a_mark_the_breaks_imitate_the_enter_key() {
+        // Without a mark the program does not tell the pasted from the typed, so the key has to be
+        // imitated: Enter sends carriage return. Sending 0x0A would be a different key.
         assert_eq!(paste("ls\n", false), b"ls\r");
         assert_eq!(paste("a\nb", false), b"a\rb");
-        assert_eq!(paste("sin saltos", false), b"sin saltos");
+        assert_eq!(paste("no breaks", false), b"no breaks");
     }
 
     #[test]
-    fn con_marca_los_saltos_van_tal_cual_y_no_como_retorno() {
-        // **Esto se descubrió mirando la pantalla, no un test.** Con marca, un retorno de carro no es
-        // «la tecla Enter»: es un carácter de control dentro de un texto que el programa va a insertar
-        // literal. Pegando dos órdenes salía «echo uno ▯ echo dos» con un cuadro en medio, y al pulsar
-        // Enter el shell imprimía el cuadro. El salto tiene que ir como salto y que decida el programa.
+    fn with_a_mark_the_breaks_go_as_is_and_not_as_carriage_return() {
+        // **This was discovered by looking at the screen, not a test.** With a mark, a carriage return is not
+        // «the Enter key»: it is a control character inside a text that the program is going to insert
+        // literally. Pasting two commands gave «echo one ▯ echo two» with a box in the middle, and on pressing
+        // Enter the shell printed the box. The break has to go as a break and let the program decide.
         assert_eq!(
-            paste("echo uno\necho dos", true),
-            b"\x1b[200~echo uno\necho dos\x1b[201~"
+            paste("echo one\necho two", true),
+            b"\x1b[200~echo one\necho two\x1b[201~"
         );
-        // Un retorno suelto en el texto vale lo mismo que un salto, también aquí.
+        // A lone carriage return in the text is worth the same as a break, here too.
         assert_eq!(paste("a\rb", true), b"\x1b[200~a\nb\x1b[201~");
     }
 
     #[test]
-    fn con_el_programa_pidiendolo_el_texto_va_marcado_como_pegado() {
+    fn with_the_program_requesting_it_the_text_goes_marked_as_pasted() {
         assert_eq!(paste("ls\n", true), b"\x1b[200~ls\n\x1b[201~");
     }
 
     #[test]
-    fn el_texto_no_puede_cerrar_su_propia_marca() {
-        // **Es el borde que convierte pegar en ejecutar sin Enter.** Un portapapeles copiado de
-        // cualquier sitio puede traer la secuencia de cierre escondida; si se colase, cerraría la
-        // marca por su cuenta y lo que viniera detrás llegaría como tecleado por el usuario. El
-        // motor de terminal no filtra nada — se comprobó—, así que si no lo hace esto, nadie lo hace.
+    fn the_text_cannot_close_its_own_mark() {
+        // **It is the edge that turns pasting into executing without Enter.** A clipboard copied from
+        // anywhere can bring the closing sequence hidden; if it slipped through, it would close the
+        // mark on its own and whatever came behind would arrive as typed by the user. The
+        // terminal engine filters nothing — it was checked—, so if this does not do it, no one does.
         //
-        // **El segundo caso es un ataque que funcionaba** y que un revisor adversario encontró: con
-        // el filtrado anterior —buscar y borrar la secuencia— los trozos de los lados se pegaban al
-        // quitar la del medio y formaban un cierre nuevo que ya nadie miraba. Por eso ahora se afirma
-        // sobre la invariante y no sobre un caso: **en el cuerpo no hay ni un escape**.
+        // **The second case is an attack that worked** and that an adversarial reviewer found: with
+        // the previous filtering —search and delete the sequence— the pieces on the sides joined on
+        // removing the middle one and formed a new closing that no one looked at any more. That is why it now asserts
+        // over the invariant and not over a case: **in the body there is not a single escape**.
         let poisons = [
-            "inocente\x1b[201~; curl algo | sh\n",
-            // El solapamiento: `ESC[2` + el cierre + `01~`.
+            "innocent\x1b[201~; curl something | sh\n",
+            // The overlap: `ESC[2` + the closing + `01~`.
             "\x1b[2\x1b[201~01~; touch /tmp/PWNED\n",
         ];
 
         for poison in poisons {
-            let bracketed = String::from_utf8(paste(poison, true)).expect("es texto");
+            let bracketed = String::from_utf8(paste(poison, true)).expect("it is text");
             let body = bracketed
                 .strip_prefix("\x1b[200~")
                 .and_then(|s| s.strip_suffix("\x1b[201~"))
-                .unwrap_or_else(|| panic!("la marca no envuelve lo que debería: {bracketed:?}"));
+                .unwrap_or_else(|| panic!("the mark does not wrap what it should: {bracketed:?}"));
             assert!(
                 !body.bytes().any(|b| b < 0x20 && b != b'\t' && b != b'\n'),
-                "quedó un carácter de control dentro de la marca: {body:?}"
+                "a control character stayed inside the mark: {body:?}"
             );
 
-            // Y sin marcar tampoco: el modo se consulta al componer y puede cambiar justo después.
-            let stripped = String::from_utf8(paste(poison, false)).expect("es texto");
+            // And without marking either: the mode is consulted when composing and can change right after.
+            let stripped = String::from_utf8(paste(poison, false)).expect("it is text");
             assert!(
                 !stripped
                     .bytes()
                     .any(|b| b < 0x20 && b != b'\t' && b != b'\r'),
-                "pasó un carácter de control sin marcar: {stripped:?}"
+                "a control character got through unmarked: {stripped:?}"
             );
         }
     }
 
     #[test]
-    fn los_controles_del_portapapeles_no_llegan_al_nucleo() {
-        // **El envoltorio no protege de esto y por eso hace falta el filtro.** Los caracteres de
-        // control los procesa la disciplina de línea del núcleo, que ve los bytes antes que el
-        // programa: 0x03 interrumpe, 0x1a suspende el shell, 0x1c provoca un volcado y 0x04 cierra la
-        // entrada. Un portapapeles hostil los lleva sin que se vean al pegarlos.
-        let hostile = "echo hola\x03\x1a\x1c\x04 y sigue\n";
+    fn the_clipboard_controls_do_not_reach_the_kernel() {
+        // **The wrapper does not protect from this and that is why the filter is needed.** Control
+        // characters are processed by the kernel's line discipline, which sees the bytes before the
+        // program: 0x03 interrupts, 0x1a suspends the shell, 0x1c triggers a dump and 0x04 closes the
+        // input. A hostile clipboard carries them without their being seen when pasting them.
+        let hostile = "echo hello\x03\x1a\x1c\x04 and continues\n";
 
         for bracketed in [true, false] {
             let bytes_out = paste(hostile, bracketed);
@@ -594,58 +594,58 @@ mod tests {
             for byte in body {
                 assert!(
                     *byte >= 0x20 || *byte == b'\t' || *byte == b'\n' || *byte == b'\r',
-                    "un control llegó al programa: {byte:#04x} en {body:?}"
+                    "a control reached the program: {byte:#04x} in {body:?}"
                 );
             }
         }
     }
 
     #[test]
-    fn el_tabulador_y_los_saltos_sobreviven_al_filtro() {
-        // Son los tres controles que un texto pegado lleva de verdad, y quitarlos convertiría pegar
-        // una tabla o un guion en pegar una sola línea corrida.
+    fn the_tab_and_the_breaks_survive_the_filter() {
+        // They are the three controls a pasted text really carries, and removing them would turn pasting
+        // a table or a script into pasting a single run-on line.
         assert_eq!(paste("a\tb\nc", false), b"a\tb\rc");
         assert_eq!(paste("a\tb\nc", true), b"\x1b[200~a\tb\nc\x1b[201~");
-        // Un retorno suelto vale lo mismo que un salto: el escritorio ya normalizó los pares.
+        // A lone carriage return is worth the same as a break: the desktop already normalized the pairs.
         assert_eq!(paste("a\rb", false), b"a\rb");
     }
 
     #[test]
-    fn pegar_nada_no_manda_nada_ni_una_marca_vacia() {
+    fn pasting_nothing_sends_nothing_not_even_an_empty_mark() {
         assert!(paste("", true).is_empty());
         assert!(paste("", false).is_empty());
-        // Un texto que era solo controles se queda en nada, y tampoco manda la marca vacía.
+        // A text that was only controls comes to nothing, and it does not send the empty mark either.
         assert!(paste("\x1b\x1b\x1b", true).is_empty());
         assert!(paste("\x03\x04\x1a", true).is_empty());
 
-        // **Pero lo que queda al quitarle el escape SÍ se manda, y eso es lo correcto.** `[201~` sin
-        // su escape delante es texto corriente: se escribe en la línea, no cierra nada. Tirarlo sería
-        // comerse caracteres que el usuario pegó a propósito.
-        let left = String::from_utf8(paste("\x1b[201~", true)).expect("es texto");
+        // **But what remains after removing the escape IS sent, and that is correct.** `[201~` without
+        // its escape in front is plain text: it is written on the line, it closes nothing. Dropping it would be
+        // eating characters the user pasted on purpose.
+        let left = String::from_utf8(paste("\x1b[201~", true)).expect("it is text");
         assert_eq!(left, "\x1b[200~[201~\x1b[201~");
     }
 
     #[test]
-    fn un_evento_que_no_es_de_teclado_se_ignora() {
+    fn an_event_that_is_not_from_the_keyboard_is_ignored() {
         assert!(bytes(&Event::WindowFocused(true)).is_none());
     }
 }
 
-// ── Los atajos de la aplicación: qué acorde hace qué ────────────────────────────────────────────
+// ── The application's shortcuts: which chord does what ───────────────────────────────────────────
 
-/// Lo que la aplicación hace cuando alguien pulsa un acorde suyo.
+/// What the application does when someone presses a chord of its own.
 ///
-/// **Once, y son las que hoy existen.** No es una lista abierta a propósito: cada una tiene su condición y
-/// su efecto escritos en el sitio donde ocurren, y una acción sin efecto sería un nombre que se puede
-/// configurar y no hace nada.
+/// **Eleven, and they are the ones that exist today.** It is not an open list on purpose: each one has its condition and
+/// its effect written where they happen, and an action with no effect would be a name that can be
+/// configured and does nothing.
 ///
-/// **Copiar y pegar no están aquí, y no es un olvido.** Sus acordes **no llegan como teclas**: el
-/// escritorio los resuelve antes y llegan como eventos propios, sin acorde que reasignar ni que devolverle
-/// al programa de dentro. Lo de pegar está comprobado desde F2.6; lo de copiar lo destapó una revisión de
-/// este hito, **ejecutándolo**, y de paso encontró que hasta entonces copiar no copiaba: interrumpía el
-/// programa.
+/// **Copy and paste are not here, and it is not an oversight.** Their chords **do not arrive as keys**: the
+/// desktop resolves them earlier and they arrive as their own events, with no chord to reassign or to hand back
+/// to the program inside. Paste has been verified since F2.6; copy was uncovered by a review of
+/// this milestone, **by running it**, and along the way it found that until then copy did not copy: it interrupted the
+/// program.
 ///
-/// De copiar solo se puede **apagar** la atención, con `key.copy = none`; pegar no tiene clave.
+/// Of copy only the attention can be **turned off**, with `key.copy = none`; paste has no key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
     SplitRight,
@@ -662,7 +662,7 @@ pub enum Action {
 }
 
 impl Action {
-    /// Cómo se escribe en el fichero de configuración.
+    /// How it is written in the configuration file.
     pub fn as_written(self) -> &'static str {
         match self {
             Self::SplitRight => "split-right",
@@ -679,7 +679,7 @@ impl Action {
         }
     }
 
-    /// La que se escribe así, si alguna.
+    /// The one written this way, if any.
     pub fn from_written(text: &str) -> Option<Self> {
         ALL.iter()
             .copied()
@@ -687,7 +687,7 @@ impl Action {
     }
 }
 
-/// Las once, para recorrerlas.
+/// The eleven, to iterate over them.
 pub const ALL: [Action; 11] = [
     Action::SplitRight,
     Action::SplitDown,
@@ -702,10 +702,10 @@ pub const ALL: [Action; 11] = [
     Action::ScrollToBottom,
 ];
 
-/// Un acorde: las teclas de mando que hacen falta, y la tecla.
+/// A chord: the modifier keys needed, and the key.
 ///
-/// **`Copy` y comparable por valor**, porque es la clave con la que se busca en la tabla una vez por
-/// evento de teclado — el camino más caliente que este proyecto tiene.
+/// **`Copy` and comparable by value**, because it is the key looked up in the table once per
+/// keyboard event — the hottest path this project has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Chord {
     pub ctrl: bool,
@@ -715,9 +715,9 @@ pub struct Chord {
 }
 
 impl Chord {
-    /// El acorde que se escribe así, si se puede.
+    /// The chord written this way, if possible.
     ///
-    /// Las partes van separadas por `+`, en cualquier orden y sin importar mayúsculas: `ctrl+shift+e`,
+    /// The parts are separated by `+`, in any order and regardless of case: `ctrl+shift+e`,
     /// `Shift+Prior`, `alt+f4`.
     pub fn from_written(text: &str) -> Option<Self> {
         let mut chord = Self {
@@ -734,8 +734,8 @@ impl Chord {
                 "shift" => chord.shift = true,
                 "alt" => chord.alt = true,
                 _ => {
-                    // **Una sola tecla por acorde.** Dos serían un acorde que no se puede pulsar, y
-                    // aceptarlo dejaría al usuario esperando que funcionara.
+                    // **A single key per chord.** Two would be a chord that cannot be pressed, and
+                    // accepting it would leave the user expecting it to work.
                     if key.is_some() {
                         return None;
                     }
@@ -744,45 +744,45 @@ impl Chord {
             }
         }
         chord.key = key?;
-        // **Los acordes de copiar y de pegar no se pueden reclamar, y aceptarlos sería prometer algo que
-        // no ocurre.** El escritorio los resuelve **antes** de que lleguen: no aparecen como teclas, llegan
-        // ya convertidos en un copiado o un pegado, y **sin decir si había Mayúsculas**. Un
-        // `key.split-right = ctrl+shift+c` se aceptaría, no funcionaría nunca, y quien lo escribió no
-        // tendría forma de saber por qué.
+        // **The copy and paste chords cannot be claimed, and accepting them would be promising something that
+        // does not happen.** The desktop resolves them **before** they arrive: they do not appear as keys, they arrive
+        // already turned into a copy or a paste, and **without saying whether there was Shift**. A
+        // `key.split-right = ctrl+shift+c` would be accepted, would never work, and whoever wrote it would
+        // have no way to know why.
         if chord.ctrl && matches!(chord.key, eframe::egui::Key::C | eframe::egui::Key::V) {
             return None;
         }
-        // **Un acorde sin ninguna tecla de mando se le queda al programa de dentro.** Admitirlo sería
-        // dejar que quien configura se quite la `a` de escribir sin que nada se lo advierta.
+        // **A chord with no modifier key stays with the program inside.** Allowing it would be
+        // letting whoever configures take away the `a` from typing without anything warning them.
         (chord.ctrl || chord.shift || chord.alt).then_some(chord)
     }
 }
 
-/// La tecla que se escribe así, si existe.
+/// The key written this way, if it exists.
 ///
-/// **`Key::from_name` distingue mayúsculas y quien escribe un fichero de configuración no**: `F4` sí y
-/// `f4` no, `PageUp` sí y `pageup` no. Comprobado ejecutándolo. Así que se prueba tal cual, y si no, con
-/// la inicial en mayúscula.
+/// **`Key::from_name` is case-sensitive and whoever writes a configuration file is not**: `F4` yes and
+/// `f4` no, `PageUp` yes and `pageup` no. Checked by running it. So it is tried as is, and if not, with
+/// the initial capitalized.
 ///
-/// **Y hay alias.** `prior` y `next` son como los llaman los terminales de siempre —y como los llamaba el
-/// documento de este proyecto antes de que nadie comprobara que no existen—; `pgup`, `pgdn` y `esc` son las
-/// abreviaturas que están escritas en la propia tecla.
+/// **And there are aliases.** `prior` and `next` are what the traditional terminals call them —and what
+/// this project's document called them before anyone checked they do not exist—; `pgup`, `pgdn` and `esc` are the
+/// abbreviations written on the key itself.
 fn key_named(name: &str) -> Option<eframe::egui::Key> {
     use eframe::egui::Key;
     let alias = match name.to_ascii_lowercase().as_str() {
         "prior" | "pgup" => Some(Key::PageUp),
         "next" | "pgdn" => Some(Key::PageDown),
         "esc" => Some(Key::Escape),
-        // **Las flechas se escriben también con la flecha, y así las publica el documento del proyecto.**
-        // No aceptarlas fue un desajuste real entre lo que se prometía y lo que el código entendía, cazado
-        // contrastando el documento contra la fuente. **El símbolo no tiene idioma**, así que sobrevive al
-        // hito: lo que se retira es el nombre en español, no el dibujo de la tecla.
+        // **The arrows are also written with the arrow, and that is how the project's document publishes them.**
+        // Not accepting them was a real mismatch between what was promised and what the code understood, caught
+        // by contrasting the document against the source. **The symbol has no language**, so it survives the
+        // milestone: what is withdrawn is the Spanish name, not the drawing of the key.
         //
-        // **Y solo el símbolo: `up`, `down`, `left` y `right` NO están aquí porque no hacen falta.** egui
-        // llama a estas cuatro teclas `Up`, `Down`, `Left` y `Right`, así que el respaldo de abajo ya las
-        // resuelve por su nombre. Medido antes de quitarlas: sin estos cuatro brazos la suite entera sigue
-        // verde, incluidos los casos que las prueban. Un alias que repite lo que el respaldo ya hace se lee
-        // como una decisión y no lo es.
+        // **And only the symbol: `up`, `down`, `left` and `right` are NOT here because they are not needed.** egui
+        // calls these four keys `Up`, `Down`, `Left` and `Right`, so the fallback below already
+        // resolves them by their name. Measured before removing them: without these four arms the whole suite stays
+        // green, including the cases that test them. An alias that repeats what the fallback already does reads
+        // as a decision and it is not one.
         "↑" => Some(Key::ArrowUp),
         "↓" => Some(Key::ArrowDown),
         "←" => Some(Key::ArrowLeft),
@@ -792,35 +792,35 @@ fn key_named(name: &str) -> Option<eframe::egui::Key> {
     if alias.is_some() {
         return alias;
     }
-    // **Se busca entre TODAS ignorando mayúsculas, y no dándole la vuelta al nombre.** Poner la inicial
-    // en mayúscula arregla `f4` pero no `pageup`, que de verdad se llama `PageUp` con dos. Recorrer la
-    // lista es una vez por línea del fichero, no por fotograma.
+    // **It searches among ALL ignoring case, and not by flipping the name around.** Capitalizing the
+    // initial fixes `f4` but not `pageup`, which is really called `PageUp` with two. Iterating the
+    // list is once per line of the file, not per frame.
     Key::ALL
         .iter()
         .copied()
         .find(|key| key.name().eq_ignore_ascii_case(name))
 }
 
-/// Qué acorde hace cada cosa.
+/// Which chord does each thing.
 ///
-/// **Es la única fuente de qué acorde pertenece a la aplicación**, y ésa es la razón de que exista. Antes
-/// eran **dos listas paralelas** —una decía si el acorde era nuestro y otra qué hacía— y desalinearlas ya
-/// dejó una flecha «en la cola sin llegar nunca al programa», con su comentario escrito en el sitio. Con
-/// once acordes configurables ese riesgo se multiplica por once.
+/// **It is the single source of which chord belongs to the application**, and that is the reason it exists. Before
+/// they were **two parallel lists** —one said whether the chord was ours and the other what it did— and misaligning them already
+/// left an arrow «in the queue never reaching the program», with its comment written in place. With
+/// eleven configurable chords that risk multiplies by eleven.
 ///
-/// **Lo que NO unifica es la condición de cada acción**: que crear no valga repetido, o que cambiar de
-/// pestaña solo sea nuestro con más de una abierta, sigue colgando de la acción que lo necesita. Son
-/// reales y tienen que sobrevivir a que el acorde cambie.
+/// **What it does NOT unify is each action's condition**: that creating does not count repeated, or that switching
+/// tabs is only ours with more than one open, still hangs off the action that needs it. They are
+/// real and have to survive the chord changing.
 #[derive(Debug, Clone)]
 pub struct Keymap {
-    /// Pares acorde → acción. **Un vector y no un mapa**: son once como mucho, y recorrer once parejas de
-    /// booleanos y un entero es más rápido que resumir el acorde a un número. Se busca una vez por evento
-    /// de teclado, que es el camino más caliente del proyecto.
+    /// Chord → action pairs. **A vector and not a map**: they are eleven at most, and iterating eleven pairs of
+    /// booleans and an integer is faster than reducing the chord to a number. It is looked up once per keyboard
+    /// event, which is the project's hottest path.
     table: Vec<(Chord, Action)>,
 }
 
 impl Default for Keymap {
-    /// Los de fábrica: los mismos trece de siempre menos pegar, que no llega como tecla.
+    /// The factory ones: the same usual thirteen minus paste, which does not arrive as a key.
     fn default() -> Self {
         use eframe::egui::Key;
         let with_the_chord = |key| Chord {
@@ -829,9 +829,9 @@ impl Default for Keymap {
             alt: false,
             key,
         };
-        // **El historial va con `Mayúsculas` a secas, y no es una excepción caprichosa.** Sin ella,
-        // `RePág` es del programa —un paginador la usa— y quitársela sería romper `less` dentro de esta
-        // ventana.
+        // **The scrollback goes with plain «Shift», and it is not a capricious exception.** Without it,
+        // `PageUp` is the program's —a pager uses it— and taking it away would break `less` inside this
+        // window.
         let scrollback = |key| Chord {
             ctrl: false,
             shift: true,
@@ -857,10 +857,10 @@ impl Default for Keymap {
 }
 
 impl Keymap {
-    /// Qué acción hace ese acorde, si alguna.
+    /// Which action that chord does, if any.
     ///
-    /// **Un acorde que no está en la tabla NO es de la aplicación**, y sus bytes bajan al programa de
-    /// dentro. Es la mitad que hace que desatar un atajo sirva de algo.
+    /// **A chord that is not in the table is NOT the application's**, and its bytes go down to the program
+    /// inside. It is the half that makes unbinding a shortcut worth something.
     pub fn action_for(&self, chord: Chord) -> Option<Action> {
         self.table
             .iter()
@@ -868,16 +868,16 @@ impl Keymap {
             .map(|(_, action)| *action)
     }
 
-    /// Le cambia el acorde a una acción. `None` la desata.
+    /// Changes an action's chord. `None` unbinds it.
     ///
-    /// Devuelve la acción que se queda **sin** su acorde por el choque, si alguna: dos acciones no pueden
-    /// compartir acorde, porque entonces pulsar no sabría cuál de las dos hacer.
+    /// Returns the action left **without** its chord by the clash, if any: two actions cannot
+    /// share a chord, because then pressing would not know which of the two to do.
     pub fn bind(&mut self, action: Action, chord: Option<Chord>) -> Option<Action> {
         self.table.retain(|(_, chord_of)| *chord_of != action);
         let chord = chord?;
-        // **Gana la última leída, y se dice cuál perdió.** Es lo que hace que pegar un juego de atajos
-        // encima de otro haga lo que se espera; callarlo dejaría a alguien media hora cambiando una línea
-        // que otra de más abajo está pisando.
+        // **The last one read wins, and which one lost is said.** It is what makes pasting one set of shortcuts
+        // on top of another do what is expected; keeping quiet would leave someone half an hour changing a line
+        // that another further down is stepping on.
         let displaced = self
             .table
             .iter()
@@ -895,14 +895,14 @@ mod keymap_tests {
     use eframe::egui::Key;
 
     #[test]
-    fn el_documento_publica_exactamente_los_atajos_que_el_codigo_tiene() {
-        // **Es el revisor que más rinde en este proyecto, escrito como prueba.** Contrastar el documento
-        // publicado contra la fuente encontró nueve desajustes en un solo PR, ninguno visible en el diff.
-        // Aquí ya cazó dos: el documento prometía «shift+prior», que el código rechazaba, y publicaba las
-        // flechas con su símbolo, que tampoco entendía.
+    fn the_document_publishes_exactly_the_shortcuts_the_code_has() {
+        // **It is the highest-yielding reviewer in this project, written as a test.** Contrasting the published
+        // document against the source found nine mismatches in a single PR, none visible in the diff.
+        // Here it already caught two: the document promised «shift+prior», which the code rejected, and published the
+        // arrows with their symbol, which it did not understand either.
         //
-        // **La tabla de abajo se copia del documento a mano y a propósito.** Generarla del código mediría
-        // que el código es consistente consigo mismo; lo que hay que atar es que lo publicado sea verdad.
+        // **The table below is copied from the document by hand and on purpose.** Generating it from the code would measure
+        // that the code is consistent with itself; what has to be tied down is that what is published is true.
         let published = [
             ("split-right", "ctrl+shift+d", Action::SplitRight),
             ("split-down", "ctrl+shift+b", Action::SplitDown),
@@ -919,7 +919,7 @@ mod keymap_tests {
         assert_eq!(
             published.len(),
             ALL.len(),
-            "el documento publica {} atajos y el código tiene {}",
+            "the document publishes {} shortcuts and the code has {}",
             published.len(),
             ALL.len()
         );
@@ -929,24 +929,24 @@ mod keymap_tests {
             assert_eq!(
                 Action::from_written(name),
                 Some(action),
-                "el documento publica el nombre «{name}» y el código no lo entiende"
+                "the document publishes the name «{name}» and the code does not understand it"
             );
             let chord = Chord::from_written(written).unwrap_or_else(|| {
-                panic!("el documento publica «{written}» y el código no lo entiende")
+                panic!("the document publishes «{written}» and the code does not understand it")
             });
             assert_eq!(
                 keymap.action_for(chord),
                 Some(action),
-                "el documento dice que «{name}» es «{written}» de fábrica, y no lo es"
+                "the document says «{name}» is «{written}» by default, and it is not"
             );
         }
     }
 
     #[test]
-    fn los_once_de_fabrica_son_los_mismos_de_siempre() {
-        // **Es lo que hace que este cambio no rompa a nadie.** Los acordes de fábrica son los que el
-        // terminal tenía antes de que se pudieran configurar, y una tabla que naciera con otros los
-        // cambiaría de golpe a todo el mundo sin que nadie lo pidiera.
+    fn the_eleven_factory_ones_are_the_same_as_always() {
+        // **It is what makes this change break no one.** The factory chords are the ones the
+        // terminal had before they could be configured, and a table born with others would
+        // change them for everyone all at once without anyone asking.
         let keymap = Keymap::default();
         let with_the_chord = |key| Chord {
             ctrl: true,
@@ -979,26 +979,26 @@ mod keymap_tests {
             assert_eq!(
                 keymap.action_for(chord),
                 Some(expected),
-                "el acorde de fábrica de «{}» cambió",
+                "the factory chord of «{}» changed",
                 expected.as_written()
             );
         }
-        // **Contra los pares que se acaban de ejercer, no contra un número escrito aparte.** Un literal
-        // aquí se queda viejo en cuanto la lista cambia, y lo que hay que atar es que **ninguna acción se
-        // quede sin acorde de fábrica**: una acción nueva sin par en la lista de arriba no se dispararía
-        // nunca y nada lo diría.
+        // **Against the pairs just exercised, not against a number written separately.** A literal
+        // here goes stale as soon as the list changes, and what has to be tied down is that **no action is
+        // left without a factory chord**: a new action with no pair in the list above would never
+        // fire and nothing would say so.
         assert_eq!(
             ALL.len(),
             factory.len(),
-            "hay acciones sin acorde de fábrica, o acordes de fábrica de acciones que ya no existen"
+            "there are actions without a factory chord, or factory chords of actions that no longer exist"
         );
     }
 
     #[test]
-    fn un_acorde_que_nadie_reclama_no_es_de_la_aplicacion() {
-        // **Es la mitad que hace que desatar un atajo sirva de algo**: lo que no está en la tabla baja al
-        // programa de dentro. Sin ella, `none` dejaría el acorde en un limbo donde ni hace nada ni
-        // llega a `vim`.
+    fn a_chord_that_no_one_claims_is_not_the_applications() {
+        // **It is the half that makes unbinding a shortcut worth something**: what is not in the table goes down to the
+        // program inside. Without it, `none` would leave the chord in a limbo where it neither does anything nor
+        // reaches `vim`.
         let keymap = Keymap::default();
         assert_eq!(
             keymap.action_for(Chord {
@@ -1008,12 +1008,12 @@ mod keymap_tests {
                 key: Key::Z
             }),
             None,
-            "un acorde que nadie configuró salió como de la aplicación"
+            "a chord no one configured came out as the application's"
         );
     }
 
     #[test]
-    fn desatar_una_accion_le_devuelve_el_acorde_al_programa() {
+    fn unbinding_an_action_gives_the_chord_back_to_the_program() {
         let mut keymap = Keymap::default();
         let its_own = Chord {
             ctrl: true,
@@ -1026,19 +1026,19 @@ mod keymap_tests {
         assert_eq!(
             keymap.bind(Action::SplitRight, None),
             None,
-            "desatar no pisa a nadie"
+            "unbinding steps on no one"
         );
         assert_eq!(
             keymap.action_for(its_own),
             None,
-            "el acorde desatado sigue siendo de la aplicación, así que no llega al programa"
+            "the unbound chord is still the application's, so it does not reach the program"
         );
     }
 
     #[test]
-    fn cambiar_un_acorde_deja_libre_el_viejo() {
-        // **Las dos mitades del criterio**: el nuevo hace lo suyo, y el viejo deja de hacerlo. Sin la
-        // segunda, reasignar sumaría acordes en vez de moverlos.
+    fn changing_a_chord_frees_the_old_one() {
+        // **The two halves of the criterion**: the new one does its thing, and the old one stops doing it. Without the
+        // second, reassigning would add chords instead of moving them.
         let mut keymap = Keymap::default();
         let old = Chord {
             ctrl: true,
@@ -1058,20 +1058,20 @@ mod keymap_tests {
         assert_eq!(
             keymap.action_for(new),
             Some(Action::SplitRight),
-            "el acorde nuevo no hace nada"
+            "the new chord does nothing"
         );
         assert_eq!(
             keymap.action_for(old),
             None,
-            "el acorde viejo sigue partiendo: reasignar sumó en vez de mover, y el programa nunca lo recibe"
+            "the old chord still splits: reassigning added instead of moving, and the program never receives it"
         );
     }
 
     #[test]
-    fn dos_acciones_no_se_quedan_con_el_mismo_acorde_y_se_dice_cual_pierde() {
-        // **Gana la última, y se dice cuál perdió.** Callarlo dejaría a alguien media hora cambiando una
-        // línea que otra de más abajo está pisando; y dejar las dos con el mismo acorde haría que pulsar
-        // no supiera cuál de las dos hacer.
+    fn two_actions_do_not_keep_the_same_chord_and_which_one_loses_is_said() {
+        // **The last one wins, and which one lost is said.** Keeping quiet would leave someone half an hour changing a
+        // line that another further down is stepping on; and leaving both with the same chord would make pressing
+        // not know which of the two to do.
         let mut keymap = Keymap::default();
         let of_closing = Chord {
             ctrl: true,
@@ -1085,17 +1085,17 @@ mod keymap_tests {
         assert_eq!(
             displaced,
             Some(Action::ClosePane),
-            "no se dijo qué acción se quedaba sin acorde"
+            "it did not say which action was left without a chord"
         );
         assert_eq!(
             keymap.action_for(of_closing),
             Some(Action::SplitRight),
-            "no ganó la última"
+            "the last one did not win"
         );
     }
 
     #[test]
-    fn un_acorde_se_escribe_como_lo_escribe_la_gente() {
+    fn a_chord_is_written_the_way_people_write_it() {
         for text in [
             "ctrl+shift+e",
             "Ctrl+Shift+E",
@@ -1110,27 +1110,27 @@ mod keymap_tests {
                     alt: false,
                     key: Key::E
                 }),
-                "«{text}» no se entendió"
+                "«{text}» was not understood"
             );
         }
-        // **Y la tecla de mando ya solo se escribe en inglés.** D27 mete en el hito lo que ve quien usa el
-        // terminal y decide no dejar tabla de alias; sin esta afirmación, una rama que siguiera admitiendo
-        // la grafía vieja no la nota nadie y devuelve por la puerta de atrás la deuda que la decisión se
-        // ahorró.
+        // **And the modifier key is now written only in English.** D27 brings into the milestone what whoever uses the
+        // terminal sees and decides to leave no alias table; without this assertion, a branch that kept admitting
+        // the old spelling goes unnoticed and brings back through the back door the debt the decision
+        // saved.
         for text in ["ctrl+mayusculas+e", "ctrl+mayúsculas+e", "ctrl+mayus+e"] {
             assert_eq!(
                 Chord::from_written(text),
                 None,
-                "«{text}» se sigue aceptando: hay tabla de alias donde D27 dice que no la hay"
+                "«{text}» is still accepted: there is an alias table where D27 says there is none"
             );
         }
     }
 
     #[test]
-    fn las_teclas_se_escriben_como_las_escribe_la_gente() {
-        // **`Key::from_name` distingue mayúsculas y quien teclea un fichero no.** Comprobado ejecutándolo:
-        // `F4` sí y `f4` no, `PageUp` sí y `pageup` no. Sin esto, la mitad de los acordes que alguien
-        // escribiría a mano se rechazarían sin que se entienda por qué.
+    fn the_keys_are_written_the_way_people_write_them() {
+        // **`Key::from_name` is case-sensitive and whoever types a file is not.** Checked by running it:
+        // `F4` yes and `f4` no, `PageUp` yes and `pageup` no. Without this, half the chords someone
+        // would write by hand would be rejected without it being understood why.
         for (text, expected) in [
             ("ctrl+f4", Key::F4),
             ("ctrl+F4", Key::F4),
@@ -1142,13 +1142,13 @@ mod keymap_tests {
             assert_eq!(
                 Chord::from_written(text).map(|a| a.key),
                 Some(expected),
-                "«{text}» no se entendió"
+                "«{text}» was not understood"
             );
         }
 
-        // **Y los alias.** `prior` y `next` son como los llaman los terminales de siempre — y como los
-        // llamaba el documento de este proyecto antes de que nadie comprobara que no existen. Las flechas
-        // se escriben también con la flecha, que es como las publica el documento y no tiene idioma.
+        // **And the aliases.** `prior` and `next` are what the traditional terminals call them — and what
+        // this project's document called them before anyone checked they do not exist. The arrows
+        // are also written with the arrow, which is how the document publishes them and it has no language.
         for (text, expected) in [
             ("shift+prior", Key::PageUp),
             ("shift+next", Key::PageDown),
@@ -1157,10 +1157,10 @@ mod keymap_tests {
             ("ctrl+esc", Key::Escape),
             ("ctrl+left", Key::ArrowLeft),
             ("ctrl+up", Key::ArrowUp),
-            // **Las cuatro flechas por su símbolo, y las cuatro porque son el único alias de este
-            // `match` que el respaldo NO puede resolver**: egui las llama `Up`, `Down`, `Left` y
-            // `Right`, así que sus nombres se resuelven solos y el dibujo no. Dos de ellas no las
-            // ejercía nada mientras el documento las publicaba.
+            // **The four arrows by their symbol, and the four because they are the only alias in this
+            // `match` that the fallback CANNOT resolve**: egui calls them `Up`, `Down`, `Left` and
+            // `Right`, so their names resolve on their own and the drawing does not. Two of them nothing
+            // exercised while the document published them.
             ("ctrl+←", Key::ArrowLeft),
             ("ctrl+→", Key::ArrowRight),
             ("ctrl+↑", Key::ArrowUp),
@@ -1169,12 +1169,12 @@ mod keymap_tests {
             assert_eq!(
                 Chord::from_written(text).map(|a| a.key),
                 Some(expected),
-                "«{text}» no se entendió"
+                "«{text}» was not understood"
             );
         }
 
-        // **Y los nombres de tecla en español ya no valen**, por lo mismo que la tecla de mando de arriba:
-        // sin afirmarlo, la mitad de una tabla de alias que D27 prohíbe puede sobrevivir sin que nada caiga.
+        // **And the Spanish key names are no longer valid**, for the same reason as the modifier key above:
+        // without asserting it, half of an alias table that D27 forbids can survive without anything failing.
         for text in [
             "shift+repág",
             "ctrl+supr",
@@ -1186,16 +1186,16 @@ mod keymap_tests {
             assert_eq!(
                 Chord::from_written(text),
                 None,
-                "«{text}» se sigue aceptando: hay tabla de alias donde D27 dice que no la hay"
+                "«{text}» is still accepted: there is an alias table where D27 says there is none"
             );
         }
     }
 
     #[test]
-    fn los_acordes_de_copiar_y_pegar_no_se_pueden_reclamar() {
-        // **Aceptarlos sería prometer algo que no ocurre**: el escritorio los resuelve antes de que
-        // lleguen, así que esos acordes no aparecen nunca como teclas. Quien los escribiera vería un atajo
-        // que no hace nada y no tendría forma de saber por qué.
+    fn the_copy_and_paste_chords_cannot_be_claimed() {
+        // **Accepting them would be promising something that does not happen**: the desktop resolves them before they
+        // arrive, so those chords never appear as keys. Whoever wrote them would see a shortcut
+        // that does nothing and would have no way to know why.
         for text in [
             "ctrl+shift+v",
             "ctrl+v",
@@ -1207,37 +1207,37 @@ mod keymap_tests {
             assert_eq!(
                 Chord::from_written(text),
                 None,
-                "«{text}» se aceptó, y no llegaría nunca"
+                "«{text}» was accepted, and it would never arrive"
             );
         }
-        // Pero sin Ctrl son teclas como otra cualquiera.
+        // But without Ctrl they are keys like any other.
         for text in ["shift+v", "shift+c", "alt+c"] {
             assert!(
                 Chord::from_written(text).is_some(),
-                "«{text}» se rechazó, y ése sí llega"
+                "«{text}» was rejected, and that one does arrive"
             );
         }
     }
 
     #[test]
-    fn un_acorde_sin_tecla_de_mando_no_se_admite() {
-        // **Admitirlo dejaría que quien configura se quite una letra de escribir** sin que nada se lo
-        // advierta: `key.copy = c` haría que la `c` no llegara nunca al programa.
+    fn a_chord_without_a_modifier_key_is_not_allowed() {
+        // **Allowing it would let whoever configures take a letter away from typing** without anything
+        // warning them: `key.copy = c` would make the `c` never reach the program.
         for text in ["c", "e", "prior"] {
             assert_eq!(
                 Chord::from_written(text),
                 None,
-                "«{text}» se aceptó como acorde, y se llevaría esa tecla por delante"
+                "«{text}» was accepted as a chord, and it would take that key down with it"
             );
         }
-        // Y lo que no es ninguna tecla conocida tampoco.
+        // And what is no known key either.
         for text in ["ctrl+shift+", "ctrl+shift+noexiste", "ctrl+shift+e+f", ""] {
-            assert_eq!(Chord::from_written(text), None, "«{text}» se aceptó");
+            assert_eq!(Chord::from_written(text), None, "«{text}» was accepted");
         }
     }
 
     #[test]
-    fn las_acciones_se_escriben_como_las_publica_el_documento() {
+    fn the_actions_are_written_the_way_the_document_publishes_them() {
         for action in ALL {
             let written = action.as_written();
             assert_eq!(Action::from_written(written), Some(action));
@@ -1245,12 +1245,12 @@ mod keymap_tests {
         assert_eq!(
             Action::from_written("paste"),
             None,
-            "pegar no es un atajo reasignable"
+            "paste is not a reassignable shortcut"
         );
         assert_eq!(Action::from_written("made-up"), None);
 
-        // **Y los nombres viejos ya no valen**, que es la mitad que D27 decide y nada más ataba: sin esto,
-        // dejar la lista vieja al lado de la nueva no lo nota ninguna prueba.
+        // **And the old names are no longer valid**, which is the half D27 decides and nothing else tied down: without this,
+        // leaving the old list beside the new one no test notices.
         for old in [
             "partir-al-lado",
             "cerrar-division",
@@ -1260,56 +1260,56 @@ mod keymap_tests {
             assert_eq!(
                 Action::from_written(old),
                 None,
-                "«{old}» se sigue aceptando: hay tabla de alias donde D27 dice que no la hay"
+                "«{old}» is still accepted: there is an alias table where D27 says there is none"
             );
         }
     }
 
-    /// **Los once nombres viven dos veces**: aquí y en el documento de configuración, escritos a mano
-    /// en los dos sitios. Nada los comparaba, así que renombrar uno dejaba publicado un fichero de
-    /// configuración con una clave que la aplicación rechaza — y ninguna prueba se enteraba.
+    /// **The eleven names live twice**: here and in the configuration document, written by hand
+    /// in both places. Nothing compared them, so renaming one left a
+    /// configuration file published with a key the application rejects — and no test noticed.
     ///
-    /// Se lee el documento en tiempo de compilación en vez de repetir la lista: una prueba que
-    /// copiase los once nombres se arregla sola cuando alguien los traduce en los dos lados y se
-    /// olvida del documento, que es exactamente el fallo que viene a cazar.
+    /// The document is read at compile time instead of repeating the list: a test that
+    /// copied the eleven names fixes itself when someone translates them on both sides and
+    /// forgets the document, which is exactly the failure it comes to catch.
     ///
-    /// **Y es la otra dirección de [`el_documento_publica_exactamente_los_atajos_que_el_codigo_tiene`],
-    /// no un duplicado suyo.** Aquélla copia la tabla del documento a mano **a propósito** —lo dice su
-    /// comentario— y con eso caza que **el código** se desvíe de lo publicado. Pero al ser una copia,
-    /// un cambio en el documento sin tocar el código la deja verde: medido. Ésta lee el documento de
-    /// verdad, así que caza esa mitad. Hacen falta las dos, y por eso ninguna sobra.
-    /// **Los once nombres viven dos veces**: aquí y en el documento de configuración, escritos a mano
-    /// en los dos sitios. Nada los comparaba, así que renombrar uno dejaba publicado un fichero de
-    /// configuración con una clave que la aplicación rechaza — y ninguna prueba se enteraba.
+    /// **And it is the other direction of [`the_document_publishes_exactly_the_shortcuts_the_code_has`],
+    /// not a duplicate of it.** That one copies the document's table by hand **on purpose** —its
+    /// comment says so— and with that catches **the code** deviating from what is published. But being a copy,
+    /// a change in the document without touching the code leaves it green: measured. This one reads the document
+    /// for real, so it catches that half. Both are needed, and that is why neither is redundant.
+    /// **The eleven names live twice**: here and in the configuration document, written by hand
+    /// in both places. Nothing compared them, so renaming one left a
+    /// configuration file published with a key the application rejects — and no test noticed.
     ///
-    /// Se lee el documento en tiempo de compilación en vez de repetir la lista: una prueba que
-    /// copiase los once nombres se arregla sola cuando alguien los traduce en los dos lados y se
-    /// olvida del documento, que es exactamente el fallo que viene a cazar.
+    /// The document is read at compile time instead of repeating the list: a test that
+    /// copied the eleven names fixes itself when someone translates them on both sides and
+    /// forgets the document, which is exactly the failure it comes to catch.
     ///
-    /// **Y es la otra dirección de [`el_documento_publica_exactamente_los_atajos_que_el_codigo_tiene`],
-    /// no un duplicado suyo.** Aquélla copia la tabla del documento a mano **a propósito** —lo dice su
-    /// comentario— y con eso caza que **el código** se desvíe de lo publicado. Pero al ser una copia,
-    /// un cambio en el documento sin tocar el código la deja verde: medido. Ésta lee el documento de
-    /// verdad, así que caza esa mitad. Hacen falta las dos, y por eso ninguna sobra.
-    /// **Cada acorde que el documento publica se interpreta de verdad.**
+    /// **And it is the other direction of [`the_document_publishes_exactly_the_shortcuts_the_code_has`],
+    /// not a duplicate of it.** That one copies the document's table by hand **on purpose** —its
+    /// comment says so— and with that catches **the code** deviating from what is published. But being a copy,
+    /// a change in the document without touching the code leaves it green: measured. This one reads the document
+    /// for real, so it catches that half. Both are needed, and that is why neither is redundant.
+    /// **Each chord the document publishes is really interpreted.**
     ///
-    /// Es el hueco que quedaba entre las otras dos guardas: aquéllas atan los once **nombres** y la tabla
-    /// de claves, y dejan fuera la prosa —las grafías de tecla, la lista de teclas de mando y la columna
-    /// «De fábrica»—, que es de donde salió el desajuste histórico de este proyecto: el documento prometía
-    /// `shift+prior` y el código lo rechazaba, y no lo vio nadie hasta que una persona contrastó los dos
-    /// ficheros a mano. Ese acorde es uno de los catorce que esta prueba recorre.
+    /// It is the gap that remained between the other two guards: those tie down the eleven **names** and the key
+    /// table, and leave out the prose —the key spellings, the list of modifier keys and the
+    /// «By default» column—, which is where this project's historical mismatch came from: the document promised
+    /// `shift+prior` and the code rejected it, and no one saw it until a person contrasted the two
+    /// files by hand. That chord is one of the fourteen this test walks.
     ///
-    /// **Un acorde se reconoce por su forma y no por dónde está**, así que esta guarda no ancla en ninguna
-    /// frase. Eso importa porque la prosa de este documento está en español y **la traduce otra entrega**:
-    /// una guarda que enganchara por el texto moriría ese día sin que nadie lo notara.
+    /// **A chord is recognized by its shape and not by where it is**, so this guard anchors on no
+    /// phrase. That matters because this document's prose is in Spanish and **another delivery translates it**:
+    /// a guard that hooked by the text would die that day without anyone noticing.
     #[test]
-    fn cada_acorde_que_el_documento_publica_lo_entiende_el_codigo() {
+    fn each_chord_the_document_publishes_the_code_understands() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
-        // **Los bloques de ejemplo se quitan antes de partir por las comillas invertidas**, y no por
-        // gusto: sus vallas son tres comillas invertidas, así que partir sobre el documento entero
-        // devuelve el cuerpo del bloque como si fuera un token. Los ejemplos ya tienen su propia guarda,
-        // que los pasa por el intérprete del fichero.
+        // **The example blocks are removed before splitting on the backticks**, and not for
+        // fun: their fences are three backticks, so splitting over the whole document
+        // returns the block's body as if it were a token. The examples already have their own guard,
+        // that passes them through the file's parser.
         let mut inside = false;
         let prose: String = DOCUMENT
             .lines()
@@ -1326,37 +1326,37 @@ mod keymap_tests {
             .split('`')
             .skip(1)
             .step_by(2)
-            // Un acorde es un `+` **entre dos partes**, y esa forma es la que lo distingue del `+` a
-            // secas con el que el documento explica cómo se escribe uno.
+            // A chord is a `+` **between two parts**, and that shape is what distinguishes it from the plain `+`
+            // with which the document explains how one is written.
             .filter(|token| token.contains('+') && token.split('+').all(|part| !part.is_empty()))
-            // **Y la caja distingue las dos cosas que el documento escribe con `+`.** Lo que va en
-            // minúsculas es una línea del fichero —los ejemplos y la columna «De fábrica»—; lo que lleva
-            // mayúscula nombra **la tecla que se pulsa** (`Ctrl+Mayúsculas+C`), que es prosa y no
-            // sintaxis. Los dos que el documento declara imposibles de asignar caen en el segundo grupo,
-            // y que se rechazan ya lo afirma [`los_acordes_de_copiar_y_pegar_no_se_pueden_reclamar`].
+            // **And the case distinguishes the two things the document writes with `+`.** What is in
+            // lowercase is a line of the file —the examples and the «By default» column—; what carries a
+            // capital names **the key that is pressed** (`Ctrl+Shift+C`), which is prose and not
+            // syntax. The two the document declares impossible to assign fall in the second group,
+            // and that they are rejected is already asserted by [`the_copy_and_paste_chords_cannot_be_claimed`].
             .filter(|token| **token == token.to_lowercase())
             .collect();
-        // Sin suelo, un documento que dejara de escribir acordes entre comillas invertidas dejaría esta
-        // prueba pasando por estar vacía. Hoy publica catorce.
+        // Without a floor, a document that stopped writing chords in backticks would leave this
+        // test passing by being empty. Today it publishes fourteen.
         assert_eq!(
             published.len(),
             14,
-            "el documento publica {} acordes en minúsculas: o cambió de forma, o este recorrido dejó \
-             de encontrarlos y la prueba no está mirando nada — {published:?}",
+            "the document publishes {} chords in lowercase: either it changed shape, or this walk stopped \
+             finding them and the test is not looking at anything — {published:?}",
             published.len()
         );
 
         for chord in published {
             assert!(
                 Chord::from_written(chord).is_some(),
-                "el documento publica el acorde «{chord}» y el código lo rechaza: quien lo copie \
-                 escribiría una línea que no hace nada"
+                "the document publishes the chord «{chord}» and the code rejects it: whoever copies it \
+                 would write a line that does nothing"
             );
         }
     }
 
     #[test]
-    fn cada_accion_esta_publicada_en_el_documento_de_configuracion() {
+    fn each_action_is_published_in_the_configuration_document() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
 
         let unpublished: Vec<&str> = ALL
@@ -1367,9 +1367,9 @@ mod keymap_tests {
 
         assert!(
             unpublished.is_empty(),
-            "estas acciones se pueden configurar y el documento no las publica: {unpublished:?}. \
-             Quien lea el documento no sabría que existen, y quien lo siga escribiría una clave que \
-             la aplicación rechaza"
+            "these actions can be configured and the document does not publish them: {unpublished:?}. \
+             Whoever reads the document would not know they exist, and whoever follows it would write a key that \
+             the application rejects"
         );
     }
 }

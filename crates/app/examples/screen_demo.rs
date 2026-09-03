@@ -1,29 +1,29 @@
-//! Una pantalla de terminal llena de trampas, pintada sin nada vivo detrás.
+//! A terminal screen full of traps, painted with nothing alive behind it.
 //!
-//! No hay shell, ni teclado, ni hilo que traiga nada: la rejilla se rellena a mano con una cadena
-//! fija y se pinta. Existe porque el pintor es la única pieza del hito **sin test posible** —lo que
-//! hay que comprobar es cómo se ve— y sin esto sería la única que nadie podría verificar por su
-//! cuenta.
+//! There is no shell, no keyboard, no thread bringing anything: the grid is filled by hand with a
+//! fixed string and painted. It exists because the painter is the only piece of the milestone **with
+//! no possible test** —what has to be checked is how it looks— and without this it would be the only
+//! one nobody could verify on their own.
 //!
-//! El contenido no es decorativo. Cada fila está puesta para enseñar uno de los riesgos que el
-//! diseño dejó anotados:
+//! The content is not decorative. Each row is placed to show one of the risks the design left noted
+//! down:
 //!
-//! - **Temblor de espaciado**: la fila de emes pegadas. Si egui ajusta cada glifo al retículo de
-//!   píxeles por su cuenta, en un monoespaciado se ve como un espaciado irregular.
-//! - **Costura entre fondos**: el bloque de fondo continuo. Con el antialias activo, dos
-//!   rectángulos contiguos del mismo color pueden dejar una raya de un píxel entre ellos.
-//! - **Desajuste con los caracteres anchos**: el japonés y el emoji. La rejilla les reserva dos
-//!   columnas porque lo dice el parser; si la fuente los pinta más anchos o más estrechos, se ve.
-//! - Y de paso: colores nombrados, colores de la paleta de 256, negrita, atenuado y vídeo inverso.
+//! - **Spacing jitter**: the row of packed Ms. If egui snaps each glyph to the pixel grid on its
+//!   own, in a monospace it looks like uneven spacing.
+//! - **Seam between backgrounds**: the block of continuous background. With antialiasing on, two
+//!   adjacent rectangles of the same color can leave a one-pixel line between them.
+//! - **Mismatch with wide characters**: the Japanese and the emoji. The grid reserves two columns
+//!   for them because the parser says so; if the font paints them wider or narrower, it shows.
+//! - And along the way: named colors, colors from the 256 palette, bold, dim and inverse video.
 //!
-//! Se lanza con `cargo run --example screen_demo -p app --release`.
+//! It is launched with `cargo run --example screen_demo -p app --release`.
 
 use app::painter::{CellMetrics, paint};
 use app::theme::Theme;
 use eframe::egui;
 use term_core::{Screen, Size};
 
-/// Lo que se escribe en la rejilla. Fijo: dos ejecuciones tienen que dar la misma pantalla.
+/// What is written into the grid. Fixed: two executions have to give the same screen.
 const SCRIPT: &str = concat!(
     "\x1b[1;33magent-terminal\x1b[0m — pantalla de prueba del pintor\r\n",
     "\r\n",
@@ -38,9 +38,9 @@ const SCRIPT: &str = concat!(
     "\x1b[38;5;196m196 \x1b[38;5;46m46 \x1b[38;5;21m21 \x1b[38;5;226m226 \x1b[38;5;244m244 \x1b[38;5;232m232 \x1b[38;5;255m255\x1b[0m\r\n",
     "Color exacto:         \x1b[38;2;207;106;76mCF6A4C\x1b[0m  ",
     "Vídeo inverso: \x1b[7m seleccionado \x1b[0m\r\n",
-    // El inverso combinado con intensidad: la negrita y el atenuado describen el color que el
-    // programa declaró como primer plano, que aquí ha pasado a ser el fondo. Si se aplicaran al
-    // otro, estos dos bloques saldrían idénticos entre sí y al de arriba.
+    // The inverse combined with intensity: the bold and the dim describe the color the program
+    // declared as foreground, which here has become the background. If they were applied to the
+    // other, these two blocks would come out identical to each other and to the one above.
     "Inverso + negrita: \x1b[1;31;7m rojo brillante detrás \x1b[0m  ",
     "Inverso + atenuado: \x1b[2;31;7m rojo apagado detrás \x1b[0m\r\n",
     "\r\n",
@@ -51,8 +51,9 @@ const SCRIPT: &str = concat!(
     "\r\n",
     "Caracteres anchos: 日本語 🎉 — cada uno ocupa dos columnas\r\n",
     "Y entre ellos:     [日]本[語] — los corchetes marcan dónde deberían acabar\r\n",
-    // Un ancho que **no cabe** al final de la fila: se va entero a la siguiente y deja la última
-    // columna vacía. Sin esta fila, la rama del pintor que trata ese hueco no la mira nadie.
+    // A wide char that **does not fit** at the end of the row: it goes whole to the next one and
+    // leaves the last column empty. Without this row, the painter branch that handles that gap is
+    // looked at by nobody.
     "Un ancho que no cabe al final de la fila de 80 columnas, justo aquí: ---------日 sigue\r\n",
     "Texto \x1b[8moculto entre estas dos marcas\x1b[0m — entre las marcas no debe verse nada\r\n",
     "\r\n",
@@ -63,11 +64,11 @@ const SCRIPT: &str = concat!(
     "El cursor se posa sobre esta M, que tiene que seguir leyéndose: M\x1b[1D",
 );
 
-/// El tamaño de la rejilla de prueba. Fijo, para que la pantalla no dependa de la ventana.
+/// The size of the test grid. Fixed, so the screen does not depend on the window.
 ///
-/// Treinta y dos filas y no veinticuatro: con las veinticuatro de un terminal clásico el guion se
-/// sale por abajo, la rejilla desplaza y **la primera fila deja de verse**. Que una pantalla de
-/// prueba esconda parte de lo que hay que mirar es peor que ser poco realista.
+/// Thirty-two rows and not twenty-four: with the twenty-four of a classic terminal the script runs
+/// off the bottom, the grid scrolls and **the first row stops being seen**. That a test screen
+/// should hide part of what has to be looked at is worse than being unrealistic.
 const GRID: Size = Size { rows: 32, cols: 80 };
 
 fn main() -> eframe::Result {
@@ -97,9 +98,9 @@ impl eframe::App for Demo {
 
         let view = self.screen.view();
         let origin = ui.max_rect().left_top();
-        // **Un descubridor de usar y tirar, y a propósito.** Este banco mide el pintado con texto que las
-        // fuentes de fábrica ya cubren, así que nunca hay nada que descubrir; y como no llama a
-        // `resolve`, uno persistente solo acumularía apuntes que nadie mira.
+        // **A throwaway discoverer, and on purpose.** This bench measures painting with text that the
+        // factory fonts already cover, so there is never anything to discover; and since it does not
+        // call `resolve`, a persistent one would only accumulate notes nobody looks at.
         paint(
             ui.painter(),
             &view,

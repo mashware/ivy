@@ -1,12 +1,12 @@
-//! Dibuja la rejilla del terminal: fondos, glifos y cursor.
+//! Draws the terminal grid: backgrounds, glyphs and cursor.
 //!
-//! **Es a propósito el pintor más ingenuo que funciona**: una celda cada vez, sin caché y sin
-//! seguimiento de lo que cambió. No es descuido ni un primer borrador — optimizar antes de medir
-//! escondería el síntoma que este hito existe para observar, y el modo de fallo de una caché de
-//! glifos son celdas fantasma, que es de los que no se ven hasta que ya llevas semanas encima.
+//! **It is deliberately the most naive painter that works**: one cell at a time, with no cache and
+//! no tracking of what changed. This is neither carelessness nor a first draft — optimizing before
+//! measuring would hide the very symptom this milestone exists to observe, and the failure mode of a
+//! glyph cache is phantom cells, which are the kind you don't see until you are already weeks deep.
 //!
-//! **La medida de la celda se pregunta, no se inventa.** El ancho sale del glifo de referencia de
-//! la fuente y el alto de su altura de línea. Calcularlo a ojo es lo que descuadra las filas.
+//! **The cell's size is asked for, not invented.** The width comes from the font's reference glyph
+//! and the height from its line height. Guessing it by eye is what throws the rows out of line.
 
 use crate::fonts::Presentation;
 use crate::theme::Theme;
@@ -15,38 +15,38 @@ use eframe::egui::{
 };
 use term_core::{CellWidth, CursorShape, Size, TermColor, View, ViewCell};
 
-/// El tamaño más grande que se acepta para una rejilla.
+/// The largest size accepted for a grid.
 ///
-/// Holgado a propósito: un monitor de 4K con la letra más pequeña que se puede leer no pasa de
-/// unas 300 columnas. No es un límite de producto, es el filtro que impide que un rectángulo que
-/// no corresponde a ninguna ventana se convierta en una rejilla de cientos de miles de celdas.
+/// Deliberately generous: a 4K monitor with the smallest legible font does not go past about 300
+/// columns. It is not a product limit, it is the filter that keeps a rectangle that corresponds to
+/// no window from becoming a grid of hundreds of thousands of cells.
 const CEILING: Size = Size {
     rows: 300,
     cols: 1000,
 };
 
-/// Cuánto ocupa una celda en pantalla.
+/// How much a cell takes up on screen.
 #[derive(Debug, Clone)]
 pub struct CellMetrics {
-    /// Privados juntos: el ancho y el alto son medidas **de esta fuente**. Con los tres campos
-    /// abiertos, cambiar uno solo deja una métrica que mide una fuente y pinta con otra, y la
-    /// rejilla se descuadra sin que nada falle — el mismo motivo por el que la vista de celdas
-    /// guarda su tamaño en privado.
+    /// Private together: the width and the height are measurements **of this font**. With the three
+    /// fields open, changing just one leaves a metric that measures one font and paints with another,
+    /// and the grid goes out of line without anything failing — the same reason the cell view keeps
+    /// its size private.
     width: f32,
     height: f32,
     font: FontId,
 }
 
 impl CellMetrics {
-    /// Pregunta a la fuente cuánto mide una celda.
+    /// Asks the font how much a cell measures.
     ///
-    /// El ancho se toma de un glifo cualquiera **de ancho fijo**: en una fuente monoespaciada todos
-    /// miden lo mismo, así que preguntar por uno vale por todos. Si algún día se admite una fuente
-    /// que no lo sea, este es el sitio donde se romperá — y romperse aquí es mejor que descuadrarse
-    /// en pantalla sin avisar.
+    /// The width is taken from any glyph **of fixed width**: in a monospaced font they all measure
+    /// the same, so asking about one stands for all. If some day a font that is not monospaced is
+    /// admitted, this is the place where it will break — and breaking here is better than going out
+    /// of line on screen without warning.
     ///
-    /// **Se pregunta en cada pasada, no se guarda.** Al cambiar el aumento del escritorio la fuente
-    /// cambia de tamaño, y una medida guardada descuadraría la rejilla entera sin avisar.
+    /// **It is asked for on every pass, not cached.** When the desktop zoom changes the font changes
+    /// size, and a cached measurement would throw the whole grid out of line without warning.
     pub fn measure(ctx: &Context, font: FontId) -> Self {
         let (width, height) =
             ctx.fonts_mut(|fonts| (fonts.glyph_width(&font, 'M'), fonts.row_height(&font)));
@@ -57,65 +57,65 @@ impl CellMetrics {
         }
     }
 
-    /// Lo que ocupa una celda de ancho.
+    /// How wide a cell is.
     ///
-    /// Se puede leer, pero no fijar: quien mide una rejilla necesita este número —para colocar dos
-    /// consolas seguidas, o para saber si caben en la ventana— y calcularlo por su cuenta sería
-    /// justo lo que esta caja evita, medir con una fuente y pintar con otra.
+    /// It can be read, but not set: whoever measures a grid needs this number —to place two consoles
+    /// side by side, or to know whether they fit in the window— and computing it on their own would
+    /// be exactly what this crate avoids, measuring with one font and painting with another.
     pub fn width(&self) -> f32 {
         self.width
     }
 
-    /// Lo que ocupa una celda de alto. Se lee por lo mismo que [`CellMetrics::width`].
+    /// How tall a cell is. It is read for the same reason as [`CellMetrics::width`].
     pub fn height(&self) -> f32 {
         self.height
     }
 
-    /// La fuente con la que se midió, para quien pinte texto que tenga que cuadrar con esta rejilla.
+    /// The font it was measured with, for whoever paints text that has to line up with this grid.
     ///
-    /// Se clona en vez de prestarse porque `Painter::text` la consume, y un `FontId` son dos campos.
-    /// Sigue sin poder fijarse: medir con una y pintar con otra es lo que esta caja existe para
-    /// impedir.
+    /// It is cloned rather than borrowed because `Painter::text` consumes it, and a `FontId` is two
+    /// fields. It still cannot be set: measuring with one and painting with another is what this
+    /// crate exists to prevent.
     pub fn font(&self) -> FontId {
         self.font.clone()
     }
 
-    /// Cuántas celdas enteras caben en el espacio dado.
+    /// How many whole cells fit in the given space.
     ///
-    /// **Nunca menos de una fila y una columna, y nunca más de [`CEILING`].** El suelo está porque
-    /// `Screen::resize` entra en pánico con cero columnas: sin él, arrastrar el borde de la ventana
-    /// hasta hacerla estrecha mataría la aplicación. El techo está porque el espacio disponible no
-    /// siempre es el de una ventana de verdad — mientras el escritorio no ha dicho todavía cuánto
-    /// mide, egui responde con su rectángulo de reserva, que son diez mil puntos de lado. Sin
-    /// techo, eso son cientos de miles de celdas reservadas y un aviso de tamaño absurdo al
-    /// programa de dentro.
+    /// **Never fewer than one row and one column, and never more than [`CEILING`].** The floor is
+    /// there because `Screen::resize` panics with zero columns: without it, dragging the window edge
+    /// until it is narrow would kill the application. The ceiling is there because the available
+    /// space is not always that of a real window — while the desktop has not yet said how big it is,
+    /// egui answers with its reservation rectangle, which is ten thousand points on a side. Without a
+    /// ceiling, that is hundreds of thousands of reserved cells and an absurd size notice to the
+    /// program inside.
     pub fn cells_in(&self, space: Vec2) -> Size {
-        // Los tamaños imposibles —negativos, o sin número mientras la ventana se crea— caen en
-        // cero al convertirse a entero, y el suelo los sube a uno.
+        // Impossible sizes —negative, or with no number while the window is being created— fall to
+        // zero when converted to an integer, and the floor lifts them to one.
         Size {
             rows: ((space.y / self.height) as u16).clamp(1, CEILING.rows),
             cols: ((space.x / self.width) as u16).clamp(1, CEILING.cols),
         }
     }
 
-    /// El rectángulo que ocupa la celda de una fila y columna, desde el origen dado.
+    /// The rectangle the cell of a given row and column occupies, from the given origin.
     fn cell(&self, origin: Pos2, row: u16, column: u16) -> Rect {
         let corner = origin + vec2(column as f32 * self.width, row as f32 * self.height);
         Rect::from_min_size(corner, vec2(self.width, self.height))
     }
 }
 
-/// Pinta la vista entera en el sitio indicado.
+/// Paints the whole view at the indicated spot.
 ///
-/// **Precondición: la superficie ya tiene que estar pintada con el fondo del tema.** Las celdas
-/// que llevan ese mismo fondo no se pintan —serían casi dos mil rectángulos por pasada para no
-/// cambiar nada, y con el antialias activo, una frontera por celda donde puede aparecer costura—,
-/// así que sobre una superficie sin limpiar saldría el hueco de la ventana entre las letras.
+/// **Precondition: the surface must already be painted with the theme background.** Cells that carry
+/// that same background are not painted —they would be nearly two thousand rectangles per pass to
+/// change nothing, and with antialiasing on, one boundary per cell where a seam can appear—, so on
+/// an uncleared surface the window's gap would show between the letters.
 ///
-/// El orden importa y es siempre el mismo: **primero todos los fondos, después todos los glifos y
-/// el cursor al final**. Pintar cada celda entera de una vez dejaría el fondo de una celda encima
-/// del glifo de la anterior en cuanto un glifo se saliera de su hueco — que es precisamente lo que
-/// aquí no se recorta, para poder verlo.
+/// The order matters and is always the same: **first all the backgrounds, then all the glyphs and
+/// the cursor last**. Painting each cell whole at once would leave one cell's background on top of
+/// the previous glyph as soon as a glyph spilled out of its slot — which is precisely what is not
+/// clipped here, so it can be seen.
 pub fn paint(
     painter: &Painter,
     view: &View,
@@ -125,51 +125,51 @@ pub fn paint(
     discoverer: &mut crate::fonts::Discoverer,
 ) {
     let grid_size = view.size();
-    // El fondo por defecto es el mismo para toda la pantalla: preguntarlo una vez por celda serían
-    // casi dos mil consultas por pasada para obtener siempre lo mismo.
+    // The default background is the same for the whole screen: asking for it once per cell would be
+    // nearly two thousand queries per pass to always get the same thing.
     let window_background = theme.background();
 
-    // Se recorre la rejilla entera en trozos de una fila. La vista es densa por contrato —hay
-    // exactamente filas por columnas celdas— así que esto no puede dejarse ninguna fuera, y no hay
-    // ningún caso imposible que fingir que se trata.
+    // The whole grid is walked in one-row chunks. The view is dense by contract —there are exactly
+    // rows-by-columns cells— so this cannot leave any out, and there is no impossible case to pretend
+    // to handle.
     let width = grid_size.cols as usize;
     for (row, cells) in view.cells().chunks_exact(width).enumerate() {
         let row = row as u16;
         for (column, cell) in cells.iter().enumerate() {
             let (_, background) = colors_of(cell, theme);
-            // El fondo por defecto ya lo pinta la ventana entera: repetirlo celda a celda es
-            // trabajo por nada y, con el antialias activo, una costura por cada frontera.
+            // The whole window already paints the default background: repeating it cell by cell is
+            // work for nothing and, with antialiasing on, a seam at every boundary.
             if background != window_background {
                 painter.rect_filled(metrics.cell(origin, row, column as u16), 0.0, background);
             }
         }
     }
 
-    // **Los glifos se pintan en DOS pasadas —primero los de texto, después los de color— y eso no es
-    // organización: es lo que decide cuánto cuesta dibujar el fotograma.** El motor solo puede juntar en
-    // el mismo lote de dibujo formas que compartan textura; los emojis viven en su atlas y las letras en
-    // el de fuentes, así que pintarlos entremezclados en el orden de la rejilla parte el lote **en cada
-    // emoji**. Ver **D25**, que trae la medida.
+    // **The glyphs are painted in TWO passes —first the text ones, then the color ones— and that is
+    // not organization: it is what decides how much drawing the frame costs.** The engine can only
+    // batch into the same draw call shapes that share a texture; emojis live in their atlas and the
+    // letters in the font one, so painting them intermingled in grid order splits the batch **at every
+    // emoji**. See **D25**, which brings the measurement.
     //
-    // **El coste de la pasada de más es recorrer la rejilla otra vez**, unos microsegundos: la del color
-    // descarta con una comparación todo lo que no va a color, que es casi todo.
-    // **Los glifos se pintan en DOS pasadas —primero los de texto, después los de color— y eso no es
-    // organización: es lo que decide cuánto cuesta dibujar el fotograma.** El motor solo puede juntar en
-    // el mismo lote de dibujo formas que compartan textura; los emojis viven en su atlas y las letras en
-    // el de fuentes, así que pintarlos entremezclados en el orden de la rejilla parte el lote **en cada
-    // emoji**. Ver **D25**, que trae la medida.
+    // **The cost of the extra pass is walking the grid one more time**, a few microseconds: the color
+    // one discards with a comparison everything that does not go to color, which is nearly everything.
+    // **The glyphs are painted in TWO passes —first the text ones, then the color ones— and that is
+    // not organization: it is what decides how much drawing the frame costs.** The engine can only
+    // batch into the same draw call shapes that share a texture; emojis live in their atlas and the
+    // letters in the font one, so painting them intermingled in grid order splits the batch **at every
+    // emoji**. See **D25**, which brings the measurement.
     //
-    // **El coste de la pasada de más es recorrer la rejilla otra vez**, unos microsegundos: la del color
-    // descarta con una comparación todo lo que no va a color, que es casi todo.
-    // **Y la segunda pasada solo ocurre si la primera vio algún emoji.** Una pantalla sin ninguno —que es
-    // la inmensa mayoría— recorrería la rejilla entera para no pintar nada. Con ASCII el atajo de abajo la
-    // dejaría en casi nada de todos modos, pero con japonés en pantalla no hay atajo que valga: cada celda
-    // consultaría las tablas de Unicode por segunda vez.
+    // **The cost of the extra pass is walking the grid one more time**, a few microseconds: the color
+    // one discards with a comparison everything that does not go to color, which is nearly everything.
+    // **And the second pass only happens if the first saw any emoji.** A screen without a single one
+    // —which is the vast majority— would walk the whole grid to paint nothing. With ASCII the shortcut
+    // below would leave it at almost nothing anyway, but with Japanese on screen no shortcut helps:
+    // each cell would consult the Unicode tables a second time.
     //
-    // **Lo que ahorra está por debajo de lo que el banco puede distinguir, y se dice así**: dos corridas de
-    // la misma tanda con japonés dan 280 y 301 µs en el tramo del pintado, así que cualquier diferencia
-    // menor que esos 21 µs no se puede afirmar. Se hace por la forma —no recorrer la rejilla para no pintar
-    // nada— y no porque haya un número detrás.
+    // **What it saves is below what the bench can tell apart, and it is stated that way**: two runs of
+    // the same batch with Japanese give 280 and 301 µs in the painting stretch, so any difference
+    // smaller than those 21 µs cannot be asserted. It is done for the shape —not walking the grid to
+    // paint nothing— and not because there is a number behind it.
     let mut there_was_color = false;
     for pass in [Presentation::Text, Presentation::Color] {
         if pass == Presentation::Color && !there_was_color {
@@ -178,46 +178,48 @@ pub fn paint(
         for (row, cells) in view.cells().chunks_exact(width).enumerate() {
             let row = row as u16;
             for (column, cell) in cells.iter().enumerate() {
-                // **Apuntar es lo único que corre por celda, y por eso tiene que ser barato**: un
-                // carácter ASCII o ya resuelto se descarta sin tocar nada. Buscar la fuente y registrarla
-                // ocurren fuera de esta pasada — ver `Discoverer::resolve`. Va solo en la primera de
-                // las dos: apuntar dos veces lo mismo no cambia nada, pero se pagaría dos veces.
+                // **Noting is the only thing that runs per cell, and that is why it has to be cheap**:
+                // an ASCII or already-resolved character is discarded without touching anything.
+                // Finding the font and registering it happen outside this pass — see
+                // `Discoverer::resolve`. It runs only on the first of the two: noting the same thing
+                // twice changes nothing, but would be paid for twice.
                 if pass == Presentation::Text {
                     discoverer.note(cell.c);
                 }
-                // El acompañante de un carácter ancho **no pinta nada**. El glifo entero lo dibuja su
-                // primera columna y se sale sobre esta; volver a pintarlo aquí lo duplicaría, medio
-                // encima del otro. Y el hueco que deja un ancho que no cabía al final de la fila tampoco
-                // es un espacio: es un sitio donde no hay carácter.
+                // The companion of a wide character **paints nothing**. Its first column draws the whole
+                // glyph and spills over this one; painting it again here would duplicate it, half on top
+                // of the other. And the gap left by a wide character that did not fit at the end of the
+                // row is not a space either: it is a spot where there is no character.
                 if matches!(cell.width, CellWidth::WideTail | CellWidth::WrapFiller) {
                     continue;
                 }
-                // Un espacio no tiene nada que dibujar, y son la mayor parte de una pantalla.
+                // A space has nothing to draw, and they are most of a screen.
                 if cell.c == ' ' || cell.hidden {
                     continue;
                 }
                 let attached = view.combining_of(cell);
-                // **Un ASCII SIN NADA PEGADO se descarta de la pasada del color sin consultar las tablas
-                // de Unicode.** Es la inmensa mayoría de lo que pasa por una pantalla de terminal.
+                // **An ASCII WITH NOTHING ATTACHED is discarded from the color pass without consulting
+                // the Unicode tables.** It is the vast majority of what passes through a terminal screen.
                 //
-                // **Lo que este atajo ahorra NO se distingue del ruido entre corridas** —366 µs contra
-                // 377 en el tramo del pintado— y queda dicho así en vez de atribuirle un número que no
-                // le corresponde: los 92 µs que cuesta la pasada de más los paga **recorrer la rejilla
-                // otra vez**, y eso el atajo no lo evita. Lo que sí evita es consultar las tablas de
-                // Unicode en casi todas las celdas, que es un argumento de forma y no una medida.
+                // **What this shortcut saves is NOT distinguishable from the noise between runs** —366 µs
+                // against 377 in the painting stretch— and it is stated that way rather than attributing
+                // to it a number that is not its own: the 92 µs the extra pass costs are paid by **walking
+                // the grid again**, and the shortcut does not avoid that. What it does avoid is consulting
+                // the Unicode tables in almost every cell, which is an argument of shape and not a
+                // measurement.
                 //
-                // **Lo de «sin nada pegado» no es prudencia, es obligatorio**: `#`, `*` y los dígitos
-                // tienen `Emoji=Yes`, así que `#` seguido del selector es `#️⃣` y va a color. La primera
-                // versión de este atajo descartaba todo el ASCII y se los comía; lo destapó la prueba que
-                // recorre los 128 con los dos selectores detrás, escrita justamente porque duplicar aquí
-                // una regla que vive en `fonts` solo es aceptable si algo avisa cuando dejan de decir
-                // lo mismo.
+                // **The "with nothing attached" part is not prudence, it is mandatory**: `#`, `*` and the
+                // digits have `Emoji=Yes`, so `#` followed by the selector is `#️⃣` and goes to color. The
+                // first version of this shortcut discarded all ASCII and ate them; it was uncovered by the
+                // test that walks the 128 with both selectors behind, written precisely because
+                // duplicating here a rule that lives in `fonts` is only acceptable if something warns when
+                // they stop saying the same thing.
                 if pass == Presentation::Color && cell.c.is_ascii() && attached.is_empty() {
                     continue;
                 }
-                // Cada celda se pinta en la pasada que le toca por su presentación, y en la otra no.
+                // Each cell is painted in the pass its presentation calls for, and not in the other.
                 if crate::fonts::presentation_of(cell.c, attached) != pass {
-                    // Si en la pasada del texto una celda pide color, la del color tiene trabajo.
+                    // If in the text pass a cell asks for color, the color pass has work to do.
                     there_was_color |= pass == Presentation::Text;
                     continue;
                 }
@@ -238,12 +240,12 @@ pub fn paint(
     paint_cursor(painter, view, theme, metrics, origin, discoverer);
 }
 
-/// Los dos colores de una celda, ya con la intensidad aplicada donde corresponde.
+/// The two colors of a cell, with the intensity already applied where it belongs.
 ///
-/// **La negrita y el atenuado describen el color que el programa declaró como primer plano**, y con
-/// vídeo inverso ese color es el que viaja en el fondo — el motor lo entrega intercambiado y marca
-/// que lo está. Aplicar la intensidad siempre al primer plano parece lo natural y es el error:
-/// atenúa un color que ya no se ve y deja el otro a plena intensidad.
+/// **Bold and dim describe the color the program declared as foreground**, and with inverse video
+/// that color is the one traveling in the background — the engine delivers it swapped and marks that
+/// it is. Always applying the intensity to the foreground seems natural and is the mistake: it dims a
+/// color that is no longer seen and leaves the other at full intensity.
 fn colors_of(cell: &ViewCell, theme: &Theme) -> (Color32, Color32) {
     let (foreground, background) = if cell.inverse {
         (
@@ -257,15 +259,15 @@ fn colors_of(cell: &ViewCell, theme: &Theme) -> (Color32, Color32) {
         )
     };
 
-    // **Lo seleccionado se realza intercambiando sus dos colores, y no con un color nuevo del tema.**
-    // Es lo que hace cualquier terminal, y la razón es que **se lee siempre**: los dos colores de una
-    // celda ya eran legibles el uno sobre el otro, así que intercambiarlos no puede dejar texto
-    // ilegible. Un color de realce propio sí puede — y lo haría justo donde el programa ha elegido
-    // colores raros, que es donde nadie lo probaría.
+    // **A selection is highlighted by swapping its two colors, and not with a new theme color.** It
+    // is what any terminal does, and the reason is that **it always reads**: a cell's two colors were
+    // already legible one over the other, so swapping them cannot leave text illegible. A highlight
+    // color of its own can — and it would do so right where the program chose odd colors, which is
+    // where no one would test it.
     //
-    // **Va después del vídeo inverso y no antes**, así que sobre una celda ya invertida el realce la
-    // devuelve a sus colores de origen. Es lo correcto y lo que se espera: seleccionar por encima del
-    // cursor de `vim` lo enseña como el resto del texto en vez de dejarlo indistinguible.
+    // **It goes after inverse video and not before**, so on an already-inverted cell the highlight
+    // returns it to its original colors. That is correct and what is expected: selecting over `vim`'s
+    // cursor shows it like the rest of the text instead of leaving it indistinguishable.
     if cell.selected {
         (background, foreground)
     } else {
@@ -273,16 +275,17 @@ fn colors_of(cell: &ViewCell, theme: &Theme) -> (Color32, Color32) {
     }
 }
 
-/// Pinta un carácter en su hueco: a color si le toca color, y por el camino de texto si no.
+/// Paints a character in its slot: in color if color is called for, and via the text path if not.
 ///
-/// **Existe como función aparte porque el cursor de bloque repinta el carácter que tapa**, y sin esto
-/// ese repintado no sabría de emojis: un emoji bajo el cursor saldría en monocromo o no saldría.
+/// **It exists as a separate function because the block cursor repaints the character it covers**, and
+/// without this that repaint would not know about emojis: an emoji under the cursor would come out
+/// monochrome or not come out at all.
 #[expect(
     clippy::too_many_arguments,
-    reason = "    Son los datos que hacen falta para pintar un carácter, y ninguno se deduce de otro: el carácter, lo \
-    que lleva pegado —que decide la presentación—, dónde va, si ocupa dos columnas, de qué color si es \
-    texto, con qué tamaño, quién sabe de fuentes y dónde se recuerdan los glifos de color. Agruparlos en \
-    un tipo sería una caja que no significa nada fuera de esta llamada."
+    reason = "    These are the data needed to paint a character, and none is derived from another: the character, what \
+    is attached to it —which decides the presentation—, where it goes, whether it takes two columns, what color if it \
+    is text, at what size, who knows about fonts and where the color glyphs are remembered. Grouping them into \
+    a type would be a struct that means nothing outside this call."
 )]
 fn paint_character(
     painter: &Painter,
@@ -294,8 +297,9 @@ fn paint_character(
     metrics: &CellMetrics,
     discoverer: &mut crate::fonts::Discoverer,
 ) {
-    // **Un emoji ancho ocupa las DOS columnas que el motor le reservó**, no una. El hueco que llega es
-    // el de su primera columna; el dibujo se centra en el de las dos, que es lo que su anchura declara.
+    // **A wide emoji occupies the TWO columns the engine reserved for it**, not one. The slot that
+    // arrives is that of its first column; the drawing is centered on the two, which is what its width
+    // declares.
     let its_own = if is_wide {
         Rect::from_min_max(slot.min, slot.max + vec2(metrics.width, 0.0))
     } else {
@@ -306,33 +310,33 @@ fn paint_character(
     {
         return;
     }
-    // **No se recorta el glifo a su celda.** Si la fuente pinta más ancho de lo que el parser
-    // reservó, tiene que verse: es el dato que decide si hay que embarcar una fuente propia.
-    // Recortarlo escondería el desajuste y lo convertiría en una sorpresa mucho más cara.
+    // **The glyph is not clipped to its cell.** If the font paints wider than the parser reserved, it
+    // has to be seen: it is the datum that decides whether a font of our own has to be shipped.
+    // Clipping it would hide the mismatch and turn it into a far more expensive surprise.
     //
-    // **La familia se elige por carácter, y ahí está el único sitio donde se puede elegir.** egui ordena
-    // su cadena de reserva por familia entera, no por rango: para que la fuente de iconos que el usuario
-    // instaló gane en las zonas de uso privado **sin** quitarle las letras a la del terminal, tiene que
-    // vivir en su propia familia y pedirse solo donde toca. Quien recorre celda a celda es esto.
+    // **The family is chosen per character, and that is the only place where it can be chosen.** egui
+    // orders its fallback chain by whole family, not by range: for the icon font the user installed to
+    // win in the private-use areas **without** taking the letters away from the terminal's, it has to
+    // live in its own family and be requested only where it belongs. What walks cell by cell is this.
     let font = eframe::egui::FontId::new(metrics.font.size, discoverer.family_of(character));
     painter.text(slot.left_top(), Align2::LEFT_TOP, character, font, color);
 }
 
-/// Pinta el glifo de color de ese carácter, centrado en su hueco. Dice si llegó a pintar algo.
+/// Paints that character's color glyph, centered in its slot. Says whether it painted anything.
 ///
-/// **Devolver `false` no es un fallo: es el Contrato 5 del diseño.** Un carácter cuya presentación pide
-/// color pero que ninguna fuente de la máquina pinta a color se dibuja con lo que dé el motor —su
-/// silueta monocroma, o su cuadro— y no se intenta nada más. El terminal no dibuja glifos que la máquina
-/// no tiene.
+/// **Returning `false` is not a failure: it is Contract 5 of the design.** A character whose
+/// presentation asks for color but that no font on the machine paints in color is drawn with whatever
+/// the engine gives —its monochrome silhouette, or its tofu box— and nothing more is attempted. The
+/// terminal does not draw glyphs the machine does not have.
 fn paint_in_color(
     painter: &Painter,
     character: char,
     slot: Rect,
     discoverer: &mut crate::fonts::Discoverer,
 ) -> bool {
-    // **En píxeles FÍSICOS, no en puntos.** La textura se sube al tamaño con el que se va a ver: pedirla
-    // en puntos la dejaría a la mitad de resolución en una pantalla al 200 % y el emoji saldría borroso
-    // justo donde más se nota.
+    // **In PHYSICAL pixels, not in points.** The texture is uploaded at the size it will be seen at:
+    // asking for it in points would leave it at half resolution on a screen at 200 % and the emoji
+    // would come out blurry right where it shows most.
     let per_point = painter.ctx().pixels_per_point();
     let height = (slot.height() * per_point).round() as u32;
     let width = (slot.width() * per_point).round() as u32;
@@ -341,9 +345,9 @@ fn paint_in_color(
     else {
         return false;
     };
-    // **Centrado en su hueco, y por eso hace falta el tamaño real de la textura**: el reescalado conserva
-    // la proporción del dibujo, así que casi nunca llena el hueco exacto — sobra en un eje. Estirarlo
-    // para que llene deformaría el emoji.
+    // **Centered in its slot, and that is why the real texture size is needed**: the rescaling keeps
+    // the drawing's proportion, so it almost never fills the exact slot — there is room to spare on one
+    // axis. Stretching it to fill would deform the emoji.
     let drawing = Rect::from_center_size(slot.center(), measurements / per_point);
     painter.image(atlas, drawing, uv, Color32::WHITE);
     true
@@ -357,13 +361,13 @@ fn paint_cursor(
     origin: Pos2,
     discoverer: &mut crate::fonts::Discoverer,
 ) {
-    // **Sin cursor no se pinta cursor**, y desde que hay historial ese caso ocurre de verdad: subiendo
-    // lo bastante, el cursor se queda en el área activa, por debajo de lo que se mira. La foto lo dice
-    // en vez de recortarlo, que es lo que este sitio anunciaba desde F1.3.
+    // **With no cursor, no cursor is painted**, and since there is history that case really happens:
+    // scrolling up far enough, the cursor stays in the active area, below what is being looked at. The
+    // snapshot says so instead of clamping it, which is what this spot announced since F1.3.
     //
-    // **Y la guarda de abajo no cubría esto**, aunque su comentario dijera que sí: la fila llegaba
-    // recortada, así que siempre estaba dentro de la rejilla y `cell` nunca devolvía nada. Se habría
-    // pintado un cursor fantasma en la última fila.
+    // **And the guard below did not cover this**, even though its comment said it did: the row arrived
+    // clamped, so it was always inside the grid and `cell` never returned anything. A phantom cursor
+    // would have been painted in the last row.
     let Some(cursor) = view.cursor() else {
         return;
     };
@@ -374,31 +378,30 @@ fn paint_cursor(
         return;
     };
     let mut slot = metrics.cell(origin, cursor.row, cursor.col);
-    // Sobre un carácter ancho, el cursor cubre **las dos columnas** que ese carácter ocupa. Cubrir
-    // solo una deja media letra tapada y la otra media no, que se lee como un error de dibujo.
+    // Over a wide character, the cursor covers **the two columns** that character occupies. Covering
+    // only one leaves half the letter covered and the other half not, which reads as a drawing error.
     if under_cursor.width == CellWidth::WideHead {
         slot.max.x += metrics.width;
     }
     let color = theme.color(TermColor::Cursor);
-    // Sin parpadeo, y no por falta de tiempo: un cursor que parpadea es un temporizador, y un
-    // temporizador es trabajo en reposo — justo lo que este hito mide y no puede permitirse
-    // contaminar.
+    // No blinking, and not for lack of time: a cursor that blinks is a timer, and a timer is work at
+    // rest — exactly what this milestone measures and cannot afford to contaminate.
     match cursor.shape {
         CursorShape::Block => {
             painter.rect_filled(slot, 0.0, color);
-            // El bloque es opaco y va después de los glifos, así que se come el carácter que hay
-            // debajo. Se repinta encima, en el color del fondo: es lo que hace un terminal, y sin
-            // esto el cursor **borra** la letra sobre la que está en vez de resaltarla.
+            // The block is opaque and goes after the glyphs, so it eats the character underneath. It is
+            // repainted on top, in the background color: it is what a terminal does, and without this
+            // the cursor **erases** the letter it sits on instead of highlighting it.
             if under_cursor.c != ' ' && !under_cursor.hidden {
-                // **Por el mismo camino que el pintado normal, y no con un `painter.text` propio.** Sin
-                // esto, el repintado no sabría ni de la familia de iconos —un separador de Powerline
-                // cambiaba de símbolo al pasarle el cursor por encima, lo encontró una revisión— ni de
-                // los emojis a color, que saldrían en monocromo solo bajo el cursor.
+                // **Via the same path as the normal painting, and not with a `painter.text` of its
+                // own.** Without this, the repaint would know neither about the icon family —a Powerline
+                // separator changed symbol when the cursor passed over it, a review found it— nor about
+                // the color emojis, which would come out monochrome only under the cursor.
                 //
-                // **Y el emoji se repinta a color tal cual, no teñido del color del fondo.** Un dibujo a
-                // color no se puede recolorear a un solo tono sin dejarlo en una mancha plana: lo que se
-                // ve encima del bloque es el emoji, que es lo que hacen los demás terminales y lo único
-                // que se lee.
+                // **And the emoji is repainted in color as is, not tinted with the background color.** A
+                // color drawing cannot be recolored to a single tone without leaving it a flat smear:
+                // what is seen on top of the block is the emoji, which is what the other terminals do and
+                // the only thing that reads.
                 paint_character(
                     painter,
                     under_cursor.c,
@@ -436,8 +439,9 @@ mod tests {
     use super::*;
     use term_core::Screen;
 
-    /// Una métrica de medidas redondas, para que las cuentas del test se lean solas. No pasa por
-    /// la fuente a propósito: preguntarle exige una ventana, y lo que aquí se prueba es la cuenta.
+    /// A metric with round measurements, so the test's arithmetic reads on its own. It deliberately
+    /// does not go through the font: asking it requires a window, and what is tested here is the
+    /// arithmetic.
     fn metrics(width: f32, height: f32) -> CellMetrics {
         CellMetrics {
             width,
@@ -447,11 +451,11 @@ mod tests {
     }
 
     #[test]
-    fn lo_seleccionado_se_pinta_con_los_dos_colores_intercambiados() {
-        // **El realce se lee siempre porque no inventa un color**: intercambia los dos que la celda ya
-        // tenía, que por fuerza eran legibles el uno sobre el otro. Se afirma sobre los **colores que
-        // salen**, no sobre el campo de la celda: pintar el realce con el mismo fondo de siempre dejaría
-        // la selección invisible y el campo puesto igual.
+    fn a_selection_is_painted_with_its_two_colors_swapped() {
+        // **The highlight always reads because it does not invent a color**: it swaps the two the cell
+        // already had, which were necessarily legible one over the other. The assertion is on the
+        // **colors that come out**, not on the cell's field: painting the highlight with the same
+        // background as always would leave the selection invisible and the field set the same.
         let theme = Theme::default();
         let mut cell = ViewCell {
             fg: TermColor::Indexed(1),
@@ -466,21 +470,21 @@ mod tests {
         assert_eq!(
             (selected_foreground, selected_background),
             (background, foreground),
-            "lo seleccionado no salió con sus dos colores intercambiados"
+            "the selection did not come out with its two colors swapped"
         );
         assert_ne!(
             selected_background, background,
-            "el fondo de la celda realzada es el mismo de antes: la selección no se vería"
+            "the highlighted cell's background is the same as before: the selection would not be seen"
         );
     }
 
     #[test]
-    fn el_realce_intercambia_los_colores_ya_atenuados_y_no_al_reves() {
-        // **La intensidad se aplica primero y el realce se intercambia después**, y el orden se nota
-        // justo donde el programa pidió atenuado: es el color que él declaró como primer plano el que va
-        // apagado, y con vídeo inverso ese color viaja en el fondo. Intercambiando antes de aplicar la
-        // intensidad, lo apagado sería el color equivocado — el mismo defecto que una revisión ya
-        // encontró en este pintor sin la selección de por medio.
+    fn the_highlight_swaps_the_already_dimmed_colors_and_not_the_other_way_around() {
+        // **The intensity is applied first and the highlight is swapped after**, and the order shows
+        // right where the program asked for dim: it is the color it declared as foreground that goes
+        // dimmed, and with inverse video that color travels in the background. Swapping before applying
+        // the intensity, what is dimmed would be the wrong color — the same defect a review already
+        // found in this painter without the selection in the way.
         let theme = Theme::default();
         let cell = ViewCell {
             fg: TermColor::Indexed(1),
@@ -501,34 +505,34 @@ mod tests {
 
         assert_eq!(
             selected_foreground, dim_background,
-            "la letra de la celda realzada no es el color que iba atenuado: el realce se intercambió \
-             antes de aplicar la intensidad"
+            "the highlighted cell's letter is not the color that was dimmed: the highlight was swapped \
+             before applying the intensity"
         );
         assert_ne!(
             selected_foreground,
             theme.color(TermColor::Indexed(4)),
-            "la letra salió a plena intensidad: el atenuado que el programa pidió se perdió"
+            "the letter came out at full intensity: the dim the program asked for was lost"
         );
     }
 
     #[test]
-    fn el_espacio_se_reparte_en_celdas_enteras() {
+    fn the_space_is_divided_into_whole_cells() {
         let grid = metrics(10.0, 20.0).cells_in(vec2(805.0, 419.0));
 
-        // Las celdas que no caben enteras no cuentan: media columna pintada al borde sería medio
-        // carácter cortado.
+        // Cells that do not fit whole do not count: half a column painted at the edge would be half a
+        // character cut off.
         assert_eq!(grid, Size { rows: 20, cols: 80 });
     }
 
     #[test]
-    fn el_cuerpo_de_letra_mas_grande_que_se_admite_no_deja_una_rejilla_imposible() {
-        // **Desde que el cuerpo se configura hay un camino nuevo hasta esta guarda**, y no es el que la
-        // motivó: antes solo se llegaba estrechando la ventana, ahora basta con pedir letra grande. Con el
-        // máximo que se admite —96 puntos— la celda mide 58×112, así que una división de una ventana
-        // pequeña se queda sin sitio para una sola columna.
+    fn the_largest_font_body_admitted_does_not_leave_an_impossible_grid() {
+        // **Since the body is configurable there is a new path to this guard**, and it is not the one
+        // that motivated it: before, it was only reached by narrowing the window, now asking for a large
+        // font is enough. With the maximum admitted —96 points— the cell measures 58×112, so a pane of
+        // a small window is left without room for a single column.
         //
-        // Comprobado ejecutándolo: la rejilla sale **1×1** y no 0×1. Una consola de una celda es inútil
-        // pero está viva; una de cero columnas es una división entre cero esperando a ocurrir.
+        // Verified by running it: the grid comes out **1×1** and not 0×1. A one-cell console is useless
+        // but alive; a zero-column one is a division by zero waiting to happen.
         let ctx = Context::default();
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
@@ -545,8 +549,8 @@ mod tests {
         for grid in grids {
             assert!(
                 grid.cols >= 1 && grid.rows >= 1,
-                "con el cuerpo máximo la rejilla salió {}x{}: una consola de cero columnas es una \
-                 división entre cero esperando a ocurrir",
+                "with the maximum body the grid came out {}x{}: a zero-column console is a \
+                 division by zero waiting to happen",
                 grid.cols,
                 grid.rows
             );
@@ -554,26 +558,26 @@ mod tests {
     }
 
     #[test]
-    fn una_ventana_mas_estrecha_que_una_celda_sigue_dando_una_columna() {
+    fn a_window_narrower_than_a_cell_still_gives_one_column() {
         let grid = metrics(10.0, 20.0).cells_in(vec2(3.0, 4.0));
 
         assert_eq!(grid, Size { rows: 1, cols: 1 });
     }
 
     #[test]
-    fn el_rectangulo_de_reserva_de_egui_no_produce_una_rejilla_descomunal() {
-        // Diez mil puntos de lado es lo que egui responde mientras el escritorio no ha dicho
-        // cuánto mide la ventana. Sin techo eso son 743 000 celdas reservadas y un aviso de tamaño
-        // absurdo al programa de dentro.
+    fn eguis_reservation_rectangle_does_not_produce_an_enormous_grid() {
+        // Ten thousand points on a side is what egui answers while the desktop has not said how big the
+        // window is. Without a ceiling that is 743,000 reserved cells and an absurd size notice to the
+        // program inside.
         let grid = metrics(8.4, 16.0).cells_in(vec2(10_000.0, 10_000.0));
 
         assert_eq!(grid, CEILING);
     }
 
     #[test]
-    fn ningun_espacio_produce_una_rejilla_que_la_pantalla_rechace() {
-        // Este es el test que ata las dos piezas: si alguien quita el suelo, revienta aquí y no en
-        // la mano del usuario mientras arrastra la ventana.
+    fn no_space_produces_a_grid_the_screen_rejects() {
+        // This is the test that ties the two pieces together: if someone removes the floor, it blows up
+        // here and not in the user's hand while dragging the window.
         let mut screen = Screen::new(Size { rows: 24, cols: 80 });
 
         for space in [
@@ -588,47 +592,47 @@ mod tests {
 
             assert!(
                 grid.rows >= 1 && grid.cols >= 1,
-                "{space:?} produjo una rejilla que hace estallar la pantalla: {grid:?}"
+                "{space:?} produced a grid that blows up the screen: {grid:?}"
             );
             assert!(
                 grid.rows <= CEILING.rows && grid.cols <= CEILING.cols,
-                "{space:?} se saltó el techo: {grid:?}"
+                "{space:?} skipped the ceiling: {grid:?}"
             );
             screen.resize(grid);
         }
     }
 
-    /// Lo que `paint_cursor` deja dibujado, contado en formas.
+    /// What `paint_cursor` leaves drawn, counted in shapes.
     ///
-    /// **Se cuenta lo que se PINTA, no lo que la foto dice.** Que la vista devuelva `None` es la mitad
-    /// del criterio; la otra —la que se comprueba aquí— es que este pintor no dibuje nada con ese
-    /// `None`. Se pinta sobre una capa propia y vacía, así que lo que salga es exactamente lo de este
-    /// pintor y nada más.
-    /// Cuántas imágenes y cuántos textos encola el pintor para esa pantalla.
+    /// **What is PAINTED is counted, not what the snapshot says.** That the view returns `None` is half
+    /// the criterion; the other —the one checked here— is that this painter draws nothing with that
+    /// `None`. It paints onto its own empty layer, so what comes out is exactly this painter's and
+    /// nothing more.
+    /// How many images and how many texts the painter enqueues for that screen.
     ///
-    /// **Es el único oráculo que dice si un emoji salió a color**, y por eso las pruebas de aquí cuentan
-    /// formas en vez de mirar campos. Un emoji a color es una **imagen** en la lista de formas; uno
-    /// monocromo es un **texto**. Afirmar sobre lo que decidió la regla —o sobre si la caché tiene una
-    /// entrada— pasaría igual con el pintor devolviendo `false` siempre.
+    /// **It is the only oracle that says whether an emoji came out in color**, and that is why the
+    /// tests here count shapes instead of looking at fields. A color emoji is an **image** in the shape
+    /// list; a monochrome one is a **text**. Asserting on what the rule decided —or on whether the cache
+    /// has an entry— would pass just the same with the painter returning `false` always.
     fn shapes_of(screen: &Screen) -> (usize, usize) {
         shapes_of_with(screen, &mut crate::fonts::Discoverer::default())
     }
 
-    /// Lo mismo, pero con un descubridor que la prueba ha dejado en el estado que quiere mirar.
+    /// The same, but with a discoverer the test has left in the state it wants to look at.
     fn shapes_of_with(
         screen: &Screen,
         discoverer: &mut crate::fonts::Discoverer,
     ) -> (usize, usize) {
         let ctx = Context::default();
-        // **Una pasada en vacío antes**, porque el motor de texto no existe hasta que la hay: sin esto
-        // la primera maquetación ocurre a mitad de la pasada que se está midiendo.
+        // **An empty pass first**, because the text engine does not exist until there is one: without
+        // this the first layout happens halfway through the pass being measured.
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
         let view = screen.view();
         let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
-                eframe::egui::Id::new("la rejilla"),
+                eframe::egui::Id::new("the grid"),
             ));
             paint(
                 &painter,
@@ -647,10 +651,10 @@ mod tests {
         (images, texts)
     }
 
-    /// **Una imagen encolada es una malla con una textura que NO es el atlas de fuentes.** `Painter::image`
-    /// no produce una variante propia: arma una malla de dos triángulos con la textura pedida —leído en
-    /// `epaint/shapes/shape.rs:373`—. Distinguirla por su textura es lo que impide contar como imagen
-    /// cualquier malla que el marco pinte por su cuenta.
+    /// **An enqueued image is a mesh with a texture that is NOT the font atlas.** `Painter::image`
+    /// produces no variant of its own: it builds a two-triangle mesh with the requested texture —read in
+    /// `epaint/shapes/shape.rs:373`—. Distinguishing it by its texture is what keeps any mesh the
+    /// framework paints on its own from being counted as an image.
     fn count(shape: &eframe::egui::Shape, images: &mut usize, texts: &mut usize) {
         match shape {
             eframe::egui::Shape::Mesh(mesh)
@@ -668,14 +672,15 @@ mod tests {
         }
     }
 
-    /// Una pantalla de una sola línea con ese texto dentro.
+    /// A single-line screen with that text inside.
     fn of_text(text: &str) -> Screen {
         let mut screen = Screen::new(Size { rows: 1, cols: 20 });
         screen.advance(text.as_bytes());
         screen
     }
 
-    /// Si esta máquina tiene con qué pintar emojis a color. Sin eso, medio hito no es comprobable aquí.
+    /// Whether this machine has what it takes to paint color emojis. Without that, half the milestone is
+    /// not verifiable here.
     fn there_is_color_on_this_machine() -> bool {
         let ctx = Context::default();
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
@@ -686,96 +691,97 @@ mod tests {
     }
 
     #[test]
-    fn un_emoji_de_los_de_toda_la_vida_sale_a_color_sin_que_nadie_lo_pida() {
-        // **AC3, y es la mitad visible del hito.** `😀` tiene `Emoji_Presentation=Yes`, así que va a
-        // color sin selector ninguno.
+    fn a_good_old_fashioned_emoji_comes_out_in_color_without_anyone_asking() {
+        // **AC3, and it is the visible half of the milestone.** `😀` has `Emoji_Presentation=Yes`, so it
+        // goes to color with no selector at all.
         //
-        // **Se afirma en los DOS escenarios**: donde la máquina tiene fuente de color, el emoji tiene que
-        // salir como imagen; donde no la tiene, tiene que seguir saliendo por el camino de texto y la
-        // ventana quedar en pie. Saltar la prueba en una máquina pelada dejaría sin cubrir justo el
-        // camino donde se cae una implementación.
+        // **The assertion is in BOTH scenarios**: where the machine has a color font, the emoji has to
+        // come out as an image; where it does not, it has to keep coming out via the text path and the
+        // window stay standing. Skipping the test on a bare machine would leave uncovered exactly the
+        // path where an implementation falls over.
         let (images, texts) = shapes_of(&of_text("\u{1F600}"));
         if there_is_color_on_this_machine() {
             assert_eq!(
                 images, 1,
-                "el emoji no se pintó como imagen: salió por el camino de texto, o sea en monocromo"
+                "the emoji was not painted as an image: it came out via the text path, that is, monochrome"
             );
         } else {
             assert_eq!(
                 images, 0,
-                "no hay fuente de color en la máquina y aun así se pintó una imagen"
+                "there is no color font on the machine and yet an image was painted"
             );
             assert_eq!(
                 texts, 1,
-                "sin fuente de color el emoji tiene que salir igualmente, en monocromo"
+                "without a color font the emoji has to come out anyway, in monochrome"
             );
         }
     }
 
     #[test]
-    fn el_simbolo_de_texto_se_queda_en_texto_y_con_su_selector_se_va_a_color() {
-        // **AC4, y las dos mitades en la misma prueba a propósito.** `☁` y `☁️` son **el mismo carácter**
-        // con presentación distinta: comprobar solo una de las dos pasaría con un pintor que mandara todo
-        // a color, o todo a texto.
+    fn the_text_symbol_stays_text_and_with_its_selector_goes_to_color() {
+        // **AC4, and both halves in the same test on purpose.** `☁` and `☁️` are **the same character**
+        // with a different presentation: checking only one of the two would pass with a painter that sent
+        // everything to color, or everything to text.
         let (no_selector, texts_without) = shapes_of(&of_text("\u{2601}"));
         assert_eq!(
             no_selector, 0,
-            "una nube sin selector se pintó a color: es un símbolo de texto y así se pierde"
+            "a cloud with no selector was painted in color: it is a text symbol and this way it is lost"
         );
-        assert_eq!(texts_without, 1, "la nube no se pintó de ninguna manera");
+        assert_eq!(texts_without, 1, "the cloud was not painted in any way");
 
         let (with_selector, _) = shapes_of(&of_text("\u{2601}\u{FE0F}"));
         if there_is_color_on_this_machine() {
             assert_eq!(
                 with_selector, 1,
-                "la nube con selector de emoji no salió a color: el selector no está llegando a la regla"
+                "the cloud with an emoji selector did not come out in color: the selector is not reaching the rule"
             );
         }
     }
 
     #[test]
-    fn una_tecla_hecha_con_una_almohadilla_sale_a_color() {
-        // **El caso que el atajo del ASCII se comió, y por eso está aquí y no solo en la regla.** La
-        // pasada del color descarta el ASCII sin consultar las tablas de Unicode, porque es casi todo lo
-        // que pasa por una pantalla; pero `#`, `*` y los dígitos tienen `Emoji=Yes`, así que con el
-        // selector detrás son teclas y van a color.
+    fn a_keycap_made_with_a_hash_comes_out_in_color() {
+        // **The case the ASCII shortcut ate, and that is why it is here and not only in the rule.** The
+        // color pass discards ASCII without consulting the Unicode tables, because it is almost all of
+        // what passes through a screen; but `#`, `*` and the digits have `Emoji=Yes`, so with the
+        // selector behind they are keycaps and go to color.
         //
-        // La prueba de la regla, en `fonts`, no cubre esto: el atajo vive **aquí**, y mutarlo para que
-        // se comiera todo el ASCII dejaba aquella en verde. Se comprobó mutándolo.
+        // The rule's test, in `fonts`, does not cover this: the shortcut lives **here**, and mutating it
+        // to eat all of ASCII left that one green. It was verified by mutating it.
         if !there_is_color_on_this_machine() {
             return;
         }
         let (images, _) = shapes_of(&of_text("#\u{FE0F}\u{20E3}"));
         assert_eq!(
             images, 1,
-            "la tecla «#️⃣» salió por el camino de texto: quien pinta está descartando el ASCII sin \
-             mirar lo que lleva pegado, y se come las once teclas que Unicode hace con ASCII"
+            "the «#️⃣» keycap came out via the text path: the painter is discarding ASCII without \
+             looking at what is attached to it, and eats the eleven keycaps Unicode makes with ASCII"
         );
     }
 
     #[test]
-    fn el_selector_de_texto_devuelve_a_monocromo_un_emoji_que_iria_a_color() {
-        // La otra mitad de **AC4**, la que nadie escribe: el selector que **quita** el color. Sin ella, un
-        // pintor que ignorase `U+FE0E` pasaría las dos pruebas de arriba.
+    fn the_text_selector_returns_to_monochrome_an_emoji_that_would_go_to_color() {
+        // The other half of **AC4**, the one no one writes: the selector that **removes** the color.
+        // Without it, a painter that ignored `U+FE0E` would pass the two tests above.
         let (images, texts) = shapes_of(&of_text("\u{1F600}\u{FE0E}"));
         assert_eq!(
             images, 0,
-            "el emoji salió a color llevando detrás el selector de TEXTO, que es justo lo que lo prohíbe"
+            "the emoji came out in color carrying the TEXT selector behind it, which is exactly what forbids it"
         );
         assert_eq!(
             texts, 1,
-            "con el selector de texto el emoji tiene que salir igual, en monocromo"
+            "with the text selector the emoji has to come out the same, in monochrome"
         );
     }
 
     #[test]
-    fn el_emoji_no_invade_la_celda_de_al_lado() {
-        // **AC5.** El mapa de bits de `Noto Color Emoji` es **más ancho que alto** —136×128, comprobado
-        // ejecutándolo— así que escalarlo por la altura de la celda lo deja más ancho que las dos columnas
-        // que el motor le reservó, y se come el borde de su vecina.
+    fn the_emoji_does_not_invade_the_neighboring_cell() {
+        // **AC5.** The `Noto Color Emoji` bitmap is **wider than tall** —136×128, verified by running
+        // it— so scaling it by the cell's height leaves it wider than the two columns the engine reserved
+        // for it, and it eats its neighbor's edge.
         //
-        // **Se afirma sobre el rectángulo que se encoló**, que es lo que se ve, y no sobre el tamaño de la
-        // textura: una textura del tamaño correcto pintada en un rectángulo estirado sale igual de mal.
+        // **The assertion is on the rectangle that was enqueued**, which is what is seen, and not on the
+        // texture's size: a texture of the correct size painted in a stretched rectangle comes out just
+        // as badly.
         if !there_is_color_on_this_machine() {
             return;
         }
@@ -785,7 +791,7 @@ mod tests {
         assert_eq!(
             view.cell(0, 0).map(|cell| cell.width),
             Some(CellWidth::WideHead),
-            "el motor no le dio dos columnas al emoji: la prueba no está midiendo lo que dice"
+            "the engine did not give the emoji two columns: the test is not measuring what it says"
         );
 
         let ctx = Context::default();
@@ -794,7 +800,7 @@ mod tests {
         let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
-                eframe::egui::Id::new("un emoji"),
+                eframe::egui::Id::new("an emoji"),
             ));
             paint(
                 &painter,
@@ -814,38 +820,38 @@ mod tests {
             }
         }
         output.drop_without_applying_deltas();
-        let drawing = drawing.expect("el emoji no se pintó como imagen");
+        let drawing = drawing.expect("the emoji was not painted as an image");
 
-        // Las dos columnas que su anchura declara, y ni un punto más.
+        // The two columns its width declares, and not a point more.
         let its_own = Rect::from_min_size(Pos2::ZERO, vec2(metrics.width * 2.0, metrics.height));
         assert!(
             its_own.contains_rect(drawing),
-            "el emoji ocupa {drawing:?} y sus dos columnas son {its_own:?}: se sale sobre la celda vecina"
+            "the emoji occupies {drawing:?} and its two columns are {its_own:?}: it spills over the neighboring cell"
         );
-        // **Y que no se haya deformado para llenarlas.** El margen es ceñido a propósito: con uno de una
-        // décima, estirar el emoji al hueco entero —proporción 1,000 contra la suya, 1,062— pasaba esta
-        // prueba. Se comprobó mutándolo, y es el disfraz que este proyecto tiene fichado: un margen
-        // elegido con el que el defecto y el arreglo dan el mismo resultado.
+        // **And that it has not been deformed to fill them.** The margin is tight on purpose: with one of
+        // a tenth, stretching the emoji to the whole slot —ratio 1.000 against its own, 1.062— passed this
+        // test. It was verified by mutating it, and it is the disguise this project has on file: a margin
+        // chosen with which the defect and the fix give the same result.
         let ratio = drawing.width() / drawing.height();
         assert!(
             (ratio - 136.0 / 128.0).abs() < 0.03,
-            "el emoji se pintó con proporción {ratio:.3} en vez de la suya (1,062): está estirado"
+            "the emoji was painted with ratio {ratio:.3} instead of its own (1.062): it is stretched"
         );
-        // **Y la otra cara de lo mismo, que es la que se ve**: conservar la proporción dentro de un hueco
-        // que no la tiene obliga a que sobre sitio en uno de los dos ejes. Un dibujo que llena el hueco
-        // exacto está estirado por definición.
+        // **And the other face of the same thing, which is the one that is seen**: keeping the proportion
+        // inside a slot that does not have it forces room to be left on one of the two axes. A drawing
+        // that fills the exact slot is stretched by definition.
         assert!(
             drawing.width() < its_own.width() || drawing.height() < its_own.height(),
-            "el emoji llena su hueco exacto ({drawing:?} contra {its_own:?}): está estirado para llenarlo"
+            "the emoji fills its exact slot ({drawing:?} against {its_own:?}): it is stretched to fill it"
         );
     }
 
     #[test]
-    fn bajo_el_cursor_el_emoji_se_sigue_viendo_a_color() {
-        // **El cursor de bloque tapa el carácter y lo repinta encima.** Ese repintado tenía su propia
-        // llamada al motor de texto, así que un emoji bajo el cursor salía en monocromo —solo ahí, y solo
-        // mientras el cursor estuviera encima—. Es el mismo defecto que una revisión encontró con los
-        // iconos de Powerline, en el mismo sitio.
+    fn under_the_cursor_the_emoji_is_still_seen_in_color() {
+        // **The block cursor covers the character and repaints it on top.** That repaint had its own call
+        // to the text engine, so an emoji under the cursor came out monochrome —only there, and only
+        // while the cursor was over it—. It is the same defect a review found with the Powerline icons, in
+        // the same spot.
         if !there_is_color_on_this_machine() {
             return;
         }
@@ -855,13 +861,13 @@ mod tests {
         assert_eq!(
             screen.view().cursor().map(|c| (c.row, c.col)),
             Some((0, 0)),
-            "el cursor no quedó sobre el emoji: la prueba no está midiendo lo que dice"
+            "the cursor did not land over the emoji: the test is not measuring what it says"
         );
         let (images, _) = shapes_of(&screen);
         assert_eq!(
             images, 2,
-            "con el cursor encima tiene que haber dos imágenes —la del pintado y la del repintado del \
-             cursor—: si hay una, el cursor está tapando el emoji y repintándolo en monocromo"
+            "with the cursor over it there have to be two images —the painting one and the cursor's \
+             repaint one—: if there is one, the cursor is covering the emoji and repainting it in monochrome"
         );
     }
 
@@ -870,7 +876,7 @@ mod tests {
         let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
-                eframe::egui::Id::new("solo el cursor"),
+                eframe::egui::Id::new("only the cursor"),
             ));
             paint_cursor(
                 &painter,
@@ -887,41 +893,42 @@ mod tests {
     }
 
     #[test]
-    fn subido_el_historial_no_se_pinta_ningun_cursor() {
-        // **La otra mitad de «el cursor no se ve», y no la ataba nadie.** Que la foto devuelva `None`
-        // se comprueba en `term-core`; que este pintor no dibuje igualmente un bloque en la última
-        // fila, no se comprobaba en ninguna parte. La guarda de más abajo —la que mira si la celda
-        // existe— no cubría esto aunque su comentario dijera que sí: la fila llegaba recortada, así que
-        // siempre caía dentro de la rejilla y se habría pintado un **cursor fantasma** en un sitio
-        // donde el programa no escribe.
+    fn with_the_history_scrolled_up_no_cursor_is_painted() {
+        // **The other half of "the cursor is not seen", and no one tied it down.** That the snapshot
+        // returns `None` is checked in `term-core`; that this painter does not draw a block in the last
+        // row anyway was checked nowhere. The guard further below —the one that looks at whether the cell
+        // exists— did not cover this even though its comment said it did: the row arrived clamped, so it
+        // always fell inside the grid and a **phantom cursor** would have been painted in a spot where the
+        // program does not write.
         let mut screen = Screen::new(Size { rows: 4, cols: 20 });
         for n in 0..40 {
-            screen.advance(format!("linea {n}\r\n").as_bytes());
+            screen.advance(format!("line {n}\r\n").as_bytes());
         }
 
-        // Al día, el cursor se ve y se pinta: sin esto, un pintor que no dibujara nunca nada pasaría.
+        // Up to date, the cursor is seen and painted: without this, a painter that never drew anything
+        // would pass.
         assert!(
             cursor_shapes(&screen.view()) > 0,
-            "con la pantalla al día no se pintó ningún cursor, así que la comprobación de abajo no \
-             distingue nada"
+            "with the screen up to date no cursor was painted, so the check below does not \
+             distinguish anything"
         );
 
         screen.scroll_by(term_core::Scroll::ToTop);
         assert_eq!(
             screen.view().cursor(),
             None,
-            "la prueba no llegó a dejar el cursor fuera de lo que se mira"
+            "the test did not manage to leave the cursor outside what is being looked at"
         );
 
         assert_eq!(
             cursor_shapes(&screen.view()),
             0,
-            "se pintó un cursor con la foto diciendo que no se ve: es un cursor fantasma en la última \
-             fila, y quien mire creerá que el programa escribe ahí"
+            "a cursor was painted with the snapshot saying it is not seen: it is a phantom cursor in the \
+             last row, and whoever looks will believe the program writes there"
         );
     }
 
-    /// En qué orden encoló el pintor sus glifos: `"texto"` o `"imagen"`, uno por forma.
+    /// In what order the painter enqueued its glyphs: `"text"` or `"image"`, one per shape.
     fn order_of(screen: &Screen) -> Vec<&'static str> {
         let ctx = Context::default();
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
@@ -930,7 +937,7 @@ mod tests {
         let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
                 eframe::egui::Order::Foreground,
-                eframe::egui::Id::new("el orden"),
+                eframe::egui::Id::new("the order"),
             ));
             paint(
                 &painter,
@@ -954,9 +961,9 @@ mod tests {
             eframe::egui::Shape::Mesh(mesh)
                 if mesh.texture_id != eframe::egui::TextureId::default() =>
             {
-                order.push("imagen");
+                order.push("image");
             }
-            eframe::egui::Shape::Text(_) => order.push("texto"),
+            eframe::egui::Shape::Text(_) => order.push("text"),
             eframe::egui::Shape::Vec(many) => {
                 for one in many {
                     note_down(one, order);
@@ -967,17 +974,18 @@ mod tests {
     }
 
     #[test]
-    fn los_emojis_se_encolan_todos_juntos_y_no_entre_las_letras() {
-        // **Es la razón de ser del atlas, y hasta aquí no la ataba nadie.** El motor solo junta en el
-        // mismo lote de dibujo formas que compartan textura: los emojis viven en su atlas y las letras en
-        // el de fuentes, así que encolarlos en el orden de la rejilla parte el lote **en cada emoji**.
-        // Medido en **D25** con las dos consolas volcando emojis: el resto del fotograma pasaba de 275 a
-        // 743 µs, o sea casi el triple de la cifra con la que **D3** juzga al framework, y por trabajo que
-        // no es suyo.
+    fn the_emojis_are_enqueued_all_together_and_not_among_the_letters() {
+        // **It is the atlas's reason for being, and until here no one tied it down.** The engine only
+        // batches into the same draw call shapes that share a texture: emojis live in their atlas and the
+        // letters in the font one, so enqueuing them in grid order splits the batch **at every emoji**.
+        // Measured in **D25** with the two consoles dumping emojis: the rest of the frame went from 275 to
+        // 743 µs, that is, almost triple the figure with which **D3** judges the framework, and for work
+        // that is not its own.
         //
-        // **Se afirma sobre el orden de lo encolado, que es lo único que decide el reparto en lotes.**
-        // Contar cuántas imágenes salen —que es lo que hacen las demás pruebas de aquí— pasa igual con las
-        // dos pasadas fundidas en una: se comprobó fundiéndolas, y las 647 seguían en verde.
+        // **The assertion is on the order of what was enqueued, which is the only thing that decides the
+        // split into batches.** Counting how many images come out —which is what the other tests here do—
+        // passes just the same with the two passes merged into one: it was verified by merging them, and
+        // the 647 stayed green.
         if !there_is_color_on_this_machine() {
             return;
         }
@@ -986,38 +994,39 @@ mod tests {
         assert_eq!(
             order
                 .iter()
-                .filter(|character| **character == "imagen")
+                .filter(|character| **character == "image")
                 .count(),
             2,
-            "no salieron los dos emojis como imagen ({order:?}): la prueba no está mirando lo que dice"
+            "the two emojis did not come out as images ({order:?}): the test is not looking at what it says"
         );
         assert!(
             order
                 .iter()
-                .filter(|character| **character == "texto")
+                .filter(|character| **character == "text")
                 .count()
                 >= 3,
-            "no salieron las tres letras ({order:?}): la prueba no está mirando lo que dice"
+            "the three letters did not come out ({order:?}): the test is not looking at what it says"
         );
-        let first_image = order.iter().position(|what| *what == "imagen");
-        let last_text = order.iter().rposition(|what| *what == "texto");
+        let first_image = order.iter().position(|what| *what == "image");
+        let last_text = order.iter().rposition(|what| *what == "text");
         assert!(
             first_image > last_text,
-            "los emojis se encolaron entre las letras ({order:?}): el motor parte el lote de dibujo en \
-             cada uno, que es exactamente lo que el atlas existe para evitar"
+            "the emojis were enqueued among the letters ({order:?}): the engine splits the draw batch at \
+             each one, which is exactly what the atlas exists to avoid"
         );
     }
 
     #[test]
-    fn con_el_atlas_lleno_el_emoji_se_sigue_viendo_aunque_sea_en_monocromo() {
-        // **El Contrato 5 por el camino que esta máquina no recorre nunca.** Cuando el atlas se llena,
-        // pedir el glifo de color devuelve nada y quien pinta **tiene que caer al camino de texto**: el
-        // emoji sale en monocromo, que es como salía antes del hito, en vez de desaparecer de la pantalla.
+    fn with_the_atlas_full_the_emoji_is_still_seen_even_if_in_monochrome() {
+        // **Contract 5 by the path this machine never walks.** When the atlas fills up, asking for the
+        // color glyph returns nothing and the painter **has to fall back to the text path**: the emoji
+        // comes out in monochrome, which is how it came out before the milestone, instead of disappearing
+        // from the screen.
         //
-        // **En una máquina con fuente de emoji esa caída no la ejercita ninguna otra prueba**, porque
-        // aquí el color siempre está: se comprobó mutando la caída para que no pintara nada, y las 647
-        // seguían en verde. La otra mitad —que con el atlas lleno no se devuelva una textura cualquiera—
-        // se ata en `fonts`.
+        // **On a machine with an emoji font no other test exercises that fallback**, because here the
+        // color is always there: it was verified by mutating the fallback so it painted nothing, and the
+        // 647 stayed green. The other half —that with the atlas full no arbitrary texture is returned— is
+        // tied down in `fonts`.
         if !there_is_color_on_this_machine() {
             return;
         }
@@ -1025,19 +1034,19 @@ mod tests {
         let ctx = Context::default();
         ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
-        // La celda de esta prueba mide 20 puntos de alto, y los píxeles físicos aquí van uno a uno.
+        // This test's cell is 20 points tall, and the physical pixels here go one to one.
         discoverer.fill_the_atlas(&ctx, 20);
 
         let (images, texts) = shapes_of_with(&of_text("\u{1F600}"), &mut discoverer);
 
         assert_eq!(
             images, 0,
-            "con el atlas lleno se pintó una imagen igualmente: sale el dibujo de otro glifo"
+            "with the atlas full an image was painted anyway: another glyph's drawing comes out"
         );
         assert_eq!(
             texts, 1,
-            "con el atlas lleno el emoji no se pintó de ninguna manera: desaparece de la pantalla en vez \
-             de salir en monocromo, y quien lo escribió no sabrá que estaba"
+            "with the atlas full the emoji was not painted in any way: it disappears from the screen \
+             instead of coming out in monochrome, and whoever wrote it will not know it was there"
         );
     }
 }

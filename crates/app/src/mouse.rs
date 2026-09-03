@@ -1,50 +1,50 @@
-//! Qué bytes manda al programa cada gesto del ratón.
+//! Which bytes each mouse gesture sends to the program.
 //!
-//! Es una función pura de un gesto a los bytes que un terminal enviaría, hermana de [`keyboard`]. No
-//! escribe en ningún sitio: quien los mande es el bucle, y por dónde los mande es el puente.
+//! It is a pure function from a gesture to the bytes a terminal would send, sibling of [`keyboard`]. It
+//! writes nowhere: whoever sends them is the loop, and where it sends them through is the bridge.
 //!
-//! **Esta codificación no viene de la librería.** El motor de VT sabe decir si el programa quiere el
-//! ratón —eso son sus banderas—, pero armar el informe lo hacía el binario de Alacritty, no su caja.
-//! Así que la tabla es de este proyecto y por eso está escrita aquí con su porqué.
+//! **This encoding does not come from the library.** The VT engine knows how to say whether the program
+//! wants the mouse —those are its flags—, but assembling the report was the Alacritty binary's job, not
+//! its crate's. So the table belongs to this project and that is why it is written here with its reasoning.
 //!
-//! **Dónde se corta este hito, y por qué.** Queda fuera la codificación de coordenadas en UTF-8. La
-//! antigua mete cada número en un byte con 32 sumado, así que **satura en la columna 223**, y lo que
-//! `xterm` hace sin ese modo es exactamente eso: dejar de informar. Escribir esa tabla sin poder verla
-//! funcionando sería adivinar, y este proyecto ya declaró ese mismo corte para las teclas de función.
-//! Lo que queda fuera **devuelve silencio, nunca un byte aproximado**: unas coordenadas equivocadas el
-//! programa las entiende como un clic en otro sitio, y eso es peor que no recibir nada.
+//! **Where this milestone stops, and why.** The UTF-8 coordinate encoding is left out. The old one puts
+//! each number in one byte with 32 added, so it **saturates at column 223**, and what `xterm` does
+//! without that mode is exactly that: stop reporting. Writing that table without being able to see it
+//! working would be guessing, and this project already declared that same cutoff for the function keys.
+//! What is left out **returns silence, never an approximate byte**: wrong coordinates the program reads
+//! as a click somewhere else, and that is worse than receiving nothing.
 //!
 //! [`keyboard`]: crate::keyboard
 
 use eframe::egui::{Modifiers, PointerButton};
 use term_core::MouseReporting;
 
-/// La columna o fila más alta que la codificación antigua puede decir.
+/// The highest column or row that the old encoding can report.
 ///
-/// Cada número viaja en **un byte** con 32 sumado, así que el mayor que cabe es `255 - 32`. Pasado ese
-/// punto no se informa, que es lo que hace `xterm` sin la codificación en UTF-8.
+/// Each number travels in **one byte** with 32 added, so the largest that fits is `255 - 32`. Past that
+/// point nothing is reported, which is what `xterm` does without the UTF-8 encoding.
 const LEGACY_ENCODING_CEILING: u16 = 223;
 
-/// Qué ha hecho el ratón, en el vocabulario del informe.
+/// What the mouse did, in the vocabulary of the report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseReport {
-    /// Se ha apretado un botón.
+    /// A button was pressed.
     Press(PointerButton),
-    /// Se ha soltado un botón.
+    /// A button was released.
     Release(PointerButton),
-    /// Se ha movido el puntero con un botón apretado.
+    /// The pointer moved with a button held down.
     Drag(PointerButton),
-    /// Se ha girado la rueda hacia lo viejo.
+    /// The wheel was turned toward the old.
     WheelUp,
-    /// Se ha girado la rueda hacia lo nuevo.
+    /// The wheel was turned toward the new.
     WheelDown,
 }
 
-/// La celda sobre la que ocurrió el gesto, contada **desde uno** como manda el informe.
+/// The cell where the gesture happened, counted **from one** as the report requires.
 ///
-/// Se construye con [`from_zero`](CellPos::from_zero) para que la conversión ocurra en un solo sitio:
-/// el resto del programa cuenta filas y columnas desde cero, y mezclar los dos orígenes deja un informe
-/// desplazado una celda que nadie nota hasta que un menú abre la entrada de al lado.
+/// It is built with [`from_zero`](CellPos::from_zero) so the conversion happens in a single place: the
+/// rest of the program counts rows and columns from zero, and mixing the two origins leaves a report
+/// shifted by one cell that nobody notices until a menu opens the entry next door.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellPos {
     column: u16,
@@ -52,7 +52,7 @@ pub struct CellPos {
 }
 
 impl CellPos {
-    /// La celda que quien pinta llama `(fila, columna)`, contando desde cero.
+    /// The cell that whoever paints calls `(row, column)`, counting from zero.
     pub fn from_zero(row: u16, column: u16) -> Self {
         Self {
             column: column + 1,
@@ -61,10 +61,10 @@ impl CellPos {
     }
 }
 
-/// Los bytes que le corresponden a ese gesto, o nada si no hay nada que mandar.
+/// The bytes that correspond to that gesture, or nothing if there is nothing to send.
 ///
-/// Devuelve nada cuando el programa **no ha pedido** lo que se le iba a contar —un arrastre a quien
-/// solo pidió los clics— y cuando las coordenadas no caben en la codificación que toca.
+/// Returns nothing when the program **has not asked** for what was going to be reported —a drag to one
+/// who only asked for the clicks— and when the coordinates do not fit in the encoding that applies.
 pub fn encode(
     report: MouseReport,
     at: CellPos,
@@ -81,15 +81,15 @@ pub fn encode(
     legacy_form(report, button, at)
 }
 
-/// Si el programa ha pedido que se le cuente **esta clase** de gesto.
+/// Whether the program has asked to be told about **this class** of gesture.
 ///
-/// **Pedir los clics no es pedir el arrastre**, y son banderas distintas justamente porque un programa
-/// que solo quiere saber dónde se pincha no quiere un informe por cada celda que el puntero recorre con
-/// el botón apretado.
+/// **Asking for the clicks is not asking for the drag**, and they are distinct flags precisely because a
+/// program that only wants to know where a click lands does not want a report for every cell the pointer
+/// travels with the button held down.
 fn wants_this(report: MouseReport, reporting: MouseReporting) -> bool {
     match report {
-        // **La rueda va con los botones.** Un programa que pide los clics recibe los giros: es lo que
-        // hace que la rueda mueva la lista de `htop` sin pedir nada más.
+        // **The wheel goes with the buttons.** A program that asks for the clicks receives the turns: it
+        // is what makes the wheel move `htop`'s list without asking for anything else.
         MouseReport::Press(_)
         | MouseReport::Release(_)
         | MouseReport::WheelUp
@@ -98,34 +98,35 @@ fn wants_this(report: MouseReport, reporting: MouseReporting) -> bool {
     }
 }
 
-/// El número con el que viaja el botón, antes de sumarle el acorde.
+/// The number the button travels with, before adding the chord to it.
 ///
-/// **Soltar viaja como el botón que se suelta solo en la codificación extendida.** La antigua no tiene
-/// forma de decir cuál se soltó y usa un número propio para «se soltó algo», que es el 3.
+/// **Releasing travels as the button that was released only in the extended encoding.** The old one has
+/// no way to say which one was released and uses a number of its own for «something was released», which
+/// is the 3.
 fn button_number(report: MouseReport) -> Option<u8> {
     let number_of = |button| match button {
         PointerButton::Primary => Some(0),
         PointerButton::Middle => Some(1),
         PointerButton::Secondary => Some(2),
-        // Los botones laterales no tienen número en esta codificación. Silencio, no un número
-        // aproximado: el programa entendería un clic que nadie hizo.
+        // The side buttons have no number in this encoding. Silence, not an approximate number: the
+        // program would read a click that nobody made.
         _ => None,
     };
     match report {
         MouseReport::Press(button) | MouseReport::Release(button) => number_of(button),
-        // **Arrastrar lleva 32 sumado**: es el bit de «esto es movimiento», que es lo que distingue
-        // recorrer una celda con el botón apretado de volver a apretarlo ahí.
+        // **Dragging carries 32 added**: it is the «this is movement» bit, which is what tells apart
+        // travelling a cell with the button held down from pressing it there again.
         MouseReport::Drag(button) => Some(number_of(button)? + 32),
         MouseReport::WheelUp => Some(64),
         MouseReport::WheelDown => Some(65),
     }
 }
 
-/// Lo que el acorde le suma al número del botón.
+/// What the chord adds to the button's number.
 ///
-/// **`Mayúsculas` no aparece, y es a propósito**: en esta ventana esa tecla fuerza la selección, así que
-/// un gesto con ella apretada no llega nunca hasta aquí. Ponerla igualmente sería escribir una rama
-/// muerta que además sugiere lo contrario de lo que la ventana hace.
+/// **«Shift» does not appear, and it is on purpose**: in this window that key forces the selection,
+/// so a gesture with it held down never reaches here. Putting it in anyway would be writing a dead branch
+/// that on top of that suggests the opposite of what the window does.
 fn chord_bits(chord: Modifiers) -> u8 {
     let mut bits = 0;
     if chord.alt {
@@ -137,7 +138,7 @@ fn chord_bits(chord: Modifiers) -> u8 {
     bits
 }
 
-/// El informe en la codificación extendida: números en texto y una letra que dice si se apretó o soltó.
+/// The report in the extended encoding: numbers as text and a letter that says whether it was pressed or released.
 fn extended_form(report: MouseReport, button: u8, at: CellPos) -> Vec<u8> {
     let final_byte = if matches!(report, MouseReport::Release(_)) {
         'm'
@@ -147,15 +148,15 @@ fn extended_form(report: MouseReport, button: u8, at: CellPos) -> Vec<u8> {
     format!("\x1b[<{button};{};{}{final_byte}", at.column, at.row).into_bytes()
 }
 
-/// El informe en la codificación antigua: tres bytes con 32 sumado a cada número.
+/// The report in the old encoding: three bytes with 32 added to each number.
 ///
-/// Devuelve nada pasada la columna o la fila 223: ver [`LEGACY_ENCODING_CEILING`].
+/// Returns nothing past column or row 223: see [`LEGACY_ENCODING_CEILING`].
 fn legacy_form(report: MouseReport, button: u8, at: CellPos) -> Option<Vec<u8>> {
     if at.column > LEGACY_ENCODING_CEILING || at.row > LEGACY_ENCODING_CEILING {
         return None;
     }
-    // **Soltar no dice qué botón se soltó**: esta codificación no tiene sitio para ello y usa el 3 para
-    // «se soltó algo». Quien quiera saber cuál pide la extendida.
+    // **Releasing does not say which button was released**: this encoding has no room for it and uses 3
+    // for «something was released». Whoever wants to know which one asks for the extended.
     let button = if matches!(report, MouseReport::Release(_)) {
         3 + (button & !0b11)
     } else {
@@ -175,7 +176,7 @@ fn legacy_form(report: MouseReport, button: u8, at: CellPos) -> Option<Vec<u8>> 
 mod tests {
     use super::*;
 
-    /// Un programa que pidió los clics y el arrastre, en la codificación antigua.
+    /// A program that asked for the clicks and the drag, in the old encoding.
     fn like_htop() -> MouseReporting {
         MouseReporting {
             buttons: true,
@@ -184,7 +185,7 @@ mod tests {
         }
     }
 
-    /// Lo mismo, pero pidiendo la codificación extendida.
+    /// The same, but asking for the extended encoding.
     fn with_the_extended() -> MouseReporting {
         MouseReporting {
             extended: true,
@@ -193,9 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn un_programa_que_no_pide_el_raton_no_recibe_nada() {
-        // La consola de todos los días. Sin esto, cada clic dentro de un shell le metería basura en la
-        // línea de órdenes.
+    fn a_program_that_does_not_ask_for_the_mouse_receives_nothing() {
+        // The everyday console. Without this, every click inside a shell would put garbage on the
+        // command line.
         assert_eq!(
             encode(
                 MouseReport::Press(PointerButton::Primary),
@@ -208,26 +209,26 @@ mod tests {
     }
 
     #[test]
-    fn la_celda_del_informe_empieza_en_uno() {
-        // **La esquina de arriba a la izquierda es la 1;1 y no la 0;0.** Quien pinta cuenta desde cero,
-        // el informe desde uno, y mezclar los dos orígenes deja todo desplazado una celda: un menú abre
-        // la entrada de al lado y una barra se agarra por el sitio equivocado.
+    fn the_report_cell_starts_at_one() {
+        // **The top-left corner is 1;1 and not 0;0.** Whoever paints counts from zero, the report from
+        // one, and mixing the two origins leaves everything shifted by one cell: a menu opens the entry
+        // next door and a bar is grabbed by the wrong spot.
         let bytes = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(0, 0),
             with_the_extended(),
             Modifiers::NONE,
         )
-        .expect("el programa pidió los clics");
+        .expect("the program asked for the clicks");
 
         assert_eq!(bytes, b"\x1b[<0;1;1M");
     }
 
     #[test]
-    fn soltar_y_apretar_se_distinguen_en_la_codificacion_extendida() {
-        // **La letra final es lo único que los separa**, y es lo que un editor usa para saber que
-        // terminaste de arrastrar la selección. Mandar siempre la misma deja el gesto abierto para
-        // siempre desde el punto de vista del programa.
+    fn releasing_and_pressing_are_told_apart_in_the_extended_encoding() {
+        // **The final letter is the only thing that separates them**, and it is what an editor uses to
+        // know you finished dragging the selection. Always sending the same one leaves the gesture open
+        // forever from the program's point of view.
         let press = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(4, 9),
@@ -246,25 +247,26 @@ mod tests {
     }
 
     #[test]
-    fn la_codificacion_antigua_no_dice_que_boton_se_solto() {
-        // No tiene sitio para decirlo: usa un número propio para «se soltó algo». Mandar el del botón
-        // haría que el programa entendiera un clic nuevo del botón central justo al soltar el derecho.
+    fn the_old_encoding_does_not_say_which_button_was_released() {
+        // It has no room to say it: it uses a number of its own for «something was released». Sending the
+        // button's would make the program read a new click of the middle button right as the right one is
+        // released.
         let bytes = encode(
             MouseReport::Release(PointerButton::Secondary),
             CellPos::from_zero(0, 0),
             like_htop(),
             Modifiers::NONE,
         )
-        .expect("el programa pidió los clics");
+        .expect("the program asked for the clicks");
 
         assert_eq!(bytes, vec![0x1b, b'[', b'M', 32 + 3, 33, 33]);
     }
 
     #[test]
-    fn la_codificacion_antigua_calla_pasada_la_columna_223() {
-        // **Silencio, no un byte aproximado.** Cada número viaja en un byte con 32 sumado, así que la
-        // 224 no cabe: saturarla en 223 le diría al programa que se pinchó en un sitio donde no se
-        // pinchó, y volver a empezar por el 0 sería peor todavía.
+    fn the_old_encoding_goes_silent_past_column_223() {
+        // **Silence, not an approximate byte.** Each number travels in one byte with 32 added, so 224
+        // does not fit: saturating it at 223 would tell the program a click landed somewhere it did not,
+        // and starting over from 0 would be worse still.
         let inside = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(0, 222),
@@ -278,30 +280,30 @@ mod tests {
             Modifiers::NONE,
         );
 
-        assert!(inside.is_some(), "la columna 223 sí cabe y se calló");
-        assert_eq!(outside, None, "la columna 224 no cabe y se mandó igual");
+        assert!(inside.is_some(), "column 223 does fit and it went silent");
+        assert_eq!(outside, None, "column 224 does not fit and was sent anyway");
     }
 
     #[test]
-    fn la_codificacion_extendida_no_tiene_ese_techo() {
-        // Es la razón de ser de la extendida: sus números van en texto, así que una ventana ancha de
-        // verdad sigue informando donde la antigua ya no puede.
+    fn the_extended_encoding_does_not_have_that_ceiling() {
+        // It is the whole reason the extended one exists: its numbers travel as text, so a truly wide
+        // window keeps reporting where the old one no longer can.
         let bytes = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(0, 399),
             with_the_extended(),
             Modifiers::NONE,
         )
-        .expect("la extendida no satura");
+        .expect("the extended one does not saturate");
 
         assert_eq!(bytes, b"\x1b[<0;400;1M");
     }
 
     #[test]
-    fn pedir_los_clics_no_es_pedir_el_arrastre() {
-        // **Son banderas distintas porque significan cosas distintas.** Un programa que solo quiere
-        // saber dónde se pincha recibiría, si no, un informe por cada celda que el puntero recorre con
-        // el botón apretado — decenas por gesto, y ninguno pedido.
+    fn asking_for_the_clicks_is_not_asking_for_the_drag() {
+        // **They are distinct flags because they mean distinct things.** A program that only wants to
+        // know where a click lands would otherwise receive a report for every cell the pointer travels
+        // with the button held down — dozens per gesture, and none of them asked for.
         let clicks_only = MouseReporting {
             buttons: true,
             ..MouseReporting::default()
@@ -324,30 +326,29 @@ mod tests {
                 Modifiers::NONE,
             )
             .is_some(),
-            "pidió los clics y no recibió el suyo"
+            "asked for the clicks and did not receive its own"
         );
     }
 
     #[test]
-    fn arrastrar_lleva_el_bit_de_movimiento() {
-        // Los 32 sumados son lo que distingue «voy recorriendo celdas con el botón apretado» de «he
-        // vuelto a apretar aquí». Sin ellos, arrastrar una barra de `htop` se lee como una ráfaga de
-        // clics.
+    fn dragging_carries_the_movement_bit() {
+        // The 32 added are what tells apart «I am travelling cells with the button held down» from «I
+        // have pressed here again». Without them, dragging an `htop` bar reads as a burst of clicks.
         let bytes = encode(
             MouseReport::Drag(PointerButton::Primary),
             CellPos::from_zero(0, 0),
             with_the_extended(),
             Modifiers::NONE,
         )
-        .expect("pidió el arrastre");
+        .expect("asked for the drag");
 
         assert_eq!(bytes, b"\x1b[<32;1;1M");
     }
 
     #[test]
-    fn la_rueda_viaja_con_sus_dos_numeros() {
-        // 64 y 65, y son lo que hace que la lista de `htop` suba y baje. Intercambiarlos deja la rueda
-        // andando al revés, que es un defecto que se nota a diario y no rompe ninguna otra cosa.
+    fn the_wheel_travels_with_its_two_numbers() {
+        // 64 and 65, and they are what makes `htop`'s list scroll up and down. Swapping them leaves the
+        // wheel running backwards, a defect that shows daily and breaks nothing else.
         let wheel_up = encode(
             MouseReport::WheelUp,
             CellPos::from_zero(0, 0),
@@ -366,10 +367,10 @@ mod tests {
     }
 
     #[test]
-    fn el_acorde_viaja_sumado_al_boton() {
-        // `Ctrl` suma 16 y `Alt` 8, que es como el programa distingue un clic normal de uno con acorde
-        // —abrir en otra pestaña, por ejemplo—. **`Mayúsculas` no aparece a propósito**: en esta
-        // ventana esa tecla fuerza la selección, así que un gesto con ella no llega hasta aquí.
+    fn the_chord_travels_added_to_the_button() {
+        // `Ctrl` adds 16 and `Alt` 8, which is how the program tells a normal click from one with a chord
+        // —open in another tab, for instance—. **«Shift» does not appear on purpose**: in this
+        // window that key forces the selection, so a gesture with it does not reach here.
         let with_ctrl = encode(
             MouseReport::Press(PointerButton::Primary),
             CellPos::from_zero(0, 0),
@@ -388,9 +389,9 @@ mod tests {
     }
 
     #[test]
-    fn los_botones_laterales_no_mandan_nada() {
-        // No tienen número en esta codificación. Darles uno prestado sería contarle al programa un clic
-        // de un botón que nadie tocó.
+    fn the_side_buttons_send_nothing() {
+        // They have no number in this encoding. Giving them a borrowed one would be telling the program a
+        // click of a button that nobody touched.
         assert_eq!(
             encode(
                 MouseReport::Press(PointerButton::Extra1),

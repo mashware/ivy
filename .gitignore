@@ -3,6 +3,9 @@ CLAUDE.md
 FLOW.md
 .claude/
 
+# Per-branch work directories (git.worktree in FLOW.md)
+.worktrees/
+
 # Rust (llega en F1.0)
 /target
 
