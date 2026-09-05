@@ -66,6 +66,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/watcher.rs",
     "app/src/pty_output.rs",
     "app/src/lib.rs",
+    "app/src/injected.rs",
     "app/src/measure.rs",
     "app/src/session.rs",
     "app/src/settings.rs",
@@ -119,6 +120,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
 /// this file for exactly that — it found two.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/lib.rs", "app"),
+    ("app/src/injected.rs", "app"),
     ("app/src/main.rs", "app"),
     ("app/src/settings.rs", "app"),
     ("app/src/fonts.rs", "app"),
@@ -136,6 +138,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/examples/screen_demo.rs", "app"),
     ("app/examples/sweep.rs", "app"),
     ("app/tests/prose.rs", "app"),
+    ("app/tests/shape.rs", "app"),
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.

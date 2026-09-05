@@ -52,6 +52,7 @@ use std::collections::BTreeSet;
 /// exact count: the file it watches will keep growing.
 const SOURCES: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("../src/lib.rs")),
+    ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     ("src/measure.rs", include_str!("../src/measure.rs")),
     ("src/session.rs", include_str!("../src/session.rs")),
@@ -561,8 +562,8 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
 #[test]
 fn the_walk_still_reads_the_comments_of_every_file() {
     assert!(
-        SOURCES.len() >= 17,
-        "the list of translated files has {} entries and this delivery left seventeen, which is \
+        SOURCES.len() >= 18,
+        "the list of translated files has {} entries and this delivery left eighteen, which is \
          every file of the crate: it only ever grows, so this is somebody emptying it and every \
          check downstream going quiet",
         SOURCES.len()

@@ -1752,10 +1752,15 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 3] = [
+        const SOURCES: [(&str, &str); 4] = [
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),
+            // **It arrived because this walk noticed it leaving.** D28 took the bench's injected
+            // gestures out of `lib.rs`, and six sentence-shaped literals went with them — the walk
+            // dropped from 78 to 72 and said so. A module split silently narrows every list that
+            // names files, which is why the guard counts and does not just judge.
+            ("injected.rs", include_str!("injected.rs")),
         ];
         let mut sentences: Vec<(&str, String)> = Vec::new();
         for (name, source) in SOURCES {

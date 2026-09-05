@@ -4181,3 +4181,94 @@ porque la guarda pregunta por la caja entera y `settings.rs` todavía declaraba 
 exactamente lo que el anexo anterior anunció —«las entregas que quedan van a encontrar más, no menos»— y
 la primera confirmación con números: **la última entrega mecánica del hito arregla citas de la
 penúltima**.
+
+## D28 — A module has a ceiling, and a guard holds it
+
+**One file of this repository has 3 119 lines of production code and the other eleven have between 97
+and 542.** It is not a pattern, it is a single file nobody ever split: `crates/app/src/lib.rs`, the
+window's core. Inside it one block takes a third of the total — `impl Window`, 1 110 lines across 47
+methods.
+
+**And the rule against it was not written anywhere**, which is the same shape of problem **D27**
+exists for. The Spanish grew to 43 860 lines because «here we program in Spanish» lived only in the
+code; a file grows to 3 119 lines for exactly the same reason. This is the paragraph there was never
+one of.
+
+### What the measurements say, because they change what the rule should be about
+
+| | |
+|---|---|
+| Production functions across the whole workspace | 443 |
+| Median function | 10 lines |
+| 90th percentile | 38 lines |
+| Functions over 60 lines | 13 of 443 |
+
+**The functions are already fine**, so a rule about function length would be a rule about nothing —
+it would flag thirteen lines of existing, argued code and prevent no future defect. What is out of
+hand is **files and `impl` blocks**, and that is what the ceiling is about.
+
+### The decision
+
+- **A module holds at most 600 lines of production code.** Comments and the `#[cfg(test)] mod tests`
+  block do not count: Rust keeps unit tests in the file by convention, and this project writes
+  comments that argue. Counting them would make the rule punish the two habits it most wants to keep.
+- **An `impl` block holds at most 300 lines of production code.** A type whose behaviour does not fit
+  in 300 lines is more than one type, or its seams are in the wrong place.
+- **The ceilings are held by a test**, not by review. A rule with no guard is what this whole entry is
+  about; `crates/app/tests/shape.rs` is the guard, built the same way as the two that hold the
+  language: floors so it cannot pass by looking at nothing, and every exception declared by name with
+  its reason.
+- **`crates/app/src/lib.rs` is the one declared exception, and it is a ratchet.** The guard records
+  the number it has today and fails if it **grows**. Every delivery that takes a piece out lowers the
+  recorded number; nothing can put one back.
+
+### What was discarded
+
+- **Splitting the file in one delivery.** It is 24 000 lines with 15 302 of tests that reach into
+  private items; a single change moving all of it would be unreviewable, and it would collide head-on
+  with the delivery that is translating that very file.
+- **A ceiling on total lines rather than production lines.** It would have counted 7 319 comment lines
+  against a file whose comments are the reason its decisions are traceable, and the cheapest way to
+  pass would have been to delete argument.
+- **A ceiling on function length.** Measured first: it would flag 13 of 443 and prevent nothing.
+- **Leaving `lib.rs` out of the guard entirely.** An exception with no number is an exemption, and the
+  next reader cannot tell «too big, being worked on» from «fine». The ratchet is what makes the
+  difference visible.
+
+### The order the pieces come out in, and why each one is a piece
+
+Written down so the next delivery does not have to rediscover it. Sizes are production lines.
+
+| What | Lines | Where it goes | Why it is separable |
+|---|---|---|---|
+| ~~The injected drags of the measurement bench~~ | 300 | **done** — `injected.rs`, 311 lines | Instrumentation living in the core. **Not `measure.rs`**: that module is at 540 lines and the ceiling is 600, so it can absorb 60 — the guard's own arithmetic ruled out the obvious home |
+| The layout tree — `Node`, `Tab`, tiling | 455 | a module of its own | A closed data structure; its serialisation already lives outside, in `session.rs` |
+| Routing the mouse, 15 methods of `Window` | ~350 | `mouse.rs` | It fits: 99 lines today, 449 after |
+| Publishing the report and measuring what is out of sight | ~150 | with the injected drags | Same reason as the first row, and the same owner: everything the bench needs from the window |
+| The tab bar | ~76 | a module of its own | Painting and hit-testing one strip, coupled to nothing else |
+| Saving and the watcher | ~50 | `session.rs`, `watcher.rs` | Both modules exist |
+
+**That correction is worth keeping rather than editing out.** The first version of this table sent two
+pieces to `measure.rs` because that is the module whose name matches them. Doing the arithmetic the
+guard does says it fits neither: `measure.rs` is at 540 of its 600. A ceiling is only useful if it is
+consulted **before** deciding where something goes, and this table is the first time it was.
+
+### What the first piece coming out taught, recorded because the next one will hit it too
+
+`lib.rs` went from **3 119 production lines to 2 819**, and two guards fired on the way — neither of
+them the one that measures size:
+
+- **The on-screen-sentence walk dropped from 78 sentences to 72 and said so.** Six of the literals a
+  user can read moved out of a file that walk names, into a file it did not. **A module split
+  silently narrows every list that names files**, and the only reason it was caught is that this
+  project floors its walks on a count instead of only judging what they find.
+- **The identifier guard refused the new test file** for not being on its citations list, which is
+  the same class: a new file is an unguarded file until somebody puts it on the lists.
+
+So the checklist for taking a piece out is four lists, not one: `shape.rs`, `prose.rs`,
+`glossary.rs` (twice — the clean-files list and the citations list) and `settings.rs`'s walk. It is
+written here rather than left to be rediscovered by whoever takes the layout tree out next.
+
+That leaves `lib.rs` at about 1 400 production lines and `impl Window` at about 480 — over the
+ceiling still, and the ratchet is what keeps it moving.
+
