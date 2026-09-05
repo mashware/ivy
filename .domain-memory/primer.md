@@ -2,88 +2,92 @@
 
 ## What this is
 
-Un terminal **anfitrión de agentes**: ventana → pestañas → divisiones, donde cada división es una
-consola independiente **más un panel de estado**. El panel no lo escribe la app: lo escribe *quien
-hace el trabajo* (un agente, un CI, un despliegue, un script) mediante un fichero con formato
-definido (`panel.json`). La app solo lo pinta.
+An **agent-hosting terminal**: window → tabs → panes, where each pane is an independent console
+**plus a status panel**. The panel is not written by the app: it is written by *whoever does the
+work* (an agent, a CI run, a deployment, a script) through a file with a defined format
+(`panel.json`). The app only paints it.
 
-Resuelve el problema de trabajar con varios agentes de terminal en paralelo sin saber, de un
-vistazo, cuál trabaja y cuál espera, por qué paso va cada tarea, a cuál le queda poco contexto,
-cuánto lleva gastado y qué está bloqueado.
+It solves the problem of working with several terminal agents in parallel without knowing, at a
+glance, which one is working and which is waiting, what step each task is on, which one is running
+low on context, how much it has spent, and what is blocked.
 
-**Qué NO es:** no es un agente (no razona ni llama a modelos), no es un multiplexor de sesiones
-remotas (eso es tmux/Zellij) y no reescribe el emulador de terminal (se consume como librería).
+**What it is NOT:** it is not an agent (it does not reason and it does not call models), it is not a
+multiplexer of remote sessions (that is tmux/Zellij), and it does not rewrite the terminal emulator
+(that is consumed as a library).
 
 ## Users
 
-- **Desarrollador que orquesta varios agentes a la vez** (Claude Code, opencode, Codex, Gemini
-  CLI) — necesita la vista global del estado de todas sus tareas en curso.
-- **Productor de estado, agente o no** — cualquier proceso que corra dentro de una división y
-  quiera publicar en qué va: un CI, un despliegue, un script propio.
+- **A developer orchestrating several agents at once** (Claude Code, opencode, Codex, Gemini CLI) —
+  needs the global view of the state of every task in flight.
+- **A state producer, agent or not** — any process running inside a pane that wants to publish how
+  it is going: a CI run, a deployment, a script of one's own.
 
 ## Main modules / domains
 
-- **Terminal** — el emulador por división. Existe porque sin una consola correcta y rápida nada
-  de lo demás importa; el motor VT y el PTY son de terceros (D2), aquí solo se hospedan.
-- **Panel** — pinta el estado publicado por el productor. Su razón de ser es que la información
-  que **no** se puede deducir desde fuera (contexto restante, coste, bloqueos) vale más que la
-  que sí, y solo el que trabaja la conoce.
-- **Contrato `panel.json`** — el formato abierto que separa a la app de cualquier dominio
-  concreto. Es lo que permite cuatro divisiones con cuatro productores distintos y un resumen
-  global de todas.
-- **Canales (D5)** — tres, deliberadamente: MCP (agente → app: crear divisiones, publicar
-  estado, leer salida), `panel.json` (productor → app) y PTY (app → agente: botones y todo lo
-  que no hable MCP). El PTY no es el mecanismo principal, es el respaldo universal.
-- **Identidad por división (D7)** — `PANEL_ID` / `PANEL_DIR` inyectados al lanzar cada shell.
-  Es lo que desata el contrato de cualquier herramienta concreta y, a la vez, el límite de
-  seguridad de MCP.
+- **Terminal** — the emulator per pane. It exists because without a correct and fast console nothing
+  else matters; the VT engine and the PTY are third-party (D2), and here they are only hosted.
+- **Panel** — paints the state published by the producer. Its reason for being is that the
+  information that **cannot** be deduced from outside (remaining context, cost, blockers) is worth
+  more than the information that can, and only whoever does the work knows it.
+- **The `panel.json` contract** — the open format that separates the app from any particular
+  domain. It is what allows four panes with four different producers and one global summary of them
+  all.
+- **Channels (D5)** — three, deliberately: MCP (agent → app: open panes, publish state, read
+  output), `panel.json` (producer → app) and the PTY (app → agent: buttons and everything that does
+  not speak MCP). The PTY is not the main mechanism, it is the universal fallback.
+- **Identity per pane (D7)** — `PANEL_ID` / `PANEL_DIR` injected when each shell is launched. It is
+  what unties the contract from any particular tool and, at the same time, MCP's security boundary.
 
 ## Invariants / constraints
 
-- **La app nunca define `ANTHROPIC_API_KEY`** ni equivalentes de otros proveedores al lanzar un
-  panel: tendría prioridad sobre la sesión de la suscripción y cambiaría la facturación del
-  usuario sin que se entere (D4).
-- **La app no deduce el estado.** No parsea el pintado de una TUI ni ficheros de terceros para
-  inferir en qué va una tarea. Esa semántica solo la conoce quien trabaja — deducirla ya produjo
-  tres errores seguidos en el prototipo (D6).
-- **El control de agentes va por consola, no por API.** Las suscripciones solo valen dentro del
-  cliente oficial de cada proveedor; obligar a pagar API por lo ya pagado mata la adopción (D4).
-- Los `actions` del panel son **ejecución de código** en el shell del usuario: el comando se ve
-  antes de ejecutarse y el texto que se envía es plano, sin interpolación ni plantillas.
-- Un `panel.json` de **origen ajeno** (repo clonado, contenedor) es no confiable: nunca ejecutar
-  nada de ahí sin confirmación visible.
-- Leer el buffer y mandarlo a un modelo **exfiltra** lo que haya en pantalla (tokens, claves,
-  respuestas de API): qué se envía se elige explícitamente, nunca de forma automática.
-- **MCP se acota por `PANEL_ID`**: un agente alcanza su división y no las demás.
-- **Multiplataforma real** (Linux, macOS, Windows). Descarta de raíz cualquier solución
-  solo-Linux, por cómoda que sea (D1).
-- **Que funcione sin el panel:** si nadie publica nada, sigue siendo un terminal correcto.
-- Cada fase del roadmap vale por sí sola aunque se abandone la siguiente; lo que una fase deja
-  fuera está fuera a propósito.
+- **The app never sets `ANTHROPIC_API_KEY`** or another provider's equivalent when launching a
+  panel: it would take precedence over the subscription session and would change the user's billing
+  without them noticing (D4).
+- **The app does not deduce state.** It does not parse a TUI's painting or third-party files to
+  infer how a task is going. Only whoever does the work knows that semantics — deducing it already
+  produced three mistakes in a row in the prototype (D6).
+- **Agent control goes through the console, not through an API.** Subscriptions are only worth
+  anything inside each provider's official client; making somebody pay for the API on top of what
+  they already pay kills adoption (D4).
+- The panel's `actions` are **code execution** in the user's shell: the command is visible before it
+  runs and the text sent is plain, with no interpolation and no templates.
+- A `panel.json` of **foreign origin** (a cloned repo, a container) is untrusted: never run anything
+  from it without visible confirmation.
+- Reading the buffer and sending it to a model **exfiltrates** whatever is on screen (tokens, keys,
+  API responses): what gets sent is chosen explicitly, never automatically.
+- **MCP is scoped by `PANEL_ID`**: an agent reaches its own pane and no other.
+- **Genuinely cross-platform** (Linux, macOS, Windows). This rules out at the root any Linux-only
+  solution, however convenient (D1).
+- **It works without the panel:** if nobody publishes anything, it is still a correct terminal.
+- Every phase of the roadmap stands on its own even if the next one is abandoned; what a phase
+  leaves out is out on purpose.
 
 ## External stakeholders / integrations
 
-- **MCP (Model Context Protocol)** — el canal agente→app. Elegido porque lo hablan Claude Code,
-  opencode, Gemini CLI y Codex: se escribe el servidor una vez y sirven todos, y **no consume
-  API aparte** (se añade a la sesión que el agente ya tiene con su suscripción).
-- **`alacritty_terminal`** — parseo VT y estado del terminal, como librería.
-- **`portable-pty`** — el PTY, abstrayendo Unix y ConPTY de Windows.
+- **MCP (Model Context Protocol)** — the agent→app channel. Chosen because Claude Code, opencode,
+  Gemini CLI and Codex all speak it: the server is written once and serves them all, and it **does
+  not consume a separate API budget** (it is added to the session the agent already has through its
+  subscription).
+- **`alacritty_terminal`** — VT parsing and terminal state, as a library.
+- **`portable-pty`** — the PTY, abstracting over Unix and Windows's ConPTY.
 
 ## Glossary
 
-- **División** — una consola independiente dentro de una pestaña: terminal + panel. Es la unidad
-  de identidad (`PANEL_ID`) y el límite de seguridad de MCP.
-- **Panel** — la vista de estado de una división. Nunca la escribe la app.
-- **Productor** — quien publica el estado en `panel.json`: un agente, un CI, un despliegue, un
-  script. La app no sabe cuál es ni le importa.
-- **Contrato abierto** — que el formato del panel no pertenece a ningún producto concreto, a
-  diferencia del panel de opencode, que solo sabe de opencode.
-- **Rancio (stale)** — un resumen cuyo `updated_at` ha envejecido. Un resumen que solo se escribe
-  al terminar un paso miente si el proceso muere a mitad; la marca de tiempo lo delata (D6).
+- **Pane** — an independent console inside a tab: terminal + panel. It is the unit of identity
+  (`PANEL_ID`) and MCP's security boundary. **`split` is the gesture that creates one**, never the
+  thing itself.
+- **Panel** — a pane's state view. Never written by the app.
+- **Producer** — whoever publishes the state in `panel.json`: an agent, a CI run, a deployment, a
+  script. The app does not know which and does not care.
+- **Open contract** — that the panel's format belongs to no particular product, unlike opencode's
+  panel, which only knows about opencode.
+- **Stale** — a summary whose `updated_at` has aged. A summary written only when a step finishes
+  lies if the process dies halfway; the timestamp gives it away (D6).
 
 ## Stack
 
-Rust 1.94. **GPUI** para el producto y **egui** para prototipar (D3); Electron/Tauri + xterm.js
-descartado por su techo con muchos paneles. Las decisiones vivas están en `docs/02-decisiones.md`
-(D1–D7) y el plan por fases en `docs/05-roadmap.md`: la Parte I define qué entra en cada fase y
-la Parte II cómo se construye.
+Rust 1.97.1, pinned exactly rather than as a range because the numbers this project publishes are
+only comparable with each other if the compiler is the same. **GPUI** for the product and **egui**
+for prototyping (D3); Electron/Tauri + xterm.js discarded for its ceiling with many panes. The live
+decisions are in `docs/02-decisiones.md` (D1–D28) and the phased plan in `docs/05-roadmap.md`: Part
+I defines what belongs to each phase and Part II how it is built.

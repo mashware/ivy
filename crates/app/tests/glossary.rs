@@ -1192,6 +1192,14 @@ const NOT_OURS: &[&str] = &[
     // would read as *the configuration* instead of as *what it cost to read it*» — so the citation is
     // of something deliberately absent. Nothing else in this list is of that kind.
     "Configuracion",
+    // Keys of the domain-memory store's own frontmatter, cited by the guard that walks it. The
+    // store's format belongs to the MCP server that writes it, not to this crate.
+    "content_hashes",
+    "file_paths",
+    "symbols",
+    "tags",
+    // The language tag of a fenced block, which belongs to whoever renders the Markdown.
+    "mermaid",
 ];
 
 /// The `.rs` file names this milestone retired, derived from the arrows in the annex.

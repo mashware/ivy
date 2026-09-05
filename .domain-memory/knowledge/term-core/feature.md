@@ -1,7 +1,7 @@
 ---
 id: feat_term-core_nx0g1r
 slug: term-core
-name: term-core — el PTY y la rejilla de una división
+name: term-core — a pane's PTY and grid
 type: feature
 status: active
 superseded_by: null
@@ -19,17 +19,25 @@ content_hashes:
   crates/term-core/src/lib.rs: 'sha256:21f7f713225e6dcff89ef43f9b4945f03c264d3071780325d2969d2661de4d18'
   crates/term-core/examples/shell.rs: 'sha256:316b3b2821edca42c7b5b15633c9ad0743a8db9eee90986d65db3203a22cac3d'
 tags:
-  - fase-1
+  - phase-1
   - pty
-  - arquitectura
+  - architecture
 ---
 
 ## What it does
 
-La caja que sabe ejecutar y leer un programa dentro de un pseudoterminal. Existe separada de la capa de pintado por una razón económica, no estética: la interfaz se va a reescribir (egui ahora, GPUI cuando haga falta, ver D3), y cuando eso pase esta caja tiene que seguir sirviendo tal cual. Por eso no depende de nada visual y por eso los tipos de sus dependencias (`portable-pty`) no asoman en su API pública — quien la usa no debería tener que conocerlas ni migrar con ellas.
+The crate that knows how to run and read a program inside a pseudoterminal. It exists apart from the
+painting layer for an economic reason, not an aesthetic one: the interface is going to be rewritten
+(egui now, GPUI when it is needed, see D3), and when that happens this crate has to keep serving
+exactly as it is. That is why it depends on nothing visual, and why the types of its dependencies
+(`portable-pty`) do not show through in its public API — whoever uses it should not have to know
+them, nor migrate along with them.
 
-Entrega los bytes **crudos**: no interpreta, no valida UTF-8, no normaliza saltos de línea. Una secuencia de escape puede llegar partida entre dos mensajes del canal, y eso es correcto. Quien interpreta es la capa de arriba — hasta F1.2, el terminal donde se imprime; a partir de ahí, `alacritty_terminal`.
+It delivers the bytes **raw**: it does not interpret, does not validate UTF-8, does not normalize
+line breaks. An escape sequence can arrive split between two messages of the channel, and that is
+correct. Whoever interprets is the layer above — up to F1.2, the terminal where it is printed; from
+there on, `alacritty_terminal`.
 
 ## Where it lives
 
-`crates/term-core/`. El `example` `shell.rs` es la demostración a mano de que funciona.
+`crates/term-core/`. The `example` `shell.rs` is the by-hand demonstration that it works.

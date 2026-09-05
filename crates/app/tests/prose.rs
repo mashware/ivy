@@ -25,7 +25,7 @@
 //!
 //! **The non-ASCII half of the sibling oracle is deliberately absent, and it was measured before
 //! being dropped.** `settings.rs` judges thirteen short on-screen messages and can afford
-//! `is_ascii()`; here **1 851 of the 12 734 comment lines are not pure ASCII** — angle quotes, em
+//! `is_ascii()`; here **1 858 of the 12 783 comment lines are not pure ASCII** — angle quotes, em
 //! dashes, `µs`, Japanese, emoji — so that test reports a seventh of the corpus. The narrower
 //! variant — a Spanish accent or `ñ` anywhere in the line — leaves **five** lines, and it would
 //! need a line-by-line exemption for every one of them: two are deliberate Spanish citations
@@ -47,7 +47,7 @@ use std::collections::BTreeSet;
 /// left four tests green. Here the same mistake does not compile.
 ///
 /// **`src/lib.rs` is here, and adding it was the one line an earlier delivery promised it would
-/// be.** It is more than half the crate's prose on its own — 7 043 of the 12 734 comment lines —
+/// be.** It is more than half the crate's prose on its own — 7 043 of the 12 783 comment lines —
 /// and it is why the list is written as data and every floor below is a lower bound rather than an
 /// exact count: the file it watches will keep growing. It carried 7 319 until the module ceiling
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
@@ -80,27 +80,27 @@ const SOURCES: &[(&str, &str)] = &[
 ///
 /// **Without a floor this test passes by being empty**, which is how the guards of this suite die:
 /// somebody reshapes the comment detection, the walk finds nothing, every file looks clean and
-/// nothing says otherwise. Measured as this delivery leaves the tree: **12 734** comment lines, the
+/// nothing says otherwise. Measured as this delivery leaves the tree: **12 783** comment lines, the
 /// thinnest file being `src/main.rs` with **one** — it is four lines of `fn main`, and a floor that
 /// demanded more of it would have to be a table instead of a number.
 ///
 /// **Two floors and not one over the sum**, the lesson the sibling paid for twice, and adding
 /// `src/lib.rs` is what makes it matter: `src/main.rs`, `examples/leak.rs` and
-/// `examples/screen_demo.rs` together carry 94 lines, so losing all three leaves 12 640 — above the
+/// `examples/screen_demo.rs` together carry 94 lines, so losing all three leaves 12 689 — above the
 /// total floor, and reported by nothing but the per-file one. That is the case the second floor is
 /// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 7 043 of the
-/// 12 734, so losing it drops the corpus to 5 691 and the total fires loudly. The two floors answer
+/// 12 783, so losing it drops the corpus to 5 740 and the total fires loudly. The two floors answer
 /// different halves, which is why there are two.
 ///
 /// **The total floor is 12 500 and not 12 000, and the 500 was measured rather than chosen.** With
-/// the corpus at 12 734 a floor of 12 000 leaves 734 lines of slack, which is more than any file of
+/// the corpus at 12 783 a floor of 12 000 leaves 783 lines of slack, which is more than any file of
 /// this crate carries bar four — so `src/settings.rs` could be cut from 473 comment lines to one and
-/// both floors would still pass. Checked by doing exactly that. At 12 500 the slack is 234 and every
-/// file above that size is defended; the **eight** below it are not — `src/main.rs` (1),
+/// both floors would still pass. Checked by doing exactly that. At 12 500 the slack is 283 and every
+/// file above that size is defended; the **nine** below it are not — `src/main.rs` (1),
 /// `examples/screen_demo.rs` (34), `examples/leak.rs` (59), `src/mouse.rs` (94),
-/// `examples/sweep.rs` (134), `examples/fonts.rs` (168), `src/theme.rs` (202) and
-/// `src/watcher.rs` (203) — and that is what the per-file floor is for and why it is stated here
-/// rather than left to be discovered.
+/// `examples/sweep.rs` (134), `examples/fonts.rs` (168), `src/theme.rs` (202),
+/// `src/watcher.rs` (203) and `src/pty_output.rs` (248) — and that is what the per-file floor is
+/// for and why it is stated here rather than left to be discovered.
 const COMMENT_LINES_AT_LEAST: usize = 12_500;
 const COMMENT_LINES_PER_FILE_AT_LEAST: usize = 1;
 
@@ -179,7 +179,7 @@ const ISLANDS: &[(&str, &str)] = &[
 ///
 /// The list is closed, and the threshold above is what covers its remaining softness: a handful of
 /// entries — «con», «la», «es» — do exist in some corner of English, and one of them alone is never
-/// a verdict. Measured over all 12 734 comment lines of the eighteen files: **zero** English lines
+/// a verdict. Measured over all 12 783 comment lines of the eighteen files: **zero** English lines
 /// reach three markers.
 const SPANISH_WORDS: &[&str] = &[
     // ── The function words, from the sibling list in src/settings.rs ──
@@ -462,7 +462,7 @@ fn fold(text: &str) -> String {
 /// block-comment line costs the guard.
 ///
 /// **Not one of the eighteen files uses `/* */` today**, and that has a consequence worth writing
-/// down: replacing the block-comment arm with `if false` leaves the corpus at 12 734 lines and every
+/// down: replacing the block-comment arm with `if false` leaves the corpus at 12 783 lines and every
 /// floor green — measured, and it was the one mutation of eleven that stayed green.
 /// [`the_walk_finds_a_block_comment_and_notices_one_that_never_closes`] is what covers that arm, on
 /// a fixture, because the tree cannot.
@@ -574,7 +574,7 @@ fn the_walk_still_reads_the_comments_of_every_file() {
     }
     assert!(
         total >= COMMENT_LINES_AT_LEAST,
-        "the walk found {total} comment lines and there are 12 734: the detection stopped matching \
+        "the walk found {total} comment lines and there are 12 783: the detection stopped matching \
          and this guard is judging almost nothing"
     );
 }
@@ -827,7 +827,7 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
     // one would go on passing.
     assert!(
         examined >= COMMENT_LINES_AT_LEAST,
-        "this guard judged {examined} comment lines and there are 12 734: whatever it reports, it is \
+        "this guard judged {examined} comment lines and there are 12 783: whatever it reports, it is \
          not reporting on the prose of these eighteen files"
     );
 
@@ -1116,4 +1116,599 @@ fn no_document_mixes_the_two_languages() {
         reported.len(),
         reported.join("\n")
     );
+}
+
+// ── The stored knowledge, which is the last thing this milestone translated ──────────────────────
+
+/// Where the domain-memory store lives, from this test's own file.
+const STORE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.domain-memory");
+
+/// How many records the walk has to still find, how much prose in total, and how little in the
+/// thinnest of them.
+///
+/// **Measured as this delivery leaves the tree:** 74 records carrying 2 127 lines of prose, the
+/// thinnest being an aspect with 7 and the fattest the store's own manual with 116.
+///
+/// **The record floor is the exact count and not a margin below it**, which is a stronger claim
+/// than [`SOURCES`] can make and it is the store's own rule that allows it: `instructions.md` says a
+/// feature removed from the product is **archived, not deleted** — `status: archived`, because
+/// «we used to do X and removed it because Y» is worth keeping. So the file count only ever grows,
+/// and any drop is somebody deleting knowledge.
+///
+/// **And there are three floors, not two.** The sum hides what a single record does: with the total
+/// at 2 127 against a floor of 2 000, the fattest record in the store could be emptied and the sum
+/// would wave it through. That is the same lesson [`COMMENT_LINES_AT_LEAST`] already paid for, one
+/// corpus over.
+const RECORDS_AT_LEAST: usize = 74;
+const STORE_PROSE_AT_LEAST: usize = 2_000;
+const RECORD_PROSE_AT_LEAST: usize = 5;
+
+/// How many paths the records cite between them, counting every occurrence and not the distinct set.
+///
+/// **The first version of this floor was 30 against a real 174**, because it was written from the
+/// count of *distinct* paths — 33 — which is a different quantity and a fifth of the right one. It
+/// would have let 82 % of the citations stop being checked with nothing failing, which is precisely
+/// the shape of guard this file exists to refuse.
+const CITED_PATHS_AT_LEAST: usize = 165;
+
+/// How many records still hand over a headline for [`no_records_headline_reads_as_spanish`] to read.
+///
+/// **Seventy-two and not seventy-four**: `instructions.md` and `primer.md` carry no frontmatter, so
+/// they carry no `name:` either, and the two of them are the only records that legitimately yield
+/// nothing here.
+///
+/// **The exact count and not a margin**, for the reason [`RECORDS_AT_LEAST`] gives: the store's own
+/// rule archives instead of deleting, so this number only grows. A drop of one is either a record
+/// gone or a `name:` that stopped being found — and a headline that stops being found is judged
+/// English without having been read, which is the failure this floor exists to refuse.
+const HEADLINES_AT_LEAST: usize = 72;
+
+/// The one cited path that is not in the tree, and why that is correct.
+///
+/// `CLAUDE.md` is in `.gitignore`: it is the operating manual of whoever works here, it lives in
+/// their checkout and it reaches no worktree. A record citing it is citing something real that this
+/// guard cannot see, so it is named here rather than silently skipped by an extension filter —
+/// which is what the first version did, and that filter also skipped the other 32 `.md` citations
+/// along with it.
+const CITED_BUT_NOT_IN_THE_TREE: &[&str] = &["CLAUDE.md"];
+
+/// Spanish a record quotes **on purpose**, and why it may.
+///
+/// Same mechanism as [`ISLANDS`] and [`DOCUMENT_ISLANDS`], and the same ratchet: an entry naming
+/// text no record contains fails [`no_store_island_is_stale`].
+///
+/// **Every one of them is in the migration's own records**, and that is not a coincidence: those
+/// five files are where this repository writes down what it used to call things. A citation of a
+/// retired name is a historical fact, and translating it would be reporting that the thing was
+/// called something it was never called.
+const STORE_ISLANDS: &[(&str, &str)] = &[(
+    "escribir la disposición",
+    "one of twelve report literals the bench census table quotes as they were in August 2026, \
+     before the measurement script was translated: the report says «writing the layout» today, and \
+     the record's whole point is what the old literal did to the guards",
+)];
+
+/// The `.md` files of the store, read from disk with their paths.
+///
+/// **A directory walk here and `include_str!` for the crate's own sources, and the difference is
+/// deliberate.** [`SOURCES`] names its files one by one because a guard that resolves paths at run
+/// time turns a renamed source into a target it silently skips. That argument does not carry over:
+/// the store is data, its files are renamed by the tool that owns them, and a walk **finds** a
+/// renamed record instead of missing it. What the walk cannot notice is a record that disappears —
+/// so [`RECORDS_AT_LEAST`] is the floor that answers exactly that, and it is why the count is
+/// asserted before anything is judged.
+fn store_records() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("the store is not readable at {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry.expect("a directory entry of the store").path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "md") {
+                let name = path
+                    .strip_prefix(std::path::Path::new(STORE))
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string();
+                out.push((
+                    name,
+                    std::fs::read_to_string(&path).expect("a record of the store"),
+                ));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(std::path::Path::new(STORE), &mut out);
+    out.sort();
+    out
+}
+
+/// A record split into its frontmatter and its body, or all body when it has none.
+///
+/// `instructions.md` and `primer.md` carry no frontmatter — they are the store's manual and its
+/// overview, not records — and treating them as headerless is what keeps them inside the corpus
+/// instead of quietly outside it.
+fn record_halves(md: &str) -> (&str, &str, usize) {
+    match md
+        .strip_prefix("---")
+        .and_then(|rest| rest.split_once("\n---"))
+    {
+        // **The two delimiters are already counted, once each.** `front` opens with the newline
+        // that follows the first `---`, so its first line is empty and stands for that delimiter;
+        // `body` opens with what is left of the closing `---` line, so **its** first line is empty
+        // and stands for that one. Adding two on top put every reported line **two** past the real
+        // one — checked by seeding a Spanish line at 49 and reading 51 back. Off-by-one here fails
+        // nothing, which is exactly why it survived: it only sends whoever reads a report to the
+        // wrong line, and that is worse than saying nothing.
+        Some((front, body)) => (front, body, front.lines().count()),
+        None => ("", md, 0),
+    }
+}
+
+/// The prose lines of a record, and how many fences it opened.
+///
+/// The three exclusions are the ones [`document_prose`] makes and for the same reasons, plus one of
+/// its own: **the frontmatter is not prose**. It is addresses, checksums and symbol names —
+/// `content_hashes` alone is a wall of hexadecimal — and judging it as language would report a sha
+/// as Spanish about as often as chance allows.
+///
+/// **The fence count comes back with the lines for the reason its sibling gives**: an unbalanced
+/// fence does not hide a record, it **inverts** it — every block read as prose and every paragraph
+/// skipped — and the totals stay plausible throughout.
+fn record_prose(md: &str) -> (Vec<(usize, String)>, usize) {
+    let (_, body, offset) = record_halves(md);
+    let mut found = Vec::new();
+    let mut fences = 0usize;
+    for (nth, line) in body.lines().enumerate() {
+        if line.trim_start().starts_with("```") {
+            fences += 1;
+            continue;
+        }
+        if fences % 2 == 1 {
+            continue;
+        }
+        let outside = line.split('`').step_by(2).collect::<Vec<_>>().join(" ");
+        if outside.chars().any(char::is_alphabetic) {
+            found.push((offset + nth + 1, outside));
+        }
+    }
+    (found, fences)
+}
+
+/// Every path a record cites under `file_paths:`, keyed off that block and not off an extension.
+///
+/// **The key and not the suffix**, because `symbols:` is a list of the same shape two lines down: a
+/// symbol that happens to look like a module file name would be read as a path and reported red,
+/// and a citation of a `.md` document would be skipped for having the wrong suffix. The first
+/// version filtered by extension and did both.
+fn cited_paths(front: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut inside = false;
+    for line in front.lines() {
+        // **The dash is found after trimming, not at a fixed indent.** A record re-indented by hand
+        // — or by a tool that reflows YAML — writes `- path` at column zero, and matching the exact
+        // two spaces would walk past every citation it carries with the floor still satisfied by
+        // the rest.
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("- ") {
+            if inside {
+                found.push(rest.trim());
+            }
+        } else if !line.starts_with(char::is_whitespace) {
+            inside = line.starts_with("file_paths:");
+        }
+    }
+    found
+}
+
+/// The record's headline: the whole value of `name:`, folded blocks joined back into one sentence.
+///
+/// **One sentence and not one line per line.** Sixty-eight of the seventy-two are written `name: >-`
+/// with the text wrapped across two or three indented lines, and judging those lines apart splits a
+/// Spanish sentence into halves that each score below the threshold. Joining is what makes the
+/// oracle see what a reader sees.
+///
+/// The value stops at the next key, found as a line that does not start with whitespace — the same
+/// rule [`cited_paths`] uses to leave a block, and for the same reason: it survives a re-indent.
+fn record_headline(front: &str) -> String {
+    let mut lines = front.lines().skip_while(|line| !line.starts_with("name:"));
+    let Some(first) = lines.next().and_then(|line| line.strip_prefix("name:")) else {
+        return String::new();
+    };
+    // `>-`, `>`, `|` and `|-` are the block styles the store writes; what follows on that same line
+    // is the whole value in the four records that do not use one.
+    let mut headline = first.trim().trim_matches(['>', '|', '-', '+']).trim().to_string();
+    for line in lines {
+        if !line.starts_with(char::is_whitespace) {
+            break;
+        }
+        headline.push(' ');
+        headline.push_str(line.trim());
+    }
+    headline.trim().to_string()
+}
+
+/// The headline of a record is prose, and this milestone claims it is English prose.
+///
+/// **This is the half of the frontmatter [`record_prose`] is right to skip and wrong to lose.** That
+/// exclusion is argued on `content_hashes` — a wall of hexadecimal — and the argument holds for the
+/// hashes, the ids and the dates. It does not hold for `name:`, which is a full sentence written for
+/// a person: it is what the store hands back first when an agent searches it, so a record whose
+/// headline is Spanish reads as Spanish at the one moment anybody looks.
+///
+/// **The hex wall never reached the threshold anyway**, which is why narrowing the exclusion instead
+/// of widening it is safe: a sha is split on non-letters, so the only listed words it can spell are
+/// those written entirely over `a`–`f` — «de» and «cabe» — and two is below
+/// [`MARKERS_TO_CALL_IT_SPANISH`]. Judging `name:` alone keeps even that out of reach.
+///
+/// **Discarded: judging `tags:` with the same oracle.** A tag is one word on a line of its own, so
+/// three different listed words on one line is unreachable and the guard would be a test of nothing;
+/// catching a Spanish tag needs a one-marker rule, which is a different claim with a different false
+/// positive rate and belongs to whoever writes it.
+#[test]
+fn no_records_headline_reads_as_spanish() {
+    let mut reported = Vec::new();
+    let mut read = 0usize;
+    for (name, md) in store_records() {
+        let headline = record_headline(record_halves(&md).0);
+        if headline.is_empty() {
+            continue;
+        }
+        read += 1;
+        let markers = record_markers(&headline);
+        if markers.len() >= MARKERS_TO_CALL_IT_SPANISH {
+            reported.push(format!("  {name}: {headline}"));
+        }
+    }
+    assert!(
+        read >= HEADLINES_AT_LEAST,
+        "this guard read {read} headlines and the store has {HEADLINES_AT_LEAST}: a record lost its \
+         `name:`, or the block style changed and the value is no longer being found — either way \
+         what is not read is being called English"
+    );
+    assert!(
+        reported.is_empty(),
+        "{} record headline(s) read as Spanish. The headline is what a search of the store returns \
+         before anything else, so this is the one line of a record that is read whether or not the \
+         record is:\n{}",
+        reported.len(),
+        reported.join("\n")
+    );
+}
+
+#[test]
+fn the_walk_still_reads_the_prose_of_every_record() {
+    let records = store_records();
+    assert!(
+        records.len() >= RECORDS_AT_LEAST,
+        "the store gave {} records and this delivery left {RECORDS_AT_LEAST}: the store's own rule \
+         is that a retired entry is archived and not deleted, so a drop is somebody deleting \
+         knowledge — or this walk no longer finding it",
+        records.len()
+    );
+    let mut total = 0usize;
+    for (name, md) in &records {
+        let (lines, fences) = record_prose(md);
+        assert_eq!(
+            fences % 2,
+            0,
+            "«{name}» opens {fences} fences and closes one fewer: from there on the walk reads the \
+             complement of its prose — every block judged as a sentence and every sentence skipped \
+             — and the totals stay plausible"
+        );
+        assert!(
+            lines.len() >= RECORD_PROSE_AT_LEAST,
+            "«{name}» gave {} lines of prose: either it emptied out, or the walk stopped finding \
+             its body and it is being judged clean without having been read",
+            lines.len()
+        );
+        total += lines.len();
+    }
+    assert!(
+        total >= STORE_PROSE_AT_LEAST,
+        "the walk found {total} lines of prose across the store and there are 2 127: the \
+         frontmatter split, the fence count or the backtick split stopped matching"
+    );
+}
+
+#[test]
+fn no_record_of_the_store_mixes_the_two_languages() {
+    let mut reported = Vec::new();
+    let mut examined = 0usize;
+    for (name, md) in store_records() {
+        let (lines, _) = record_prose(&md);
+        examined += lines.len();
+        for (line, text) in lines {
+            let markers = record_markers(&text);
+            if markers.len() >= MARKERS_TO_CALL_IT_SPANISH {
+                reported.push(format!("  {name}:{line}: {}", text.trim()));
+            }
+        }
+    }
+    // The same floor as its sibling and repeated here for the same reason: this is the assertion
+    // somebody reads as «the store is English», and it may not say that while having looked at
+    // nothing.
+    assert!(
+        examined >= STORE_PROSE_AT_LEAST,
+        "this guard judged {examined} lines of the store and there are 2 127: whatever it reports, \
+         it is not reporting on the stored knowledge"
+    );
+    assert!(
+        reported.is_empty(),
+        "{} line(s) of the stored knowledge read as Spanish. The store is the first thing an agent \
+         is told to consult, so Spanish coming back here hands the retired vocabulary to whoever \
+         comes next as if it were current:\n{}",
+        reported.len(),
+        reported.join("\n")
+    );
+}
+
+/// Every fenced block of a record, joined into one string, with the line its fence opened on.
+///
+/// **Joined and not line by line**, for the reason [`record_headline`] gives: the store's fences are
+/// `mermaid` diagrams, and a diagram's line is a three-word label — `B -->|nothing| C[...]` — which
+/// no per-line threshold can judge. The block is the sentence here.
+///
+/// A block left open at the end of the file is still handed over. That is not a second parity check
+/// — [`the_walk_still_reads_the_prose_of_every_record`] owns that — it is so an unbalanced fence
+/// costs a red assertion rather than a block that quietly stops being read.
+fn record_fences(md: &str) -> Vec<(usize, Vec<&str>)> {
+    let (_, body, offset) = record_halves(md);
+    let mut blocks = Vec::new();
+    let mut open: Option<(usize, Vec<&str>)> = None;
+    for (nth, line) in body.lines().enumerate() {
+        if line.trim_start().starts_with("```") {
+            match open.take() {
+                Some(block) => blocks.push(block),
+                None => open = Some((offset + nth + 1, Vec::new())),
+            }
+            continue;
+        }
+        if let Some((_, held)) = open.as_mut() {
+            held.push(line);
+        }
+    }
+    blocks.extend(open);
+    blocks
+}
+
+/// How many fenced blocks the store carries, and how many lines they hold between them.
+///
+/// **Both, because either alone passes by looking at nothing.** Three blocks of one line each would
+/// satisfy a block count; one fat block would satisfy a line count. As this delivery leaves the tree
+/// there are three blocks holding twenty-two lines: two `mermaid` diagrams in the records and the
+/// record template inside `instructions.md`.
+const FENCED_BLOCKS_AT_LEAST: usize = 3;
+const FENCED_LINES_AT_LEAST: usize = 22;
+
+/// What a record fences off is prose too when the fence holds a diagram.
+///
+/// [`record_prose`] skips fenced blocks, and for a corpus of code samples that is right. **The
+/// store's fences are not code**: all three hold English sentences a reader reads — «a thread gains a
+/// wait», «the thread stops collecting» — and this delivery translated every one of them. Rewriting
+/// a diagram back into Spanish passed the six guards without a word.
+///
+/// **Measured:** the three blocks score **zero** listed words between them as they stand; the same
+/// two diagrams written back in Spanish score sixteen. So the threshold that judges prose serves
+/// here unchanged — what had to change is the unit it judges, which is the block and not the line.
+#[test]
+fn no_fenced_block_of_a_record_reads_as_spanish() {
+    let mut reported = Vec::new();
+    let mut blocks = 0usize;
+    let mut lines = 0usize;
+    for (name, md) in store_records() {
+        for (at, held) in record_fences(&md) {
+            blocks += 1;
+            lines += held.len();
+            let markers = record_markers(&held.join(" "));
+            if markers.len() >= MARKERS_TO_CALL_IT_SPANISH {
+                reported.push(format!("  {name}:{at}: {markers:?}"));
+            }
+        }
+    }
+    assert!(
+        blocks >= FENCED_BLOCKS_AT_LEAST && lines >= FENCED_LINES_AT_LEAST,
+        "this guard found {blocks} fenced blocks holding {lines} lines, and the store has \
+         {FENCED_BLOCKS_AT_LEAST} holding {FENCED_LINES_AT_LEAST}: the fence walk stopped matching, \
+         so whatever it reports it is not reporting on the diagrams"
+    );
+    assert!(
+        reported.is_empty(),
+        "{} fenced block(s) of the stored knowledge read as Spanish. A diagram is read by whoever \
+         opens the record and by nothing else in this file, so Spanish coming back inside a fence \
+         is Spanish nobody is told about:\n{}",
+        reported.len(),
+        reported.join("\n")
+    );
+}
+
+/// A record's **file name** is prose this milestone translated, and nothing above reads one.
+///
+/// This delivery renamed sixty-nine files. [`store_records`] walks the directory precisely so a
+/// renamed record is found instead of missed — which is right, and which also means a record renamed
+/// **back** into Spanish is found, counted towards every floor and judged clean. So is a brand new
+/// record that arrives with a Spanish name and English prose: the walk adds it, the count grows and
+/// every assertion above is satisfied. Both were tried against the guards as this delivery left
+/// them, and both passed.
+///
+/// **One marker and not [`MARKERS_TO_CALL_IT_SPANISH`], and this is where the number is argued.** A
+/// slug is four or five words, so three different listed words in one is rare even in Spanish:
+/// `migracion-a-ingles` scores **zero** and `la-cache-se-invalida-por-celdas` scores four, and a
+/// threshold of three would wave the first one through. The reason one is affordable here and not in
+/// prose is that a file name is **chosen**, not written: it is a closed string of hyphen-separated
+/// segments, each compared whole, so there is no sentence for a word like «la» to hide in.
+///
+/// **Measured, both ways.** Over the seventy-four paths the store carries today — directories
+/// included, since the tool derives them from the feature slug and this delivery renamed one of
+/// those too — **zero** score a single marker. Over the sixty-nine paths the delivery retired,
+/// **sixty-eight** score at least one; the one that escapes is `migracion-a-ingles`, whose three
+/// segments are all absent from the list. That is the honest limit of this guard: it catches a
+/// Spanish name made of Spanish grammar, not one made only of nouns the list never needed.
+///
+/// **No exemption list, and that is deliberate.** The islands elsewhere in this file exist because
+/// prose has to be able to **quote** a retired name. A file name does not quote anything — whoever
+/// names a record picks the words — so the day a record genuinely has to carry one, the exemption
+/// gets written then, with the reason, rather than standing open now for nothing.
+#[test]
+fn no_record_of_the_store_is_named_in_spanish() {
+    let records = store_records();
+    assert!(
+        records.len() >= RECORDS_AT_LEAST,
+        "this guard judged {} record names and this delivery left {RECORDS_AT_LEAST}: whatever it \
+         reports, it is not reporting on the store's file names",
+        records.len()
+    );
+    let mut reported = Vec::new();
+    for (name, _) in &records {
+        let folded = fold(name);
+        let listed = folded
+            .split(|c: char| !c.is_ascii_alphabetic())
+            .filter(|word| SPANISH_WORDS.contains(word))
+            .collect::<BTreeSet<_>>();
+        if !listed.is_empty() {
+            reported.push(format!("  {name} → {listed:?}"));
+        }
+    }
+    assert!(
+        reported.is_empty(),
+        "{} record(s) of the store are filed under a Spanish name. The name is the record's address \
+         — it is what `search_knowledge` returns, what a citation points at and what somebody types \
+         to open it — so a Spanish one hands the retired vocabulary on regardless of what the prose \
+         inside says:\n{}",
+        reported.len(),
+        reported.join("\n")
+    );
+}
+
+#[test]
+fn no_record_points_at_a_file_that_is_not_there() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut missing = Vec::new();
+    let mut checked = 0usize;
+    let mut unfronted = Vec::new();
+    for (name, md) in store_records() {
+        let (front, _, offset) = record_halves(&md);
+        // **A record whose frontmatter never closes yields none**, and a guard that shrugs at that
+        // walks past every path it cites. The two files that legitimately carry no frontmatter are
+        // the store's manual and its primer, and they cite nothing — so anything else without one
+        // is a record that lost its head.
+        if offset == 0 && !matches!(name.as_str(), "instructions.md" | "primer.md") {
+            unfronted.push(name.clone());
+        }
+        for cited in cited_paths(front) {
+            checked += 1;
+            if CITED_BUT_NOT_IN_THE_TREE.contains(&cited) {
+                continue;
+            }
+            if !root.join(cited).exists() {
+                missing.push(format!("  {name} cites {cited}"));
+            }
+        }
+    }
+    assert!(
+        unfronted.is_empty(),
+        "{} record(s) yielded no frontmatter, so every path they cite went unchecked: their \
+         delimiters are unbalanced, or the shape changed — {unfronted:?}",
+        unfronted.len()
+    );
+    assert!(
+        checked >= CITED_PATHS_AT_LEAST,
+        "this guard checked {checked} cited paths and the store cites 174: the frontmatter changed \
+         shape and most of the citations are no longer being verified"
+    );
+    assert!(
+        missing.is_empty(),
+        "{} record(s) of the stored knowledge point at a file the tree does not have. The store is \
+         consulted before the code is read, so a dead path sends whoever comes next looking for \
+         something that was renamed:\n{}",
+        missing.len(),
+        missing.join("\n")
+    );
+}
+
+/// Every exemption of [`CITED_BUT_NOT_IN_THE_TREE`] is still cited by some record.
+///
+/// Without it the list is a standing permission: the day nothing cites `CLAUDE.md` any more, the
+/// entry excuses a path that is not there for anybody.
+#[test]
+fn no_exempted_path_is_stale() {
+    let records = store_records();
+    for exempt in CITED_BUT_NOT_IN_THE_TREE {
+        assert!(
+            records
+                .iter()
+                .any(|(_, md)| cited_paths(record_halves(md).0).contains(exempt)),
+            "«{exempt}» is exempted from the path check and no record cites it any more: the \
+             exemption excuses nothing and what is left is a hole"
+        );
+    }
+}
+
+/// Every declared island of the store is still quoted by some record, and the list is not empty.
+#[test]
+fn no_store_island_is_stale() {
+    assert!(
+        !STORE_ISLANDS.is_empty(),
+        "the store's island list is empty: either the last deliberate Spanish citation was \
+         translated — in which case say so and delete the mechanism — or somebody emptied the list \
+         and turned the guard below into a test of nothing"
+    );
+    let records = store_records();
+    for (island, why) in STORE_ISLANDS {
+        let folded = fold(island);
+        assert!(
+            records.iter().any(|(_, md)| fold(md).contains(&folded)),
+            "«{island}» is exempted here as «{why}» and no record quotes it any more: it was \
+             translated, and what is left is a standing permission for Spanish that nothing needs"
+        );
+        let markers = record_markers(island);
+        assert!(
+            markers.len() < MARKERS_TO_CALL_IT_SPANISH,
+            "a line citing only «{island}» still scores {markers:?}: the entry does not match the \
+             text the way the records write it"
+        );
+    }
+}
+
+/// The store's islands are load-bearing **today**, the same claim [`ISLANDS`] has to make.
+#[test]
+fn the_store_islands_are_what_keeps_its_english_green() {
+    let without_islands = |line: &str| -> usize {
+        fold(line)
+            .split(|c: char| !c.is_ascii_alphabetic())
+            .filter(|word| SPANISH_WORDS.contains(word))
+            .collect::<BTreeSet<_>>()
+            .len()
+    };
+    let mut saved = Vec::new();
+    for (name, md) in store_records() {
+        for (line, text) in record_prose(&md).0 {
+            if without_islands(&text) >= MARKERS_TO_CALL_IT_SPANISH
+                && record_markers(&text).len() < MARKERS_TO_CALL_IT_SPANISH
+            {
+                saved.push(format!("{name}:{line}"));
+            }
+        }
+    }
+    assert!(
+        !saved.is_empty(),
+        "with the store's islands removed not one of its lines would be reported: the exemption is \
+         no longer doing anything, so either it or the threshold should go"
+    );
+}
+
+/// The listed words a record's line carries, with the declared Spanish removed first.
+fn record_markers(line: &str) -> BTreeSet<String> {
+    let mut text = fold(line);
+    for (island, _) in STORE_ISLANDS {
+        let island = fold(island);
+        while let Some(at) = text.find(&island) {
+            text.replace_range(at..at + island.len(), " ");
+        }
+    }
+    text.split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|word| SPANISH_WORDS.contains(word))
+        .map(str::to_owned)
+        .collect()
 }
