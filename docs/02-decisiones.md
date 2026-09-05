@@ -1,3786 +1,3947 @@
-# Decisiones
+# Decisions
 
-Cada una con su razón y lo que se descartó. Si una decisión cambia, se edita aquí y se dice por qué.
-
----
-
-## D1 — Multiplataforma real (Linux, macOS, Windows)
-
-**Decidido.** No es una app personal para Linux: hay demasiada gente en Mac y Windows como
-para descartarla.
-
-**Consecuencia:** descarta GTK4 + VTE, que era la opción técnicamente más cómoda en Linux
-(ver D3).
-
-**Confirmado por el panorama, agosto 2026.** De los cuatro competidores analizados, tres son **solo
-macOS** (Xirp, Conductor, y Superset salvo un AppImage experimental). El único que corre en las tres
-plataformas es Warp — y es también el único que cumple todas las demás condiciones
-([07-panorama.md](07-panorama.md) → E5). Que la multiplataforma sea rara en esta categoría no
-debilita D1: la señala como lo que efectivamente distingue al rival más fuerte del resto.
+Each one with its reason and what was discarded. If a decision changes, it is edited here and the
+why is stated.
 
 ---
 
-## D2 — El motor de terminal se consume como librería
+## D1 — Real cross-platform (Linux, macOS, Windows)
 
-**Decidido:** crate **`alacritty_terminal`** para el parseo VT y el estado, **`portable-pty`**
-para el PTY (abstrae Unix y ConPTY de Windows).
+**Decided.** This is not a personal app for Linux: there are too many people on Mac and Windows to
+write them off.
 
-**Por qué:** escribir un emulador de terminal es años-persona — parser VT con décadas de casos
-borde, scrollback, reflow, shaping, IME. Pero ya no hace falta: **Zed lo consume exactamente
-así** y pinta encima con su propio framework.
+**Consequence:** it rules out GTK4 + VTE, which was the technically most comfortable option on Linux
+(see D3).
 
-**Descartado:**
-- **VTE** — solo GTK/Linux; además sin ligaduras de fuente ([issue #192](https://gitlab.gnome.org/GNOME/vte/-/issues/192), abierto hace años) ni protocolo gráfico de Kitty.
-- **Escribirlo nosotros** — es lo que hicieron Warp y JetBrains, ambos con equipos a sueldo.
+**Confirmed by the landscape, August 2026.** Of the four competitors analyzed, three are **macOS
+only** (Xirp, Conductor, and Superset except for an experimental AppImage). The only one that runs
+on all three platforms is Warp — and it is also the only one that meets every other condition
+([07-panorama.md](07-panorama.md) → E5). That being cross-platform is rare in this category does not
+weaken D1: it marks it as what actually sets the strongest rival apart from the rest.
 
 ---
 
-## D3 — Rust + GPUI para la interfaz
+## D2 — The terminal engine is consumed as a library
 
-**Decidido:** Rust, con **GPUI** para el producto y **egui** como opción para prototipar rápido.
+**Decided:** the **`alacritty_terminal`** crate for the VT parsing and the state, **`portable-pty`**
+for the PTY (it abstracts Unix and Windows's ConPTY).
 
-**Por qué:** es el camino de Zed para este caso exacto (terminal embebido, GPU, muchos paneles,
-tres plataformas), y Rust es donde vive el ecosistema de esta pieza concreta.
+**Why:** writing a terminal emulator is person-years — a VT parser with decades of edge cases,
+scrollback, reflow, shaping, IME. But it is no longer necessary: **Zed consumes it exactly like
+this** and paints on top with its own framework.
 
-**Riesgo asumido:** GPUI tiene API inestable y poca documentación fuera de Zed. Si se hace
-cuesta arriba, egui o Iced.
+**Discarded:**
+- **VTE** — GTK/Linux only; and on top of that with no font ligatures ([issue #192](https://gitlab.gnome.org/GNOME/vte/-/issues/192), open for years) and no Kitty graphics protocol.
+- **Writing it ourselves** — that is what Warp and JetBrains did, both with paid teams.
 
-**Candidato nuevo, no decidido — `warpui`, agosto 2026.** Warp liberó su cliente el 30 de abril de
-2026 y **el reparto de licencias no es uniforme**; textual de su README:
+---
 
-> Warp's UI framework (the `warpui_core` and `warpui` crates) are licensed under the **MIT license**.
-> The rest of the code in this repository is licensed under the **AGPL v3**.
+## D3 — Rust + GPUI for the interface
 
-Verificado en el `Cargo.toml` de los dos crates (`license = "MIT"`). Eso pone sobre la mesa un
-framework de interfaz en Rust, con GPU, licencia permisiva y **ya probado en un terminal
-multiplataforma de verdad** — exactamente el hueco que el riesgo de arriba describe para GPUI.
+**Decided:** Rust, with **GPUI** for the product and **egui** as an option for prototyping fast.
 
-**No cambia la decisión, y no debe cambiarla nadie sin medir.** Esta decisión se toma con números
-—así se tomó el descarte de Electron y así se juzgó egui— y aquí no hay ninguno todavía. Dos cosas
-hay que comprobar antes de que esto sea siquiera una opción:
+**Why:** it is Zed's path for this exact case (embedded terminal, GPU, many panels, three
+platforms), and Rust is where the ecosystem of this particular piece lives.
 
-1. **Que `warpui` se pueda usar suelto.** Está en el mismo repositorio que el código AGPL y puede
-   arrastrar dependencias de esos crates; si las arrastra, la licencia MIT del crate no sirve de nada.
-2. **Que del resto no se copie nada.** El resto del repositorio es AGPLv3 y este proyecto no lo es.
+**Risk accepted:** GPUI has an unstable API and little documentation outside Zed. If it turns into
+an uphill climb, egui or Iced.
 
-Ver [07-panorama.md](07-panorama.md) → E5 para el contexto de producto.
+**New candidate, not decided — `warpui`, August 2026.** Warp released its client on 30 April 2026
+and **the licenses are not handed out uniformly**; verbatim from its README:
 
-**Descartado — Electron/Tauri + xterm.js.** Era lo más barato en esfuerzo (stack conocido), pero
-tiene un techo justo en nuestro caso de uso. Del propio issue de xterm.js
+> Warp's UI framework (the `warpui_core` and `warpui` crates) are licensed under the **MIT
+> license**. The rest of the code in this repository is licensed under the **AGPL v3**.
+
+Verified in the `Cargo.toml` of both crates (`license = "MIT"`). That puts on the table an interface
+framework in Rust, with GPU, a permissive license and **already proven in a real cross-platform
+terminal** — exactly the gap that the risk above describes for GPUI.
+
+**It does not change the decision, and nobody should change it without measuring.** This decision is
+taken with numbers —that is how Electron was ruled out and that is how egui was judged— and here
+there are none yet. Two things have to be checked before this is even an option:
+
+1. **That `warpui` can be used on its own.** It sits in the same repository as the AGPL code and it
+   may drag in dependencies from those crates; if it does, the crate's MIT license is worth nothing.
+2. **That nothing gets copied from the rest.** The rest of the repository is AGPLv3 and this project
+   is not.
+
+See [07-panorama.md](07-panorama.md) → E5 for the product context.
+
+**Discarded — Electron/Tauri + xterm.js.** It was the cheapest in effort (a known stack), but it has
+a ceiling right in our use case. From xterm.js's own issue
 [«Support dozens of terminals on a single page»](https://github.com/xtermjs/xterm.js/issues/4379):
 
-- Los navegadores limitan los contextos WebGL activos (~una docena). Dicen literalmente que los
-  multiplexores necesitan decenas de paneles y **el navegador no lo soporta**.
-- Los terminales compiten por el hilo principal: **2 instancias → 30 fps, 4 → 15 fps**.
+- Browsers limit the number of active WebGL contexts (~a dozen). They say literally that
+  multiplexers need dozens of panes and **the browser does not support it**.
+- Terminals compete for the main thread: **2 instances → 30 fps, 4 → 15 fps**.
 
-Eso describe exactamente «varios agentes escribiendo a la vez». VS Code no sufre porque ahí
-sueles tener uno o dos terminales activos, no ocho.
+That describes exactly «several agents writing at the same time». VS Code does not suffer because
+there you usually have one or two active terminals, not eight.
 
-### Medido — 8 agosto 2026
+### Measured — 8 August 2026
 
-El issue de xterm.js era razonamiento prestado. Ahora hay medida propia, contra
-[Orca](https://github.com/stablyai/orca) (Electron + xterm.js con WebGL, el producto más maduro
-de esta categoría) y WezTerm como referencia nativa. Misma máquina, Wayland, GPU por hardware
-confirmada en Orca (`--ozone-platform=wayland`, `--render-node-override=/dev/dri/renderD128`, sin
-rastro de SwiftShader). Carga: 22,7 MiB de salida tipo TUI —color, negrita y repintado de barra de
-estado con movimiento de cursor cada 50 líneas— volcada de golpe. Se mide lo que el terminal tarda
-en vaciar el PTY.
+The xterm.js issue was borrowed reasoning. Now there is a measurement of our own, against
+[Orca](https://github.com/stablyai/orca) (Electron + xterm.js with WebGL, the most mature product in
+this category) and WezTerm as the native reference. Same machine, Wayland, hardware GPU confirmed in
+Orca (`--ozone-platform=wayland`, `--render-node-override=/dev/dri/renderD128`, with no trace of
+SwiftShader). Load: 22.7 MiB of TUI-style output —color, bold and a status-bar repaint with cursor
+movement every 50 lines— dumped all at once. What is measured is how long the terminal takes to
+drain the PTY.
 
 | | WezTerm | Orca |
 |---|---|---|
-| 1 división | 0,80 s · 28,4 MiB/s | 2,63 s · 8,6 MiB/s |
-| 4 divisiones visibles | 0,98 / 0,98 / 1,01 / 1,06 s | 8,44 / 12,50 / 12,72 / 12,64 s |
-| Caída de 1 → 4 | ×1,26 | ×4,4 |
-| Agregado con 4 | 85,7 MiB/s | 7,1 MiB/s |
+| 1 pane | 0.80 s · 28.4 MiB/s | 2.63 s · 8.6 MiB/s |
+| 4 visible panes | 0.98 / 0.98 / 1.01 / 1.06 s | 8.44 / 12.50 / 12.72 / 12.64 s |
+| Drop from 1 → 4 | ×1.26 | ×4.4 |
+| Aggregate with 4 | 85.7 MiB/s | 7.1 MiB/s |
 
-**Lo que decide no es el 12× de diferencia, es el signo:** Orca con cuatro divisiones mueve *menos*
-trabajo total que con una (7,1 frente a 8,6 MiB/s). Escala negativo. WezTerm pasa de 28,4 a 85,7,
-o sea ×3. Es la firma del hilo principal compartido.
+**What decides is not the 12× difference, it is the sign:** Orca with four panes moves *less* total
+work than with one (7.1 against 8.6 MiB/s). It scales negatively. WezTerm goes from 28.4 to 85.7,
+that is ×3. It is the signature of the shared main thread.
 
-El método juega a favor: mide el vaciado del PTY, así que un terminal que bufferea y descarta
-frames saldría bien aquí y mal a la vista. Orca sale mal ya en el vaciado.
+The method plays in its favor: it measures the draining of the PTY, so a terminal that buffers and
+drops frames would come out well here and badly to the eye. Orca comes out badly already in the
+draining.
 
-**Lo que esta medida prueba y lo que no.** Prueba que el techo existe y dónde está. **No** prueba
-que la carga de un agente lo toque: la prosa de un agente son decenas de bytes por segundo, y un
-`cargo build` son unos cientos de KB, que incluso a los 1,8 MiB/s degradados de Orca se vacían en
-0,2 s. Vender el 12× como justificación del terminal propio sería tramposo.
+**What this measurement proves and what it does not.** It proves that the ceiling exists and where
+it is. It does **not** prove that an agent's load touches it: an agent's prose is tens of bytes per
+second, and a `cargo build` is a few hundred KB, which even at Orca's degraded 1.8 MiB/s drain in
+0.2 s. Selling the 12× as the justification for a terminal of our own would be cheating.
 
-**El régimen donde sí muerde es el uso real, no el sintético.** Cinco o seis divisiones visibles:
-cuatro con agentes y **una o dos siguiendo logs** de un worktree que se está probando. Un `tail -f`
-sobre un servidor de desarrollo es un productor **sostenido**, no una ráfaga, y convive con el
-repintado continuo del panel de cada división. Esa combinación —uno o dos productores sostenidos
-más N paneles pintando— es la carga que hay que medir, y es justo la que el escalado negativo dice
-que este stack no aguanta. Orca no la tiene: sus paneles están quietos mientras el agente piensa.
+**The regime where it does bite is real use, not the synthetic one.** Five or six visible panes:
+four with agents and **one or two following logs** from a worktree that is being tested. A `tail -f`
+on a development server is a **sustained** producer, not a burst, and it lives alongside the
+continuous repaint of each pane's panel. That combination —one or two sustained producers plus N
+panels painting— is the load that has to be measured, and it is exactly the one that the negative
+scaling says this stack cannot take. Orca does not have it: its panels sit still while the agent
+thinks.
 
-**Consecuencia para el producto:** Orca esquiva el techo porque su producto es otro — abanica
-agentes en worktrees y solo monta los terminales del worktree activo (montaje perezoso
-documentado), así que mira uno cada vez. Aquí las divisiones son visibles a la vez por definición,
-así que no se puede esquivar igual.
+**Consequence for the product:** Orca dodges the ceiling because its product is a different one — it
+fans agents out across worktrees and only mounts the terminals of the active worktree (documented
+lazy mounting), so it looks at one at a time. Here the panes are visible at the same time by
+definition, so it cannot be dodged the same way.
 
-**Criterio de aceptación:** con N divisiones visibles produciendo a la vez, el rendimiento agregado
-tiene que **subir** con N, no bajar. La herramienta que lo mide vive en el repo: `crates/host-load`,
-y su documentación lleva el protocolo y estos números como referencia.
+**Acceptance criterion:** with N visible panes producing at the same time, the aggregate throughput
+has to **go up** with N, not down. The tool that measures it lives in the repo: `crates/host-load`,
+and its documentation carries the protocol and these numbers as a reference.
 
-**Contra quién decide ese criterio, y contra quién no.** Decide **contra terminales ajenos**: Orca
-falló ya en el vaciado, así que no hizo falta ver el pintado para descartarlo. **No decide contra el
-nuestro**, y la razón es estructural, no un matiz — conviene leerla antes de dar el criterio por
-cerrado con una medida de `host-load`:
+**Who that criterion decides against, and who it does not.** It decides **against other people's
+terminals**: Orca failed already in the draining, so there was no need to look at the painting to
+rule it out. It does **not decide against ours**, and the reason is structural, not a nuance — worth
+reading before taking the criterion as closed with a `host-load` measurement:
 
-- El instrumento mide lo que el terminal **vacía del PTY**, no lo que **pinta**.
-- La mitigación que esta misma fase planifica para F1.3 es *«repintar solo cuando el PTY produzca
-  cambios»* (ver los riesgos de la Fase 1 en [05-roadmap.md](05-roadmap.md)), o sea **coalescer
-  frames**. Nuestra app aprobaría la prueba **por construcción**, midiendo bien precisamente por
-  hacer lo que la prueba no mira.
-- Y el pintado es **inobservable desde el proceso que produce la carga**: ningún protocolo de
-  terminal reporta un frame presentado, y el ida y vuelta de `ESC[6n` solo demuestra *consumido y
-  parseado*.
+- The instrument measures what the terminal **drains from the PTY**, not what it **paints**.
+- The mitigation that this very phase plans for F1.3 is *«repaint only when the PTY produces
+  changes»* (see the Phase 1 risks in [05-roadmap.md](05-roadmap.md)), that is, **coalescing
+  frames**. Our app would pass the test **by construction**, measuring well precisely for doing what
+  the test does not look at.
+- And the painting is **unobservable from the process that produces the load**: no terminal protocol
+  reports a presented frame, and the round trip of `ESC[6n` only proves *consumed and parsed*.
 
-**Pendiente, por tanto:** los contadores que sí lo verían —bytes procesados por frame, frames
-presentados, retraso del último respecto a la última entrada— viven **dentro de `app`** y no se
-pueden construir antes que el bucle de pintado. Es trabajo de F1.3/F1.4, y es lo que cierra de
-verdad el segundo síntoma que el roadmap pide medir.
+**Pending, therefore:** the counters that would see it —bytes processed per frame, frames presented,
+the lag of the last one with respect to the last input— live **inside `app`** and cannot be built
+before the painting loop. That is F1.3/F1.4 work, and it is what really closes the second symptom
+the roadmap asks to measure.
 
-Si con carga real el techo no se toca, la justificación honesta del terminal propio deja de ser el
-rendimiento y pasa a ser el control del compositado y el panel integrado.
+If with real load the ceiling is not touched, the honest justification for a terminal of our own
+stops being performance and becomes control of the compositing and the integrated panel.
 
-**También descarta forkear Orca**, por dos motivos independientes: heredaría este techo, y su
-extensibilidad va toda hacia el agente (skills, MCP) — no hay API de plugins para su interfaz, que
-es justo donde tendría que vivir el panel.
+**It also rules out forking Orca**, for two independent reasons: it would inherit this ceiling, and
+its extensibility all points at the agent (skills, MCP) — there is no plugin API for its interface,
+which is exactly where the panel would have to live.
 
-**Descartado — GTK4 + VTE.** Técnicamente el más cómodo en Linux (barra de título, botones,
-arrastrar paneles gratis) pero incompatible con D1.
+**Discarded — GTK4 + VTE.** Technically the most comfortable on Linux (title bar, buttons, dragging
+panes for free) but incompatible with D1.
 
-### Medido — 9 agosto 2026: egui bajo carga, desde dentro
+### Measured — 9 August 2026: egui under load, from inside
 
-Esto **construye** los contadores que la medida anterior dejó pendientes: los que ven el **pintado**
-—y no solo el vaciado del pseudoterminal— ya existen dentro de `app`, porque ya existe el bucle de
-pintado. No cierra el criterio entero de aquella medida: *«con N divisiones visibles produciendo a
-la vez, el agregado tiene que subir con N»* sigue sin comprobarse, porque la Fase 1 todavía no tiene
-dos divisiones — llega en F1.4. Todos los números son de la misma máquina (Wayland, pantalla de 120 Hz), en `--release`,
-con el pintor **más ingenuo posible**: una celda cada vez, sin caché y sin seguimiento de lo que
-cambió.
+This **builds** the counters that the previous measurement left pending: the ones that see the
+**painting** —and not only the draining of the pseudoterminal— already exist inside `app`, because
+the painting loop already exists. It does not close that measurement's whole criterion: *«with N
+visible panes producing at the same time, the aggregate has to go up with N»* is still unchecked,
+because Phase 1 does not have two panes yet — that arrives in F1.4. All the numbers are from the
+same machine (Wayland, a 120 Hz display), in `--release`, with the **most naive painter possible**:
+one cell at a time, with no cache and no tracking of what changed.
 
-**El primer síntoma que el roadmap pedía vigilar — el repintado completo con más de una división:**
+**The first symptom the roadmap asked to watch — the full repaint with more than one pane:**
 
-| Consolas sintéticas de 24×80 | 1 (1 920 celdas) | 2 (3 840 celdas) |
+| Synthetic 24×80 consoles | 1 (1 920 cells) | 2 (3 840 cells) |
 |---|---|---|
-| CPU por fotograma | 1,52 ms (peor 2,96) | **2,98 ms** (peor 5,73) |
+| CPU per frame | 1.52 ms (worst 2.96) | **2.98 ms** (worst 5.73) |
 
-Dos consolas cuestan **1,96×** lo que cuesta una: escala lineal, no super-lineal. Con dos, el
-fotograma gasta el **36 %** de su hueco de 8,4 ms —y su **peor** fotograma, el 68 %—. Medido con
-pantallas **llenas** —cada celda con fondo propio, que obliga a dibujar un rectángulo por celda
-además del glifo— y en repintado continuo, que es el techo y no el uso normal. El instrumento es
-`cargo run --release --example sweep -p app`, y llama al pintor de verdad, no a una copia.
+Two consoles cost **1.96×** what one costs: it scales linearly, not super-linearly. With two, the
+frame spends **36 %** of its 8.4 ms gap —and its **worst** frame, 68 %—. Measured with **full**
+screens —every cell with its own background, which forces drawing a rectangle per cell on top of the
+glyph— and in continuous repaint, which is the ceiling and not normal use. The instrument is `cargo
+run --release --example sweep -p app`, and it calls the real painter, not a copy.
 
-**El tamaño de esas consolas importa y hay que decirlo antes de leer el número:** son de 24×80 cada
-una, así que las dos juntas suman 3 840 celdas — **menos que las 6 954 de una sola ventana real** de
-esta máquina (61×114), que es donde se tomó la latencia de más abajo. El banco no mide «dos
-divisiones»; mide **dos rejillas independientes** de tamaño clásico. Los fotogramas por segundo de
-esa tanda (119,6 y 119,2) se omiten a propósito de la tabla: están topados por la sincronía
-vertical, así que solo demuestran que el fotograma cabe en su hueco, no cuánto margen sobra — para
-eso está el porcentaje.
+**The size of those consoles matters and has to be said before reading the number:** they are 24×80
+each, so the two together add up to 3 840 cells — **fewer than the 6 954 of a single real window**
+on this machine (61×114), which is where the latency further down was taken. The bench does not
+measure «two panes»; it measures **two independent grids** of the classic size. That batch's frames
+per second (119.6 and 119.2) are left out of the table on purpose: they are capped by vertical sync,
+so they only prove that the frame fits in its gap, not how much headroom is left over — that is what
+the percentage is for.
 
-**El segundo síntoma — la latencia:**
+**The second symptom — the latency:**
 
-Tomada dentro de la aplicación, en una ventana de 61×114 celdas:
+Taken inside the application, in a window of 61×114 cells:
 
-| | uso normal (13 teclas, 32 fotogramas) | volcado de 13,5 MB (111 fotogramas) |
+| | normal use (13 keys, 32 frames) | dump of 13.5 MB (111 frames) |
 |---|---|---|
-| tecla en el fotograma → byte en el programa | **36 µs** (72 el 95 %) | — |
-| byte disponible → fotograma pagado | **3,27 ms** (9,8 el 95 %) | **377 ms** (671 el 95 %) |
-| … esperando turno | 2,61 ms | 373 ms |
-| … interpretar + encolar + el resto | 0,65 ms | 4,1 ms |
+| key in the frame → byte in the program | **36 µs** (72 at the 95 %) | — |
+| byte available → frame paid for | **3.27 ms** (9.8 at the 95 %) | **377 ms** (671 at the 95 %) |
+| … waiting its turn | 2.61 ms | 373 ms |
+| … interpreting + enqueuing + the rest | 0.65 ms | 4.1 ms |
 
-La muestra de «uso normal» es pequeña —trece pulsaciones— y sirve para lo que se usa aquí: fijar el
-orden de magnitud, que son microsegundos. Para afirmar más haría falta más.
+The «normal use» sample is small —thirteen keystrokes— and it serves for what it is used for here:
+fixing the order of magnitude, which is microseconds. To claim more would take more.
 
-**Lo que estas dos tablas dicen junto es el veredicto: el trabajo de verdad nunca pasa de unos
-pocos milisegundos.** Lo que se percibe como retraso es, en los dos regímenes, **esperar turno** — y
-son dos esperas distintas, ninguna imputable al framework: en uso normal son los 2,6 ms del hueco
-entre fotogramas de una pantalla de 120 Hz, o sea sincronía vertical; en el volcado son los 373 ms
-del **presupuesto de 128 KiB por fotograma**, que es el precio elegido a conciencia para que la
-ventana no se congele.
+**What these two tables say together is the verdict: the real work never goes beyond a few
+milliseconds.** What is perceived as lag is, in both regimes, **waiting its turn** — and they are
+two different waits, neither of them chargeable to the framework: in normal use it is the 2.6 ms of
+the gap between frames of a 120 Hz display, that is, vertical sync; in the dump it is the 373 ms of
+the **budget of 128 KiB per frame**, which is the price deliberately chosen so that the window does
+not freeze.
 
-**Respuesta a los dos síntomas: ninguno aparece.** El repintado completo escala lineal y deja dos
-tercios del fotograma libres con dos rejillas llenas; la latencia de escritura es de microsegundos.
-Ninguno de los dos justifica revisar el framework hoy.
+**Answer to the two symptoms: neither of them appears.** The full repaint scales linearly and leaves
+two thirds of the frame free with two full grids; the write latency is microseconds. Neither of the
+two justifies revisiting the framework today.
 
-Y un dato que confirma que el presupuesto está bien puesto: **interpretar 128 KiB cuesta 1,67 ms
-medidos**, contra los ~1,94 ms que predecía la absorción de 64,5 MiB/s calculada en F1.2. La
-estimación de entonces era buena.
+And a figure that confirms the budget is well set: **interpreting 128 KiB costs 1.67 ms measured**,
+against the ~1.94 ms that the absorption of 64.5 MiB/s calculated in F1.2 predicted. The estimate
+back then was a good one.
 
-**La escalera de escape del pintado no se activa.** Estaba escrita como celda a celda → tramos por
-fila → malla con el atlas de fuentes, y ejecutable **solo si el número la pedía**. No lo pide: el
-peldaño más ingenuo deja el 64 % del fotograma libre con dos consolas. Queda escrita para cuando
-haga falta, sin tocar.
+**The painting escape ladder is not triggered.** It was written as cell by cell → spans per row → a
+mesh with the font atlas, and executable **only if the number asked for it**. It does not ask: the
+most naive rung leaves 64 % of the frame free with two consoles. It stays written for when it is
+needed, untouched.
 
-**Qué NO prueban estos números, dicho antes de que alguien los cite de más:**
+**What these numbers do NOT prove, said before anyone over-cites them:**
 
-- **Una máquina, una pantalla, un compositor.** Los números son de este equipo con Wayland y 120 Hz.
-- **Dos rejillas de 24×80, no dos divisiones de la ventana real.** Es la reserva más importante de
-  todas: 3 840 celdas contra las 6 954 de la ventana donde se midió la latencia. En F1.4 dos
-  divisiones **se reparten** la ventana en vez de duplicarla, así que el área total no crece — lo
-  que crece es el número de rejillas, de lecturas y de llamadas al pintor. Ese caso **no está
-  medido**, y es exactamente el que F1.4 tiene que volver a pasar por el banco, con la ventana de
-  verdad partida.
-- **Cuatro y ocho consolas tampoco están medidas.** El síntoma del roadmap se redacta con dos y ahí
-  se midió. Extrapolando la escala lineal, cuatro rondarían los 6 ms de media y su peor fotograma se
-  saldría del hueco: **el margen no da para todo**.
-- **El peor fotograma con dos rejillas ya gasta el 68 %** del hueco. La media dice que sobra sitio;
-  el peor dice cuánto margen hay realmente, y es la mitad de lo que sugiere la media.
-- **Nada de esto mide el compositado ni el panel**, que es lo que la Fase 1 no tiene todavía.
-- **Hay coste que hoy se atribuye a egui sin ser suyo.** Leer la rejilla materializa todas sus
-  celdas en cada pase —288 KiB por pase en una ventana de 60×240, que a 60 fotogramas son 17 MiB/s—
-  y eso se lo llevará puesto cualquier framework. Y el aviso de repintado se pide **una vez por cada
-  trozo de 8 KiB** que llega del pseudoterminal, unos 34 000 por segundo en un volcado, cada uno
-  tomando un candado que el hilo de interfaz también usa; egui además convierte cada petición en
-  **dos** pases. Ninguna de las tres cosas se aisló en estas medidas. Si un día el número sale raro,
-  este párrafo es el primer sitio donde mirar.
+- **One machine, one display, one compositor.** The numbers are from this box with Wayland and 120
+  Hz.
+- **Two 24×80 grids, not two panes of the real window.** It is the most important caveat of them
+  all: 3 840 cells against the 6 954 of the window where the latency was measured. In F1.4 two panes
+  **share out** the window instead of doubling it, so the total area does not grow — what grows is
+  the number of grids, of reads and of calls to the painter. That case is **not measured**, and it
+  is exactly the one that F1.4 has to put through the bench again, with the real window split.
+- **Four and eight consoles are not measured either.** The roadmap's symptom is written with two and
+  that is where it was measured. Extrapolating the linear scale, four would come to around 6 ms on
+  average and their worst frame would fall out of the gap: **the headroom does not stretch to
+  everything**.
+- **The worst frame with two grids already spends 68 %** of the gap. The average says there is room
+  to spare; the worst says how much headroom there really is, and it is half of what the average
+  suggests.
+- **None of this measures the compositing or the panel**, which is what Phase 1 does not have yet.
+- **There is cost attributed to egui today that is not its own.** Reading the grid materializes all
+  of its cells on every pass —288 KiB per pass in a 60×240 window, which at 60 frames is 17 MiB/s—
+  and any framework will carry that too. And the repaint request is asked for **once for every 8 KiB
+  chunk** that arrives from the pseudoterminal, some 34 000 per second in a dump, each of them
+  taking a lock that the interface thread also uses; egui on top of that turns every request into
+  **two** passes. None of the three things was isolated in these measurements. If one day the number
+  comes out strange, this paragraph is the first place to look.
 
-**Dos cosas que sí muerden y no son de rendimiento.** Van aquí porque un veredicto que solo mirase
-los milisegundos daría una impresión falsa de «esto está listo»:
+**Two things that do bite and are not about performance.** They go here because a verdict that only
+looked at the milliseconds would give a false impression of «this is ready»:
 
-1. **egui no usa las fuentes del sistema.** Embarca cuatro y ninguna cubre CJK ni el Área de Uso
-   Privado, así que el japonés y los iconos de un `ls` moderno salen como cuadros vacíos, aunque la
-   máquina tenga esas fuentes instaladas. El pintor hace lo correcto —reserva el hueco y pide el
-   glifo—; quien no lo tiene es la fuente. Registrar fuentes del sistema al arrancar es trabajo
-   pendiente, y es lo que separa esto de ser usable a diario.
-2. **La cola de salida no tiene techo** ([#20](https://github.com/mashware/agent-terminal/issues/20)):
-   un programa que escribe sin parar —`yes`, `cat /dev/urandom`— agota la memoria. El único freno
-   real es dejar de leer el pseudoterminal, y eso vive en `term-core`.
+1. **egui does not use the system fonts.** It ships four and none of them covers CJK or the Private
+   Use Area, so Japanese and the icons of a modern `ls` come out as empty boxes, even though the
+   machine has those fonts installed. The painter does the right thing —it reserves the slot and
+   asks for the glyph—; the one that does not have it is the font. Registering system fonts at
+   startup is pending work, and it is what separates this from being usable daily.
+2. **The output queue has no ceiling**
+   ([#20](https://github.com/mashware/agent-terminal/issues/20)): a program that writes without
+   stopping —`yes`, `cat /dev/urandom`— exhausts memory. The only real brake is to stop reading the
+   pseudoterminal, and that lives in `term-core`.
 
-**Qué significa para esta decisión.** D3 sigue como está: **egui aguanta de sobra lo que la Fase 1
-necesita**, que es exactamente el papel que esta decisión le daba. Lo que estos números añaden es
-una pregunta que antes no se podía ni formular con datos —si el margen es este, ¿qué aporta GPUI que
-justifique su coste?— y que **no se responde aquí**: se responde cuando F1.4 tenga dos divisiones de
-verdad y F1.6 los paneles pintando a la vez, que es la carga que D3 dice que hay que medir. Cambiar
-la decisión de fondo en un anexo, con dos consolas sintéticas de una sola máquina, sería justo el
-tipo de atajo que esta decisión se tomó para evitar.
+**What it means for this decision.** D3 stands as it is: **egui takes what Phase 1 needs with room
+to spare**, which is exactly the role this decision gave it. What these numbers add is a question
+that before could not even be put with data —if the headroom is this, what does GPUI bring that
+justifies its cost?— and one that is **not answered here**: it is answered when F1.4 has two real
+panes and F1.6 has the panels painting at the same time, which is the load D3 says has to be
+measured. Changing the underlying decision in an annex, with two synthetic consoles from a single
+machine, would be exactly the kind of shortcut this decision was taken to avoid.
 
-### Medido — 11 agosto 2026: dos consolas de verdad, dentro de la aplicación
+### Measured — 11 August 2026: two real consoles, inside the application
 
-Esto es lo que el anexo anterior dejó pendiente: **las divisiones ya no son sintéticas**. Son las dos
-consolas de F1.4, cada una con su pseudoterminal, su rejilla y su programa, medidas **dentro de la
-aplicación** y no en un banco. Misma máquina que las medidas anteriores, `--release`, pantalla de 120 Hz,
-rejilla **61×57 por consola** (ventana maximizada, repartida a mitades).
+This is what the previous annex left pending: **the panes are no longer synthetic**. They are F1.4's
+two consoles, each with its pseudoterminal, its grid and its program, measured **inside the
+application** and not on a bench. Same machine as the previous measurements, `--release`, a 120 Hz
+display, a grid of **61×57 per console** (window maximized, shared out in halves).
 
-La carga es un volcado tipo TUI —color, negrita y repintado de barra de estado con movimiento de
-cursor—. **La tanda que se publica es la de 400.000 líneas por consola**, que da entre **376 y 382
-fotogramas con salida** por corrida: dos corridas del caso simétrico. El asimétrico son dos corridas de
-120.000 líneas (105-120 fotogramas). Los números son la media de las medias.
+The load is a TUI-style dump —color, bold and a status-bar repaint with cursor movement—. **The
+batch that is published is the one of 400 000 lines per console**, which gives between **376 and 382
+frames with output** per run: two runs of the symmetric case. The asymmetric one is two runs of
+120 000 lines (105-120 frames). The numbers are the mean of the means.
 
-| Tramo del fotograma | Una volcando, la otra quieta | **Las dos volcando a la vez** |
+| Frame span | One dumping, the other still | **Both dumping at once** |
 |---|---|---|
-| Interpretar (las dos consolas) | 1,92 ms | **3,35 ms** |
-| Encolar el pintado (las dos) | 0,87 ms | **1,83 ms** |
-| El resto del fotograma (teselar, dibujar, armazón) | 0,61 ms | **0,74 ms** |
-| **Coste del fotograma** | **3,39 ms** | **5,92 ms** |
-| Del hueco de 120 Hz (8,33 ms) | 41 % | **71 %** |
-| Del hueco de 60 Hz (16,67 ms) | 20 % | 36 % |
-| **Tecla en el fotograma → byte en el programa** | no medido | **3,42 ms de media, 5,00 ms el p95** (28 pulsaciones) |
+| Interpreting (both consoles) | 1.92 ms | **3.35 ms** |
+| Enqueuing the paint (both) | 0.87 ms | **1.83 ms** |
+| The rest of the frame (tessellating, drawing, scaffolding) | 0.61 ms | **0.74 ms** |
+| **Frame cost** | **3.39 ms** | **5.92 ms** |
+| Of the 120 Hz gap (8.33 ms) | 41 % | **71 %** |
+| Of the 60 Hz gap (16.67 ms) | 20 % | 36 % |
+| **Key in the frame → byte in the program** | not measured | **3.42 ms on average, 5.00 ms the p95** (28 keystrokes) |
 
-**Una tanda más corta da peor número, y el porqué importa.** Tres corridas de 120.000 líneas
-(105-120 fotogramas) dieron **7,00 ms**, el 84 % del hueco. La diferencia no es ruido: con el triple de
-fotogramas, el coste del arranque —abrir la ventana, subir texturas, medir la fuente por primera vez—
-pesa un tercio en la media. **El número que vale es el de la tanda larga**, y la corta queda aquí escrita
-para que nadie la encuentre después y crea que hay una contradicción.
+**A shorter batch gives a worse number, and the why of it matters.** Three runs of 120 000 lines
+(105-120 frames) gave **7.00 ms**, 84 % of the gap. The difference is not noise: with three times
+the frames, the startup cost —opening the window, uploading textures, measuring the font for the
+first time— weighs a third in the mean. **The number that counts is the long batch's**, and the
+short one is written down here so that nobody finds it afterwards and believes there is a
+contradiction.
 
-**Lo que estos números prueban:**
+**What these numbers prove:**
 
-- Con dos consolas de verdad **volcando a la vez**, el fotograma cuesta **5,92 ms de media y cabe en el
-  hueco de 120 Hz**, con el 29 % de margen. Es la primera vez que ese número se toma sobre divisiones
-  reales y no simuladas.
-- **El grueso del fotograma no lo gasta el framework de interfaz: lo gasta interpretar.** 3,35 de los
-  5,92 ms son `alacritty_terminal` tragando los 128 KiB por fotograma **de cada consola** — trabajo del
-  terminal, y exactamente lo que el presupuesto por fotograma existe para acotar. Lo que queda para
-  dibujar son 2,57 ms, el **31 %** del hueco.
-- **La ventana sigue respondiendo al teclado mientras dura el volcado doble, y ahora con cifra:** de la
-  tecla en el fotograma al byte escrito en el programa, **3,42 ms de media y 5,00 ms el percentil 95**,
-  sobre 28 pulsaciones tecleadas a mano durante la caída. En F1.3, sin volcado, ese tramo daba **36 µs**:
-  sube casi ×100, y **la causa está identificada, no es un misterio** — el cronómetro arranca al empezar
-  el fotograma y por delante de escribir la tecla corre interpretar, que son esos mismos 3,35 ms. La
-  tecla espera a que el fotograma acabe de tragar. Sigue siendo imperceptible: 5 ms en el peor caso es
-  menos que un fotograma de 60 Hz.
-- **El instrumento reparte bien.** El resto del fotograma descuenta también el pintado de una consola que
-  no recibió salida en ese fotograma, que era un fallo de atribución encontrado en revisión. Se ve en el
-  propio informe: los fotogramas contados en «el resto» (105-120) igualan o superan los de la consola con
-  salida (107-115), porque incluyen aquellos en que solo se pintó la quieta.
+- With two real consoles **dumping at the same time**, the frame costs **5.92 ms on average and fits
+  in the 120 Hz gap**, with 29 % of headroom. It is the first time that number is taken over real
+  panes and not simulated ones.
+- **The bulk of the frame is not spent by the interface framework: it is spent interpreting.** 3.35
+  of the 5.92 ms are `alacritty_terminal` swallowing the 128 KiB per frame **of each console** — the
+  terminal's work, and exactly what the per-frame budget exists to bound. What is left for drawing
+  is 2.57 ms, **31 %** of the gap.
+- **The window keeps responding to the keyboard while the double dump lasts, and now with a
+  figure:** from the key in the frame to the byte written into the program, **3.42 ms on average and
+  5.00 ms at the 95th percentile**, over 28 keystrokes typed by hand during the flood. In F1.3, with
+  no dump, that span gave **36 µs**: it goes up almost ×100, and **the cause is identified, it is
+  not a mystery** — the stopwatch starts when the frame starts and ahead of writing the key runs
+  interpreting, which is those same 3.35 ms. The key waits for the frame to finish swallowing. It is
+  still imperceptible: 5 ms in the worst case is less than a 60 Hz frame.
+- **The instrument shares out correctly.** The rest of the frame also discounts the painting of a
+  console that received no output in that frame, which was an attribution defect found in review. It
+  shows in the report itself: the frames counted in «the rest» (105-120) equal or exceed those of
+  the console with output (107-115), because they include the ones in which only the still console
+  was painted.
 
-**Lo que NO prueban. Esta lista es la mitad del valor del anexo, y es larga a propósito:**
+**What they do NOT prove. This list is half the value of the annex, and it is long on purpose:**
 
-- **Este 31 % NO confirma el 36 % del banco del 9 de agosto, porque no miden lo mismo.** Aquel medía
-  **pantallas llenas y repintado continuo** —un techo, y así lo decía— sobre 3.840 celdas. Este mide un
-  volcado tipo TUI con repintado a demanda sobre **6.954 celdas**, casi el doble, y en un régimen donde
-  el pintor se salta la mayoría de las celdas por llevar el fondo por defecto. Que los dos porcentajes
-  salgan parecidos es **coincidencia de dos efectos opuestos** —casi el doble de celdas contra un relleno
-  mucho más barato—, no una confirmación. El aviso que el propio instrumento lleva escrito
-  (`crates/app/src/medida.rs`) dice justamente esto: comparar tramos entre medidas exige mirar la rejilla,
-  no solo el tramo.
-- **No hay línea base de una consola dentro de la aplicación**, así que **no se puede afirmar cómo escala
-  el pintado** de una a dos. Y no es un descuido evitable: desde F1.4 la ventana abre **siempre dos**
-  consolas, así que la comparación 1 contra 2 dejó de ser medible desde dentro. El instrumento que la
-  daría es el banco con reparto real, que está sin hacer
+- **This 31 % does NOT confirm the 36 % of the 9 August bench, because they do not measure the same
+  thing.** That one measured **full screens and continuous repaint** —a ceiling, and it said so—
+  over 3 840 cells. This one measures a TUI-style dump with repaint on demand over **6 954 cells**,
+  almost double, and in a regime where the painter skips most of the cells for carrying the default
+  background. That the two percentages come out similar is a **coincidence of two opposing effects**
+  —almost double the cells against a much cheaper fill—, not a confirmation. The warning that the
+  instrument itself carries written down (`crates/app/src/measure.rs`) says exactly this: comparing
+  spans across measurements demands looking at the grid, not just at the span.
+- **There is no baseline of one console inside the application**, so **there is no way to state how
+  the painting scales** from one to two. And it is not an avoidable oversight: since F1.4 the window
+  opens **always two** consoles, so the 1-against-2 comparison stopped being measurable from inside.
+  The instrument that would give it is the bench with real tiling, which is not built
   ([#33](https://github.com/mashware/agent-terminal/issues/33)).
 
 ---
 
-## D11 — Pegar es del terminal, `Ctrl+V` es del programa, y lo pegado va sin controles
+## D11 — Pasting belongs to the terminal, `Ctrl+V` belongs to the program, and what is pasted goes without controls
 
-**Decidido.** `Ctrl+Mayúsculas+V` pega: el terminal escribe el texto del portapapeles en el programa
-de dentro. `Ctrl+V` **no pega** — le entrega al programa el byte de control que le corresponde, y él
-decide qué significa. Y a todo lo que se pega **se le quitan los caracteres de control**, menos el
-tabulador y los saltos de línea.
+**Decided.** `Ctrl+Shift+V` pastes: the terminal writes the clipboard's text into the program
+inside. `Ctrl+V` **does not paste** — it hands the program the control byte that corresponds to it,
+and the program decides what it means. And everything that is pasted **has its control characters
+removed**, except the tab and the line breaks.
 
-**Por qué el reparto de los dos atajos, y no uno solo.** Son capas distintas atendiendo cada tecla, y
-eso se comprobó mirando qué hace un terminal de verdad: en Tilix `Ctrl+V` no pega, pero **dentro de
-esa misma ventana** Claude sí pega con `Ctrl+V`, porque recibe el byte y ha decidido que para él eso
-significa pegar. Vim recibe el mismo byte y entra en bloque visual; un shell lo usa para
-*quoted-insert*. **Quién pega con `Ctrl+V` no es decisión del terminal**, y quedárselo rompería el
-bloque visual sin que nadie lo pidiera.
+**Why the work is split between the two shortcuts, and not left to one alone.** They are different
+layers attending to each key, and that was checked by looking at what a real terminal does: in Tilix
+`Ctrl+V` does not paste, but **inside that same window** Claude does paste with `Ctrl+V`, because it
+receives the byte and has decided that for it that means pasting. Vim receives the same byte and
+enters visual block; a shell uses it for *quoted-insert*. **Who pastes with `Ctrl+V` is not the
+terminal's decision**, and keeping it would break visual block without anybody asking for it.
 
-**El apaño técnico que hace falta para conseguirlo**, porque no es gratis: el escritorio emite el
-**mismo evento** para los dos atajos —comprobado en la fuente de `egui-winit`: la condición es
-«mandato + V» y no mira Mayúsculas— y **se traga el evento de tecla**. Distinguirlos exige
-reconstruir el estado de las teclas muertas recorriendo los eventos en orden. Leer el campo que el
-framework publica **no vale**: es uno solo por pase y describe cómo estaban al **final** del lote, no
-cuando llegó el pegado.
+**The technical workaround it takes to get this**, because it is not free: the desktop emits the
+**same event** for both shortcuts —checked in `egui-winit`'s source: the condition is «command + V»
+and it does not look at Shift— and **it swallows the key event**. Telling them apart demands
+reconstructing the state of the modifier keys by walking the events in order. Reading the field the
+framework publishes **is no good**: it is a single one per pass and it describes how they were at
+the **end** of the batch, not when the paste arrived.
 
-**Por qué se filtran los controles, y son dos razones distintas.**
+**Why the controls are filtered, and there are two different reasons.**
 
-1. **La marca de pegado se puede cerrar desde dentro.** Un portapapeles que traiga su secuencia de
-   cierre la cierra por su cuenta, y lo que venga detrás entra como tecleado — **ejecutándose sin
-   Enter**. Quitar solo esa secuencia **no basta**: un ataque comprobado la reconstruye aprovechando
-   que buscar-y-borrar no vuelve a mirar lo que deja.
-2. **Y el envoltorio no protege del núcleo.** Los caracteres de control los procesa la disciplina de
-   línea, que ve los bytes **antes** que el programa: un `0x03` interrumpe, un `0x1a` suspende el
-   shell, un `0x1c` provoca un volcado, un `0x04` cierra la entrada — y con las dos consolas cerradas,
-   la ventana. Marcar el pegado no cambia nada de eso. Es la razón por la que `xterm` y `VTE` filtran
-   los controles del pegado desde hace años.
+1. **The paste mark can be closed from inside.** A clipboard that brings its closing sequence closes
+   it on its own, and whatever comes behind enters as typed — **executing with no Enter**. Removing
+   only that sequence **is not enough**: a proven attack rebuilds it by taking advantage of the fact
+   that search-and-delete does not look again at what it leaves behind.
+2. **And the wrapper does not protect from the kernel.** Control characters are processed by the
+   line discipline, which sees the bytes **before** the program does: a `0x03` interrupts, a `0x1a`
+   suspends the shell, a `0x1c` triggers a dump, a `0x04` closes the input — and with both consoles
+   closed, the window. Marking the paste changes none of that. It is the reason `xterm` and `VTE`
+   have filtered paste's controls for years.
 
-**Un salto de línea sale distinto según haya marca o no, y equivocarse se ve en pantalla.** Sin
-marca hay que imitar la tecla, y Enter manda **retorno de carro**. Con marca el salto va **tal cual**:
-el programa sabe que es un pegado y decide él. Mandarle un retorno de carro dentro de la marca es
-meterle un carácter de control en medio de un texto, y lo inserta literal — sale un cuadro en la orden
-y el shell lo imprime al ejecutar. Se descubrió pegando dos líneas y mirando.
+**A line break comes out differently depending on whether there is a mark or not, and getting it
+wrong shows on screen.** Without a mark the key has to be imitated, and Enter sends a **carriage
+return**. With a mark the break goes **as it is**: the program knows it is a paste and decides for
+itself. Sending it a carriage return inside the mark is putting a control character in the middle of
+a text, and it inserts it literally — a box comes out in the command and the shell prints it on
+executing. It was found by pasting two lines and looking.
 
-**Lo que cuesta, y se acepta.** Un texto con secuencias de color pierde sus escapes y el resto queda
-como texto corriente: pegar un volcado coloreado deja `[32mok[0m` en la línea. Es lo mismo que hace
-`xterm` por defecto. Desde el terminal **no hay forma de distinguir el control que el usuario quería
-del que le colaron**, y uno cuyo pegado puede ejecutar o suspender es peor que uno que pega en texto
-plano.
+**What it costs, and is accepted.** A text with color sequences loses its escapes and the rest stays
+as ordinary text: pasting a colored dump leaves `[32mok[0m` on the line. It is the same thing
+`xterm` does by default. From the terminal **there is no way to tell the control the user wanted
+from the one that was slipped in**, and one whose paste can execute or suspend is worse than one
+that pastes as plain text.
 
-**Lo que se descartó, y por qué.**
+**What was discarded, and why.**
 
-- **Que pegar sea también `Ctrl+V`.** Más simple y quita el mecanismo más delicado — pero se lleva por
-  delante el bloque visual de vim y el *quoted-insert* del shell, que se usan a diario.
-- **Leer los modificadores del campo del framework.** No distingue los dos atajos: ver arriba.
-- **Quitar solo la secuencia de cierre.** Se escapa, comprobado.
-- **Repetir el borrado hasta que no quede ninguna.** Cerraría *ese* agujero y ninguno de los del
-  núcleo.
-- **El clic central** (la selección primaria del escritorio). `egui` no la expone: su portapapeles
-  solo sabe leer y escribir el normal, y la pieza de debajo que sí la tiene es privada.
-- **Copiar.** Arrastra selección con el ratón y, en la práctica, scrollback. Sigue en F2.6.
+- **Making `Ctrl+V` paste as well.** Simpler and it removes the most delicate mechanism — but it
+  takes out vim's visual block and the shell's *quoted-insert*, which are used daily.
+- **Reading the modifiers from the framework's field.** It does not tell the two shortcuts apart:
+  see above.
+- **Removing only the closing sequence.** It escapes, checked.
+- **Repeating the deletion until none is left.** It would close *that* hole and none of the
+  kernel's.
+- **The middle click** (the desktop's primary selection). `egui` does not expose it: its clipboard
+  only knows how to read and write the normal one, and the piece underneath that does have it is
+  private.
+- **Copying.** It drags mouse selection along with it and, in practice, scrollback. It stays in
+  F2.6.
 
-**Lo que hay que saber para no llevarse un susto.**
+**What you need to know so as not to get a fright.**
 
-- **El programa de dentro puede pedir que lo pegado le llegue marcado**, y el terminal se lo pregunta
-  al motor. Ese accesor devuelve un `bool` y no el tipo del motor, para que la caja del terminal
-  siga sin dejar asomar sus dependencias.
-- **Con el portapapeles vacío, `Ctrl+V` no manda nada.** El escritorio se traga la tecla y no emite
-  ningún evento cuando no hay qué pegar, así que el byte de control tampoco sale. Se nota poco —un
-  portapapeles vacío es raro— pero significa que el bloque visual de vim no se abre en una sesión
-  recién arrancada sin haber copiado nada. No se puede arreglar desde aquí.
-- **En macOS los dos atajos se comportan distinto** y esta regla los rompería: allí el «mandato» es ⌘,
-  así que ⌘+V daría el byte de control mientras `Ctrl+V` llega como tecla. La primera compilación en
-  ese sistema es F2.7 y tendrá que revisarlo.
-- **Pegar puede colgar la ventana** mientras el programa de dentro no lea su entrada. No es de pegar:
-  es que escribir al pseudoterminal bloquea sin techo
-  ([#50](https://github.com/mashware/agent-terminal/issues/50)). Pegar solo lo hace alcanzable.
-- **«Encolar» no es coste de egui: es el pintor de este proyecto**, que sigue siendo el más ingenuo
-  posible —una celda cada vez, sin caché ni seguimiento de lo que cambió— llamando a `rect_filled` y
-  `text`. De los 3,21 ms de dibujo, lo único atribuible al framework sin discusión es **el resto del
-  fotograma: 0,74 ms, el 9 % del hueco**. Decir «el framework gasta el 31 %» sería cargarle código propio
-  que se reescribiría igual con cualquier otro.
-- **El peor caso no se ha remedido con dos divisiones.** Este escenario es exigente pero no es el techo:
-  el techo son pantallas llenas y repintado continuo, que es lo que medía el banco. Así que este anexo
-  **no cierra** el criterio de aceptación que pedía medir el peor caso con divisiones de verdad.
-- **El percentil 95 del caso simétrico se sale del hueco de 120 Hz** (~9,4 ms sumando los p95 de la
-  tanda larga; y sumar percentiles de tramos no da el percentil del fotograma, así que ese número es
-  indicativo, no una medida). Cabe en el de 60 Hz con holgura. Hay tirones ocasionales durante un volcado
-  doble.
-- **Nada sobre cuatro consolas.** Multiplicar por dos da 11,8 ms, pero eso **contradice el propio modelo
-  de este anexo**: si con cuatro cada rejilla es más estrecha, encolar por consola baja y solo interpretar
-  escala lineal, con lo que saldría algo más cerca de 9 ms. Las dos cuentas son aritmética, no medida, y
-  por eso el aviso del roadmap sigue en pie.
-- **Nada del panel pintando a la vez**, que es F1.6 y la otra mitad de la carga que esta decisión dice
-  que hay que medir.
-- **La serie «byte disponible → fotograma pagado» solo es interpretable en el caso simétrico.** Incluye
-  el fotograma entero —se presenta indivisible— así que en el asimétrico la de la consola tranquila se
-  degrada por el volcado de la vecina y no la describe. Ahí valen los tramos propios, no ese total.
+- **The program inside can ask for what is pasted to reach it marked**, and the terminal asks the
+  engine about it. That accessor returns a `bool` and not the engine's type, so that the terminal
+  crate carries on without letting its dependencies show through.
+- **With an empty clipboard, `Ctrl+V` sends nothing.** The desktop swallows the key and emits no
+  event when there is nothing to paste, so the control byte does not come out either. It is barely
+  noticeable —an empty clipboard is rare— but it means that vim's visual block does not open in a
+  freshly started session with nothing copied. It cannot be fixed from here.
+- **On macOS the two shortcuts behave differently** and this rule would break them: there the
+  «command» is ⌘, so ⌘+V would give the control byte while `Ctrl+V` arrives as a key. The first
+  build on that system is F2.7 and it will have to review this.
+- **Pasting can hang the window** for as long as the program inside does not read its input. It is
+  not pasting's doing: it is that writing to the pseudoterminal blocks with no ceiling
+  ([#50](https://github.com/mashware/agent-terminal/issues/50)). Pasting only makes it reachable.
+- **«Enqueuing» is not egui's cost: it is this project's painter**, which is still the most naive
+  one possible —one cell at a time, with no cache and no tracking of what changed— calling
+  `rect_filled` and `text`. Of the 3.21 ms of drawing, the only thing attributable to the framework
+  beyond argument is **the rest of the frame: 0.74 ms, 9 % of the gap**. Saying «the framework
+  spends 31 %» would be charging it with code of our own that would be rewritten the same way with
+  any other.
+- **The worst case has not been re-measured with two panes.** This scenario is demanding but it is
+  not the ceiling: the ceiling is full screens and continuous repaint, which is what the bench
+  measured. So this annex **does not close** the acceptance criterion that asked for the worst case
+  to be measured with real panes.
+- **The 95th percentile of the symmetric case falls outside the 120 Hz gap** (~9.4 ms adding up the
+  p95s of the long batch; and adding up the percentiles of spans does not give the frame's
+  percentile, so that number is indicative, not a measurement). It fits in the 60 Hz one with room
+  to spare. There are occasional stutters during a double dump.
+- **Nothing about four consoles.** Multiplying by two gives 11.8 ms, but that **contradicts this
+  annex's own model**: if with four each grid is narrower, enqueuing per console goes down and only
+  interpreting scales linearly, which would come out somewhat closer to 9 ms. Both sums are
+  arithmetic, not measurement, and that is why the roadmap's warning still stands.
+- **Nothing about the panel painting at the same time**, which is F1.6 and the other half of the
+  load this decision says has to be measured.
+- **The «byte available → frame paid for» series is only interpretable in the symmetric case.** It
+  includes the whole frame —it is presented indivisible— so in the asymmetric one the quiet
+  console's series is degraded by the neighbor's dump and does not describe it. There its own spans
+  are what counts, not that total.
 
-**Qué significa para esta decisión.** **D3 no cambia, y sigue sin poder cerrarse.** Lo que este anexo
-aporta no es la confirmación que parecía: es un **orden de magnitud tomado sobre divisiones reales** —el
-fotograma cabe en el hueco de 120 Hz con dos consolas volcando— y, sobre todo, **un cambio de sospechoso**.
-El framework de interfaz se lleva **0,74 ms demostrables de 8,33**; el resto lo gastan el parser del
-terminal y un pintor propio que nadie ha optimizado todavía. Antes de reabrir si GPUI compensa su coste, hay dos
-cosas que costarían menos y darían más margen: **escribir un pintor que no repinte cada celda cada
-fotograma**, y probar los turnos rotatorios del presupuesto que el diseño de F1.4 dejó anotados. Y para
-cerrar el criterio de verdad faltan tres medidas que no están: el peor caso con dos divisiones, la línea
-base de una sola dentro de la aplicación, y F1.6 con los paneles encima.
+**What it means for this decision.** **D3 does not change, and it still cannot be closed.** What
+this annex contributes is not the confirmation it seemed to be: it is an **order of magnitude taken
+over real panes** —the frame fits in the 120 Hz gap with two consoles dumping— and, above all, **a
+change of suspect**. The interface framework takes **0.74 demonstrable ms out of 8.33**; the rest is
+spent by the terminal's parser and by a painter of our own that nobody has optimized yet. Before
+reopening whether GPUI is worth its cost, there are two things that would cost less and would give
+more headroom: **writing a painter that does not repaint every cell every frame**, and trying the
+rotating turns of the budget that F1.4's design left noted down. And to really close the criterion
+three measurements are missing: the worst case with two panes, the baseline of a single one inside
+the application, and F1.6 with the panels on top.
 
-### Medido — 13 agosto 2026: con los dos paneles pintando
+### Measured — 13 August 2026: with both panels painting
 
-La tercera de esas tres. Misma máquina y mismo `--release`, rejilla de **61 filas** por consola y
-ventana sin tocar; la carga es el volcado determinista de `host-load` —color, negrita y repintado de
-barra de estado con movimiento de cursor—, **44 MiB por consola**, arrancadas a la vez con su
-alineación al reloj de pared. Cada tanda son **dos corridas** y los números son la media de las
-medias, sobre **357-358 fotogramas con salida por consola** en las cuatro. Se toma con
-`scripts/medir-fotograma.sh`, que va en el repo: la tanda del 11 de agosto no dejó guion y
-reconstruirla costó más que tomarla.
+The third of those three. Same machine and same `--release`, a grid of **61 rows** per console and
+the window untouched; the load is `host-load`'s deterministic dump —color, bold and a status-bar
+repaint with cursor movement—, **44 MiB per console**, started at the same time with their alignment
+to the wall clock. Each batch is **two runs** and the numbers are the mean of the means, over
+**357-358 frames with output per console** in all four. It is taken with
+`scripts/measure-frame.sh`, which ships in the repo: the 11 August batch left no script behind and
+reconstructing it cost more than taking it.
 
-**Tres regímenes, y el primero es el que hace legible a los otros dos:**
+**Three regimes, and the first is the one that makes the other two legible:**
 
-| | **A** sin panel | **B** panel quieto | **C** panel publicándose 1×s |
+| | **A** with no panel | **B** panel still | **C** panel publishing 1×s |
 |---|---|---|---|
-| Columnas por consola | **57** | **21** | **21** |
-| Interpretar (las dos) | 4,35 ms | 4,51 ms | 4,35 ms |
-| Encolar el pintado (las dos) | 1,80 ms | 0,75 ms | 0,74 ms |
-| **El panel (las dos)** | **0,77 µs** | **12,8 µs** | **13,6 µs** |
-| El resto del fotograma | 0,86 ms | 0,50 ms | 0,46 ms |
-| **Coste del fotograma** | **7,01 ms** | **5,78 ms** | **5,56 ms** |
-| Del hueco de 120 Hz | 84 % | 69 % | 67 % |
-| Fotogramas de la ventana | 368 y 369 | 372 y 371 | **472 y 471** |
+| Columns per console | **57** | **21** | **21** |
+| Interpreting (both) | 4.35 ms | 4.51 ms | 4.35 ms |
+| Enqueuing the paint (both) | 1.80 ms | 0.75 ms | 0.74 ms |
+| **The panel (both)** | **0.77 µs** | **12.8 µs** | **13.6 µs** |
+| The rest of the frame | 0.86 ms | 0.50 ms | 0.46 ms |
+| **Frame cost** | **7.01 ms** | **5.78 ms** | **5.56 ms** |
+| Of the 120 Hz gap | 84 % | 69 % | 67 % |
+| Frames of the window | 368 and 369 | 372 and 371 | **472 and 471** |
 
-> **Con los paneles pintando el fotograma sale más barato, y eso NO significa que los paneles salgan
-> gratis.** El panel se lleva **36 de las 57 columnas** de su consola, así que la consola pinta un
-> 63 % menos de celdas. **El tramo que baja por esa causa es `encolar`** —1,80 a 0,75 ms, un −58 %—,
-> y baja porque hay menos celdas que apilar, no porque nada haya mejorado. Lo que la tabla enseña es
-> un intercambio —menos consola a cambio de un panel—, no una ganancia. **Leer «−18 % de coste» como
-> una mejora es el error que esta tanda de control existe para impedir**, y sin la columna A el anexo
-> lo habría cometido.
+> **With the panels painting the frame comes out cheaper, and that does NOT mean the panels come
+> free.** The panel takes **36 of the 57 columns** of its console, so the console paints 63 % fewer
+> cells. **The span that goes down because of that is `enqueue`** —1.80 to 0.75 ms, a −58 %—, and it
+> goes down because there are fewer cells to stack, not because anything has improved. What the
+> table shows is a trade —less console in exchange for a panel—, not a gain. **Reading «−18 % of
+> cost» as an improvement is the mistake this control batch exists to prevent**, and without column
+> A the annex would have made it.
 
-**Y una que sale al revés de lo esperado: envolver no se nota.** A 57 columnas las líneas de la carga
-—~50 caracteres visibles— no envuelven; a 21 envuelven en tres filas. Cabía esperar que interpretar se
-encareciera, porque el ancho de envoltura es justamente de lo que depende. **No pasa**: 4,35 / 4,51 /
-4,35 ms, plano dentro del ruido entre corridas. El coste de meter bytes en la rejilla lo domina la
-cantidad de bytes, no la forma en que se reparten en filas.
+**And one that comes out the opposite way round from what was expected: wrapping is not
+noticeable.** At 57 columns the load's lines —~50 visible characters— do not wrap; at 21 they wrap
+into three rows. It was reasonable to expect interpreting to get more expensive, because the wrap
+width is precisely what it depends on. **It does not happen**: 4.35 / 4.51 / 4.35 ms, flat within
+the noise between runs. The cost of putting bytes into the grid is dominated by the amount of bytes,
+not by the way they are shared out into rows.
 
-**Lo que sí es del panel, aislado.** La resta que sí vale es la del **tramo del panel**, porque su
-suelo es el mismo en las tres columnas: en A ese tramo no es cero —el directorio se crea siempre, así
-que hay que recoger la bandera, pedir la hora y repartir el ancho— y mide **0,77 µs**. Sobre ese
-suelo:
+**What does belong to the panel, isolated.** The subtraction that does count is the one of the
+**panel span**, because its floor is the same in the three columns: in A that span is not zero —the
+directory is always created, so the flag has to be picked up, the time asked for and the width
+shared out— and it measures **0.77 µs**. On top of that floor:
 
-| | Media (las dos) | El 95 %, consola izquierda |
+| | Mean (both) | The 95 %, left console |
 |---|---|---|
-| A — sin panel | 0,77 µs | 1,4 µs |
-| B — panel quieto | **12,8 µs** | 19,3 µs |
-| C — panel publicándose | **13,6 µs** | 21,4 µs |
+| A — with no panel | 0.77 µs | 1.4 µs |
+| B — panel still | **12.8 µs** | 19.3 µs |
+| C — panel publishing | **13.6 µs** | 21.4 µs |
 
-Leer y pintar dos paneles cuesta **unos 13 µs por fotograma**, el **0,2 % del fotograma** y el
-**0,15 % del hueco de 120 Hz**. El panel, como coste por fotograma, **no se nota**.
+Reading and painting two panels costs **around 13 µs per frame**, **0.2 % of the frame** and **0.15
+% of the 120 Hz gap**. The panel, as a per-frame cost, **is not noticeable**.
 
-**Lo que publicar añade no se puede separar del ruido, y decirlo importa.** La tabla enseña 12,8 µs
-quieto y 13,6 publicándose, o sea 0,8 de diferencia. Pero **la tanda D es una réplica válida de C**
-—una vez demostrado abajo que dónde cae el temporal no influye—, y las cuatro corridas del régimen
-«publicándose» se reparten entre **13,5 y 15,3 µs**: la variación **dentro** del mismo régimen dobla
-el efecto que se le atribuye a publicar. Con dos corridas parecía separado; con las cuatro
-comparables, no lo está. Lo que sí aguanta es lo cualitativo: **publicar una vez por segundo no se
-nota**.
+**What publishing adds cannot be separated from the noise, and saying so matters.** The table shows
+12.8 µs still and 13.6 publishing, that is 0.8 of difference. But **batch D is a valid replicate of
+C** —once it is shown below that where the temporary file lands makes no difference—, and the four
+runs of the «publishing» regime spread between **13.5 and 15.3 µs**: the variation **inside** the
+same regime doubles the effect attributed to publishing. With two runs it looked separated; with the
+four comparable ones, it is not. What does hold up is the qualitative part: **publishing once per
+second is not noticeable**.
 
-**Lo que sí se nota del panel hablador son los fotogramas, no su coste.** Cada consola produce en
-357-358 fotogramas en las cuatro tandas, y sin embargo la ventana cuenta **368-369 en A** y **471-472
-en C**. La unión crece con los sumandos iguales, así que **hay menos solape**: en A las dos consolas
-producen casi siempre en el mismo fotograma —358 + 357 − 368 = **347 compartidos**, el 97 %— y en C
-bastante menos: 358 + 357 − 472 = **243**, el 68 %. El mismo trabajo se reparte entre un **28 % más de fotogramas**, cada uno más
-barato. Por eso **el «coste del fotograma» de C no se compara con el de B**: son fotogramas que llevan
-dentro cantidades distintas de trabajo.
+**What is noticeable about the talkative panel is the frames, not its cost.** Each console produces
+in 357-358 frames in all four batches, and yet the window counts **368-369 in A** and **471-472 in
+C**. The union grows with the addends staying equal, so **there is less overlap**: in A the two
+consoles almost always produce in the same frame —358 + 357 − 368 = **347 shared**, 97 %— and in C
+considerably less: 358 + 357 − 472 = **243**, 68 %. The same work is shared out over **28 % more
+frames**, each of them cheaper. That is why **C's «frame cost» is not compared with B's**: they are
+frames that carry different amounts of work inside them.
 
-> **La aritmética del solape está en los datos; la causa es interpretación y así hay que leerla.**
-> Que sean los despertares del vigilante los que desincronizan las dos consolas **no está medido**: el
-> informe no publica ni la duración de la corrida ni cuántas veces despertó, así que no se puede
-> contrastar que las publicaciones expliquen los ~104 fotogramas de más. Lo único que apunta en esa
-> dirección es que B —con vigilante armado pero sin nadie publicando— se queda en 371.
+> **The arithmetic of the overlap is in the data; the cause is interpretation and has to be read as
+> such.** That it is the watcher's wake-ups that desynchronize the two consoles is **not measured**:
+> the report publishes neither the run's duration nor how many times it woke up, so there is no way
+> to check that the publications explain the ~104 extra frames. The only thing pointing in that
+> direction is that B —with the watcher armed but with nobody publishing— stays at 371.
 
-**Dónde cae el fichero temporal no influye, y no por casualidad.** Parecía la explicación obvia de
-esos 100 fotogramas —un temporal escrito dentro del directorio vigilado despertando a la ventana por
-su cuenta—, así que se tomó una cuarta tanda idéntica a C pero con el temporal **fuera**: 473 y 466
-fotogramas, contra 472 y 471. Y el código explica por qué tenía que salir igual: el vigilante
-**filtra por ruta exacta** y solo levanta la bandera cuando el aviso trae `<dir>/panel.json`
-(`crates/app/src/vigilante.rs`), así que cualquier otro fichero del directorio le es invisible. La
-hipótesis se cayó dos veces, midiendo y leyendo, y queda escrita para que nadie la vuelva a levantar.
+**Where the temporary file lands makes no difference, and not by chance.** It looked like the
+obvious explanation for those 100 frames —a temporary file written inside the watched directory
+waking the window up on its own—, so a fourth batch identical to C was taken but with the temporary
+file **outside**: 473 and 466 frames, against 472 and 471. And the code explains why it had to come
+out the same: the watcher **filters by exact path** and only raises the flag when the notice carries
+`<dir>/panel.json` (`crates/app/src/watcher.rs`), so any other file in the directory is invisible
+to it. The hypothesis fell twice, by measuring and by reading, and it stays written down so that
+nobody raises it again.
 
-**Dos huecos de atribución, los dos con su número:**
+**Two attribution gaps, both with their number:**
 
-1. **Armar el despertador es trabajo del panel que hoy se publica como coste de egui.** Calcular
-   cuándo tocará avisar de que un panel está viejo se hace **dos veces por fotograma** y **fuera** de
-   los tres relojes de la división, así que cae en «el resto del fotograma». Medido con sonda en dos
-   corridas —784 y 860 ns—: **822 ns por llamada, 1,64 µs por fotograma**, el **0,4 %** de ese tramo y
-   un **12 % del coste propio del panel**. El sesgo es pequeño pero va en la dirección que más daño
-   hace, porque infla justo la cifra sobre la que esta decisión tiene que decidir.
-2. **Enterarse no aparece en ninguna parte.** El vigilante de ficheros corre en **su propio hilo**, y
-   el cronómetro de `eframe` es un reloj de pared sobre la pasada del hilo de interfaz. Su coste no
-   infla «el resto» —o sea que no se le carga a egui, que era el riesgo— pero **tampoco está en el
-   número**: lo que aquí se publica es lo que cuesta leer y pintar el panel, no lo que cuesta saber
-   que cambió.
+1. **Arming the alarm is the panel's work that today is published as egui's cost.** Working out when
+   it will be time to warn that a panel is old is done **twice per frame** and **outside** the
+   pane's three clocks, so it falls into «the rest of the frame». Measured with a probe in two runs
+   —784 and 860 ns—: **822 ns per call, 1.64 µs per frame**, **0.4 %** of that span and **12 % of
+   the panel's own cost**. The bias is small but it goes in the direction that does the most damage,
+   because it inflates precisely the figure this decision has to decide about.
+2. **Finding out appears nowhere.** The file watcher runs on **its own thread**, and `eframe`'s
+   stopwatch is a wall clock over the interface thread's pass. Its cost does not inflate «the rest»
+   —that is, it is not charged to egui, which was the risk— but **it is not in the number either**:
+   what is published here is what it costs to read and paint the panel, not what it costs to find
+   out that it changed.
 
-**Lo que estos números NO prueban. Como en los dos anexos anteriores, esta lista es la mitad del
-valor:**
+**What these numbers do NOT prove. As in the two previous annexes, this list is half the value:**
 
-- **No comparan con el 11 de agosto, y la propia tanda A lo demuestra.** Aquella publicó 5,92 ms sin
-  paneles; ésta, en la misma configuración, da **7,01 ms**. Otro día, otra carga, otra máquina en otro
-  estado. **La única comparación válida es dentro de esta tabla**, que es para lo que se tomaron las
-  tres el mismo día y en la misma ventana.
-- **El total de B y C no se resta contra el de A.** Solo la resta del tramo del panel es honesta,
-  porque es el único cuyo suelo no cambia con la rejilla.
-- **El 95 % del tramo del panel se toma solo sobre fotogramas en que esa consola recibió salida.** Las
-  series solo se anotan cuando llegó algo, mientras que el tramo se descuenta del total siempre. Un
-  fotograma que el vigilante despierta sin salida de consola no entra en ese percentil.
-- **El coste del fotograma es reloj de pared, no CPU**, pese a que el campo del framework se llame
-  así. Con la máquina cargada, la contención de otros procesos entra en el número.
-- **Toda corrida imprime «el directorio que se vigilaba ha dejado de existir», y no afecta a los
-  números.** Los directorios de panel se borran cuando **la aplicación** termina, no cuando muere el
-  programa de una consola: la ventana espera a las dos y solo entonces se cierra. Así que ese aviso
-  sale durante el apagado, después de medir. Se deja dicho porque quien repita la tanda lo verá y
-  pensará que ha roto algo.
-- **La consola izquierda cuesta sistemáticamente más que la derecha, y no se sabe por qué.** En las
-  ocho corridas, sin excepción: en la tanda del panel hablador su tramo de panel es ~8,4 µs frente a
-  ~5,2 —**1,6×**— y encolar el pintado 437 µs frente a 328 —**1,3×**—. La columna «las dos» esconde
-  esa asimetría al sumar. Las dos consolas tienen la misma rejilla y la misma carga, así que la explicación
-  está en el orden en que se pintan o en el foco, y **no se ha investigado**.
-- **Tres cosas del método no se pueden comprobar desde el informe**: los 44 MiB por consola, que las
-  dos arrancaran alineadas, y la frecuencia de publicación. El informe no imprime ni volumen, ni
-  duración, ni recuento de publicaciones — quien quiera auditarlo tiene que leer
-  `scripts/medir-fotograma.sh`, no los ficheros de salida.
-- **Nada del peor caso**: esto es un volcado exigente, no el techo de pantallas llenas con repintado
-  continuo. Sigue sin cerrarse ese criterio.
-- **Nada de cuatro divisiones**, y ahora hay una razón nueva para no extrapolar: si dos consolas dan
-  57 columnas cada una, cuatro darían unas **28 antes de descontar el panel** — y el panel se lleva
-  **36**. O sea que con cuatro divisiones el panel **no cabe**, y el reparto tendría que hacer algo
-  que hoy no hace. El número no se puede multiplicar
+- **They do not compare with 11 August, and batch A itself proves it.** That one published 5.92 ms
+  with no panels; this one, in the same configuration, gives **7.01 ms**. Another day, another load,
+  another machine in another state. **The only valid comparison is inside this table**, which is
+  what the three were taken the same day and in the same window for.
+- **B's and C's totals are not subtracted against A's.** Only the subtraction of the panel span is
+  honest, because it is the only one whose floor does not change with the grid.
+- **The 95 % of the panel span is taken only over frames in which that console received output.**
+  The series are only recorded when something arrived, whereas the span is discounted from the total
+  always. A frame that the watcher wakes with no console output does not enter that percentile.
+- **The frame cost is wall clock, not CPU**, despite the framework's field being called that. With
+  the machine loaded, the contention from other processes enters the number.
+- **Every run prints «the directory being watched has stopped existing», and it does not affect the
+  numbers.** The panel directories are deleted when **the application** ends, not when the program
+  of a console dies: the window waits for both and only then closes. So that notice comes out during
+  the shutdown, after measuring. It is said here because whoever repeats the batch will see it and
+  think they have broken something.
+- **The left console costs systematically more than the right one, and nobody knows why.** In all
+  eight runs, without exception: in the talkative panel's batch its panel span is ~8.4 µs against
+  ~5.2 —**1.6×**— and enqueuing the paint 437 µs against 328 —**1.3×**—. The «both» column hides
+  that asymmetry by adding them up. The two consoles have the same grid and the same load, so the
+  explanation is in the order in which they are painted or in the focus, and **it has not been
+  investigated**.
+- **Three things about the method cannot be checked from the report**: the 44 MiB per console, that
+  the two started aligned, and the publishing frequency. The report prints neither volume, nor
+  duration, nor a count of publications — whoever wants to audit it has to read
+  `scripts/measure-frame.sh`, not the output files.
+- **Nothing about the worst case**: this is a demanding dump, not the ceiling of full screens with
+  continuous repaint. That criterion is still not closed.
+- **Nothing about four panes**, and now there is a new reason not to extrapolate: if two consoles
+  give 57 columns each, four would give around **28 before discounting the panel** — and the panel
+  takes **36**. That is, with four panes the panel **does not fit**, and the tiling would have to do
+  something it does not do today. The number cannot be multiplied
   ([#33](https://github.com/mashware/agent-terminal/issues/33)).
 
-**Qué significa para esta decisión.** **D3 no cambia, y el cambio de sospechoso que anunció el anexo
-anterior se confirma y se agranda.** Con los dos paneles encima, lo demostrablemente atribuible al
-framework de interfaz es **0,50 ms de 8,33**, el **6 % del hueco** —menos que los 0,74 ms de agosto, y
-por una razón que no le hace ningún favor a egui: hay menos celdas que teselar—. Los paneles, que eran
-la otra mitad de la carga que esta decisión mandaba medir, gastan **13 µs**, cuatro órdenes de
-magnitud por debajo del presupuesto. **El fotograma sigue gastándolo interpretar** —4,5 de los 5,8 ms
-de la tanda del panel quieto— y
-un pintor propio que nadie ha optimizado.
+**What it means for this decision.** **D3 does not change, and the change of suspect the previous
+annex announced is confirmed and grows.** With both panels on top, what is demonstrably attributable
+to the interface framework is **0.50 ms out of 8.33**, **6 % of the gap** —less than August's 0.74
+ms, and for a reason that does egui no favors at all: there are fewer cells to tessellate—. The
+panels, which were the other half of the load this decision ordered measured, spend **13 µs**, four
+orders of magnitude below the budget. **The frame is still spent by interpreting** —4.5 of the 5.8
+ms of the still-panel batch— and by a painter of our own that nobody has optimized.
 
-De las tres medidas que faltaban, **ésta queda hecha**. Siguen faltando dos, y las dos dependen del
-banco con reparto real: el peor caso con dos divisiones y la línea base de una sola dentro de la
-aplicación, que dejó de ser medible desde dentro cuando la ventana pasó a abrir siempre dos.
+Of the three measurements that were missing, **this one is done**. Two are still missing, and both
+depend on the bench with real tiling: the worst case with two panes and the baseline of a single one
+inside the application, which stopped being measurable from inside when the window went over to
+always opening two.
 
 ---
 
-## D4 — Control por consola, no por API
+## D4 — Control through the console, not through the API
 
-**Decidido.** El agente se controla escribiendo en su PTY y leyendo su salida, no llamando a
-la API del proveedor.
+**Decided.** The agent is controlled by writing into its PTY and reading its output, not by calling
+the provider's API.
 
-**Por qué — es económico, no técnico.** Las suscripciones (Claude Max, etc.) solo valen dentro
-del cliente oficial de cada proveedor. Llamar a la API se factura por tokens aparte. Una
-herramienta que obligue a pagar API por lo que el usuario ya paga por suscripción no se adopta.
+**Why — it is economic, not technical.** Subscriptions (Claude Max, etc.) are only worth something
+inside each provider's official client. Calling the API is billed by tokens separately. A tool that
+forces the user to pay for the API for what they already pay for by subscription does not get
+adopted.
 
-**Confirmado desde fuera, dos veces.** Cline Kanban orquesta lanzando los binarios oficiales de cada
-agente en un proceso, no llamando a modelos por API; y Xirp autentica cada agente *«through its
-native CLI»* — con miles de ingenieros y factura de empresa detrás, que es justo donde pagar API
-aparte habría costado menos justificar. Ver [07-panorama.md](07-panorama.md) → E1 y E3.
+**Confirmed from outside, twice.** Cline Kanban orchestrates by launching each agent's official
+binaries in a process, not by calling models over the API; and Xirp authenticates each agent
+*«through its native CLI»* — with thousands of engineers and a company invoice behind it, which is
+exactly where paying for the API separately would have cost less to justify. See
+[07-panorama.md](07-panorama.md) → E1 and E3.
 
-**Consecuencia de diseño:** la app **nunca** debe definir `ANTHROPIC_API_KEY` (ni equivalentes)
-al lanzar un panel. Esa variable tiene prioridad sobre la sesión de la suscripción y cambiaría
-la facturación del usuario sin que se entere.
+**Design consequence:** the app must **never** define `ANTHROPIC_API_KEY` (or equivalents) when
+launching a panel. That variable takes priority over the subscription's session and would change the
+user's billing without them noticing.
 
-**Zona gris a vigilar:** el modo no interactivo de Claude Code (`claude -p`) debería usar la
-sesión de la suscripción, pero hay issues abiertos reportando facturación de API inesperada
+**Gray area to watch:** Claude Code's non-interactive mode (`claude -p`) ought to use the
+subscription's session, but there are open issues reporting unexpected API billing
 ([#43333](https://github.com/anthropics/claude-code/issues/43333),
-[#37686](https://github.com/anthropics/claude-code/issues/37686) — 1.800 $ en dos días).
-**No construir sobre ese camino sin verificarlo con gasto pequeño y vigilado.**
+[#37686](https://github.com/anthropics/claude-code/issues/37686) — $1 800 in two days). **Do not
+build on that path without verifying it with small, watched spending.**
 
-### Confirmado por la vía dura — Anthropic lo prohibió, y con fecha
+### Confirmed the hard way — Anthropic banned it, and with a date
 
-Esto era la suposición sobre la que descansaba toda la decisión, y **dejó de ser una suposición en
-2026**. La cronología, verificada en agosto de 2026:
+This was the assumption the whole decision rested on, and **it stopped being an assumption in
+2026**. The chronology, verified in August 2026:
 
-| Cuándo | Qué |
+| When | What |
 |---|---|
-| Enero de 2026 | Anthropic **bloquea** los tokens OAuth de suscripción fuera de sus aplicaciones oficiales, sin aviso previo. Marcha atrás tras las protestas |
-| Febrero de 2026 | Lo **prohíbe formalmente**: los tokens de Free, Pro y Max no pueden usarse en herramientas de terceros ni en el SDK de agentes |
-| **4 de abril de 2026** | **Entra en vigor.** Pro, Max y Team dejan de cubrir el uso a través de herramientas de terceros — **opencode**, OpenClaw, NanoClaw y cualquier otra que enrute peticiones por OAuth. Compensación: un crédito equivalente a un mes de suscripción |
+| January 2026 | Anthropic **blocks** subscription OAuth tokens outside its official applications, with no prior notice. Backs down after the protests |
+| February 2026 | It **bans it formally**: Free, Pro and Max tokens cannot be used in third-party tools or in the agents SDK |
+| **4 April 2026** | **It comes into force.** Pro, Max and Team stop covering use through third-party tools — **opencode**, OpenClaw, NanoClaw and any other that routes requests over OAuth. Compensation: a credit equivalent to one month of subscription |
 
-> **Una suscripción de Claude Code no es una credencial de desarrollador.** Lo que se compra es el
-> derecho de uso de **dos productos** —Claude Code y `claude.ai`—, no un token que se enchufa a
-> cualquier orquestador. Quien integre Claude en su producto necesita clave de API y facturación por
-> uso.
+> **A Claude Code subscription is not a developer credential.** What is bought is the right to use
+> **two products** —Claude Code and `claude.ai`—, not a token that plugs into any orchestrator.
+> Whoever integrates Claude into their product needs an API key and billing by usage.
 
-**Qué significa para este proyecto, y es la línea que lo separa todo:** **nosotros no usamos el token
-de nadie.** Lanzamos el binario oficial en un pseudoterminal y él se autentica con su propia sesión,
-igual que si el usuario lo hubiera escrito a mano. Por eso la app **hospeda** agentes en lugar de
-llamarlos, y por eso `ANTHROPIC_API_KEY` está prohibida: no es higiene, es la diferencia entre estar
-dentro o fuera de la política. La regla dura sigue exactamente igual, con una razón externa detrás.
+**What it means for this project, and it is the line that separates everything:** **we do not use
+anybody's token.** We launch the official binary in a pseudoterminal and it authenticates with its
+own session, just as if the user had typed it by hand. That is why the app **hosts** agents instead
+of calling them, and that is why `ANTHROPIC_API_KEY` is forbidden: it is not hygiene, it is the
+difference between being inside or outside the policy. The hard rule stays exactly the same, with an
+external reason behind it now.
 
-**Y una consecuencia para la Fase 5 que no estaba escrita.** El supervisor —«un agente que observa a
-los demás y avisa»— **no puede ser una llamada nuestra a un modelo**: eso sería la app consumiendo
-API, o sea el usuario pagando aparte por lo que ya paga. Tiene que ser **otro agente de consola**, en
-su división, hablando por MCP como cualquier otro. El roadmap dice que la Fase 5 «no necesita ninguna
-pieza nueva»; sigue siendo cierto, y **esta es la razón por la que tiene que seguir siéndolo**.
+**And a consequence for Phase 5 that was not written down.** The supervisor —«an agent that watches
+the others and warns»— **cannot be a call of ours to a model**: that would be the app consuming API,
+that is, the user paying separately for what they already pay for. It has to be **another console
+agent**, in its pane, speaking over MCP like any other. The roadmap says that Phase 5 «does not need
+any new piece»; that is still true, and **this is the reason it has to go on being true**.
 
-**Y sobre opencode en concreto** ([06-referencias.md](06-referencias.md)): admite más de 75
-proveedores —es el más agnóstico de todos— pero **con Claude va por API y tokens desde el 4 de abril
-de 2026**. Como *productor* de panel es perfecto; como agente hospedado, su usuario de Claude paga
-por uso.
+**And about opencode in particular** ([06-referencias.md](06-referencias.md)): it supports more than
+75 providers —it is the most agnostic of them all— but **with Claude it goes over the API and tokens
+since 4 April 2026**. As a panel *producer* it is perfect; as a hosted agent, its Claude user pays
+by usage.
 
-Fuentes: [alternativeto.net](https://alternativeto.net/news/2026/2/anthropic-officially-bans-using-subscription-authentication-for-third-party-claude-use) ·
+Sources: [alternativeto.net](https://alternativeto.net/news/2026/2/anthropic-officially-bans-using-subscription-authentication-for-third-party-claude-use) ·
 [winbuzzer.com](https://winbuzzer.com/2026/02/19/anthropic-bans-claude-subscription-oauth-in-third-party-apps-xcxwbn/) ·
 [yage.ai — «A Claude Code Subscription Is Not a Developer Credential»](https://yage.ai/share/claude-code-subscription-not-a-developer-credential-en-20260321.html)
 
 ---
 
-## D5 — Tres canales, no uno
+## D5 — Three channels, not one
 
-**Decidido.** Ver [03-arquitectura.md](03-arquitectura.md).
+**Decided.** See [03-arquitectura.md](03-arquitectura.md).
 
-| Dirección | Canal | Para qué |
+| Direction | Channel | What for |
 |---|---|---|
-| Agente → app | **MCP** | Crear divisiones, publicar estado, leer salida |
-| Productor → app | **el documento de panel** | Estado que publica cualquiera, agente o no. Hoy llega por fichero; el transporte no es el contrato (**D17**) |
-| App → agente | **PTY** | Botones, y todo lo que no hable MCP |
+| Agent → app | **MCP** | Create panes, publish state, read output |
+| Producer → app | **the panel document** | State that anybody publishes, agent or not. Today it arrives by file; the transport is not the contract (**D17**) |
+| App → agent | **PTY** | Buttons, and everything that does not speak MCP |
 
-**Por qué MCP:** lo hablan Claude Code, opencode, Gemini CLI y Codex — se escribe el servidor
-una vez y sirven todos. Y **no consume API aparte**: el agente ya corre con su suscripción y MCP
-solo le añade herramientas a esa sesión. Es el canal limpio que la API no podía ser (D4).
+**Why MCP:** Claude Code, opencode, Gemini CLI and Codex all speak it — the server is written once
+and they are all served. And **it does not consume API separately**: the agent is already running
+with its subscription and MCP only adds tools to that session. It is the clean channel the API could
+not be (D4).
 
-**El PTY deja de ser el mecanismo principal** y pasa a ser el respaldo universal: limpio con
-quien habla MCP, funcional con quien no.
+**The PTY stops being the main mechanism** and becomes the universal fallback: clean with whoever
+speaks MCP, workable with whoever does not.
 
 ---
 
-## D6 — El estado lo publica quien trabaja
+## D6 — State is published by whoever does the work
 
-**Decidido.** La app no deduce el estado leyendo la pantalla ni parseando ficheros de terceros.
+**Decided.** The app does not deduce the state by reading the screen or by parsing third-party
+files.
 
-**Por qué:** aprendido a base de fallar. En el prototipo, intentar deducir el estado de un tren
-de merge requests desde los datos crudos produjo **tres errores seguidos** — qué cuenta como
-«cerrada», cuál de dos entradas en curso es la real, qué significan las fases acumuladas. Esa
-semántica solo la conoce quien hace el trabajo.
+**Why:** learned by failing. In the prototype, trying to deduce the state of a train of merge
+requests from the raw data produced **three failures in a row** — what counts as «closed», which of
+two entries in progress is the real one, what the accumulated phases mean. That semantics is known
+only to whoever does the work.
 
-**Consecuencia:** el contrato lleva `updated_at` y la app avisa si el resumen se queda rancio.
-Un resumen que solo se escribe al terminar un paso miente si el proceso muere a mitad; la marca
-de tiempo lo delata.
+**Consequence:** the contract carries `updated_at` and the app warns if the summary goes stale. A
+summary that is only written when a step finishes lies if the process dies halfway through; the
+timestamp gives it away.
 
-### Validación externa — Xirp, agosto 2026
+### External validation — Xirp, August 2026
 
-Spotify abrió **Xirp** en beta pública el 10 de agosto de 2026: app de escritorio que hospeda
-sesiones de Claude Code, Codex y Gemini CLI, salida de más de 36.000 sesiones internas. Es la
-confirmación más fuerte que ha tenido esta decisión, y a la vez el aviso más preciso sobre dónde
-está de verdad el diferenciador.
+Spotify opened **Xirp** in public beta on 10 August 2026: a desktop app that hosts sessions of
+Claude Code, Codex and Gemini CLI, born out of more than 36 000 internal sessions. It is the
+strongest confirmation this decision has had, and at the same time the most precise warning about
+where the differentiator really is.
 
-**Lo que confirma:** no deducen el estado leyendo la pantalla. Se lo declaran, por *session hooks*
-del propio harness — «Session hooks let Xirp detect when an agent is working, idle, or waiting for
-input». Quien ha montado esto a escala de miles de ingenieros llegó a lo mismo que D6: el estado se
-pide, no se adivina.
+**What it confirms:** they do not deduce the state by reading the screen. It is declared to them, by
+*session hooks* of the harness itself — «Session hooks let Xirp detect when an agent is working,
+idle, or waiting for input». Whoever has built this at the scale of thousands of engineers arrived
+at the same place as D6: the state is asked for, not guessed.
 
-**Lo que separa las dos cosas: que el estado sea declarado no basta, importa quién lo declara.**
-Hay tres niveles y solo el tercero contesta «por dónde va la tarea»:
+**What separates the two things: it is not enough for the state to be declared, it matters who
+declares it.** There are three levels and only the third answers «where has the task got to»:
 
-| Nivel | Quién declara | Vocabulario | Qué contesta |
+| Level | Who declares | Vocabulary | What it answers |
 |---|---|---|---|
-| 1 — inferido | la app, mirando el pintado o el PTY | el que la app se invente | nada fiable: es el error de los tres fallos de arriba |
-| 2 — ciclo de vida | el *harness* (Claude Code, Codex), por hooks | fijo: `working` / `idle` / `waiting for input` | si el programa corre o espera |
-| 3 — publicado | quien hace el trabajo, en `panel.json` | el suyo, texto libre | en qué paso va, cuánto queda, qué lo bloquea |
+| 1 — inferred | the app, looking at the painting or at the PTY | whatever the app makes up | nothing trustworthy: it is the mistake behind the three failures above |
+| 2 — life cycle | the *harness* (Claude Code, Codex), through hooks | fixed: `working` / `idle` / `waiting for input` | whether the program is running or waiting |
+| 3 — published | whoever does the work, in `panel.json` | its own, free text | what step it is on, how much is left, what is blocking it |
 
-**Por qué el nivel 2 no puede crecer hasta el 3.** No es un hueco de implementación que se tape con
-más hooks: el harness **no conoce** esa información. Claude Code sabe que ejecutó una herramienta y
-que se detuvo; no sabe que un ciclo de trabajo va por el paso `build`, que lleva dos de tres
-entregas, ni que está parado esperando que se apruebe un diseño. Con el nivel 2 los siete pasos de
-un ciclo se ven idénticos: `Working`. Y un CI, un despliegue o un script propio —que no tienen
-harness— no tienen dónde publicar nada.
+**Why level 2 cannot grow into level 3.** It is not an implementation gap that more hooks would
+plug: the harness **does not know** that information. Claude Code knows that it ran a tool and that
+it stopped; it does not know that a work cycle is on the `build` step, that it is two deliveries
+into three, nor that it is stopped waiting for a design to be approved. With level 2 the seven steps
+of a cycle look identical: `Working`. And a CI, a deployment or a script of one's own —which have no
+harness— have nowhere to publish anything.
 
-Fuente: [Get started with Xirp](https://backstage.spotify.com/docs/xirp/getting-started). El resto
-de la comparación, en [07-panorama.md](07-panorama.md) → E3.
+Source: [Get started with Xirp](https://backstage.spotify.com/docs/xirp/getting-started). The rest
+of the comparison, in [07-panorama.md](07-panorama.md) → E3.
 
-### El nivel 2 reinterpretado falla igual que adivinar — con datos ajenos
+### Level 2 reinterpreted fails just like guessing — with someone else's data
 
-**Superset** ([07-panorama.md](07-panorama.md) → E4) hace lo mismo que Xirp pero con cuatro eventos
-en vez de tres: `Start`, `Stop`, `PermissionRequest`, `PendingQuestion`. Y como su código es
-consultable, se puede ver el fallo entero en vez de razonarlo.
+**Superset** ([07-panorama.md](07-panorama.md) → E4) does the same as Xirp but with four events
+instead of three: `Start`, `Stop`, `PermissionRequest`, `PendingQuestion`. And since its code can be
+consulted, the whole failure can be seen instead of reasoned about.
 
-Su bug [#5259](https://github.com/superset-sh/superset/issues/5259), abierto: la notificación de
-«Task complete» salta **en cada turno del modelo**. Una tarea con 63 turnos produjo **63 avisos**. La
-causa, literal: el hook `stop` de Cursor Agent significa *«acabé este turno»*, y la app lo leyó como
-*«acabé la tarea»*. Ya les había pasado (#1785) y el arreglo por *debounce* (#1786) se cerró sin
-fusionar.
+Its bug [#5259](https://github.com/superset-sh/superset/issues/5259), open: the «Task complete»
+notification fires **on every turn of the model**. A task with 63 turns produced **63 warnings**.
+The cause, literally: Cursor Agent's `stop` hook means *«I finished this turn»*, and the app read it
+as *«I finished the task»*. It had already happened to them (#1785) and the fix by *debounce*
+(#1786) was closed without merging.
 
-> **Un evento declarado no basta si la app le pone encima una semántica que el harness no tenía.**
-> Falla exactamente igual que adivinar mirando la pantalla, porque es lo mismo con más pasos.
+> **A declared event is not enough if the app puts on top of it a semantics the harness did not
+> have.** It fails exactly like guessing by looking at the screen, because it is the same thing with
+> more steps.
 
-Y no se arregla con un *debounce*: el dato que distingue «turno» de «tarea» **no está en ninguna
-parte del sistema**, porque nadie lo publicó. Solo lo sabe quien hace el trabajo.
+And it is not fixed with a *debounce*: the datum that tells «turn» from «task» **is nowhere in the
+system**, because nobody published it. Only whoever does the work knows it.
 
-**Lo que esto añade a la tabla de arriba:** el nivel 2 no es un escalón intermedio seguro. Usado
-para lo que es —«el programa arrancó, paró, pide permiso»— es correcto y útil. Traducido a
-progreso de tarea, es el nivel 1 con un disfraz. La frontera no está en si el dato viene declarado,
-sino en si **quien lo declaró conocía la pregunta que se le está haciendo.**
+**What this adds to the table above:** level 2 is not a safe intermediate step. Used for what it is
+—«the program started, stopped, asks for permission»— it is correct and useful. Translated into task
+progress, it is level 1 in disguise. The boundary is not in whether the datum comes declared, but in
+whether **whoever declared it knew the question being asked of them.**
 
 ---
+## D7 — Identity per pane
 
-## D7 — Identidad por división
-
-**Decidido.** Al lanzar el shell de una división, la app inyecta variables de entorno:
+**Decided.** When launching a pane's shell, the app injects environment variables:
 
 ```
 PANEL_ID=a3f2   PANEL_DIR=/run/user/1000/panels/a3f2
 ```
 
-**Por qué:** es lo que desata el contrato de cualquier herramienta concreta. Cualquier proceso
-que corra ahí hereda la variable, sabe dónde publicar, y la app sabe qué fichero corresponde a
-qué división. Sin esto el descubrimiento queda atado a convenciones ajenas (hoy el prototipo
-busca en `.claude/work/`, que es específico de `flow`).
+**Why:** it is what unties the contract from any one concrete tool. Any process running there
+inherits the variable, knows where to publish, and the app knows which file corresponds to which
+pane. Without this, discovery stays tied to conventions that belong to someone else (today the
+prototype looks in `.claude/work/`, which is specific to `flow`).
 
-**También es el límite de seguridad de MCP:** el servidor da al agente acceso a *su* división y
-no a las demás. Sin identidad, cuatro agentes se pisan.
+**It is also MCP's security boundary:** the server gives the agent access to *its* pane and not to
+the others. Without identity, four agents step on each other.
 
-### Construido — 11 agosto: la forma exacta, y en qué se separa del ejemplo de arriba
+### Built — August 11: the exact shape, and where it departs from the example above
 
-Implementado en F1.5. La decisión no cambia; lo que sigue concreta lo que el ejemplo dejaba abierto,
-y **se separa de él en dos cosas**, cada una con su razón.
+Implemented in F1.5. The decision does not change; what follows pins down what the example left
+open, and **departs from it in two things**, each one with its reason.
 
 ```
 PANEL_ID=3f2a9c14   PANEL_DIR=/run/user/1000/agent-terminal-3f2a9c14
 ```
 
-| | Lo elegido | Por qué |
+| | What was chosen | Why |
 |---|---|---|
-| Dónde | `$XDG_RUNTIME_DIR`, y el temporal del sistema cuando esa variable no está | El directorio de ejecución del usuario es suyo y solo suyo, vive en memoria y **el sistema lo vacía al cerrar la sesión**. Falta en macOS y en una sesión de Linux sin gestor, y ahí el temporal es la única alternativa que existe en todas partes |
-| **Sin el tramo `panels/`** | Un solo componente nuevo: `agent-terminal-<id>` | Un tramo intermedio hay que crearlo —y es el único trozo de la ruta con **nombre fijo**, o sea el único que otro usuario puede dejar preparado de antemano en un temporal compartido, donde el modo del directorio de la hoja ya no protege de un padre ajeno. Sin él, las dos cosas desaparecen |
-| **Ocho dígitos y no cuatro** | 32 bits de `getrandom` | Cuatro dígitos son 65.536 nombres. La creación **falla si el nombre ya existe** —así la unicidad no se comprueba, se obtiene— y a ese tamaño una colisión dejaría a una división sin identidad. Ensancharlo cuesta lo mismo |
-| Permisos | `0700` explícito | Medido: sin fijarlo el modo sale de la máscara de la sesión, `0775` en la máquina de referencia. Bajo el directorio de ejecución no se alcanzaría, pero el respaldo puede ser un temporal compartido, y ahí va a vivir un fichero que cuenta en qué anda el usuario |
-| Quién borra | El propio valor, al morir | Cubre tres caminos que un barrido al apagar no cubre: el error a medio construir de quien lanza la consola, el **pánico** —donde el framework de interfaz no ejecuta su gancho de apagado, comprobado en su fuente, pero los destructores sí corren— y cerrar una división sin cerrar la ventana, que llega en la Fase 2 |
-| Cómo borra | El fichero del contrato y después el directorio; **nunca en recursivo** | El directorio es de la aplicación, pero **su contenido es del productor**. Un borrado recursivo se llevaría lo que hubiera dejado ahí y convertiría cualquier ruta mal construida en pérdida de datos en vez de en un error. Si queda algo que no es del contrato, el directorio sobrevive y se dice por dónde |
+| Where | `$XDG_RUNTIME_DIR`, and the system's temporary directory when that variable is not there | The user's runtime directory is theirs and theirs alone, it lives in memory and **the system empties it when the session closes**. It is missing on macOS and in a Linux session without a manager, and there the temporary directory is the only alternative that exists everywhere |
+| **Without the `panels/` span** | A single new component: `agent-terminal-<id>` | An intermediate span has to be created — and it is the only piece of the path with a **fixed name**, that is, the only one another user can leave prepared in advance in a shared temporary directory, where the mode of the leaf directory no longer protects from a foreign parent. Without it, both things disappear |
+| **Eight digits and not four** | 32 bits of `getrandom` | Four digits are 65 536 names. Creation **fails if the name already exists** — so uniqueness is not checked, it is obtained — and at that size a collision would leave a pane without identity. Widening it costs the same |
+| Permissions | An explicit `0700` | Measured: without setting it the mode comes out of the session's mask, `0775` on the reference machine. Under the runtime directory it would not be reached, but the fallback may be a shared temporary directory, and a file that tells what the user is up to is going to live there |
+| Who deletes | The value itself, when it dies | It covers three paths that a sweep at shutdown does not cover: the half-built error of whoever launches the console, the **panic** — where the interface framework does not run its shutdown hook, checked in its source, but destructors do run — and closing a pane without closing the window, which arrives in Phase 2 |
+| How it deletes | The contract's file and then the directory; **never recursively** | The directory belongs to the application, but **its content belongs to the producer**. A recursive delete would carry off whatever had been left there and would turn any badly built path into data loss instead of into an error. If something that is not the contract's remains, the directory survives and it is said where |
 
-**Lo que la app fija gana sobre lo que el hijo hereda, y sin directorio se quitan.** No es un detalle
-de implementación: el pseudoterminal copia el entorno del proceso padre, así que **lanzar la aplicación
-desde dentro de una de sus propias consolas** —lo que va a pasar en cuanto se use a diario— le pasaría
-a la consola hija la identidad de la madre, y las dos escribirían en el mismo sitio.
+**What the app sets wins over what the child inherits, and without a directory they are removed.**
+This is not an implementation detail: the pseudoterminal copies the parent process's environment, so
+**launching the application from inside one of its own consoles** — which is going to happen as soon
+as it is used daily — would pass the child console the mother's identity, and the two would write in
+the same place.
 
-Con directorio se fijan, y eso ya pisa lo heredado. **Sin directorio hay que quitarlas, que no es lo
-mismo que no ponerlas**: lo que no se toca se hereda, así que una consola sin panel se quedaría con la
-identidad de quien la lanzó, su productor publicaría en el buzón ajeno y el destructor de la madre
-borraría el fichero del hijo. Nunca se lee de vuelta el valor heredado; se fija o se borra.
+With a directory they are set, and that already overrides what was inherited. **Without a directory
+they have to be removed, which is not the same as not setting them**: what is not touched is
+inherited, so a console without a panel would keep the identity of whoever launched it, its producer
+would publish in someone else's mailbox and the mother's destructor would delete the child's file.
+The inherited value is never read back; it is set or it is deleted.
 
-**Quién pone el techo de lo que se inyecta.** La caja del pseudoterminal acepta una lista abierta de
-pares, porque no tiene por qué saber qué es un panel; el techo está en que **lo único que se le pasa
-sale del contrato**, en forma de dos pares exactos. Así, añadir una variable al entorno del usuario
-exige cambiar la caja del contrato, no un sitio de llamada. Es lo que hace comprobable la regla de
-[D4](#d4--el-control-de-agentes-va-por-consola-no-por-api): la lista completa de lo que la aplicación
-define son cuatro nombres, y hay una prueba que falla si aparece un quinto.
+**Who puts the ceiling on what is injected.** The pseudoterminal's box accepts an open list of
+pairs, because it has no reason to know what a panel is; the ceiling is that **the only thing passed
+to it comes out of the contract**, in the form of two exact pairs. That way, adding a variable to
+the user's environment requires changing the contract's box, not a call site. It is what makes the
+rule of [D4](#d4--control-through-the-console-not-through-the-api) checkable: the complete list of
+what the application defines is four names, and there is a test that fails if a fifth one appears.
 
-**Si el directorio no se puede crear, la ventana abre igual y no se inyecta ninguna de las dos
-variables.** Mismo criterio que el respaldo del shell, y con más motivo: nada dentro de la aplicación
-las consume todavía, así que una consola sin directorio sigue siendo un terminal completo. Y **media
-identidad le mentiría** a un productor que lea `PANEL_ID` como «me hospeda la app»: publicaría en un
-sitio que nadie mira.
+**If the directory cannot be created, the window opens anyway and neither of the two variables is
+injected.** Same criterion as the shell's fallback, and with more reason: nothing inside the
+application consumes them yet, so a console without a directory is still a complete terminal. And
+**half an identity would lie** to a producer that reads `PANEL_ID` as «the app is hosting me»: it
+would publish in a place nobody looks at.
 
-**Lo que este hito deja sin hacer, a propósito:** nadie lee el fichero —eso es F1.6, y hasta entonces
-el pendiente «descubrimiento por `PANEL_DIR`» del [contrato](04-contrato-panel.md) sigue abierto— y no
-hay barrido de directorios huérfanos: un barrido borra por descubrimiento en vez de por «esto lo hice
-yo», que es la variedad peligrosa de borrado.
+**What this milestone deliberately leaves undone:** nobody reads the file — that is F1.6, and until
+then the pending «discovery through `PANEL_DIR`» of the [contract](04-contrato-panel.md) stays open
+— and there is no sweep of orphaned directories: a sweep deletes by discovery instead of by «I made
+this one myself», which is the dangerous variety of deletion.
 
-**Un aviso para la Fase 2:** si `PANEL_ID` pasa a ser el testigo con el que el servidor MCP autoriza,
-32 bits **no bastan** y habrá que ensancharlo ahí. Aquí no es un testigo: es un nombre.
+**A warning for Phase 2:** if `PANEL_ID` becomes the token with which the MCP server authorizes, 32
+bits **are not enough** and it will have to be widened there. Here it is not a token: it is a name.
 
 ---
 
-## D8 — El terminal frena al programa: se deja de leer, no se descarta
+## D8 — The terminal brakes the program: it stops reading, it does not discard
 
-**Decidido.** Cuando lo que un programa escribe entra más deprisa de lo que la pantalla lo
-interpreta, la aplicación **deja de leer el pseudoterminal**. Eso llena el búfer del núcleo y el
-programa se bloquea al escribir, como en cualquier terminal. Lo retenido tiene un techo en dos
-sitios, y hacen falta los dos:
+**Decided.** When what a program writes comes in faster than the screen interprets it, the
+application **stops reading the pseudoterminal**. That fills the kernel's buffer and the program
+blocks on writing, as in any terminal. What is held back has a ceiling in two places, and both of
+them are needed:
 
-| Dónde | Cuánto | Qué pasa al llenarse |
+| Where | How much | What happens when it fills up |
 |---|---|---|
-| El canal de `Pty::spawn`, en `term-core` | 8 lecturas de 8 KiB (64 KiB) | El hilo lector deja de leer del pseudoterminal |
-| La cola del puente, en `app` | 1 MiB | El hilo deja de recoger del canal, y así el canal se llena |
+| The `Pty::spawn` channel, in `term-core` | 8 reads of 8 KiB (64 KiB) | The reader thread stops reading from the pseudoterminal |
+| The bridge's queue, in `app` | 1 MiB | The thread stops collecting from the channel, and so the channel fills up |
 
-**Por qué:** sin esto, un programa que escribe sin parar —`cat /dev/zero`, `cat /dev/urandom`—
-agota la memoria de la máquina. Medido antes del arreglo: **+343 MiB/s de crecimiento lineal**, 512
-MiB en 1,6 s, sin el menor asomo de estabilizarse. Con el arreglo, la misma carga se queda en
-**2,7 MiB durante 30 s** sin perder velocidad de drenaje.
+**Why:** without this, a program that writes without stopping — `cat /dev/zero`, `cat /dev/urandom`
+— exhausts the machine's memory. Measured before the fix: **+343 MiB/s of linear growth**, 512 MiB
+in 1.6 s, without the slightest hint of leveling off. With the fix, the same load stays at **2.7 MiB
+for 30 s** without losing drain speed.
 
-**Por qué en dos sitios y no en uno.** Está medido: acotar solo el canal de `term-core` **no frena
-nada**. Un consumidor que vacía el canal en cuanto llega algo hace que ese techo no se alcance
-nunca, y los bytes se acumulan igual, solo que un poco más allá. La regla, que vale para cualquier
-cola futura de este proyecto:
+**Why in two places and not in one.** It is measured: bounding only `term-core`'s channel **brakes
+nothing**. A consumer that empties the channel as soon as something arrives makes that ceiling never
+be reached, and the bytes pile up all the same, only a little further along. The rule, which holds
+for any future queue of this project:
 
-> Un techo solo frena si quien consume esa cola deja de vaciarla.
+> A ceiling only brakes if whoever consumes that queue stops emptying it.
 
-**Descartado — descartar bytes al llegar al tope.** Es la salida fácil y la peor: un terminal que
-pierde salida en silencio miente sobre lo que el programa escribió, y este proyecto trata el fallo
-silencioso como el peor resultado posible. Con el freno no se pierde nada: lo que no cabe se queda
-en el programa que lo escribió, esperando.
+**Discarded — discarding bytes on reaching the top.** It is the easy way out and the worst one: a
+terminal that loses output silently lies about what the program wrote, and this project treats
+silent failure as the worst possible outcome. With the brake nothing is lost: what does not fit
+stays in the program that wrote it, waiting.
 
-**Descartado — dejar que lo resuelva quien pinta.** Un presupuesto por fotograma acota el *trabajo*
-de un fotograma, no la memoria, y confundir las dos cosas fue el error que llevó a este fallo. El
-freno vive en `term-core`, la caja que sobrevive a un cambio de framework de interfaz (D3), y se
-expresa en bytes, nunca en fotogramas.
+**Discarded — letting whoever paints resolve it.** A per-frame budget bounds the *work* of a frame,
+not the memory, and confusing the two was the mistake that led to this failure. The brake lives in
+`term-core`, the box that survives a change of interface framework (D3), and is expressed in bytes,
+never in frames.
 
-**Consecuencia sobre el cierre, en los dos hilos.** Un hilo que espera sitio no está bloqueado
-leyendo, así que no se entera de nada de lo que normalmente lo despertaría. Cada uno necesita su
-bandera de parada, y por motivos distintos:
+**Consequence for shutdown, in both threads.** A thread waiting for room is not blocked reading, so
+it learns nothing of what would normally wake it up. Each one needs its own stop flag, and for
+different reasons:
 
-- En `term-core`, `Drop` la levanta **antes** del `kill`, porque el `join` que viene después espera
-  a ese hilo: sin ella, **cerrar la ventana se cuelga**.
-- En el puente, `Drop` la levanta porque quien hace sitio es quien recoge, y un puente destruido ya
-  no va a recoger nunca: sin ella el hilo **gira para siempre**. No cuelga el cierre —nadie lo
-  espera— pero deja una fuga por cada división que se cierre en ese instante, que hoy tapa el que
-  el proceso muera entero detrás y que dejará de taparse en cuanto haya más de una división.
+- In `term-core`, `Drop` raises it **before** the `kill`, because the `join` that comes afterwards
+  waits for that thread: without it, **closing the window hangs**.
+- In the bridge, `Drop` raises it because whoever makes room is whoever collects, and a destroyed
+  bridge is never going to collect again: without it the thread **spins forever**. It does not hang
+  the shutdown — nobody waits for it — but it leaves a leak for every pane closed at that instant,
+  which today is covered by the process dying whole behind it and which will stop being covered as
+  soon as there is more than one pane.
 
-Las dos comprobadas, no temidas: quitando cualquiera de las dos, su prueba se pone en rojo.
+Both of them checked, not feared: taking either of the two away puts its test in the red.
 
-**Por qué no estaba decidido antes.** No se descartó: no se miró. El canal viene de F1.1, donde la
-elección fue *«`mpsc` de la biblioteca estándar frente a `crossbeam-channel` frente a un callback»*
-con el criterio de no añadir dependencias; acotado frente a sin acotar no llegó a plantearse, y lo
-ilimitado es el valor por defecto de `mpsc::channel()`.
+**Why it was not decided before.** It was not discarded: it was not looked at. The channel comes
+from F1.1, where the choice was *«`mpsc` de la biblioteca estándar frente a `crossbeam-channel`
+frente a un callback»* with the criterion of not adding dependencies; bounded versus unbounded never
+came up, and unbounded is the default value of `mpsc::channel()`.
 
 ---
 
-## D9 — Los símbolos del panel se eligen midiendo la fuente, no de memoria
+## D9 — The panel's symbols are chosen by measuring the font, not from memory
 
-**Decisión.** Las seis marcas del contrato se pintan con `●` (`done`), `▶` (`current`), `·`
-(`pending`), `…` (`wait`), `×` (`block`) y `›` (`info`). No es el juego del prototipo, y la diferencia
-no es estética: **es el único juego de seis que la fuente monoespaciada tiene y que mide lo que mide
-una celda**.
+**Decision.** The contract's six marks are painted with `●` (`done`), `▶` (`current`), `·`
+(`pending`), `…` (`wait`), `×` (`block`) and `›` (`info`). It is not the prototype's set, and the
+difference is not aesthetic: **it is the only set of six that the monospaced font has and that
+measures what a cell measures**.
 
-**Lo medido**, sobre las fuentes por defecto de egui 0.36.1 y a cuerpo 14, donde una celda son 8,43
-puntos:
+**What was measured**, over egui 0.36.1's default fonts and at size 14, where a cell is 8.43
+points:
 
-| Símbolo | Ancho | Veredicto |
+| Symbol | Width | Verdict |
 |---|---|---|
-| `✓` U+2713, `✗` U+2717 | **0,00** | no están en la fuente |
-| `⏸` U+23F8 | 14,00 | solo en la de emoji |
-| `⚠` U+26A0, `✔` U+2714 | 17,77 | solo en la de emoji |
-| `✱` U+2731 | 13,00 | solo en la de emoji |
-| `▶` `·` `›` `→` `»` `…` `─` `●` `◆` `■` `▪` `◦` `▸` `∙` `∘` | 8,43 | están, y monoespaciados |
+| `✓` U+2713, `✗` U+2717 | **0.00** | they are not in the font |
+| `⏸` U+23F8 | 14.00 | only in the emoji one |
+| `⚠` U+26A0, `✔` U+2714 | 17.77 | only in the emoji one |
+| `✱` U+2731 | 13.00 | only in the emoji one |
+| `▶` `·` `›` `→` `»` `…` `─` `●` `◆` `■` `▪` `◦` `▸` `∙` `∘` | 8.43 | they are there, and monospaced |
 
-**Por qué el ancho y no `has_glyphs`.** Porque ese predicado **no responde lo que su nombre promete**:
-por dentro es `resolve_face(c) != replacement_face_key` (`epaint-0.36.1/src/text/font.rs:719`), y con
-la familia monoespaciada **la cara base es la de reemplazo**, así que devuelve `false` para todo lo que
-la fuente sí tiene — comprobado con la letra `A` de control. Solo devuelve `true` para lo que cae a las
-fuentes de emoji, o sea justo para lo que **no** sirve. La primera medida de este hito se tomó con él y
-salió invertida: daba por ausentes tres símbolos que están, y por buenos dos que descuadran la columna.
+**Why the width and not `has_glyphs`.** Because that predicate **does not answer what its name
+promises**: inside it is `resolve_face(c) != replacement_face_key`
+(`epaint-0.36.1/src/text/font.rs:719`), and with the monospaced family **the base face is the
+replacement one**, so it returns `false` for everything the font does have — checked with the
+control letter `A`. It only returns `true` for what falls through to the emoji fonts, that is,
+for exactly what does **not** serve. This milestone's first measurement was taken with it and came
+out inverted: it gave as absent three symbols that are there, and as good two that throw the column
+out of line.
 
-**Lo que se descartó, y por qué.**
+**What was discarded, and why.**
 
-- **Portar el juego del prototipo tal cual.** Dos de sus seis no están y dos vienen de la fuente de
-  emoji. Un panel con cuadros en su primera columna es exactamente lo que el veredicto sobre egui no
-  puede permitirse, porque los cuadros estarían en cada línea.
-- **Cambiar a la familia proporcional.** No tiene el ancho fijo del que depende la alineación de la
-  columna, así que arreglaría los glifos rompiendo lo que los glifos sirven para construir.
-- **Usar los de emoji igualmente.** Miden entre 1,5 y 2 celdas: la columna se descuadra, y eso se lee
-  peor que un cuadro — un cuadro parece un fallo de fuente, una columna torcida parece un panel mal
-  hecho.
+- **Porting the prototype's set just as it is.** Two of its six are not there and two come from the
+  emoji font. A panel with boxes in its first column is exactly what the verdict on egui cannot
+  afford, because the boxes would be on every line.
+- **Switching to the proportional family.** It does not have the fixed width that the column's
+  alignment depends on, so it would fix the glyphs by breaking what the glyphs serve to build.
+- **Using the emoji ones anyway.** They measure between 1.5 and 2 cells: the column goes out of
+  line, and that reads worse than a box — a box looks like a font failure, a crooked column looks
+  like a badly made panel.
 
-**La salida si el juego se queda corto** de expresividad al verlo en uso: pintar las marcas como forma
-—un rectángulo, un círculo— en vez de como carácter. Está fuera del hito a propósito y es su propio
-trabajo.
+**The way out if the set falls short** of expressiveness once it is seen in use: painting the marks
+as a shape — a rectangle, a circle — instead of as a character. It is deliberately outside the
+milestone and is its own piece of work.
 
-**Cuándo dejaría de valer.** Si cambia la versión de egui o si algún día se embarca una fuente propia
-—que es la otra cosa conocida que muerde, porque CJK y los iconos de un `ls` moderno salen como
-cuadros—. La comprobación está atada por una prueba que pregunta a la fuente y falla si algún símbolo
-deja de medir una celda, así que el día que cambie se enterará quien corra la suite y no quien mire la
-pantalla.
+**When it would stop holding.** If egui's version changes or if some day a font of our own is
+embedded — which is the other known thing that bites, because CJK and a modern `ls`'s icons come out
+as boxes. The check is tied down by a test that asks the font and fails if any symbol stops
+measuring one cell, so the day it changes whoever runs the suite will find out and not whoever looks
+at the screen.
 
-### Lo que F2.8 añadió: los tres del reclamo, medidos igual
+### What F2.8 added: the three of the claim, measured the same way
 
-**Decisión.** El reclamo de una división —el campo `attention` de **D18**— se pinta con `?` (`wait`),
-`⊘` (`block`) y `∎` (`done`), y **ninguno de los tres es uno de los seis del cuerpo**. Medidos con el
-mismo criterio y en la misma fuente: los tres miden **8,43 puntos**, que es lo que mide una celda.
+**Decision.** A pane's claim — the `attention` field of **D18** — is painted with `?` (`wait`),
+`⊘` (`block`) and `∎` (`done`), and **none of the three is one of the body's six**. Measured with
+the same criterion and in the same font: the three of them measure **8.43 points**, which is what a
+cell measures.
 
-| Símbolo | Ancho | Veredicto |
+| Symbol | Width | Verdict |
 |---|---|---|
-| `?` U+003F, `⊘` U+2298, `∎` U+220E | 8,43 | están, y monoespaciados |
-| `✓` U+2713, `☑` U+2611, `⏳` U+23F3, `⚠` U+26A0, `⛔` U+26D4, `★` U+2605 | 0,00 o de emoji | fuera, por lo mismo de siempre |
+| `?` U+003F, `⊘` U+2298, `∎` U+220E | 8.43 | they are there, and monospaced |
+| `✓` U+2713, `☑` U+2611, `⏳` U+23F3, `⚠` U+26A0, `⛔` U+26D4, `★` U+2605 | 0.00 or from emoji | out, for the same reason as always |
 
-**Y por qué no se repiten los del cuerpo, que también miden bien.** Porque el mismo signo en dos sitios
-del mismo panel invita a leer que la aplicación **dedujo el uno del otro** — que es exactamente lo que
-D18 prohíbe: un `mark: block` en una línea del resumen no es un reclamo de la división. Con el juego
-repetido, un panel que solo cuenta que algo se atascó el martes se vería igual que uno que te reclama
-ahora.
+**And why the body's are not repeated, which also measure right.** Because the same sign in two
+places of the same panel invites reading that the application **deduced the one from the other** —
+which is exactly what D18 forbids: a `mark: block` on a line of the summary is not a claim of the
+pane. With the set repeated, a panel that only tells that something got stuck on Tuesday would look
+the same as one that is claiming you right now.
 
-**La tabla de color es propia, y no la de las marcas.** La de las marcas **apaga** `done` porque lo
-terminado es donde ya no queda nada que hacer; aquí `done` dice lo contrario —terminó y **nadie lo ha
-mirado**—, así que reutilizarla apagaría justo lo que reclama. *Descartado:* reutilizarla «porque son
-los mismos nombres». Los nombres coinciden y el significado no.
+**The color table is its own, and not the marks'.** The marks' one **dims** `done` because what is
+finished is where there is nothing left to do; here `done` says the opposite — it finished and
+**nobody has looked at it** —, so reusing it would dim exactly what is claiming. *Discarded:*
+reusing it «because they are the same names». The names coincide and the meaning does not.
 
-**Un reclamo que nadie sostiene se atenúa; no se apaga.** Si la aplicación tiene algo que confesar sobre
-ese panel —lleva callado más de lo suyo, o su fichero dejó de leerse—, el reclamo se sigue pintando con
-su color atenuado: reclama, y no hay nadie detrás. **Con una excepción, que está en D18**: lo terminado
-no se atenúa por callar, porque callar es lo que hace quien terminó. *Descartado:* esconderlo, que contradice el idioma de
-este panel —confesar y no esconder, que es la razón de que un productor rancio siga teniendo panel—; y
-pintarlo igual, que haría a la ficha de la pestaña mentir sobre lo fresco que es. El detalle —desde
-cuándo, o qué falló— lo sigue diciendo el aviso, en su propia línea y con su propio color.
+**A claim that nobody holds up is dimmed; it is not switched off.** If the application has something
+to confess about that panel — it has been quiet for longer than it should, or its file stopped being
+readable —, the claim keeps being painted in its dimmed color: it claims, and there is nobody behind
+it. **With one exception, which is in D18**: what is finished is not dimmed for keeping quiet,
+because keeping quiet is what whoever finished does. *Discarded:* hiding it, which contradicts this
+panel's language — confess and do not hide, which is the reason a stale producer still has a panel
+—; and painting it just the same, which would make the tab's card lie about how fresh it is. The
+detail — since when, or what failed — is still told by the notice, in its own line and with its own
+color.
 
 ---
 
-## D10 — El ancho del panel: en celdas, de cada división, y plegable con el mismo gesto
+## D10 — The panel's width: in cells, per pane, and foldable with the same gesture
 
-**Decisión.** El panel se cuenta **en celdas de la fuente** —ni una fracción del ancho de la división ni
-un número de puntos— y **es de cada división**: nace con 36 y desde ahí lo mueve quien mira la ventana,
-arrastrando la frontera que separa el panel de su consola. Cuando no cabe todo, el que cede es el panel:
-se estrecha hasta desaparecer y la consola conserva su suelo de veinte columnas.
+**Decision.** The panel is counted **in cells of the font** —neither a fraction of the pane's width
+nor a number of points— and **belongs to each pane**: it is born with 36 and from there it is moved
+by whoever is looking at the window, dragging the border that separates the panel from its console.
+When not everything fits, the one that gives way is the panel: it narrows until it disappears and
+the console keeps its floor of twenty columns.
 
-> **Actualizada en F2.4 (agosto de 2026).** Antes decía que el ancho era fijo y no se podía arrastrar.
-> Lo que sigue en pie es lo que de verdad decidía —contarlo en celdas y que el que cede sea el panel—; lo
-> que cambia es que el número dejó de ser el ancho y pasó a ser **con cuántas celdas nace** una división
-> que nadie ha tocado. Las tres decisiones nuevas están abajo, en «Lo que F2.4 añadió».
+> **Updated in F2.4 (August 2026).** It used to say that the width was fixed and could not be
+> dragged. What still stands is what it really decided —counting it in cells, and that the one that
+> gives way is the panel—; what changes is that the number stopped being the width and became **how
+> many cells a pane is born with** when nobody has touched it. The three new decisions are below, in
+> «What F2.4 added».
 
-### Lo que F2.4 añadió, con su razón y lo descartado
+### What F2.4 added, with its reason and what was discarded
 
-**1. El ancho es de cada división, no de la aplicación.** Cuatro divisiones son cuatro productores
-publicando cosas de tamaños distintos, y el sentido de poder estrechar el panel es dejar ancho el que
-cuenta algo y estrecho el que no. *Descartado:* un ancho global — tendría que ceder al mínimo de la
-división más estrecha o mentir en las demás, y el suelo de la consola es por división.
+**1. The width belongs to each pane, not to the application.** Four panes are four producers
+publishing things of different sizes, and the point of being able to narrow the panel is to leave
+wide the one that is saying something and narrow the one that is not. *Discarded:* a global width —
+it would have to give way to the minimum of the narrowest pane or lie in all the others, and the
+console's floor is per pane.
 
-**2. Plegar es un estado aparte, no «ancho cero».** Plegado, la división deja de **pedir** ancho, así que
-su consola se queda con el rectángulo entero por el **mismo camino** que una cuyo productor no ha
-publicado nada — no hay dos formas de no tener panel que alguien tenga que mantener de acuerdo.
-*Descartado:* guardar un cero en el ancho. Perdería el ancho de trabajo, y desplegar tendría que
-inventarse un valor cuando lo que el usuario espera es volver **al suyo**.
+**2. Folding is a state apart, not «zero width».** Folded, the pane stops **asking for** width, so
+its console keeps the whole rectangle by the **same path** as one whose producer has published
+nothing — there are not two ways of having no panel that somebody has to keep in agreement with each
+other. *Discarded:* storing a zero in the width. It would lose the working width, and unfolding
+would have to invent a value when what the user expects is to come back **to their own**.
 
-**3. El gesto tiene un mínimo, y ese mínimo es la raya entre estrechar y plegar.** Pedir menos que una
-celda es lo que el gesto lee como «ciérralo». Y plegado **queda un asidero** pegado al borde derecho de
-la división, hacia dentro: sin él, la frontera se iría con el panel y el gesto que lo cerró no se podría
-deshacer con el ratón. *Descartado:* que el asidero fuera a caballo del borde, como el de una frontera
-con panel a la vista — ahí empieza el divisor que reparte las consolas, y al registrarse después le
-ganaría el empate y lo dejaría muerto. *Precio aceptado y declarado:* en una consola plegada, esa banda
-del borde derecho agarra su panel y no la consola, así que ahí no se la puede coger para llevársela.
+**3. The gesture has a minimum, and that minimum is the line between narrowing and folding.** Asking
+for less than one cell is what the gesture reads as «close it». And folded **a handle remains**,
+stuck to the pane's right edge, facing inwards: without it, the border would go away with the panel
+and the gesture that closed it could not be undone with the mouse. *Discarded:* that the handle
+should straddle the edge, like that of a border with its panel in sight — that is where the divider
+that tiles the consoles begins, and by registering afterwards it would win the tie and leave the
+handle dead. *Price accepted and declared:* in a folded console, that band of the right edge grabs
+its panel and not the console, so there it cannot be picked up to be carried away.
 
-**Y lo que no se pinta, a propósito:** la frontera del panel **no tiene línea**. Pintarla descontaría su
-grosor del reparto y movería la rejilla de todas las consolas, con lo que las medidas dejarían de ser
-comparables con los anexos anteriores — se perdería la comparación para ganar un adorno. Lo que la hace
-encontrable es el cursor, y por eso su banda de agarre es más ancha que la línea de un divisor.
+**And what is not painted, on purpose:** the panel's border **has no line**. Painting it would
+subtract its thickness from the tiling and would move the grid of every console, with which the
+measurements would stop being comparable with the earlier annexes — the comparison would be lost to
+gain an ornament. What makes it findable is the cursor, and that is why its grab band is wider than
+a divider's line.
 
-**Por qué en celdas y no en puntos.** La petición fue «ancho fijo, sin plegar», y se cumple en lo que
-quería decir —no depende del ancho de la ventana y no se arrastra— pero **medido en celdas**. Un ancho
-en puntos se estrecha en columnas al subir el aumento del escritorio, y lo que el panel tiene que
-conservar es **cuántos caracteres caben**, que es lo que decide si su texto se lee. Un panel que en una
-pantalla enseña las líneas enteras y en otra las corta no es el mismo panel.
+**Why in cells and not in points.** The request was «ancho fijo, sin plegar», and it is met in what
+it meant to say —it does not depend on the window's width and it is not dragged— but **measured in
+cells**. A width in points narrows in columns when the desktop's zoom goes up, and what the panel
+has to keep is **how many characters fit**, which is what decides whether its text can be read. A
+panel that on one screen shows whole lines and on another cuts them is not the same panel.
 
-> Ojo con probarlo: con una celda de 8 puntos, «36 celdas» y «288 puntos» dan el mismo número. Una
-> prueba escrita con ese ancho de celda no distingue las dos implementaciones — hay que variar el
-> tamaño de la celda para que la diferencia aparezca.
+> Careful when testing it: with a cell of 8 points, «36 cells» and «288 points» give the same
+> number. A test written with that cell width does not tell the two implementations apart — the cell
+> size has to be varied for the difference to show up.
 
-**Por qué el que cede es el panel.** El panel es margen y la consola es el trabajo: en una ventana
-estrecha lo que sobra es el estado, no el programa. Con la regla al revés, arrastrar el divisor dejaría
-a un programa interactivo sin sitio donde escribir mientras su panel conserva sus treinta y seis
-columnas.
+**Why the one that gives way is the panel.** The panel is margin and the console is the work: in a
+narrow window what is left over is the state, not the program. With the rule the other way round,
+dragging the divider would leave an interactive program with nowhere to write while its panel keeps
+its thirty-six columns.
 
-**Por qué ajustarlo no entra hasta F2.4.** Plegar y estrechar son **el mismo gesto sobre la misma
-frontera** —plegar es arrastrar hasta el final—, así que hacer uno y volver después por el otro sale más
-caro que hacer los dos juntos. Y lo que hace falta para cualquiera de los dos es de Fase 2: una segunda
-frontera arrastrable por división —hoy solo existe la que reparte las dos consolas— y guardar ese ancho
-por división para restaurarlo al abrir, que es F2.5.
+**Why adjusting it does not come in until F2.4.** Folding and narrowing are **the same gesture on
+the same border** —folding is dragging all the way to the end—, so doing one and coming back later
+for the other works out dearer than doing both together. And what is needed for either of them
+belongs to Phase 2: a second draggable border per pane —today only the one that tiles the two
+consoles exists— and storing that width per pane so as to restore it on opening, which is F2.5.
 
-**Lo que ya está resuelto para cuando llegue.** El pintado no supone que el ancho sea 36: `apartar()` ya
-devuelve panels más estrechos cuando no cabe, y la maqueta guarda **para qué ancho** se envolvió el
-texto y solo la rehace cuando ese ancho cambia — o sea que un panel de ancho variable no reenvuelve en
-cada fotograma. Lo que queda por decidir es qué pasa con anchos muy pequeños, donde la columna de `ref`
-tiene que seguir sin empujar el texto fuera del panel.
+**What is already solved for when it arrives.** The painting does not assume that the width is 36:
+`set_aside()` already returns narrower panels when they do not fit, and the layout stores **for what
+width** the text was wrapped and only redoes it when that width changes — that is, a panel of
+variable width does not re-wrap on every frame. What is left to decide is what happens with very
+small widths, where the `ref` column has to go on without pushing the text out of the panel.
 
-**Lo que se descartó, y por qué.**
+**What was discarded, and why.**
 
-- **Una fracción del ancho de la división**, como el reparto entre las dos consolas. Al redimensionar la
-  ventana el panel crecería y encogería con ella, y con él el punto donde se corta su texto: líneas que
-  se leían enteras dejarían de leerse sin que nadie tocara nada.
-- **Ancho en puntos** — arriba: fijo en puntos no es fijo en columnas.
-- **Que ceda la consola** — arriba.
-- **Hacerlo arrastrable ya en F1.6.** Era trabajo de Fase 2 dentro del hito que tenía que responder si el
-  panel merece existir, y la respuesta a eso no dependía de poder estrecharlo. Llegó en F2.4.
+- **A fraction of the pane's width**, like the tiling between the two consoles. On resizing the
+  window the panel would grow and shrink with it, and with it the point where its text is cut: lines
+  that were read whole would stop being readable without anyone touching anything.
+- **Width in points** — above: fixed in points is not fixed in columns.
+- **That the console should give way** — above.
+- **Making it draggable already in F1.6.** It was Phase 2 work inside the milestone that had to
+  answer whether the panel deserves to exist, and the answer to that did not depend on being able to
+  narrow it. It arrived in F2.4.
 
-**Cuándo dejaría de valer.** Lo de las cuatro divisiones ya está medido y respondido en el anexo de esta
-misma decisión, y el issue [#33](https://github.com/mashware/agent-terminal/issues/33) quedó cerrado con
-esos números. Y el coste del propio gesto también está medido: ver «Medido — lo que cuesta el gesto del
-panel», abajo.
+**When it would stop being valid.** The matter of the four panes is already measured and answered in
+the annex of this very decision, and the issue
+[#33](https://github.com/mashware/agent-terminal/issues/33) was closed with those numbers. And the
+cost of the gesture itself is measured too: see «Measured — what the panel's gesture costs», below.
 
-### Medido — lo que cuesta el gesto del panel (19 de agosto de 2026)
+### Measured — what the panel's gesture costs (19 August 2026)
 
-**Cuatro corridas con el binario que se entrega**: dos de la tanda **K** —dos divisiones, las dos volcando,
-y la frontera del panel de la izquierda arrastrándose sin parar— y dos de la **C**, idéntica pero sin gesto.
-`scripts/medir-fotograma.sh K` y `... C`, ventana de 1280×800 puntos.
+**Four runs with the binary that is delivered**: two of batch **K** —two panes, both dumping, and
+the border of the left one's panel being dragged without stopping— and two of **C**, identical but
+with no gesture. `scripts/measure-frame.sh K` and `... C`, window of 1280×800 points.
 
-> **Y son las de después de la revisión, no las primeras.** La revisión de este PR cambió el binario —cuatro
-> defectos en el gesto y en lo que el informe publica— así que las cuatro corridas anteriores describían un
-> programa que no es el que se entrega. Es la segunda vez que pasa en este proyecto y la lección es la misma:
-> **la tanda se corre al final, después de la revisión**.
+> **And they are the ones from after the review, not the first ones.** This PR's review changed the
+> binary —four defects in the gesture and in what the report publishes— so the four earlier runs
+> described a program that is not the one that is delivered. It is the second time this has happened
+> in this project and the lesson is the same: **the batch is run at the end, after the review**.
 
-> **El control está DENTRO de cada corrida, y eso es lo que hace la resta honesta.** El gesto solo agarra la
-> frontera de la división **izquierda**; la derecha tiene su panel publicado y no lo toca nadie. Así que las
-> dos comparten fotograma, máquina y momento, y la diferencia entre sus tramos de panel es lo que cuesta el
-> gesto — sin depender de comparar dos corridas distintas.
+> **The control is INSIDE each run, and that is what makes the subtraction honest.** The gesture
+> only grabs the border of the **left** pane; the right one has its panel published and nobody
+> touches it. So the two share frame, machine and moment, and the difference between their panel
+> spans is what the gesture costs — without depending on comparing two different runs.
 
-| Corrida | Gestos · efectos | Panel, división **con** gesto | Panel, división **sin** gesto | Diferencia |
+| Run | Gestures · effects | Panel, pane **with** gesture | Panel, pane **without** gesture | Difference |
 |---|---|---|---|---|
-| K, 1.ª | 958 · 1.918 | **35,562 µs** (107,3 el 95 %) | 12,238 µs (7,2 el 95 %) | 23,3 µs |
-| K, 2.ª | 870 · 1.740 | **33,721 µs** (97,3 el 95 %) | 2,821 µs | 30,9 µs |
-| C, 1.ª | — | 4,264 µs | 2,615 µs | 1,6 µs |
-| C, 2.ª | — | 3,632 µs | 2,190 µs | 1,4 µs |
+| K, 1st | 958 · 1 918 | **35.562 µs** (107.3 at the 95th) | 12.238 µs (7.2 at the 95th) | 23.3 µs |
+| K, 2nd | 870 · 1 740 | **33.721 µs** (97.3 at the 95th) | 2.821 µs | 30.9 µs |
+| C, 1st | — | 4.264 µs | 2.615 µs | 1.6 µs |
+| C, 2nd | — | 3.632 µs | 2.190 µs | 1.4 µs |
 
-**Lo que el gesto cuesta: entre 23 y 31 µs por fotograma**, en la división que lo recibe. Sobre el hueco de
-60 Hz son **dos décimas del 1 %**; sobre el de 120 Hz, cuatro. Y el tramo cubre las tres cosas del gesto:
-atender la frontera, volver a repartir el ancho y **rehacer la maqueta del panel**.
+**What the gesture costs: between 23 and 31 µs per frame**, in the pane that receives it. Against
+the 60 Hz slot that is **two tenths of 1%**; against the 120 Hz one, four. And the span covers the
+three things the gesture does: serving the border, tiling the width again and **redoing the panel's
+layout**.
 
-**La horquilla es ancha a propósito, y el motivo está en la tabla.** En la primera K la división **sin**
-gesto marca 12,2 µs de media con un 95 % de 7,2: la media por encima de su propio percentil es la firma de
-un pico único, no de un régimen. Con un suelo que se mueve así, publicar «el gesto cuesta 30,9 µs» con tres
-cifras sería fingir precisión.
+**The range is wide on purpose, and the reason is in the table.** In the first K the pane
+**without** the gesture marks a mean of 12.2 µs with a 95th of 7.2: a mean above its own percentile
+is the signature of a single spike, not of a regime. With a floor that moves like that, publishing
+«the gesture costs 30.9 µs» to three figures would be feigning precision.
 
-**La vecina no paga el gesto.** 2,2 a 2,8 µs en tres de las cuatro corridas, con gesto y sin él; la cuarta
-es el pico de arriba. Estrechar un panel no le cuesta al panel de al lado, que es lo que cabía esperar de un
-ancho que es de cada división.
+**The neighbor does not pay for the gesture.** 2.2 to 2.8 µs in three of the four runs, with the
+gesture and without it; the fourth is the spike above. Narrowing a panel costs the panel next door
+nothing, which is what was to be expected of a width that belongs to each pane.
 
-**Los efectos son el doble que los gestos, y conviene saber por qué antes de leer el número:** 1.740 para
-870 —el doble exacto— y **1.918 para 958, que son dos de más**. **No es un conteo doble** — se sondeó porque
-una proporción tan redonda lo parecía, y hay una prueba que fija el número por gesto. Un gesto tiene dos
-fotogramas de arrastre y **cada uno empuja la frontera otras ocho celdas**, porque el punto al que va el
-puntero se calcula desde donde la frontera está *ahora*: el ancho recorre 36 → 28 → 20 y vuelve con el gesto
-siguiente. Así que son **dos repartos y dos maquetados reales por gesto**, y esos 30 µs ya los incluyen.
+**The effects are double the gestures, and it is worth knowing why before reading the number:** 1
+740 for 870 —exactly double— and **1 918 for 958, which is two too many**. **It is not a double
+count** — it was probed because so round a ratio looked like one, and there is a test that pins down
+the number per gesture. A gesture has two drag frames and **each one pushes the border another eight
+cells**, because the point the pointer goes to is computed from where the border is *now*: the width
+travels 36 → 28 → 20 and comes back with the next gesture. So there are **two real tilings and two
+real layouts per gesture**, and those 30 µs already include them.
 
-> **Y los dos que sobran tienen explicación, que es lo que hay que decir cuando un número no cuadra.** El
-> informe cuenta los gestos **completos**, o sea los que llegaron a soltar el botón; los efectos se cuentan
-> por fotograma. Un gesto que produjo sus dos fotogramas de arrastre y al que la ventana cerró antes de
-> soltar deja sus dos efectos contados y su propio gesto sin contar. La corrida de 870 acabó entre dos
-> gestos; la de 958, a mitad de uno.
+> **And the two left over have an explanation, which is what has to be said when a number does not
+> add up.** The report counts the **complete** gestures, that is, the ones that got as far as
+> releasing the button; the effects are counted per frame. A gesture that produced its two drag
+> frames and that the window closed on before releasing leaves its two effects counted and its own
+> gesture uncounted. The run of 870 ended between two gestures; the one of 958, halfway through one.
 
-> **Lo que esta tanda NO mide, y hay que decirlo:** el gesto avanza a saltos de ocho celdas, así que **no hay
-> ningún fotograma en que la frontera cruce una sola celda**, que es lo que hace un ratón humano moviéndose
-> despacio. Lo medido es el arrastre rápido: menos maquetados, cada uno con un salto de ancho grande. Un
-> arrastre lento haría más maquetados de menos recorrido cada uno, y esa forma no está en estos números.
+> **What this batch does NOT measure, and it has to be said:** the gesture advances in jumps of
+> eight cells, so **there is no frame at all in which the border crosses a single cell**, which is
+> what a human mouse moving slowly does. What is measured is the fast drag: fewer layouts, each one
+> with a big jump in width. A slow drag would do more layouts each covering less ground, and that
+> shape is not in these numbers.
 
-> **AVISO, el mismo que lleva el anexo del gesto de F2.3 y por la misma razón: las medias por fotograma de K
-> y C NO se comparan entre sí.** Inyectar entrada mantiene la ventana despierta, así que K corrió 3.844 y
-> 3.490 fotogramas contra los 468 y 376 de C — de ocho a diez veces más. Se ve en el «resto del fotograma»,
-> que en K sale **más barato** (144 y 135 µs) que en C (240 y 232 µs) simplemente porque se reparte entre
-> miles de fotogramas sin trabajo de consola dentro. Lo que sí se compara es lo de la tabla: dos divisiones
-> del **mismo** fotograma.
+> **WARNING, the same one the annex of the F2.3 gesture carries and for the same reason: the
+> per-frame means of K and C are NOT compared with each other.** Injecting input keeps the window
+> awake, so K ran 3 844 and 3 490 frames against C's 468 and 376 — eight to ten times more. It shows
+> in «the rest of the frame», which in K comes out **cheaper** (144 and 135 µs) than in C (240 and
+> 232 µs) simply because it is spread over thousands of frames with no console work inside. What is
+> compared is what is in the table: two panes of the **same** frame.
 
-**Un punto ciego que esta tanda hace visible.** La rejilla que el informe publica es la del **último**
-fotograma, y en una tanda con este gesto el ancho de la consola izquierda está oscilando: las dos corridas
-de K acabaron con 47 y 39 columnas para la misma división. No es una anomalía, es el punto ciego del
-instrumento que ya estaba declarado — y aquí obliga a algo práctico: **el comparador de corridas rechaza dos
-tandas K por rejillas distintas, y hace bien**. Dos K no se promedian; se leen por separado.
+**A blind spot that this batch makes visible.** The grid the report publishes is the one of the
+**last** frame, and in a batch with this gesture the width of the left console is oscillating: the
+two runs of K ended with 47 and 39 columns for the same pane. It is not an anomaly, it is the
+instrument's blind spot that was already declared — and here it forces something practical: **the
+run comparator rejects two K batches for having different grids, and it is right to**. Two Ks are
+not averaged; they are read separately.
 
-**La vuelta completa no se mueve:** 75,1 y 74,9 ms con gesto, 73,7 y 74,0 sin él. Está dominada por la
-espera en la cola —72 de los 75— así que el gesto no aparece ahí, ni tendría por qué: treinta microsegundos
-sobre setenta y cinco milisegundos son cuatro diezmilésimas.
+**The full round trip does not move:** 75.1 and 74.9 ms with the gesture, 73.7 and 74.0 without it.
+It is dominated by the wait in the queue —72 of the 75— so the gesture does not show up there, nor
+would it have any reason to: thirty microseconds over seventy-five milliseconds are four
+ten-thousandths.
 
 ---
 
-## D12 — El pseudoterminal se queda con el procesamiento de salida del núcleo, aunque cueste
+## D12 — The pseudoterminal keeps the kernel's output processing, even though it costs
 
-**Decidido.** El pseudoterminal **no** toca `termios`: `OPOST` se queda encendido y el núcleo sigue
-convirtiendo cada salto de línea en retorno de carro más salto. Se paga el coste. **Esta decisión se
-tomó al revés primero, se entregó, y se revirtió al descubrir por qué no puede funcionar** — lo que
-sigue es esa autopsia, que vale más que la decisión.
+**Decided.** The pseudoterminal does **not** touch `termios`: `OPOST` stays on and the kernel goes
+on turning every line feed into a carriage return plus a line feed. The cost is paid. **This
+decision was taken the other way round first, was delivered, and was reverted on discovering why it
+cannot work** — what follows is that autopsy, which is worth more than the decision.
 
-**Lo que cuesta, medido en este repo** con `cargo run --release --example delivery -p term-core`,
-volcando doce megas con `cat` por un pseudoterminal real:
+**What it costs, measured in this repo** with `cargo run --release --example delivery -p term-core`,
+dumping twelve megabytes with `cat` through a real pseudoterminal:
 
-| Línea | Procesando en el núcleo | Sin procesar | Relación |
+| Line | Processing in the kernel | Without processing | Ratio |
 |---|---|---|---|
-| de log, 70 B | 53,3 MiB/s | 208,2 MiB/s | **4×** |
-| corta, 2 B | 2,4 MiB/s | 270,0 MiB/s | **112×** |
+| log, 70 B | 53.3 MiB/s | 208.2 MiB/s | **4×** |
+| short, 2 B | 2.4 MiB/s | 270.0 MiB/s | **112×** |
 
-**El titular del issue —«casi dos órdenes de magnitud»— es cierto y necesita un adverbio.** Lo que se
-paga es **cada salto de línea**, no cada byte: con líneas de log son cuatro veces y con líneas de dos
-bytes, ciento doce. Un solo número parece universal y no lo es. El ejemplo se queda en el repo aunque
-la optimización no: mide un coste real que sigue ahí.
+**The issue's headline —«casi dos órdenes de magnitud»— is true and needs an adverb.** What is paid
+for is **every line feed**, not every byte: with log lines it is four times and with lines of two
+bytes, a hundred and twelve. A single number looks universal and is not. The example stays in the
+repo even though the optimization does not: it measures a real cost that is still there.
 
-**Por qué no se puede quitar, que es lo que había que averiguar.** Apagar `OPOST` obliga a reponer el
-retorno de carro desde fuera, y **eso exige saber si el programa de dentro lo quiere**. El núcleo lo
-sabía porque traducía según el `termios` de cada uno; desde fuera hay que deducirlo, y **la
-información no está**:
+**Why it cannot be removed, which is what had to be found out.** Turning `OPOST` off forces the
+carriage return to be put back from outside, and **that requires knowing whether the program inside
+wants it**. The kernel knew because it translated according to each one's `termios`; from outside it
+has to be deduced, and **the information is not there**:
 
-| Estado del terminal | ¿El núcleo traduce? | Quién lo deja así |
+| Terminal state | Does the kernel translate? | Who leaves it that way |
 |---|---|---|
-| `OPOST` on, `ONLCR` on | sí | nadie lo ha tocado |
-| `OPOST` off, `ONLCR` on | **no** | `stty raw`, `cfmakeraw`, `tty.setraw`, `enable_raw_mode` de crossterm, `MakeRaw` de Go |
-| `OPOST` off, `ONLCR` on | **no** | **y también nosotros, si lo apagáramos** |
+| `OPOST` on, `ONLCR` on | yes | nobody has touched it |
+| `OPOST` off, `ONLCR` on | **no** | `stty raw`, `cfmakeraw`, `tty.setraw`, crossterm's `enable_raw_mode`, Go's `MakeRaw` |
+| `OPOST` off, `ONLCR` on | **no** | **and us too, if we turned it off** |
 
-Las dos últimas filas son **el mismo estado, bit a bit** (comprobado ejecutándolo). El modo crudo
-estándar apaga **solo** `OPOST` y deja `ONLCR` puesto, que es exactamente lo que dejaría un apagado
-nuestro. Así que no hay forma de distinguir «nadie ha tocado nada, tradúceme» de «he entrado en modo
-crudo, no me traduzcas», y a todo programa que entra en crudo por la vía normal —cualquier TUI de
-`ratatui`, de Node o de Go— se le inyectaría un retorno que pidió no tener.
+The last two rows are **the same state, bit for bit** (checked by running it). Standard raw mode
+turns **only** `OPOST` off and leaves `ONLCR` set, which is exactly what a switching-off of ours
+would leave. So there is no way to tell «nobody has touched anything, translate for me» from «I have
+entered raw mode, do not translate for me», and every program that enters raw mode by the normal
+route —any TUI of `ratatui`, of Node or of Go— would be injected with a carriage return it asked not
+to have.
 
-> **La regla que deja, y es general:** en cuanto le mientes al programa sobre el estado de su
-> terminal, **pierdes la información de quién puso qué**. No es que falte una señal mejor: es que el
-> núcleo la destruye al aceptar la escritura. Por eso ningún emulador de terminal apaga `OPOST`.
+> **The rule it leaves, and it is a general one:** the moment you lie to the program about the state
+> of its terminal, **you lose the information about who set what**. It is not that a better signal
+> is missing: it is that the kernel destroys it on accepting the write. That is why no terminal
+> emulator turns `OPOST` off.
 
-**Lo que se probó y no bastó.**
+**What was tried and was not enough.**
 
-- **Condicionar la traducción a `ONLCR`.** Es la señal que usa `ncurses` —su manual dice que solo usa
-  el salto como movimiento después de `nonl()`— y **cubre a `vim`, `htop` y `nano`**, que lo apagan al
-  arrancar. No cubre a nada que no sea `ncurses`. Esta fue la versión que se entregó y se revirtió.
-- **Comparar el `termios` entero contra el que dejamos.** Falla igual: `stty raw` produce nuestro
-  mismo `c_oflag`.
-- **Añadir `ICANON` a la condición.** Arregla el modo crudo y rompe a un programa de `ncurses` en
-  `cbreak`, que apaga `ICANON` sin apagar `ONLCR`. Cambia un agujero por otro.
-- **Encender el modo `LNM` del motor de terminal** (`ESC[20h`), que hace esto en una línea.
-  `reset_state()` lo borra —el modo por defecto al que vuelve no lo incluye— así que un `reset` en la
-  consola dejaría la escalera **permanente**. Y un modo es estado que el programa puede pisar:
-  reponer con una preferencia algo que garantizaba el núcleo.
+- **Making the translation conditional on `ONLCR`.** It is the signal `ncurses` uses —its manual
+  says that it only uses the line feed as a movement after `nonl()`— and it **covers `vim`, `htop`
+  and `nano`**, which turn it off on starting up. It does not cover anything that is not `ncurses`.
+  This was the version that was delivered and reverted.
+- **Comparing the whole `termios` against the one we leave.** It fails just the same: `stty raw`
+  produces the very same `c_oflag` as ours.
+- **Adding `ICANON` to the condition.** It fixes raw mode and breaks an `ncurses` program in
+  `cbreak`, which turns `ICANON` off without turning `ONLCR` off. It swaps one hole for another.
+- **Turning on the terminal engine's `LNM` mode** (`ESC[20h`), which does this in one line.
+  `reset_state()` wipes it —the default mode it goes back to does not include it— so a `reset` in
+  the console would leave the staircase **permanent**. And a mode is state that the program can
+  trample on: putting back with a preference something that the kernel guaranteed.
 
-**Lo que se aprendió y no se tira.**
+**What was learned and is not thrown away.**
 
-- **La ventana de emular al leer algo que se hacía al escribir.** Aunque la señal fuera fiable, el
-  trozo que ya está en el búfer del núcleo se traduciría con la regla de *ahora*. Cota: los ~20 KiB
-  del búfer; y **con contrapresión no son microsegundos sino segundos**, porque el hilo lector está
-  parado esperando sitio. Medido: 17 KiB de un log en escalera al abrir `vim` detrás de un `cat`
-  grande.
-- **Cómo medir esto sin engañarse**: generar las líneas con un `while` de `sh` y `printf` da 12 MiB/s
-  con el interruptor puesto de las dos formas, porque el cuello es el bucle del shell. Sale «1×» y
-  entierra el hallazgo con un número tranquilizador y falso. Hay que volcar un fichero con `cat`.
-- **Y el cuello de esta aplicación, de paso**: el núcleo entrega ~358 MiB/s sin procesar y por el
-  canal de `term-core` salían ~170. Si algún día el coste del pseudoterminal importa de verdad, hay
-  más que ganar ahí que en `termios`.
+- **The window of emulating on reading something that was done on writing.** Even if the signal were
+  reliable, the chunk that is already in the kernel's buffer would be translated with the rule of
+  *now*. Bound: the ~20 KiB of the buffer; and **with backpressure they are not microseconds but
+  seconds**, because the reading thread is stopped waiting for room. Measured: 17 KiB of a log in a
+  staircase on opening `vim` behind a big `cat`.
+- **How to measure this without fooling yourself**: generating the lines with a `while` in `sh` and
+  `printf` gives 12 MiB/s with the switch set both ways, because the bottleneck is the shell's loop.
+  It comes out as «1×» and buries the finding under a reassuring, false number. A file has to be
+  dumped with `cat`.
+- **And this application's bottleneck, while we are at it**: the kernel delivers ~358 MiB/s without
+  processing and through `term-core`'s channel ~170 were coming out. If one day the pseudoterminal's
+  cost really matters, there is more to be gained there than in `termios`.
 
-**Cuándo reabrir esto.** Si aparece una forma de saber qué quiere el programa **sin** mentirle sobre
-el estado de su terminal. Hoy no la hay, y el issue
-[#27](https://github.com/mashware/agent-terminal/issues/27) queda con esta autopsia dentro.
+**When to reopen this.** If a way appears of knowing what the program wants **without** lying to it
+about the state of its terminal. Today there is none, and the issue
+[#27](https://github.com/mashware/agent-terminal/issues/27) is left with this autopsy inside it.
 
-## D13 — Las pestañas son una lista de disposiciones, y las que no se ven trabajan igual
+## D13 — Tabs are a list of layouts, and the ones you cannot see work just the same
 
-**Qué se decidió.** La ventana pasa a ser una **lista de pestañas** más el índice de la que se ve.
-Cada pestaña se lleva lo que es de una disposición —sus dos divisiones, cuál tiene el foco y dónde
-está el divisor— y la ventana conserva lo que es del proceso: el tema, el vigilante, la medida y los
-modificadores del teclado. **Lo que una disposición es cambió en F2.2**, y la frontera que esta decisión
-traza aguantó el cambio: donde aquí se leen «dos divisiones y dónde está el divisor», ahora hay un árbol
-n-ario con pesos y el foco es un nombre en vez de una posición. Lo que se quedó arriba, en la ventana, no
-se movió. Ver **D14**. La mitad lógica del fotograma recorre **todas** las pestañas; la de
-interfaz pinta **solo** la que se ve.
+**What was decided.** The window becomes a **list of tabs** plus the index of the one on show. Each
+tab takes what belongs to a layout —its two panes, which one has the focus and where the divider is—
+and the window keeps what belongs to the process: the theme, the watcher, the measurement and the
+keyboard's modifiers. **What a layout is changed in F2.2**, and the border this decision draws held
+up through the change: where here you read «two panes and where the divider is», there is now an
+n-ary tree with weights and the focus is a name instead of a position. What stayed up above, in the
+window, did not move. See **D14**. The logical half of the frame goes through **all** the tabs; the
+interface half paints **only** the one on show.
 
-**Por qué.** Es el primer hito de la Fase 2 porque **decide la forma del estado** sobre la que
-escriben el árbol de divisiones (F2.2), el arrastre (F2.3) y la persistencia (F2.5). Y porque el
-problema que el proyecto resuelve —varios agentes a la vez— no cabe en dos consolas: hace falta un
-contexto por tarea.
+**Why.** It is the first milestone of Phase 2 because it **decides the shape of the state** on which
+the tree of panes (F2.2), the drag (F2.3) and the persistence (F2.5) are written. And because the
+problem the project solves —several agents at once— does not fit into two consoles: a context per
+task is needed.
 
-**Lo que se descartó, y por qué:**
+**What was discarded, and why:**
 
-- **Esconder la disposición detrás de una frontera de métodos.** Obligaba a meter dentro del pintado
-  dos funciones que se extrajeron a propósito para poder probarse **sin abrir ventana**, y cuatro de
-  esos métodos existían solo para no indexar. `Pestaña` es un **contenedor transparente**: sus tres
-  campos se ven desde la ventana. El beneficio de la frontera se cobraba en F2.2, y adelantar trabajo
-  de la fase siguiente es justo lo que las reglas del proyecto prohíben.
-- **Bajarle el presupuesto de bombeo a las pestañas que no se ven.** Es incompatible por
-  construcción con lo que el hito promete: el margen que el núcleo regala antes de bloquear al
-  programa son **20 KiB**, seis veces menos que el propio presupuesto de 128 KiB, así que recortarlo
-  no hace que la consola de fondo vaya más despacio — **hace que su programa se pare al escribir**.
-  Las de fondo se bombean con el mismo presupuesto y el fotograma se alarga: el reparto lo hace el
-  propio fotograma, sin mecanismo, y el precio se paga en fotogramas por segundo de toda la ventana.
-- **Invertir el orden con F2.2** (árbol de divisiones antes que pestañas). Un árbol sin pestañas no
-  vale por sí solo, y el orden ya estaba justificado en el roadmap.
-- **Una serie propia en el informe** para lo que interpretan las consolas que no se pintan, y un
-  contador de pestañas cerradas. Los dos se cortaron por no tener consumidor.
-- **Cerrar la última pestaña dejando la lista vacía.** Pedir el cierre no cierra en el acto —siguen
-  corriendo fotogramas y el informe se publica al salir—, así que una lista vacía dejaría el índice
-  de la activa apuntando fuera de rango en cada uno de ellos. La última pestaña no se quita: lo que
-  se cierra es la ventana.
+- **Hiding the layout behind a border of methods.** It forced into the painting two functions that
+  were extracted on purpose so that they could be tested **without opening a window**, and four of
+  those methods existed only so as not to index. `Tab` is a **transparent container**: its three
+  fields are visible from the window. The benefit of the border would be collected in F2.2, and
+  bringing forward work from the next phase is exactly what the project's rules forbid.
+- **Lowering the pumping budget of the tabs you cannot see.** It is incompatible by construction
+  with what the milestone promises: the margin the kernel gives away before blocking the program is
+  **20 KiB**, six times less than the budget of 128 KiB itself, so cutting it does not make the
+  background console go slower — **it makes its program stop on writing**. The background ones are
+  pumped with the same budget and the frame gets longer: the sharing-out is done by the frame
+  itself, with no mechanism, and the price is paid in frames per second of the whole window.
+- **Inverting the order with F2.2** (tree of panes before tabs). A tree without tabs is not worth
+  anything on its own, and the order was already justified in the roadmap.
+- **A series of its own in the report** for what the consoles that are not painted interpret, and a
+  counter of closed tabs. Both were cut for having no consumer.
+- **Closing the last tab leaving the list empty.** Asking to close does not close on the spot
+  —frames go on running and the report is published on exit—, so an empty list would leave the index
+  of the active one pointing out of range in every one of them. The last tab is not removed: what is
+  closed is the window.
 
-**Lo que costó, y conviene que quede escrito.** Los números del informe estaban mal en cinco sitios
-distintos en cuanto hubo pestañas, y ninguno se veía desde fuera: el fotograma se cerraba dos veces
-cuando egui repetía la pasada —la guarda contaba pasadas y no fotogramas—, la segunda anotación
-machacaba la buena y borraba lo interpretado, abrir una pestaña lanzaba dos procesos que nadie
-declaraba, cerrarla se llevaba el tiempo que su consola ya había medido, y las etiquetas del informe
-se renumeraban al cerrar una pestaña, de modo que una tabla de números podía acabar titulada con el
-nombre de otra. **La lección es del método, no del código:** en un instrumento que reparte un total
-por resta, cada camino nuevo que aparece —una pestaña que no se pinta, un atajo que crea procesos— es
-una fuga posible, y ninguna se ve leyendo el informe, porque el número sale plausible.
+**What it cost, and it is as well that it be written down.** The report's numbers were wrong in five
+different places as soon as there were tabs, and none of them was visible from outside: the frame
+was closed twice when egui repeated the pass —the guard counted passes and not frames—, the second
+recording clobbered the good one and wiped out what had been interpreted, opening a tab launched two
+processes that nobody declared, closing it took away the time its console had already measured, and
+the report's labels were renumbered on closing a tab, so that a table of numbers could end up titled
+with somebody else's name. **The lesson is about the method, not about the code:** in an instrument
+that shares out a total by subtraction, every new path that appears —a tab that is not painted, a
+chord that creates processes— is a possible leak, and none of them is visible by reading the report,
+because the number comes out plausible.
 
-### Medido — el fotograma con pestañas (16 de agosto de 2026)
+### Measured — the frame with tabs (16 August 2026)
 
-> **Estas cifras son de antes del historial.** Desde que cada consola guarda 3 500 líneas, interpretar
-> cuesta el doble y la vuelta completa con ello (**D21**). Las mismas tandas vueltas a tomar con el
-> historial encendido están en el anexo «las cuatro tandas de los anexos, vueltas a tomar con historial»
-> de **D21**; lo que sigue se conserva porque es lo que se midió aquel día y es lo que sostiene las
-> conclusiones de esta decisión.
+> **These figures are from before the scrollback.** Since each console keeps 3 500 lines,
+> interpreting costs double and the full round trip along with it (**D21**). The same batches taken
+> again with the scrollback turned on are in the annex «the four batches of the annexes, taken again
+> with scrollback» of **D21**; what follows is kept because it is what was measured that day and it
+> is what holds up this decision's conclusions.
 
-Tres tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
-`scripts/medir-fotograma.sh C|F|G`. Las tres con los cuatro paneles publicándose a ritmo de una vez
-por segundo, para que se puedan comparar entre sí. Carga de 44 MiB por consola que vuelca.
+Three batches, **two runs each**, in release, without touching the machine, with
+`scripts/measure-frame.sh C|F|G`. All three with the four panels publishing at a rate of once per
+second, so that they can be compared with each other. A load of 44 MiB per dumping console.
 
-| | **C** — 1 pestaña | **F** — 2, la de fondo quieta | **G** — 2, la de fondo volcando |
+| | **C** — 1 tab | **F** — 2, the background one idle | **G** — 2, the background one dumping |
 |---|---|---|---|
-| Rejilla de cada consola | 61×21 | 59×21 | 59×21 |
-| Consolas volcando | 2 | 2 | **4** |
-| Vuelta completa | 76,4 ms · 76,4 | 75,1 · 76,9 | **90,3 · 95,1** |
-| — esperando en la cola | 71,0 · 71,0 | 70,1 · 71,3 | **81,0 · 85,4** |
-| — interpretando | 2,21 · 2,17 | 1,97 · 2,25 | 2,03 · 2,24 |
-| — encolando el pintado | 371 µs · 351 | 360 · 346 | 361 · 369 |
-| — el panel de estado | 7,6 µs · 7,0 | 6,5 · 7,4 | 7,1 · 7,6 |
-| **el resto del fotograma** | **386 µs · 409** | **466 · 399** | **399 · 403** |
+| Each console's grid | 61×21 | 59×21 | 59×21 |
+| Consoles dumping | 2 | 2 | **4** |
+| Full round trip | 76.4 ms · 76.4 | 75.1 · 76.9 | **90.3 · 95.1** |
+| — waiting in the queue | 71.0 · 71.0 | 70.1 · 71.3 | **81.0 · 85.4** |
+| — interpreting | 2.21 · 2.17 | 1.97 · 2.25 | 2.03 · 2.24 |
+| — enqueueing the paint | 371 µs · 351 | 360 · 346 | 361 · 369 |
+| — the status panel | 7.6 µs · 7.0 | 6.5 · 7.4 | 7.1 · 7.6 |
+| **the rest of the frame** | **386 µs · 409** | **466 · 399** | **399 · 403** |
 
-**Qué prueba esto, que es lo que la decisión mandaba medir:**
+**What this proves, which is what the decision ordered to be measured:**
 
-1. **El coste del framework de interfaz no se mueve al añadir una pestaña.** El «resto del
-   fotograma» —teselar, dibujar y el armazón de egui— se queda entre **386 y 466 µs** en las seis
-   corridas, y la variación entre las dos corridas de una misma tanda (386 → 409 en C, 466 → 399 en F)
-   es del mismo orden que la variación entre tandas. Dicho al revés: **el número con el que D3 juzga a
-   egui no empeora por tener pestañas**, ni siquiera con cuatro consolas volcando a la vez.
-2. **La barra sale gratis.** F le quita a cada consola dos filas de rejilla frente a C —61 pasa a
-   59— y el fotograma no se distingue del de C en ningún tramo. Pintar las fichas y repartir el alto
-   no cuesta nada medible.
-3. **Lo que sí cuesta es el trabajo de fondo, y se paga en la cola.** En G la vuelta completa sube de
-   76 a **93 ms**, y **casi todo el aumento está en esperar** (71 → 83 ms). Es el presupuesto haciendo
-   su trabajo: cuatro divisiones tragan 128 KiB cada una por fotograma, así que con el doble de
-   consolas volcando cada byte espera más su turno. Interpretar, encolar y el panel **no se mueven**,
-   que es lo que confirma que no hay coste nuevo por división.
+1. **The interface framework's cost does not move on adding a tab.** «The rest of the frame»
+—tessellating, drawing and egui's scaffolding— stays between **386 and 466 µs** in the six runs, and
+the variation between the two runs of one and the same batch (386 → 409 in C, 466 → 399 in F) is of
+the same order as the variation between batches. Put the other way round: **the number with which D3
+judges egui does not get worse for having tabs**, not even with four consoles dumping at once. 2.
+**The bar comes free.** F takes two grid rows away from each console compared with C —61 becomes 59—
+and the frame is indistinguishable from C's in every span. Painting the tabs' cards and sharing out
+the height costs nothing measurable. 3. **What does cost is the background work, and it is paid in
+the queue.** In G the full round trip goes up from 76 to **93 ms**, and **almost all of the increase
+is in waiting** (71 → 83 ms). It is the budget doing its job: four panes swallow 128 KiB each per
+frame, so with twice as many consoles dumping every byte waits longer for its turn. Interpreting,
+enqueueing and the panel **do not move**, which is what confirms that there is no new cost per pane.
 
-**Y qué NO prueba, que importa igual:**
+**And what it does NOT prove, which matters just as much:**
 
-- **No dice lo que le cuesta a la consola de fondo interpretar sus 44 MiB.** Su bloque del informe
-  sale **vacío**, y es por decisión: una consola que no se pinta declara su vuelta **sin espera** para
-  no ensuciar las cuatro medias con muestras de una vuelta que nadie vio. Su tiempo **sí se descuenta**
-  del resto —eso es lo que arregló el hito—, pero no hay número publicado de su trabajo. Lo que la
-  tanda G mide es el **efecto** del trabajo de fondo sobre las consolas de delante, no su coste
-  directo.
-- **No es un fotograma de 120 Hz.** Con dos consolas volcando a plena carga el fotograma entero está
-  muy por encima del hueco de 8,3 ms; estos números describen el **peor caso sostenido**, no el uso
-  normal. La comparación válida es entre tandas, no contra el presupuesto de un refresco.
-- **No dice nada de cuatro pestañas.** Todo esto es con una y con dos. Con cuatro divisiones visibles
-  el panel se comería la consola entera y habría que volver a medir
+- **It does not say what it costs the background console to interpret its 44 MiB.** Its block of the
+  report comes out **empty**, and that is by decision: a console that is not painted declares its
+  round trip **with no wait** so as not to dirty the four means with samples of a round trip that
+  nobody saw. Its time **is** subtracted from the rest —that is what the milestone fixed—, but there
+  is no published number for its work. What batch G measures is the **effect** of the background
+  work on the consoles in front, not its direct cost.
+- **It is not a 120 Hz frame.** With two consoles dumping at full load the whole frame is well above
+  the 8.3 ms slot; these numbers describe the **sustained worst case**, not normal use. The valid
+  comparison is between batches, not against the budget of a refresh.
+- **It says nothing about four tabs.** All of this is with one and with two. With four visible panes
+  the panel would eat the whole console and it would have to be measured again
   ([#33](https://github.com/mashware/agent-terminal/issues/33)).
-- **La rejilla de estas tandas es de 21 columnas por consola**, no de 57: el panel se lleva 36. No son
-  comparables con los anexos de D3 anteriores a los paneles.
+- **The grid of these batches is 21 columns per console**, not 57: the panel takes 36. They are not
+  comparable with the D3 annexes from before the panels.
 
-**Un número de campo que vale la pena conservar:** en la tanda G la cabecera publica la pestaña de
-fondo con rejilla **59×21**, la misma que la visible. Antes de este hito habría dicho **24×80** —la
-rejilla de arranque— porque el tamaño solo se calculaba al pintar. Es la comprobación en la
-aplicación real de que un agente en una pestaña que no miras trabaja con la ventana que de verdad
-tiene.
+**A field number worth keeping:** in batch G the header publishes the background tab with a grid of
+**59×21**, the same as the visible one. Before this milestone it would have said **24×80** —the
+start-up grid— because the size was only computed on painting. It is the check, in the real
+application, that an agent in a tab you are not looking at works with the window it really has.
 
 ---
 
-## D14 — La disposición de una pestaña es un árbol n-ario que reparte por pesos
+## D14 — A tab's layout is an n-ary tree that tiles by weights
 
-**Qué se decidió.** Dentro de una pestaña, las consolas viven en un **árbol**: una hoja es una
-división y una rama es una **orientación** más una lista de hijos **con peso**. Cuatro reglas lo
-definen, y las cuatro se eligieron por lo que evitan:
+**What was decided.** Inside a tab, the consoles live in a **tree**: a leaf is a pane and a branch
+is an **orientation** plus a list of children **with a weight**. Four rules define it, and all four
+were chosen for what they avoid:
 
-1. **N-ario, no binario.** Una rama tiene los hijos que hagan falta, así que tres consolas en fila son
-   **tres hermanas** y cada frontera mueve solo a sus dos vecinas.
-2. **Partir en el mismo sentido que la rama que te contiene inserta como hermana**, en vez de crear una
-   rama nueva. Es lo que mantiene la regla 1 después del segundo corte.
-3. **Pesos, no fracciones normalizadas.** El reparto divide cada peso por la suma de los de su rama, así
-   que «los pesos suman 1» no es una invariante que mantener: cerrar un hijo es quitarlo de la lista y
-   el resto se reparte solo, en proporción a lo que ya tenía.
-4. **Cerrar deshace lo que cerrar puede crear.** Quitar una hoja colapsa la rama que se quede con una
-   sola hija, y si esa hija reparte **en el mismo sentido** que la rama de fuera, sus hijas **suben a
-   hermanas** con el peso escalado. Sin esto, la regla 1 se rompe en tres gestos.
+1. **N-ary, not binary.** A branch has as many children as are needed, so three consoles in a row
+are **three siblings** and each border moves only its two neighbors. 2. **Splitting in the same
+direction as the branch that contains you inserts as a sibling**, instead of creating a new branch.
+It is what keeps rule 1 alive after the second cut. 3. **Weights, not normalized fractions.** The
+tiling divides each weight by the sum of those of its branch, so «the weights add up to 1» is not an
+invariant to be maintained: closing a child is removing it from the list and the rest share it out
+by themselves, in proportion to what they already had. 4. **Closing undoes what closing can
+create.** Removing a leaf collapses the branch that is left with a single child, and if that child
+tiles **in the same direction** as the branch outside, its children **come up as siblings** with the
+weight scaled. Without this, rule 1 breaks in three gestures.
 
-El foco es el **nombre** de una división, no su sitio; y cada frontera se identifica por su **posición**
-en la lista del fotograma, como ya hacía el clic. Los atajos son `Ctrl+Mayúsculas+D` (partir al lado),
-`+B` (partir debajo) y `+X` (cerrar la división).
+The focus is the **name** of a pane, not its place; and each border is identified by its
+**position** in the frame's list, as the click already did. The chords are `Ctrl+Shift+D` (split to
+the side), `+B` (split below) and `+X` (close the pane).
 
-**Por qué.** Tres razones, y ninguna es de gusto:
+**Why.** Three reasons, and none of them is a matter of taste:
 
-- **El divisor que mueve un bloque.** Es lo que más se le critica a `tmux`: con tres consolas en fila, un
-  árbol binario anida, y la frontera de fuera arrastra **dos consolas a la vez**. El n-ario las hace
-  hermanas. Está medido en este proyecto, no supuesto: con la forma anidada, una consola que esa frontera
-  no debería tocar pasa de **335,6 a 504,0 puntos**.
-- **La invariante sale gratis.** Que lo pintado cubra el área **sin huecos ni solapes** lo garantiza la
-  estructura; con rectángulos libres pasaría a ser código que mantener.
-- **F2.3 sale casi hecho.** Arrastrar una división a otro sitio es «quitar» e «insertar», y este hito
-  construye las dos primitivas de todas formas. Con rectángulos libres, recolocar sería un algoritmo de
-  empaquetado.
+- **The divider that moves a block.** It is what `tmux` is criticized for most: with three consoles
+  in a row, a binary tree nests, and the outer border drags **two consoles at once**. The n-ary one
+  makes them siblings. It is measured in this project, not assumed: with the nested shape, a console
+  that border should not touch goes from **335.6 to 504.0 points**.
+- **The invariant comes free.** That what is painted covers the area **with no gaps and no
+  overlaps** is guaranteed by the structure; with free rectangles it would become code to be
+  maintained.
+- **F2.3 comes out almost done.** Dragging a pane somewhere else is «remove» and «insert», and this
+  milestone builds the two primitives anyway. With free rectangles, re-placing would be a packing
+  algorithm.
 
-**Lo que se descartó, y por qué:**
+**What was discarded, and why:**
 
-- **Una lista de columnas** (`Vec<Division>` con pesos), repitiendo la jugada de `Vec<Pestaña>`. Sería la
-  más corta y **no cumple el hito**: solo da una fila, y la Parte I del roadmap pide «colocadas como
-  quieras». Habría que rehacerla en F2.3.
-- **El árbol binario a secas**, por el divisor que mueve bloques.
-- **Una rejilla de rectángulos en fracciones**, que pierde la invariante que el árbol regala.
-- **Un techo al número de divisiones.** No se puede justificar con un escenario real: partir exige un
-  gesto humano por división, y la ventana se vuelve inusable por geometría —el suelo de columnas se niega
-  a partir lo que no puede dar a las dos hijas su mínimo— mucho antes de agotar memoria (~1,06 MiB de
-  colas por división) o descriptores. El límite sale de la geometría, no de una constante inventada.
-- **Nombre estable para cada rama.** Se justificó diciendo que el identificador de control de egui tiene
-  que ser estable entre fotogramas, y el precedente lo contradice: el clic identifica cada división por
-  su índice y llevaba un hito funcionando. **Queda un caso conocido**: con el ratón apretado sobre una
-  frontera y el acorde de partir con la otra mano, la partición renumera las fronteras y el arrastre en
-  vuelo pasa a mover otra. Son dos manos, el efecto es visible y se corrige soltando. Se reabre en F2.3,
-  que es donde recolocar vuelve a mover posiciones en caliente.
-- **Una guarda «si la suma de los pesos es cero, reparte a partes iguales».** Deja vivo el estado
-  inválido y confía en que todos los caminos pasen por la guarda. En su lugar, el tipo `Peso` rechaza lo
-  no finito y lo no positivo, así que la suma cero **no se puede construir**; y arrastrar no deja bajar a
-  ningún vecino del 1 % de la suma de los dos. Ese suelo es relativo a los dos vecinos y no al área, así
-  que no hornea la geometría de hoy en el estado.
+- **A list of columns** (`Vec<Pane>` with weights), repeating the trick of `Vec<Tab>`. It would be
+  the shortest one and it **does not meet the milestone**: it only gives one row, and Part I of the
+  roadmap asks for «placed however you like». It would have to be redone in F2.3.
+- **The plain binary tree**, because of the divider that moves blocks.
+- **A grid of rectangles in fractions**, which loses the invariant that the tree gives away.
+- **A ceiling on the number of panes.** It cannot be justified with a real scenario: splitting
+  demands a human gesture per pane, and the window becomes unusable through geometry —the floor of
+  columns refuses to split what it cannot give both children their minimum of— long before
+  exhausting memory (~1.06 MiB of queues per pane) or descriptors. The limit comes out of the
+  geometry, not out of an invented constant.
+- **A stable name for each branch.** It was justified by saying that egui's widget identifier has to
+  be stable between frames, and the precedent contradicts it: the click identifies each pane by its
+  index and had been working for a whole milestone. **One known case remains**: with the mouse held
+  down on a border and the splitting chord pressed with the other hand, the split renumbers the
+  borders and the drag in flight switches to moving another one. It takes two hands, the effect is
+  visible and it is corrected by releasing. It is reopened in F2.3, which is where re-placing goes
+  back to moving positions live.
+- **A guard «if the sum of the weights is zero, tile in equal parts».** It leaves the invalid state
+  alive and trusts that every path goes through the guard. In its place, the `Weight` type rejects
+  the non-finite and the non-positive, so the sum of zero **cannot be constructed**; and dragging
+  does not let any neighbor go below 1% of the sum of the two. That floor is relative to the two
+  neighbors and not to the area, so it does not bake today's geometry into the state.
 
-  **Corrección, hecha al implementar F2.5, y hace falta escribirla porque el párrafo de arriba se lee como
-  si el 1 % fuera un suelo y no lo es.** El uno por ciento es de **la fracción**, así que el peso que deja
-  un arrastre es el uno por ciento de lo que suman los dos vecinos — y esa suma **encoge con cada
-  arrastre**. Arrastrando todas las fronteras de una fila al tope, los pesos convergen a un punto fijo
-  donde cada uno es la centésima parte del siguiente: **con veintidós consolas en fila, el más pequeño
-  vale 10⁻⁴¹**, y de ahí el reparto —que multiplica dos pesos— llega a cero en un solo paso. Medido, no
-  razonado. Así que **el reescalado lleva suelo propio** (`Peso::escalado`): los tres sitios donde un peso
-  sale de otro —arrastrar, partir y el reescalado de cerrar— recortan el resultado al menor peso normal.
-  El estado imposible deja de existir donde se produce, que es lo que este proyecto prefiere a una guarda
-  aguas abajo. Y la consecuencia que se descubrió con esto: **el formato en disco no puede exigir un
-  mínimo mayor**, o rechazaría disposiciones que un gesto produce — ver D16.
-- **Copiar los acordes de otro terminal para partir.** No se puede: **no coinciden entre ellos** — lo que
-  en uno parte al lado, en otro parte debajo. Se eligieron por lo que significan aquí (*derecha*, *bajo*).
-  Para cerrar sí hay precedente que no se contradice —la `x` de `tmux` y de Zellij matan el panel—, así
-  que cerrar la división es `X`. **`W` se queda con la pestaña**, que es lo que hace en cualquier
-  navegador, y ninguno de los tres toca a `C` ni a `V`, que son del portapapeles. Los tres llevan guarda
-  de repetición porque cada uno lanza o mata programas: sin ella, un segundo con el acorde apretado
-  cierra las consolas, la pestaña y la ventana.
+  **A correction, made while implementing F2.5, and it needs writing down because the paragraph
+  above reads as if the 1% were a floor and it is not.** The one per cent is of **the fraction**, so
+  the weight a drag leaves is one per cent of what the two neighbors add up to — and that sum
+  **shrinks with every drag**. Dragging every border of a row to the stop, the weights converge on a
+  fixed point where each one is a hundredth of the next: **with twenty-two consoles in a row, the
+  smallest is worth 10⁻⁴¹**, and from there the tiling —which multiplies two weights— reaches zero
+  in a single step. Measured, not reasoned. So **the rescaling carries a floor of its own**
+  (`Weight::scaled`): the three places where a weight comes out of another one —dragging, splitting
+  and the rescaling of closing— clip the result to the smallest normal weight. The impossible state
+  stops existing where it is produced, which is what this project prefers to a guard downstream. And
+  the consequence that was discovered along with this: **the on-disk format cannot demand a larger
+  minimum**, or it would reject layouts that a gesture produces — see D16.
+- **Copying another terminal's chords for splitting.** It cannot be done: **they do not agree with
+  each other** — what in one splits to the side, in another splits below. They were chosen for what
+  they mean here (*right*, *below*). For closing there is a precedent that does not contradict
+  itself —the `x` of `tmux` and of Zellij kill the pane—, so closing the pane is `X`. **`W` stays
+  with the tab**, which is what it does in any browser, and none of the three touches `C` or `V`,
+  which belong to the clipboard. All three carry a repeat guard because each one launches or kills
+  programs: without it, a second with the chord held down closes the consoles, the tab and the
+  window.
 
-**Lo que costó, y conviene que quede escrito.** El hito se entregó en siete PRs y **lo que rompió no fue
-lo que se construía**: el PR que enseñó a **partir** cerró catorce hallazgos bloqueantes y **trece estaban
-en código que ese PR no escribía**, y el que enseñó a **cerrar** cerró tres, todos fuera del suyo. Lo que rompe es **lo que la operación nueva vuelve alcanzable** — tres
-divisiones donde el informe indexaba un array de dos lados (pánico al salir, o sea perdiendo todo lo
-medido), dos ramas hermanas donde la búsqueda de frontera cortaba por «cambió» en vez de por
-«encontrada», una pestaña de una sola consola donde el texto «izquierda» dejó de describir nada. Y en el
-instrumento, la misma lección con otro traje: **lo que una consola lleva sin declarar al cerrarse vive en
-tres sitios** —lo anotado en su medida, lo que el bombeo dejó interpretado y lo que costó releer su
-panel—, y mirar solo el primero declaraba **cero** justo en el fotograma del acorde. Cada camino nuevo es
-una fuga posible, y ninguna se ve leyendo el informe: el número sale plausible.
+**What it cost, and it is as well that it be written down.** The milestone was delivered in seven
+PRs and **what it broke was not what was being built**: the PR that taught it to **split** closed
+fourteen blocking findings and **thirteen were in code that PR did not write**, and the one that
+taught it to **close** closed three, all of them outside its own. What breaks is **what the new
+operation makes reachable** — three panes where the report indexed an array of two sides (a panic on
+exit, that is, losing everything measured), two sibling branches where the border search cut on
+«changed» instead of on «found», a tab with a single console where the text «left» stopped
+describing anything. And in the instrument, the same lesson in different clothes: **what a console
+carries undeclared when it closes lives in three places** —what was recorded in its measurement,
+what the pumping left interpreted and what it cost to re-read its panel—, and looking only at the
+first declared **zero** in precisely the frame of the chord. Every new path is a possible leak, and
+none of them is visible by reading the report: the number comes out plausible.
 
-### Medido — el fotograma con cuatro divisiones (17 de agosto de 2026)
+### Measured — the frame with four panes (17 August 2026)
 
-> **Estas cifras son de antes del historial.** Desde que cada consola guarda 3 500 líneas, interpretar
-> cuesta el doble y la vuelta completa con ello (**D21**). Las mismas tandas vueltas a tomar con el
-> historial encendido están en el anexo «las cuatro tandas de los anexos, vueltas a tomar con historial»
-> de **D21**; lo que sigue se conserva porque es lo que se midió aquel día y es lo que sostiene las
-> conclusiones de esta decisión.
+> **These figures are from before the scrollback.** Since each console keeps 3 500 lines,
+> interpreting costs double and the full round trip along with it (**D21**). The same batches taken
+> again with the scrollback turned on are in the annex «the four batches of the annexes, taken again
+> with scrollback» of **D21**; what follows is kept because it is what was measured that day and it
+> is what holds up this decision's conclusions.
 
-Tres tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
-`scripts/medir-fotograma.sh C|H|I`. Las tres con **todos** los paneles publicándose a ritmo de una vez
-por segundo y carga de 44 MiB por consola, para que se puedan comparar entre sí. Los tramos son de la
-**división 0** de cada corrida.
+Three batches, **two runs each**, in release, without touching the machine, with
+`scripts/measure-frame.sh C|H|I`. All three with **every** panel publishing at a rate of once per
+second and a load of 44 MiB per console, so that they can be compared with each other. The spans are
+those of **pane 0** of each run.
 
-**La ventana se pide, y eso es nuevo.** Todas las corridas son de **1280×800 puntos**, pedidos con
-`MEDIR_TAMANO` y comprobados en el informe. Antes de este hito el tamaño lo decidía el escritorio, y eso
-hacía la medida irreproducible sin que nada lo dijera: el mismo día, tres corridas de la misma tanda
-dieron **36×47, 40×66 y 61×57** de rejilla. Por eso **estos números no se comparan con los anexos
-anteriores** —los suyos se tomaron con ventanas cuyo tamaño nadie apuntó— y sí entre ellos.
+**The window is asked for, and that is new.** All the runs are of **1280×800 points**, asked for
+with `MEASURE_SIZE` and checked in the report. Before this milestone the size was decided by the
+desktop, and that made the measurement irreproducible without anything saying so: on the same day,
+three runs of the same batch gave grids of **36×47, 40×66 and 61×57**. That is why **these numbers
+are not compared with the earlier annexes** —theirs were taken with windows whose size nobody wrote
+down— and are compared with each other.
 
-| | **C** — 2 divisiones | **H** — 4 en fila | **I** — 4 en cuadro |
+| | **C** — 2 panes | **H** — 4 in a row | **I** — 4 in a square |
 |---|---|---|---|
-| Rejilla de cada consola | 49×39 | **49×20** | **24×39** |
-| Celdas en total | 3 822 | 3 920 | 3 744 |
-| Consolas volcando | 2 | **4** | **4** |
-| Vuelta completa | 52,0 ms · 51,6 | **100,2 · 101,4** | **97,2 · 99,4** |
-| — esperando en la cola | 46,5 · 46,2 | **89,9 · 91,1** | **87,2 · 89,3** |
-| — interpretando | 2,12 · 2,13 | 2,18 · 2,07 | 2,20 · 2,20 |
-| — encolando el pintado | 458 µs · 464 | 316 · 320 | 259 · 256 |
-| — el panel de estado | 6,1 µs · 6,5 | 15,4 · 18,4 | 25,8 · 8,9 |
-| **el resto del fotograma** | **444 µs · 402** | **530 · 513** | **503 · 463** |
+| Each console's grid | 49×39 | **49×20** | **24×39** |
+| Cells in total | 3 822 | 3 920 | 3 744 |
+| Consoles dumping | 2 | **4** | **4** |
+| Full round trip | 52.0 ms · 51.6 | **100.2 · 101.4** | **97.2 · 99.4** |
+| — waiting in the queue | 46.5 · 46.2 | **89.9 · 91.1** | **87.2 · 89.3** |
+| — interpreting | 2.12 · 2.13 | 2.18 · 2.07 | 2.20 · 2.20 |
+| — enqueueing the paint | 458 µs · 464 | 316 · 320 | 259 · 256 |
+| — the status panel | 6.1 µs · 6.5 | 15.4 · 18.4 | 25.8 · 8.9 |
+| **the rest of the frame** | **444 µs · 402** | **530 · 513** | **503 · 463** |
 
-**Qué prueba esto, que es lo que quedaba por medir:**
+**What this proves, which is what was left to measure:**
 
-1. **El coste del framework de interfaz no empeora al duplicar las divisiones.** El «resto del
-   fotograma» —teselar, dibujar y el armazón de egui— se queda entre **402 y 530 µs** en las seis
-   corridas, y la variación entre las dos corridas de una misma tanda (444 → 402 en C, 503 → 463 en I) es
-   del mismo orden que la variación entre tandas. Es la misma conclusión que el anexo de D13 sacó para
-   las pestañas, ahora para las divisiones, y **cierra la pregunta que el issue
-   [#33](https://github.com/mashware/agent-terminal/issues/33) dejó abierta**. Las tres tandas tienen casi
-   las mismas celdas en total (3 744 a 3 920), que es justamente lo que las hace comparables: lo que
-   cambia es en cuántas consolas están repartidas.
-2. **Lo que cuesta el trabajo de fondo se paga en la cola.** La vuelta completa pasa de ~52 ms con dos
-   consolas volcando a 98 y 101 ms con cuatro, y **casi todo el aumento está en esperar** (46 ms en C, 88 en
-   I y 91 en H). Interpretar **no se mueve** (2,07 a 2,20 ms en las seis corridas), que es lo que confirma que no hay
-   coste nuevo por división: es el presupuesto de 128 KiB por división haciendo su trabajo, con el doble de
-   consolas tragando del mismo fotograma.
-3. **Encolar el pintado baja, y baja con las celdas.** 458 µs con 1 911 celdas por consola, 316 con 980,
-   259 con 936. No es una mejora: es que cada consola pinta menos.
-4. **El panel cede y la consola no, comprobado en el peor caso.** Lo **medido** es esto: con las cuatro
-   **en fila** cada consola publica **20 columnas** de rejilla —exactamente `panel::MINIMUM_CONSOLE`—, y en
-   **cuadro** publica las **39** de la tanda de dos. Y de ahí se **deduce** el reparto, que la cabecera no
-   publica: en la tanda C cada división son 39 columnas de consola más las 36 del panel, o sea 75; en fila
-   le toca la mitad de eso, unas 37, así que el panel no cabe y **cede hasta 17** para dejarle a la consola
-   su suelo de 20. En cuadro lo que se parte por la mitad es el **alto** —24 filas en vez de 49— y el ancho
-   no se toca, así que la disposición que alguien usaría de verdad no le quita ni una columna a la consola.
+1. **The interface framework's cost does not get worse on doubling the panes.** «The rest of the
+frame» —tessellating, drawing and egui's scaffolding— stays between **402 and 530 µs** in the six
+runs, and the variation between the two runs of one and the same batch (444 → 402 in C, 503 → 463 in
+I) is of the same order as the variation between batches. It is the same conclusion the D13 annex
+drew for the tabs, now for the panes, and it **closes the question the issue
+[#33](https://github.com/mashware/agent-terminal/issues/33) left open**. The three batches have
+almost the same number of cells in total (3 744 to 3 920), which is exactly what makes them
+comparable: what changes is how many consoles they are shared out among. 2. **What the background
+work costs is paid in the queue.** The full round trip goes from ~52 ms with two consoles dumping to
+98 and 101 ms with four, and **almost all of the increase is in waiting** (46 ms in C, 88 in I and
+91 in H). Interpreting **does not move** (2.07 to 2.20 ms in the six runs), which is what confirms
+that there is no new cost per pane: it is the budget of 128 KiB per pane doing its job, with twice
+as many consoles swallowing from the same frame. 3. **Enqueueing the paint goes down, and it goes
+down with the cells.** 458 µs with 1 911 cells per console, 316 with 980, 259 with 936. It is not an
+improvement: it is that each console paints less. 4. **The panel gives way and the console does not,
+checked in the worst case.** What is **measured** is this: with the four **in a row** each console
+publishes **20 columns** of grid —exactly `panel::MINIMUM_CONSOLE`—, and in a **square** it
+publishes the **39** of the batch of two. And from there the tiling is **deduced**, which the header
+does not publish: in batch C each pane is 39 columns of console plus the panel's 36, that is 75; in
+a row it gets half of that, some 37, so the panel does not fit and **gives way down to 17** to leave
+the console its floor of 20. In a square what is halved is the **height** —24 rows instead of 49—
+and the width is not touched, so the layout somebody would really use does not take a single column
+away from the console.
 
-**Y qué NO prueba, que importa igual:**
+**And what it does NOT prove, which matters just as much:**
 
-- **No dice nada de una ventana grande.** En esta máquina el escritorio deja llegar hasta **5 120×1 357
-  puntos** —comprobado pidiendo más y viendo qué concede—, y la tanda mide 1280×800. Con cuatro en fila a
-  lo ancho de esa ventana el panel entraría entero y la conclusión 4 sería otra: la interesante es la que
-  se midió, porque es la que aprieta.
-- **El tramo del panel son microsegundos y su relación entre corridas no significa nada**: 25,8 y 8,9 µs en
-  las dos corridas de la misma tanda I. Está publicado por completitud, no para leer tendencias.
-- **No mide partir ni cerrar en caliente.** Las tandas abren la disposición y vuelcan; el congelón de
-  ~100 ms al cerrar ([#62](https://github.com/mashware/agent-terminal/issues/62)) sigue sin medirse con
-  divisiones, y este hito recorre ese camino mucho más a menudo que antes.
-- **No es un fotograma de 120 Hz.** Con cuatro consolas volcando a plena carga la vuelta completa está muy
-  por encima del hueco de 8,3 ms: describe el **peor caso sostenido**, no el uso normal. La comparación
-  válida es entre tandas.
+- **It says nothing about a large window.** On this machine the desktop lets you get as far as **5
+  120×1 357 points** —checked by asking for more and seeing what it grants—, and the batch measures
+  1280×800. With four in a row across the width of that window the panel would fit whole and
+  conclusion 4 would be another one: the interesting one is the one that was measured, because it is
+  the one that squeezes.
+- **The panel's span is microseconds and its ratio between runs means nothing**: 25.8 and 8.9 µs in
+  the two runs of the same batch I. It is published for completeness, not so that trends can be read
+  into it.
+- **It does not measure splitting or closing live.** The batches open the layout and dump; the ~100
+  ms freeze on closing ([#62](https://github.com/mashware/agent-terminal/issues/62)) is still
+  unmeasured with panes, and this milestone goes down that path far more often than before.
+- **It is not a 120 Hz frame.** With four consoles dumping at full load the full round trip is well
+  above the 8.3 ms slot: it describes the **sustained worst case**, not normal use. The valid
+  comparison is between batches.
 
-**Una corrida se marcó inválida mientras se afinaba el guion, y conviene que quede escrito por qué.** Una
-tanda I publicó una ventana de **1 279,8125×799,8125** puntos habiendo pedido 1 280×800: el compositor
-entrega el tamaño con fracción y **no siempre la misma**. La guarda del guion la tiró con una comparación exacta, y ahora
-lleva **medio punto de margen** —el mismo que la aplicación usa para no pelearse con el escritorio—,
-porque medio punto no mueve ni una celda de la rejilla y sin él la guarda descarta corridas idénticas.
+**One run was marked invalid while the script was being tuned, and it is as well that it be written
+down why.** A batch I published a window of **1 279.8125×799.8125** points having asked for 1
+280×800: the compositor delivers the size with a fraction and **not always the same one**. The
+script's guard threw it out with an exact comparison, and now it carries **half a point of margin**
+—the same one the application uses so as not to fight with the desktop—, because half a point does
+not move a single cell of the grid and without it the guard discards runs that are identical.
 
-## D15 — Mover una división transforma el árbol por valor, y solo lo sustituye si la transformación llega al final
+## D15 — Moving a pane transforms the tree by value, and only replaces it if the transformation reaches the end
 
-**Qué se decidió.** Una división se **agarra con el ratón** y se **suelta a un lado de otra**; al soltar,
-la disposición se reordena para hacerle sitio. Cinco decisiones lo definen:
+**What was decided.** A pane is **grabbed with the mouse** and **dropped to one side of another**;
+on dropping, the layout is rearranged to make room for it. Five decisions define it:
 
-1. **La operación se hace por valor y es atómica por construcción.** `Nodo::mover` recibe el árbol
-   entero, lo transforma y solo se sustituye el original **si la transformación llega al final**. No hay
-   ningún camino en el que una consola quede viva y fuera del árbol.
-2. **El destino es una de las cuatro mitades de otra división**, y cuál se elige por la distancia al borde
-   **en proporción al lado que le toca** —multiplicando en cruz, no dividiendo—. En puntos, una consola
-   ancha y baja solo se dejaría soltar por arriba y por abajo.
-3. **Antes de soltar se ve la mitad que la consola va a ocupar**, y no una franja fina al borde: es
-   literalmente el sitio que ocupará. Una franja se leería como el gesto de acoplar a la pantalla de los
-   gestores de ventanas, que aquí no existe.
-4. **El velo no promete lo que se va a rechazar.** El suelo geométrico —el mismo que ya usa partir— se
-   consulta **antes** de señalar un destino, así que donde soltar se vaya a negar no se marca nada.
-5. **Las divisiones se identifican por su nombre, y el identificador con el que egui sostiene el arrastre
-   también.** Las fronteras siguen por posición.
+1. **The operation is done by value and is atomic by construction.** `Nodo::mover` receives the
+   whole tree, transforms it and the original is only replaced **if the transformation reaches the
+   end**. There is no path at all in which a console ends up alive and outside the tree.
+2. **The destination is one of the four halves of another pane**, and which one is chosen by the
+   distance to the edge **in proportion to the side it belongs to** —cross-multiplying, not
+   dividing—. In points, a wide, short console would only let itself be dropped on from above and
+   from below.
+3. **Before dropping, the half the console is going to occupy is visible**, and not a thin strip at
+   the edge: it is literally the place it will occupy. A strip would read as the window managers'
+   gesture for snapping to the screen, which does not exist here.
+4. **The veil does not promise what is going to be refused.** The geometric floor —the same one
+   splitting already uses— is consulted **before** pointing at a destination, so where dropping is
+   going to be denied nothing is marked.
+5. **Panes are identified by their name, and so is the identifier with which egui holds the drag.**
+   Dividers stay by position.
 
-**Por qué.**
+**Why.**
 
-- **Componer «cerrar» con «partir» no da atomicidad, y no por descuido de implementación.** `colapsar`
-  descarta el peso de la hija superviviente y `absorber` escala los de las nietas, así que **tras quitar
-  una hoja la forma anterior ya no se puede reconstruir**: si partir fallara después, no hay a dónde
-  volver y la consola se queda fuera. Por valor, el fallo es no haber cambiado nada.
-- **Y una operación que muta en el sitio con validación previa también funcionaría — mientras todos se
-  acuerden de validar.** Este proyecto tiene contado con números lo que pasa con las invariantes que
-  dependen de que alguien se acuerde: 15 de 17 hallazgos bloqueantes de los dos hitos anteriores estaban
-  en código que esos PRs no escribían. Transformar por valor la hace **imposible de romper**.
-- **El suelo se comprueba contra el árbol de ahora**, y es conservador: quitar una hoja casi nunca le quita
-  área a las que quedan —`absorber` les cuesta un divisor, y nada más—. La formulación intuitiva
-  —«validar contra el árbol posterior a quitar»— **es incoherente**: no se puede validar contra un árbol
-  que todavía no existe.
-- **La identidad no se refactorizó, y con esto queda cerrado el caso que D14 dejó abierto para este hito.**
-  Las hojas ya tenían nombre estable; lo que faltaba era que el identificador del control lo llevara
-  **también**. Con el sitio dentro, cualquier cosa que renumere mientras el botón sigue apretado hace que
-  el arrastre en vuelo apunte a otra cosa — y no hacen falta dos manos: agarrar una consola y pulsar
-  `Ctrl+Mayúsculas+→` sin soltar **reordenaba dos consolas de la pestaña de destino**. Las fronteras
-  siguen por posición porque su arrastre **no sobrevive a nada**: se resuelve dentro del mismo fotograma.
+- **Composing «close» with «split» does not give atomicity, and not through an implementation
+  oversight.** `colapsar` discards the surviving child's weight and `absorber` scales the
+  grandchildren's, so **once a leaf has been removed the previous shape can no longer be
+  reconstructed**: if splitting then failed, there is nowhere to go back to and the console is left
+  outside. By value, failing means having changed nothing.
+- **And an operation that mutates in place with prior validation would also work — as long as
+  everyone remembers to validate.** This project has counted with numbers what happens to invariants
+  that depend on somebody remembering: 15 of the 17 blocking findings of the two previous milestones
+  were in code those PRs did not write. Transforming by value makes it **impossible to break**.
+- **The floor is checked against the tree as it is now**, and it is conservative: removing a leaf
+  almost never takes area away from the ones that remain —`absorber` costs them one divider, and
+  nothing more—. The intuitive formulation —«validate against the tree that comes after removing»—
+  **is incoherent**: you cannot validate against a tree that does not exist yet.
+- **Identity was not refactored, and with this the case D14 left open for this milestone is
+  closed.** The leaves already had a stable name; what was missing was for the control's identifier
+  to carry it **too**. With the slot inside it, anything that renumbers while the button is still
+  held down makes the in-flight drag point at something else — and two hands are not needed:
+  grabbing a console and pressing `Ctrl+Shift+→` without letting go **rearranged two consoles of the
+  destination tab**. Dividers stay by position because their drag **survives nothing**: it is
+  resolved within the same frame.
 
-**Lo que se descartó, y por qué:**
+**What was discarded, and why:**
 
-- **Componer `cerrar` + `partir`** desde la ventana: no son atómicos, por lo de arriba.
-- **Mutar en el sitio con validación previa**: funciona, pero la atomicidad pasa a depender de cada camino
-  futuro.
-- **Cerrar la consola y volver a abrirla en el destino**: mata el trabajo de dentro, que es el motivo del
-  hito. Y está medido: cerrar en caliente congela la ventana **50,72 ms** de mediana, **404 ms** si el
-  programa ignora `SIGHUP`, y puede colgarla indefinidamente.
-- **`Result<Nodo, Nodo>` para el resultado de mover.** Era el diseño; se cambió a una tupla porque la
-  variante de error cargaba el árbol entero y porque `Err` no significaba siempre lo mismo. Una tupla no
-  invita a leer «falló» como «no cambió nada».
-- **Deshacer un movimiento.** No hace falta: un movimiento que no puede completarse no llega a empezar.
-- **Mover una división a otra pestaña.** Fuera de F2.3 por la Parte I del roadmap, no por dificultad.
-- **Nombre estable para las fronteras.** Ver arriba: su arrastre no cruza fotogramas.
+- **Composing `cerrar` + `partir`** from the window: they are not atomic, for what is above.
+- **Mutating in place with prior validation**: it works, but atomicity comes to depend on every
+  future path.
+- **Closing the console and reopening it at the destination**: it kills the work inside, which is
+  the whole reason for the milestone. And it is measured: closing a live console freezes the window
+  for a median of **50.72 ms**, **404 ms** if the program ignores `SIGHUP`, and it can hang it
+  indefinitely.
+- **`Result<Nodo, Nodo>` for the result of moving.** That was the design; it was changed to a tuple
+  because the error variant carried the whole tree and because `Err` did not always mean the same
+  thing. A tuple does not invite reading «it failed» as «nothing changed».
+- **Undoing a move.** Not needed: a move that cannot be completed never gets to start.
+- **Moving a pane to another tab.** Out of F2.3 by Part I of the roadmap, not by difficulty.
+- **A stable name for the dividers.** See above: their drag does not cross frames.
 
-### Medido — el fotograma mientras se arrastra (18 de agosto de 2026)
+### Measured — the frame while dragging (18 August 2026)
 
-Dos tandas, **dos corridas cada una**, en release, sin tocar la máquina, con
-`scripts/medir-fotograma.sh C|J`. Las dos con una pestaña de **dos divisiones**, los dos paneles
-publicándose a ritmo de una vez por segundo, carga de 44 MiB por consola y ventana de **1280×800 puntos**,
-con las dos consolas a 49×39 celdas. La **J** añade una sola cosa: **la ventana se arrastra a sí misma** de
-principio a fin —agarra una consola, la lleva sobre la otra y la suelta, alternando el lado— por la misma
-puerta por la que entra el ratón de verdad. Los tramos son de la **división 0**.
+Two batches, **two runs each**, in release, without touching the machine, with
+`scripts/measure-frame.sh C|J`. Both with one tab of **two panes**, both panels publishing at a
+rate of once per second, a load of 44 MiB per console and a window of **1280×800 points**, with both
+consoles at 49×39 cells. The **J** adds a single thing: **the window drags itself** from beginning
+to end —it grabs a console, carries it over the other one and drops it, alternating the side—
+through the same door the real mouse comes in by. The spans are those of **pane 0**.
 
-| | **C** — sin gesto | **J** — arrastrando sin parar |
+| | **C** — no gesture | **J** — dragging non-stop |
 |---|---|---|
-| Gestos inyectados | — | **1 724 · 1 722** |
-| De ésos, los que reordenaron | — | **862 · 861** |
-| Fotogramas con salida | 358 · 363 | 357 · 357 |
-| **Fotogramas en total** | **467 · 532** | **6 898 · 6 888** |
-| Vuelta completa | 37,2 ms · 37,1 | **37,3 · 38,5** |
-| — esperando en la cola | 35,0 · 35,0 | **35,1 · 35,6** |
-| — interpretando | 849 µs · 763 | 813 · 1 058 |
-| — encolando el pintado | 205 µs · 189 | 163 · 234 |
-| — el panel de estado | 3,6 µs · 3,6 | 2,6 · 4,6 |
-| el resto del fotograma | 222 µs · 220 | 112 · 105 |
+| Injected gestures | — | **1 724 · 1 722** |
+| Of those, the ones that rearranged | — | **862 · 861** |
+| Frames with output | 358 · 363 | 357 · 357 |
+| **Frames in total** | **467 · 532** | **6 898 · 6 888** |
+| Full round trip | 37.2 ms · 37.1 | **37.3 · 38.5** |
+| — waiting in the queue | 35.0 · 35.0 | **35.1 · 35.6** |
+| — interpreting | 849 µs · 763 | 813 · 1 058 |
+| — enqueueing the paint | 205 µs · 189 | 163 · 234 |
+| — the status panel | 3.6 µs · 3.6 | 2.6 · 4.6 |
+| the rest of the frame | 222 µs · 220 | 112 · 105 |
 
-**Qué prueba esto:**
+**What this proves:**
 
-1. **Arrastrar sin parar no empeora nada de lo que la consola percibe.** La vuelta completa —lo que tarda un
-   byte disponible en llegar a un fotograma pagado— es **37,1 a 38,5 ms en las cuatro corridas**, y la
-   variación entre las dos corridas de la misma tanda (37,3 → 38,5 en J) es del mismo orden que la variación
-   entre tandas. Esperar en la cola tampoco se mueve: **35,0 a 35,6 ms**. Y los fotogramas **con salida** son
-   los mismos (357 a 363), o sea que el presupuesto de bombeo hace su trabajo igual.
-2. **El gesto declara su coste.** Atender el ratón, pintar el velo, rehacer el reparto al soltar e inyectar
-   los eventos están **todos** cronometrados y restados, así que ninguno se publica como coste del framework
-   —la cifra con la que D3 juzga a egui—. La revisión encontró una quinta pieza que se había quedado fuera:
-   la copia de los rectángulos del último fotograma. No se cronometró: se **quitó**, moviendo el vector en
-   vez de copiarlo, que es mejor que declarar trabajo que no hace falta hacer.
-3. **El resto del fotograma se queda muy por debajo del presupuesto** incluso arrastrando: 112 y 105 µs de
-   media, 258 y 302 µs el 95 %.
+1. **Dragging non-stop makes nothing the console perceives any worse.** The full round trip —how
+   long an available byte takes to reach a paid-for frame— is **37.1 to 38.5 ms across the four
+   runs**, and the variation between the two runs of the same batch (37.3 → 38.5 in J) is of the
+   same order as the variation between batches. Waiting in the queue does not move either: **35.0 to
+   35.6 ms**. And the frames **with output** are the same (357 to 363), which means the pumping
+   budget does its job just the same.
+2. **The gesture declares its cost.** Attending to the mouse, painting the veil, redoing the tiling
+   on dropping and injecting the events are **all** timed and subtracted, so none of them is
+   published as the framework's cost —the figure D3 judges egui by—. The review found a fifth piece
+   that had been left out: copying the last frame's rectangles. It was not timed: it was
+   **removed**, by moving the vector instead of copying it, which is better than declaring work that
+   does not need doing.
+3. **The rest of the frame stays well below the budget** even while dragging: 112 and 105 µs on
+   average, 258 and 302 µs at the 95th percentile.
 
-**Y qué NO prueba, que importa igual:**
+**And what it does NOT prove, which matters just as much:**
 
-- **Las medias del «resto del fotograma» de C y J NO se comparan entre sí, y la tabla las pone juntas solo
-  para que se vea por qué.** Inyectar eventos de puntero mantiene la ventana despierta —igual que la mantiene
-  despierta un ratón humano moviéndose—, así que J corre **unas trece veces más fotogramas** que C. El coste
-  medio por fotograma baja porque se reparte entre miles de fotogramas que no llevan trabajo de consola
-  dentro, no porque el gesto abarate nada. Leer «112 µs contra 222» como una mejora sería exactamente el
-  número plausible que este proyecto lleva tres hitos evitando. Lo mismo vale para interpretar, encolar y el
-  panel. La conclusión 1 se apoya en la vuelta completa, que es por fotograma **con salida**.
-- **La mitad de los gestos se descartan al soltar, y el informe lo dice: 1 724 inyectados y 862 que
-  reordenaron.** No es un fallo del gesto: el inyector agarra la consola **por su hueco**, así que tras el
-  primer intercambio vuelve a agarrar la misma —que ahora está en el otro hueco— y la suelta encima de sí
-  misma, caso que el gesto rechaza a propósito. La tanda mide por tanto una **mezcla** de los dos caminos, y
-  los dos son reales al arrastrar. Sondeado con instrumentación en el camino del soltado, no deducido.
-- **Publicar solo los gestos inyectados habría dejado pasar una tanda vacía**, y esto lo encontró la
-  revisión: en una ventana estrecha el suelo geométrico rechaza **todos** los soltados, la disposición no
-  cambia ni una vez, y una corrida así declaraba «1 724 hechos» y se daba por buena. El anexo habría
-  publicado que el gesto no cuesta nada. Ahora el guion invalida la corrida si ninguno reordenó.
-- **La etiqueta «(izquierda)» o «(derecha)» de cada tabla de tramos describe el hueco en el que la consola
-  acabó**, y en la tanda J una consola cambia de hueco a mitad de corrida: la mitad de las muestras se
-  tomaron con ella en el otro lado. Los números no salen mal porque las dos consolas se reparten el ancho a
-  medias y tienen la misma rejilla, pero la etiqueta afirma una procedencia que la corrida no sostiene, y
-  dejaría de ser inocua en una tanda de anchos distintos.
-- **No hay tanda con arrastres de cuatro divisiones**, y no es un olvido: el ciclo del gesto solo devuelve la
-  disposición a la de partida **con dos**. Con más, insertar parte el peso del destino y quitar lo reparte
-  entre las que quedan, así que el peso se concentra — medido con cuatro en fila sobre 1 200 puntos, la
-  primera consola pasa de **298,5 a 119,4** puntos en un solo ciclo de ida y vuelta.
-- **El número de fotogramas de la tanda J no es estable, y con él tampoco el de gestos.** Tres corridas
-  seguidas dieron **6 898, 6 888 y 6 854** fotogramas —muy parejas— pero una cuarta, tomada mientras la
-  máquina compilaba, se quedó en **764** con solo 191 gestos. Los fotogramas **con salida** fueron los mismos
-  en las cuatro (357 a 359), que es lo que hace que la conclusión 1 aguante: se apoya en la vuelta completa,
-  que es por fotograma con salida, y no en nada dividido por el total. Es otra razón para no comparar las
-  medias del resto entre corridas, no solo entre tandas.
-- **No mide el gesto de una persona.** Mide un gesto sintético que agarra el centro de una consola, cruza en
-  dos fotogramas y suelta. Un arrastre humano dura más y se mueve más despacio.
-- **No mide partir ni cerrar en caliente**, igual que el anexo anterior: el congelón de ~100 ms al cerrar
-  ([#62](https://github.com/mashware/agent-terminal/issues/62)) sigue sin medirse con divisiones.
+- **The «rest of the frame» means of C and J are NOT compared with each other, and the table puts
+  them together only so that it can be seen why.** Injecting pointer events keeps the window awake
+  —just as a human mouse moving keeps it awake—, so J runs **some thirteen times more frames** than
+  C. The mean cost per frame goes down because it is shared out among thousands of frames that carry
+  no console work inside them, not because the gesture makes anything cheaper. Reading «112 µs
+  against 222» as an improvement would be exactly the plausible number this project has spent three
+  milestones avoiding. The same goes for interpreting, enqueueing and the panel. Conclusion 1 rests
+  on the full round trip, which is per frame **with output**.
+- **Half the gestures are discarded on dropping, and the report says so: 1 724 injected and 862 that
+  rearranged.** It is not a failure of the gesture: the injector grabs the console **by its slot**,
+  so after the first swap it grabs the same one again —which is now in the other slot— and drops it
+  on top of itself, a case the gesture rejects on purpose. The batch therefore measures a
+  **mixture** of the two paths, and both of them are real when dragging. Probed with instrumentation
+  in the dropping path, not deduced.
+- **Publishing only the injected gestures would have let an empty batch through**, and this the
+  review found: in a narrow window the geometric floor rejects **every** drop, the layout does not
+  change even once, and a run like that declared «1 724 done» and was taken as good. The annex would
+  have published that the gesture costs nothing. Now the script invalidates the run if none of them
+  rearranged.
+- **The «(left)» or «(right)» label of each span table describes the slot the console ended up in**,
+  and in batch J one console changes slot halfway through the run: half the samples were taken with
+  it on the other side. The numbers do not come out wrong because the two consoles share the width
+  equally and have the same grid, but the label asserts a provenance the run does not support, and
+  it would stop being harmless in a batch of different widths.
+- **There is no batch with drags of four panes**, and it is not an oversight: the gesture's cycle
+  only returns the layout to the starting one **with two**. With more, inserting splits the
+  destination's weight and removing shares it out among the ones that remain, so the weight
+  concentrates — measured with four in a row over 1 200 points, the first console goes from **298.5
+  to 119.4** points in a single round-trip cycle.
+- **The frame count of batch J is not stable, and with it neither is the gesture count.** Three
+  consecutive runs gave **6 898, 6 888 and 6 854** frames —very close— but a fourth, taken while the
+  machine was compiling, stopped at **764** with only 191 gestures. The frames **with output** were
+  the same in all four (357 to 359), which is what makes conclusion 1 hold up: it rests on the full
+  round trip, which is per frame with output, and not on anything divided by the total. It is
+  another reason not to compare the means of the rest between runs, not only between batches.
+- **It does not measure a person's gesture.** It measures a synthetic gesture that grabs the center
+  of a console, crosses in two frames and drops. A human drag lasts longer and moves more slowly.
+- **It does not measure splitting or closing live**, just like the previous annex: the ~100 ms
+  freeze on closing ([#62](https://github.com/mashware/agent-terminal/issues/62)) still goes
+  unmeasured with panes.
 
-**Dos cosas que la primera versión de la tanda hizo mal, y quedan escritas porque los números salían
-plausibles.** La primera: el gesto pedía repintado en cada fotograma para no dormirse a mitad de un arrastre,
-y con eso la tanda dejaba de ser «la de comparación más el gesto» para ser otro régimen —**2 219 y 7 008
-fotogramas** con el resto en **163 y 103 µs**, o sea el gesto *abaratando* el fotograma a la mitad—. La
-segunda: contar los gestos inyectados como si fueran reordenaciones, que es la que habría dejado pasar la
-tanda vacía de más arriba. Las dos las cazó la revisión de este PR, no la medida.
+**Two things the first version of the batch got wrong, and they stay written down because the
+numbers came out plausible.** The first: the gesture asked for a repaint on every frame so as not to
+fall asleep halfway through a drag, and with that the batch stopped being «the comparison one plus
+the gesture» and became another regime —**2 219 and 7 008 frames** with the rest at **163 and 103
+µs**, that is, the gesture *making the frame cheaper* by half—. The second: counting the injected
+gestures as if they were rearrangements, which is the one that would have let the empty batch above
+through. Both were caught by this PR's review, not by the measurement.
 
 ---
 
-## D16 — La disposición se guarda en un fichero propio, y lo que no se entiende abre de fábrica
+## D16 — The layout is saved in a file of its own, and what is not understood opens factory-fresh
 
-**Qué se decidió.** Al cerrar la ventana y volver a abrirla vuelven **las pestañas, el árbol de
-divisiones con sus pesos, y por cada consola el ancho de su panel y si estaba plegada**. Se guarda en
-un fichero JSON propio, `$XDG_CONFIG_HOME/agent-terminal/disposicion.json` —con caída a
-`$HOME/.config/…`—, y **nada más**: ni el directorio de trabajo de cada consola, ni el tamaño de la
-ventana, ni qué pestaña estaba activa. Nueve decisiones lo definen:
+**What was decided.** On closing the window and opening it again, back come **the tabs, the tree of
+panes with their weights, and for each console the width of its panel and whether it was folded**.
+It is saved in a JSON file of its own, `$XDG_CONFIG_HOME/agent-terminal/layout.json` —falling
+back to `$HOME/.config/…`—, and **nothing else**: not each console's working directory, not the size
+of the window, not which tab was active. Nine decisions define it:
 
-1. **Fichero propio, y uno solo para toda la máquina.** No una disposición por directorio de
-   lanzamiento: eso metería «el proyecto» como concepto y ninguna fase lo ha definido.
-2. **La ruta tiene que ser absoluta, o no se persiste.** Solo se acepta una variable de entorno **no
-   vacía y absoluta**; si ninguna resuelve, **no se lee ni se escribe nada** y la ventana abre de
-   fábrica. **No hay caída a un directorio temporal**, al contrario de lo que hace el contrato del
-   panel.
-3. **Se escribe con retardo de 500 ms, contado desde el primer cambio no escrito**, no desde el último.
-   Y hacen falta **dos** referencias, con papeles distintos: el plazo se **arma** cuando la disposición
-   difiere de la **última vista** —o sea cuando algo cambia—, y al vencer se **escribe** si difiere de la
-   **última escrita con éxito**. Con una sola no funciona ninguno de los dos extremos: comparando
-   siempre contra lo último escrito, un directorio no escribible deja la diferencia puesta y la ventana
-   no se duerme nunca; y guardando el intento fallido como si hubiera salido bien, **un fallo no se
-   reintenta jamás** si la disposición no vuelve a cambiar, y se pierde todo desde la última escritura
-   buena en vez de medio segundo.
-4. **La escritura es atómica**: se escribe un temporal en el **mismo directorio** que el destino
-   —`disposicion.json.<pid>.<intento>`, para que dos instancias no se pisen el temporal, y **creado en
-   exclusiva**: si ese nombre ya existe **no se adopta**, porque el temporal es lo que se renombra
-   encima del destino y un enlace plantado ahí se escribiría a través— y se renombra encima.
-   El número de intento se añadió al implementar, y por un escenario que esta decisión no había visto:
-   **el número de proceso se recicla**. Un temporal que sobreviviera a una muerte violenta —entre crearlo
-   y renombrarlo— no lo limpia nadie, así que con el nombre dependiendo solo del proceso, **toda sesión
-   futura a la que el sistema le diera ese número se quedaría sin poder guardar nada**, para siempre y con
-   un solo aviso que quien abre desde un icono no ve. Contando los intentos, un temporal huérfano estorba
-   **un intento** y no una sesión; y no se adopta ninguno, que era el punto.
-   El destino nunca contiene un documento a medias. Permisos `0600` en el fichero y `0700` en su
-   directorio. Si el renombrado falla, se borra el temporal y se avisa **una vez por sesión y por
-   motivo**; lo que reintenta es el cambio siguiente.
-5. **Una consola restaurada estrena identidad**: `PANEL_ID` y `PANEL_DIR` nuevos, panel vacío hasta que
-   alguien publique.
-6. **Tolerancia por documento, no por campo.** Lo que no se entiende se descarta **entero** y la
-   ventana abre de fábrica —una pestaña, una consola— sin impedir el arranque.
-7. **La versión del formato es obligatoria.** Una **mayor** que la conocida **no se sobrescribe en toda
-   la sesión**. Una **conocida y más vieja** se lee con el lector de esa versión y se reescribe en la
-   nueva al primer guardado — y **retirar el soporte de una versión vieja es una decisión aparte, que se
-   escribe**. Sin esa segunda regla, un fichero de la versión anterior caería en «forma inválida» y se
-   machacaría, que es el daño exacto que la versión existe para evitar.
-8. **Dos techos y ninguno más**: **64 KiB** de fichero —porque tiene tamaño arbitrario, y leerlo sin
-   tope es reservar sin tope en el arranque— y **128 hojas** de documento, comprobadas **recorriendo el
-   árbol antes del primer `fork`**. Y **si un `fork` falla a mitad, no se instala nada**: la ventana abre
-   de fábrica, la misma atomicidad que D15 — media ventana restaurada es un estado que nadie ha
-   diseñado. En el documento, **hoja y rama llevan etiqueta explícita** (`hoja` / `rama`), no se deducen
-   de qué clave está presente: así el fallo dice qué y dónde.
-9. **El fichero guarda geometría y nunca instrucciones.**
+1. **A file of its own, and a single one for the whole machine.** Not one layout per launch
+   directory: that would bring in «the project» as a concept and no phase has defined it.
+2. **The path has to be absolute, or nothing is persisted.** Only an environment variable that is
+   **non-empty and absolute** is accepted; if none resolves, **nothing is read and nothing is
+   written** and the window opens factory-fresh. **There is no fallback to a temporary directory**,
+   unlike what the panel contract does.
+3. **It is written with a 500 ms delay, counted from the first unwritten change**, not from the
+   last. And **two** references are needed, with different roles: the deadline is **armed** when the
+   layout differs from the **last one seen** —that is, when something changes—, and on expiring it
+   is **written** if it differs from the **last one written successfully**. With only one, neither
+   of the two ends works: comparing always against what was last written, a non-writable directory
+   leaves the difference standing and the window never falls asleep; and saving the failed attempt
+   as if it had gone well, **a failure is never retried** if the layout does not change again, and
+   everything since the last good write is lost instead of half a second.
+4. **The write is atomic**: a temporary is written in the **same directory** as the destination
+   —`layout.json.<pid>.<attempt>`, so that two instances do not tread on each other's
+   temporary, and **created exclusively**: if that name already exists it **is not adopted**,
+   because the temporary is what gets renamed over the destination and a link planted there would be
+   written through— and it is renamed over it. The attempt number was added while implementing, and
+   because of a scenario this decision had not seen: **the process number is recycled**. A temporary
+   that survived a violent death —between creating it and renaming it— is cleaned up by nobody, so
+   with the name depending only on the process, **every future session the system gave that number
+   to would be left unable to save anything**, forever and with a single warning that whoever opens
+   from an icon does not see. Counting the attempts, an orphaned temporary gets in the way of **one
+   attempt** and not of a session; and none is adopted, which was the point. The destination never
+   holds a half-written document. Permissions `0600` on the file and `0700` on its directory. If the
+   rename fails, the temporary is deleted and a warning is given **once per session and per
+   reason**; what retries is the next change.
+5. **A restored console starts a fresh identity**: new `PANEL_ID` and `PANEL_DIR`, an empty panel
+   until somebody publishes.
+6. **Tolerance per document, not per field.** What is not understood is discarded **whole** and the
+   window opens factory-fresh —one tab, one console— without preventing startup.
+7. **The format version is mandatory.** One **higher** than the known one **is not overwritten for
+   the whole session**. One that is **known and older** is read with that version's reader and
+   rewritten in the new one on the first save — and **retiring support for an old version is a
+   separate decision, and it gets written down**. Without that second rule, a file of the previous
+   version would fall into «invalid shape» and be clobbered, which is the exact damage the version
+   exists to prevent.
+8. **Two ceilings and no more**: **64 KiB** of file —because it has an arbitrary size, and reading
+   it with no cap is reserving with no cap at startup— and **128 leaves** of document, checked **by
+   walking the tree before the first `fork`**. And **if a `fork` fails halfway, nothing is
+   installed**: the window opens factory-fresh, the same atomicity as D15 — half a restored window
+   is a state nobody has designed. In the document, **leaf and branch carry an explicit label**
+   (`hoja` / `rama`), they are not deduced from which key is present: that way the failure says what
+   and where.
+9. **The file saves geometry and never instructions.**
 
-**Por qué.** Hoy la ventana abre siempre igual, así que todo el trabajo de F2.1 a F2.4 —pestañas por
-contexto, las divisiones que quieras colocadas como quieras, cada panel con su ancho— **se pierde en
-cada cierre**, y colocar la ventana es un gesto que hay que repetir cada mañana.
+**Why.** Today the window always opens the same, so all the work of F2.1 to F2.4 —tabs per context,
+as many panes as you like placed as you like, each panel with its own width— **is lost on every
+close**, and arranging the window is a gesture that has to be repeated every morning.
 
-Y las decisiones de arriba no son gustos. Cada una tiene detrás algo ya medido en este proyecto:
+And the decisions above are not tastes. Each one has something already measured in this project
+behind it:
 
-- **El retardo son 500 ms, y el número no es al azar**: es el mismo que el respiro con el que la ventana
-  relee los paneles cuando el vigilante se ha quedado ciego, que ya está en el código. Con él, un
-  arrastre continuo escribe **dos veces por segundo** en vez de sesenta, y lo que se pierde al morir
-  —medio segundo de gesto— no se nota.
-- **El retardo se cuenta desde el primer cambio y no desde el último porque, contado desde el último,
-  no escribe nunca mientras el usuario arrastra.** La disposición cambia **una y otra vez mientras el
-  botón sigue apretado**: mover una frontera reparte pesos en cuanto el puntero se mueve, y la del
-  panel en cuanto cruza una celda —su ancho se cuenta en celdas enteras, así que no cambia en cada
-  fotograma, pero sí muchas veces por gesto—. Rearmar el plazo en cada cambio lo empuja mientras el
-  gesto dure: uno de diez segundos se pierde entero. Contado desde el primero, ese mismo gesto escribe
-  una vez por retardo.
-- **La escritura es atómica porque no existe un cierre limpio garantizado.** La aplicación se cierra
-  por el gestor de ventanas o por señal, y **cerrar una consola congela la ventana 50,7 ms de mediana**
-  —una pestaña de dos consolas, unos 101 ms; y **404 ms esa misma consola** si el programa de dentro
-  ignora la señal de cuelgue— y puede colgarla
-  ([#62](https://github.com/mashware/agent-terminal/issues/62)). Guardar solo al salir habría
-  perdido la sesión entera en el caso normal.
-- **La identidad es nueva porque conservarla sería deducir el estado.** Un panel restaurado con el
-  `panel.json` de ayer pintaría **como actual** el último estado de un agente que ya no existe:
-  «compilando» de una compilación que murió anoche. La app no deduce el estado (**D6**), y esto sería
-  deducirlo por omisión.
-- **La tolerancia es por documento porque este fichero lo escribe siempre la aplicación.** Es lo
-  contrario de lo que hace el contrato del panel, y a propósito: aquel lo escribe un tercero a mano y
-  perder el panel entero por un campo que nadie mira sería lo peor posible; aquí **adivinar media
-  disposición es peor que no restaurarla**.
-- **La versión entra el primer día porque el fichero congela la forma del árbol en disco.** Sin ella,
-  el primer cambio de forma mete al fichero viejo en el mismo cajón que al corrupto y **lo borra en
-  silencio**. Sube solo con lo que un lector viejo malinterpretaría; añadir una clave opcional no la
-  sube. Y una versión mayor no se sobrescribe porque tener dos binarios en la máquina no es raro, y
-  machacar el fichero sería que el viejo se lleve por delante la disposición del nuevo.
-- **El techo de hojas existe aunque D14 descartara un techo al número de divisiones, y no la
-  contradice.** Partir exige un gesto humano y **la geometría se niega antes de crear nada**; restaurar
-  bifurca N shells **antes de que exista geometría** —al abrir no se sabe el tamaño de la ventana—. El
-  suelo que protege a partir está **aguas abajo del `fork`**. Es techo **del documento**, no de
-  divisiones.
-- **Y el techo de hojas no se deriva de una geometría concreta**, porque no la hay: sale de que el
-  techo de bytes deja pasar **del orden de un millar de hojas** —entre seiscientas y mil según lo
-  compacto que venga el documento—, y **el número se elige contra el recurso que el techo guarda, no
-  contra lo que cabe en pantalla**. Cada hoja restaurada es un proceso, un pseudoterminal, sus
-  descriptores y ~1,06 MiB de colas: mil hojas serían más de un gigabyte de colas **antes de que exista
-  geometría**, o sea el techo convertido en el desastre que venía a evitar. **128 hojas** son unos 136
-  MiB, un número acotado y declarado, y siguen estando por encima de las **del orden de cien consolas**
-  que caben en la ventana con la que se mide —siete columnas de veinte celdas por quince filas de tres,
-  con el cuerpo de 14—, que es la única ventana de la que este proyecto tiene un tamaño escrito. **No se
-  publica una cifra exacta de hojas por byte a propósito**: depende de la
-  forma del documento, no de su tamaño.
-- **El fichero no guarda instrucciones porque ahí está la frontera de lo sensible.** El lanzamiento de
-  una consola deja de ser inofensivo «en cuanto el programa o sus argumentos procedan de
-  **configuración**», y este fichero es configuración. Guarda geometría; el tipo con el que se lee **no
-  tiene ni un campo de texto libre**, y restaurar llama al constructor que lanza el shell del usuario,
-  nunca al que acepta un programa por parámetro. El día que algo de eso cambie, hay que revisar el
-  lanzamiento como superficie sensible y tratarlo como un `panel.json` ajeno.
+- **The delay is 500 ms, and the number is not at random**: it is the same as the breather with
+  which the window rereads the panels when the watcher has gone blind, which is already in the code.
+  With it, a continuous drag writes **twice a second** instead of sixty, and what is lost on dying
+  —half a second of gesture— is not noticed.
+- **The delay is counted from the first change and not from the last because, counted from the last,
+  it never writes while the user drags.** The layout changes **over and over while the button is
+  still held down**: moving a divider shares out weights as soon as the pointer moves, and the
+  panel's border as soon as it crosses a cell —its width is counted in whole cells, so it does not
+  change on every frame, but it does many times per gesture—. Rearming the deadline on every change
+  pushes it for as long as the gesture lasts: a ten-second one is lost entirely. Counted from the
+  first, that same gesture writes once per delay.
+- **The write is atomic because there is no guaranteed clean shutdown.** The application is closed
+  by the window manager or by a signal, and **closing one console freezes the window for a median of
+  50.7 ms** —a tab of two consoles, around 101 ms; and **404 ms that same console** if the program
+  inside ignores the hang-up signal— and it can hang it
+  ([#62](https://github.com/mashware/agent-terminal/issues/62)). Saving only on the way out would
+  have lost the whole session in the normal case.
+- **The identity is new because keeping it would be deducing the state.** A panel restored with
+  yesterday's `panel.json` would paint **as current** the last state of an agent that no longer
+  exists: «compiling» from a build that died last night. The app does not deduce the state (**D6**),
+  and this would be deducing it by omission.
+- **Tolerance is per document because this file is always written by the application.** It is the
+  opposite of what the panel contract does, and on purpose: that one is written by a third party by
+  hand and losing the whole panel over a field nobody looks at would be the worst possible thing;
+  here **guessing half a layout is worse than not restoring it**.
+- **The version goes in on day one because the file freezes the shape of the tree on disk.** Without
+  it, the first change of shape puts the old file in the same drawer as the corrupt one and
+  **deletes it in silence**. It only goes up with what an old reader would misinterpret; adding an
+  optional key does not raise it. And a higher version is not overwritten because having two
+  binaries on the machine is not unusual, and clobbering the file would mean the old one taking the
+  new one's layout with it.
+- **The leaf ceiling exists even though D14 discarded a ceiling on the number of panes, and it does
+  not contradict it.** Splitting demands a human gesture and **the geometry refuses before creating
+  anything**; restoring forks N shells **before any geometry exists** —on opening, the size of the
+  window is not known—. The floor that protects splitting is **downstream of the `fork`**. It is a
+  ceiling **on the document**, not on panes.
+- **And the leaf ceiling is not derived from any particular geometry**, because there is none: it
+  comes from the byte ceiling letting **on the order of a thousand leaves** through —between six
+  hundred and a thousand depending on how compact the document comes—, and **the number is chosen
+  against the resource the ceiling guards, not against what fits on screen**. Every restored leaf is
+  a process, a pseudoterminal, its descriptors and ~1.06 MiB of queues: a thousand leaves would be
+  more than a gigabyte of queues **before any geometry exists**, that is, the ceiling turned into
+  the disaster it came to prevent. **128 leaves** are some 136 MiB, a bounded and declared number,
+  and they are still above the **order of a hundred consoles** that fit in the window used for
+  measuring —seven columns of twenty cells by fifteen rows of three, with a body of 14—, which is
+  the only window this project has a written size for. **No exact figure of leaves per byte is
+  published, and that is on purpose**: it depends on the shape of the document, not on its size.
+- **The file does not save instructions because that is where the sensitive boundary lies.**
+  Launching a console stops being harmless «as soon as the program or its arguments come from
+  **configuration**», and this file is configuration. It saves geometry; the type it is read into
+  **does not have a single free-text field**, and restoring calls the constructor that launches the
+  user's shell, never the one that takes a program by parameter. The day any of that changes,
+  launching has to be reviewed as a sensitive surface and treated like a `panel.json` of foreign
+  origin.
 
-**Lo que se descartó, y por qué:**
+**What was discarded, and why:**
 
-- **El almacén de persistencia que trae el framework de interfaz.** Cede **la ruta del fichero y la
-  cadencia del guardado** —las dos cosas que este hito decide— y mete el estado del producto dentro de
-  la pieza que **D3** declara sustituible. Además exigiría **activar una funcionalidad que hoy no está
-  pedida** —no viene de serie— y que arrastra al árbol un formato de serialización y un resolutor de
-  directorios que nada más necesita.
-- **Guardar el registro de gestos que construyó el árbol** en vez del árbol. Tentador porque las
-  operaciones ya rechazan lo que no cabe, así que validar saldría gratis. **No cubre la mitad del
-  hito**: el ancho y el plegado del panel no nacen de partir ni de mover, viven en la consola
-  (**D10**), así que el espejo por consola hace falta igual.
-- **Tolerancia por campo**, por lo dicho arriba.
-- **Un techo de profundidad del árbol.** El intérprete de JSON ya corta en 128 niveles, y **la opción
-  que desactiva ese corte no está pedida en ningún manifiesto del repo**, así que un techo propio
-  **pasaría su prueba por construcción** — el disfraz que este proyecto ya tiene fichado. Y con la invariante «una rama tiene
-  dos hijos o más», el techo de 128 hojas ya acota profundidad, nodos, pestañas e hijos por rama: **un
-  número hace los cuatro trabajos**.
-- **Un tope al ancho de panel leído.** El reparto ya lo recorta y hay prueba que lo ata.
-- **Una guarda contra el valor sin número en los pesos.** JSON no tiene literal para él, y el tipo del
-  peso ya rechaza lo no finito y lo no positivo, así que **la suma cero no se puede construir**.
-- **Un mínimo propio para los pesos leídos.** Lo hubo —`1e-6`— y **era un defecto, no una guarda**:
-  rechazaba disposiciones **que un gesto produce**. Arrastrar recorta la *fracción* al uno por ciento, no
-  el peso, así que lo que deja es una parte de lo que suman los dos vecinos, y esa suma encoge con cada
-  arrastre; con una fila larga se baja de `1e-6` sin esfuerzo, y **el suelo de columnas hace que en
-  pantalla no se note nada**. O sea: la ventana se veía bien, el fichero se escribía, y al reabrir se
-  descartaba entero con un aviso que quien abre desde un icono no ve. La razón por la que ese mínimo
-  existía —que el reparto multiplica dos pesos y el producto puede subdesbordar— **es cierta, y su sitio
-  es el reescalado**, no el lector: ver la corrección de D14. **El tope por arriba se queda**, porque un
-  fichero escrito a mano sí puede traer un peso que ningún gesto produce.
-- **Forzar la escritura a disco antes de renombrar.** La garantía que hace falta es «nunca se ve medio
-  fichero», y eso lo da el renombrado solo; sobrevivir a un corte de luz no lo pidió nadie, y ese
-  empujón dentro del fotograma son milisegundos en un disco ocupado.
-- **Borrar el directorio de panel de la sesión anterior.** En la rama normal vive bajo el directorio de
-  ejecución del usuario, que **el sistema vacía al cerrar sesión**, así que no hay nada que limpiar y
-  construir la limpieza sería un mecanismo sin escenario. **Donde no hay tal directorio** —macOS, o
-  Linux sin gestor de sesión— **cae al temporal del sistema, que NO se vacía**: lo dice el propio
-  destructor del tipo, que avisa precisamente por eso. Y ese destructor **no corre cuando la aplicación
-  se mata o la cierra el gestor de ventanas**, que es el modo de cierre en el que esta decisión se apoya
-  más arriba. Así que en esa rama **se acumulan directorios vacíos**, y eso va escrito abajo como límite
-  en vez de taparse con una limpieza que la rama normal no necesita.
-- **Una variable de entorno propia para que las tandas de medida no toquen el fichero real.** Basta con
-  que el guion apunte la variable del directorio de configuración al de la corrida: nada más en el
-  código la lee. Una variable menos y un contrato menos.
-- **Guardar el tamaño y la posición de la ventana.** Restaurarlos devolvería el tamaño a algo que
-  cambia entre sesiones, y de ahí salieron **tres rejillas distintas el mismo día**, que es lo que hace
-  incomparables las medidas de las que vive D3. Conviene no confundirlo con lo que ya pasa: **hoy no
-  hay tamaño por defecto** —si nadie lo pide, lo elige el escritorio—, y los 1280×800 son de la tanda
-  de medida, no del arranque.
-- **Guardar el directorio de trabajo de cada consola.** Saber dónde está un proceso hijo se lee del
-  sistema de ficheros virtual de Linux y no existe igual en macOS ni Windows: adelantaría trabajo de
-  F2.7 o abriría una vía por plataforma. Y sería **una ruta del fichero que acaba en el lanzamiento**,
-  o sea la línea de arriba.
-- **Guardar qué pestaña estaba activa y qué consola tenía el foco.** Abre en la primera.
+- **The persistence store the interface framework brings.** It gives away **the path of the file and
+  the cadence of the saving** —the two things this milestone decides— and puts the product's state
+  inside the piece **D3** declares replaceable. It would also require **turning on a feature that is
+  not asked for today** —it does not come as standard— and that drags into the tree a serialization
+  format and a directory resolver nothing else needs.
+- **Saving the log of gestures that built the tree** instead of the tree. Tempting because the
+  operations already reject what does not fit, so validating would come out free. **It does not
+  cover half the milestone**: the panel's width and folding are not born of splitting or of moving,
+  they live in the console (**D10**), so the per-console mirror is needed all the same.
+- **Tolerance per field**, for what is said above.
+- **A ceiling on the tree's depth.** The JSON interpreter already cuts off at 128 levels, and **the
+  option that turns that cut-off off is not asked for in any manifest of the repo**, so a ceiling of
+  our own **would pass its test by construction** — the disguise this project already has on file.
+  And with the invariant «a branch has two children or more», the ceiling of 128 leaves already
+  bounds depth, nodes, tabs and children per branch: **one number does all four jobs**.
+- **A cap on the panel width read in.** The tiling already clips it and there is a test that pins it
+  down.
+- **A guard against the not-a-number value in the weights.** JSON has no literal for it, and the
+  weight's type already rejects the non-finite and the non-positive, so **a zero sum cannot be
+  constructed**.
+- **A minimum of our own for the weights read in.** There was one —`1e-6`— and **it was a defect,
+  not a guard**: it rejected layouts **that a gesture produces**. Dragging clips the *fraction* at
+  one per cent, not the weight, so what it leaves is a part of what the two neighbors add up to, and
+  that sum shrinks with every drag; with a long row you go below `1e-6` without effort, and **the
+  column floor means nothing shows on screen**. That is: the window looked fine, the file was
+  written, and on reopening it was discarded whole with a warning that whoever opens from an icon
+  does not see. The reason that minimum existed —that the tiling multiplies two weights and the
+  product can underflow— **is true, and its place is the rescaling**, not the reader: see D14's
+  correction. **The cap from above stays**, because a hand-written file can indeed bring a weight no
+  gesture produces.
+- **Forcing the write to disk before renaming.** The guarantee that is needed is «half a file is
+  never seen», and the rename gives that on its own; surviving a power cut was asked for by nobody,
+  and that push inside the frame is milliseconds on a busy disk.
+- **Deleting the previous session's panel directory.** On the normal branch it lives under the
+  user's runtime directory, which **the system empties on logging out**, so there is nothing to
+  clean up and building the cleanup would be a mechanism with no scenario. **Where there is no such
+  directory** —macOS, or Linux without a session manager— **it falls back to the system's temporary,
+  which is NOT emptied**: the type's own destructor says so, and it warns precisely because of that.
+  And that destructor **does not run when the application is killed or closed by the window
+  manager**, which is the shutdown mode this decision leans on further up. So on that branch **empty
+  directories pile up**, and that goes written below as a limit instead of being papered over with a
+  cleanup the normal branch does not need.
+- **An environment variable of our own so that the measurement batches do not touch the real file.**
+  It is enough for the script to point the configuration directory variable at the run's own:
+  nothing else in the code reads it. One variable fewer and one contract fewer.
+- **Saving the size and the position of the window.** Restoring them would hand the size back to
+  something that changes between sessions, and out of that came **three different grids on the same
+  day**, which is what makes incomparable the measurements D3 lives off. It is worth not confusing
+  it with what already happens: **today there is no default size** —if nobody asks for one, the
+  desktop chooses it—, and the 1280×800 belongs to the measurement batch, not to startup.
+- **Saving each console's working directory.** Knowing where a child process is, is read from
+  Linux's virtual file system and does not exist the same way on macOS or on Windows: it would bring
+  forward F2.7's work or open up one path per platform. And it would be **a route out of the file
+  that ends up at the launch**, that is, the line above.
+- **Saving which tab was active and which console had the focus.** It opens on the first one.
 
-**Lo que el hito añade al informe de medida, y por qué se decide aquí y no al implementarlo.** El coste
-del fotograma se reparte **por resta**, así que todo trabajo que no se declara se publica como coste del
-framework — la cifra exacta con la que D3 juzga a egui. Este hito abre dos caminos dentro del fotograma
-y los dos se declaran:
+**What the milestone adds to the measurement report, and why it is decided here and not while
+implementing it.** The frame's cost is shared out **by subtraction**, so all work that is not
+declared is published as the framework's cost — the exact figure D3 judges egui by. This milestone
+opens two paths inside the frame and both of them are declared:
 
-- **Comparar el espejo de la ventana con lo último escrito**, que corre **en cada pasada de interfaz y
-  sobre la ventana entera**.
-- **Escribir el fichero** cuando vence el plazo. Su cronómetro abarca **desde copiar la disposición hasta
-  que el renombrado vuelve** —o hasta que el temporal queda borrado, si falló—: la copia, la validación y
-  la serialización van dentro, no solo la llamada de escribir. **Se precisó al implementar**, porque el
-  texto anterior decía «desde resolver la ruta» y con cien consolas la copia y el recorrido de validación
-  pueden dominar la muestra: un tramo mal delimitado se acaba atribuyendo al disco.
-- Y el reparto entre los dos: **lo que no llega a tocar el disco no es una escritura**. Un plazo que vence
-  sin nada nuevo que guardar, y una disposición que el formato no admite, se cuentan en el tramo del
-  espejo, que es lo que son —comparar y validar—. Así el tramo de la escritura describe **solo** lo que
-  cuesta escribir, y el informe puede publicar «tantas escrituras de tantos intentos» sin mezclar.
+- **Comparing the window's mirror with what was last written**, which runs **on every interface pass
+  and over the whole window**.
+- **Writing the file** when the deadline expires. Its stopwatch covers **from copying the layout
+  until the rename returns** —or until the temporary is deleted, if it failed—: the copy, the
+  validation and the serialization go inside, not just the call that writes. **It was made precise
+  while implementing**, because the earlier text said «from resolving the path» and with a hundred
+  consoles the copy and the validation walk can dominate the sample: a badly delimited span ends up
+  attributed to the disk.
+- And the apportionment between the two: **what never reaches the disk is not a write**. A deadline
+  that expires with nothing new to save, and a layout the format does not admit, are counted in the
+  mirror's span, which is what they are —comparing and validating—. That way the write's span
+  describes **only** what writing costs, and the report can publish «so many writes out of so many
+  attempts» without mixing.
 
-**Y cada uno necesita DOS cosas, no una, porque restar y publicar son mecanismos distintos.** El resto
-del fotograma se calcula restándole a lo que costó entero **lo que los tramos declararon**, y lo que
-alimenta esa resta son los tramos de cada división más el acumulador de la ventana. **Una serie solo
-guarda muestras para imprimirlas: no resta nada.** Así que un tramo con serie y sin acumulador queda
-publicado y **sin descontar** —su coste sigue apareciendo como coste del framework—, y un tramo en el
-acumulador y sin serie queda descontado y **sin ninguna fila que auditar**. Los dos caminos nuevos
-entran **en el acumulador y además con serie propia**.
+**And each one needs TWO things, not one, because subtracting and publishing are different
+mechanisms.** The rest of the frame is worked out by subtracting from what it cost as a whole **what
+the spans declared**, and what feeds that subtraction is each pane's spans plus the window's
+accumulator. **A series only keeps samples in order to print them: it subtracts nothing.** So a span
+with a series and no accumulator ends up published and **undiscounted** —its cost still shows up as
+the framework's cost—, and a span in the accumulator and with no series ends up discounted and
+**with no row to audit**. The two new paths go **into the accumulator and, on top of that, with a
+series of their own**.
 
-**Y el precedente del tramo del panel no se hereda, conviene decirlo:** ese viaja **dentro de los tramos
-de una división**, que es un campo por división; el espejo es de **la ventana entera** y no tiene ese
-vehículo. Quien lea «como el panel» hará lo que hizo el panel y se quedará sin la resta.
+**And the precedent of the panel's span is not inherited, and it is worth saying so:** that one
+travels **inside a pane's spans**, which is a field per pane; the mirror is of **the whole window**
+and does not have that vehicle. Whoever reads «like the panel» will do what the panel did and will
+be left without the subtraction.
 
-**El del espejo, además, acumula por pasada y anota una sola muestra al cerrar el fotograma**: anotarla
-por pasada mete dos muestras en el fotograma que egui repite, y entonces la media describe «por pasada»
-y no «por fotograma».
+**The mirror's, moreover, accumulates per pass and records a single sample when the frame closes**:
+recording it per pass puts two samples into the frame egui repeats, and then the mean describes «per
+pass» and not «per frame».
 
-Y **leer el fichero al arrancar no entra en ningún fotograma**, a propósito: se interpreta antes de que
-la ventana exista. No hay tramo que declarar porque no hay coste que atribuir.
+And **reading the file at startup does not go into any frame**, on purpose: it is interpreted before
+the window exists. There is no span to declare because there is no cost to attribute.
 
-**Y la tanda tiene que poder delatarse, con el reparto que este proyecto ya usa: el informe declara, el
-guion invalida.** El **informe** publica cuántas veces se escribió el fichero —ese número vive dentro
-del proceso y el guion no puede saberlo—, y el **guion** invalida la corrida si no se escribió ninguna,
-igual que ya invalida la que no publicó ningún panel o la que no completó ningún arrastre: sin ese
-número, una serie vacía se lee como «esto no cuesta nada». El guion apunta además el directorio de
-configuración **al de la corrida y lo borra al empezar cada una**, o la corrida siguiente arranca con la
-disposición que dejó la anterior. Y **lo que la tanda pide explícitamente manda sobre lo que se
-restauró**: si la corrida pide dos pestañas y cuatro divisiones, eso es lo que abre, aunque el fichero
-diga otra cosa.
+**And the batch has to be able to give itself away, with the sharing out this project already uses:
+the report declares, the script invalidates.** The **report** publishes how many times the file was
+written —that number lives inside the process and the script cannot know it—, and the **script**
+invalidates the run if none was written, just as it already invalidates the one that published no
+panel or the one that completed no drag: without that number, an empty series reads as «this costs
+nothing». The script also points the configuration directory **at the run's own and deletes it at
+the start of each one**, or the next run starts with the layout the previous one left. And **what
+the batch asks for explicitly rules over what was restored**: if the run asks for two tabs and four
+panes, that is what it opens, even if the file says otherwise.
 
-**Dos consecuencias de eso, y las dos hay que escribirlas porque si no se descubren tarde:**
+**Two consequences of that, and both have to be written down because otherwise they are discovered
+late:**
 
-- **El plazo del guardado es una razón nueva para que la ventana despierte**, y eso cambia **cuántos
-  fotogramas tiene una corrida**. El anexo de D15 ya avisa de que una tanda con más fotogramas **no
-  compara sus medias por fotograma**; este hito reintroduce ese mismo confundido, así que se declara en
-  el anexo en vez de descubrirse leyéndolo.
-- **Con las dos reglas de arriba juntas, ninguna corrida restaura nada** —se borra el directorio, y lo
-  que la tanda pide manda—, así que **el camino más caro que añade el hito quedaría excluido de la medida
-  por construcción**. Hace falta **una tanda propia** que escriba un fichero de disposición conocido
-  **antes** de abrir y lance **sin pedir pestañas ni divisiones**, para que gane el fichero, y cuyo
-  informe declare **cuántas consolas se restauraron** y lo que costó restaurarlas. Sin ella, «el coste de
-  bifurcar N consolas ya está pagado» es una afirmación que **ninguna corrida sostiene**.
+- **The saving deadline is a new reason for the window to wake up**, and that changes **how many
+  frames a run has**. D15's annex already warns that a batch with more frames **does not compare its
+  per-frame means**; this milestone reintroduces that same confounder, so it is declared in the
+  annex instead of being discovered by reading it.
+- **With the two rules above put together, no run restores anything** —the directory is deleted, and
+  what the batch asks for rules—, so **the most expensive path the milestone adds would be excluded
+  from the measurement by construction**. A **batch of its own** is needed, one that writes a known
+  layout file **before** opening and launches **without asking for tabs or panes**, so that the file
+  wins, and whose report declares **how many consoles were restored** and what restoring them cost.
+  Without it, «the cost of forking N consoles is already paid» is a claim **no run supports**.
 
-**Seis límites aceptados, escritos porque ninguno se mitiga y todos se descubren usándolo:**
+**Six accepted limits, written down because none of them is mitigated and all of them are discovered
+by using it:**
 
-- **Un fallo de escritura solo se reintenta con el cambio siguiente, no con el tiempo.** Es la cara buena
-  de las dos referencias —lo que reintenta es el cambio, así que la ventana no se queda despierta
-  reintentando ni hace falta inventar una espera—, y su precio: si el disco falla a las diez y el usuario
-  **no vuelve a mover nada**, la colocación de ese día no llega nunca al fichero. Lo dice una línea por la
-  salida de error, que quien abre desde un icono no ve.
+- **A write failure is only retried with the next change, not with time.** It is the good side of
+  the two references —what retries is the change, so the window does not stay awake retrying and
+  there is no need to invent a wait—, and its price: if the disk fails at ten and the user **does
+  not move anything again**, that day's arrangement never reaches the file. A line on the error
+  output says so, which whoever opens from an icon does not see.
 
-- **Dos instancias abiertas se machacan la disposición**: la última que guarde se lleva el fichero. Es
-  consecuencia directa de que la disposición sea una y global, y ponerle un cerrojo entre procesos
-  sería un mecanismo mayor que el hito.
-- **Restaurar no revalida la geometría.** Un árbol guardado en una pantalla grande y abierto en una
-  pequeña deja consolas apretadas por debajo de sus mínimos. Se acepta porque la alternativa
-  —revalidar y caer a fábrica— **tiraría la disposición del usuario por abrir el portátil sin el
-  monitor**, que es peor producto; y hay atenuante ya construido: **el que cede es el panel** (D10), así
-  que la consola conserva su suelo mientras el panel tenga algo que dar.
-- **Quien abre la aplicación desde un icono del escritorio no ve la salida de error**, así que para él
-  todos los fallos de lectura son silenciosos. Es carencia aceptada: F2.5 no estrena interfaz, y es la
-  razón de no ampliar el conjunto de fallos más allá de lo que cabe en una línea.
-- **Cada consola vuelve en el directorio desde el que se lanzó la aplicación, no donde estaba.** Es lo
-  primero que nota cualquiera: con cuatro consolas en cuatro repositorios vuelve el árbol exacto y los
-  anchos exactos, y cuatro shells en el sitio equivocado. Y la razón de dejarlo fuera **no** es que
-  adelantaría otro hito: es que **saber dónde está un proceso hijo se lee de una interfaz que solo
-  existe en Linux**, así que hacerlo crearía trabajo por plataforma — que es precisamente lo que F2.7
-  existe para acotar. Y sería además **una ruta que sale del fichero y acaba en el lanzamiento**, o sea
-  la línea de arriba.
-- **En una máquina sin directorio de ejecución de sesión** —macOS, o Linux sin gestor— **los directorios
-  de panel se acumulan**: ahí el respaldo es el temporal del sistema, que no se vacía, y el destructor
-  que los borra no corre cuando la aplicación se mata o la cierra el gestor de ventanas. Con identidad
-  nueva por consola restaurada, son tantos directorios vacíos como consolas por arranque. No se mitiga
-  aquí porque en la rama normal no hay nada que mitigar, y una limpieza propia sería un mecanismo sin
-  escenario en el 99 % de los casos.
+- **Two open instances clobber each other's layout**: the last one to save takes the file. It is a
+  direct consequence of the layout being one and global, and putting a lock between processes on it
+  would be a mechanism bigger than the milestone.
+- **Restoring does not revalidate the geometry.** A tree saved on a big screen and opened on a small
+  one leaves consoles squeezed below their minimums. It is accepted because the alternative
+  —revalidating and falling back to factory— **would throw away the user's layout for opening the
+  laptop without the monitor**, which is a worse product; and there is a mitigating factor already
+  built: **the one that gives way is the panel** (D10), so the console keeps its floor for as long
+  as the panel has something to give.
+- **Whoever opens the application from a desktop icon does not see the error output**, so for them
+  every read failure is silent. It is an accepted shortcoming: F2.5 does not premiere any interface,
+  and it is the reason not to widen the set of failures beyond what fits on one line.
+- **Every console comes back in the directory the application was launched from, not where it was.**
+  It is the first thing anyone notices: with four consoles in four repositories the exact tree and
+  the exact widths come back, and four shells in the wrong place. And the reason for leaving it out
+  is **not** that it would bring forward another milestone: it is that **knowing where a child
+  process is, is read from an interface that only exists on Linux**, so doing it would create work
+  per platform — which is precisely what F2.7 exists to bound. And it would also be **a route that
+  leaves the file and ends up at the launch**, that is, the line above.
+- **On a machine with no session runtime directory** —macOS, or Linux without a manager— **the panel
+  directories pile up**: there the fallback is the system's temporary, which is not emptied, and the
+  destructor that deletes them does not run when the application is killed or closed by the window
+  manager. With a fresh identity per restored console, there are as many empty directories as
+  consoles per startup. It is not mitigated here because on the normal branch there is nothing to
+  mitigate, and a cleanup of our own would be a mechanism with no scenario in 99 % of cases.
 
-### Medido — 24 agosto 2026: lo que cuesta abrir con las consolas que dejaste
+### Measured — 24 August 2026: what it costs to open with the consoles you left
 
-**La tanda `L`**, que es la que este hito añade y la única que recorre el arranque restaurado: siembra un
-fichero de disposición conocido —una pestaña con **cuatro consolas en fila**— y lanza **sin pedir
-pestañas ni divisiones**, para que mande el fichero. **Su control es `H`**, que abre esas mismas cuatro
-pidiéndolas, y se tomó **el mismo día y con el mismo binario**: las cifras de `H` del anexo de D14 son de
-agosto y de otro binario, así que compararse con ellas mezclaría el coste de restaurar con todo lo que ha
-cambiado desde entonces. Las cuatro corridas publican la **misma rejilla** —49×20 por consola— que es lo
-que las hace comparables.
+**Batch `L`**, which is the one this milestone adds and the only one that walks the restored
+startup: it seeds a known layout file —one tab with **four consoles in a row**— and launches
+**without asking for tabs or panes**, so that the file rules. **Its control is `H`**, which opens
+those same four by asking for them, and it was taken **on the same day and with the same binary**:
+the `H` figures of D14's annex are from August and from another binary, so comparing against them
+would mix the cost of restoring with everything that has changed since then. The four runs publish
+the **same grid** —49×20 per console— which is what makes them comparable.
 
-| | **L** — restaurada | **L** (2.ª) | **H** — pedida | **H** (2.ª) |
+| | **L** — restored | **L** (2nd) | **H** — asked for | **H** (2nd) |
 |---|---|---|---|---|
-| Consolas restauradas del fichero | **4** | **4** | — | — |
-| — leer el fichero, interpretarlo y validarlo | **35,1 µs** | **35,2 µs** | — | — |
-| — abrir la ventana con ellas | **5,261 ms** | **5,506 ms** | — | — |
-| Vuelta completa (división 0) | 49,4 ms | 47,2 | 57,6 | 45,7 |
-| **el resto del fotograma** | **401 µs · 393 fot.** | **379 · 410** | **461 · 403** | **370 · 410** |
-| mirar si la disposición cambió | 652 ns | 688 | 920 | 659 |
+| Consoles restored from the file | **4** | **4** | — | — |
+| — reading the file, interpreting it and validating it | **35.1 µs** | **35.2 µs** | — | — |
+| — opening the window with them | **5.261 ms** | **5.506 ms** | — | — |
+| Full round trip (pane 0) | 49.4 ms | 47.2 | 57.6 | 45.7 |
+| **the rest of the frame** | **401 µs · 393 fr.** | **379 · 410** | **461 · 403** | **370 · 410** |
+| checking whether the layout changed | 652 ns | 688 | 920 | 659 |
 
-**Las tres cosas que esto prueba:**
+**The three things this proves:**
 
-1. **Restaurar cuesta 5,42 ms una sola vez, y ocurre entero antes del primer fotograma.** De ahí,
-   **35 µs** son leer el fichero —el **0,65 %**— y el resto es abrir la ventana con esas consolas:
-   **1,35 ms por consola**. Ese segundo tramo **no es solo el `fork` y el `exec`**: incluye armar el
-   vigilante del directorio de cada consola y describir el árbol entero para el primer espejo, que son
-   los otros dos trabajos que crecen con el número de consolas.
-2. **No deja ningún rastro en el fotograma, y ésa era la pregunta.** El «resto del fotograma» —la cifra
-   con la que D3 juzga a egui— sale **401 y 379 µs** restaurando y **461 y 370 µs** pidiendo: los mismos
-   números, con los dos rangos solapados. El tramo del espejo tampoco se mueve (652-920 ns en las
-   cuatro). Es lo que el diseño afirmaba sin medirlo, y ahora lo sostiene una corrida.
-3. **El informe declara de dónde salieron las consolas**, y el guion **invalida la corrida** si no lo
-   dice. Sin esa línea, una tanda en la que el fichero no llegara a mandar publicaría la ventana de
-   fábrica bajo etiqueta de restaurada: mismo número de consolas, misma rejilla, y ninguna guarda
-   saltando. Es el mismo disfraz que el testigo evita con los paneles y la cuenta de efectos con los
-   gestos. **Y el comparador también la mira**, porque `L` y `H` son idénticas en geometría por
-   construcción: sin ese dato daba luz verde a promediar una con otra.
+1. **Restoring costs 5.42 ms once and only once, and it happens entirely before the first frame.**
+   Of that, **35 µs** are reading the file —**0.65 %**— and the rest is opening the window with
+   those consoles: **1.35 ms per console**. That second span **is not just the `fork` and the
+   `exec`**: it includes arming each console's directory watcher and describing the whole tree for
+   the first mirror, which are the other two jobs that grow with the number of consoles.
+2. **It leaves no trace at all in the frame, and that was the question.** The «rest of the frame»
+   —the figure D3 judges egui by— comes out at **401 and 379 µs** restoring and **461 and 370 µs**
+   asking for: the same numbers, with the two ranges overlapping. The mirror's span does not move
+   either (652-920 ns in all four). It is what the design claimed without measuring it, and now a
+   run supports it.
+3. **The report declares where the consoles came from**, and the script **invalidates the run** if
+   it does not say so. Without that line, a batch in which the file never got to rule would publish
+   the factory-fresh window under the label of a restored one: the same number of consoles, the same
+   grid, and not one guard going off. It is the same disguise the witness prevents with the panels
+   and the count of effects with the gestures. **And the comparator looks at it too**, because `L`
+   and `H` are identical in geometry by construction: without that datum it gave the green light to
+   averaging one with the other.
 
-**Y tres avisos para quien vuelva a estas cifras:**
+**And three warnings for whoever comes back to these figures:**
 
-- **La primera versión de este anexo publicó 4,45 ms, y estaba mal etiquetada.** El cronómetro se
-  paraba cuando los procesos existían, no cuando la ventana estaba construida, así que dejaba fuera el
-  vigilante de cada consola y el recorrido del árbol — **dos trabajos que crecen con N**, dentro de un
-  número que dice medir justo eso. Lo cazó una revisión, y la diferencia es del **15 %**. Queda escrito
-  porque es la regla dura del proyecto vista en directo: lo que no se declara se publica como coste de
-  otro.
-- **La vuelta completa dispersa mucho entre corridas de la misma tanda** —49,4 contra 47,2 en `L`, 57,6
-  contra 45,7 en `H`— y **la dispersión es de la máquina, no del hito**: aparece igual en las dos tandas.
-  Lo que sí se puede leer es la **comparación entre tandas de la misma pareja**, que es para lo que están.
-- **Una corrida de `H` se descartó por contaminada**, y conviene saber cómo se cazó: publicaba **5,7 s**
-  de media en la cola con un percentil 95 de 76 ms —una sola muestra dispara la media— y su informe
-  traía una sección de **latencia de teclado** que las otras no tienen. Alguien pulsó una tecla mientras
-  corría. Es el aviso de «no toques la máquina» convertido en algo que se puede comprobar después: **si
-  el informe habla de teclado, la corrida no vale**.
+- **The first version of this annex published 4.45 ms, and it was badly labeled.** The stopwatch
+  stopped when the processes existed, not when the window was built, so it left out each console's
+  watcher and the walk of the tree — **two jobs that grow with N**, inside a number that claims to
+  measure exactly that. A review caught it, and the difference is **15 %**. It stays written down
+  because it is the project's hard rule seen live: what is not declared is published as somebody
+  else's cost.
+- **The full round trip scatters a lot between runs of the same batch** —49.4 against 47.2 in `L`,
+  57.6 against 45.7 in `H`— and **the scatter is the machine's, not the milestone's**: it shows up
+  the same in both batches. What can be read is the **comparison between the batches of the same
+  pair**, which is what they are there for.
+- **One `H` run was discarded as contaminated**, and it is worth knowing how it was caught: it
+  published **5.7 s** of mean in the queue with a 95th percentile of 76 ms —a single sample sets the
+  mean off— and its report carried a **keyboard latency** section the others do not have. Somebody
+  pressed a key while it was running. It is the «do not touch the machine» warning turned into
+  something that can be checked afterwards: **if the report talks about the keyboard, the run is no
+  good**.
 
 ---
 
-## D17 — El contrato es el documento, no el fichero: la fuente de verdad es el estado de la app
+## D17 — The contract is the document, not the file: the source of truth is the app's state
 
-**Qué se decidió.** `panel.json` deja de ser **la** definición del contrato y pasa a ser **un
-transporte** de un documento que también puede llegar por otros. Tres partes:
+**What was decided.** `panel.json` stops being **the** definition of the contract and becomes **one
+transport** for a document that can also arrive by others. Three parts:
 
-1. **El contrato es el documento de panel** — `phase`, `lines`, marcas, estilos, caducidad. Eso es lo
-   que se versiona y lo que nadie puede romper. Dónde vive y cómo viaja es aparte.
-2. **La fuente de verdad es el estado que la app tiene por división**, no el fichero. El fichero
-   alimenta ese estado; no lo es.
-3. **Cada entrega trae una fuente y un orden.** Quién publica (`fichero`, `mcp`, y lo que venga) y un
-   número creciente por fuente. Dos productores sobre la misma división dejan de pisarse por azar.
+1. **The contract is the panel document** — `phase`, `lines`, marks, styles, expiry. That is what
+   gets versioned and what nobody may break. Where it lives and how it travels is separate.
+2. **The source of truth is the state the app holds per pane**, not the file. The file feeds that
+   state; it is not it.
+3. **Every delivery brings a source and an order.** Who publishes (`fichero`, `mcp`, and whatever
+   comes) and an increasing number per source. Two producers on the same pane stop treading on each
+   other by chance.
 
-**Por qué, y la razón no es teórica.** El plan ya tenía **dos escritores** del mismo sitio: el
-productor por fichero y el agente por `panel_set` de MCP en la Fase 3 (**D5**). Sin fuente ni orden,
-quien manda es quien escribió el último, que es la peor forma posible de decidirlo — depende de la
-planificación del sistema operativo. El síntoma no aparece hoy porque solo hay un productor real, y
-por eso conviene decidirlo ahora y no cuando muerda.
+**Why, and the reason is not theoretical.** The plan already had **two writers** of the same place:
+the file producer and the agent through MCP's `panel_set` in Phase 3 (**D5**). With no source and no
+order, whoever rules is whoever wrote last, which is the worst possible way of deciding it — it
+depends on the operating system's scheduling. The symptom does not show up today because there is
+only one real producer, and that is why it is worth deciding it now and not when it bites.
 
-**Y una razón de origen, que conviene admitir.** El primer productor fue un agente que escribe
-ficheros, y para eso el fichero es imbatible. Las tres razones que justificaban elegirlo —aislamiento
-de fallos, se lee con `cat`, cruza SSH sin protocolo propio— siguen siendo buenas, pero **ninguna
-dice por qué tiene que ser el único**. La decisión del medio se tomó con un solo tipo de productor a
-la vista.
+**And a reason of origin, which is worth admitting.** The first producer was an agent that writes
+files, and for that the file is unbeatable. The three reasons that justified choosing it —failure
+isolation, it is read with `cat`, it crosses SSH with no protocol of its own— are still good, but
+**none of them says why it has to be the only one**. The decision about the medium was taken with a
+single kind of producer in view.
 
-**Los candidatos, medidos por lo único que decide: qué tiene que hacer el productor para publicar.**
+**The candidates, measured by the only thing that decides: what the producer has to do in order to
+publish.**
 
-| | Fichero | MCP | Socket | OSC por el PTY | API HTTP |
+| | File | MCP | Socket | OSC over the PTY | HTTP API |
 |---|---|---|---|---|---|
-| Publicar desde un script | `cat >` | no | necesita cliente | `printf` | `curl` + puerto |
-| Publicar desde un agente | ya lo hace | sí, si habla MCP | no | sí | sí |
-| Cruza contenedor / SSH | solo con volumen montado | no | no | **gratis, sin configurar nada** | con red y puerto |
-| Sobrevive al productor | **gratis** | si la app lo guarda | si la app lo guarda | si la app lo guarda | si la app lo guarda |
-| Sabe quién escribe | **no, nadie** | sí, por sesión | sí, credenciales del proceso | **sí, por construcción: es su PTY** | solo si lo autenticas |
-| Avisa al productor de que su documento está roto | **no** | sí | sí | no | sí |
-| Superficie de ataque | quien escriba en el directorio | acotado por `PANEL_ID` | quien alcance el socket | **un `cat` de un fichero con secuencias publica lo que quiera** | cualquiera en la red |
+| Publishing from a script | `cat >` | no | needs a client | `printf` | `curl` + a port |
+| Publishing from an agent | already does it | yes, if it speaks MCP | no | yes | yes |
+| Crosses container / SSH | only with a mounted volume | no | no | **free, configuring nothing** | with a network and a port |
+| Survives the producer | **free** | if the app saves it | if the app saves it | if the app saves it | if the app saves it |
+| Knows who writes | **no, nobody** | yes, by session | yes, the process's credentials | **yes, by construction: it is its PTY** | only if you authenticate it |
+| Warns the producer that its document is broken | **no** | yes | yes | no | yes |
+| Attack surface | whoever writes in the directory | bounded by `PANEL_ID` | whoever reaches the socket | **a `cat` of a file with sequences publishes whatever it likes** | anyone on the network |
 
-**Lo que se decide con esa tabla:**
+**What that table decides:**
 
-- **El fichero se queda de serie**, y no por inercia: es el único donde el productor más tonto
-  posible publica sin escribir código, y el único donde el estado sobrevive a que el productor muera
-  sin que nadie programe nada. Para un contrato cuyo valor depende de que alguien publique, el listón
-  de entrada es la propiedad más importante que tiene.
-- **MCP entra en la Fase 3 entregando el mismo documento al estado de la app, sin escribir el
-  fichero.** Escribirlo sería que la app se detecte a sí misma por el vigilante, un rodeo con un
-  fotograma de retraso y sin ninguna ventaja.
-- **OSC por el PTY queda como candidato a evaluar después de F2.7**, y es el que tapa el agujero que
-  hoy no tapa nadie: un CI dentro de un `ssh` dentro de la división, sin volumen montado ni puerto.
-  Es además **el único transporte donde el acotado por división no se puede falsear**, porque llega
-  por el PTY de esa división y no por un identificador que el emisor elige. Su límite lo enseña cmux:
-  por ahí caben avisos, no cuerpos grandes ([07-panorama.md](07-panorama.md) → E6).
+- **The file stays as standard**, and not out of inertia: it is the only one where the dumbest
+  possible producer publishes without writing code, and the only one where the state survives the
+  producer dying without anybody programming anything. For a contract whose value depends on
+  somebody publishing, the entry bar is the most important property it has.
+- **MCP comes in in Phase 3 delivering the same document to the app's state, without writing the
+  file.** Writing it would mean the app detecting itself through the watcher, a detour with a frame
+  of delay and with no advantage at all.
+- **OSC over the PTY stays as a candidate to be evaluated after F2.7**, and it is the one that plugs
+  the hole nobody plugs today: a CI inside an `ssh` inside the pane, with no mounted volume and no
+  port. It is also **the only transport where the per-pane bounding cannot be faked**, because it
+  arrives over that pane's PTY and not through an identifier the sender chooses. Its limit is shown
+  by cmux: notices fit through there, not big bodies ([07-panorama.md](07-panorama.md) → E6).
 
-**Lo que se descartó, y por qué:**
+**What was discarded, and why:**
 
-- **La API HTTP.** Todo lo que aporta lo cubre otro transporte, y añade puerto, autenticación,
-  descubrimiento y una superficie de red que la tabla de seguridad de
-  [03-arquitectura.md](03-arquitectura.md) hoy no tiene. Es la única de las cinco que convierte «quien
-  escriba en tu directorio» en «cualquiera que alcance tu máquina».
-- **El socket local como transporte principal.** Es lo que hace Herdr, y su ventaja real —saber qué
-  proceso escribe— no compensa perder al productor que no puede hablarlo: un contenedor, un CI en otra
-  máquina, un `scp`. Ahí está la diferencia entre «fuera de banda» y «fuera del proceso»
-  ([07-panorama.md](07-panorama.md) → E8).
-- **Sustituir el fichero en vez de acompañarlo.** Cualquier transporte que exija un cliente sube el
-  listón de entrada, y el listón de entrada es lo que hace que el formato pueda tener productores —
-  que es la única cosa que puede convertirse en foso ([01-vision.md](01-vision.md)).
-- **Dejar la fuente de verdad en el fichero y que MCP escriba ahí.** Mantiene una sola fuente y se
-  sigue leyendo con `cat`, pero le da al agente permiso de escritura sobre el fichero de su división
-  por un camino que no pasa por el acotado de `PANEL_ID`, y hace que el estado de la app dependa de
-  que el sistema de ficheros avise a tiempo. La inspeccionabilidad se conserva de otra forma: el
-  fichero sigue siendo el transporte de serie y sigue estando ahí.
+- **The HTTP API.** Everything it brings is covered by another transport, and it adds a port,
+  authentication, discovery and a network surface that [03-arquitectura.md](03-arquitectura.md)'s
+  security table does not have today. It is the only one of the five that turns «whoever writes in
+  your directory» into «anyone who reaches your machine».
+- **The local socket as the main transport.** It is what Herdr does, and its real advantage —knowing
+  which process writes— does not make up for losing the producer that cannot speak it: a container,
+  a CI on another machine, an `scp`. That is where the difference between «out of band» and «out of
+  process» lies ([07-panorama.md](07-panorama.md) → E8).
+- **Replacing the file instead of accompanying it.** Any transport that demands a client raises the
+  entry bar, and the entry bar is what makes it possible for the format to have producers — which is
+  the only thing that can turn into a moat ([01-vision.md](01-vision.md)).
+- **Leaving the source of truth in the file and having MCP write there.** It keeps a single source
+  and it is still read with `cat`, but it gives the agent write permission over its pane's file by a
+  path that does not go through `PANEL_ID`'s bounding, and it makes the app's state depend on the
+  file system giving notice in time. Inspectability is preserved another way: the file is still the
+  standard transport and is still there.
 
-**Lo que esto NO cambia, y conviene decirlo para que nadie lo reabra por error:**
+**What this does NOT change, and it is worth saying so that nobody reopens it by mistake:**
 
-- **D6 sigue intacta.** Esto es sobre **por dónde llega** el estado, no sobre quién lo decide. Lo
-  sigue declarando quien trabaja, en su vocabulario.
-- **El documento no cambia de forma.** Un `panel.json` escrito hoy vale igual mañana.
-- **El vigilante no era el problema.** Se comprobó antes de escribir esto: la app usa **un solo
-  vigilante** para todos los directorios, no uno por división, y los límites del sistema en la máquina
-  de desarrollo son 1.024 instancias y 524.288 rutas. Vigilar ficheros no escala mal aquí, y ese
-  argumento no debe usarse contra el fichero.
+- **D6 stays intact.** This is about **which way** the state arrives, not about who decides it. It
+  is still declared by whoever does the work, in their own vocabulary.
+- **The document does not change shape.** A `panel.json` written today is just as good tomorrow.
+- **The watcher was not the problem.** It was checked before writing this: the app uses **a single
+  watcher** for all the directories, not one per pane, and the system's limits on the development
+  machine are 1 024 instances and 524 288 paths. Watching files does not scale badly here, and that
+  argument must not be used against the file.
 
-**Consecuencias, y una es trabajo pendiente:** [04-contrato-panel.md](04-contrato-panel.md) se parte
-en dos —el documento y los transportes—, la tabla de canales de **D5** deja de nombrar `panel.json`
-como si fuera el canal, y **queda por decidir cómo se expresan la fuente y el orden en el propio
-documento**: Herdr lo resuelve con `--source` y un `--seq` estrictamente creciente, y aquí no hay
-todavía ni uno ni otro. No se decide en esta entrada porque con un solo transporte vivo sería
-inventar la forma antes de tener el segundo caso delante.
+**Consequences, and one of them is pending work:** [04-contrato-panel.md](04-contrato-panel.md)
+splits in two —the document and the transports—, **D5**'s channel table stops naming `panel.json` as
+if it were the channel, and **it remains to be decided how the source and the order are expressed in
+the document itself**: Herdr solves it with `--source` and a strictly increasing `--seq`, and here
+there is neither one nor the other yet. It is not decided in this entry because with a single live
+transport it would be inventing the shape before having the second case in front of us.
 
 ---
 
-## D18 — El productor declara si su división reclama, y la app no lo deduce del cuerpo
+## D18 — The producer declares whether its pane claims, and the app does not deduce it from the body
 
-**Qué se decidió.** El documento de panel gana un campo opcional, `attention`, con tres valores:
-`wait`, `block`, `done`. Ausente significa que esa división no reclama nada. Lo escribe el productor.
+**What was decided.** The panel document gains an optional field, `attention`, with three values:
+`wait`, `block`, `done`. Absent means that pane claims nothing. The producer writes it.
 
-| Valor | Qué dice | Ejemplo |
+| Value | What it says | Example |
 |---|---|---|
-| `wait` | **te espera a ti**: una pregunta, un permiso, una decisión | «¿apruebo el diseño?» |
-| `block` | atascada por algo que no eres tú | «esperando que el contrato de otro servicio exista» |
-| `done` | terminó y nadie lo ha mirado | el ciclo acabó y el diff sigue sin revisar |
+| `wait` | **it is waiting for you**: a question, a permission, a decision | «do I approve the design?» |
+| `block` | stuck on something else, not you | «waiting for another service's contract to exist» |
+| `done` | it finished and nobody looked | the cycle ended and the diff is still unreviewed |
 
-**Y la app lo acumula hacia arriba:** división → pestaña, con `wait` ganando a `block` y `block` a
-`done`. `wait` va primero porque **es lo único que se desatasca contigo delante ahora mismo**; una
-división bloqueada por un tercero puede seguir esperando cinco minutos más.
+**And the app accumulates it upwards:** pane → tab, with `wait` beating `block` and `block` beating
+`done`. `wait` goes first because **it is the only thing that gets unstuck with you in front of it
+right now**; a pane blocked by a third party can go on waiting five minutes more.
 
-**Por qué hace falta un campo y no vale el cuerpo que ya existe.** El contrato sabe expresar
-«esperando» y «bloqueado» desde el principio — `mark: wait`, `mark: block` — pero eso son **líneas del
-cuerpo**, y el cuerpo es libre por diseño. Para pintar el indicador de una pestaña o disparar un aviso
-a partir de ahí, la app tendría que **leer el cuerpo y decidir qué significa**: que una línea con
-`block` en el medio de un resumen quiere decir que la división entera reclama. Eso es la app
-decidiendo qué significa el trabajo de otro, o sea **D6 rota por dentro**, que es la peor forma de
-romperla: sin que ningún documento diga que se rompió.
+**Why a field is needed and the body that already exists will not do.** The contract has been able
+to express «waiting» and «blocked» from the beginning — `mark: wait`, `mark: block` — but those are
+**lines of the body**, and the body is free by design. To paint a tab's indicator or fire a
+notification from that, the app would have to **read the body and decide what it means**: that a
+line with `block` in the middle of a summary means the whole pane is claiming. That is the app
+deciding what somebody else's work means, that is, **D6 broken from the inside**, which is the worst
+way to break it: without any document saying that it was broken.
 
-**Por qué esto no contradice la regla del cuerpo libre.** El campo no nombra una métrica ni un
-vocabulario de dominio: nombra **la única pregunta que la app necesita responder para navegar** —
-¿tengo que ir ahí?—. Sigue sin haber campos de coste, de contexto ni de progreso, y `phase` sigue
-siendo texto libre que se pinta literal. La app entiende de navegación; la semántica sigue siendo
-del productor.
+**Why this does not contradict the free-body rule.** The field does not name a metric or a domain
+vocabulary: it names **the only question the app needs to answer in order to navigate** — do I have
+to go there?—. There are still no fields for cost, for context or for progress, and `phase` is still
+free text painted literally. The app understands navigation; the semantics still belong to the
+producer.
 
-**Y sin el campo la app no inventa nada.** Un productor que no publique `attention` tiene el mismo
-panel que hoy y su pestaña no se marca. No hay valor por defecto deducido del cuerpo, ni de la
-`phase`, ni de la actividad de la consola. **Callar es callar**, no «esto no reclama porque no lo
-parece».
+**And without the field the app invents nothing.** A producer that does not publish `attention` has
+the same panel it has today and its tab is not marked. There is no default value deduced from the
+body, or from the `phase`, or from the console's activity. **Saying nothing is saying nothing**, not
+«this is not claiming because it does not look like it».
 
-**Por qué ahora y no en la Fase 4.** Porque desbloquea tres cosas que están escritas como pendientes
-en tres documentos distintos y todas esperaban a esta decisión: el aviso al pasar a «esperando»
-([04-contrato-panel.md](04-contrato-panel.md) → Pendiente), el indicador de una pestaña que no miras
-—hoy lo que corre en una pestaña de fondo no se anuncia de ninguna forma—, y la vista resumen de la
-Fase 4, que ordena por esto mismo. Y porque la afirmación de que **nadie más ordena por lo que te
-reclama dejó de ser cierta en agosto de 2026**: Herdr acumula agente → panel → pestaña → workspace y
-su barra lateral contesta esa pregunta mejor que la nuestra ([07-panorama.md](07-panorama.md) → E8).
+**Why now and not in Phase 4.** Because it unblocks three things that are written down as pending in
+three different documents and all of them were waiting for this decision: the notification on going
+to «waiting» ([04-contrato-panel.md](04-contrato-panel.md) → Pending), the indicator of a tab you
+are not looking at —today what runs in a background tab is not announced in any way—, and Phase 4's
+summary view, which orders by this very thing. And because the claim that **nobody else orders by
+what claims you stopped being true in August 2026**: Herdr accumulates agent → panel → tab →
+workspace and its sidebar answers that question better than ours does
+([07-panorama.md](07-panorama.md) → E8).
 
-**Lo que se descartó, y por qué:**
+**What was discarded, and why:**
 
-- **Un enum de estado de trabajo tipo `idle` / `working` / `blocked`** — lo que tienen Herdr, Xirp,
-  Superset y Warp. Describe **qué hace el programa**, y eso o lo deduce la app (D6) o lo declara un
-  harness que no conoce la pregunta (**D6**, «el nivel 2 reinterpretado falla igual que adivinar»).
-  `attention` no pregunta qué hace: pregunta si te reclama, que es lo que la app necesita para
-  navegar y lo único que el productor puede contestar sin equivocarse.
-- **Deducirlo de la presencia de un `mark: wait` en el cuerpo.** Es lo barato y es lo que rompe D6 por
-  dentro. Además sería frágil de la forma más tonta: una línea histórica —«esperé aprobación el
-  martes», con `mark: wait`— marcaría la pestaña para siempre.
-- **Un campo de urgencia numérica.** Tres valores contestan la pregunta; un número obliga a cada
-  productor a calibrar contra los demás, y nadie puede hacer eso porque nadie ve los otros paneles.
-- **Que el aviso del sistema lo dispare la app por su cuenta al aparecer un `wait`.** Se deja para
-  cuando el campo tenga productores: notificar es interrumpir, y una interrupción falsa cuesta mucho
-  más que un indicador falso. El indicador entra ahora; el aviso, cuando se sepa que el campo se
-  publica bien.
+- **A work-state enum along the lines of `idle` / `working` / `blocked`** — what Herdr, Xirp,
+  Superset and Warp have. It describes **what the program is doing**, and that is either deduced by
+  the app (D6) or declared by a harness that does not know the question (**D6**, «level 2
+  reinterpreted fails just like guessing»). `attention` does not ask what it is doing: it asks
+  whether it claims you, which is what the app needs in order to navigate and the only thing the
+  producer can answer without getting it wrong.
+- **Deducing it from the presence of a `mark: wait` in the body.** It is the cheap thing and it is
+  what breaks D6 from the inside. It would also be fragile in the silliest way: a historical line
+  —«I waited for approval on Tuesday», with `mark: wait`— would mark the tab forever.
+- **A numeric urgency field.** Three values answer the question; a number forces every producer to
+  calibrate against the others, and nobody can do that because nobody sees the other panels.
+- **Having the app fire the system notification on its own when a `wait` appears.** It is left for
+  when the field has producers: notifying is interrupting, and a false interruption costs a great
+  deal more than a false indicator. The indicator comes in now; the notification, when it is known
+  that the field is published properly.
 
-### Lo que F2.8 añadió: quién sostiene un reclamo, y la excepción de lo terminado
+### What F2.8 added: who holds a claim, and the exception for what has finished
 
-**Un reclamo se ve atenuado cuando la aplicación tiene algo que confesar sobre ese panel** — lleva
-callado más de lo suyo, o su fichero dejó de leerse. Dice las dos cosas a la vez: *reclama*, y *no hay
-nadie detrás*. La razón de atenuarlo en vez de esconderlo, con lo descartado, está en **D9** → «lo que
-F2.8 añadió».
+**A claim is seen dimmed when the application has something to confess about that panel** — it has
+been quiet for longer than it should, or its file stopped being readable. It says both things at
+once: *it claims*, and *there is nobody behind it*. The reason for dimming it instead of hiding it,
+along with what was discarded, is in **D9** → «what F2.8 added».
 
-**Excepción, y es de producto: `done` no se atenúa por silencio.** Quien terminó **deja de publicar por
-definición**, así que su silencio no desmiente nada: es su estado normal. Sin la excepción, media hora
-después de acabar —el plazo de serie— *todo* lo terminado se pintaría apagado, y **encontrar por la
-mañana lo que acabó de noche es justo para lo que sirve el campo**. Lo que sí lo atenúa es **no poder
-leer su fichero**: ahí lo que se enseña es lo último que llegó, y nada dice que siga siendo verdad.
+**An exception, and it is a product one: `done` is not dimmed by silence.** Whoever finished **stops
+publishing by definition**, so their silence contradicts nothing: it is their normal state. Without
+the exception, half an hour after finishing —the standard deadline— *everything* finished would be
+painted dimmed, and **finding in the morning what finished at night is exactly what the field is
+for**. What does dim it is **not being able to read its file**: there what is shown is the last
+thing that arrived, and nothing says that it is still true.
 
-*Descartado:* tratar las tres clases igual, que es más simple de explicar y apaga el caso central del
-producto. *Descartado también:* que `done` no se atenúe **nunca** — eso sería esconder un panel roto
-detrás de un resumen plausible, que es lo que este panel existe para no hacer.
+*Discarded:* treating the three classes alike, which is simpler to explain and dims the product's
+central case. *Also discarded:* that `done` should **never** be dimmed — that would be hiding a
+broken panel behind a plausible summary, which is what this panel exists in order not to do.
 
-**Lo encontró la revisión, no el diseño.** El diseño escribió «el rancio se atenúa» para las tres sin
-mirar qué significa el silencio en cada una.
+**The review found it, not the design.** The design wrote «the stale is dimmed» for all three
+without looking at what silence means in each one.
 
-### Medido — 24 agosto 2026: lo que cuesta la barra desde que su ficha acumula
+### Measured — 24 August 2026: what the bar costs now that its card accumulates
 
-**La ficha de cada pestaña dice lo que más reclaman sus divisiones, así que pintar la barra ahora
-recorre.** Ese trabajo **se declara** —tiene su línea propia en la cabecera del informe— y por tanto
-**no** se publica como coste del framework, que es la cifra con la que **D3** juzga a egui.
+**Each tab's card says the most its panes claim, so painting the bar now walks.** That work **is
+declared** —it has a line of its own in the report's header— and therefore is **not** published as
+the framework's cost, which is the figure **D3** judges egui by.
 
-Cuatro corridas, dos de la tanda `F` (la pestaña de fondo quieta) y dos de la `G` (la de fondo volcando
-como la de delante), con ventana de 1280×800 y **las cuatro consolas publicando un reclamo** —la mitad
-`wait` y la mitad `done`—, con las **dos fichas marcadas** en las cuatro corridas.
+Four runs, two of batch `F` (the background tab still) and two of `G` (the background one dumping
+like the one in front), with a 1280×800 window and **all four consoles publishing a claim** —half
+`wait` and half `done`—, with **both cards marked** in all four runs.
 
-| Corrida | Fotogramas con barra | La barra, por fotograma | El resto del fotograma |
+| Run | Frames with a bar | The bar, per frame | The rest of the frame |
 |---|---|---|---|
-| `F` #1 | 512 | **2,346 µs** | 256,2 µs |
-| `F` #2 | 479 | **2,689 µs** | 268,1 µs |
-| `G` #1 | 553 | **2,689 µs** | 290,0 µs |
-| `G` #2 | 552 | **2,398 µs** | 293,9 µs |
+| `F` #1 | 512 | **2.346 µs** | 256.2 µs |
+| `F` #2 | 479 | **2.689 µs** | 268.1 µs |
+| `G` #1 | 553 | **2.689 µs** | 290.0 µs |
+| `G` #2 | 552 | **2.398 µs** | 293.9 µs |
 
-**Entre 2,35 y 2,69 µs**, o sea **una centésima y media del 1 %** del presupuesto de 16,7 ms a 60 Hz —
-con dos pestañas y cuatro consolas reclamando. Las dos corridas de cada tanda **se pueden promediar**
-según el comparador del guion.
+**Between 2.35 and 2.69 µs**, that is **one and a half hundredths of 1 %** of the 16.7 ms budget at
+60 Hz — with two tabs and four consoles claiming. The two runs of each batch **can be averaged**
+according to the script's comparator.
 
-**Qué entra en ese número y qué no.** Entra el recorrido que acumula los reclamos de cada pestaña y el
-pintado de sus fichas: el cronómetro vive **dentro** de la función que las pinta, no en quien la llama,
-porque desde fuera el tramo abarca la llamada entera se haga lo que se haga dentro — y entonces sacar
-trabajo de la región medida no rompe ninguna prueba. **No entra atender el clic de la barra**, que
-corre en otro punto de la pasada y **sigue sin declararse desde antes de este hito**: es una fuga
-conocida, pequeña y anterior, y arreglarla aquí habría arriesgado contar dos veces lo que el cambio de
-pestaña ya declara por su cuenta.
+**What goes into that number and what does not.** In goes the walk that accumulates each tab's
+claims and the painting of its cards: the stopwatch lives **inside** the function that paints them,
+not in whoever calls it, because from outside the span covers the whole call whatever is done inside
+it — and then taking work out of the measured region breaks no test. **Attending to the bar's click
+does not go in**, which runs at another point of the pass and **has gone undeclared since before
+this milestone**: it is a known leak, small and prior, and fixing it here would have risked counting
+twice what changing tab already declares on its own.
 
-**Y el número describe el camino sano**: productores vivos, publicando dentro de plazo. Con paneles
-rancios o rotos, la pregunta que la ficha hace compone además el texto del aviso de cada división, y eso
-no está medido — sigue dentro del tramo declarado, así que no se le regala a nadie, pero no es este
-número.
+**And the number describes the healthy path**: live producers, publishing within the deadline. With
+stale or broken panels, the question the card asks also composes the text of each pane's warning,
+and that is not measured — it stays inside the declared span, so it is not given away to anybody,
+but it is not this number.
 
-**Por qué se mide con dos pestañas y no con una.** Con una sola pestaña **no hay barra**, así que una
-tanda de una pestaña afirmaría «el coste está declarado» **con el código quitado**. El guion lo impide
-por su cuenta desde este hito: en una tanda de dos pestañas o más, la corrida se marca `.INVALIDA` si el
-informe no trae la línea de la barra **o si la barra no llegó a marcar ni una ficha** — porque el
-recorrido ocurre haya reclamo o no, y sin esa segunda guarda una corrida cuyos productores no
-publicaran el campo mediría la mitad del trabajo y se leería igual que una buena. Es la misma guarda que
-ya evita publicar como buenas las tandas sin panel, sin gestos o sin restaurar.
+**Why it is measured with two tabs and not with one.** With a single tab **there is no bar**, so a
+one-tab batch would claim «the cost is declared» **with the code taken out**. The script prevents it
+on its own from this milestone on: in a batch of two tabs or more, the run is marked `.INVALIDA` if
+the report does not carry the bar's line **or if the bar never got to mark a single card** — because
+the walk happens whether there is a claim or not, and without that second guard a run whose
+producers did not publish the field would measure half the work and would read just like a good one.
+It is the same guard that already prevents publishing as good the batches with no panel, with no
+gestures or with no restoring.
 
-**Lo que este número NO dice.** No se compara con las corridas `F`/`G` del anexo de **D13**: son de otro
-día y de otro binario, y ahí el resto del fotograma salió entre 386 y 466 µs. Lo que se sostiene es lo de
-dentro de esta tabla — que el tramo existe, que está separado, y que es **dos órdenes de magnitud menor**
-que el residuo del que se le habría restado.
+**What this number does NOT say.** It is not compared with the `F`/`G` runs of **D13**'s annex: they
+are from another day and from another binary, and there the rest of the frame came out between 386
+and 466 µs. What holds is what is inside this table — that the span exists, that it is separated
+out, and that it is **two orders of magnitude smaller** than the residue it would have been
+subtracted from.
 
 ---
 
-## D19 — Nos posicionamos contra emuladores de terminal, no contra orquestadores de agentes
+## D19 — We position ourselves against terminal emulators, not against agent orchestrators
 
-**Qué se decidió.** El usuario al que hay que ganarle es **el que hoy tiene WezTerm, Ghostty, Kitty,
-iTerm2 o Windows Terminal abierto con agentes dentro** — no el que usa Orca, Superset o Conductor. La
-evolución hacia funciones de entorno de desarrollo queda **después**, y condicionada a que esto tenga
-usuarios.
+**What was decided.** The user to be won over is **the one who today has WezTerm, Ghostty, Kitty,
+iTerm2 or Windows Terminal open with agents inside** — not the one who uses Orca, Superset or
+Conductor. Evolving towards development-environment features comes **afterwards**, and conditional
+on this having users.
 
-**Por qué, y son tres razones independientes:**
+**Why, and there are three independent reasons:**
 
-- **Contra terminales el panel no tiene competencia.** Ningún emulador tiene estado por división: la
-  comparación es «lo que ya tienes, **más** una cosa que no tiene ninguno». Contra orquestadores la
-  comparación es una lista de quince funciones donde siempre vas detrás, y **un producto con el 70 %
-  de Orca y nada propio es peor que Orca**.
-- **La carrera de superficie no se gana.** Orca lleva desde marzo de 2026 con equipo y empujes
-  diarios; su navegador Chromium por worktree, su app móvil y su integración con Linear son proyectos
-  enteros cada uno ([07-panorama.md](07-panorama.md) → E7).
-- **El reloj corre al revés.** Cada mes gastado en paridad es un mes en que a Herdr le puede aparecer
-  el campo que le falta para llevarse la única pata que queda (E8). Y hay precedente del año en
-  curso: **Herdr salió con mucho menos que tmux en superficie y llegó a 31.888 estrellas en cinco
-  meses**, por hacer una cosa que tmux no hacía. La adopción no vino de la paridad.
+- **Against terminals the panel has no competition.** No emulator has state per pane: the comparison
+  is «what you already have, **plus** one thing none of them has». Against orchestrators the
+  comparison is a list of fifteen features where you are always behind, and **a product with 70 % of
+  Orca and nothing of its own is worse than Orca**.
+- **The surface race cannot be won.** Orca has been going since March 2026 with a team and daily
+  pushes; its Chromium browser per worktree, its mobile app and its Linear integration are whole
+  projects each ([07-panorama.md](07-panorama.md) → E7).
+- **The clock runs the other way.** Every month spent on parity is a month in which Herdr may grow
+  the field it is missing in order to take away the only leg that is left (E8). And there is a
+  precedent from the current year: **Herdr came out with far less surface than tmux and reached 31
+  888 stars in five months**, for doing one thing tmux did not do. Adoption did not come from
+  parity.
 
-**El listón que sí hay que pasar**, y sale de esta liga y no de la otra:
+**The bar that does have to be cleared**, and it comes out of this league and not the other:
 
-| Qué da por hecho un usuario de terminal | Estado |
+| What a terminal user takes for granted | Status |
 |---|---|
-| Scrollback, selección, copiar, buscar | **F2.6** |
-| Pegar | hecho — **D11** |
-| Corre en su máquina: macOS y Windows | **F2.7** |
-| **Que se vean sus fuentes** — CJK y los iconos de un `ls` moderno | **no tenía hito hasta hoy → F2.9** |
-| **Poder configurarlo** — fuente, tamaño, colores, atajos | **no tenía hito hasta hoy → F2.10** |
-| Que el ratón llegue al programa de dentro (`vim`, `htop`) | dentro de **F2.6**, ahora explícito |
-| Enlaces clicables (OSC 8) | pendiente, no descalificatorio |
-| Ligaduras, protocolo gráfico de Kitty | **fuera**, y se declara |
-| Latencia y coste por fotograma | medidos y publicados — **D3**, D13, D14, D15 |
+| Scrollback, selection, copying, searching | **F2.6** |
+| Pasting | done — **D11** |
+| It runs on their machine: macOS and Windows | **F2.7** |
+| **That their fonts show** — CJK and the icons of a modern `ls` | **had no milestone until today → F2.9** |
+| **Being able to configure it** — font, size, colors, shortcuts | **had no milestone until today → F2.10** |
+| That the mouse reaches the program inside (`vim`, `htop`) | inside **F2.6**, now explicit |
+| Clickable links (OSC 8) | pending, not disqualifying |
+| Ligatures, Kitty's graphics protocol | **out**, and it is declared |
+| Latency and cost per frame | measured and published — **D3**, D13, D14, D15 |
 
-**Las tres que no tenían sitio en ninguna fase, y la razón de que aparezcan al cambiar de liga:**
+**The three that had no place in any phase, and the reason they appear on changing league:**
 
-1. **Las fuentes del sistema.** En un entorno de desarrollo es una pega; **en un terminal
-   descalifica**. El usuario abre, hace `ls`, ve cuadros vacíos y cierra. Ya estaba escrito en D3 con
-   estas palabras —*«es lo que separa esto de ser usable a diario»*— y llevaba desde agosto sin hito.
-2. **La configuración.** Cero menciones en el roadmap antes de hoy. Es **la primera cosa que hace
-   cualquiera** al instalar un terminal, y sin ella no hay adopción que valga.
-3. **El ratón dentro de la TUI.** Los informes SGR/X10 no están implementados, así que hoy no se puede
-   hacer clic dentro de un programa de texto. Estaba fichado como materia de F2.6, pero como nota
-   dentro de otro hito y no como algo que alguien fuera a comprobar.
+1. **The system fonts.** In a development environment it is a nuisance; **in a terminal it
+   disqualifies**. The user opens it, runs `ls`, sees empty boxes and closes it. It was already
+   written in D3 in these words —*«it is what separates this from being usable daily»*— and it had
+   gone without a milestone since August.
+2. **Configuration.** Zero mentions in the roadmap before today. It is **the first thing anybody
+   does** on installing a terminal, and without it there is no adoption worth the name.
+3. **The mouse inside the TUI.** The SGR/X10 reports are not implemented, so today you cannot click
+   inside a text program. It was on file as F2.6 material, but as a note inside another milestone
+   and not as something anybody was going to check.
 
-**Lo que queda fuera del listón, y con quién lo hace** — está aquí para saberlo, no para hacerlo:
+**What stays outside the bar, and who it stays outside with** — it is here to be known, not to be
+done:
 
-| | Quién lo tiene |
+| | Who has it |
 |---|---|
-| **Abanico**: el mismo encargo a N agentes en N worktrees, comparar y quedarse con el ganador | Orca |
-| Navegador integrado; señalar un elemento de la interfaz y mandárselo al agente | Orca (*Design Mode*), Superset |
-| Editor de ficheros dentro; diff con anotaciones; atribución de lo que escribió el agente | Orca, Superset |
-| Commit, push y abrir la MR/PR desde la app; cola de revisión | Orca, Conductor, Vibe Kanban |
-| App móvil de acompañamiento | Orca |
-| Worktrees remotos por SSH o en un VPS | Orca, Superset, Herdr |
-| Restaurar sesiones de agente tras reiniciar; hibernar las inactivas | Orca, Herdr |
-| Integración con Linear y Jira; registro de habilidades instalables | Orca, Superset |
-| Tablero de tareas y cadenas de dependencias | Cline Kanban, Vibe Kanban — ver «Ideas sin fase» en [05-roadmap.md](05-roadmap.md) |
+| **Fan-out**: the same assignment to N agents in N worktrees, compare and keep the winner | Orca |
+| A built-in browser; pointing at an interface element and sending it to the agent | Orca (*Design Mode*), Superset |
+| A file editor inside; an annotated diff; attribution of what the agent wrote | Orca, Superset |
+| Commit, push and opening the MR/PR from the app; a review queue | Orca, Conductor, Vibe Kanban |
+| A companion mobile app | Orca |
+| Remote worktrees over SSH or on a VPS | Orca, Superset, Herdr |
+| Restoring agent sessions after a restart; hibernating the idle ones | Orca, Herdr |
+| Linear and Jira integration; a registry of installable skills | Orca, Superset |
+| A task board and dependency chains | Cline Kanban, Vibe Kanban — see «Ideas with no phase» in [05-roadmap.md](05-roadmap.md) |
 
-**El criterio para dejar entrar algo de esa lista antes de tiempo: que sirva al contrato, no que lo
-tenga el vecino.** A favor, los worktrees remotos: un productor publicando desde otra máquina es
-exactamente el caso que el fichero gana y el socket de Herdr pierde (**D17**). En contra, el *Design
-Mode*: es magnífico y no le sirve de nada a lo que aquí diferencia.
+**The criterion for letting something from that list in early: that it serves the contract, not that
+the neighbor has it.** In favor, the remote worktrees: a producer publishing from another machine is
+exactly the case the file wins and Herdr's socket loses (**D17**). Against, the *Design Mode*: it is
+magnificent and it is of no use at all to what differentiates things here.
 
-**Lo que esta decisión NO cambia, y conviene no reabrirlo:** **seguimos sin competir con tmux ni con
-Zellij** ([01-vision.md](01-vision.md)). Posicionarse contra emuladores no arrastra lo más caro de la
-liga de al lado —que la sesión sobreviva a cerrar la ventana, adjuntar y desacoplar, un servidor de
-fondo—, y eso es precisamente lo que hace que este listón sea corto.
+**What this decision does NOT change, and it is best not to reopen it:** **we still do not compete
+with tmux or with Zellij** ([01-vision.md](01-vision.md)). Positioning against emulators does not
+drag in the most expensive part of the league next door —the session surviving the window being
+closed, attaching and detaching, a background server—, and that is precisely what makes this bar a
+short one.
 
-**Cuándo se revisa esta decisión:** cuando haya usuarios que no seas tú, o cuando alguno de la lista
-de arriba publique un contrato abierto con cuerpo. Lo primero cambia a quién hay que convencer; lo
-segundo cambia si hay algo que defender.
-
----
-
-## D20 — El botón izquierdo dentro de una consola selecciona; mover la división pasa a `Ctrl+Mayúsculas`
-
-**Decisión.** Arrastrar con el botón primario **dentro del cuerpo de una consola selecciona texto**.
-Para **mover la división de sitio** —el gesto de **D15**— hay que arrastrar con **`Ctrl+Mayúsculas`**
-apretado. Y cuando el programa de dentro pide el ratón, **`Mayúsculas` sola fuerza la selección del
-terminal**, que es la convención de `xterm` y de todos los que vinieron después.
-
-**Por qué se toca un gesto ya entregado y medido.** Hasta aquí el primario reclamaba el rectángulo
-entero de cada consola y **movía la división**. Eso convertía «seleccionar texto» —lo que se hace
-todos los días en un terminal— en algo que había que aprender, y dejaba el gesto libre para lo que se
-hace de vez en cuando. El listón de **D19** es un usuario de WezTerm, y ahí arrastrar selecciona: un
-terminal donde arrastrar mueve paneles no pasa ese listón, por mucho que mover paneles sea lo que más
-nos diferencia.
-
-**Por qué `Ctrl+Mayúsculas` y no otra tecla.**
-
-- Es **el prefijo que la aplicación ya usa para todo lo suyo**: partir, cerrar, cambiar de pestaña,
-  pegar. Mover una división es de esa familia; darle otro prefijo sería inventar un segundo idioma.
-- Deja **`Mayúsculas` sola libre**, y hace falta: es lo que fuerza la selección cuando el programa
-  reclama el ratón. Gastarla en mover haría imposible seleccionar dentro de `vim`.
-- Deja **`Ctrl` y `Alt` libres**, que es donde los demás terminales ponen la **selección en bloque**.
-- **`Super` queda descartada** aparte: en GNOME y en KDE arrastra la ventana entera.
-
-**Lo que se descartó, y por qué.**
-
-- **Dejar el primario moviendo y cualificar la selección.** Es lo que había, y es lo contrario de lo
-  que pide el listón: el gesto diario detrás de una tecla y el raro en el gesto libre.
-- **Una cabecera por división, al estilo de Tilix**, que fuera el asidero para arrastrar y llevara el
-  botón de cerrar. **Buena idea, y por eso no se descarta del todo: pasa a ser su propio hito** (ver el
-  roadmap). Aquí se descarta **como parte de F2.6** por su precio: una cabecera **le quita alto a todas
-  las consolas, siempre**, y este proyecto ya tomó esa decisión en sentido contrario cuando dejó de
-  pintar la barra de pestañas con una sola pestaña — precisamente para que la rejilla fuera idéntica a
-  la de antes y las medidas se pudieran comparar. Con cabecera, **las tandas de control publicadas
-  dejan de comparar con nada**. Y no resuelve el problema entero: `Mayúsculas` seguiría haciendo falta
-  para forzar la selección dentro de un programa que pide el ratón.
-- **Un asidero invisible en el borde superior**, sin fila propia. No cuesta alto, pero hay que
-  descubrirlo y no da sitio a un botón de cerrar. Queda como opción para el hito de la cabecera.
-
-**Y los dos caminos conviven.** Elegir el modificador ahora no cierra la puerta a la cabecera después:
-Tilix tiene las dos cosas. Lo que este hito no hace es meter una decisión de disposición dentro de un
-hito de historial y selección.
-
-**Lo que arrastra, y está en el diseño del hito:**
-
-- **El significado del arrastre se fija al empezar**, leyéndolo del propio evento de pulsación. El
-  estado de modificadores de un fotograma describe **el final del lote**, no el instante del clic.
-- **La tanda `J` del guion de medida deja de medir lo que dice.** Inyecta arrastres primarios pelados,
-  así que con el primario seleccionando mediría selección y declararía cero reordenaciones — y el guion
-  la invalidaría sola. Se le añade el acorde al inyector.
+**When this decision is reviewed:** when there are users who are not you, or when one of the list
+above publishes an open contract with a body. The first changes who has to be convinced; the second
+changes whether there is anything to defend.
 
 ---
 
-## D21 — El historial son 3 500 líneas por consola: lo elige el listón, y las medidas descartan el resto
+## D20 — The left button inside a console selects; moving the pane goes to `Ctrl+Shift`
 
-**Decisión.** Cada consola guarda **3 500 líneas** de historial. El número lo pone este proyecto y **no
-se hereda** el del motor —10 000—. El **3 500 sale del listón**: es el defecto de WezTerm, que es contra
-quien **D19** dice que nos medimos. Lo que las medidas hacen es **descartar los demás** y poner precio
-al elegido.
+**Decision.** Dragging with the primary button **inside a console's body selects text**. To **move
+the pane somewhere else** —the **D15** gesture— you have to drag with **`Ctrl+Shift`** held down.
+And when the program inside asks for the mouse, **`Shift` alone forces the terminal's selection**,
+which is the convention of `xterm` and of all those that came after.
 
-**Lo medido**, con `cargo run --release --example scrollback -p term-core`, rejilla de 49×180, volcado de
-8 MiB, **cinco muestras por punto** y publicando la mediana:
+**Why a gesture already delivered and measured is being touched.** Up to here the primary claimed
+each console's whole rectangle and **moved the pane**. That turned «selecting text» —what is done
+every day in a terminal— into something that had to be learned, and left the free gesture for what
+is done every now and then. **D19**'s bar is a WezTerm user, and there dragging selects: a terminal
+where dragging moves panes does not clear that bar, however much moving panes is what differentiates
+us most.
 
-| Techo | Techo de memoria por consola | Recolocar: líneas cortas | Recolocar: **líneas que envuelven** | Leer 8 MiB |
+**Why `Ctrl+Shift` and not another key.**
+
+- It is **the prefix the application already uses for everything of its own**: splitting, closing,
+  changing tab, pasting. Moving a pane is of that family; giving it another prefix would be
+  inventing a second language.
+- It leaves **`Shift` alone free**, and that is needed: it is what forces the selection when the
+  program claims the mouse. Spending it on moving would make selecting inside `vim` impossible.
+- It leaves **`Ctrl` and `Alt` free**, which is where the other terminals put **block selection**.
+- **`Super` is discarded** separately: on GNOME and on KDE it drags the whole window.
+
+**What was discarded, and why.**
+
+- **Leaving the primary moving and qualifying the selection.** It is what there was, and it is the
+  opposite of what the bar asks for: the daily gesture behind a key and the rare one in the free
+  gesture.
+- **A header per pane, in the style of Tilix**, which would be the handle for dragging and would
+  carry the close button. **A good idea, and that is why it is not discarded entirely: it becomes a
+  milestone of its own** (see the roadmap). Here it is discarded **as part of F2.6** because of its
+  price: a header **takes height away from every console, always**, and this project already took
+  that decision the other way round when it stopped painting the tab bar with a single tab —
+  precisely so that the grid would be identical to the earlier one and the measurements could be
+  compared. With a header, **the published control batches stop comparing with anything**. And it
+  does not solve the whole problem: `Shift` would still be needed to force the selection inside a
+  program that asks for the mouse.
+- **An invisible handle on the top edge**, with no row of its own. It costs no height, but it has to
+  be discovered and it leaves no room for a close button. It stays as an option for the header
+  milestone.
+
+**And the two paths coexist.** Choosing the modifier now does not close the door on the header
+later: Tilix has both things. What this milestone does not do is put a layout decision inside a
+milestone about scrollback and selection.
+
+**What it drags along, and it is in the milestone's design:**
+
+- **The drag's meaning is fixed when it starts**, read from the press event itself. A frame's
+  modifier state describes **the end of the batch of events**, not the instant of the click.
+- **Batch `J` of the measurement script stops measuring what it says.** It injects bare primary
+  drags, so with the primary selecting it would measure selection and would declare zero
+  rearrangements — and the script would invalidate it on its own. The chord is added to the
+  injector.
+
+---
+
+## D21 — The scrollback is 3 500 lines per console: the bar chooses it, and the measurements discard the rest
+
+**Decision.** Every console keeps **3 500 lines** of scrollback. The number is set by this project
+and the engine's —10 000— **is not inherited**. The **3 500 comes out of the bar**: it is WezTerm's
+default, and WezTerm is who **D19** says we measure ourselves against. What the measurements do is
+**discard the others** and put a price on the chosen one.
+
+**What was measured**, with `cargo run --release --example scrollback -p term-core`, a 49×180 grid,
+an 8 MiB dump, **five samples per point** and publishing the median:
+
+| Ceiling | Memory ceiling per console | Reflow: short lines | Reflow: **lines that wrap** | Reading 8 MiB |
 |---|---|---|---|---|
-| 0 (lo de hoy) | 0 | 7,7 µs | 6,4 µs | **44,1 ms** · 182 MiB/s |
-| 1 000 | hasta 4,1 MiB | 72 µs | 148 µs | 46,4 ms · 173 MiB/s **(+5 %)** |
-| **3 500** | hasta **14,4 MiB** | 280 µs | **984 µs** | **81,6 ms** · 98 MiB/s **(+85 %)** |
-| 10 000 (el del motor) | hasta 41,2 MiB | 1,70 ms | **4,07 ms** | 89,9 ms · 89 MiB/s (+104 %) |
+| 0 (what there is today) | 0 | 7.7 µs | 6.4 µs | **44.1 ms** · 182 MiB/s |
+| 1 000 | up to 4.1 MiB | 72 µs | 148 µs | 46.4 ms · 173 MiB/s **(+5 %)** |
+| **3 500** | up to **14.4 MiB** | 280 µs | **984 µs** | **81.6 ms** · 98 MiB/s **(+85 %)** |
+| 10 000 (the engine's) | up to 41.2 MiB | 1.70 ms | **4.07 ms** | 89.9 ms · 89 MiB/s (+104 %) |
 
-Una celda ocupa **24 B** — preguntado, no derivado sumando campos.
+A cell takes up **24 B** — asked for, not derived by summing fields.
 
-**Dos avisos sobre esa tabla, porque una revisión los tuvo que sacar:**
+**Two warnings about that table, because a review had to bring them out:**
 
-1. **La columna de memoria es una cuenta, no una medida, y es un TECHO.** El motor **no reserva el
-   historial de antemano**: su almacenamiento crece al llenarse. Esas cifras son lo que una consola
-   puede llegar a ocupar con el historial lleno, no lo que ocupa al abrirse.
-2. **Las dos columnas de recolocar son dos regímenes reales, y la que decide es la de la derecha.** Una
-   línea **más corta que la rejilla no se recoloca**: al estrechar, el motor la empuja entera y sale por
-   la puerta barata. La primera versión de este banco medía **solo** líneas cortas y publicó un número
-   **cuatro veces menor** que el real. Una sesión de terminal tiene de los dos, así que el techo se
-   elige contra el caro.
+1. **The memory column is a calculation, not a measurement, and it is a CEILING.** The engine **does
+   not reserve the scrollback in advance**: its storage grows as it fills. Those figures are what a
+   console can come to occupy with the scrollback full, not what it occupies when it opens.
+2. **The two reflow columns are two real regimes, and the one that decides is the one on the
+   right.** A line **shorter than the grid is not reflowed**: on narrowing, the engine pushes it
+   whole and it leaves by the cheap door. The first version of this bench measured **only** short
+   lines and published a number **four times smaller** than the real one. A terminal session has
+   both kinds, so the ceiling is chosen against the expensive one.
 
-**Por qué se descarta el del motor.** Con 10 000 y contenido que envuelve, recolocar cuesta **4,07 ms
-por consola**, y una frontera del árbol mueve **dos**: son **8,1 ms por fotograma** mientras se
-arrastra, o sea **la mitad del presupuesto a 60 Hz**, en un gesto que dura lo que dure el botón
-apretado. Y hasta 165 MiB con cuatro consolas, sin que nada acote cuántas hay (**D14**).
+**Why the engine's is discarded.** With 10 000 and content that wraps, reflowing costs **4.07 ms per
+console**, and one divider of the tree moves **two**: that is **8.1 ms per frame** while dragging,
+that is, **half the budget at 60 Hz**, in a gesture that lasts as long as the button is held down.
+And up to 165 MiB with four consoles, with nothing bounding how many there are (**D14**).
 
-**El precio de 3 500, dicho entero y aceptado.**
+**The price of 3 500, said in full and accepted.**
 
-- **Arrastrar una frontera cuesta ~2 ms por fotograma** con dos consolas de contenido que envuelve — un
-  **12 %** del presupuesto. Solo se paga **mientras se arrastra**, y solo en los fotogramas que cruzan
-  un borde de celda: el reparto sale temprano cuando la rejilla no cambia.
-- **Leer un volcado se encarece un 85 %** en el banco: de 182 a 98 MiB/s. **Dentro de la ventana eso se
-  traduce en un 39 % más de interpretar y un 1,2 % de vuelta completa** — el banco lee a lo ancho de una
-  rejilla de 180 columnas y la ventana traga 128 KiB por fotograma, así que no son el mismo régimen. Ver
-  abajo el anexo con las cuatro corridas.
-- **Hasta 14,4 MiB por consola** de historial lleno, 58 con cuatro.
+- **Dragging a divider costs ~2 ms per frame** with two consoles of content that wraps — **12 %** of
+  the budget. It is only paid **while dragging**, and only in the frames that cross a cell boundary:
+  the tiling comes out early when the grid does not change.
+- **Reading a dump gets 85 % more expensive** in the bench: from 182 to 98 MiB/s. **Inside the
+  window that translates into 39 % more interpreting and 1.2 % of the full round trip** — the bench
+  reads across the width of a 180-column grid and the window swallows 128 KiB per frame, so they are
+  not the same regime. See below the annex with the four runs.
+- **Up to 14.4 MiB per console** of full scrollback, 58 with four.
 
-Es el precio de que un terminal recuerde lo que salió, y se declara en vez de esconderse.
+It is the price of a terminal remembering what came out, and it is declared instead of hidden.
 
-**Y obliga a volver a tomar las medidas publicadas.** Todas las tablas de los anexos —D3, D13, D14,
-D15, D16, D18— se tomaron con el historial **apagado**. En cuanto se encienda, su tramo «interpretando»
-describe otro régimen. **Volver a tomarlas es parte del hito**: un anexo que mide un régimen bajo la
-etiqueta de otro es exactamente el número mal etiquetado que este proyecto no publica.
+**And it forces the published measurements to be taken again.** All the annexes' tables —D3, D13,
+D14, D15, D16, D18— were taken with the scrollback **off**. As soon as it is turned on, their
+«interpreting» span describes another regime. **Taking them again is part of the milestone**: an
+annex that measures one regime under the label of another is exactly the badly labeled number this
+project does not publish.
 
-**Lo que se descartó, y por qué.**
+**What was discarded, and why.**
 
-- **Heredar las 10 000 del motor.** Es lo que habría pasado por no tocar una línea, y cuesta la mitad
-  del fotograma en un gesto normal. El defecto de una dependencia no es una decisión de este proyecto.
-- **1 000 líneas.** Casi gratis —+5 % al leer, 1,8 % del fotograma al arrastrar— pero son veinte
-  pantallas: sirven para mirar atrás, no para buscar algo de hace un rato. No pasa el listón.
-- **Que lo elija quien usa la aplicación.** Es lo correcto **a medio plazo** y está en el roadmap
-  (**F2.10**, la configuración), pero hoy no hay dónde ponerlo: adelantar media configuración dentro de
-  este hito es meter otro hito dentro.
+- **Inheriting the engine's 10 000.** It is what would have happened by not touching a line, and it
+  costs half the frame in a normal gesture. A dependency's default is not a decision of this
+  project.
+- **1 000 lines.** Almost free —+5 % on reading, 1.8 % of the frame on dragging— but they are twenty
+  screens: they serve for looking back, not for finding something from a while ago. It does not
+  clear the bar.
+- **Letting whoever uses the application choose it.** It is the right thing **in the medium term**
+  and it is in the roadmap (**F2.10**, configuration), but today there is nowhere to put it:
+  bringing forward half a configuration system inside this milestone is putting another milestone
+  inside.
 
-**Cuándo dejaría de valer.** Si cambia la versión del motor —los números son suyos—, si llega la
-configuración de F2.10, o si alguien mide que recolocar dejó de crecer con el historial. El banco está
-en el repositorio para volver a tomarlos en un minuto.
+**When it would stop being valid.** If the engine's version changes —the numbers are its own—, if
+F2.10's configuration arrives, or if somebody measures that reflowing has stopped growing with the
+scrollback. The bench is in the repository so they can be taken again in a minute.
 
-### Medido — 25 agosto 2026: lo que el historial le hace a la ventana de verdad
+### Measured — 25 August 2026: what the scrollback does to the real window
 
-**El banco medía el motor; esto mide la aplicación.** Cuatro corridas de la tanda `C` —dos consolas
-volcando, con panel—, **las cuatro con el mismo binario y seguidas**: dos compilando con el techo a cero
-y dos con las 3 500 líneas puestas. Las dos de cada par **se pueden promediar** según el comparador del
-guion, y la tabla publica la media con las dos corridas detrás.
+**The bench measured the engine; this measures the application.** Four runs of batch `C` —two
+consoles dumping, with a panel—, **all four with the same binary and consecutive**: two compiling
+with the ceiling at zero and two with the 3 500 lines in place. The two of each pair **can be
+averaged** according to the script's comparator, and the table publishes the mean with the two runs
+behind it.
 
-| | sin historial | con 3 500 líneas | |
+| | with no scrollback | with 3 500 lines | |
 |---|---|---|---|
-| **byte disponible → fotograma pagado** | **74,6 ms** (74,19 · 74,94) | **75,5 ms** (75,62 · 75,40) | **+1,2 %** |
-| de eso, esperando en la cola | 71,7 ms (71,65 · 71,80) | 72,0 ms (71,99 · 71,95) | +0,4 % |
-| **interpretando** | **1,05 ms** (0,95 · 1,16) | **1,46 ms** (1,51 · 1,41) | **+39 %** |
-| encolando el pintado | 249 µs (229 · 269) | 234 µs (237 · 230) | dentro del ruido |
-| **el resto del fotograma** (el framework) | 279 µs (257 · 300) | 262 µs (262 · 263) | dentro del ruido |
+| **available byte → paid-for frame** | **74.6 ms** (74.19 · 74.94) | **75.5 ms** (75.62 · 75.40) | **+1.2 %** |
+| of that, waiting in the queue | 71.7 ms (71.65 · 71.80) | 72.0 ms (71.99 · 71.95) | +0.4 % |
+| **interpreting** | **1.05 ms** (0.95 · 1.16) | **1.46 ms** (1.51 · 1.41) | **+39 %** |
+| enqueueing the paint | 249 µs (229 · 269) | 234 µs (237 · 230) | within the noise |
+| **the rest of the frame** (the framework) | 279 µs (257 · 300) | 262 µs (262 · 263) | within the noise |
 
-**Lo que hay que leer aquí: el historial encarece interpretar un 39 %, y la vuelta completa un 1,2 %.**
-Cada fotograma traga un presupuesto fijo de 128 KiB por división; interpretarlo cuesta ahora la mitad más,
-y eso se paga **dentro** del fotograma, no en la cola. El framework no se mueve, que es lo que **D3**
-vigila, y el tramo `recolocar` va declarado aparte desde este hito para que no se le cuele.
+**What has to be read here: the scrollback makes interpreting 39 % more expensive, and the full
+round trip 1.2 %.** Every frame swallows a fixed budget of 128 KiB per pane; interpreting it now
+costs half as much again, and that is paid **inside** the frame, not in the queue. The framework
+does not move, which is what **D3** watches, and the `recolocar` span goes declared separately from
+this milestone on so that it does not slip in there.
 
-**Una versión anterior de este anexo publicó «la vuelta se dobla, 37,1 → 75,4 ms» y era falso. Se retira,
-y conviene que quede escrito por qué**, porque el fallo es exactamente el que la regla dura del proyecto
-describe:
+**An earlier version of this annex published «the round trip doubles, 37.1 → 75.4 ms» and it was
+false. It is withdrawn, and it is worth writing down why**, because the failure is exactly the one
+the project's hard rule describes:
 
-1. **La columna «sin historial» no era del mismo binario ni del mismo día.** Salía de una corrida del **18
-   de agosto**, aunque el texto afirmaba «el mismo binario del día y a media hora de distancia». Nadie
-   podía verlo leyendo el anexo.
-2. **Y la conclusión no la sostenían los datos.** Hay corridas de la tanda `C` del **19 de agosto**, con el
-   historial **apagado**, que ya daban **73,7 y 74,0 ms** de vuelta y 71,5 ms de cola. O sea que el salto
-   de 37 a 74 ms ya había ocurrido **antes** de encender el historial: atribuírselo era colgarle un coste
-   ajeno.
+1. **The «with no scrollback» column was not from the same binary or from the same day.** It came
+   out of a run of **18 August**, even though the text claimed «the same binary of the day and half
+   an hour apart». Nobody could see it by reading the annex.
+2. **And the conclusion was not supported by the data.** There are runs of batch `C` from **19
+   August**, with the scrollback **off**, that already gave **73.7 and 74.0 ms** of round trip and
+   71.5 ms of queue. That is, the jump from 37 to 74 ms had already happened **before** turning the
+   scrollback on: attributing it to it was hanging somebody else's cost on it.
 
-**Y eso deja una pregunta abierta que no es de este hito:** entre el 18 y el 19 de agosto la vuelta
-completa de la misma tanda, con la misma ventana y la misma rejilla, pasó de **37 a 74 ms** con el
-historial apagado — **y no es coste de CPU**: interpretar se movió de 763 a 851 µs y el residuo del
-framework de 220 a 240. Los fotogramas son parecidos en número y en coste, así que lo que se duplicó es
-**lo que cada byte espera**, no lo que cuesta atenderlo. Apunta a cuándo se pide repintado, no a cuánto
-cuesta pintar. Queda como issue propio.
+**And that leaves an open question that does not belong to this milestone:** between 18 and 19
+August the full round trip of the same batch, with the same window and the same grid, went from **37
+to 74 ms** with the scrollback off — **and it is not CPU cost**: interpreting moved from 763 to 851
+µs and the framework's residue from 220 to 240. The frames are similar in number and in cost, so
+what doubled is **what each byte waits**, not what it costs to attend to it. It points at when a
+repaint is asked for, not at how much painting costs. It stays as an issue of its own.
 
-**Cuándo se nota el 39 %, y cuándo no.** Solo con un volcado sostenido —un `cat` de un fichero grande, que
-es lo que esta tanda hace a propósito—, y ahí se traduce en menos de un 2 % de retraso. Un comando normal
-no llena la cola y no espera nada. **El precio caro del historial no está aquí**: está en recolocar el
-texto al cambiar de ancho, que es lo que mide el anexo siguiente.
+**When the 39 % is noticed, and when it is not.** Only with a sustained dump —a `cat` of a big file,
+which is what this batch does on purpose—, and there it translates into less than a 2 % delay. A
+normal command does not fill the queue and does not wait for anything. **The scrollback's expensive
+price is not here**: it is in reflowing the text on a change of width, which is what the next annex
+measures.
 
-### Medido — 24 agosto 2026: el peor caso de recolocar, con la frontera moviéndose sin parar
+### Measured — 24 August 2026: the worst case of reflowing, with the divider moving non-stop
 
-**Por qué hace falta una tanda nueva y no valían las que había.** Recolocar el texto se paga **por
-consola**, y ninguna de las dos tandas con gestos le cambia el ancho a más de una: la `K` estrecha el
-panel de la consola izquierda, y la `J` reordena el árbol al soltar sin cruzar bordes de celda mientras
-vuela. La frontera que reparte dos consolas es la única que se las cambia **a las dos a la vez**, así que
-es la única que ejercita el techo de 3 500 líneas por su lado caro. Es la tanda **`M`**.
+**Why a new batch is needed and the ones there were would not do.** Reflowing the text is paid **per
+console**, and neither of the two batches with gestures changes the width of more than one: `K`
+narrows the left console's panel, and `J` rearranges the tree on dropping without crossing cell
+boundaries while in flight. The divider that shares two consoles out is the only one that changes it
+**for both at once**, so it is the only one that exercises the ceiling of 3 500 lines on its
+expensive side. It is batch **`M`**.
 
-| | tanda `C` (control, quieta) | tanda `M`, corrida 1 | tanda `M`, corrida 2 |
+| | batch `C` (control, still) | batch `M`, run 1 | batch `M`, run 2 |
 |---|---|---|---|
-| fotogramas de la corrida | 429 · 470 | 799 | **3 488** |
-| fotogramas con salida | 358 | 357 | 357 |
-| gestos inyectados · efectos | — | 159 · 480 | 697 · 2 093 |
-| **recolocaciones** | 3 · 3 (las del arranque) | **320** | **1 397** |
-| lo que costó cada una | 671 · 524 µs | **654 µs** | 197 µs |
-| **el resto del fotograma** (el framework) | 262 · 263 µs | **257 µs** | 163 µs |
+| frames in the run | 429 · 470 | 799 | **3 488** |
+| frames with output | 358 | 357 | 357 |
+| injected gestures · effects | — | 159 · 480 | 697 · 2 093 |
+| **reflows** | 3 · 3 (the ones from startup) | **320** | **1 397** |
+| what each one cost | 671 · 524 µs | **654 µs** | 197 µs |
+| **the rest of the frame** (the framework) | 262 · 263 µs | **257 µs** | 163 µs |
 
-**Lo primero, que es lo que la tanda venía a comprobar: el gesto no se le cuela al framework.** Con la
-frontera moviéndose sin parar y recolocando dos consolas trescientas veintitantas veces, el residuo se
-queda en **257 µs**, dentro de los 262–263 del control quieto. El tramo `recolocar` está declarado y se
-resta de su fotograma, así que los 209 ms que costó recolocar en esa corrida **no se publican como coste
-de egui** — que es exactamente lo que la regla dura del proyecto persigue.
+**The first thing, which is what the batch came to check: the gesture does not slip into the
+framework.** With the divider moving non-stop and reflowing two consoles three hundred and
+twenty-odd times, the residue stays at **257 µs**, inside the 262–263 of the still control. The
+`recolocar` span is declared and is subtracted from its frame, so the 209 ms reflowing cost in that
+run **are not published as egui's cost** — which is exactly what the project's hard rule is after.
 
-**Lo segundo: recolocar cuesta lo que el banco dijo, y las dos corridas no dicen lo mismo.** Los 654 µs
-por vez de la primera están en el mismo orden que los 984 µs del banco y los 524–671 del control quieto.
-La segunda da **197 µs**, tres veces menos, y **por qué difieren no está aislado**. Se publican las dos y
-se dice lo que se sabe:
+**The second: reflowing costs what the bench said, and the two runs do not say the same thing.** The
+654 µs a time of the first are of the same order as the bench's 984 µs and the still control's
+524–671. The second gives **197 µs**, three times less, and **why they differ is not isolated**.
+Both are published and what is known is said:
 
-- **No se promedian.** Las dos tienen los mismos 357 fotogramas con salida pero una vivió 3 488 fotogramas
-  y la otra 799 —inyectar gestos mantiene la ventana despierta, igual que un ratón humano—. Es el mismo
-  aviso que el anexo de **D15** lleva para la tanda `J`, y aquí muerde más porque la diferencia es de
-  cuatro veces.
-- **La explicación que los datos DESCARTAN** es que la corrida barata midiera el historial a medio llenar:
-  recolocar crece con las líneas guardadas, y en la corrida larga el volcado terminó pronto, así que la
-  mayoría de sus recolocaciones ocurrieron con **más** historial detrás, no con menos. Predice lo
-  contrario de lo que salió.
-- **La que queda en pie** es con quién compite cada recolocación: la corta pasó el 45 % de sus fotogramas
-  volcando y la larga el 10 %. Es consistente con los números **y no está medida** — aislarla pide que el
-  informe publique cuánto historial había detrás de cada recolocación, que es instrumentación que este
-  hito no añade. Queda dicho como hipótesis, no como resultado.
+- **They are not averaged.** Both have the same 357 frames with output but one lived 3 488 frames
+  and the other 799 —injecting gestures keeps the window awake, just like a human mouse—. It is the
+  same warning **D15**'s annex carries for batch `J`, and here it bites harder because the
+  difference is fourfold.
+- **The explanation the data RULE OUT** is that the cheap run measured the scrollback half full:
+  reflowing grows with the lines kept, and in the long run the dump finished early, so most of its
+  reflows happened with **more** scrollback behind them, not with less. It predicts the opposite of
+  what came out.
+- **The one left standing** is what each reflow competes with: the short one spent 45 % of its
+  frames dumping and the long one 10 %. It is consistent with the numbers **and it is not measured**
+  — isolating it demands that the report publish how much scrollback there was behind each reflow,
+  which is instrumentation this milestone does not add. It is said as a hypothesis, not as a result.
 
-**Lo que esta tanda NO mide, y conviene saberlo antes de fiarse: redimensionar la ventana.** Cambiar el
-tamaño de la ventana le cambia el ancho a **todas** las consolas de **todas** las pestañas a la vez —las
-de fondo se remiden en cada fotograma contra el área nueva—, así que un solo fotograma de ese arrastre
-recoloca ocho consolas donde el gesto de la frontera recoloca dos. Con el historial lleno son del orden de
-**8 ms por fotograma**, más que el fotograma entero. **Ninguna tanda lo cubre**, y no por olvido: todas
-piden un tamaño fijo y el guion invalida la corrida que no lo tuvo, que es justo lo que hace comparables
-las medidas del proyecto. El trabajo **sí está declarado** —el tramo suma todas las consolas del fotograma
-y se resta de él—, así que no es un número mal etiquetado: es un **camino sin número**. Medirlo pide una
-tanda que redimensione, y esa tanda tiene que decidir antes qué hacer con la guarda del tamaño.
+**What this batch does NOT measure, and it is worth knowing before trusting it: resizing the
+window.** Changing the size of the window changes the width of **every** console of **every** tab at
+once —the background ones are remeasured on every frame against the new area—, so a single frame of
+that drag reflows eight consoles where the divider's gesture reflows two. With the scrollback full
+that is on the order of **8 ms per frame**, more than the whole frame. **No batch covers it**, and
+not through oversight: they all ask for a fixed size and the script invalidates the run that did not
+have it, which is precisely what makes the project's measurements comparable. The work **is**
+declared —the span sums all the frame's consoles and is subtracted from it—, so it is not a badly
+labeled number: it is a **path with no number**. Measuring it demands a batch that resizes, and that
+batch has to decide first what to do about the size guard.
 
-**Lo tercero, y es el número que se lleva alguien que arrastre una frontera con una consola volcando:**
-dos recolocaciones por gesto, de medio milisegundo largo cada una, dentro de un fotograma que ya paga 76
-ms de espera en la cola. El gesto se ve fluido porque lo que cuesta no está en el pintado; lo que se
-retrasa es **lo que la consola tenía pendiente de enseñar**.
+**The third, and it is the number somebody who drags a divider with a console dumping takes away:**
+two reflows per gesture, a good half millisecond each, inside a frame that already pays 76 ms of
+waiting in the queue. The gesture looks fluid because what it costs is not in the painting; what is
+delayed is **what the console had pending to show**.
 
-**Lo que la tanda destapó de camino, y no era de rendimiento.** El gesto inyectado apretaba sobre la línea
-del divisor **en el mismo fotograma** en que llevaba el puntero hasta ella, y así perdía el empate contra
-la consola de al lado: egui admite como candidatos a los tres —la línea mide dos puntos y las dos consolas
-la tocan— y el empate lo gana el último registrado. El resultado era que la tanda **arrastraba una
-consola** y publicaba el gesto de **D15** bajo esta etiqueta. Se arregla acercando el puntero en un
-fotograma y apretando en el siguiente, que es lo que hace una mano: comprobado que un arrastre humano gana
-siempre. **A quien usa la aplicación no le pasa**, y eso está medido y no razonado.
+**What the batch uncovered along the way, and it was not about performance.** The injected gesture
+pressed on the divider's line **in the same frame** in which it carried the pointer to it, and so it
+lost the tie against the console next to it: egui admits all three as candidates —the line measures
+two points and both consoles touch it— and the tie is won by the last one registered. The result was
+that the batch **dragged a console** and published the **D15** gesture under this label. It is fixed
+by bringing the pointer close in one frame and pressing in the next, which is what a hand does:
+verified that a human drag always wins. **It does not happen to whoever uses the application**, and
+that is measured and not reasoned.
 
-### Medido — 24 agosto 2026: las cuatro tandas de los anexos, vueltas a tomar con historial
+### Measured — 24 August 2026: the annexes' four batches, taken again with scrollback
 
-**Por qué se vuelven a tomar.** Guardar historial encarece **interpretar**, y las tablas publicadas en los
-anexos de **D13** (pestañas) y **D14** (cuatro divisiones) se midieron con el historial apagado: dejarlas
-sin más las convertiría en cifras que ya no describen a esta aplicación. Ocho corridas, dos por tanda, el
-mismo día y con el mismo binario, y **el comparador del guion dice que las dos de cada par se pueden
-promediar**.
+**Why they are taken again.** Keeping scrollback makes **interpreting** more expensive, and the
+tables published in the annexes of **D13** (tabs) and **D14** (four panes) were measured with the
+scrollback off: leaving them as they are would turn them into figures that no longer describe this
+application. Eight runs, two per batch, the same day and with the same binary, and **the script's
+comparator says that the two of each pair can be averaged**.
 
-| | **F** — 2 pestañas, la de fondo quieta | **G** — 2 pestañas, las cuatro volcando | **H** — 4 en fila | **I** — 4 en cuadro |
+| | **F** — 2 tabs, the background one still | **G** — 2 tabs, all four dumping | **H** — 4 in a row | **I** — 4 in a square |
 |---|---|---|---|---|
-| Rejilla de cada consola | 47×39 | 47×39 | **49×20** | **24×39** |
-| Consolas volcando | 2 de 4 | **4** | **4** | **4** |
-| Vuelta completa | 75,3 ms · 74,8 | 77,7 · 78,8 | 77,1 · 80,0 | 79,2 · 80,0 |
-| — esperando en la cola | 71,9 · 71,4 | 72,0 · 72,5 | 71,7 · 73,5 | 73,1 · 73,5 |
-| — interpretando | 1,41 ms · 1,42 | 1,31 · 1,44 | 1,21 · 1,45 | 1,51 · 1,48 |
-| — encolando el pintado | 203 µs · 215 | 203 · 246 | 146 · 171 | 128 · 135 |
-| — el panel de estado | 5,4 µs · 5,1 | 5,1 · 6,6 | 10,9 · 12,4 | 5,3 · 5,5 |
-| — la barra de pestañas | 2,78 µs · 2,08 | 2,41 · 2,90 | (no hay) | (no hay) |
-| **el resto del fotograma** | **236 µs · 243** | **263 · 298** | **319 · 355** | **274 · 291** |
+| Each console's grid | 47×39 | 47×39 | **49×20** | **24×39** |
+| Consoles dumping | 2 of 4 | **4** | **4** | **4** |
+| Full round trip | 75.3 ms · 74.8 | 77.7 · 78.8 | 77.1 · 80.0 | 79.2 · 80.0 |
+| — waiting in the queue | 71.9 · 71.4 | 72.0 · 72.5 | 71.7 · 73.5 | 73.1 · 73.5 |
+| — interpreting | 1.41 ms · 1.42 | 1.31 · 1.44 | 1.21 · 1.45 | 1.51 · 1.48 |
+| — enqueueing the paint | 203 µs · 215 | 203 · 246 | 146 · 171 | 128 · 135 |
+| — the status panel | 5.4 µs · 5.1 | 5.1 · 6.6 | 10.9 · 12.4 | 5.3 · 5.5 |
+| — the tab bar | 2.78 µs · 2.08 | 2.41 · 2.90 | (there is none) | (there is none) |
+| **the rest of the frame** | **236 µs · 243** | **263 · 298** | **319 · 355** | **274 · 291** |
 
-**Estas cifras NO se comparan con las de los anexos de D13 y D14, y decirlo importa más que la tabla.**
-Aquéllas son del 16 y el 17 de agosto, con otro binario y otro día de máquina: la misma tanda `C` daba
-allí 52 ms de vuelta completa, el 18 de agosto daba 37 y el 19 —todavía **sin historial**— ya daba 74.
-Lo que estas ocho corridas sirven es (a) dejar publicado lo que la aplicación hace **hoy**, y (b)
-responder entre ellas, que es la comparación válida porque son del mismo día y el mismo binario.
+**These figures are NOT compared with those of D13's and D14's annexes, and saying so matters more
+than the table.** Those are from 16 and 17 August, with another binary and another day of machine:
+the same batch `C` gave 52 ms of full round trip there, on 18 August it gave 37 and on the 19th
+—still **with no scrollback**— it already gave 74. What these eight runs are good for is (a) leaving
+published what the application does **today**, and (b) answering among themselves, which is the
+valid comparison because they are from the same day and the same binary.
 
-**Lo que responden entre ellas:**
+**What they answer among themselves:**
 
-1. **El residuo del framework sigue sin crecer con nada.** Entre **236 y 355 µs** en las ocho corridas, con
-   la variación entre las dos de una misma tanda (319 → 355 en `H`) del mismo orden que la variación entre
-   tandas. Es la misma conclusión de los anexos de **D13** y **D14**, ahora con el historial encendido y
-   con el tramo `recolocar` declarado aparte para que no se cuele aquí.
-2. **Cuántas consolas vuelcan casi no mueve la vuelta completa.** De dos volcando (`F`, 75,0 ms de
-   media) a cuatro (`H`, 78,6) hay **menos de un 5 %**, y la espera en la cola se queda clavada entre 71,4
-   y 73,5 ms en las **ocho** corridas. En el anexo de D14, en agosto, esa misma diferencia era del
-   **doble** (52 → 100 ms) — pero eso es de otro binario y no se cruza con esto: lo que aquí se afirma es
-   lo de hoy, y hoy no se mueve.
-3. **Interpretar se mueve poco y encolar el pintado baja con las celdas**, igual que antes: 146 µs con las
-   980 celdas de `H`, 128 con las 936 de `I`, 203 con las 1 833 de `F`… al revés de lo que la cuenta de
-   celdas haría esperar entre las dos primeras y la tercera, y por eso se publica sin conclusión: son
-   microsegundos dentro de una vuelta de 75 ms.
-4. **Recolocar apenas aparece en estas cuatro**, y es lo correcto: ninguna arrastra nada, así que las
-   entre dos y cinco recolocaciones de cada corrida son las del arranque, cuando el compositor entrega el
-   tamaño. Lo que cuesta cada una —de 43 µs en cuadro a 976 µs en fila— depende de cuánto texto hay que
-   recolocar, y el caso caro tiene su propia tanda: la **`M`** de aquí arriba.
+1. **The framework's residue still does not grow with anything.** Between **236 and 355 µs** across
+   the eight runs, with the variation between the two of one and the same batch (319 → 355 in `H`)
+   of the same order as the variation between batches. It is the same conclusion as the annexes of
+   **D13** and **D14**, now with the scrollback on and with the `recolocar` span declared separately
+   so that it does not slip in here.
+2. **How many consoles dump barely moves the full round trip.** From two dumping (`F`, a mean of
+   75.0 ms) to four (`H`, 78.6) there is **less than 5 %**, and the wait in the queue stays pinned
+   between 71.4 and 73.5 ms across the **eight** runs. In D14's annex, in August, that same
+   difference was **double** (52 → 100 ms) — but that is from another binary and is not crossed with
+   this: what is claimed here is today's, and today it does not move.
+3. **Interpreting moves little and enqueueing the paint goes down with the cells**, just as before:
+   146 µs with `H`'s 980 cells, 128 with `I`'s 936, 203 with `F`'s 1 833… the other way round from
+   what the cell count would lead you to expect between the first two and the third, and that is why
+   it is published with no conclusion: they are microseconds inside a round trip of 75 ms.
+4. **Reflowing barely appears in these four**, and that is correct: none of them drags anything, so
+   the between two and five reflows of each run are the ones from startup, when the compositor hands
+   over the size. What each one costs —from 43 µs in a square to 976 µs in a row— depends on how
+   much text there is to reflow, and the expensive case has its own batch: the **`M`** above.
+## D22 — What «the text» that gets copied is, and the four rules the selection inherits from the engine
 
-## D22 — Qué es «el texto» que se copia, y las cuatro reglas que la selección hereda del motor
+**What was decided.** Copying returns what the terminal engine calls «the text of the selection»,
+and **those rules are written down here** even though the code belongs to the dependency. Inheriting
+the code is correct; inheriting the decision without saying it, not — in this project no decision
+lives only in the code, and least of all if it lives in somebody else's.
 
-**Qué se decidió.** Copiar devuelve lo que el motor de terminal llama «el texto de la selección», y
-**esas reglas se escriben aquí** aunque el código sea de la dependencia. Heredar el código es correcto;
-heredar la decisión sin decirla, no — en este proyecto ninguna decisión vive solo en el código, y menos
-si vive en el de otro.
+**The four rules of what «the text» is:**
 
-**Las cuatro reglas de qué es «el texto»:**
+1. **A line that wraps is copied WITHOUT the break.** A line longer than the grid is split by the
+   terminal, not by the program. Copying it with a break inside returns something **nobody wrote**, and
+   pasting it into a shell runs two commands instead of one. Two real lines **do** keep theirs: what tells
+   them apart is who put the ending in.
+2. **The padding at the end of each line is not copied.** A grid is full of empty cells to the right of
+   what was written; dragging them turns any paste into a line with a tail of spaces.
+3. **A wide character's companion is not duplicated.** A CJK character or an emoji takes up two cells and
+   are **one**; copying both would return it repeated.
+4. **A tab's gap is skipped.**
 
-1. **Una línea que envuelve se copia SIN el salto.** Una línea más larga que la rejilla la parte el
-   terminal, no el programa. Copiarla con un salto dentro devuelve algo que **nadie escribió**, y pegarlo
-   en un shell ejecuta dos órdenes en vez de una. Dos líneas de verdad **sí** conservan el suyo: lo que
-   las distingue es quién puso el final.
-2. **El relleno del final de cada línea no se copia.** Una rejilla está llena de celdas vacías a la
-   derecha de lo escrito; arrastrarlas convierte cualquier pegado en una línea con cola de espacios.
-3. **El acompañante de un carácter ancho no se duplica.** Un carácter CJK o un emoji ocupan dos celdas y
-   son **uno**; copiar las dos lo devolvería repetido.
-4. **El hueco de una tabulación se salta.**
+**The three ways to lose a selection, and they are its as well:**
 
-**Las tres formas de perder una selección, y también son suyas:**
+- **Changing the number of columns clears it.** The text is laid out again: what was marked stops being
+  where it was, and keeping the range would leave a piece nobody chose highlighted. **With the same
+  columns it does not**: resizing only the height keeps it, because nothing is laid out again.
+- **Switching to the alternate screen clears it.** A full-screen program —`vim`, `less`, `htop`— switches
+  to the alternate one when it starts, and what was marked is not on the new screen.
+- **Clearing a region that crosses it clears it.** The program erased what was marked; surviving would
+  mean highlighting empty cells, or whatever it writes there afterwards.
 
-- **Cambiar el número de columnas la borra.** El texto se recoloca: lo que estaba marcado deja de estar
-  donde estaba, y conservar el rango dejaría realzado un trozo que nadie eligió. **Con las mismas
-  columnas no**: redimensionar solo el alto la conserva, porque no se recoloca nada.
-- **Saltar a pantalla alterna la borra.** Un programa de pantalla completa —`vim`, `less`, `htop`— cambia
-  a la alterna al arrancar, y lo que se marcó no está en la pantalla nueva.
-- **Limpiar una región que la cruza la borra.** El programa borró lo que estaba marcado; sobrevivir sería
-  realzar celdas vacías, o lo que él escriba ahí después.
+> **When `htop` clears your selection, the reason is here.** That was the point of writing them down:
+> without this section, the explanation lives in a dependency's source and whoever looks for it does not
+> even know it exists.
 
-> **Cuando `htop` te borre la selección, la razón está aquí.** Ese era el objeto de escribirlas: sin esta
-> sección, la explicación vive en el fuente de una dependencia y quien la busque no sabe ni que existe.
+**A fifth rule that was missing, and that the dump to text broke: what goes attached to a character
+is text too.** An emoji selector —`U+FE0F`— or a combining mark **take up no column**, but the
+program wrote them. Copying with the mouse has always kept them, because the engine does that;
+**this crate's dump to text threw them away**, so a program that wrote `☁️` read as `☁`. It is not a
+clipped character: it is **another** character. Fixed in August 2026, on adding to the view what
+goes attached to each cell (**F2.9**), which is when the defect became visible for the first time.
 
-**Una quinta regla que faltaba, y que el volcado a texto incumplía: lo que va pegado a un carácter también
-es texto.** Un selector de emoji —`U+FE0F`— o una marca combinante **no ocupan columna**, pero el programa
-los escribió. Copiar con el ratón siempre los ha conservado, porque eso lo hace el motor; **el volcado a
-texto de esta caja los tiraba**, así que un programa que escribiera `☁️` se leía como `☁`. No es un
-carácter recortado: es **otro** carácter. Corregido en agosto de 2026, al añadirle a la vista lo que va
-pegado a cada celda (**F2.9**), que es cuando el defecto se hizo visible por primera vez.
+**And one rule this project adds, because the engine cannot know it.** A wide character's companion
+**is highlighted along with its head**. The engine only does the opposite path —it marks the head
+when the companion falls inside, so that its text does not come out cut off— and that is enough for
+it because **its** painter draws the background of a wide character two cells wide. Ours paints the
+background of **each cell separately** (**D3**), so without adding it a wide character at the edge
+of the selection comes out with half a letter highlighted and half not, right where there is CJK or
+emoji.
 
-**Y una regla que este proyecto añade, porque el motor no puede saberla.** El acompañante de un carácter
-ancho **se realza con su cabeza**. El motor hace solo el camino contrario —marca la cabeza cuando el
-acompañante cae dentro, para que su texto no salga cortado— y le basta porque **su** pintor dibuja el
-fondo de un carácter ancho de dos celdas de ancho. El nuestro pinta el fondo de **cada celda por
-separado** (**D3**), así que sin añadirla un carácter ancho en el borde de la selección sale con media
-letra realzada y media no, justo donde hay CJK o emoji.
+**How what is selected looks: by swapping its two colors.** There is no highlight color in the
+theme, and it is not to save anything: a cell's two colors **were already legible one on the
+other**, so swapping them cannot leave text illegible. A color of our own can, and it would do it
+right where the program has chosen odd colors — which is where nobody would test it. The swap goes
+**after** reverse video, so selecting over `vim`'s cursor shows it like the rest of the text instead
+of leaving it indistinguishable.
 
-**Cómo se ve lo seleccionado: intercambiando sus dos colores.** No hay color de realce en el tema, y no
-es por ahorrar: los dos colores de una celda **ya eran legibles el uno sobre el otro**, así que
-intercambiarlos no puede dejar texto ilegible. Un color propio sí puede, y lo haría justo donde el
-programa ha elegido colores raros — que es donde nadie lo probaría. El intercambio va **después** del
-vídeo inverso, así que seleccionar por encima del cursor de `vim` lo enseña como el resto del texto en
-vez de dejarlo indistinguible.
+**Copying does not filter control characters, unlike pasting.** What comes out is already text from
+cells and the engine does not keep escapes. Pasting filters because it protects **the inner
+program** from what comes in (**D11**); here the direction is the opposite and there is nobody to
+protect.
 
-**Copiar no filtra caracteres de control, al revés que pegar.** Lo que sale ya es texto de celdas y el
-motor no guarda escapes. Pegar filtra porque protege **al programa de dentro** de lo que entra (**D11**);
-aquí la dirección es la contraria y no hay a quién proteger.
+**What was discarded, and why.**
 
-**Lo que se descartó, y por qué.**
+- **Writing our own rules of what «the text» is.** They are ten fine rules —wrappings, companions, tabs,
+  padding— that the engine already holds up and that would have to be kept in step with it. Rewriting them
+  is guaranteeing that one day they disagree with the highlight, which does come out of its coordinates.
+- **Pulling the selection range out through `term-core`'s API.** It is a type of the engine's and it would
+  be the leak that that crate's founding criterion prevents. What whoever paints needs is **a `bool` per
+  cell**, and with that the highlight's two fine rules are still decided by the engine.
+- **Filtering the controls when copying**, for symmetry with pasting. None come out: what there is are
+  cells. It would be copying the paste guard without its reason.
+- **A highlight color in the theme.** See above: it can leave text illegible, and the swap cannot.
 
-- **Escribir nuestras propias reglas de «el texto».** Son diez reglas finas —envolturas, acompañantes,
-  tabulaciones, relleno— que el motor ya sostiene y que hay que mantener al día con él. Reescribirlas es
-  garantizar que un día discrepen del realce, que sí sale de sus coordenadas.
-- **Sacar el rango de la selección por la API de `term-core`.** Es un tipo del motor y sería la fuga que
-  el criterio fundacional de esa caja impide. Lo que quien pinta necesita es **un `bool` por celda**, y
-  con eso las dos reglas finas del realce las sigue decidiendo el motor.
-- **Filtrar los controles al copiar**, por simetría con el pegado. Ninguno sale: lo que hay son celdas.
-  Sería copiar la guarda del pegado sin su razón.
-- **Un color de realce en el tema.** Ver arriba: puede dejar texto ilegible, y el intercambio no.
+**When it would stop holding.** If the engine changes its rules for converting to text —the numbers
+and the behavior are its—, or if one day the painter drew the background of a wide character in one
+go, in which case the rule this project adds would be superfluous.
 
-**Cuándo dejaría de valer.** Si el motor cambia sus reglas de conversión a texto —los números y el
-comportamiento son suyos—, o si algún día el pintor dibujara el fondo de un carácter ancho de una vez, en
-cuyo caso la regla que este proyecto añade sobraría.
+### Measured — 25 August 2026: what having text marked costs
 
-### Medido — 25 agosto 2026: lo que cuesta tener texto marcado
+**With its control inside the same run.** Batch **`N`** opens two consoles dumping the same thing
+and marks text **only in the left one**: the right one is not touched. It is the same shape batch
+`K` uses for the panel gesture.
 
-**Con su control dentro de la misma corrida.** La tanda **`N`** abre dos consolas volcando lo mismo y
-marca texto **solo en la izquierda**: la derecha no se toca. Es la misma forma que la tanda `K` usa para
-el gesto del panel.
-
-| encolando el pintado | consola marcada | consola sin tocar | diferencia |
+| queuing the painting | marked console | untouched console | difference |
 |---|---|---|---|
-| tanda `N`, corrida 1 | 277,4 µs | 191,9 µs | **+85,5** |
-| tanda `N`, corrida 2 | 297,5 µs | 187,3 µs | **+110,2** |
-| tanda `C` (quieta), corrida 1 | 236,7 µs | 204,8 µs | **+31,9** |
-| tanda `C` (quieta), corrida 2 | 230,4 µs | 189,6 µs | **+40,8** |
+| batch `N`, run 1 | 277.4 µs | 191.9 µs | **+85.5** |
+| batch `N`, run 2 | 297.5 µs | 187.3 µs | **+110.2** |
+| batch `C` (still), run 1 | 236.7 µs | 204.8 µs | **+31.9** |
+| batch `C` (still), run 2 | 230.4 µs | 189.6 µs | **+40.8** |
 
-**Y aquí está lo que la primera versión de este anexo publicó mal.** Decía «marcar cuesta ~100 µs» tomando
-la diferencia entre las dos consolas de la corrida. Pero **esa diferencia existe sin selección ninguna**:
-la tanda quieta ya da 32 y 41 µs entre izquierda y derecha. La consola de al lado **no es un control
-limpio** — hay una asimetría de sitio que no es de este gesto.
+**And here is what the first version of this annex published wrong.** It said «marking costs ~100
+µs», taking the difference between the two consoles of the run. But **that difference exists with no
+selection at all**: the still batch already gives 32 and 41 µs between left and right. The console
+next door **is not a clean control** — there is an asymmetry of position that does not belong to
+this gesture.
 
-**Lo que queda, con las dos cuentas que se pueden hacer y su desacuerdo dicho:**
+**What is left, with the two sums that can be done and their disagreement stated:**
 
-- **Diferencia de diferencias** (98 − 36): **~62 µs por fotograma**.
-- **La misma posición entre corridas** (287 de media contra 234, izquierda con y sin marcar): **~53 µs**.
+- **Difference of differences** (98 − 36): **~62 µs per frame**.
+- **The same position across runs** (287 on average against 234, the left one with and without marking):
+  **~53 µs**.
 
-**Las dos no coinciden del todo, y con estos datos no se cierra la diferencia.** La corrida de la tanda
-`N` vivió **1 066 y 2 640 fotogramas** contra los **429 y 470** de la quieta: inyectar gestos mantiene la
-ventana despierta, así que las dos no comparten régimen — el mismo aviso que el anexo de **D15** lleva para
-la tanda `J`. Señal de ello: el control de `N` sale **más barato** que el mismo puesto en la tanda quieta,
-que es al revés de lo que cualquier explicación de «marcar cuesta» predice. Lo que se publica es la
-horquilla, **50–60 µs por fotograma**, y que **no está aislada**. Aislarla pide una tanda que marque y
-desmarque alternando dentro de la misma corrida, contra la misma consola.
+**The two do not quite agree, and with this data the gap does not close.** The runs of batch `N`
+lived **1 066 and 2 640 frames** against the **429 and 470** of the still one: injecting gestures
+keeps the window awake, so the two do not share a regime — the same warning the annex of **D15**
+carries for batch `J`. A sign of it: `N`'s control comes out **cheaper** than the same position in
+the still batch, which is the opposite of what any explanation of «marking costs» predicts. What is
+published is the range, **50–60 µs per frame**, and that it **is not isolated**. Isolating it calls
+for a batch that marks and unmarks alternately inside the same run, against the same console.
 
-**Lo que sí está claro, y es más importante que la cifra: el coste NO crece con lo que hay marcado.**
-Mientras haya una selección viva, componer la foto pregunta **por cada celda de la rejilla** si va
-realzada — las 1 911 de una consola de 49×39, marcadas dos o dos mil. O sea que:
+**What is clear, and it matters more than the figure: the cost does NOT grow with how much is
+marked.** While a selection is alive, composing the picture asks **for every cell of the grid**
+whether it goes highlighted — the 1 911 of a 49×39 console, two marked or two thousand. Which means:
 
-- marcar una palabra cuesta lo mismo que marcar la pantalla entera;
-- el coste **crece con la rejilla y con el número de consolas**, no con el gesto;
-- y se paga en **todos** los fotogramas mientras la selección siga viva, no solo mientras se arrastra.
+- marking a word costs the same as marking the whole screen;
+- the cost **grows with the grid and with the number of consoles**, not with the gesture;
+- and it is paid on **every** frame while the selection stays alive, not only while it is being dragged.
 
-La primera versión de este anexo lo explicaba como «veinte rectángulos de más al pintar», y la aritmética
-se contradecía sola: sesenta microsegundos entre veinte rectángulos serían tres cada uno, cuando encolar
-las 1 911 celdas enteras cuesta 190. Los rectángulos de más existen —una celda realzada tiene un fondo
-distinto del de la ventana, y el pintor se salta las que llevan ese fondo—, pero no son el grueso.
+The first version of this annex explained it as «twenty extra rectangles when painting», and the
+arithmetic contradicted itself: sixty microseconds across twenty rectangles would be three each,
+when queuing the 1 911 whole cells costs 190. The extra rectangles do exist —a highlighted cell has
+a background different from the window's, and the painter skips the ones carrying that background—
+but they are not the bulk.
 
-**Hasta dónde llega lo medido, dicho antes de que alguien se fíe de más.** La tanda marca **veinte
-celdas de una fila**, que es un gesto de los que se hacen —una ruta, una orden—. Lo que **no** se ha
-corrido es el otro extremo: marcar la pantalla entera, que es el gesto de «copiar toda la salida». Ahí, al
-barrido por celda se le suma **un rectángulo de fondo por cada celda marcada** —el pintor se salta las que
-llevan el fondo de la ventana, y una realzada no lo lleva—, y eso son 1 911 rectángulos por fotograma
-contra los veinte de la tanda. Que ese sumando no sea el grueso está **razonado, no corrido**.
+**How far the measurement reaches, said before anyone trusts it too much.** The batch marks **twenty
+cells of one row**, which is one of the gestures people do make —a path, a command—. What **has
+not** been run is the other extreme: marking the whole screen, which is the «copy all the output»
+gesture. There, on top of the per-cell sweep comes **one background rectangle per marked cell** —the
+painter skips the ones carrying the window's background, and a highlighted one does not carry it—,
+and that is 1 911 rectangles per frame against the twenty of the batch. That that addend is not the
+bulk is **argued, not run**.
 
-**Y dura más de lo que parece: una selección sigue viva —y cobrando— hasta que alguien la tira.** No la
-tiran teclear, ni perder el foco, ni cambiar de pestaña, ni mover la división: solo un clic seco o las tres
-reglas del motor de aquí arriba. El camino cotidiano que lo paga es marcar una línea, copiarla y seguir
-trabajando: el `cargo build` siguiente barre la rejilla en cada fotograma **con la marca ya fuera de
-pantalla**. Y **cada consola sostiene la suya**, así que con cuatro divisiones se paga cuatro veces.
+**And it lasts longer than it seems: a selection stays alive —and charging— until somebody throws it
+away.** It is not thrown away by typing, nor by losing the focus, nor by switching tabs, nor by
+moving the pane: only a plain click or the three engine rules above. The everyday path that pays for
+it is marking a line, copying it and carrying on working: the next `cargo build` sweeps the grid on
+every frame **with the mark already off screen**. And **each console holds its own**, so with four
+panes it is paid four times.
 
-**Queda una pregunta abierta, y no es de este hito:** preguntar por celda con la selección viva se puede
-acotar mirando primero si la fila entra en el rango. No se hace ahora porque sería optimizar contra una
-cifra que este anexo acaba de declarar **no aislada**, y este proyecto no optimiza contra números que no
-sostiene.
+**One question stays open, and it does not belong to this milestone:** asking per cell with the
+selection alive can be narrowed by looking first at whether the row falls inside the range. It is
+not done now because it would be optimizing against a figure this annex has just declared **not
+isolated**, and this project does not optimize against numbers it does not hold up.
 
-**Y el gesto se declara con TRES números en la cabecera, no con dos.** A los gestos inyectados y los que
-surtieron efecto se les suma **en cuántos fotogramas quedó texto marcado** —fotogramas y no gestos: cada
-gesto extiende la selección una vez por fotograma de arrastre, así que sale mayor—. Ese tercero lo leen las
-tandas en los dos sentidos: la que mide marcar exige **más de uno por gesto**, y **todas las demás exigen
-cero**. La razón es **D20**: desde que el botón primario a secas marca texto, cualquier gesto que pierda su
-asidero se convierte en una selección **sin que nada más lo delate**, porque se inyecta entero y declara
-efectos igual. Comprobado quitándole el acorde al gesto de mover consolas: la tanda `J` se invalida
-diciendo que dejó texto marcado en 183 fotogramas. Y en el otro sentido, la que marca exige **más de uno
-por gesto** y no simplemente más de cero: cada gesto extiende la selección una vez por fotograma de
-arrastre, así que pedir «al menos uno en toda la corrida» dejaría pasar una tanda en la que solo el primero
-marcara.
+**And the gesture is declared with THREE numbers in the header, not two.** To the injected gestures
+and the ones that took effect is added **in how many frames text was left marked** —frames and not
+gestures: each gesture extends the selection once per drag frame, so it comes out larger—. That
+third one is read by the batches in both directions: the one that measures marking demands **more
+than one per gesture**, and **all the rest demand zero**. The reason is **D20**: ever since the
+primary button on its own marks text, any gesture that loses its handle turns into a selection
+**with nothing else giving it away**, because it is injected whole and declares effects just the
+same. Checked by taking the chord off the gesture that moves consoles: batch `J` invalidates itself
+saying it left text marked in 183 frames. And in the other direction, the one that marks demands
+**more than one per gesture** and not simply more than zero: each gesture extends the selection once
+per drag frame, so asking for «at least one in the whole run» would let through a batch in which
+only the first one marked.
 
 ---
 
-## D23 — El ratón al programa de dentro: quién se queda cada gesto, y en qué se lo cuenta
+## D23 — The mouse to the inner program: who keeps each gesture, and what it is told in
 
-**Decisión.** Una consola cuyo programa **ha pedido** el ratón recibe los gestos que ocurren sobre ella, en
-un informe que **escribe este proyecto** porque la librería del motor no lo trae. El reparto tiene un orden
-fijo, se decide **al apretar** y no se relee, y `Mayúsculas` es la salida que devuelve el gesto al terminal
-pase lo que pase.
+**Decision.** A console whose program **has asked** for the mouse receives the gestures that happen
+over it, in a report **this project writes** because the engine's library does not bring one. The
+handout has a fixed order, is decided **on press** and is not read again, and `Shift` is the way out
+that returns the gesture to the terminal come what may.
 
-### El orden, y por qué es ése
+### The order, and why it is that one
 
-| Quién se lo queda | Cuándo | Por qué va ahí |
+| Who keeps it | When | Why it goes there |
 |---|---|---|
-| **Mover la división** | `Ctrl+Mayúsculas` apretado | Es de la ventana. Si un programa pudiera quitárselo, abrir `vim` en una consola la dejaría clavada donde está |
-| **La selección** | `Mayúsculas` apretado | Sin esta salida, dentro de `htop` o de `vim` no habría **ninguna** forma de sacar una línea de la pantalla. Es lo que hace todo terminal con esa misma tecla |
-| **El programa** | Lo ha pedido | Lo normal en cuanto hay una interfaz de pantalla completa dentro |
-| **La selección** | Nadie más lo reclamó | El caso de todos los días: un shell no pide el ratón |
+| **Moving the pane** | `Ctrl+Shift` held | It belongs to the window. If a program could take it away, opening `vim` in a console would leave it nailed where it is |
+| **The selection** | `Shift` held | Without this way out, inside `htop` or `vim` there would be **no** way to get a line off the screen. It is what every terminal does with that same key |
+| **The program** | It has asked for it | The normal thing as soon as there is a full-screen interface inside |
+| **The selection** | Nobody else claimed it | The everyday case: a shell does not ask for the mouse |
 
-**Para la rueda el orden es el mismo con una rama más**, y ésa es la que hace que `less` y `man` se
-desplacen sin pedir el ratón: `Mayúsculas` → siempre el historial; el programa lo pide → sus dos números
-propios; **pantalla alterna** → flechas; si no → el historial.
+**For the wheel the order is the same with one more branch**, and that is the one that makes `less`
+and `man` scroll without asking for the mouse: `Shift` → always the scrollback; the program asks for
+it → its own two numbers; **alternate screen** → arrows; if not → the scrollback.
 
-**Y el significado se fija al apretar**, exactamente como en **D20**: los gestos entran todos por el mismo
-botón, y releer el acorde en cada fotograma haría que soltar una tecla a mitad de un arrastre cambiara lo
-que el gesto significa **con el botón todavía apretado**.
+**And the meaning is fixed on press**, exactly as in **D20**: the gestures all come in through the
+same button, and re-reading the chord on every frame would make releasing a key halfway through a
+drag change what the gesture means **with the button still held down**.
 
-### La codificación es nuestra, y dónde se corta
+### The encoding is ours, and where it stops
 
-La caja del motor sabe decir **si** el programa quiere el ratón —son sus banderas— pero armar el informe lo
-hacía el binario de Alacritty, no su librería. Así que la tabla es de este proyecto:
+The engine's crate knows how to say **whether** the program wants the mouse —they are its flags— but
+assembling the report was done by Alacritty's binary, not by its library. So the table belongs to
+this project:
 
 ```
-extendida:   \x1b[<{botón};{columna};{fila}M   al apretar
-             \x1b[<{botón};{columna};{fila}m   al soltar
-antigua:     \x1b[M{32+botón}{32+columna}{32+fila}
-rueda:       botón 64 (arriba) y 65 (abajo);  arrastrar suma 32;  Ctrl 16 y Alt 8
+extended:  \x1b[<{button};{column};{row}M   on press
+           \x1b[<{button};{column};{row}m   on release
+legacy:    \x1b[M{32+button}{32+column}{32+row}
+wheel:     button 64 (up) and 65 (down);  dragging adds 32;  Ctrl 16 and Alt 8
 ```
 
-Columnas y filas **empiezan en uno** y son las de la rejilla visible.
+Columns and rows **start at one** and are those of the visible grid.
 
-**Lo que queda fuera: la codificación de coordenadas en UTF-8.** La antigua mete cada número en un byte con
-32 sumado, así que **satura en la columna 223** — y lo que hace `xterm` sin ese modo es exactamente eso:
-dejar de informar. Pasado ese punto **no se manda nada**, nunca un número aproximado: unas coordenadas
-equivocadas el programa las entiende como un clic en otro sitio, y eso es peor que no recibir nada. Es el
-mismo corte que este proyecto ya declaró para las teclas de función, y por la misma razón: escribir una
-tabla sin poder verla funcionando es adivinar.
+**What is left out: encoding the coordinates in UTF-8.** The legacy one puts each number into a byte
+with 32 added, so it **saturates at column 223** — and what `xterm` does without that mode is
+exactly that: stop reporting. Past that point **nothing is sent**, never an approximate number:
+coordinates that are wrong are understood by the program as a click somewhere else, and that is
+worse than receiving nothing. It is the same cut-off this project already declared for the function
+keys, and for the same reason: writing a table without being able to see it working is guessing.
 
-**Y `Mayúsculas` no viaja en el informe**, aunque la codificación tenga sitio para ella: en esta ventana esa
-tecla fuerza la selección, así que un gesto con ella apretada no llega nunca a codificarse. Ponerla sería
-una rama muerta que además sugiere lo contrario de lo que la ventana hace.
+**And `Shift` does not travel in the report**, even though the encoding has room for it: in this
+window that key forces the selection, so a gesture with it held down never gets as far as being
+encoded. Putting it in would be a dead branch that on top of that suggests the opposite of what the
+window does.
 
-### Lo que se leyó en el motor y no se supuso
+### What was read in the engine and not assumed
 
-**El desplazamiento alternativo viene ENCENDIDO de fábrica.** Está en el modo por defecto del motor —leído
-en su fuente, igual que hace `xterm`—, así que en la práctica lo que decide que la rueda salga como flechas
-es **la pantalla alterna**. La bandera se sigue preguntando porque un programa **puede apagarla**: `vim` lo
-hace en cuanto quiere el ratón para sí, y darle flechas entonces movería su punto de inserción sin que nadie
-tocara una tecla. La primera prueba de esto se escribió suponiendo lo contrario y **falló**: es un caso más
-de que la API ajena se lee.
+**Alternate scrolling comes ON from the factory.** It is in the engine's default mode —read in its
+source, the same as `xterm` does—, so in practice what decides that the wheel comes out as arrows is
+**the alternate screen**. The flag is still asked about because a program **can turn it off**: `vim`
+does as soon as it wants the mouse for itself, and giving it arrows then would move its insertion
+point without anyone touching a key. The first test for this was written assuming the opposite and
+**failed**: it is one more case of somebody else's API being read.
 
-### La medida: serie propia, y una etiqueta que dice exactamente lo que abarca
+### The measurement: its own series, and a label that says exactly what it covers
 
-Lo que cuesta el ratón se anota en **su propia serie**, no en la de la tecla. Es la misma razón por la que
-aquélla excluye el pegado: son dos poblaciones distintas bajo una etiqueta que solo describe a una. Un
-arrastre mete **decenas de muestras por gesto** —una por celda cruzada— contra la única que mete una tecla,
-así que promediarlas juntas dejaría la cifra que **D3** publica describiendo sobre todo al ratón.
+What the mouse costs is recorded in **its own series**, not in the key's. It is the same reason that
+one excludes pasting: they are two different populations under a label that only describes one. A
+drag puts in **dozens of samples per gesture** —one per cell crossed— against the single one a key
+puts in, so averaging them together would leave the figure **D3** publishes describing mostly the
+mouse.
 
-**La etiqueta es «codificar el gesto de ratón → byte en el programa», y no la de la tecla.** La primera
-versión de este anexo lo publicaba como «del fotograma que ve el gesto al byte», que es lo que mide la serie
-de la tecla — y **es falso**: este reloj empieza mucho después, con el recorrido del árbol, el reparto del
-puntero y resolver la celda **fuera**, dentro del reloj que ya cronometra atender el ratón entero. Bajo
-aquella etiqueta publicaba un tramo estrictamente más corto que el que nombraba, que es el error que este
-proyecto castiga por encima de los demás. Corregido en el código, en el informe y aquí. **Los dos números no
-se comparan.**
+**The label is «encoding the mouse gesture → byte in the program», and not the key's.** The first
+version of this annex published it as «from the frame that sees the gesture to the byte», which is
+what the key's series measures — and **it is false**: this clock starts much later, with walking the
+tree, handing out the pointer and resolving the cell **outside**, inside the clock that already
+times attending to the mouse as a whole. Under that label it published a span strictly shorter than
+the one it named, which is the error this project punishes above all the others. Fixed in the code,
+in the report and here. **The two numbers do not compare.**
 
-**Anexo — medido.** Tanda `O`, dos corridas del mismo binario, promediables según el comparador. Hace **el
-mismo recorrido** que la tanda que marca texto y solo se distingue en que el programa de la consola
-izquierda ha pedido el ratón; la derecha es el control dentro de la misma corrida.
+**Annex — measured.** Batch `O`, two runs of the same binary, averageable according to the
+comparator. It makes **the same walk** as the batch that marks text and differs only in that the
+program of the left console has asked for the mouse; the right one is the control inside the same
+run.
 
-| Corrida | Gestos | Informes | Codificar y escribir, media | El 95 % |
+| Run | Gestures | Reports | Encoding and writing, average | The 95 % |
 |---|---|---|---|---|
-| 1 | 1 001 | 3 004 | 5,126 µs | 10,480 µs |
-| 2 | 1 387 | 4 164 | 5,286 µs | 10,200 µs |
+| 1 | 1 001 | 3 004 | 5.126 µs | 10.480 µs |
+| 2 | 1 387 | 4 164 | 5.286 µs | 10.200 µs |
 
-**Lo que cuesta codificar un gesto y escribírselo al programa: 5,1–5,3 µs de media y unos 10 µs el 95 %.**
+**What encoding a gesture and writing it to the program costs: 5.1–5.3 µs on average and about 10 µs
+for the 95 %.**
 
-**Y los informes salen exactamente a tres por gesto** —apretar, un movimiento, soltar—, que es lo que
-confirma que ningún camino informa de más: la primera versión mandaba **cuatro**, con un movimiento
-publicado **después** del soltado.
+**And the reports come out at exactly three per gesture** —press, one movement, release—, which is
+what confirms that no path reports extra: the first version sent **four**, with a movement published
+**after** the release.
 
-**Y esta cifra sí está aislada, al revés que la de D22.** No sale de restar una consola de la otra: es su
-propia serie, cronometrada entre dos puntos del mismo camino, y sus muestras se cuentan **por informe** y no
-por fotograma. Lo que **no** se puede hacer con esta tanda es restarle la consola de control para sacar «lo
-que cuesta el ratón por fotograma»: la asimetría entre izquierda y derecha existe sin gesto ninguno, y esa
-resta ya publicó dos números falsos en este mismo documento.
+**And this figure is isolated, unlike D22's.** It does not come from subtracting one console from
+the other: it is its own series, timed between two points of the same path, and its samples are
+counted **per report** and not per frame. What **cannot** be done with this batch is subtracting the
+control console from it to get «what the mouse costs per frame»: the asymmetry between left and
+right exists with no gesture at all, and that subtraction has already published two false numbers in
+this very document.
 
-**Un aviso más, del mismo tipo que el de D15:** las dos corridas **no comparten régimen** —1 001 y 1 387
-gestos inyectados—, así que sus medias **por fotograma** no se promedian. Las de esta serie sí, porque su
-unidad es el informe.
+**One more warning, of the same kind as D15's:** the two runs **do not share a regime** —1 001 and 1
+387 injected gestures—, so their **per-frame** averages are not averaged. This series' ones are,
+because its unit is the report.
 
-**Y los efectos se cuentan por GESTO, no por informe.** Un gesto de ratón son el apretón, sus movimientos y
-el soltado; contando cada uno, la tanda publicaba **el triple de efectos que de gestos** y su columna dejaba
-de ser comparable con las de las demás tandas, donde los efectos nunca pasan de los gestos. Cuenta el
-apretón, que abre el gesto, y el giro de rueda, que **es** un gesto entero por sí mismo. Con el código
-final la tanda declara **1 001 gestos y 1 002 efectos**.
+**And the effects are counted per GESTURE, not per report.** A mouse gesture is the press, its
+movements and the release; counting each one, the batch published **three times as many effects as
+gestures** and its column stopped being comparable with those of the other batches, where the
+effects never exceed the gestures. It counts the press, which opens the gesture, and the wheel turn,
+which **is** a whole gesture by itself. With the final code the batch declares **1 001 gestures and
+1 002 effects**.
 
-### Las guardas nuevas, y en los dos sentidos
+### The new guards, and in both directions
 
-La cabecera del informe declara ahora **cuatro** números del gesto, no tres: a los inyectados, los que
-surtieron efecto y los fotogramas con texto marcado se les suma **cuántos informes de ratón salieron**. Ese
-cuarto se lee igual que el tercero:
+The report header now declares **four** numbers of the gesture, not three: to the injected ones, the
+ones that took effect and the frames with marked text is added **how many mouse reports went out**.
+That fourth one is read the same way as the third:
 
-- **Y las flechas no cuentan.** Lo que sale cuando la rueda se traduce son las mismas teclas que manda el
-  teclado; publicarlas bajo «N informes de ratón» metía muestras ajenas en esa serie **y hacía saltar la
-  guarda** que exige cero informes en toda tanda que no sea la del ratón — una corrida correcta con un
-  `less` desplazándose se marcaba inválida.
-- **La tanda del ratón exige más de uno por gesto.** Sin ese número, una corrida en la que el programa nunca
-  llegara a pedir el ratón —la secuencia que no sale, un binario viejo— publicaría los tramos de una
-  **selección** bajo la etiqueta del ratón, y las dos tandas serían **indistinguibles leyendo el informe**:
-  hacen el mismo recorrido.
-- **Y exige además que no marcara nada**, porque los dos caminos corriendo a la vez mezclarían sus tramos.
-- **Todas las demás exigen cero.** Un informe que se escapara metería una ida al pseudoterminal dentro de la
-  media de otra tanda.
+- **And the arrows do not count.** What comes out when the wheel is translated are the same keys the
+  keyboard sends; publishing them under «N mouse reports» put samples that did not belong into that series
+  **and made the guard fire** that demands zero reports in every batch that is not the mouse's — a correct
+  run with a `less` scrolling was marked invalid.
+- **The mouse batch demands more than one per gesture.** Without that number, a run in which the program
+  never got as far as asking for the mouse —the sequence that does not come out, an old binary— would
+  publish the spans of a **selection** under the mouse's label, and the two batches would be
+  **indistinguishable from reading the report**: they make the same walk.
+- **And it demands as well that it marked nothing**, because the two paths running at once would mix their
+  spans.
+- **All the rest demand zero.** A report that got away would put a trip to the pseudoterminal inside
+  another batch's average.
 
-**Probadas fallando, que es la única forma de saber que sirven.** Quitándole a la tanda la línea que hace
-que su programa pida el ratón, la corrida se invalida diciendo que **dejó texto marcado en 1 990
-fotogramas** — el gesto entero se resolvió como una selección, exactamente el escenario contra el que la
-guarda existe. Sin ella, ese informe se habría publicado como bueno y sus tramos serían los de la tanda que
-marca texto con la etiqueta del ratón encima.
+**Tested by failing, which is the only way to know they are worth anything.** Taking off the batch
+the line that makes its program ask for the mouse, the run invalidates itself saying it **left text
+marked in 1 990 frames** — the whole gesture resolved as a selection, exactly the scenario the guard
+exists against. Without it, that report would have been published as good and its spans would be
+those of the batch that marks text with the mouse's label on top.
 
 ---
 
-## D24 — Las fuentes del sistema se buscan cuando hacen falta, no al arrancar
+## D24 — The system fonts are looked for when they are needed, not at startup
 
-**Decisión.** El terminal **no enumera las fuentes de la máquina al abrir la ventana**. Las busca la
-primera vez que aparece un carácter que ninguna de las caras registradas cubre, y registra entonces la
-que lo cubra. **Elegido con los números delante**, igual que el techo del historial en **D21**.
+**Decision.** The terminal **does not enumerate the machine's fonts when it opens the window**. It
+looks for them the first time a character appears that none of the registered faces covers, and
+registers then the one that covers it. **Chosen with the numbers in front**, the same as the
+scrollback ceiling in **D21**.
 
-### Los números, medidos aquí
+### The numbers, measured here
 
-`cargo run --release --example fonts -p app`, cinco muestras por punto y **tres corridas del binario con
-la máquina en reposo**. Máquina de desarrollo con **259 familias** instaladas.
+`cargo run --release --example fonts -p app`, five samples per point and **three runs of the binary
+with the machine at rest**. Development machine with **259 families** installed.
 
-**En frío y en caliente van por separado, y ésa es la mitad del anexo.** El banco cachea los ficheros que
-abre, así que la primera muestra paga abrirlos y las demás no. **La vía perezosa paga siempre la fría** —
-una vez por escritura nueva, que es justo lo que ocurre en producción.
+**Cold and warm go separately, and that is half the annex.** The bench caches the files it opens, so
+the first sample pays for opening them and the rest do not. **The lazy path always pays the cold
+one** — once per new writing system, which is exactly what happens in production.
 
-**Y por eso la columna fría se publica como rango de corridas y no como un valor.** El frío **ocurre una
-vez por corrida**: dentro de una corrida no hay cinco muestras frías que promediar, hay **una**. Así que
-la única forma de saber cuánto se mueve es **repetir la corrida**, y se movió — hasta un **40 %** en el
-número que sostiene esta decisión. Publicar el valor de una corrida como si fuera *el* valor es
-exactamente lo que la regla dura del proyecto prohíbe, y la primera versión de este anexo lo hacía.
+**And that is why the cold column is published as a range of runs and not as a value.** The cold
+**happens once per run**: inside a run there are not five cold samples to average, there is **one**.
+So the only way to know how much it moves is **to repeat the run**, and it moved — by up to **40 %**
+in the number that holds up this decision. Publishing one run's value as if it were *the* value is
+exactly what the project's hard rule forbids, and the first version of this annex did it.
 
-| Qué | En frío (3 corridas) | En caliente |
+| What | Cold (3 runs) | Warm |
 |---|---|---|
-| **Enumerar** las fuentes del sistema | **17,3 – 23,2 ms** | 15,1 ms |
-| **Registrar 4 caras** en el motor de texto | **6,2 – 7,8 ms** · 24,5 MiB de fuente en memoria | 1,9 – 2,2 ms |
-| **Registrar 1 cara con la ventana andando** | **3,4 – 4,8 ms** — del **21 % al 29 %** de un fotograma a 60 Hz | 1,2 – 1,5 ms |
-| Encontrar quién cubre 日 **por script** | **570 – 852 µs** | 140 – 210 ns |
-| Encontrar el emoji **a color por familia genérica** | **7,2 – 10,8 µs** | 0,67 – 0,98 µs |
-| Encontrar quién lo cubre **abriendo las 259 en orden** | de 94 µs a **18,2 ms** | 94 – 152 µs |
+| **Enumerating** the system fonts | **17.3 – 23.2 ms** | 15.1 ms |
+| **Registering 4 faces** in the text engine | **6.2 – 7.8 ms** · 24.5 MiB of font in memory | 1.9 – 2.2 ms |
+| **Registering 1 face with the window running** | **3.4 – 4.8 ms** — from **21 % to 29 %** of a frame at 60 Hz | 1.2 – 1.5 ms |
+| Finding who covers 日 **by script** | **570 – 852 µs** | 140 – 210 ns |
+| Finding the color emoji **by generic family** | **7.2 – 10.8 µs** | 0.67 – 0.98 µs |
+| Finding who covers it **by opening all 259 in order** | from 94 µs to **18.2 ms** | 94 – 152 µs |
 
-> **La columna caliente sí es estable, y el contraste es el dato.** Enumerar en caliente dio 15,07, 15,10,
-> 15,17 y 15,12 ms en cuatro corridas seguidas — cuatro cifras dentro del 1 %—, mientras su frío iba de
-> 17,3 a 23,2. Lo que varía es **abrir ficheros**, no recorrer listas. Y sirve de aviso: **la primera
-> versión de este anexo publicaba 13,7 ms de caliente, un número que no se ha vuelto a ver en ninguna de
-> las cuatro corridas.**
+> **The warm column is stable, and the contrast is the finding.** Enumerating warm gave 15.07, 15.10,
+> 15.17 and 15.12 ms in four consecutive runs — four figures within 1 % — while its cold went from 17.3
+> to 23.2. What varies is **opening files**, not walking lists. And it serves as a warning: **the first
+> version of this annex published 13.7 ms warm, a number that has not been seen again in any of the four
+> runs.**
 
-### Por qué perezoso, en una resta
+### Why lazy, in one subtraction
 
-**Al arrancar costarían entre 23,5 y 31,0 ms** —enumerar más registrar, sumando los dos extremos de cada
-rango—, y son ms que **hoy no se pagan**.
+**At startup they would cost between 23.5 and 31.0 ms** —enumerating plus registering, adding the
+two extremes of each range—, and they are ms that **today are not paid**.
 
-> **Con qué se compara, dicho con precisión, porque la primera versión de este anexo lo dijo mal.** Decía
-> que «multiplica por 5,3 lo que hoy se tarda en llegar al primer fotograma», tomando los **5,42 ms** de
-> **D16** como si fueran el arranque entero. **No lo son**: ese número es lo que cuesta **restaurar la
-> disposición**, y es **el único tramo del arranque que este proyecto tiene medido**. Abrir la ventana,
-> montar el framework y cargar las fuentes de fábrica **no están medidos**, así que no hay un total con el
-> que dividir. Lo que sí se puede afirmar: son **entre cuatro y seis veces el único tramo medido**, y se
-> pagarían **antes del primer fotograma**.
+> **What it compares against, said precisely, because the first version of this annex said it wrong.** It
+> said that it «multiplies by 5.3 what it takes today to reach the first frame», taking the **5.42 ms** of
+> **D16** as if they were the whole startup. **They are not**: that number is what **restoring the
+> layout** costs, and it is **the only span of the startup this project has measured**. Opening the
+> window, setting up the framework and loading the factory fonts **are not measured**, so there is no
+> total to divide by. What can be stated: they are **between four and six times the only measured span**,
+> and they would be paid **before the first frame**.
 
-**Buscar cuando hace falta cuesta entre 4,0 y 5,7 ms** —encontrar la cara más registrarla, sumando otra vez
-los extremos— y ocurre **una vez por escritura nueva**, no por carácter ni por fotograma. Son **del 24 % al
-34 % de un fotograma**: un tirón medible, puntual, y a cambio de no pagar nada al abrir.
+**Looking when it is needed costs between 4.0 and 5.7 ms** —finding the face plus registering it,
+adding the extremes again— and it happens **once per new writing system**, not per character or per
+frame. They are **from 24 % to 34 % of a frame**: a measurable, one-off jolt, and in exchange for
+paying nothing on opening.
 
-**La decisión aguanta el rango entero, y ésa es la razón de publicarlo.** El peor caso de la vía perezosa
-(5,7 ms) contra el **mejor** del arranque (23,5 ms) sigue siendo una distancia de **más de cuatro veces**
-— y el arranque se paga **siempre**, mientras que lo perezoso se paga **solo si el carácter aparece**.
-Ninguna combinación de los extremos medidos le da la vuelta.
+**The decision holds across the whole range, and that is the reason for publishing it.** The worst
+case of the lazy path (5.7 ms) against the **best** of the startup (23.5 ms) is still a distance of
+**more than four times** — and the startup is paid **always**, while the lazy one is paid **only if
+the character appears**. No combination of the measured extremes turns it around.
 
-> **Ese porcentaje es cuatro veces lo que decía la primera versión de este anexo, y conviene decir por qué.**
-> Publicaba «1,3 ms, un 8 %» por tres errores que la revisión encontró **corriendo el banco**: la mediana
-> de cinco muestras publicaba el caso **caliente** cuando la vía perezosa paga el **frío**; las dos mitades
-> de la suma estaban medidas **con fuentes distintas** —la búsqueda con una de 19,5 MiB y el registro con
-> otra de 3,8—; y los tiempos de búsqueda medían **una copia del fichero de fuente**, no la búsqueda.
+> **That percentage is four times what the first version of this annex said, and it is worth saying why.**
+> It published «1.3 ms, an 8 %» because of three errors that the review found **by running the bench**:
+> the median of five samples published the **warm** case when the lazy path pays the **cold** one; the two
+> halves of the sum were measured **with different fonts** —the search with one of 19.5 MiB and the
+> registration with another of 3.8—; and the search timings measured **a copy of the font file**, not the
+> search.
 
-> **Y esos 24,5 MiB no son un detalle.** Es el fichero de fuente **entero por cara**, no los glifos que se
-> usan. Con la vía perezosa solo se paga la memoria de lo que de verdad aparece en pantalla.
+> **And those 24.5 MiB are not a detail.** It is the **whole font file per face**, not the glyphs that get
+> used. With the lazy path only the memory of what really appears on screen is paid for.
 
-### Lo que la medida encontró y no se buscaba
+### What the measurement found and was not looking for
 
-**Una fuente que «cubre» un emoji puede pintarlo en blanco y negro, y ganar por orden alfabético.**
-Recorriendo las familias en orden, quien se lleva `😀` en esta máquina es **DejaVu Sans**, y el banco lo
-publica con esas palabras: `DejaVu Sans [monocromo]` — teniendo `Noto Color Emoji` instalada. Es
-exactamente el defecto que Alacritty tiene documentado desde hace años.
+**A font that «covers» an emoji can paint it in black and white, and win by alphabetical order.**
+Walking the families in order, the one that takes `😀` on this machine is **DejaVu Sans**, and the
+bench publishes it in those words: `DejaVu Sans [monochrome]` — with `Noto Color Emoji` installed. It
+is exactly the defect Alacritty has had documented for years.
 
-**Preguntar por la familia genérica de emoji lo arregla, y además es lo más barato de todo el anexo:
-7,2 – 10,8 µs.** Así que la regla no es «la primera que cubra», es **«la primera que cubra con la
-presentación que toca»** — y el número de arriba ya está medido **con esa regla**, no con la de solo
-cobertura.
+**Asking for the generic emoji family fixes it, and on top of that it is the cheapest thing in the
+whole annex: 7.2 – 10.8 µs.** So the rule is not «the first one that covers it», it is **«the first
+one that covers it with the right presentation»** — and the number above is already measured **with
+that rule**, not with the coverage-only one.
 
-**Y `Noto Color Emoji` no tiene contornos de color: es un mapa de bits de 136×128.** Confirma por el lado
-duro lo que la lectura de la fuente de egui ya decía — su rasterizador solo dibuja contornos, así que
-registrar esa fuente **no daría ni la silueta**: no daría nada.
+**And `Noto Color Emoji` has no color outlines: it is a 136×128 bitmap.** It confirms from the hard
+side what reading egui's source already said — its rasterizer only draws outlines, so registering
+that font **would not even give the silhouette**: it would give nothing.
 
-**La dispersión de recorrerlo todo no es «según dónde caiga en el orden», es según lo que pese la
-ganadora.** `Adwaita Sans` está pronto y pesa 0,88 MB: 94 – 134 µs. `Noto Sans CJK HK` está más tarde y
-pesa 19,5 MB: 12,2 – 18,2 ms. Lo que se paga es abrir el fichero, no recorrer la lista — y la primera
-versión de este anexo atribuía el rango a la posición, que es una causa falsa.
+**The spread of walking everything is not «depending on where it falls in the order», it is
+depending on how much the winner weighs.** `Adwaita Sans` comes early and weighs 0.88 MB: 94 – 134
+µs. `Noto Sans CJK HK` comes later and weighs 19.5 MB: 12.2 – 18.2 ms. What is paid for is opening
+the file, not walking the list — and the first version of this annex attributed the range to the
+position, which is a false cause.
 
-### Lo que cuesta guardar los emojis ya dibujados
+### What storing the already-drawn emojis costs
 
-La celda de este terminal mide **16,3 puntos de alto**, preguntados al motor de texto y no inventados. Un
-glifo reescalado a esa celda ocupa:
+This terminal's cell is **16.3 points high**, asked of the text engine and not invented. A glyph
+rescaled to that cell takes up:
 
-| Aumento del escritorio | Por glifo | Mil glifos |
+| Desktop scaling | Per glyph | A thousand glyphs |
 |---|---|---|
-| 100 % | 1.024 B | **1,0 MiB** |
-| 200 % | 4.096 B | **3,9 MiB** |
+| 100 % | 1 024 B | **1.0 MiB** |
+| 200 % | 4 096 B | **3.9 MiB** |
 
-**El techo se dimensiona en píxeles y el escritorio decide cuántos hay por punto**, así que la cifra
-depende del aumento — lo mismo que **D10** estableció para el ancho del panel. La primera versión de este
-anexo publicaba una sola cifra con una altura de celda inventada y tratada como píxeles.
+**The ceiling is sized in pixels and the desktop decides how many there are per point**, so the
+figure depends on the scaling — the same as **D10** established for the panel's width. The first
+version of this annex published a single figure with an invented cell height treated as pixels.
 
-**Ojo con el otro número:** los **68 KiB** del mapa de bits son su tamaño **una vez descodificado a RGBA**.
-La fuente lo guarda comprimido — el fichero entero de `Noto Color Emoji`, con todos sus glifos, son
-10,5 MiB.
+**Watch out for the other number:** the **68 KiB** of the bitmap are its size **once decoded to
+RGBA**. The font stores it compressed — the whole `Noto Color Emoji` file, with all its glyphs, is
+10.5 MiB.
 
-### Lo que este banco NO dice, y hay que medir aparte
+### What this bench does NOT say, and has to be measured separately
 
-- **Qué cuesta pintar el glifo ya rasterizado.** Eso vive dentro del fotograma y se mide con una tanda del
-  guion, no con un banco. Va en la entrega que traiga el color.
-- **Cuánto cuesta el arranque entero.** Solo hay medido un tramo —restaurar la disposición—, así que hoy
-  no se puede decir qué fracción del arranque sería cualquier cosa que se le añada.
+- **What painting the already-rasterized glyph costs.** That lives inside the frame and is measured with a
+  batch of the script, not with a bench. It goes in the delivery that brings the color.
+- **What the whole startup costs.** Only one span is measured —restoring the layout—, so today it cannot
+  be said what fraction of the startup anything added to it would be.
 
-### Lo que la vía perezosa obliga a recordar, y no es obvio
+### What the lazy path forces you to remember, and it is not obvious
 
-**Hay que recordar también los caracteres que NADIE cubre.** Un carácter cubierto se busca una vez y su
-cara queda registrada, así que el siguiente ya no busca. Pero uno que ninguna fuente de la máquina tenga
-**no deja nada registrado**, así que sin recordar el fallo volvería a recorrer las candidatas cada vez que
-apareciera — y ése es justo el carácter que un programa roto escupe en bucle. Es un requisito de la
-entrega que traiga el descubrimiento, y sale de esta decisión.
+**The characters that NOBODY covers have to be remembered too.** A covered character is looked for
+once and its face stays registered, so the next one does not look again. But one that no font on the
+machine has **leaves nothing registered**, so without remembering the failure it would walk the
+candidates again every time it appeared — and that is exactly the character a broken program spews
+in a loop. It is a requirement of the delivery that brings the discovery, and it comes out of this
+decision.
 
-### Y dos consecuencias de compilación que se descubrieron aquí
+### And two compilation consequences that were discovered here
 
-**Descubrir fuentes en Linux se apoya en fontconfig, y enlazarlo exigiría `pkg-config` y sus cabeceras
-para compilar** — comprobado: la máquina donde se escribió esto no las tiene y la compilación falla en el
-guion de construcción, no en el código. Se carga **en ejecución** en su lugar, que es la misma técnica —y
-la misma razón— por la que `libwayland` llega hoy de rebote. El precio está declarado: la ausencia de
-fontconfig se descubre **al arrancar** en vez de al compilar, y es el caso que el criterio de aceptación
-de este hito obliga a aguantar sin caerse.
+**Discovering fonts on Linux leans on fontconfig, and linking it would require `pkg-config` and its
+headers to compile** — checked: the machine where this was written does not have them and the
+compilation fails in the build script, not in the code. It is loaded **at run time** instead, which
+is the same technique —and the same reason— by which `libwayland` arrives today by rebound. The
+price is declared: the absence of fontconfig is discovered **at startup** instead of at compile
+time, and it is the case this milestone's acceptance criterion forces it to withstand without
+falling over.
 
-**Y una dependencia «solo de desarrollo» no es inocua para el binario que se publica.** Las dependencias
-de desarrollo participan en la resolución de versiones: añadir `fontique` movió `windows-sys` de 0.59 a
-0.60 para `arboard` —el portapapeles, que **sí** va en el binario— y metió la pila de `windows 0.62`. En
-Linux no cambia nada; **en Windows, que es la plataforma de F2.7, ya cambia lo que se compila**. Lo
-encontró la revisión leyendo el fichero de bloqueo.
-
----
-
-## D25 — El emoji a color se pinta como imagen, y todos los glifos viven en un atlas propio
-
-**Decisión.** Un carácter cuya presentación pide color **no se le pide al motor de texto**: se rasteriza
-aparte y se pinta como **imagen**. Y todos los glifos rasterizados se pegan en **una sola textura** de
-512×512 píxeles, no en una textura cada uno.
-
-Las dos mitades salen de razones distintas, y las dos están medidas.
-
-### Por qué como imagen y no por el motor de texto
-
-**epaint 0.36.1 no sabe rasterizar un glifo a color.** Su rasterizador coge **solo** el contorno
-(`outline_glyphs`) y lo pinta con `set_paint(WHITE)`; en todo su módulo de texto no hay una mención a las
-tablas de color de una fuente. Comprobado leyendo su fuente en `text/font.rs:241`.
-
-Así que registrar `Noto Color Emoji` en la cadena de reserva —que es lo que **D24** hace para el CJK y los
-iconos— **no daría emojis a color**. Daría la silueta. Y en esta máquina no daría ni eso: `Noto Color
-Emoji` es un **mapa de bits de 136×128 sin contornos**, así que el motor no tendría nada que dibujar.
-
-**Lo que sí hay en el árbol es la pieza que hace falta**: `skrifa` —que epaint ya usa por debajo— sabe
-sacar el mapa de bits de un glifo, y el pintor de este proyecto **pinta celda a celda**, así que el emoji
-como imagen es una rama más en un `if` que ya existía, no un cambio de arquitectura.
-
-### Por qué un atlas, y el número que lo decidió
-
-**La primera versión daba una textura por glifo, y la medida la tumbó.** El teselador de epaint no puede
-juntar en la misma malla dos formas con identificadores de textura distintos —lo dice él mismo: «Mixing
-different `texture_id` in the same…»— así que **cada emoji de la pantalla partía el lote de dibujo**.
-
-**Casi el triple de lo que cuesta dibujar, y por trabajo que no es del framework.** Con atlas, todos los
-emojis de la pantalla se dibujan juntos. Es lo que hacen los terminales que son el listón de este
-proyecto, y por esta razón.
-
-**Pero el atlas solo no bastaba, y el segundo número lo dice.** El motor junta formas **consecutivas** que
-compartan textura, y el pintor recorre la rejilla celda a celda: una letra, otra letra, un emoji, otra
-letra… así que el lote se partía igual, ahora entre el atlas de fuentes y el de emojis. La solución es
-pintar **en dos pasadas** —todos los textos y después todos los emojis—, que es la misma disciplina con la
-que este pintor ya separaba los fondos de los glifos, y por la misma razón.
-
-### La resta entera, con el control corrido con el mismo binario
-
-| El resto del fotograma — la cifra con la que **D3** juzga a egui | Dos consolas volcando emojis |
-|---|---|
-| Una textura por glifo | **743,4 µs** |
-| Atlas, pintado entremezclado | 565,9 µs |
-| Atlas y dos pasadas | 370,8 µs |
-| **Atlas, dos pasadas y el atajo del ASCII** | **356,3 µs** |
-| *Control: las mismas dos consolas en ASCII* | *268,8 µs* |
-
-**Lo que hay que mirar del control no es la diferencia con la tanda, sino que no se ha movido.** 268,8 µs
-con este binario contra los 274,3 que publicó el hito anterior: **una pantalla sin emojis no paga nada**
-por que el terminal sepa pintarlos, ni siquiera la pasada de más. Eso es lo que hace aceptable el resto de
-la tabla.
-
-Con emojis, dibujar cuesta un 33 % más y encolar un 26 % (289,8 → 366,1 µs). Es el precio de **117 emojis
-por consola** en pantalla, que es una carga deliberadamente peor que cualquier uso real.
-
-### El atajo del ASCII, y el defecto que casi entra con él
-
-La pasada del color recorre la rejilla entera para pintar unos pocos emojis, así que descarta el ASCII
-**sin consultar las tablas de Unicode**. Duplicar ahí una regla que vive en otro sitio solo es aceptable
-si algo avisa cuando las dos dejan de decir lo mismo, y ese algo es una prueba que recorre los 128
-caracteres con los dos selectores detrás.
-
-**Lo que el atajo ahorra no se distingue del ruido, y se dice así.** 366,1 µs contra 377,5 en el tramo del
-pintado: la diferencia entre dos corridas de la misma tanda es del mismo orden. Los 92 µs que cuesta la
-pasada de más los paga **recorrer la rejilla otra vez**, y eso el atajo no lo evita. Una versión anterior
-de este anexo se los atribuía a él — un número con la etiqueta cambiada, que es justo lo que este proyecto
-dice que es peor que no tener número.
-
-**La escribió y la tumbó a la primera.** El atajo descartaba **todo** el ASCII, y Unicode le da `Emoji=Yes`
-a la **almohadilla, al asterisco y a los diez dígitos**: `#` seguido del selector es `#️⃣`. Once teclas que
-habrían salido en monocromo, en el hito cuyo objeto es que salgan a color. El atajo ahora descarta solo el
-ASCII **sin nada pegado**.
-
-### El techo dejó de ser un contador y es mejor así
-
-El diseño pedía «la memoria de los glifos rasterizados tiene techo declarado». Con atlas, el techo es
-**una textura de tamaño fijo**: la memoria que la tarjeta gráfica dedica a los emojis es **1 MiB y no
-cambia**, aparezcan uno o mil. A la altura de celda de esta máquina caben unos ochocientos glifos —17
-píxeles de alto, 18 de ancho—, muchos más de los que una persona ve en una sesión. Cuando se llena **se
-dice por la salida de error** y los emojis que no estén ya dentro salen en monocromo.
-
-Un contador habría dado el mismo límite con memoria que crece hasta él. La textura fija lo da desde el
-primer emoji.
-
-### Qué queda fuera, dicho con su razón
-
-**Los contornos de color —`COLR`— no se pintan.** Hacerlo exige rasterizar contornos a mano, que es el
-rasterizador propio que este hito descartó **a propósito** por invalidar el histórico de medida entero.
-En Linux no se nota, porque las fuentes de emoji del sistema son de mapa de bits; **en Windows sí**,
-porque `Segoe UI Emoji` es `COLR`. Queda declarado como lo que le falta a **F2.7**, no como algo que aquí
-funcione.
-
-**Los modificadores de tono de piel tampoco.** Son caracteres **anchos**, así que el motor de terminal les
-da celda propia en vez de pegarlos a la del emoji base, y la regla de presentación no puede mirar la celda
-siguiente: no lo tiene en su firma. La base sale a color y el modificador sale por su cuenta.
-
-**Y el panel de estado no pinta color.** Descubre fuentes —eso lo arregló la entrega anterior— pero su
-texto lo maqueta el motor de una vez, no celda a celda, así que un emoji en un resumen sale monocromo. El
-hito trata de la consola; esto queda dicho para que nadie lo lea como un fallo.
-
-### Lo que se descartó
-
-- **Registrar la fuente de emoji en la cadena de reserva**, como se hace con el CJK. No da color: da la
-  silueta, o nada. Es la primera cosa que se probó y la que reordenó el hito entero.
-- **Una textura por glifo.** Medido arriba: casi triplica la cifra de **D3**.
-- **Reescalar en la tarjeta gráfica** en vez de en la CPU, subiendo el mapa de bits a su tamaño original.
-  Serían 68 KiB por emoji en memoria de vídeo en vez de 1,2 KiB, sesenta veces más, y a cambio de un
-  filtrado que a esta escala no se distingue.
-- **Un rasterizador propio para todo**, que es la opción C del abanico de este hito. Sigue escrita como
-  **destino** para cuando este proyecto cambie de framework (**D3**), no como descarte.
+**And a «development-only» dependency is not harmless for the binary that gets published.**
+Development dependencies take part in version resolution: adding `fontique` moved `windows-sys` from
+0.59 to 0.60 for `arboard` —the clipboard, which **does** go in the binary— and brought in the
+`windows 0.62` stack. On Linux nothing changes; **on Windows, which is F2.7's platform, it already
+changes what gets compiled**. The review found it by reading the lock file.
 
 ---
 
-## D26 — La configuración la escribe una persona, y por eso se tolera por línea y en texto plano
+## D25 — The color emoji is painted as an image, and every glyph lives in an atlas of its own
 
-**Decisión.** El fichero que quien usa el terminal escribe para configurarlo es **texto plano
-`clave = valor`**, con comentarios de línea completa, y **se tolera por línea**: la que no se entiende se
-ignora, se dice **con su número**, y el resto del fichero se aplica.
+**Decision.** A character whose presentation asks for color **is not asked of the text engine**: it
+is rasterized separately and painted as an **image**. And every rasterized glyph is pasted into **a
+single texture** of 512×512 pixels, not into a texture each.
 
-Vive en `$XDG_CONFIG_HOME/agent-terminal/config`, **al lado** de la disposición y no dentro: aquélla la
-escribe la aplicación, ésta la escribe una persona.
+The two halves come out of different reasons, and both are measured.
 
-### Esto NO reabre D16: es el lado que D16 ya resolvió
+### Why as an image and not through the text engine
 
-**D16 discrimina por autor, con estas palabras**: *«La tolerancia es por documento porque este fichero **lo
-escribe siempre la aplicación**. Es lo contrario de lo que hace el contrato del panel, y a propósito:
-**aquel lo escribe un tercero a mano** y perder el panel entero por un campo que nadie mira sería lo peor
-posible»*.
+**epaint 0.36.1 does not know how to rasterize a color glyph.** Its rasterizer takes **only** the
+outline (`outline_glyphs`) and paints it with `set_paint(WHITE)`; in its whole text module there is
+not one mention of a font's color tables. Checked by reading its source at `text/font.rs:241`.
 
-El fichero de configuración cae de ese segundo lado. Un documento a medias en la disposición solo puede
-venir de un error propio, y adivinar media disposición es peor que no restaurarla; aquí hay un **repuesto
-exacto para cada línea** —el valor de fábrica— y quien escribe se equivoca de tecla.
+So registering `Noto Color Emoji` in the fallback chain —which is what **D24** does for CJK and the
+icons— **would not give color emojis**. It would give the silhouette. And on this machine it would
+not even give that: `Noto Color Emoji` is a **136×128 bitmap with no outlines**, so the engine would
+have nothing to draw.
 
-> **Una versión anterior de este diseño proponía «acotar D16», y estaba equivocada.** Lo destapó el retador
-> del diseño y se comprobó leyendo la decisión. Queda escrito porque el error es instructivo: se iba a
-> cambiar una decisión que ya contemplaba el caso, por no haberla releído entera.
+**What there is in the tree is the piece that is needed**: `skrifa` —which epaint already uses
+underneath— knows how to pull a glyph's bitmap out, and this project's painter **paints cell by
+cell**, so the emoji as an image is one more branch in an `if` that already existed, not a change of
+architecture.
 
-### Por qué texto plano y no JSON, que ya está en el árbol
+### Why an atlas, and the number that decided it
 
-**La tolerancia por línea es el requisito, y un error de sintaxis global la rompe.** En JSON una coma
-olvidada impide construir el documento entero — y la coma olvidada es el error más común que existe al
-teclear.
+**The first version gave one texture per glyph, and the measurement knocked it down.** epaint's
+tessellator cannot join into the same mesh two shapes with different texture identifiers —it says so
+itself: «Mixing different `texture_id` in the same…»— so **every emoji on the screen split the draw
+batch**.
 
-Y **la tolerancia por campo no salva de eso**: el contrato del panel es JSON y tolera por campo, pero puede
-permitírselo porque **lo genera un programa**. Aquí no.
+**Almost three times what drawing costs, and for work that is not the framework's.** With an atlas,
+all the emojis on the screen are drawn together. It is what the terminals that are this project's
+bar do, and for this reason.
 
-En texto plano el peor caso es **una línea**. Y admite comentarios, sin los cuales un fichero de
-configuración no se explica a sí mismo. Es lo que hacen **Ghostty y Kitty**, que usan este mismo formato —
-una confirmación, no la razón.
+**But the atlas alone was not enough, and the second number says so.** The engine joins
+**consecutive** shapes that share a texture, and the painter walks the grid cell by cell: a letter,
+another letter, an emoji, another letter… so the draw batch split just the same, now between the
+font atlas and the emoji one. The solution is to paint **in two passes** —all the texts and then all
+the emojis—, which is the same discipline this painter already separated the backgrounds from the
+glyphs with, and for the same reason.
 
-**Descartado TOML**: resolvería los comentarios pero no el error global, y añade una dependencia al árbol
-que la política del manifiesto de la raíz obliga a justificar.
+### The whole subtraction, with the control run with the same binary
 
-### El comentario es de línea completa, y no es una simplificación
+| The rest of the frame — the figure **D3** judges egui with | Two consoles dumping emojis |
+|---|---|
+| One texture per glyph | **743.4 µs** |
+| Atlas, painting intermixed | 565.9 µs |
+| Atlas and two passes | 370.8 µs |
+| **Atlas, two passes and the ASCII shortcut** | **356.3 µs** |
+| *Control: the same two consoles in ASCII* | *268.8 µs* |
 
-**La almohadilla es a la vez el carácter de comentario y el prefijo de un color.** Un comentario al final
-del valor parte `color.1 = #ff0000` justo antes del valor, así que la primera versión del intérprete **se
-comía todos los colores**. Lo destapó la suite al primer intento, con siete pruebas en rojo.
+**What has to be looked at in the control is not the difference with the batch, but that it has not
+moved.** 268.8 µs with this binary against the 274.3 the previous milestone published: **a screen
+with no emojis pays nothing** for the terminal knowing how to paint them, not even the extra pass.
+That is what makes the rest of the table acceptable.
 
-### La versión es opcional, al contrario que en la disposición
+With emojis, drawing costs 33 % more and queuing 26 % (289.8 → 366.1 µs). It is the price of **117
+emojis per console** on screen, which is a load deliberately worse than any real use.
 
-**Y la razón es la misma que D16 da para exigirla allí.** Aquel fichero **congela la forma de un árbol**,
-así que un lector viejo malinterpretaría un fichero nuevo. Éste es plano: una clave desconocida se ignora y
-se dice, y una que falta toma su valor de fábrica. **No hay forma que congelar**, así que exigir una línea
-ritual no protegería de nada.
+### The ASCII shortcut, and the defect that almost came in with it
 
-Lo que sí se conserva es la mitad que protege: **una versión mayor que la conocida no se aplica**.
+The color pass walks the whole grid to paint a handful of emojis, so it discards ASCII **without
+consulting the Unicode tables**. Duplicating a rule that lives somewhere else is only acceptable if
+something warns when the two stop saying the same thing, and that something is a test that walks the
+128 characters with both selectors behind them.
 
-### Bajo el banco de medida, el fichero no se lee
+**What the shortcut saves does not stand out from the noise, and it is said that way.** 366.1 µs
+against 377.5 in the painting span: the difference between two runs of the same batch is of the same
+order. The 92 µs the extra pass costs are paid by **walking the grid again**, and that the shortcut
+does not avoid. An earlier version of this annex attributed them to it — a number with the label
+changed, which is exactly what this project says is worse than having no number.
 
-**Y esto sostiene más de lo que parece.** El guion de medida ya aísla el directorio de configuración, pero
-**quien lanza el binario a mano con las variables de medida —que es como la documentación dice abrir una
-disposición concreta— leería la suya**. Su tamaño de letra cambiaría la rejilla, y de la rejilla dependen
-**todas** las cifras publicadas de este proyecto.
+**It was written and knocked down on the first go.** The shortcut discarded **all** ASCII, and
+Unicode gives `Emoji=Yes` to the **hash, the asterisk and the ten digits**: `#` followed by the
+selector is `#️⃣`. Eleven keys that would have come out monochrome, in the milestone whose point is
+that they come out in color. The shortcut now discards only the ASCII **with nothing attached**.
 
-Hay una segunda consecuencia que lo hace más necesario todavía: el guion **invalida una corrida** si una
-tanda que no vuelca en japonés busca fuentes. Con una fuente configurada leída bajo medida, **toda tanda
-enumeraría y toda corrida saldría inválida**.
+### The ceiling stopped being a counter and it is better that way
 
-El veto es **del fichero entero** desde el primer día, aunque los colores no cambien la rejilla: «solo estos
-ajustes» sería una lista que se olvida de crecer.
+The design asked for «the memory of the rasterized glyphs has a declared ceiling». With an atlas,
+the ceiling is **a fixed-size texture**: the memory the graphics card devotes to the emojis is **1
+MiB and does not change**, whether one appears or a thousand. At this machine's cell height about
+eight hundred glyphs fit —17 pixels high, 18 wide—, many more than a person sees in a session. When
+it fills up **it is said on standard error** and the emojis not already inside come out monochrome.
 
-### Lo que queda fuera, con su razón
+A counter would have given the same limit with memory that grows up to it. The fixed texture gives
+it from the first emoji.
 
-- **Traer un tema desde otro fichero** (`incluir`). Se cortó en el reto al diseño: añadía una ruta, un tope
-  de recursión, una regla de ciclo y un convenio de directorio **para cero criterio de aceptación**.
-- **Un catálogo de temas con nombre**, que es lo que la gente comparte de verdad —Ghostty trae más de 460—.
-  Es **lo primero que entra después** de este hito, no un descarte.
-- **Recargar al guardar.** No lo pide ningún criterio, y el vigilante que existe sigue rutas fijadas al
-  armarlo, una por consola: no vale tal cual.
-- **Elegir el programa que lanza cada consola.** En cuanto el programa o sus argumentos vengan de
-  configuración, lanzarlo pasa a ser **superficie sensible** y hay que auditarlo como tal. Merece su propia
-  revisión, no un rincón de este hito.
+### What is left out, said with its reason
 
-### Copiar no es un acorde reasignable: es un interruptor, y hasta este hito no copiaba
+**The color outlines —`COLR`— are not painted.** Doing it requires rasterizing outlines by hand,
+which is the rasterizer of our own that this milestone discarded **on purpose** because it
+invalidates the whole measurement history. On Linux it does not show, because the system's emoji
+fonts are bitmap ones; **on Windows it does**, because `Segoe UI Emoji` is `COLR`. It is declared as
+what **F2.7** is missing, not as something that works here.
 
-**El escritorio se queda `Ctrl+Mayúsculas+C` antes de que sea una tecla.** Lo entrega ya convertido en una
-petición de copiar, y **sin decir si había Mayúsculas**: su comprobación es «mandato más la letra C». Así
-que el acorde de copiar de un terminal **no llega nunca como tecla**, y la tabla de atajos no puede
-alcanzarlo.
+**The skin-tone modifiers do not either.** They are **wide** characters, so the terminal engine
+gives them a cell of their own instead of attaching them to the base emoji's, and the presentation
+rule cannot look at the next cell: it does not have it in its signature. The base comes out in color
+and the modifier comes out on its own.
 
-De ahí salen las dos consecuencias de este anexo:
+**And the status panel does not paint color.** It discovers fonts —the previous delivery fixed that—
+but its text is laid out by the engine in one go, not cell by cell, so an emoji in a summary comes
+out monochrome. The milestone is about the console; this is stated so that nobody reads it as a bug.
 
-1. **La acción sale de la tabla.** Once acciones reasignables, no doce. Aceptar
-   `atajo.copiar = ctrl+shift+e` habría sido publicar un acorde que no se dispara nunca. La clave sigue
-   existiendo —es la que este terminal ya publicó— y **solo admite `ninguno`**, que es lo que devuelve el
-   acorde a `vim` o a `tmux`. Cualquier otro valor se rechaza diciendo por qué.
-2. **Copiar estaba roto desde F2.8, y nadie lo vio porque su prueba sembraba la tecla.** La petición caía
-   hasta la tabla del teclado, que traduce `Ctrl+C` a `\x03`: **pedir copiar interrumpía el programa**. Las
-   pruebas del hito que lo entregó encolaban un `Event::Key` con la letra `C` —un camino que en la ventana
-   de verdad no se recorre—, así que pasaron un hito entero sobre código muerto. Ahora encolan el evento
-   que manda el escritorio.
+### What was discarded
 
-**El arreglo es el mismo que el proyecto ya usaba para pegar**, y estaba escrito como pendiente en el
-propio código desde F2.6: *«quien traiga el portapapeles tendrá que decidirlo antes, en el bucle, donde el
-estado de los modificadores sí está disponible»*. Con Mayúsculas copia; sin ellas, `Ctrl+C` sigue
-interrumpiendo. Apagado, el evento cae hasta la tabla y sale por `\x03`, que es justo lo que espera quien
-se lo acaba de devolver a su programa.
-
-**Lo que se pierde, y se dice:** la guarda que impedía que mantener el acorde apretado volviera a copiar en
-cada fotograma. El evento del escritorio **no trae la marca de repetición** —`egui-winit` la descarta a
-propósito—, así que no hay dónde mirar. Costaba una copia idéntica por fotograma mientras la tecla
-estuviera apretada; hasta hoy esa guarda vivía sobre el camino de la tecla, que no se recorre, así que en
-la ventana de verdad **nunca estuvo activa**. No se cambia nada por perderla.
-
-### Un acorde sin Ctrl llega dos veces, y consumir una sola lo deja actuar y escribir
-
-`egui` emite el texto de la tecla **junto a la tecla** siempre que sea imprimible y no haya mandato. Los
-once acordes de fábrica se libraban por casualidad: los que no llevan Ctrl caen sobre teclas que no
-escriben nada. Pero el fichero acepta `shift+e` y el documento lo publica como válido — y así,
-`atajo.partir-al-lado = shift+e` partía la consola **y además escribía una `E` en el shell**.
-
-Se consumen los dos: al consumir la tecla como atajo se descarta el texto que viene detrás. La alternativa
-—rechazar los acordes sin Ctrl sobre teclas imprimibles— era más barata y le quitaba a quien configura
-`shift+F5` y compañía por el mismo precio.
+- **Registering the emoji font in the fallback chain**, as is done with CJK. It does not give color: it
+  gives the silhouette, or nothing. It is the first thing that was tried and the one that reordered the
+  whole milestone.
+- **One texture per glyph.** Measured above: it almost triples **D3**'s figure.
+- **Rescaling on the graphics card** instead of on the CPU, uploading the bitmap at its original size. It
+  would be 68 KiB per emoji in video memory instead of 1.2 KiB, sixty times more, and in exchange for a
+  filtering that at this scale cannot be told apart.
+- **A rasterizer of our own for everything**, which is option C of this milestone's spread. It stays
+  written as a **destination** for when this project changes framework (**D3**), not as a discard.
 
 ---
 
-## D27 — Todo el repositorio va en inglés: código, documentos, commits y ramas
+## D26 — The configuration is written by a person, and that is why it is tolerated line by line and in plain text
 
-**El código propio de este proyecto estuvo en español desde el primer commit** —7 de agosto de 2026—:
-tipos, funciones, campos, módulos, los nombres de diez ficheros, los comentarios, el rustdoc, los 853
-nombres de prueba y los mensajes de sus afirmaciones. También lo que ve quien usa el terminal: las claves
-del fichero de configuración y los mensajes por pantalla.
+**Decision.** The file that whoever uses the terminal writes to configure it is **plain text
+`key = value`**, with whole-line comments, and **it is tolerated line by line**: the one that is
+not
+understood is ignored, it is said **with its number**, and the rest of the file is applied.
 
-**Y esa decisión no estaba escrita en ningún sitio.** Ésta es la primera vez que aparece en este
-documento, dieciocho días después de tomarse. El proyecto tiene como regla dura que *no hay decisiones
-que vivan solo en el código*, y esta la incumplió desde el día uno — que es exactamente por lo que creció
-sin que nadie la mirara: nunca hubo un párrafo al que volver.
+It lives in `$XDG_CONFIG_HOME/agent-terminal/config`, **next to** the layout and not inside it: that
+one is written by the application, this one is written by a person.
 
-**Lo que había en la práctica era un híbrido sin enunciar.** En inglés, los nombres de las cajas y todo lo
-que toca al ecosistema (`Screen`, `Size`, `Point`, `spawn`, lo que viene de `alacritty_terminal`, `egui` o
-`serde`); en español, el dominio propio (`Ventana`, `Pestaña`, `Celda`, `Desplazamiento`,
-`RatonReclamado`). La frontera era real y funcionaba, pero al no estar dicha producía líneas como
-`pub struct Screen` con un `pub struct Celda` al lado.
+### This does NOT reopen D16: it is the side D16 already resolved
 
-### La decisión
+**D16 discriminates by author, in these words**: *«Tolerance is per document because this file **is
+always written by the application**. It is the opposite of what the panel contract does, and on
+purpose: **that one is written by a third party by hand** and losing the whole panel over a field
+nobody looks at would be the worst possible thing»*.
 
-**Todo lo que vive en el repositorio pasa a inglés**: el código propio, los nombres de fichero, los
-comentarios, el rustdoc, las pruebas, los documentos, **los mensajes de commit, los nombres de rama y los
-PR**. Y también lo que ve quien usa el terminal: las claves del fichero —`background`, `size`,
-`key.split-right`— y los mensajes por pantalla.
+The configuration file falls on that second side. A half-finished document in the layout can only
+come from an error of our own, and guessing half a layout is worse than not restoring it; here there
+is an **exact spare for every line** —the factory value— and whoever writes gets a key wrong.
 
-**Sin compatibilidad con las claves en español, y no es un descuido**: nadie tiene este terminal
-instalado todavía, así que no hay ningún fichero de configuración ahí fuera al que respetarle nada. Una
-tabla de alias sería deuda desde el minuto cero, mantenida para un usuario que no existe. Es la única
-ventana en la que este cambio sale gratis, y por eso se hace ahora.
+> **An earlier version of this design proposed «narrowing D16», and it was wrong.** The design's
+> challenger uncovered it and it was checked by reading the decision. It is written down because the error
+> is instructive: a decision that already covered the case was going to be changed, for not having reread
+> it whole.
 
-**El español se queda solo en la conversación de trabajo**, que no vive en el repositorio.
+### Why plain text and not JSON, which is already in the tree
 
-### Por qué
+**Line-by-line tolerance is the requirement, and a global syntax error breaks it.** In JSON a
+forgotten comma prevents the whole document from being built — and the forgotten comma is the most
+common error there is when typing.
 
-- **El listón que este proyecto se puso es el de un usuario de WezTerm, Ghostty o Kitty** (**D19**), y
-  ninguno de los tres se lee en español. Un terminal que no se puede leer no se puede contribuir, ni
-  auditar, ni bifurcar.
-- **Cuanto más tarde, más caro.** Son 43.860 líneas propias hoy, y cada hito las aumenta.
-- **Pide el árbol limpio**: durante la migración cualquier rama abierta da conflicto en todo. Por eso va
-  justo después de mezclarse F2.10 y **por delante de su cuarta entrega**.
+And **per-field tolerance does not save you from that**: the panel contract is JSON and tolerates
+per field, but it can afford to because **a program generates it**. Here, no.
 
-### Lo descartado
+In plain text the worst case is **one line**. And it takes comments, without which a configuration
+file does not explain itself. It is what **Ghostty and Kitty** do, which use this same format — a
+confirmation, not the reason.
 
-- **Dejarlo en español y escribir la D que faltaba.** Cierra el incumplimiento por minutos y no cuesta
-  nada. Se descarta porque no resuelve el problema de fondo: el código sigue sin poder leerlo nadie de
-  fuera, y el precio de arreglarlo sube con cada hito.
-- **Inglés solo de aquí en adelante.** Es la peor de las tres: deja dos idiomas mezclados **sin frontera
-  que los explique**, que es peor que cualquiera de los dos puros — y es justamente el estado del que este
-  hito sale.
-- **Traducir los comentarios a máquina.** Este repositorio vale por lo que sus comentarios explican, no
-  por sus líneas de código: llevan el porqué de cada decisión con mucho matiz —«miente», «el disfraz
-  fichado», «el defecto y el arreglo dan el mismo resultado»— y una traducción mecánica los convierte en
-  ruido. Se traducen a mano, y ahí es donde se va el tiempo del hito.
-- **Aceptar las claves en los dos idiomas.** Es lo que haría **D26** si hubiera alguien a quien
-  respetarle un fichero ya escrito — pero no lo hay: el terminal no está instalado en ninguna parte. Una
-  tabla de alias nace como deuda y se mantiene para siempre por un usuario que nunca existió.
+**TOML discarded**: it would solve the comments but not the global error, and it adds a dependency
+to the tree that the root manifest's policy forces you to justify.
 
-### Los commits, las ramas y los PR, desde ya
+### The comment is whole-line, and it is not a simplification
 
-**No esperan al hito.** Se escriben en inglés desde esta misma decisión — son cosa nueva cada vez, así
-que no hay nada que migrar y aplazarlo solo produciría más material que traducir. Los que ya están
-escritos se quedan como están: reescribir el histórico cuesta más de lo que aclara.
+**The hash is at the same time the comment character and a color's prefix.** A comment at the end of
+the value splits `color.1 = #ff0000` right before the value, so the first version of the parser
+**ate all the colors**. The suite uncovered it on the first attempt, with seven tests in red.
 
-**Los documentos son la excepción, y solo mientras dure el hito.** Una decisión en inglés dentro de un
-`02-decisiones.md` en español se lee peor que las dos cosas puras. Se traducen **enteros**, de una vez,
-en su entrega — no se van mezclando fichero a fichero.
+### The version is optional, unlike in the layout
 
-### Lo que este hito tiene que decidir antes de escribir código
+**And the reason is the same one D16 gives for requiring it there.** That file **freezes the shape
+of a tree**, so an old reader would misinterpret a new file. This one is flat: an unknown key is
+ignored and said, and one that is missing takes its factory value. **There is no shape to freeze**,
+so requiring a ritual line would not protect against anything.
 
-Queda abierto a propósito, porque decidirlo aquí sería adelantar trabajo del hito:
+What is kept is the half that does protect: **a version greater than the known one is not applied**.
 
-1. **Dónde queda la frontera** con el ecosistema, enunciada y no solo practicada.
-2. **Cómo se entrega.** Un solo cambio de 43.860 líneas no lo revisa nadie.
-3. **Qué mecanismo para los mensajes por pantalla**, si es que hace falta alguno más allá de escribirlos
-   en inglés.
-4. **Qué pasa con el conocimiento ya almacenado**, escrito en español.
+### Under the measurement bench, the file is not read
 
-### El riesgo que no es de traducción
+**And this holds up more than it seems.** The measurement script already isolates the configuration
+directory, but **whoever launches the binary by hand with the measurement variables —which is how
+the documentation says to open a particular layout— would read theirs**. Their font size would
+change the grid, and on the grid depend **all** the figures published by this project.
 
-**El histórico de medida se apoya en nombres que aparecen en informes y en guiones.** El banco de medida
-invalida corridas por lo que el informe **dice** —`configuración: vetada`, los recuentos de arrastres, el
-testigo de las fuentes—, y esos textos los buscan guardas de `scripts/medir-fotograma.sh` con `grep`.
-Renombrar sin mirar no rompe una prueba: **rompe una guarda**, y una guarda rota publica como buena una
-corrida mentirosa. Es el mismo modo de fallo que este proyecto ya pagó una vez, cuando la guarda del
-guion estaba muerta y su verificación fue falsa.
+There is a second consequence that makes it more necessary still: the script **invalidates a run**
+if a batch that does not dump in Japanese looks for fonts. With a configured font read under
+measurement, **every batch would enumerate and every run would come out invalid**.
 
-### El glosario, y las dos fronteras que lo ordenan
+The veto is **of the whole file** from day one, even though the colors do not change the grid: «only
+these settings» would be a list that forgets to grow.
 
-Esto es lo que el hito tenía que decidir antes de escribir código, y lo que las nueve entregas
-siguientes aplican sin volver a discutir. **No es una tabla de traducción: es una tabla de decisiones**,
-y cada fila que no es obvia lleva su razón al lado.
+### What is left out, with its reason
 
-#### La primera frontera: de quién es el nombre
+- **Bringing a theme in from another file** (`incluir`). It was cut in the design challenge: it added a
+  path, a recursion limit, a cycle rule and a directory convention **for zero acceptance criteria**.
+- **A catalog of named themes**, which is what people really share —Ghostty ships more than 460—. It is
+  **the first thing that comes in after** this milestone, not a discard.
+- **Reloading on save.** No criterion asks for it, and the watcher that exists follows paths fixed when it
+  is set up, one per console: it is not usable as it is.
+- **Choosing the program each console launches.** As soon as the program or its arguments come from
+  configuration, launching it becomes **sensitive surface** and has to be audited as such. It deserves its
+  own review, not a corner of this milestone.
 
-Después de este hito ya no hay dos idiomas, así que la frontera **deja de separar idiomas y pasa a
-separar dueños**: cuándo se adopta la palabra que el ecosistema ya usa y cuándo se acuña una propia.
-La pregunta sobrevive a la traducción, y por eso hay que contestarla.
+### Copying is not a rebindable chord: it is a switch, and until this milestone it did not copy
 
-> **Un nombre nuevo se decide con tres preguntas, y manda la primera que dé «sí».**
+**The desktop keeps `Ctrl+Shift+C` before it is a key.** It delivers it already turned into a copy
+request, and **without saying whether there was Shift**: its check is «command plus the letter C».
+So a terminal's copy chord **never arrives as a key**, and the shortcut table cannot reach it.
+
+From there come this annex's two consequences:
+
+1. **The action comes out of the table.** Eleven rebindable actions, not twelve. Accepting
+   `atajo.copiar = ctrl+shift+e` would have been publishing a chord that never fires. The key still exists
+   —it is the one this terminal already published— and **only takes `ninguno`**, which is what gives the
+   chord back to `vim` or to `tmux`. Any other value is rejected saying why.
+2. **Copying had been broken since F2.8, and nobody saw it because its test seeded the key.** The request
+   fell through to the keyboard table, which translates `Ctrl+C` to `\x03`: **asking to copy interrupted
+   the program**. The tests of the milestone that delivered it queued an `Event::Key` with the letter `C`
+   —a path that in the real window is not walked—, so they went a whole milestone over dead code. Now they
+   queue the event the desktop sends.
+
+**The fix is the same one the project already used for pasting**, and it was written as pending in
+the code itself since F2.6: *«whoever brings the clipboard will have to decide it earlier, in the
+loop, where the modifier state is available»*. With Shift it copies; without it, `Ctrl+C` still
+interrupts. Switched off, the event falls through to the table and comes out as `\x03`, which is
+exactly what whoever has just given the chord back to their program expects.
+
+**What is lost, and it is said:** the guard that prevented holding the chord down from copying again
+on every frame. The desktop's event **does not carry the repeat flag** —`egui-winit` discards it on
+purpose—, so there is nowhere to look. It cost one identical copy per frame while the key was held
+down; until today that guard lived on the key path, which is not walked, so in the real window it
+**was never active**. Nothing changes by losing it.
+
+### A chord without Ctrl arrives twice, and consuming only one leaves it acting and typing
+
+`egui` emits the key's text **alongside the key** whenever it is printable and there is no command.
+The eleven factory chords got away with it by chance: the ones without Ctrl fall on keys that type
+nothing. But the file accepts `shift+e` and the document publishes it as valid — and so,
+`atajo.partir-al-lado = shift+e` split the console **and typed an `E` in the shell as well**.
+
+Both are consumed: on consuming the key as a shortcut the text that comes behind it is discarded.
+The alternative —rejecting the chords without Ctrl on printable keys— was cheaper and took
+`shift+F5` and company away from whoever configures, for the same price.
+
+---
+
+## D27 — The whole repository goes in English: code, documents, commits and branches
+
+**This project's own code was in Spanish from the first commit** —7 August 2026—: types, functions,
+fields, modules, the names of ten files, the comments, the rustdoc, the 853 test names and their
+assertion messages. Also what whoever uses the terminal sees: the configuration file's keys and the
+on-screen messages.
+
+**And that decision was not written down anywhere.** This is the first time it appears in this
+document, eighteen days after being taken. The project has as a hard rule that *there are no
+decisions that live only in the code*, and this one broke it from day one — which is exactly why it
+grew without anyone looking at it: there was never a paragraph to go back to.
+
+**What there was in practice was an unstated hybrid.** In English, the crate names and everything
+that touches the ecosystem (`Screen`, `Size`, `Point`, `spawn`, what comes from
+`alacritty_terminal`, `egui` or `serde`); in Spanish, the domain of our own (`Ventana`, `Pestaña`,
+`Celda`, `Desplazamiento`, `RatonReclamado`). The border was real and it worked, but not being
+stated it produced lines like `pub struct Screen` with a `pub struct Celda` next to it.
+
+### The decision
+
+**Everything that lives in the repository goes to English**: the code of our own, the file names,
+the comments, the rustdoc, the tests, the documents, **the commit messages, the branch names and the
+PRs**. And also what whoever uses the terminal sees: the file's keys —`background`, `size`,
+`key.split-right`— and the on-screen messages.
+
+**With no compatibility for the Spanish keys, and it is not an oversight**: nobody has this terminal
+installed yet, so there is no configuration file out there to respect anything of. An alias table
+would be debt from minute zero, maintained for a user who does not exist. It is the only window in
+which this change comes for free, and that is why it is done now.
+
+**Spanish stays only in the working conversation**, which does not live in the repository.
+
+### Why
+
+- **The bar this project set itself is that of a WezTerm, Ghostty or Kitty user** (**D19**), and none of
+  the three reads in Spanish. A terminal that cannot be read cannot be contributed to, nor audited, nor
+  forked.
+- **The later, the more expensive.** They are 43 860 lines of our own today, and every milestone adds to
+  them.
+- **It asks for a clean tree**: during the migration any open branch conflicts on everything. That is why
+  it goes right after F2.10 merges and **ahead of its fourth delivery**.
+
+### What was discarded
+
+- **Leaving it in Spanish and writing the D that was missing.** It closes the breach in minutes and costs
+  nothing. It is discarded because it does not solve the underlying problem: the code still cannot be read
+  by anyone from outside, and the price of fixing it goes up with every milestone.
+- **English only from here on.** It is the worst of the three: it leaves two languages mixed **with no
+  border to explain them**, which is worse than either of the two pure ones — and it is exactly the state
+  this milestone is coming out of.
+- **Machine-translating the comments.** This repository is worth what its comments explain, not its lines
+  of code: they carry the why of every decision with a lot of nuance —«it lies», «the disguise on file»,
+  «the defect and the fix give the same result»— and a mechanical translation turns them into noise. They
+  are translated by hand, and that is where the milestone's time goes.
+- **Accepting the keys in both languages.** It is what **D26** would do if there were somebody whose
+  already-written file had to be respected — but there is not: the terminal is not installed anywhere. An
+  alias table is born as debt and is maintained forever for a user who never existed.
+
+### The commits, the branches and the PRs, from now on
+
+**They do not wait for the milestone.** They are written in English from this very decision — they
+are new material every time, so there is nothing to migrate and putting it off would only produce
+more material to translate. The ones already written stay as they are: rewriting the history costs
+more than it clarifies.
+
+**The documents are the exception, and only while the milestone lasts.** A decision in English
+inside an `02-decisiones.md` in Spanish reads worse than either of the two pure things. They are
+translated **whole**, in one go, in their delivery — they are not mixed file by file.
+
+### What this milestone has to decide before writing code
+
+It is left open on purpose, because deciding it here would be doing the milestone's work ahead of
+time:
+
+1. **Where the border lies** with the ecosystem, stated and not merely practiced.
+2. **How it is delivered.** A single change of 43 860 lines is reviewed by nobody.
+3. **What mechanism for the on-screen messages**, if any is needed beyond writing them in English.
+4. **What happens to the already-stored knowledge**, written in Spanish.
+
+### The risk that is not about translation
+
+**The measurement history leans on names that appear in reports and in scripts.** The measurement
+bench invalidates runs by what the report **says** —`settings:     vetoed`, the drag counts, the
+fonts witness—, and those texts are looked for by guards in `scripts/measure-frame.sh` with
+`grep`. Renaming without looking does not break a test: **it breaks a guard**, and a broken guard
+publishes a lying run as good. It is the same failure mode this project already paid for once, when
+the script's guard was dead and its verification was false.
+
+### The glossary, and the two borders that order it
+
+This is what the milestone had to decide before writing code, and what the nine following deliveries
+apply without discussing it again. **It is not a translation table: it is a table of decisions**,
+and every row that is not obvious carries its reason alongside.
+
+#### The first border: whose the name is
+
+After this milestone there are no longer two languages, so the border **stops separating languages
+and moves to separating owners**: when the word the ecosystem already uses is adopted and when one
+of our own is coined. The question survives the translation, and that is why it has to be answered.
+
+> **A new name is decided with three questions, and the first one to give a «yes» rules.**
 >
-> 1. **¿El tipo *es* el de una dependencia** —reexportado, o envoltura que tiene que seguirle la
->    forma? **Se adopta su nombre.** `Pty`, `Screen`, `Size`, `Dims`, `TermColor`, `Underline`,
->    `Watcher`.
-> 2. **¿Es una palabra que quien usa el terminal ya tiene?** El listón es su usuario (**D19**), así
->    que el criterio es comprobable y no de gusto: **la palabra aparece en la configuración, la
->    documentación o los nombres de acción de dos o más de {WezTerm, Kitty, Ghostty, tmux, Zellij}**.
->    Si sí, **se adopta aunque el tipo sea nuestro**: `Pane`, `Tab`, `Cell`, `Divider`,
->    `MouseReporting`, `Tiling`.
-> 3. **Si no es ninguna de las dos, el nombre es nuestro** y describe **nuestro** mecanismo: `Pump`,
->    `Weight`, `PtyOutput`.
+> 1. **Is the type *the* one of a dependency** —re-exported, or a wrapper that has to follow its shape?
+>    **Its name is adopted.** `Pty`, `Screen`, `Size`, `Dims`, `TermColor`, `Underline`, `Watcher`.
+> 2. **Is it a word whoever uses the terminal already has?** The bar is its user (**D19**), so the
+>    criterion is checkable and not a matter of taste: **the word appears in the configuration, the
+>    documentation or the action names of two or more of {WezTerm, Kitty, Ghostty, tmux, Zellij}**. If so,
+>    **it is adopted even though the type is ours**: `Pane`, `Tab`, `Cell`, `Divider`, `MouseReporting`,
+>    `Tiling`.
+> 3. **If it is neither of the two, the name is ours** and describes **our** mechanism: `Pump`, `Weight`,
+>    `PtyOutput`.
 >
-> **Y una prohibición que gobierna las tres: no se adopta una palabra que el ecosistema ya usa para
-> otra cosa.** Eso descalifica `Window` para la división —es lo que Kitty llama a una división y lo
-> que tmux llama a una pestaña— y `Border` para la frontera, que en Kitty y en tmux es el marco *de*
-> un panel.
+> **And one prohibition that governs all three: a word the ecosystem already uses for something else is
+> not adopted.** That disqualifies `Window` for the pane —it is what Kitty calls a pane and what tmux
+> calls a tab— and `Border` for the divider, which in Kitty and in tmux is the frame *of* a panel.
 >
-> **Y la asimetría que eso deja hay que decirla, porque salta a la vista:** `Window` sí es el nombre
-> de la ventana de verdad. No es una excepción a la prohibición, es la prohibición leída bien — lo que
-> prohíbe es adoptar una palabra **que significa otra cosa**, y para la ventana del sistema `Window`
-> significa exactamente eso, igual que en `winit`. Quien la usa para otra cosa es `egui`, donde una
-> «window» es un panel flotante dentro de la aplicación; ése es el nombre del que hay que cuidarse al
-> importar, no el concepto.
+> **And the asymmetry that leaves has to be said, because it is glaring:** `Window` is indeed the name of
+> the real window. It is not an exception to the prohibition, it is the prohibition read properly — what
+> it forbids is adopting a word **that means something else**, and for the system window `Window` means
+> exactly that, the same as in `winit`. The one who uses it for something else is `egui`, where a
+> «window» is a floating panel inside the application; that is the name to watch out for when importing,
+> not the concept.
 
-**Esta regla no es nueva: `term-core` la practica desde F1.1 y la tiene escrita tres veces**, las
-tres en el mismo fichero, en los comentarios de la celda, del ratón reclamado y del desplazamiento. La
-que la enuncia entera es la del desplazamiento: **«Vocabulario propio, no el del motor, por lo mismo
-que el resto de esta caja: quien la use no tiene que conocer los tipos de sus dependencias ni migrar
-con ellos.»**
+**This rule is not new: `term-core` has practiced it since F1.1 and has it written three times**,
+all three in the same file, in the comments of the cell, of the mouse reporting and of the scroll.
+The one that states it whole is the scroll's: **«Vocabulary of our own, not the engine's, for the
+same reason as the rest of this crate: whoever uses it does not have to know its dependencies' types
+nor migrate with them.»**
 
-> Y aquí una corrección que este anexo se hace a sí mismo, porque el registro de decisiones no puede
-> llevar una cita falsa: la primera versión decía **cuatro** veces e incluía el tipo de los caracteres
-> combinantes, que **no lleva ese comentario** —su rustdoc habla de por qué no va dentro de la celda—;
-> y la frase que citaba era **un injerto de dos de los tres comentarios**. Son tres, y la cita literal
-> es la de arriba.
+> And here a correction this annex makes to itself, because the decision log cannot carry a false
+> citation: the first version said **four** times and included the combining-characters type, which
+> **does not carry that comment** —its rustdoc talks about why it does not go inside the cell—; and the
+> sentence it quoted was **a graft of two of the three comments**. There are three, and the literal
+> citation is the one above.
 
-Lo que faltaba no era la regla, era **enunciarla y decir dónde no se aplica**: su argumento tiene
-sujeto —«quien use esta caja»— y **en `app` no hay nadie**, porque no se publica. Ahí manda la
-pregunta 2, la del usuario, y no la de la migración que nadie va a hacer.
+What was missing was not the rule, it was **stating it and saying where it does not apply**: its
+argument has a subject —«whoever uses this crate»— and **in `app` there is nobody**, because it is
+not published. There question 2 rules, the user's one, and not the one about the migration nobody is
+going to do.
 
-#### Cuando el nombre correcto choca con un `use`, se le pone alias al ajeno
+#### When the right name clashes with a `use`, the foreign one gets the alias
 
-Dos nombres de este glosario **no compilan tal cual**, y los dos por la misma razón: el módulo donde
-vive el tipo propio ya importa un nombre idéntico de una dependencia.
+Two names of this glossary **do not compile as they are**, and both for the same reason: the module
+where the type of our own lives already imports an identical name from a dependency.
 
-| Nombre propio | Qué lo bloquea |
+| Name of our own | What blocks it |
 |---|---|
-| `Scroll` (el desplazamiento por el historial) | su fichero importa `Scroll` de `alacritty_terminal::grid` |
-| `Watcher` (el vigilante del directorio del panel) | su fichero importa el *trait* `Watcher` de `notify`, y **tiene que estar en ámbito** para poder llamar a `watch` |
+| `Scroll` (scrolling through the scrollback) | its file imports `Scroll` from `alacritty_terminal::grid` |
+| `Watcher` (the panel directory's watcher) | its file imports the `Watcher` *trait* from `notify`, and **it has to be in scope** in order to call `watch` |
 
-> **La solución no es cambiar el nombre propio: es ponerle alias al ajeno.** Un `use … as GridScroll`
-> para el tipo, y un `use notify::Watcher as _;` —importación anónima de trait, que es justo para
-> esto— para el que solo hace falta en ámbito. El vocabulario del proyecto no cede el sitio al de una
-> dependencia que además no debería asomar: eso es lo que esta caja lleva defendiendo desde F1.1.
+> **The solution is not to change the name of our own: it is to alias the foreign one.** A
+> `use … as GridScroll` for the type, and a `use notify::Watcher as _;` —anonymous trait import, which is
+> exactly for this— for the one that is only needed in scope. The project's vocabulary does not give up
+> its place to a dependency's, which on top of that should not be showing: that is what this crate has
+> been defending since F1.1.
 
-**Y una clasificación de la primera versión que estaba mal, no solo estorbando:** el vigilante
-figuraba como nombre **adoptado** por la pregunta 1, «el tipo *es* el de una dependencia». No lo es.
-`notify::Watcher` es un **trait** con `watch` y `unwatch`, y el tipo propio no le sigue la forma:
-guarda un vigilante dentro y levanta una bandera. Es un nombre **acuñado** por la pregunta 3, y da la
-casualidad de que coincide con el del ecosistema.
+**And a classification of the first version that was wrong, not just in the way:** the watcher was
+listed as a name **adopted** by question 1, «the type *is* the one of a dependency». It is not.
+`notify::Watcher` is a **trait** with `watch` and `unwatch`, and the type of our own does not follow
+its shape: it keeps a watcher inside and raises a flag. It is a name **coined** by question 3, and
+it happens to coincide with the ecosystem's.
 
-**Avisos que hoy no rompen y conviene tener escritos**, porque están a un `use` de distancia: `Cell`
-—el fichero hermano ya importa la celda de `alacritty_terminal`—, `Flag` —`notify::event::Flag`
-existe, en la misma lista de importación que ese módulo ya usa—, `Row` —`epaint::text::Row` es «una
-fila de texto maquetado», exactamente lo que el tipo propio es— y `Theme` —`egui::Theme` existe, misma
-palabra y mismo dominio—. Ninguno colisiona hoy; los cuatro colisionarían con un `use` más.
+**Warnings that do not break today and are worth having written down**, because they are one `use`
+away: `Cell` —the sibling file already imports the cell from `alacritty_terminal`—, `Flag`
+—`notify::event::Flag` exists, in the same import list that module already uses—, `Row`
+—`epaint::text::Row` is «a row of laid-out text», exactly what the type of our own is— and `Theme`
+—`egui::Theme` exists, same word and same domain—. None of them collides today; all four would
+collide with one more `use`.
 
-#### La segunda frontera: lo vivo y lo que está en disco
+#### The second border: what is alive and what is on disk
 
-También estaba escrita, y en el sitio correcto: el enumerado que dice en qué sentido reparte una rama
-existe **aparte** de su gemelo vivo porque «**los nombres de este enum son el formato**: aparecen
-literalmente en el fichero de todo el que use la aplicación; reutilizar el tipo vivo ataría el fichero
-a un nombre que el código puede querer cambiar mañana». Lo mismo con el nodo, el hijo y la pestaña,
-que existen dos veces por esa razón.
+It was written down too, and in the right place: the enum that says which way a branch tiles exists
+**separately** from its living twin because «**the names of this enum are the format**: they appear
+literally in the file of everyone who uses the application; reusing the living type would tie the
+file to a name the code may want to change tomorrow». The same with the node, the child and the tab,
+which exist twice for that reason.
 
-**Si los dos gemelos acaban llamándose igual en inglés, se pierde justo esa distinción.** Así que:
+**If the two twins end up called the same in English, exactly that distinction is lost.** So:
 
-> **Un tipo cuyos nombres son el formato en disco lleva el prefijo `Stored`.** El test es mecánico y
-> **sin excepciones**: ¿el tipo deriva `Serialize` o `Deserialize` en ese módulo? Prefijo.
+> **A type whose names are the on-disk format carries the `Stored` prefix.** The test is mechanical and
+> **without exceptions**: does the type derive `Serialize` or `Deserialize` in that module? Prefix.
 
-| Vivo | En disco |
+| Alive | On disk |
 |---|---|
-| — (`Documento`) | **`StoredDocument`** — la raíz: sus dos campos *son* `{"v":…, "pestañas":[…]}` |
+| — (`Documento`) | **`StoredDocument`** — the root: its two fields *are* `{"v":…, "pestañas":[…]}` |
 | `Tab` | `StoredTab` |
 | `Node` | `StoredNode` |
 | `Child` | `StoredChild` |
 | — (`Hoja`) | `StoredLeaf` |
 | `Orientation` | `StoredOrientation` |
-| — (`Sonda`) | **`StoredProbe`** — solo lee la versión, pero la lee *del fichero* |
+| — (`Sonda`) | **`StoredProbe`** — it only reads the version, but it reads it *from the file* |
 
-La primera versión de esta regla **se incumplía a sí misma dos veces**: dejaba fuera la raíz del
-formato y el tipo que lee la versión, los dos con `derive` puesto. Un test mecánico con dos
-excepciones escritas a mano no es un test mecánico, y por eso ahora no las tiene. Los tipos de ese
-módulo que **no** derivan serde —el problema del documento, la política de guardado, el fallo de
-escritura, el documento ya validado— no llevan prefijo.
+The first version of this rule **broke itself twice**: it left out the format's root and the type
+that reads the version, both with `derive` on them. A mechanical test with two hand-written
+exceptions is not a mechanical test, and that is why it does not have them now. The types of that
+module that do **not** derive serde —the configuration file's problem, the saving policy, the write
+failure, the already-validated document— carry no prefix.
 
-**Y el prefijo avisa del tipo, pero el formato lo hacen los campos *y las variantes*.** Dos enumerados
-llevan `rename_all`, así que **los nombres de sus variantes son el fichero**: renombrar la variante de
-las filas deja el fichero escribiendo `"rows"` mientras el guion de medida sigue sembrando `"filas"`.
-Eso **no lo caza el compilador, ni la suite, ni el prefijo**: solo la guarda de la tanda que restaura,
-y solo si alguien la corre. Es el agujero real de este hito, y está aquí escrito para que nadie lo
-descubra dos veces.
+**And the prefix warns about the type, but the format is made by the fields *and the variants*.**
+Two enums carry `rename_all`, so **the names of their variants are the file**: renaming the rows
+variant leaves the file writing `"rows"` while the measurement script keeps seeding `"filas"`. That
+**is not caught by the compiler, nor by the suite, nor by the prefix**: only by the guard of the
+batch that restores, and only if somebody runs it. It is this milestone's real hole, and it is
+written here so that nobody discovers it twice.
 
-**`panel-contract` no lleva prefijo**, y es coherente: **la caja entera es el formato**, así que su
-nombre ya es la etiqueta.
+**`panel-contract` carries no prefix**, and it is consistent: **the whole crate is the format**, so its
+name is already the label.
 
-#### La división es un `Pane`, y el gesto es `split`
+#### The pane is a `Pane`, and the gesture is `split`
 
-Comprobado con fuente y no de memoria, que es lo que este proyecto exige de cualquier API ajena:
+Checked with source and not from memory, which is what this project demands of any foreign API:
 
-| Terminal | Sustantivo | Dónde |
+| Terminal | Noun | Where |
 |---|---|---|
-| WezTerm | **`pane`** | `trait Pane` en `mux/src/pane.rs`; `ActivatePaneDirection`, `PaneSelect` |
+| WezTerm | **`pane`** | `trait Pane` in `mux/src/pane.rs`; `ActivatePaneDirection`, `PaneSelect` |
 | tmux | **`pane`** | `select-pane`, `pane-border-style` |
-| Zellij | **`pane`** | `Action::NewPane`, el bloque `pane {}` de su configuración |
+| Zellij | **`pane`** | `Action::NewPane`, the `pane {}` block of its configuration |
 | Ghostty | `split` | `new_split`, `goto_split`, `split-divider-color` |
-| Kitty | `window` | una división es un «kitty window» dentro de un tab |
-| Alacritty | — | no tiene el concepto; lo delega |
+| Kitty | `window` | a pane is a «kitty window» inside a tab |
+| Alacritty | — | it does not have the concept; it delegates it |
 
-**`Pane` la cosa** —tres de cinco, y `Division` **no lo usa nadie**: es la forma española—, y **`split`
-el gesto**, que ya estaba comprometido sin que nadie se diera cuenta: esta misma decisión escribió
-`key.split-right` como ejemplo de las claves nuevas, que es exactamente lo que hacen WezTerm y
-Ghostty. Las once claves de atajo pasan a `key.*`.
+**`Pane` for the thing** —three out of five, and `Division` **is used by nobody**: it is the Spanish
+form—, and **`split` for the gesture**, which was already committed without anyone noticing: this
+very decision wrote `key.split-right` as an example of the new keys, which is exactly what WezTerm
+and Ghostty do. The eleven shortcut keys move to `key.*`.
 
-**Un hueco que se declara en vez de rellenarse:** ninguno de los cinco tiene palabra para el **peso**
-de un panel en un árbol n-ario. Lo más cercano son el `bias` de Kitty —**un entero de 10 a 90**, y de
-una pareja— y el `ratio` de Ghostty —un 0–1, también de una pareja, y **que además no es vocabulario
-de usuario**: vive en su árbol de divisiones interno y no en su configuración, así que **no pasa la
-propia pregunta 2 de este glosario**—. Aquí los pesos son n y suman lo que sea. Por eso `Weight` es
-acuñado y no adoptado: adoptar `bias` o `ratio` **mentiría sobre la aritmética del árbol**.
+**A gap that is declared instead of being filled:** none of the five has a word for a panel's
+**weight** in an n-ary tree. The closest are Kitty's `bias` —**an integer from 10 to 90**, and of a
+pair— and Ghostty's `ratio` —a 0–1, also of a pair, and **which on top of that is not user
+vocabulary**: it lives in its internal tree of splits and not in its configuration, so **it does not
+pass this glossary's own question 2**—. Here the weights are n and add up to whatever. That is why
+`Weight` is coined and not adopted: adopting `bias` or `ratio` **would lie about the tree's
+arithmetic**.
 
-#### La trampa del calco, que se cobró cinco nombres
+#### The calque trap, which claimed five names
 
-**Un calco que coincide con un nombre del ecosistema y no significa lo mismo es peor que una
-traducción libre.** La regla se escribió al empezar el glosario y aun así cazó cinco nombres ya
-propuestos:
+**A calque that coincides with an ecosystem name and does not mean the same thing is worse than a
+free translation.** The rule was written at the start of the glossary and even so it caught five
+names already proposed:
 
-| Tipo | Primer nombre, y por qué cae | Queda |
+| Type | First name, and why it falls | Ends up |
 |---|---|---|
-| `Resultado` | `Result` es de `std` y significa otra cosa | **`Outcome`** |
-| `Recogida` | `Drain`: `vec::Drain` y `HashMap::Drain` son **iteradores**, y este tipo es un resultado con dos campos | **`Pickup`** |
-| `Adjuntos` | `Combining` nombra el **referente**, no el tipo: el tipo es un tramo empaquetado de 27+5 bits que apunta a un vector aparte | **`CombiningSpan`** |
-| `Reparto` | `Partition` es de disco y `Iterator::partition` reparte por un predicado; y `Allotment`, para un nativo, es un huerto de alquiler | **`Tiling`** |
-| `Gesto` (del ratón) | `MouseEvent` nombra una **entrada**, y el tipo es una **salida**: el informe ya dice «informes al programa» | **`MouseReport`** |
-| `Puente` | `Reader` sin implementar `io::Read` miente por convención, y lo que el tipo hace —traer la salida **y la señal de muerte**— es justo lo que un `Reader` no hace | **`PtyOutput`** |
+| `Resultado` | `Result` belongs to `std` and means something else | **`Outcome`** |
+| `Recogida` | `Drain`: `vec::Drain` and `HashMap::Drain` are **iterators**, and this type is a result with two fields | **`Pickup`** |
+| `Adjuntos` | `Combining` names the **referent**, not the type: the type is a packed span of 27+5 bits pointing to a separate vector | **`CombiningSpan`** |
+| `Reparto` | `Partition` belongs to disks and `Iterator::partition` splits by a predicate; and `Allotment`, to a native speaker, is a rented vegetable garden | **`Tiling`** |
+| `Gesto` (the mouse's) | `MouseEvent` names an **input**, and the type is an **output**: the report already says «reports to the program» | **`MouseReport`** |
+| `Puente` | `Reader` without implementing `io::Read` lies by convention, and what the type does —bring the output **and the death signal**— is exactly what a `Reader` does not do | **`PtyOutput`** |
 
-#### El reparto de `Layout`, que es el choque de verdad
+#### The tiling of `Layout`, which is the real clash
 
-Tres tipos y un fichero querían la misma palabra:
+Three types and one file wanted the same word:
 
-| Hoy | Qué es | Queda | Por qué |
+| Today | What it is | Ends up | Why |
 |---|---|---|---|
-| `Reparto` | los rectángulos de las partes de un área **y las líneas que las separan** | `Tiling` | «tiling» es el término de los gestores de ventanas en mosaico, que es este dominio exacto |
-| `Hueco` | el reparto **dentro** de una división, entre consola y panel | `PanelTiling` | **emparejado a propósito**: su comentario dice que tiene nombre «por lo mismo que lo tiene `Reparto`… dos repartos que se leyeran distinto serían **dos idiomas para una sola idea**» |
-| `Maqueta` | una maqueta de texto ya calculada | `PanelLayout` | aquí `Layout` sí es lo que es: texto colocado |
-| `Disposicion` | con cuántas consolas abre cada pestaña | `OpeningLayout` | es lo que se **pide** al abrir, no lo que resulta |
-| `disposicion.json` | el fichero | `layout.json` | el nombre que espera quien abre su carpeta de configuración |
+| `Reparto` | the rectangles of the parts of an area **and the lines that separate them** | `Tiling` | «tiling» is the term of tiling window managers, which is this exact domain |
+| `Hueco` | the tiling **inside** a pane, between console and panel | `PanelTiling` | **paired on purpose**: its comment says it has a name «for the same reason `Reparto` has one… two tilings that read differently would be **two languages for a single idea**» |
+| `Maqueta` | an already-computed text layout | `PanelLayout` | here `Layout` is indeed what it is: laid-out text |
+| `Disposicion` | how many consoles each tab opens with | `OpeningLayout` | it is what is **asked for** on opening, not what results |
+| `disposicion.json` | the file | `layout.json` | the name whoever opens their configuration folder expects |
 
-#### Lo que no se traduce nunca
+#### What is never translated
 
-- **Las claves y valores de `panel.json`.** Y la razón buena **no** es que ya estén en inglés: son
-  **contrato con productores de fuera** (**D17**), así que la licencia de «sin compatibilidad» que
-  esta decisión concede **no las alcanza**. Esa licencia cubre las claves de atajo y el fichero de
-  disposición, que solo lee esta máquina. Ojo además con tres que **no se llaman como su campo**: la
-  clave es `v`, `stale_after_minutes` y `ref`.
-- **Identificadores del sistema y del protocolo:** `OPOST`, `SIGWINCH`, `TIOCSWINSZ`, `SGR`, `CSI`,
+- **`panel.json`'s keys and values.** And the good reason is **not** that they are already in English:
+  they are **a contract with outside producers** (**D17**), so the «no compatibility» licence this
+  decision grants **does not reach them**. That licence covers the shortcut keys and the layout file,
+  which only this machine reads. Watch out as well for three that **are not named like their field**: the
+  key is `v`, `stale_after_minutes` and `ref`.
+- **System and protocol identifiers:** `OPOST`, `SIGWINCH`, `TIOCSWINSZ`, `SGR`, `CSI`,
   `XDG_CONFIG_HOME`, `SHELL`, `PANEL_ID`, `PANEL_DIR`.
-- **Nombres de caja:** `alacritty_terminal`, `egui`, `eframe`, `epaint`, `serde`, `serde_json`,
-  `notify`, `skrifa`, `fontique`, `portable-pty`, `winit`, y los propios `term-core`,
-  `panel-contract`, `host-load`. (**No `fontdb`**, que la primera versión de esta lista citaba: no
-  está en el árbol — la caja de fuentes de este proyecto es `fontique`.)
-- **Nombres propios y etiquetas:** `WezTerm`, `Ghostty`, `Kitty`, `tmux`, `vim`, `htop`, `Nerd Font`,
-  `COLR`, `D1`–`D27`, `F1.0`–`F2.12`, y **las letras de tanda `A`–`Q`**, que no tienen idioma.
-- **Y los literales cuya *longitud* es la carga de prueba.** El ejemplo que pinta la pantalla de
-  comprobación coloca un carácter ancho **justo en el borde de la columna 80**, y su comentario dice
-  que «sin esta fila, la rama del pintor que trata ese hueco no la mira nadie». **Ese fichero no tiene
-  ni una prueba.** Traducir ese texto mueve el carácter de sitio y **desactiva la rama en silencio**.
-  Un texto así se mide en columnas, no en palabras.
+- **Crate names:** `alacritty_terminal`, `egui`, `eframe`, `epaint`, `serde`, `serde_json`, `notify`,
+  `skrifa`, `fontique`, `portable-pty`, `winit`, and our own `term-core`, `panel-contract`, `host-load`.
+  (**Not `fontdb`**, which the first version of this list cited: it is not in the tree — this project's
+  font crate is `fontique`.)
+- **Proper names and labels:** `WezTerm`, `Ghostty`, `Kitty`, `tmux`, `vim`, `htop`, `Nerd Font`, `COLR`,
+  `D1`–`D27`, `F1.0`–`F2.12`, and **the batch letters `A`–`Q`**, which have no language.
+- **And the literals whose *length* is the test load.** The example that paints the check screen places a
+  wide character **right on the column-80 boundary**, and its comment says that «without this row, the
+  painter branch that handles that gap is looked at by nobody». **That file does not have a single
+  test.** Translating that text moves the character and **silently disables the branch**. A text like
+  that is measured in columns, not in words.
 
-#### Los homónimos, que no son duplicación
+#### The homonyms, which are not duplication
 
-Se creyó que la coexistencia de un `Problem` inglés con dos `Problema` españoles era el precio de no
-haber escrito la frontera. **Es falso**: uno es «lo que le pasa al fichero de configuración entero» y
-otro «por qué un documento de disposición no sirve». Son tipos distintos en módulos distintos, y el
-idioma solo los estaba haciendo parecer parientes. **No se fusiona ninguno** —fusionar cambia
-comportamiento bajo suite verde, y eso es otro hito— y el criterio da tres respuestas:
+It was believed that the coexistence of an English `Problem` with two Spanish `Problema` was the
+price of not having written the border. **It is false**: one is «what happens to the whole
+configuration file» and the other «why a layout document is no good». They are different types in
+different modules, and the language was only making them look like relatives. **Neither is merged**
+—merging changes behavior under a green suite, and that is another milestone— and the criterion
+gives three answers:
 
-- **Mismo concepto, referente distinto → sustantivo compartido y calificador propio:**
-  `ConfigProblem`, `LayoutProblem`, y el `Problem` de `panel-contract` se queda como está porque su
-  caja ya lo califica. Igual `Linea` (la del fichero de configuración) → **`ConfigLine`**, frente al `Line` del panel, que se queda.
-- **Concepto idéntico duplicado a propósito → nombre idéntico:** los dos `Directorio` de prueba pasan
-  **los dos a `TestDir`**, porque su comentario dice «el mismo molde que usa el módulo hermano» y
-  calificarlos esconderían que son un patrón. No `TempDir`: es de `tempfile`.
-- **Conceptos distintos que compartían nombre por accidente → nombres sin nada en común:** los dos
-  `Gesto` no son parientes. El de la ventana es lo que **la tanda de medida se inyecta** →
-  `InjectedGesture`; el del ratón es lo que el ratón hizo para codificárselo al programa →
-  `MouseReport`. Traducir los dos a `Gesture` convertiría el accidente en intencionado.
+- **Same concept, different referent → shared noun and qualifier of its own:** `ConfigProblem`,
+  `LayoutProblem`, and `panel-contract`'s `Problem` stays as it is because its crate already qualifies it.
+  Likewise `Linea` (the configuration file's) → **`ConfigLine`**, against the panel's `Line`, which stays.
+- **Identical concept duplicated on purpose → identical name:** the two test `Directorio` both become
+  **`TestDir`**, because their comment says «the same mould the sibling module uses» and qualifying them
+  would hide that they are a pattern. Not `TempDir`: it belongs to `tempfile`.
+- **Different concepts that shared a name by accident → names with nothing in common:** the two `Gesto`
+  are not relatives. The window's one is what **the measurement batch injects into itself** →
+  `InjectedGesture`; the mouse's one is what the mouse did in order to encode it for the program →
+  `MouseReport`. Translating both to `Gesture` would turn the accident into something intended.
 
-#### El resto del glosario
+#### The rest of the glossary
 
-**Núcleo de la ventana:** `Ventana`→`Window` · `Pestaña`→`Tab` · `Division`→`Pane` ·
+**Core of the window:** `Ventana`→`Window` · `Pestaña`→`Tab` · `Division`→`Pane` ·
 `Consola`→`Console` · `Nodo`→`Node` · `Hijo`→`Child` · `Peso`→`Weight` · `Frontera`→`Divider` ·
-`Orientacion`→`Orientation` con variantes `Columns`/`Rows` —**las variantes nombran el resultado y no
-el eje**, que es lo que su comentario defiende— · `Lado`→`Side` · `Cierre`→`Closing` ·
+`Orientacion`→`Orientation` with variants `Columns`/`Rows` —**the variants name the result and not
+the axis**, which is what its comment defends— · `Lado`→`Side` · `Cierre`→`Closing` ·
 `TamañoPedido`→`RequestedSize` · `ConQueAbrir`→`OpenWith` · `Puerta`→`Entry` · `Bombeo`→`Pump` ·
-`Orden`→`WindowRequest` (**no `Command`**: ya está tomado por lo que se lanza).
+`Orden`→`WindowRequest` (**not `Command`**: it is already taken by what gets launched).
 
-**La familia de «lo que X deja para el resto del fotograma» son cuatro, no siete**, y comparten
-sufijo porque su valor es reconocerse entre sí: `DelRaton`→`MouseOutcome` ·
+**The family of «what X leaves for the rest of the frame» is four, not seven**, and they share a
+suffix because their value is recognizing each other: `DelRaton`→`MouseOutcome` ·
 `DeLaRuedaAlPrograma`→`WheelOutcome` · `DeLaBarra`→`TabBarOutcome` · `DeLaDivision`→`PaneOutcome`.
 
-Y los otros tres **no son de la familia y no llevan el sufijo**: `DeLaRueda`→`WheelInput`, porque es
-lo que la rueda **pidió** y no lo que deja; `DelBoton`→`ButtonPress`, que es un evento; y
-`DeLaSesion`→`SessionHeader`, que es la cabecera del informe.
+And the other three **are not of the family and do not carry the suffix**: `DeLaRueda`→`WheelInput`,
+because it is what the wheel **asked for** and not what it leaves; `DelBoton`→`ButtonPress`, which
+is an event; and `DeLaSesion`→`SessionHeader`, which is the report's header.
 
-**Ratón y teclado:** `RatonReclamado`→`MouseReporting` · `QueHaceElArrastre`→`DragIntent` ·
+**Mouse and keyboard:** `RatonReclamado`→`MouseReporting` · `QueHaceElArrastre`→`DragIntent` ·
 `QuienSeQuedaLaRueda`→`WheelOwner` · `Donde`→`CellPos` · `Accion`→`Action` · `Acorde`→`Chord` ·
 `Atajos`→`Keymap` · `Desplazamiento`→`Scroll` · `Mitad`→`Half`.
 
-**Configuración, sesión y panel:** `Ajustes`→`Settings` · `Colores`→`Colors` · `Aviso`→`Warning` ·
-`Avisos`→`Warnings` · `Falta`→`Missing` · `Valido`→`Validated` ·
-`Fallo`→`SaveFailure` · `Persistencia`→`Persistence` · `Estado`→`PanelState` ·
-`Reclamo`→`AttentionState` (**no `Claim`**: en inglés es «afirmación» o «derecho») · `Fila`→`Row` ·
-`Vigilante`→`Watcher` · `Vigilada`→`Watched` · `Bandera`→`Flag` · `Cola`→`Queue` · `Tema`→`Theme` ·
-`Metrica`→`CellMetrics`.
+**Configuration, session and panel:** `Ajustes`→`Settings` · `Colores`→`Colors` · `Aviso`→`Warning`
+· `Avisos`→`Warnings` · `Falta`→`Missing` · `Valido`→`Validated` · `Fallo`→`SaveFailure` ·
+`Persistencia`→`Persistence` · `Estado`→`PanelState` · `Reclamo`→`AttentionState` (**not `Claim`**:
+in English it means «assertion» or «right») · `Fila`→`Row` · `Vigilante`→`Watcher` ·
+`Vigilada`→`Watched` · `Bandera`→`Flag` · `Cola`→`Queue` · `Tema`→`Theme` · `Metrica`→`CellMetrics`.
 
-**El banco de medida** — su regla ya estaba escrita y se conserva: **«se llama por el acto y no por la
-cosa»**, porque un tipo llamado `Configuracion` dentro del módulo de medida se leería como «la
-configuración» en vez de como «lo que costó leerla». `Serie`→`Series` · `Tramos`→`Spans` ·
+**The measurement bench** — its rule was already written and is kept: **«it is named for the act and
+not for the thing»**, because a type called `Configuracion` inside the measurement module would read
+as «the configuration» instead of as «what reading it cost». `Serie`→`Series` · `Tramos`→`Spans` ·
 `Medida`→`Timings` · `RestoDelFotograma`→`RestOfFrame` · `Guardado`→`Saving` ·
 `Descubrimiento`→`Discovery` · `Rasterizado`→`Rasterizing` · `EnPuntos`→`SizeInPoints` ·
 `Reflujo`→`Reflow` · `Barra`→`TabBar` · `Restauracion`→`Restoring` ·
-`LecturaDeAjustes`→`ReadingSettings` (**no `SettingsRead`**, que se lee como participio y rompe la
-familia en `-ing`) · `Arrastres`→`Drags` · `ArrastresInyectados`→`InjectedDrags` · `Vuelta`→`Round` ·
-`CosteDelColor`→`ColorCost` · `Despertares`→`Wakeups` · `Resumen`→`Summary` · `Barrido`→`Sweep` ·
+`LecturaDeAjustes`→`ReadingSettings` (**not `SettingsRead`**, which reads as a participle and breaks
+the `-ing` family) · `Arrastres`→`Drags` · `ArrastresInyectados`→`InjectedDrags` · `Vuelta`→`Round`
+· `CosteDelColor`→`ColorCost` · `Despertares`→`Wakeups` · `Resumen`→`Summary` · `Barrido`→`Sweep` ·
 `Prueba`→`TestCase` · `Veredicto`→`Verdict` · `Montaje`→`Harness`.
 
-**Los que la primera versión se dejó fuera**, encontrados cruzando el glosario con los tipos que
-existen hoy: `Opciones`→`Options` (los argumentos de la línea de órdenes del medidor de carga) ·
-`Entrega`→`Delivery` (lo que costó volcar el fichero) · `Recogida`→`Pickup` (el resultado de una
-recogida de la cola, que solo se deducía de la fila del calco) · y los cuatro del contrato del panel,
-internos o de ejemplos: `Banco`→`Bench` · `Contador`→`Counter` · `Forma`→`Filler` · `Uso`→`Usage`.
+**The ones the first version left out**, found by crossing the glossary with the types that exist
+today: `Opciones`→`Options` (the load meter's command-line arguments) · `Entrega`→`Delivery` (what
+dumping the file cost) · `Recogida`→`Pickup` (the result of a pickup from the queue, which was only
+deducible from the calque's row) · and the four of the panel contract, internal or from examples:
+`Banco`→`Bench` · `Contador`→`Counter` · `Forma`→`Filler` · `Uso`→`Usage`.
 
-**Fuentes y glifos:** `Cara`→`Face` · `CaraDelSistema`→`SystemFace` · `Descubridor`→`Discoverer` ·
+**Fonts and glyphs:** `Cara`→`Face` · `CaraDelSistema`→`SystemFace` · `Descubridor`→`Discoverer` ·
 `Presentacion`→`Presentation` · `EnElAtlas`→`InAtlas` · `Glifos`→`Glyphs` · `Celda`→`Cell` ·
 `Adjuntos`→`CombiningSpan`.
 
-#### Tres cifras del cuerpo que el inventario deja atrás
+#### Three figures in the body that the inventory leaves behind
 
-D27 se escribió con los números de su día y **el inventario del hito los subió**. No se corrigen
-arriba —este documento añade con fecha, no edita hacia atrás— pero quedan aquí para que nadie los
-cite viejos: **46.458 líneas** propias y no 43.860, **859 nombres de prueba** y no 853, y **dieciocho
-ficheros** con nombre español y no diez. La diferencia no es un error de cuenta: **F2.10 entró en
-medio**, y es la demostración literal del «cuanto más tarde, más caro» que la propia decisión usa
-como argumento.
+D27 was written with the numbers of its day and **the milestone's inventory raised them**. They are
+not corrected above —this document adds with a date, it does not edit backwards— but they are here
+so that nobody cites them stale: **46 458 lines** of our own and not 43 860, **859 test names** and
+not 853, and **eighteen files** with a Spanish name and not ten. The difference is not a counting
+error: **F2.10 came in between**, and it is the literal demonstration of the «the later, the more
+expensive» that the decision itself uses as an argument.
 
-#### Qué significa «enteros, de una vez» para los documentos
+#### What «whole, in one go» means for the documents
 
-D27 dice que los documentos «se traducen **enteros**, de una vez, en su entrega — no se van mezclando
-fichero a fichero», y la frase admite dos lecturas. **Manda la que su propia razón sostiene**: el
-ejemplo que da es «una decisión en inglés dentro de un `02-decisiones.md` en español», o sea **la
-mezcla dentro de un fichero**. Así que:
+D27 says that the documents «are translated **whole**, in one go, in their delivery — they are not
+mixed file by file», and the sentence admits two readings. **The one its own reason holds up
+rules**: the example it gives is «a decision in English inside an `02-decisiones.md` in Spanish»,
+that is, **the mixture inside one file**. So:
 
-> **«Entero» es cada documento, y «de una vez» es su entrega.** Ningún documento se queda a medias
-> —eso es lo prohibido—, y la entrega puede llevar un cambio por documento. Con 3.186 líneas solo en
-> este fichero, un único cambio con los ocho documentos dentro no lo revisa nadie, y lo que D27
-> protege no es el tamaño del cambio: es que no se lea medio documento en cada idioma.
+> **«Whole» is each document, and «in one go» is its delivery.** No document is left half-done —that is
+> what is forbidden—, and the delivery may carry one change per document. With 3 186 lines in this file
+> alone, a single change with the eight documents inside is reviewed by nobody, and what D27 protects is
+> not the size of the change: it is that half a document is not read in each language.
 
-Queda escrito porque la lectura contraria es defendible leyendo solo la frase, y una decisión que
-admite dos lecturas se discute otra vez dentro de tres semanas.
+It is written down because the opposite reading is defensible reading the sentence alone, and a
+decision that admits two readings gets discussed again within three weeks.
 
-#### Los ficheros son dieciocho, no diez
+#### The files are eighteen, not ten
 
-La decisión contó los diez de `app/src` y se dejó ocho: `ajustes.rs`→`settings.rs` ·
+The decision counted the ten of `app/src` and left out eight: `ajustes.rs`→`settings.rs` ·
 `teclado.rs`→`keyboard.rs` · `sesion.rs`→`session.rs` · `fuentes.rs`→`fonts.rs` ·
 `medida.rs`→`measure.rs` · `pintor.rs`→`painter.rs` · `tema.rs`→`theme.rs` ·
 `vigilante.rs`→`watcher.rs` · `puente.rs`→`pty_output.rs` · `raton.rs`→`mouse.rs` ·
 `barrido.rs`→`sweep.rs` · `fuga.rs`→`leak.rs` · `pantalla.rs`→`screen_demo.rs` ·
 `lectura.rs`→`read.rs` · `entrega.rs`→`delivery.rs` · `historial.rs`→`scrollback.rs` ·
-`api_sin_terceros.rs`→`api_without_deps.rs`, más el ejemplo de fuentes de `app`.
+`api_sin_terceros.rs`→`api_without_deps.rs`, plus `app`'s fonts example.
 
-**Y uno más que no estaba en ninguna lista: el propio `scripts/medir-fotograma.sh`**, que pasa a
-`measure-frame.sh`. Su nombre se cita en **quince ficheros** —tres módulos, este documento y diez del
-conocimiento almacenado—, así que se renombra en la entrega del banco y **sus citas en prosa se
-corrigen en las entregas de prosa**: una cita al nombre viejo dentro de un comentario que todavía está
-en español no rompe nada ejecutable, y el alternativo es un cambio que cruza el repositorio entero.
+**And one more that was on no list: `scripts/medir-fotograma.sh` itself**, which becomes
+`measure-frame.sh`. Its name is cited in **fifteen files** —three modules, this document and ten of
+the stored knowledge—, so it is renamed in the bench delivery and **its prose citations are fixed in
+the prose deliveries**: a citation of the old name inside a comment that is still in Spanish breaks
+nothing executable, and the alternative is a change that crosses the whole repository.
 
-#### Una discrepancia que se declara en vez de resolverse en silencio
+#### A discrepancy that is declared instead of being resolved in silence
 
-Para lo que el programa de dentro **pide** sobre el ratón, el estándar dice *mouse tracking* (DECSET
-1000–1003) y los terminales del listón dicen *reporting* (`mouse-reporting` en Ghostty,
-`bypass_mouse_reporting_modifiers` en WezTerm). Dos revisiones dieron nombres distintos y **las dos
-citas son buenas**. Manda **D19**: el vocabulario de su usuario. Queda `MouseReporting`, y queda
-escrito que la otra opción tenía argumento.
+For what the inner program **asks** about the mouse, the standard says *mouse tracking* (DECSET
+1000–1003) and the terminals that are the bar say *reporting* (`mouse-reporting` in Ghostty,
+`bypass_mouse_reporting_modifiers` in WezTerm). Two reviews gave different names and **both
+citations are good**. **D19** rules: its user's vocabulary. It stays `MouseReporting`, and it stays
+written that the other option had an argument.
 
-#### Lo que se aprendió renombrando `app`, y no estaba previsto
+#### What was learned renaming `app`, and was not foreseen
 
-La entrega que renombró la familia de la ventana dejó cuatro cosas escritas, todas encontradas al
-hacer el trabajo y ninguna deducible del plan.
+The delivery that renamed the window's family left four things written down, all of them found while
+doing the work and none deducible from the plan.
 
-**Un renombrado que se le va a otro fichero siempre compila.** Es la propiedad que lo hace peligroso:
-el compilador no puede objetar, porque el nombre está cambiado en la declaración *y* en todos los usos.
-En esta entrega el mapa se fue a tres ficheros que no le tocaban, y cada uno enseñó algo distinto:
+**A rename that wanders off into another file always compiles.** It is the property that makes it
+dangerous: the compiler cannot object, because the name is changed in the declaration *and* in every
+use. In this delivery the map wandered into three files it had no business in, and each one taught
+something different:
 
-- Al `Gesto` del ratón le puso `InjectedGesture`, que es el nombre que este mismo anexo reserva para el
-  **otro** `Gesto`. Lo que aquí arriba se escribió para que dos homónimos no se confundieran acabó
-  produciendo la confusión al revés: **el nombre correcto, en el tipo equivocado**.
-- Al `Accion` del teclado le tradujo **una** variante de veintiuna. Es la misma forma que la fuga de
-  `Lado` de la entrega anterior, y sobrevivió al mismo barrido por la misma razón: **una expresión
-  regular de declaraciones no ve nunca una variante de `enum`**. El oráculo que sí la ve es diferenciar
-  los **conjuntos** de nombres declarados antes y después, no buscar líneas de declaración.
-- A `Hueco` le puso `PanelTiling` **con la razón equivocada**, diciendo que un enlace de rustdoc lo
-  obligaba. El enlace nombra un tipo del fichero que sí se estaba renombrando, así que actualizar la
-  cita bastaba. Y lo que hace este caso el más instructivo de los tres es que **la conclusión era
-  correcta**: el reparto de `Layout`, más arriba, dicta `Hueco`→`PanelTiling` y dice que el
-  emparejamiento con `Reparto` es a propósito. Se revirtió creyéndolo fuga y volvió al comprobar el diff
-  contra los 84 pares del anexo. Dos lecciones, no una: **una razón plausible no es una razón
-  verdadera**, y **una conclusión correcta con razón falsa no se defiende sola** — la primera vez que
-  alguien la audite, se cae.
+- To the mouse's `Gesto` it gave `InjectedGesture`, which is the name this very annex reserves for the
+  **other** `Gesto`. What was written up here so that two homonyms would not be confused ended up
+  producing the confusion the other way round: **the right name, on the wrong type**.
+- To the keyboard's `Accion` it translated **one** variant out of twenty-one. It is the same shape as the
+  previous delivery's `Lado` leak, and it survived the same sweep for the same reason: **a regular
+  expression over declarations never sees an `enum` variant**. The oracle that does see it is diffing the
+  **sets** of names declared before and after, not looking for declaration lines.
+- To `Hueco` it gave `PanelTiling` **with the wrong reason**, saying that a rustdoc link forced it. The
+  link names a type in the file that was indeed being renamed, so updating the citation was enough. And
+  what makes this case the most instructive of the three is that **the conclusion was correct**: the
+  tiling of `Layout`, further up, dictates `Hueco`→`PanelTiling` and says that the pairing with `Reparto`
+  is on purpose. It was reverted believing it a leak and came back on checking the diff against the
+  annex's 84 pairs. Two lessons, not one: **a plausible reason is not a true reason**, and **a correct
+  conclusion with a false reason does not defend itself** — the first time somebody audits it, it falls.
 
-**La lista de exenciones se compara con la caja puesta.** La guarda del glosario lleva una lista de
-nombres que siguen en español a propósito porque los declara un fichero de una entrega posterior. Se
-comparaba en minúsculas, y así cada entrada cubría **dos cosas distintas**: el tipo ajeno y el local
-propio del mismo nombre — `Gesto` y `gesto`, `Nodo` y `nodo`, `Hueco` y `hueco`. Lo segundo es
-precisamente lo que la guarda existe para cazar. Rust lo resuelve gratis, porque los tipos van en
-`CamelCase` y los locales en `snake_case`.
+**The exemption list is compared with the case on.** The glossary guard carries a list of names that
+stay in Spanish on purpose because they are declared by a file of a later delivery. It was compared
+in lowercase, and so each entry covered **two different things**: the foreign type and the local of
+our own with the same name — `Gesto` and `gesto`, `Nodo` and `nodo`, `Hueco` and `hueco`. The second
+is precisely what the guard exists to catch. Rust solves it for free, because the types go in
+`CamelCase` and the locals in `snake_case`.
 
-**Una exención que nombra algo del propio fichero no protege a nadie: esconde trabajo.** Dos entradas
-de esa lista —`ArrastresInyectados` y `QueHaceElArrastre`— se declaran en `lib.rs`, o sea en el fichero
-que la entrega estaba renombrando. Estaban ahí por descuido y su efecto era exactamente el contrario
-del que la lista busca. Regla: **cada entrada de la lista se verifica contra el fichero que declara el
-nombre**, no contra la intención de quien la escribió.
+**An exemption that names something of the file itself protects nobody: it hides work.** Two entries
+of that list —`ArrastresInyectados` and `QueHaceElArrastre`— are declared in `lib.rs`, that is, in
+the file the delivery was renaming. They were there by oversight and their effect was exactly the
+opposite of the one the list is after. Rule: **every entry of the list is verified against the file
+that declares the name**, not against the intention of whoever wrote it.
 
-**«Terminado» es una afirmación, y se parte en dos cuando no se puede sostener entera.** La guarda tenía
-una sola lista, `FINISHED`, y se le añadió la capacidad de declarar terminado **un fichero** para poder
-apuntarla a `lib.rs`. Apuntándola se vio que no se puede: además de los nombres que ese fichero solo
-*alcanza* —declarados en ficheros de entregas posteriores—, quedan **499 identificadores en español que
-el glosario nunca tuvo que decidir**, el `desde` de un rango o el `cual` de un índice, y eso ya sin contar
-los 356 nombres de función de prueba, que son prosa. Llamar «terminado» a eso sería un número mal
-etiquetado, que es lo que **D13** prohíbe.
+**«Finished» is an assertion, and it is split in two when it cannot be held up whole.** The guard
+had a single list, `FINISHED`, and it was given the ability to declare **a file** finished so that
+it could be pointed at `lib.rs`. Pointing it there showed that it cannot be done: besides the names
+that file only *reaches* —declared in files of later deliveries—, there are **499 Spanish
+identifiers the glossary never had to decide**, a range's `desde` or an index's `cual`, and that is
+without counting the 356 test function names, which are prose. Calling that «finished» would be a
+mislabelled number, which is what **D13** forbids.
 
-Así que hay dos listas, y cada una dice lo que de verdad afirma:
+So there are two lists, and each one says what it really asserts:
 
-| Lista | Qué afirma | Qué la lee |
+| List | What it asserts | What reads it |
 |---|---|---|
-| `FINISHED` | una caja cuyos identificadores están **todos** en inglés | las tres guardas |
-| `CITATIONS_CHECKED` | un fichero cuyas **citas** están comprobadas, aunque sus identificadores no | la guarda de las citas |
+| `FINISHED` | a crate whose identifiers are **all** in English | the three guards |
+| `CITATIONS_CHECKED` | a file whose **citations** are checked, even if its identifiers are not | the citations guard |
 
-**Y la segunda lista lleva dos mitades, no una**: el fichero, y **la caja cuyos nombres puede citar**.
-Un comentario de `lib.rs` tiene derecho a nombrar algo que declara un módulo hermano; sin esa segunda
-mitad, la guarda denunciaba setenta citas perfectamente vivas. Lo descartado: darle a la guarda el árbol
-entero como universo, que la habría vuelto ciega a una cita a un nombre de otra caja.
+**And the second list carries two halves, not one**: the file, and **the crate whose names it may
+cite**. A comment in `lib.rs` has the right to name something a sibling module declares; without
+that second half, the guard was denouncing seventy perfectly live citations. What was discarded:
+giving the guard the whole tree as its universe, which would have made it blind to a citation of a
+name from another crate.
 
-Lo que esto compra, medido en su primer uso: **ciento cincuenta y ocho comentarios** que nombraban
-identificadores que ya no existen, **dos de ellos doblemente muertos** —apuntando a un nombre que un
-renombrado *anterior* ya había retirado y nadie había notado—. Un comentario así no lo caza el
-compilador, no lo caza la suite, y quien busca el nombre que le dan no encuentra nada.
+What this buys, measured on its first use: **one hundred and fifty-eight comments** that named
+identifiers that no longer exist, **two of them doubly dead** —pointing at a name that an *earlier*
+rename had already retired and nobody had noticed—. A comment like that is not caught by the
+compiler, is not caught by the suite, and whoever looks for the name it gives them finds nothing.
 
-#### Lo que ninguna guarda de este hito puede ver, dicho antes de que muerda
+#### What no guard of this milestone can see, said before it bites
 
-Tres clases, encontradas las tres renombrando la ventana y ninguna cazable por la guarda.
+Three classes, all three found renaming the window and none catchable by the guard.
 
-**Un nombre de tipo que además es una palabra corriente, reemplazado en prosa.** `Hueco` es las dos
-cosas, y el reemplazo alcanzó dos comentarios donde era la palabra: «hueco de medida conocido» —la
-fórmula con la que este proyecto declara un tramo que **no** cronometra— dejó de decir eso. La guarda de
-citas lee lo que va **entre comillas invertidas**, y aquí el nombre iba a pelo en el texto. Lo cazó
-barrer los nombres nuevos en `CamelCase` buscándolos **fuera** de comillas, y **eso hay que hacerlo a
-mano en cada entrega que renombre un tipo cuyo nombre sea también una palabra del idioma**.
+**A type name that is also an ordinary word, replaced in prose.** `Hueco` is both things, and the
+replacement reached two comments where it was the word: «known measurement gap» —the formula with
+which this project declares a span it does **not** time— stopped saying that. The citations guard
+reads what goes **between backticks**, and here the name went bare in the text. It was caught by
+sweeping the new `CamelCase` names looking for them **outside** backticks, and **that has to be done
+by hand in every delivery that renames a type whose name is also a word of the language**.
 
-**Un intercambio de nombres entre dos cosas del mismo tipo.** Todos los oráculos de diferencia de
-conjuntos —nombres declarados, literales, números— son **invariantes bajo un intercambio**: si `ancho` y
-`alto` se cambian el nombre entre sí, el conjunto sale idéntico y el compilador calla. Lo que sí lo ve es
-un oráculo **posicional**: emparejar las líneas cambiadas una a una y comprobar, token por token en la
-misma posición, que cada identificador cambió a lo que la cadena de renombrados dice. Medido en esta
-entrega: **5.693 líneas emparejadas, 0 cambios sin explicar**. Sale barato y hay que hacerlo.
+**A swap of names between two things of the same type.** All the set-difference oracles —declared
+names, literals, numbers— are **invariant under a swap**: if `ancho` and `alto` swap names with each
+other, the set comes out identical and the compiler says nothing. What does see it is a
+**positional** oracle: pairing the changed lines one by one and checking, token by token in the same
+position, that each identifier changed to what the chain of renames says. Measured in this delivery:
+**5 693 lines paired, 0 unexplained changes**. It comes cheap and it has to be done.
 
-**Un nombre de prueba que cita un método.** `absorber_conserva_la_geometria…` mientras el método ya se
-llama `absorb`. No lo ve la resta de nombres declarados —no cambió— ni la guarda de citas —no es un
-comentario—. Y no tiene arreglo mecánico: **328 de los 366 nombres de prueba** del fichero grande llevan
-alguna palabra que esta entrega renombró, y casi todas son la palabra del idioma dentro de una frase, no
-una cita. Van con la prosa, que es una entrega y no un barrido.
+**A test name that cites a method.** `absorber_conserva_la_geometria…` while the method is already
+called `absorb`. It is not seen by the subtraction of declared names —it did not change— nor by the
+citations guard —it is not a comment—. And it has no mechanical fix: **328 of the 366 test names**
+of the big file carry some word this delivery renamed, and almost all of them are the word of the
+language inside a sentence, not a citation. They go with the prose, which is a delivery and not a
+sweep.
 
-#### Y una cifra que nadie había contado: la prosa llevaba muchas entregas mintiendo
+#### And a figure nobody had counted: the prose had been lying for many deliveries
 
-Al comprobar qué citas de fuera del código mató este renombrado salió el número de al lado, que es el
-que importa: **599 citas de la prosa ya nombraban cosas que el código no tiene, y son de antes de este
-hito.** Esta entrega mató 121 más (11 en el registro de decisiones, 1 en el de configuración, 109 en el
-conocimiento de dominio); el propio registro de decisiones lleva **152 muertas de antes** y 11 nuevas.
+On checking which citations from outside the code this rename killed, the number alongside came out,
+which is the one that matters: **599 prose citations already named things the code does not have,
+and they are from before this milestone.** This delivery killed 121 more (11 in the decision log, 1
+in the configuration one, 109 in the domain knowledge); the decision log itself carries **152 dead
+from before** and 11 new ones.
 
-Por eso **no se arreglan aquí**: arreglar 11 de 163 en un fichero sería tapar el 7 % del problema y dejar
-el documento pareciendo revisado. Lo que cambia es el encargo de las entregas de la prosa y de los
-documentos: **no traducen, reparan** — y ahora saben cuánto.
+That is why **they are not fixed here**: fixing 11 out of 163 in one file would be papering over 7 %
+of the problem and leaving the document looking reviewed. What changes is the brief of the prose and
+document deliveries: **they do not translate, they repair** — and now they know how much.
 
-#### El PR de arreglo: la guarda no veía **ningún** nombre en mayúsculas, y afirmaba lo que no había mirado
 
-Va suelto, entre la quinta entrega y la sexta, y por dos razones que no dan para esconderlo dentro de un
-renombrado: **una guarda que afirma en falso es peor que ninguna**, y la ceguera que se arregla aquí no
-es deuda de la quinta entrega — lleva puesta desde la tercera, la que declaró terminadas las tres cajas
-de fuera.
+#### The fixing PR: the guard saw **no** uppercase name at all, and asserted what it had not looked at
 
-**Partir un nombre antes de cada mayúscula deja una constante convertida en letras sueltas.**
-`ANCHO_DE_FABRICA` salía como catorce piezas de un carácter, y el suelo de dos caracteres que el
-comprobador aplica después las tiraba todas: **a ninguna regla se le llegaba a preguntar**. Así que un
-nombre en `MAYUSCULAS_CON_GUION` podía llevar cualquier palabra en español y la guarda lo daba por
-limpio. La regla nueva es una línea: **una pieza sin ninguna minúscula es una sola palabra**.
+It goes on its own, between the fifth delivery and the sixth, and for two reasons that do not allow
+hiding it inside a rename: **a guard that asserts falsely is worse than none**, and the blindness
+fixed here is not the fifth delivery's debt — it has been on since the third, the one that declared
+the three outside crates finished.
 
-Lo que enseñó al arreglarlo, que es la medida que justifica el PR: **tres constantes** en un módulo ya
-declarado terminado (`ANCHO_DE_FABRICA`→`DEFAULT_WIDTH` · `CONSOLA_MINIMA`→`MINIMUM_CONSOLE` ·
-`SUELO_AL_ARRASTRAR`→`DRAG_FLOOR`) y **ninguna** en las tres cajas de fuera — ésas sí estaban limpias, lo
-cual solo se sabe ahora.
+**Splitting a name before every uppercase letter leaves a constant turned into loose letters.**
+`ANCHO_DE_FABRICA` came out as fourteen one-character pieces, and the two-character floor the
+checker applies afterwards threw them all away: **no rule was ever asked about any of them**. So a
+name in `MAYUSCULAS_CON_GUION` could carry any Spanish word and the guard passed it as clean. The
+new rule is one line: **a piece with no lowercase letter is a single word**.
 
-**Se escribió primero una regla más fina y se tiró.** Cortar donde *cambia* la caja —`PTYOutput` como
-`pty` + `output` en vez de `p`, `t`, `y`, `output`— es más bonito y **no cambia ni un veredicto**: las
-letras que ahorra las tira el mismo suelo, y la palabra de detrás se encuentra igual. Ningún nombre del
-árbol distingue las dos reglas, y este fichero no se queda mecanismos sin escenario.
+What it taught on being fixed, which is the measurement that justifies the PR: **three constants**
+in a module already declared finished (`ANCHO_DE_FABRICA`→`DEFAULT_WIDTH` ·
+`CONSOLA_MINIMA`→`MINIMUM_CONSOLE` · `SUELO_AL_ARRASTRAR`→`DRAG_FLOOR`) and **none** in the three
+outside crates — those really were clean, which is something only known now.
 
-**Y la lista de ficheros terminados afirmaba «todos los identificadores en inglés» de cinco ficheros de
-los que no era verdad en ninguno.** Sus familias sí están renombradas y no les queda nombre que el
-glosario retirase —que es lo que la lista comprueba de verdad—, pero siguen llevando el **local en
-minúsculas que el glosario nunca tuvo que decidir**: el `resto` de un trozo, el `ahora` de un reloj, la
-`fase` de una cabecera. Eso es exactamente el punto ciego que la guarda declara en su cabecera, y la
-lista lo tapaba.
+**A finer rule was written first and thrown away.** Cutting where the *case* changes —`PTYOutput` as
+`pty` + `output` instead of `p`, `t`, `y`, `output`— is prettier and **does not change a single
+verdict**: the letters it saves are thrown away by the same floor, and the word behind is found just
+the same. No name in the tree tells the two rules apart, and this file does not keep mechanisms with
+no scenario.
 
-**Contados: 195 identificadores distintos** — ratón 7 · teclado 30 · pintor 27 · fuentes 57 · panel 74.
-El método, porque el número sin él no vale: se extraen los identificadores de cada fichero con el mismo
-saneo que usa la guarda (fuera cadenas, caracteres y comentarios), **se quitan los nombres de función de
-prueba** —que son prosa y van con la prosa—, se deja un ejemplar de cada nombre y se clasifica a mano. La
-lista, nombre a nombre, va abajo. Los seis exentos a propósito (`Tema`, `tema`,
-`color_del_panel`, `color_del_reclamo`, `fondo_del_panel`, `con_atributos`) no cuentan. Un nombre que
-aparece en dos ficheros cuenta en los dos: el inventario es por fichero, que es la unidad de la lista.
+**And the list of finished files asserted «all identifiers in English» of five files of which it was
+true of none.** Their families are indeed renamed and they have no name left that the glossary
+retired —which is what the list really checks—, but they still carry the **lowercase local the
+glossary never had to decide**: a chunk's `resto`, a clock's `ahora`, a header's `fase`. That is
+exactly the blind spot the guard declares in its header, and the list was covering it up.
 
-**Y el primer recuento dijo 190, que es la clase de fallo que este documento existe para no repetir.**
-Faltaban cuatro, y los cuatro por la misma razón: tres eran **locales dentro de una prueba** —`solo_clics`,
-`en_otra_distribucion`, `sin_alto`— que están **junto a una prueba cuyo nombre lleva esas mismas palabras**,
-así que leyendo el listado los tomé por nombres de prueba y los descarté; el cuarto era `Texto`, un tipo de
-otro módulo que el pintor nombra, y que cuenta por la misma regla por la que `fuentes` cuenta en tres
-ficheros. Lo destapó una revisión adversaria con un único encargo: **recontar**. La lección no es «contar
-mejor»: es que **un número producido a mano necesita que otro lo reproduzca**, y por eso el reparto por
-fichero se publica y no solo el total. (El quinto candidato, `A_EMOJI`, se cuenta: su `A_` es la
-preposición española, igual que en el `A_TEXTO` de al lado.)
+**Counted: 195 distinct identifiers** — mouse 7 · keyboard 30 · painter 27 · fonts 57 · panel 74.
+The method, because the number without it is worth nothing: the identifiers of each file are
+extracted with the same sanitizing the guard uses (strings, characters and comments out), **the test
+function names are removed** —which are prose and go with the prose—, one instance of each name is
+kept and it is classified by hand. The list, name by name, goes below. The six exempted on purpose
+(`Tema`, `tema`, `color_del_panel`, `color_del_reclamo`, `fondo_del_panel`, `con_atributos`) do not
+count. A name that appears in two files counts in both: the inventory is per file, which is the
+list's unit.
 
-**Cuatro nombres que compilan y se leen mal, encontrados por las revisiones de la quinta entrega.** Los
-cuatro son de la misma clase: **dos cosas distintas con el mismo nombre a la vista**, que es justo lo que
-el glosario existe para impedir y lo que un renombrado mecánico no puede ver.
+**And the first count said 190, which is the class of failure this document exists in order not to
+repeat.** Four were missing, and all four for the same reason: three were **locals inside a test**
+—`solo_clics`, `en_otra_distribucion`, `sin_alto`— that sit **next to a test whose name carries
+those same words**, so reading the listing I took them for test names and discarded them; the fourth
+was `Texto`, a type from another module that the painter names, and which counts by the same rule by
+which `fuentes` counts in three files. It was uncovered by an adversarial review with a single
+brief: **recount**. The lesson is not «count better»: it is that **a number produced by hand needs
+somebody else to reproduce it**, and that is why the per-file breakdown is published and not only
+the total. (The fifth candidate, `A_EMOJI`, does count: its `A_` is the Spanish preposition, the
+same as in the `A_TEXTO` next to it.)
 
-| Estaba | Pasa a | Por qué |
+**Four names that compile and read badly, found by the fifth delivery's reviews.** All four are of
+the same class: **two different things with the same name in sight**, which is exactly what the
+glossary exists to prevent and what a mechanical rename cannot see.
+
+| It was | Becomes | Why |
 |---|---|---|
-| `Action::PageUp` · `PageDown` | `ScrollPageUp` · `ScrollPageDown` | En `(historial(Key::PageUp), Action::PageUp)` el mismo nombre son **dos tipos** en la misma expresión: la tecla de egui y lo que la aplicación hace con ella |
-| `Action::GoToStart` · `GoToEnd` | `ScrollToTop` · `ScrollToBottom` | Van a `Scroll::ToTop` / `Scroll::ToBottom`, así que ahora **se llaman como acaban**; y «start/end» en un terminal se lee como principio y fin de línea |
-| `Action::SplitBeside` | `SplitRight` | La propia D27 escribió `key.split-right` como ejemplo de las claves nuevas: el nombre del código decía otra cosa que la clave que lo configura |
-| `Action::SplitBelow` | `SplitDown` | Su pareja, por lo mismo |
-| `Glyphs::paste` | `Glyphs::blit` | Dos `paste` sin parentesco en la misma caja: éste **pega una imagen en el atlas**, el otro es el portapapeles |
-| `paint_character(width: bool)` | `is_wide` | A dos líneas de `metrics.width: f32`. Un `bool` llamado como una medida |
+| `Action::PageUp` · `PageDown` | `ScrollPageUp` · `ScrollPageDown` | In `(historial(Key::PageUp), Action::PageUp)` the same name is **two types** in the same expression: egui's key and what the application does with it |
+| `Action::GoToStart` · `GoToEnd` | `ScrollToTop` · `ScrollToBottom` | They go to `Scroll::ToTop` / `Scroll::ToBottom`, so now **they are named as they end up**; and «start/end» in a terminal reads as the beginning and the end of a line |
+| `Action::SplitBeside` | `SplitRight` | D27 itself wrote `key.split-right` as an example of the new keys: the code's name said something different from the key that configures it |
+| `Action::SplitBelow` | `SplitDown` | Its pair, for the same reason |
+| `Glyphs::paste` | `Glyphs::blit` | Two `paste` with no relation in the same crate: this one **pastes an image into the atlas**, the other is the clipboard |
+| `paint_character(width: bool)` | `is_wide` | Two lines from `metrics.width: f32`. A `bool` named like a measurement |
 
-Las cadenas del fichero de configuración —`"partir-al-lado"`, `"subir-una-pagina"`— **no se tocan aquí**:
-son las claves que escribe quien usa el terminal y tienen su propia entrega, que es la de las claves de
-configuración. Allí pasan a `split-right` y `scroll-page-up`, bajo el prefijo `key.`.
+The configuration file's strings —`"partir-al-lado"`, `"subir-una-pagina"`— **are not touched
+here**: they are the keys whoever uses the terminal writes and they have their own delivery, which
+is the configuration keys one. There they become `split-right` and `scroll-page-up`, under the
+`key.` prefix.
 
-**Y la guarda de citas era ciega a los nombres de módulo, por una razón que no se ve leyéndola.** Esa
-guarda pregunta si el nombre citado existe **en alguna parte de la caja**, y **todos** los nombres de
-fichero retirados siguen existiendo — como **variable local**: «pantalla» es una `Screen` en dos
-ejemplos, «fuentes» es una lista de caras en tres módulos, «sesion» es una cabecera en el módulo de
-medida, «vigilante» es un vigilante en el módulo que ahora se llama `watcher.rs`. Así que un comentario
-que dice «la regla vive en fuentes» **pasa**: la guarda encuentra el local y da la cita por buena. Y
-ensancharla no lo habría encontrado nunca, porque el nombre que busca **está de verdad ahí**.
+**And the citations guard was blind to the module names, for a reason that is not visible reading
+it.** That guard asks whether the cited name exists **anywhere in the crate**, and **all** the
+retired file names still exist — as a **local variable**: «pantalla» is a `Screen` in two examples,
+«fuentes» is a list of faces in three modules, «sesion» is a header in the measurement module,
+«vigilante» is a watcher in the module now called `watcher.rs`. So a comment that says «the rule
+lives in fuentes» **passes**: the guard finds the local and takes the citation as good. And widening
+it would never have found it, because the name it is looking for **really is there**.
 
-Lo que hace posible cerrarlo es que los nombres **viejos** se conocen: el anexo escribe cada renombrado
-de fichero como una flecha, así que la pregunta deja de ser «¿existe este nombre?» y pasa a ser «¿es
-uno que retiramos?», que tiene respuesta exacta. La guarda nueva **deriva los diecisiete tallos de este
-mismo documento** —el mismo mecanismo que el glosario: derivar, nunca duplicar— y busca sus citas
-`` `así` ``, `` `así.rs` ``, `` `carpeta/así.rs` `` y `` `así::funcion` ``.
+What makes it possible to close is that the **old** names are known: the annex writes every file
+rename as an arrow, so the question stops being «does this name exist?» and becomes «is it one we
+retired?», which has an exact answer. The new guard **derives the seventeen stems from this very
+document** —the same mechanism as the glossary: derive, never duplicate— and looks for their
+citations `` `así` ``, `` `así.rs` ``, `` `carpeta/así.rs` `` and `` `así::funcion` ``.
 
-Encontró **once** —medido corriendo esta guarda contra el árbol de main, que es la única forma de que el
-número sea reproducible—, y **nueve eran de verdad**: dos en el manifiesto de `app`, tres en el pintor, una en
-el fichero grande, dos en la propia guarda y una en el guion de medida —`vigilante::repartir`—. Las
-otras dos no eran citas de fichero: una era una palabra entre comillas invertidas y se reescribe como
-palabra, y la otra —«las demás pruebas llegan hasta `pantalla`»— quería decir un tipo, así que pasa a
-nombrarlo (`Screen`). Reescribir una y renombrar la otra no es la misma operación, y el guion de la
-guarda dice las dos.
+It found **eleven** —measured by running this guard against main's tree, which is the only way for
+the number to be reproducible—, and **nine were real**: two in `app`'s manifest, three in the
+painter, one in the big file, two in the guard itself and one in the measurement script
+—`vigilante::repartir`—. The other two were not file citations: one was a word between backticks and
+is rewritten as a word, and the other —«the other tests reach as far as `pantalla`»— meant a type,
+so it moves to naming it (`Screen`). Rewriting one and renaming the other is not the same operation,
+and the guard's script says both.
 
-**Lee el lado del código y no el de la prosa**, y esa frontera es una decisión ya tomada: las 599 citas
-muertas de antes del hito tienen su entrega, así que `docs/`, los dos `README` y el conocimiento
-almacenado son de ellas. Aquí queda el código, sus manifiestos y el guion de medida — donde una cita
-muerta **no tiene entrega** y se quedaría.
+**It reads the code's side and not the prose's**, and that border is a decision already taken: the
+599 dead citations from before the milestone have their delivery, so `docs/`, the two `README`s and
+the stored knowledge belong to them. What is left here is the code, its manifests and the
+measurement script — where a dead citation **has no delivery** and would stay.
 
-**Y hay una segunda mitad del mismo hueco que NO se cierra con una guarda, y conviene decir por qué.**
-El mismo mecanismo —el universo de nombres es la caja entera— deja pasar una cita muerta a un **campo o
-parámetro** en cuanto un módulo hermano tenga un local que se llame igual: `caras` sobrevive en
-`fonts.rs` porque el ejemplo de fuentes tiene un local `caras`, `problema` sobrevive en `panel.rs`
-porque `session.rs` tiene uno, `pegados` sobrevive porque lo tiene el pintor, `marcado` porque lo tiene
-el fichero grande.
+**And there is a second half of the same gap that is NOT closed with a guard, and it is worth saying
+why.** The same mechanism —the universe of names is the whole crate— lets through a dead citation of
+a **field or parameter** as soon as a sibling module has a local called the same: `caras` survives
+in `fonts.rs` because the fonts example has a local `caras`, `problema` survives in `panel.rs`
+because `session.rs` has one, `pegados` survives because the painter has one, `marcado` because the
+big file has one.
 
-Estrechar el universo para una cita en minúsculas —«tiene que existir **en este fichero**»— se probó y
-se midió, sobre los diecisiete ficheros de la lista de citas y con el mismo criterio en los dos lados:
-**61 avisos sobre main, 43 sobre esta rama**. La diferencia son las citas que este PR repara. Y **de las
-43 que quedan no hay ni una de verdad**: son nombres de caja (`eframe`, `app`, `keyboard`), métodos de un
-módulo hermano que un comentario tiene derecho a nombrar (`arrancar`, `resolve`), campos del contrato que
-llegan de otra caja (`done`, `mark`, `style`, `info`, `current`), letras sueltas (`a`, `c`, `i`, `y`),
-cosas de `std` (`next`, `unwrap`, `text`), el valor de una variable de entorno entre comillas invertidas
-(`consola`) y claves del fichero de configuración (`tamano`).
+Narrowing the universe for a lowercase citation —«it has to exist **in this file**»— was tried and
+measured, over the seventeen files of the citations list and with the same criterion on both sides:
+**61 warnings on main, 43 on this branch**. The difference is the citations this PR repairs. And
+**of the 43 that are left not one is real**: they are crate names (`eframe`, `app`, `keyboard`),
+methods of a sibling module that a comment has the right to name (`arrancar`, `resolve`), contract
+fields that arrive from another crate (`done`, `mark`, `style`, `info`, `current`), single letters
+(`a`, `c`, `i`, `y`), things from `std` (`next`, `unwrap`, `text`), the value of an environment
+variable between backticks (`consola`) and configuration file keys (`tamano`).
 
-**Con 43 de 43 falsos no puede romper la compilación**, y la lista de excepciones que haría falta sería
-el mecanismo que se ensancha hasta que deja de fallar. Lo que sí cambia: **los 19 avisos ciertos se
-arreglan ahora** —once nombres en diez líneas del fichero grande, tres en fuentes, uno en el panel, uno
-en el teclado, dos en los ejemplos y uno en la propia guarda—, y el criterio queda apuntado con la
-condición que lo vuelve usable: **cuando el fichero grande, la medida, los ajustes y el tema estén en
-inglés**, «existe en este fichero» deja de ser ruido, porque entonces un nombre en minúsculas que no está
-en el fichero ya no es un local en español de un hermano. Ésa es la entrega que puede añadir la guarda.
+**With 43 out of 43 false it cannot break the compilation**, and the exception list that would be
+needed would be the mechanism widened until it stops failing. What does change: **the 19 true
+warnings are fixed now** —eleven names in ten lines of the big file, three in fonts, one in the
+panel, one in the keyboard, two in the examples and one in the guard itself—, and the criterion is
+noted down with the condition that makes it usable: **when the big file, the measurement, the
+settings and the theme are in English**, «it exists in this file» stops being noise, because then a
+lowercase name that is not in the file is no longer a sibling's Spanish local. That is the delivery
+that can add the guard.
 
-**Y la lista de ficheros con citas comprobadas decía «todos los ficheros de la caja» con dos
-excepciones que nadie había escrito.** El binario faltaba y entra. La propia guarda **no**, y ésa es la
-respuesta y no un descuido: metiéndola salen **65 citas** tal como esta entrega la deja —y el número
-**crece con el fichero**, porque lo que reporta es el vocabulario y las formas de las que ese fichero
-habla: nombres retirados (`banderas`, `RatonReclamado`), nombres de ejemplo (`CamelCase`, `like_this`,
-`Type`) y palabras corrientes entre comillas invertidas. Una guarda cuyo asunto son los nombres que ya
-no están no se puede juzgar por «cita un nombre que el código tiene»: **de las 65, una era de verdad**.
+**And the list of files with checked citations said «all the files of the crate» with two exceptions
+nobody had written down.** The binary was missing and it comes in. The guard itself does **not**,
+and that is the answer and not an oversight: putting it in gives **65 citations** just as this
+delivery leaves it —and the number **grows with the file**, because what it reports is the
+vocabulary and the shapes that file talks about: retired names (`banderas`, `RatonReclamado`),
+example names (`CamelCase`, `like_this`, `Type`) and ordinary words between backticks. A guard whose
+subject is the names that are no longer there cannot be judged by «it cites a name the code has»:
+**of the 65, one was real**.
 
-**La que sí era de verdad salió de leerse las 56, y conviene que quede escrito:** el comentario que
-explica la guarda de citas nombraba tres identificadores vivos, y uno —`prioridad`— **había
-desaparecido del árbol entero**. O sea que la frase que explica la guarda era una de las citas que la
-guarda describe. Una de cada 65 no es una guarda, pero es un buen barrido. Lo que **sí**
-se le puede envejecer es un nombre de fichero, y la guarda nueva la lee para eso: le encontró dos.
+**The one that was real came out of reading the 56, and it is worth writing down:** the comment that
+explains the citations guard named three live identifiers, and one —`prioridad`— **had disappeared
+from the whole tree**. Which means that the sentence explaining the guard was one of the citations
+the guard describes. One in 65 is not a guard, but it is a good sweep. What **can** be aged on it is
+a file name, and the new guard reads it for that: it found two.
 
-La lista pasa a llamarse por lo que comprueba —**«ficheros sin nombre que el glosario retirase»**— y los
-195 van a la entrega del fichero grande, que es la que ya tenía ese encargo para sus vecinos. **Y la
-lección se escribe entera**, porque es la de este PR: *una lista que exagera lo que miró se lee una vez,
-se cree, y la entrega siguiente la usa para decidir qué está hecho.* Es exactamente así como cinco
-ficheros acabaron declarados terminados.
+The list is renamed for what it checks —**«files with no name that the glossary retired»**— and the
+195 go to the big file's delivery, which is the one that already had that brief for its neighbors.
+**And the lesson is written whole**, because it is this PR's: *a list that exaggerates what it
+looked at is read once, is believed, and the next delivery uses it to decide what is done.* That is
+exactly how five files ended up declared finished.
 
-#### Lo que la revisión adversaria le encontró a la guarda nueva, y es la mitad del PR
+#### What the adversarial review found in the new guard, and it is half the PR
 
-Un mutador con una sola instrucción —«demuestra que algo de este diff no está cubierto»— devolvió
-**seis huecos, cada uno con su mutación superviviente ejecutada**. Ninguno se veía leyendo el código, y
-uno de ellos es el disfraz que este proyecto ya tiene fichado.
+A mutator with a single instruction —«prove that something in this diff is not covered»— returned
+**six gaps, each one with its surviving mutation executed**. None was visible reading the code, and
+one of them is the disguise this project already has on file.
 
-**1. El lector de citas de fichero no lo ejercitaba ninguna aserción.** `fn cites_the_file(..) -> bool
-{ false }` dejaba las ocho pruebas **verdes**, y también romper cada una de sus cuatro formas por
-separado. La razón hay que escribirla porque es general: **la única prueba que lo llama busca citas, y
-el árbol está limpio — así que romper el buscador deja la suite más verde, no más roja.** Un buscador
-necesita su propio oráculo; la ausencia de lo que encuentra no lo es. Entra
-`the_reader_of_file_citations_knows_the_four_shapes`, con las cuatro formas y tres negativos.
+**1. The file-citation reader was exercised by no assertion.**
+`fn cites_the_file(..) -> bool { false }` left the eight tests **green**, and so did breaking each
+one of its four shapes separately.
+The reason has to be written down because it is general: **the only test that calls it looks for
+citations, and the tree is clean — so breaking the finder leaves the suite greener, not redder.** A
+finder needs an oracle of its own; the absence of what it finds is not one. In comes
+`the_reader_of_file_citations_knows_the_four_shapes`, with the four shapes and three negatives.
 
-**2. El suelo de diecisiete flechas contaba, no identificaba.** Devolver los diecisiete tallos con un
-sufijo pegado —diecisiete nombres que no existen— dejaba el suelo contento y la prueba pasaba sin mirar
-nada. Es exactamente «afirmar sobre el conteo en vez de sobre el efecto». Ahora se piden **cuatro
-tallos por su nombre**.
+**2. The floor of seventeen arrows counted, it did not identify.** Returning the seventeen stems
+with a suffix stuck on —seventeen names that do not exist— left the floor happy and the test passed
+without looking at anything. It is exactly «asserting about the count instead of about the effect».
+Now **four stems are asked for by name**.
 
-**3. El suelo de dos caracteres no lo sostenía nada.** Subirlo a 3, a 5, o **quitarlo del todo**: las
-ocho verdes. Con cinco, el guardián deja de ver `celda`, `hueco`, `serie`, `nodo`, `fila` y `mitad`
-dentro de cualquier compuesto — y ese número es el que el comentario nuevo de la partición usa para
-explicar el defecto que arregla. Dos casos nuevos, uno por valor: un nombre retirado de tres letras y
-otro de cinco. Bajarlo no tiene caso y se dice: quitar un suelo solo endurece.
+**3. The two-character floor was held up by nothing.** Raising it to 3, to 5, or **removing it
+entirely**: the eight green. With five, the guardian stops seeing `celda`, `hueco`, `serie`, `nodo`,
+`fila` and `mitad` inside any compound — and that number is the one the partition's new comment uses
+to explain the defect it fixes. Two new cases, one per value: a retired name of three letters and
+another of five. Lowering it has no case and it is said: removing a floor only hardens.
 
-**4. «Sin minúsculas» no es «todo mayúsculas», y la diferencia es un dígito.** Escrito
-`chars().all(char::is_uppercase)` la prueba pasaba igual, y el defecto quedaba **reabierto para toda
-constante numerada**: el dígito rompe la condición, la pieza se vuelve a partir en letras sueltas y el
-suelo las tira. Caso nuevo con un número dentro.
+**4. «No lowercase» is not «all uppercase», and the difference is a digit.** Written
+`chars().all(char::is_uppercase)` the test passed just the same, and the defect stayed **reopened
+for every numbered constant**: the digit breaks the condition, the piece is split into loose letters
+again and the floor throws them away. New case with a number inside.
 
-**5. El manifiesto de la raíz tapaba los de las cajas.** Una sola pregunta «¿hay algún `.toml`?» la
-satisfacía él solo, así que quitar los `.toml` del recorrido seguía verde — y **dos de las citas
-muertas que esta guarda encontró vivían en el manifiesto de una caja**, no en el de la raíz. Ahora se
-piden los dos por separado.
+**5. The root manifest covered up the crates'.** A single question «is there any `.toml`?» was
+satisfied by it alone, so removing the `.toml` files from the walk stayed green — and **two of the
+dead citations this guard found lived in a crate's manifest**, not in the root one. Now both are
+asked for separately.
 
-**6. Las dos listas se podían vaciar sin que nada fallara.** Vaciar la de ficheros limpios: verde, porque
-las cajas terminadas seguían dando objetivos y la guarda de «esto no tiene ficheros» nunca se le
-pregunta a una lista **sin elementos**. Y quitar de la lista de citas cualquier entrada —incluida la que
-este PR añade— también: un fichero que sale de la lista simplemente deja de mirarse, y nada echa de
-menos lo que no reporta. La lista de citas pasa a **derivarse del árbol** («todos los ficheros de la
-caja» se comprueba, no se cree, con este fichero como única excepción escrita) y las dos listas de
-nombres llevan suelo de cardinalidad.
+**6. The two lists could be emptied without anything failing.** Emptying the clean-files one: green,
+because the finished crates kept giving targets and the «this has no files» guard is never asked of
+a list **with no elements**. And removing from the citations list any entry —including the one this
+PR adds— too: a file that comes off the list simply stops being looked at, and nothing misses what
+it does not report. The citations list becomes **derived from the tree** («all the files of the
+crate» is checked, not believed, with this file as the only written exception) and the two name
+lists carry a cardinality floor.
 
-**Y derivarla del árbol se cobró dos citas muertas más**: al entrar los cuatro ejemplos de `app` en la
-lista salieron `` `resolver` `` en dos de ellos, cuando el método se llama `resolve` desde la entrega
-anterior. Más dos nombres ajenos que había que declarar (`yes`, el programa; `Zsym`, un código de
-escritura de Unicode).
+**And deriving it from the tree claimed two more dead citations**: when `app`'s four examples came
+into the list, `` `resolver` `` came out in two of them, when the method has been called `resolve`
+since the previous delivery. Plus two foreign names that had to be declared (`yes`, the program;
+`Zsym`, a Unicode script code).
 
-**Las diez mutaciones supervivientes se volvieron a correr una por una: las diez caen ahora.**
+**The ten surviving mutations were run again one by one: all ten fall now.**
 
-##### Los 195, nombre a nombre
+##### The 195, name by name
 
-**Ya no están**: los renombró la entrega de los ocho módulos, que es la sección siguiente. La lista se
-conserva porque es la medida con la que se decidió partir esa entrega en dos, y porque el reparto por
-fichero es lo que permitió a otro reproducir el número.
+**They are gone**: they were renamed by the eight-modules delivery, which is the next section. The
+list is kept because it is the measurement with which it was decided to split that delivery in two,
+and because the per-file breakdown is what let somebody else reproduce the number.
 
 **`mouse.rs` — 7:** `abajo` · `apretar` · `arriba` · `dentro` · `fuera` · `solo_clics` · `soltar`
 
@@ -3792,395 +3953,409 @@ fichero es lo que permitió a otro reproducir el número.
 
 **`panel.rs` — 74:** `a_pintar` · `ahora` · `anchos` · `bloque` · `cabe` · `cabeza` · `callado` · `caso` · `casos` · `clave` · `contenido` · `corte` · `cual` · `cuando` · `cuerpo` · `dicho` · `disponible` · `entera` · `envejecer` · `estrecha` · `fase` · `fecha` · `fichero` · `fondos` · `frase` · `fresco` · `fuente` · `fuentes` · `identidad` · `izquierda` · `larga` · `largo` · `marcas` · `minutos` · `muchas_enes` · `otro` · `palabra` · `paso` · `pegada` · `pendiente` · `pintado` · `pintando` · `primera` · `publicada` · `publicado_hace` · `publicar` · `recien` · `recortada` · `referencia` · `relleno` · `repetida` · `resto` · `ruta` · `salida` · `saneado` · `sangrada` · `segunda` · `segundos` · `siguiente` · `sin_alto` · `sitio` · `sobran` · `suyo` · `tal_cual` · `textos` · `todos` · `tope` · `tres` · `ultimo_bueno` · `valor` · `viejo` · `vigente` · `visibles` · `visto`
 
-#### La entrega de los ocho módulos: 340 nombres, y por qué la entrega se partió en dos
+#### The eight-modules delivery: 340 names, and why the delivery was split in two
 
-**El plan decía 419 nombres y eran 638.** La cifra del plan se escribió antes de que nadie contara los
-cinco ficheros que la quinta entrega declaró terminados; con sus 195 dentro, la entrega que iba a llevar
-«el fichero grande y los tres módulos sin entrega» se convertía en **nueve ficheros y 33.000 líneas de
-fuente tocada**, el doble de la cuarta entrega, que ya dejó tres fugas de alcance con siete oráculos
-delante. Se parte en dos, y el corte no es por tamaño sino **por producto**:
+**The plan said 419 names and they were 638.** The plan's figure was written before anyone had
+counted the five files the fifth delivery declared finished; with their 195 inside, the delivery
+that was going to carry «the big file and the three modules with no delivery» turned into **nine
+files and 33 000 lines of source touched**, twice the fourth delivery, which already left three
+scope leaks with seven oracles in front of it. It is split in two, and the cut is not by size but
+**by product**:
 
-- **Los ocho módulos de esta entrega**: ratón, teclado, pintor, fuentes, panel, tema, watcher y
+- **The eight modules of this delivery**: mouse, keyboard, painter, fonts, panel, theme, watcher and
   pty_output.
-- **El fichero grande a solas**, que es un fichero y 23.142 líneas, y el que más pruebas tiene del
-  repositorio.
+- **The big file on its own**, which is one file and 23 142 lines, and the one with the most tests in the
+  repository.
 
-**340 nombres**, uno por uno: panel 74 · pty_output 60 · fuentes 53 · watcher 47 · theme 43 · teclado 30 ·
-pintor 26 · ratón 7. Cuatro de ellos tienen **dos destinos** porque nombraban dos cosas —el `SourceCache`
-y la vista de fuentes de egui eran los dos «fuentes», el mapa de bits y el charmap eran los dos «mapa»,
-la imagen reducida y un tamaño de prueba eran los dos «pequeño», y el trozo que sale del canal y la
-cuenta de bytes que se lleva el fotograma eran los dos «trozo»—, así que el mapa **no es apto para un
-`sed`** y eso hay que decirlo antes de escribirlo, no después.
+**340 names**, one by one: panel 74 · pty_output 60 · fonts 53 · watcher 47 · theme 43 · keyboard 30
+· painter 26 · mouse 7. Four of them have **two destinations** because they named two things —the
+`SourceCache` and egui's fonts view were both «fuentes», the bitmap and the charmap were both
+«mapa», the reduced image and a test size were both «pequeño», and the chunk that comes out of the
+channel and the byte count the frame takes were both «trozo»—, so the map **is not fit for a `sed`**
+and that has to be said before writing it, not after.
 
-**Y la cuenta a mano volvió a fallar, dos veces, en la misma dirección.** Los tres módulos que la quinta
-entrega renombró de fichero pero no de contenido se estimaron en 99 nombres, luego en 123 con un filtro,
-y son **150** (theme 43, watcher 47, pty_output 60). Las dos veces el error fue el mismo: **filtrar la
-lista de identificadores antes de leerla**. El filtro descartaba lo que ya estaba en el corpus inglés del
-repositorio, y con él se iban `con`, `marca`, `estilo`, `base` y una docena más de nombres cortos que
-resultan ser palabras de las dos lenguas. La lección, escrita porque ya cuesta tres intentos: **la lista
-completa se lee entera o no se lee**; un filtro que ahorra trabajo de lectura ahorra exactamente el
-trabajo que encuentra los nombres.
+**And the count by hand failed again, twice, in the same direction.** The three modules the fifth
+delivery renamed the file of but not the contents were estimated at 99 names, then at 123 with a
+filter, and they are **150** (theme 43, watcher 47, pty_output 60). Both times the error was the
+same: **filtering the identifier list before reading it**. The filter discarded what was already in
+the repository's English corpus, and with it went `con`, `marca`, `estilo`, `base` and a dozen more
+short names that turn out to be words of both languages. The lesson, written down because it already
+takes three attempts: **the complete list is read whole or it is not read**; a filter that saves
+reading work saves exactly the work that finds the names.
 
-**El método que sí converge, y es el que hay que repetir en la entrega del fichero grande:** aplicar el
-mapa, **volver a escanear el fichero**, y lo que quede en español es o un descuido o un nombre del
-hermano. Lo destapó theme: al reescanear salió `brillante`, un local de prueba que la lista de contexto
-me había mostrado solo en tres líneas de comentario.
+**The method that does converge, and it is the one to repeat in the big file's delivery:** apply the
+map, **scan the file again**, and what is left in Spanish is either an oversight or a sibling's
+name. Theme uncovered it: on rescanning, `brillante` came out, a test local that the context listing
+had shown me only in three comment lines.
 
-**Lo que queda, y de quién es.** De los ocho módulos, siete no conservan **ni un** identificador en
-español. El octavo, `theme.rs`, conserva seis: `Colores` y los cinco campos que lee de él
-—`paleta`, `texto`, `fondo`, `divisor`, `foco`—, que los declara `settings.rs` y **son de la entrega de
-las claves de configuración**. `Colores` entra en la lista de exenciones por eso; los otros cinco no hacen
-falta, porque el glosario nunca los decidió y la guarda no los ve.
+**What is left, and whose it is.** Of the eight modules, seven keep **not one** identifier in
+Spanish. The eighth, `theme.rs`, keeps six: `Colores` and the five fields it reads from it
+—`paleta`, `texto`, `fondo`, `divisor`, `foco`—, which are declared by `settings.rs` and **belong to
+the configuration keys delivery**. `Colores` goes into the exemption list for that reason; the other
+five are not needed, because the glossary never decided them and the guard does not see them.
 
-**Y el encuadre con el que se escribió esta entrega era falso, dicho porque es la falta que este hito
-lleva castigando.** «Todo `app` menos su fichero grande» se lee como que la superficie está cerrada, y
-**`app/src` tiene doce módulos, no nueve**: además de `lib.rs` siguen enteros en español `measure.rs`
-(96 raíces españolas), `session.rs` (93), `settings.rs` (57) y `main.rs`, que son cuatro líneas cuya
-única función es la de `lib.rs`. Cada uno tiene su entrega escrita —la medida y el formato en disco, las
-claves de configuración, y `main.rs` con el fichero grande—, así que **no falta nada del plan**; lo que
-faltaba era la frase. Lo cazó una revisión adversaria a la que se le pidió refutar la afirmación, no
-comprobarla, y es la diferencia entre las dos cosas.
+**And the framing this delivery was written with was false, said because it is the fault this
+milestone has been punishing.** «All of `app` except its big file» reads as if the surface were
+closed, and **`app/src` has twelve modules, not nine**: besides `lib.rs`, still entirely in Spanish
+are `measure.rs` (96 Spanish roots), `session.rs` (93), `settings.rs` (57) and `main.rs`, which is
+four lines whose only job is `lib.rs`'s. Each one has its delivery written —the measurement and the
+on-disk format, the configuration keys, and `main.rs` with the big file—, so **nothing is missing
+from the plan**; what was missing was the sentence. It was caught by an adversarial review that was
+asked to refute the assertion, not to check it, and that is the difference between the two things.
 
-**Ocho ficheros en la lista de la guarda, y ni una afirmación nueva.** Los ocho entran en la lista de
-«ficheros sin nombre que el glosario retirase», que es lo que la guarda **comprueba**. La afirmación más
-fuerte —«todos sus identificadores en inglés»— es cierta hoy de siete de ellos, y **no se convierte en
-una lista**: la guarda no puede verificarla, y este hito ya cerró un PR entero por una lista que afirmaba
-lo que nadie había mirado. Se escribe aquí, con su método y su residuo, que es donde una medida vive.
+**Eight files on the guard's list, and not one new assertion.** The eight go into the «files with no
+name that the glossary retired» list, which is what the guard **checks**. The stronger assertion
+—«all their identifiers in English»— is true today of seven of them, and **it is not turned into a
+list**: the guard cannot verify it, and this milestone has already closed a whole PR over a list
+that asserted what nobody had looked at. It is written here, with its method and its residue, which
+is where a measurement lives.
 
-**La lista de exenciones baja de 27 entradas a 20.** Salen las ocho que existían porque `theme.rs` y
-`watcher.rs` no estaban traducidos (`Tema`, `tema`, `con_atributos`, `color_del_panel`,
-`color_del_reclamo`, `fondo_del_panel`, `Bandera`, `Vigilante`) y la de `pty_output.rs` (`Puente`); entra
-`Colores`. Cada línea que sale es una línea que alguien tenía que borrar, que es para lo que la lista está
-escrita así.
+**The exemption list goes from 27 entries down to 20.** Out go the eight that existed because
+`theme.rs` and `watcher.rs` were not translated (`Tema`, `tema`, `con_atributos`, `color_del_panel`,
+`color_del_reclamo`, `fondo_del_panel`, `Bandera`, `Vigilante`) and `pty_output.rs`'s (`Puente`); in
+comes `Colores`. Every line that goes out is a line somebody had to delete, which is what the list
+is written that way for.
 
-**Tres hallazgos que ningún renombrado mecánico podía dar, y los tres los dio una revisión adversaria
-antes de escribir código:**
+**Three findings no mechanical rename could give, and all three were given by an adversarial review
+before any code was written:**
 
-1. **Un ayudante de prueba sin `#[test]`** en `watcher.rs` —`un_vecino_del_directorio_no_levanta_nada`—
-   que la guarda **sí** ve, porque lleva una palabra funcional española, y que habría roto la compilación
-   en el instante en que el fichero entrase en la lista. Parece prosa y no lo es.
-2. **Dos cosas con el mismo nombre a la vista, las dos ya en inglés.** En `fonts.rs`, un local `attached`
-   que cuenta cuadrados pegados al atlas, doscientas líneas de un parámetro `attached` que lleva los
-   caracteres de anchura cero de una celda. **Ninguna guarda puede verlo**: las dos son inglesas. Pasa a
-   `pasted`.
-3. **La documentación de la guarda de citas envejeció otra vez.** Nombraba tres identificadores vivos
-   para explicar por qué su universo es una caja y no el árbol; uno se había ido antes del PR anterior, y
-   el segundo —`parar`— se va con el módulo que lo declaraba. **Dos veces es un patrón**, así que queda
-   escrito en su sitio: *el comentario de una guarda envejece igual que el código que vigila, y no tiene
-   guarda*.
+1. **A test helper with no `#[test]`** in `watcher.rs` —`un_vecino_del_directorio_no_levanta_nada`— which
+   the guard **does** see, because it carries a Spanish functional word, and which would have broken the
+   compilation the instant the file entered the list. It looks like prose and it is not.
+2. **Two things with the same name in sight, both already in English.** In `fonts.rs`, a local `attached`
+   counting squares pasted into the atlas, two hundred lines from a parameter `attached` carrying a cell's
+   zero-width characters. **No guard can see it**: both are English. It becomes `pasted`.
+3. **The citations guard's documentation aged again.** It named three live identifiers to explain why its
+   universe is a crate and not the tree; one had gone before the previous PR, and the second —`parar`—
+   goes with the module that declared it. **Twice is a pattern**, so it is written down in its place: *a
+   guard's comment ages just like the code it watches, and it has no guard*.
 
-**Y un aviso sobre el universo de nombres, que es la otra cara de lo mismo.** Tres citas muertas
-aparecieron **sin que este PR las escribiera**: `` `tamano` `` en los ajustes, `` `nuevo` `` en el fichero
-grande y `` `parar` `` en la propia guarda dejaron de estar cubiertas en el momento en que el nombre que
-las tapaba se fue de un módulo hermano. No son regresiones de esta entrega: son las que **ya estaban
-mintiendo** y sobrevivían porque el universo es la caja entera. Cada módulo que se traduce destapa las
-suyas, y eso significa que **las entregas que quedan van a encontrar más, no menos**.
+**And a warning about the universe of names, which is the other side of the same thing.** Three dead
+citations appeared **without this PR writing them**: `` `tamano` `` in the settings, `` `nuevo` ``
+in the big file and `` `parar` `` in the guard itself stopped being covered the moment the name that
+was covering them left a sibling module. They are not regressions of this delivery: they are the
+ones that **were already lying** and survived because the universe is the whole crate. Every module
+that gets translated uncovers its own, and that means **the remaining deliveries are going to find
+more, not fewer**.
 
-**Lo que las cuatro revisiones de la entrega cambiaron, que es la mitad de su valor.** Ninguna encontró
-un cambio de comportamiento —el oráculo posicional emparejó **1.667 líneas token a token con cero
-desajustes**, cero literales de cadena movidos que no sean captura de formato y cero literales
-numéricos—, y aun así el PR salió distinto de como entró:
+**What the delivery's four reviews changed, which is half its value.** None found a behavior change
+—the positional oracle paired **1 667 lines token by token with zero mismatches**, zero moved string
+literals that are not a format capture and zero numeric literals—, and even so the PR came out
+different from how it went in:
 
-- **Tres citas muertas que la guarda no veía, y un hueco nuevo del lector de citas.** Una cita escrita
-  `` `Tema::con(...)` `` volvía **vacía**: el lector solo quitaba un `()` sin argumentos, así que la
-  regla de todo-o-nada la descartaba entera y a `Tema` nunca se le preguntaba — un tipo que ya no existe
-  en el árbol. Aceptar la forma `nombre(argumentos)` da **cuatro avisos, tres de verdad**, y los tres
-  nombran cosas que una entrega renombró hace dos PR (`Lineas(0)`, `Ir(1)`, `desplazar(AlFinal)`).
-  **La versión ancha de la misma idea se midió y se tiró**: partir una cita por los espacios y preguntar
-  por cada palabra da **309 avisos y ninguno de verdad**, porque `cargo doc`, `panel.json` y
-  `Mayúsculas` son palabras entre comillas invertidas que no citan nada. Cuatro contra 309: la línea
-  entra, la otra no.
-- **Dos citas que no se leen ni con eso**, y las dos siguen arregladas a mano: `visibles + sobran` y
-  `Tema::con(...)` llevan espacios o argumentos, y ese hueco **no es el declarado** en la cabecera de la
-  guarda —el de «sobrevive en un módulo hermano»—: aquí el nombre no sobrevive en ninguno, simplemente
-  no se lee.
-- **Cuatro nombres nuevos que mentían, y salieron de leer lo que nombran.** `to_paint` era el peor: su
-  propio comentario dice que **el pintado no lo usa** y que dejarlo en producción sería una puerta
-  abierta, así que el nombre afirmaba justo el papel que el comentario prohíbe; pasa a
-  `last_understood`.
-  `dispatch` no despacha a nadie: levanta banderas y devuelve un booleano, así que pasa a
-  `raise_matching`. `answered` se lee como «ya atendido» y el valor es un reclamo que **nadie** ha
-  atendido, así que pasa a `answer`. Y `cap`, sin calificar en una función larga, pasa a `head_cap`.
-- **Cuatro nombres para dos conceptos en quince líneas.** El tema recibía `faint: bool` mientras quien
-  llama le pasa `cell.dim`, y dentro convivían ese `faint`, las variantes `Dim`/`DimForeground` y un
-  método `dim()` cuyo comentario dice «acerca un color al fondo». El parámetro pasa a llamarse como el
-  campo que recibe (`dim`) y el método a decir lo que hace (`toward_background`).
-- **Un hueco de cobertura anterior al hito, cerrado porque esta entrega toca esa función.** De los seis
-  colores que el fichero de configuración puede cambiar, **el del cursor no lo comprobaba nada**:
-  cambiar su asignación por la del foco dejaba las 718 pruebas en verde. Ahora se afirma **por
-  `TermColor::Cursor`**, que es la puerta por la que el pintor pide ese color — afirmar sobre el campo
-  comprobaría que el valor está apuntado, no que se usa.
+- **Three dead citations the guard did not see, and a new gap in the citation reader.** A citation written
+  `` `Tema::con(...)` `` came back **empty**: the reader only removed a `()` with no arguments, so the
+  all-or-nothing rule discarded it whole and `Tema` was never asked about — a type that no longer exists
+  in the tree. Accepting the `nombre(argumentos)` shape gives **four warnings, three of them real**, and
+  all three name things a delivery renamed two PRs ago (`Lineas(0)`, `Ir(1)`, `desplazar(AlFinal)`).
+  **The wide version of the same idea was measured and thrown away**: splitting a citation on the spaces
+  and asking about each word gives **309 warnings and not one real**, because `cargo doc`, `panel.json`
+  and `Mayúsculas` are words between backticks that cite nothing. Four against 309: the line goes in, the
+  other does not.
+- **Two citations that are not read even with that**, and both are still fixed by hand:
+  `visibles + sobran` and `Tema::con(...)` carry spaces or arguments, and that gap **is not the declared one** in the
+  guard's header —the «it survives in a sibling module» one—: here the name survives in none, it simply is
+  not read.
+- **Four new names that lied, and they came out of reading what they name.** `to_paint` was the worst: its
+  own comment says that **the painting does not use it** and that leaving it in production would be an
+  open door, so the name asserted exactly the role the comment forbids; it becomes `last_understood`.
+  `dispatch` dispatches to nobody: it raises flags and returns a boolean, so it becomes `raise_matching`.
+  `answered` reads as «already attended to» and the value is a claim **nobody** has attended to, so it
+  becomes `answer`. And `cap`, unqualified in a long function, becomes `head_cap`.
+- **Four names for two concepts in fifteen lines.** The theme received `faint: bool` while its caller
+  passes it `cell.dim`, and inside coexisted that `faint`, the `Dim`/`DimForeground` variants and a
+  `dim()` method whose comment says «brings a color closer to the background». The parameter is renamed
+  after the field it receives (`dim`) and the method to say what it does (`toward_background`).
+- **A coverage gap predating the milestone, closed because this delivery touches that function.** Of the
+  six colors the configuration file can change, **the cursor's was checked by nothing**: swapping its
+  assignment for the focus one left the 718 tests green. Now it is asserted **through
+  `TermColor::Cursor`**, which is the door through which the painter asks for that color — asserting about
+  the field would check that the value is noted down, not that it is used.
 
-**Y dos homónimos que se aceptan a sabiendas, con su razón escrita.** El tipo `Flag` de este proyecto
-convive con `notify::event::Flag`, y el tipo `Watcher` con el *trait* `notify::Watcher`, que por eso
-entra sin nombre (`as _`). Los dos nombres los **decide el glosario** (`Bandera`→`Flag`,
-`Vigilante`→`Watcher`) y los dos choques se resuelven con idioma corriente de Rust —ruta completa y
-`as _`—, así que no se reabre una decisión sin una razón nueva. Lo que **sí** queda dicho es el precio:
-un futuro `use notify::Watcher` en ese fichero no compila, y quien lo escriba tiene que saber por qué.
+**And two homonyms that are accepted knowingly, with their reason written.** This project's `Flag`
+type coexists with `notify::event::Flag`, and the `Watcher` type with the `notify::Watcher` *trait*,
+which is why it comes in without a name (`as _`). Both names are **decided by the glossary**
+(`Bandera`→`Flag`, `Vigilante`→`Watcher`) and both clashes are resolved with ordinary Rust idiom
+—full path and `as _`—, so a decision is not reopened without a new reason. What **is** stated is
+the price: a future `use notify::Watcher` in that file does not compile, and whoever writes it has
+to know why.
 
-**Un aviso que esta misma sección se ganó al escribirse, y hay que contarlo aquí porque es el precio de
-derivar.** La guarda **saca el vocabulario de este documento**, y le basta con encontrar un nombre entre
-comillas invertidas, una flecha y otro nombre entre comillas invertidas para meter el primero en el
-vocabulario retirado — aunque la frase sea prosa corriente y la flecha, puntuación. Pasó: una
-explicación de por qué una función cambiaba de nombre puso el tipo booleano de Rust en el lado español,
-y la guarda reportó **101 identificadores** en las tres cajas de fuera, todos ellos ese tipo. Se arregla
-**reescribiendo la frase y no debilitando el extractor**: esa sensibilidad *es* el mecanismo, y aflojarla
-para que la prosa quepa es exactamente cómo un glosario derivado deja de derivar. La regla de uso queda
-dicha: **en este documento, una flecha entre dos nombres es vocabulario, no puntuación.**
+**A warning this very section earned while being written, and it has to be told here because it is
+the price of deriving.** The guard **pulls the vocabulary out of this document**, and it is enough
+for it to find a name between backticks, an arrow and another name between backticks to put the
+first one into the retired vocabulary — even if the sentence is ordinary prose and the arrow,
+punctuation. It happened: an explanation of why a function was changing its name put Rust's boolean
+type on the Spanish side, and the guard reported **101 identifiers** in the three outside crates,
+all of them that type. It is fixed **by rewriting the sentence and not by weakening the extractor**:
+that sensitivity *is* the mechanism, and loosening it so that the prose fits is exactly how a
+derived glossary stops deriving. The rule of use is stated: **in this document, an arrow between two
+names is vocabulary, not punctuation.**
 
-**Y pasó dos veces.** La segunda fue escribiendo, dos secciones más abajo, la explicación de por qué la
-guarda no protege los 317 renombrados: la frase usaba dos nombres de ejemplo con una flecha en medio
-para *enseñar la forma*, y el extractor la leyó como vocabulario igual que la primera. O sea que **ni
-conocer la trampa evita caer en ella**, porque la forma que hay que citar es exactamente la que dispara.
-La conclusión práctica, y es la única que sirve: **en este anexo la forma de una flecha no se cita nunca
-con nombres; se describe con palabras.**
+**And it happened twice.** The second was while writing, two sections further down, the explanation
+of why the guard does not protect the 317 renames: the sentence used two example names with an arrow
+in between to *show the shape*, and the extractor read it as vocabulary just like the first time.
+Which means that **not even knowing the trap avoids falling into it**, because the shape that has to
+be cited is exactly the one that fires. The practical conclusion, and it is the only one that works:
+**in this annex the shape of an arrow is never cited with names; it is described in words.**
 
-#### La entrega del fichero grande: 317 nombres en 23.143 líneas, y lo que se aprendió midiendo
+#### The big file's delivery: 317 names in 23 143 lines, and what was learned measuring
 
-`crates/app/src/lib.rs` es un fichero de **23.143 líneas** con **1.599 identificadores distintos** y
-**356 funciones de prueba**, y el que más pruebas tiene del repositorio. Va solo en su entrega, y el
-corte no fue por tamaño sino porque *«todo `app` menos el fichero grande»* y *«el fichero grande»* son
-dos productos distintos.
+`crates/app/src/lib.rs` is a file of **23 143 lines** with **1 599 distinct identifiers** and **356
+test functions**, and the one with the most tests in the repository. It goes alone in its delivery,
+and the cut was not by size but because *«all of `app` except the big file»* and *«the big file»*
+are two different products.
 
-**Se partió en cinco áreas por primera aparición del nombre** —constantes y geometría, la consola, el
-árbol y las pestañas, la ventana, y las 16.000 líneas de pruebas— y cada área tuvo su propia propuesta
-de mapa. **Las cinco salieron mutuamente consistentes: 317 nombres y cero conflictos**, ni uno con dos
-destinos incompatibles. Eso no estaba garantizado con cinco revisiones ciegas unas de otras, y la razón
-es la que este anexo lleva repitiendo: reutilizaron el glosario y los precedentes de los ocho módulos
-ya hechos en vez de acuñar de nuevo.
+**It was split into five areas by first appearance of the name** —constants and geometry, the
+console, the tree and the tabs, the window, and the 16 000 lines of tests— and each area had its own
+map proposal. **The five came out mutually consistent: 317 names and zero conflicts**, not one with
+two incompatible destinations. That was not guaranteed with five reviews blind to each other, and
+the reason is the one this annex keeps repeating: they reused the glossary and the precedents of the
+eight modules already done instead of coining anew.
 
-**Veintitrés nombres significan dos o tres cosas distintas según dónde estén**, y ése es el trabajo de
-verdad de esta entrega. `alto` es una coordenada `y` en los tres ayudantes de gesto y una altura en los
-demás. `cuantas` son pesos en el reparto, consolas al abrir y pestañas en la barra. `suyo` tiene **seis**
-destinos: un índice, un área, un coste, un tamaño, un resultado y el peso de un grupo. Un solo destino
-haría que el nombre **mintiera** en todos los sitios menos uno, que es exactamente lo que la entrega
-anterior tuvo que arreglar cuatro veces.
+**Twenty-three names mean two or three different things depending on where they are**, and that is
+this delivery's real work. `alto` is a `y` coordinate in the three gesture helpers and a height in
+the rest. `cuantas` are weights in the tiling, consoles on opening and tabs in the bar. `suyo` has
+**six** destinations: an index, an area, a cost, a size, a result and a group's weight. A single
+destination would make the name **lie** everywhere but one, which is exactly what the previous
+delivery had to fix four times.
 
-**Así que la herramienta cambió y el método con ella.** El renombrador acepta ahora **un rango de líneas
-por entrada**, y los rangos **no se escriben**: se derivan de las cabeceras `fn`, que son la unidad real
-de ámbito de un local. Escribirlos a mano desde un informe ya salió mal —los números envejecen en cuanto
-alguien edita el fichero— y entra un comprobador cuya única pregunta es la que importa: **¿queda alguna
-aparición sin destino?** Un nombre que se queda en español porque su rango no lo cubría **compila igual
-de bien**, y ni el compilador ni la guarda lo ven.
+**So the tool changed and the method with it.** The renamer now accepts **a line range per entry**,
+and the ranges **are not written**: they are derived from the `fn` headers, which are the real unit
+of scope of a local. Writing them by hand from a report already went wrong —the numbers age as soon
+as somebody edits the file— and in comes a checker whose only question is the one that matters: **is
+there any occurrence left with no destination?** A name that stays in Spanish because its range did
+not cover it **compiles just as well**, and neither the compiler nor the guard sees it.
 
-**Y la herramienta que mide este hito tenía un defecto, encontrado por una revisión adversaria y no por
-mí.** El saneo que separa código de prosa **se comía los saltos de línea** de los comentarios y las
-cadenas, así que **todas las líneas posteriores quedaban desplazadas**: 120 posiciones en este fichero.
-Un rango calculado sobre eso renombra la cosa equivocada **en silencio**. Arreglado y comprobado en los
-31 ficheros del árbol: los saltos que entran son los que salen. Y con él, un segundo punto ciego del
-mismo escáner: su patrón de identificador era **ASCII**, así que partía en dos los cuatro nombres con
-eñe y no los contaba. Comprobado después: los únicos identificadores no ASCII del árbol están en este
-fichero, la medida y la sesión, así que **no escondió nada en los ocho módulos ya mezclados**.
+**And the tool that measures this milestone had a defect, found by an adversarial review and not by
+me.** The sanitizing that separates code from prose **was eating the line breaks** of the comments
+and the strings, so **every subsequent line came out shifted**: 120 positions in this file. A range
+computed on that renames the wrong thing **silently**. Fixed and checked in the 31 files of the
+tree: the breaks that go in are the ones that come out. And with it, a second blind spot of the same
+scanner: its identifier pattern was **ASCII**, so it split in two the four names with an ñ and did
+not count them. Checked afterwards: the only non-ASCII identifiers in the tree are in this file, the
+measurement and the session, so **it hid nothing in the eight modules already merged**.
 
-**Del compilador salieron trece errores de 2.561 sustituciones, y los trece de la misma clase:** un
-campo o un método que declara la medida, la sesión o los ajustes, renombrado en su sitio de llamada
-aquí. Devueltos al nombre que su módulo aún les da. **La guarda cazó otras 22 citas muertas** que la
-herramienta no mueve, porque viven en comentarios de línea y no en enlaces de documentación.
+**Out of the compiler came thirteen errors from 2 561 substitutions, and all thirteen of the same
+class:** a field or a method declared by the measurement, the session or the settings, renamed at
+its call site here. Returned to the name their module still gives them. **The guard caught another
+22 dead citations** that the tool does not move, because they live in line comments and not in
+documentation links.
 
-**Dos nombres nuevos mentían y se cambiaron a mano**, y los dos son la clase que ninguna guarda ve:
-`absorb` tenía **dos `dentro` distintos en doce líneas** —el sentido de la rama y la lista de hijos—, que
-un solo destino habría convertido en dos cosas con un nombre a la vista; y `subidas` era una lista de
-desplazamientos en una función y las nietas que se suben en otra, donde `scrolled` era falso.
+**Two new names lied and were changed by hand**, and both are the class no guard sees: `absorb` had
+**two different `dentro` in twelve lines** —the branch's direction and the list of children—, which
+a single destination would have turned into two things with one name in sight; and `subidas` was a
+list of scrolls in one function and the granddaughters that get promoted in another, where
+`scrolled` was false.
 
-##### Lo que meter el fichero grande en la lista NO compra, medido
+##### What putting the big file on the list does NOT buy, measured
 
-**Y aquí va la corrección más importante de esta entrega, porque la encontró una revisión y no yo.**
-Meter `app/src/lib.rs` en la lista de ficheros «sin nombre que el glosario retirase» **no protege
-ninguno de los 317 renombrados**. La razón está en el mecanismo: el vocabulario español lo **deriva** la
-guarda de **las flechas de este anexo**, y **ninguno de los 317 nombres viejos es una flecha** —
-son locales, campos y parámetros, y el glosario decide **tipos**. Probado mutando: devolver `mid_y` a
-`alto` en los cuatro sitios de una función deja la guarda en **9 de 9, verde**.
+**And here goes this delivery's most important correction, because a review found it and not me.**
+Putting `app/src/lib.rs` on the «files with no name that the glossary retired» list **protects none
+of the 317 renames**. The reason is in the mechanism: the Spanish vocabulary is **derived** by the
+guard from **this annex's arrows**, and **none of the 317 old names is an arrow** — they are locals,
+fields and parameters, and the glossary decides **types**. Proven by mutating: returning `mid_y` to
+`alto` in the four places of one function leaves the guard at **9 of 9, green**.
 
-Así que la afirmación honesta es exactamente ésta y ni una palabra más: **el fichero no conserva ningún
-nombre que el glosario retirase**, y las 28 exenciones hacían falta porque esos 28 **sí** están en las
-tablas del anexo. Un regreso a cualquiera de los 317 es **invisible** para la guarda, y decir lo
-contrario sería la lista que parece vigilada y no lo está — el disfraz que este documento lleva
-fichado desde la cuarta entrega.
+So the honest assertion is exactly this one and not a word more: **the file keeps no name that the
+glossary retired**, and the 28 exemptions were needed because those 28 **are** in the annex's
+tables. A return of any of the 317 is **invisible** to the guard, and saying otherwise would be the
+list that looks watched and is not — the disguise this document has had on file since the fourth
+delivery.
 
-**Lo que sí protegió esta entrega, y con números:** el oráculo posicional. 1.855 hunks sin uno
-desequilibrado, 2.617 líneas emparejadas una a una, **3.208 sustituciones de identificador en 368 pares
-distintos, el 99,5 % coincidiendo exactamente con los mapas**, cero cambios de operador o de
-puntuación, cero literales numéricos y **76 cadenas que cambian, todas y solo en capturas de formato**
-—sustituido cada `{nombre}` por un hueco, las 76 parejas salen byte a byte idénticas—. Eso es lo que hay
-que repetir en las entregas que quedan, y no una lista.
+**What this delivery did protect, and with numbers:** the positional oracle. 1 855 hunks with not
+one unbalanced, 2 617 lines paired one by one, **3 208 identifier substitutions across 368 distinct
+pairs, 99.5 % matching the maps exactly**, zero operator or punctuation changes, zero numeric
+literals and **76 strings that change, all and only in format captures** —with each `{nombre}`
+replaced by a gap, the 76 pairs come out byte for byte identical—. That is what has to be repeated
+in the remaining deliveries, and not a list.
 
-**Y el lector de citas no aprende dos formas más, también medido.** Se le escaparon
-`` `division.redimensionar()` `` y `` `rectangulos[0]` ``, y aceptar el acceso con punto y el índice con
-corchetes da **45 avisos, de los que 26 son `panel.json`** y el resto `lib.rs`, `.ttc` y
-`fs.inotify.max_user_instances`. Dos o tres reales contra cuarenta de ruido: **no entra**. Es la tercera
-vez que se mide una ampliación de ese lector y la segunda que se rechaza, y las tres cifras quedan
-escritas —4 contra 309, y ahora 45— porque el criterio es la proporción y no la ocurrencia.
+**And the citation reader does not learn two more shapes, also measured.** It missed ``
+`division.redimensionar()` `` and `` `rectangulos[0]` ``, and accepting the dotted access and the
+bracketed index gives **45 warnings, of which 26 are `panel.json`** and the rest `lib.rs`, `.ttc`
+and `fs.inotify.max_user_instances`. Two or three real against forty of noise: **it does not go
+in**. It is the third time an extension of that reader has been measured and the second it has been
+rejected, and the three figures stay written —4 against 309, and now 45— because the criterion is
+the proportion and not the occurrence.
 
-##### La lista de exenciones, y el disfraz que se repitió por tercera vez
+##### The exemption list, and the disguise that repeated itself for the third time
 
-Meter el fichero grande en esa lista costó **28 exenciones**. Son campos y métodos que declaran la
-medida, la sesión y los ajustes y que este fichero **solo usa**: la guarda juzga un fichero por los
-identificadores que **aparecen** en él, no por los que declara. Y el número que importa es otro, medido
-por una revisión con su propio analizador: **el fichero nombra 55 identificadores españoles ajenos**, y
-solo 28 necesitan exención — a los otros 27 no los caza ninguna regla, porque el glosario decide tipos. Están verificadas una a
-una contra el fichero que las declara, agrupadas por dueño, y **cada línea la borra la entrega de su
-módulo** — la lista es el marcador de progreso que su propio comentario dice que es. Y **las 28 son
-portantes, medido de una en una**: quitar cualquiera deja la suite en rojo, siempre por la misma prueba
-y siempre señalando este fichero. Cero exenciones decorativas, que son las cuatro que este hito ya
-borró.
+Putting the big file on that list cost **28 exemptions**. They are fields and methods declared by
+the measurement, the session and the settings that this file **only uses**: the guard judges a file
+by the identifiers that **appear** in it, not by the ones it declares. And the number that matters
+is another one, measured by a review with an analyzer of its own: **the file names 55 foreign
+Spanish identifiers**, and only 28 need an exemption — the other 27 are caught by no rule, because
+the glossary decides types. They are verified one by one against the file that declares them,
+grouped by owner, and **every line is deleted by its module's delivery** — the list is the progress
+marker its own comment says it is. And **the 28 are load-bearing, measured one at a time**: removing
+any of them leaves the suite red, always through the same test and always pointing at this file.
+Zero decorative exemptions, which are the four this milestone has already deleted.
 
-##### Una clase nueva: el renombrado a mano que se come la prosa
+##### A new class: the hand rename that eats the prose
 
-**Y el defecto de verdad de esta entrega fue mío y no del mapa.** Renombrar un parámetro llamado `a` a
-`to` sobre un rango de líneas alcanzó **la preposición española «a»** dentro de un literal de cadena y en
-once comentarios. El literal es el que el informe imprime cuando la pestaña visible no tiene foco, así que
-**salía en cada tanda de medida**: «el teclado no llegaba a ninguna consola» se había convertido en «no
+**And this delivery's real defect was mine and not the map's.** Renaming a parameter called `a` to
+`to` over a range of lines reached **the Spanish preposition «a»** inside a string literal and in
+eleven comments. The literal is the one the report prints when the visible tab has no focus, so **it
+came out in every measurement batch**: «el teclado no llegaba a ninguna consola» had turned into «no
 llegaba **to** ninguna consola».
 
-**No lo vio nada.** El guion del banco no tiene patrón para esa línea, y la única prueba que la toca
-afirma sobre el prefijo «NO EXISTE», así que la cola corrupta pasaba. Lo encontró una revisión leyendo el
-diff.
+**Nothing saw it.** The bench's script has no pattern for that line, and the only test that touches
+it asserts about the prefix «NO EXISTE», so the corrupt tail went through. It was found by a review
+reading the diff.
 
-La clase es nueva y conviene nombrarla, porque la herramienta de este hito existe justamente para
-evitarla: **la herramienta distingue código de prosa; un `re.sub` sobre un rango de líneas no.** Todos los
-arreglos a mano de esta entrega —y son unos treinta— se hicieron así, y el único que tenía un nombre de
-una letra es el único que se comió una palabra. La regla que queda: **un nombre de una o dos letras no se
-renombra por rango de líneas**; o va por la herramienta que conoce las regiones, o se mira línea a línea.
+The class is new and worth naming, because this milestone's tool exists precisely to avoid it: **the
+tool tells code from prose; a `re.sub` over a range of lines does not.** All of this delivery's hand
+fixes —and there are about thirty— were done that way, and the only one with a one-letter name is
+the only one that ate a word. The rule that stays: **a name of one or two letters is not renamed by
+line range**; either it goes through the tool that knows the regions, or it is looked at line by
+line.
 
-**Y mi propia comprobación de eso no valía nada**, que es la mitad más útil del hallazgo: miré el diff
-**después** de commitear, así que salió vacío. Dos veces seguidas. Un barrido que se hace sobre el estado
-equivocado del árbol es peor que no hacerlo, porque publica un cero. El barrido va contra la rama entera
-—`main...HEAD`— y **por el proxy de la herramienta que envuelve `git`**, porque esa envoltura **resume** la
-salida del diff y eso es lo que devolvía cero comentarios cambiados cuando había sesenta y cuatro.
+**And my own check of that was worth nothing**, which is the most useful half of the finding: I
+looked at the diff **after** committing, so it came out empty. Twice in a row. A sweep done over the
+wrong state of the tree is worse than not doing it, because it publishes a zero. The sweep goes
+against the whole branch —`main...HEAD`— and **through the proxy of the tool that wraps `git`**,
+because that wrapper **summarizes** the diff output and that is what returned zero changed comments
+when there were sixty-four.
 
-**Y una cosa que la entrega NO consiguió, dicha porque el borrador afirmaba lo contrario.** Al fichero
-le quedaba **un identificador propio en español**: `en`, la preposición, en cuatro sitios que él mismo
-declara —un ayudante de prueba con quince llamadas y tres parámetros de `Pos2`—, más un parámetro `a` en
-otros dos. La guarda **no** los ve **por diseño**: el suelo de dos caracteres los tira antes de llegar a
-ninguna regla, y eso está escrito en su cabecera desde la primera entrega. Ya estaban así en `main`, así
-que no los introdujo este renombrado; los encontró una revisión a la que se le pidió **refutar** la
-afirmación, y se arreglan aquí. La lección es la de siempre y van tres: **una afirmación se le da a
-alguien para que la rompa, no para que la confirme.**
+**And one thing the delivery did NOT achieve, said because the draft asserted the opposite.** The
+file was left with **one identifier of its own in Spanish**: `en`, the preposition, in four places
+it declares itself —a test helper with fifteen calls and three `Pos2` parameters—, plus a parameter
+`a` in two others. The guard does **not** see them **by design**: the two-character floor throws
+them away before they reach any rule, and that is written in its header since the first delivery.
+They were already like that in `main`, so this rename did not introduce them; they were found by a
+review that was asked to **refute** the assertion, and they are fixed here. The lesson is the usual
+one and that makes three: **an assertion is given to somebody to break it, not to confirm it.**
 
-**Y añadirlas rompió dos casos de la prueba de reglas, que es el hallazgo de esta entrega.** La exención
-de `pestañas` —que hace falta, porque la sesión declara ese campo— exentaba de paso el caso `pestanas`,
-que es **el único sujeto posible** de la regla del plural con tilde. Y la exención de `gesto` apagaba el
-caso que demuestra que la lista no puede exentar el local propio de un fichero. Las dos veces: **verde,
-sin comprobar nada**.
+**And adding them broke two cases of the rules test, which is this delivery's finding.** The
+`pestañas` exemption —which is needed, because the session declares that field— exempted the
+`pestanas` case along with it, which is **the only possible subject** of the accented-plural rule.
+And the `gesto` exemption switched off the case that demonstrates that the list cannot exempt a
+file's own local. Both times: **green, checking nothing**.
 
-Van tres —`color_del_reclamo` en una entrega, `pestanas` y `gesto` en ésta—, así que deja de ser un
-arreglo y pasa a ser mecanismo:
+That makes three —`color_del_reclamo` in one delivery, `pestanas` and `gesto` in this one—, so it
+stops being a fix and becomes mechanism:
 
-1. **La exención compara el nombre entero y tal cual: ni la caja ni las tildes se doblan.** Y la
-   distinción no es un parche: **un nombre con tilde y el mismo sin ella son dos identificadores**, y
-   este repositorio escribe unos con y otros sin a propósito.
-2. **Los pares tipo/local se derivan de la lista** en vez de escribirse, filtrados por lo que el glosario
-   retiró de verdad, así que el conjunto se ajusta solo a medida que la lista crece.
-3. **Cada caso positivo de esa prueba se comprueba contra la lista, y lo primero**, para que el mensaje
-   diga la causa —«alguien exentó este caso»— y no el síntoma, que estaba treinta líneas más abajo.
+1. **The exemption compares the whole name and as it is: neither the case nor the accents are folded.**
+   And the distinction is not a patch: **a name with an accent and the same one without it are two
+   identifiers**, and this repository writes some with and some without on purpose.
+2. **The type/local pairs are derived from the list** instead of being written, filtered by what the
+   glossary really retired, so the set adjusts itself as the list grows.
+3. **Every positive case of that test is checked against the list, and first**, so that the message says
+   the cause —«somebody exempted this case»— and not the symptom, which was thirty lines further down.
 
-Tres mutaciones lo atan: exentar un caso positivo, volver a doblar las tildes y volver a doblar la caja.
-Las tres caen, y cada una nombra su propia causa.
+Three mutations tie it down: exempting a positive case, folding the accents again and folding the
+case again. All three fall, and each one names its own cause.
 
-#### La entrega de las claves: lo que ve quien escribe el fichero, y una guarda que se borra
+#### The keys delivery: what whoever writes the file sees, and a guard that deletes itself
 
-Es la entrega que esta decisión usó de ejemplo desde el primer día —`background`, `size`,
-`key.split-right`— y la única que cambia **lo que teclea una persona**. Las claves quedan así:
-`background`, `text`, `cursor`, `divider`, `focus`, `panel`, `color.0`–`color.15`, `size`, `version`, y
-`key.<acción>` con los once nombres del código (`split-right`, `split-down`, `close-pane`, `new-tab`,
-`close-tab`, `previous-tab`, `next-tab`, `scroll-page-up`, `scroll-page-down`, `scroll-to-top`,
-`scroll-to-bottom`) más `key.copy`, que solo se apaga. El valor de apagar es `none`. Y son las seis que
-el anexo de los ocho módulos dejó apuntadas en `theme.rs`: se traducen aquí, como decía.
+It is the delivery this decision used as an example from day one —`background`, `size`,
+`key.split-right`— and the only one that changes **what a person types**. The keys end up like this:
+`background`, `text`, `cursor`, `divider`, `focus`, `panel`, `color.0`–`color.15`, `size`,
+`version`, and `key.<action>` with the eleven names from the code (`split-right`, `split-down`,
+`close-pane`, `new-tab`, `close-tab`, `previous-tab`, `next-tab`, `scroll-page-up`,
+`scroll-page-down`, `scroll-to-top`, `scroll-to-bottom`) plus `key.copy`, which can only be switched
+off. The value for switching off is `none`. And they are the six the eight-modules annex left noted
+down in `theme.rs`: they are translated here, as it said.
 
-**Se retiran dos acomodos sin sustituirlos, y hay que decir qué se pierde.** El primero eran las dos
-grafías del tamaño (`tamaño` y `tamano`); el segundo, los nombres de tecla y de modificador en español
-—`mayúsculas`, `supr`, `repág`, `avpág`, `inicio`, `fin`, `espacio`, `izquierda`…—. Los dos existían por
-el mismo problema: **una eñe que no está en el teclado que tienes delante**. Con `size` y `shift` ese
-problema no existe, así que el acomodo se queda sin razón. Sobreviven las cuatro flechas `←↑→↓`, que no
-tienen idioma, y se añaden `up`/`down`/`left`/`right`, que es como las llaman WezTerm y Ghostty.
+**Two accommodations are withdrawn without replacing them, and what is lost has to be said.** The
+first were the two spellings of the size (`tamaño` and `tamano`); the second, the key and modifier
+names in Spanish —`mayúsculas`, `supr`, `repág`, `avpág`, `inicio`, `fin`, `espacio`, `izquierda`…—.
+Both existed because of the same problem: **an ñ that is not on the keyboard in front of you**. With
+`size` and `shift` that problem does not exist, so the accommodation is left with no reason. The
+four arrows `←↑→↓` survive, having no language, and `up`/`down`/`left`/`right` are added, which is
+what WezTerm and Ghostty call them.
 
-**«Sin tabla de alias» no lo ataba nada, y ahora sí.** Es la mitad de esta decisión que más fácil vuelve
-por la puerta de atrás: dejar una rama que siga aceptando la clave vieja no lo nota ninguna prueba y no
-lo ve ningún compilador. Van tres afirmaciones —la clave, el modificador y los nombres de acción—, y las
-tres caen al reponer la mitad vieja.
+**«No alias table» was tied down by nothing, and now it is.** It is the half of this decision that
+most easily comes back through the back door: leaving a branch that keeps accepting the old key is
+noticed by no test and seen by no compiler. There are three assertions —the key, the modifier and
+the action names—, and all three fall when the old half is put back.
 
-##### La lista de exenciones se borra, y de sus tres mecanismos sobrevive uno
+##### The exemption list deletes itself, and of its three mechanisms one survives
 
-Las cinco entradas que le quedaban —`Ajustes`, `Colores`, `atajos`, `colores`, `guardados`— son de este
-módulo, así que esta entrega las mata todas. **Vaciarla no era una opción**: la prueba de las reglas
-tiene un suelo escrito precisamente para negarse a comprobar una lista vacía, y con cero entradas cae. Y
-no queda entrega que le añada nada: de la de la prosa en adelante **no se renombra ni un identificador**.
-Es la regla que este mismo fichero aplica dos veces: un mecanismo sin escenario se borra.
+The five entries it had left —`Ajustes`, `Colores`, `atajos`, `colores`, `guardados`— belong to this
+module, so this delivery kills them all. **Emptying it was not an option**: the rules test has a
+floor written precisely to refuse to check an empty list, and with zero entries it falls. And there
+is no delivery left to add anything to it: from the prose one onwards **not one identifier gets
+renamed**. It is the rule this very file applies twice: a mechanism with no scenario is deleted.
 
-**Pero de los tres puntos que el anexo anterior dejó escritos, uno no era de la lista, y eso costó dos
-intentos.** Los dos primeros —comparar el nombre entero con la caja puesta, y derivar los pares
-tipo/local— describen cómo tenía que comportarse la exención, así que se van con ella. **El tercero
-no**: decía que *cada caso positivo de esa prueba se comprueba contra la lista, y lo primero*, y lo que
-defiende no es la lista sino que **cada caso siga ejercitando su regla en vez de salir por un atajo**.
-La lista era un atajo; **no era el único**. Sigue vivo el otro, y es peor porque no está escrito a mano:
-la guarda se rinde con una pieza en cuanto el lado **inglés** del glosario la reclama, y ese lado **se
-deriva del anexo**, que las entregas de prosa todavía editan. El día que una flecha adopte `celda`,
-`reparto` o `maqueta` como inglés, el caso que la lleva deja de comprobar nada y la suite sigue verde.
-Así que el bucle vuelve, apuntado a ese conjunto, con su suelo y con una afirmación más: que cada sujeto
-siga siendo un resto de verdad. Tres mutaciones lo atan y las tres caen.
+**But of the three points the previous annex left written, one was not the list's, and that cost two
+attempts.** The first two —comparing the whole name with the case on, and deriving the type/local
+pairs— describe how the exemption had to behave, so they go with it. **The third does not**: it said
+that *every positive case of that test is checked against the list, and first*, and what it defends
+is not the list but that **each case keeps exercising its rule instead of getting out through a
+shortcut**. The list was a shortcut; **it was not the only one**. The other is still alive, and it
+is worse because it is not written by hand: the guard gives up on a piece as soon as the **English**
+side of the glossary claims it, and that side **is derived from the annex**, which the prose
+deliveries are still editing. The day an arrow adopts `celda`, `reparto` or `maqueta` as English,
+the case that carries it stops checking anything and the suite stays green. So the loop comes back,
+pointed at that set, with its floor and with one more assertion: that each subject still really is a
+remainder. Three mutations tie it down and all three fall.
 
-**Lo que sí desaparece de verdad.** La otra mitad —que doblar la caja al comparar no cegara la regla—
-**era de la lista** y se va con ella. Se probó a sustituirla por una afirmación directa sobre el nombre
-en minúsculas y **una revisión la refutó**: `segments` ya baja a minúsculas, así que esa afirmación
-recorría el mismo camino, byte a byte, que la que había treinta líneas más arriba. Un duplicado
-presentado como sustituto es peor que el hueco, porque el hueco se ve. Se borró.
+**What really does disappear.** The other half —that folding the case when comparing should not
+blind the rule— **belonged to the list** and goes with it. Replacing it with a direct assertion
+about the lowercase name was tried and **a review refuted it**: `segments` already lowercases, so
+that assertion walked the same path, byte for byte, as the one thirty lines above. A duplicate
+presented as a replacement is worse than the gap, because the gap is visible. It was deleted.
 
-**Y arrastró dos cosas más, las dos verificadas por mutación.** `unaccent` existía separada de `fold`
-**solo** porque la lista comparaba con la caja puesta; con la lista fuera, su único cliente la baja a
-minúsculas en la línea siguiente, así que sus seis brazos en mayúscula no los alcanzaba nadie. Se funden
-en `fold`, y quitarle la eñe o el paso a minúsculas deja la guarda en rojo. La otra fue **un bloqueante
-de verdad**: la lista de casos positivos se quedó sin lector, y `clippy` con `-D warnings` convierte una
-constante sin uso en un error.
+**And it dragged two more things along, both verified by mutation.** `unaccent` existed separately
+from `fold` **only** because the list compared with the case on; with the list gone, its only client
+lowercases it on the next line, so its six uppercase arms were reached by nobody. They are merged
+into `fold`, and taking the ñ or the lowercasing out of it leaves the guard red. The other was **a
+real blocker**: the list of positive cases was left with no reader, and `clippy` with `-D warnings`
+turns an unused constant into an error.
 
-**Y una exención que un revisor dio por muerta y no lo estaba.** `restauradas` se propuso borrar
-razonando que ya nadie la citaba; se quitó, la guarda se puso roja nombrando las dos citas vivas, y se
-repuso. `frontera` y `supr` sí salieron: las dos se quedaron sin cita en esta misma entrega. La regla
-que queda escrita: **una entrada se retira quitándola y viendo qué pasa**, nunca leyéndola.
+**And an exemption a reviewer took for dead that was not.** `restauradas` was proposed for deletion
+reasoning that nobody cited it any more; it was removed, the guard went red naming the two live
+citations, and it was put back. `frontera` and `supr` did come out: both were left with no citation
+in this very delivery. The rule that stays written: **an entry is withdrawn by removing it and
+seeing what happens**, never by reading it.
 
-**Cómo se me pasó, que es la parte que sirve:** declaré la puerta en verde leyendo una corrida que no
-había vuelto a compilar la caja de pruebas. Una puerta que contesta desde la caché no se ha corrido. Van
-tres barridos de este hito publicando un cero por mirar el árbol en el estado equivocado.
+**How it got past me, which is the part that is useful:** I declared the gate green reading a run
+that had not recompiled the test crate. A gate that answers from the cache has not been run. That
+makes three sweeps of this milestone publishing a zero for looking at the tree in the wrong state.
 
-##### Cuatro nombres que el anexo ya había decidido, y yo no leí
+##### Four names the annex had already decided, and I did not read
 
-**El defecto de verdad de esta entrega fue mío y lo cazó la revisión.** El anexo de esta misma decisión
-ya había asignado los nombres del módulo, con su razón, y yo los deduje de cero en vez de leerlos:
-puse `Problem` donde dice **`ConfigProblem`** —hay otro `Problem` en `panel-contract`, y el criterio
-publicado es «mismo concepto, referente distinto → sustantivo compartido y calificador propio»—, `Line`
-donde dice **`ConfigLine`**, `Fault` donde la flecha dice **`Missing`**, y `Directory` donde dice
-**`TestDir`**, que es además el nombre que el módulo hermano ya llevaba desde la entrega anterior.
+**This delivery's real defect was mine and the review caught it.** The annex of this very decision
+had already assigned the module's names, with its reason, and I deduced them from scratch instead of
+reading them: I put `Problem` where it says **`ConfigProblem`** —there is another `Problem` in
+`panel-contract`, and the published criterion is «same concept, different referent → shared noun and
+qualifier of its own»—, `Line` where it says **`ConfigLine`**, `Fault` where the arrow says
+**`Missing`**, and `Directory` where it says **`TestDir`**, which is on top of that the name the
+sibling module had already carried since the previous delivery.
 
-**No lo cazaba nada, y esa es la mitad que importa.** La guarda del glosario deriva el vocabulario
-**español** de las flechas y no mira el lado inglés, así que un nombre inglés distinto del publicado
-compila, pasa la suite y se mezcla. En una entrega mecánica el compilador es oráculo del renombrado,
-pero **no de qué nombre tocaba**: eso solo lo dice el anexo, y hay que leerlo.
+**Nothing caught it, and that is the half that matters.** The glossary guard derives the **Spanish**
+vocabulary from the arrows and does not look at the English side, so an English name different from
+the published one compiles, passes the suite and gets merged. In a mechanical delivery the compiler
+is the oracle of the rename, but **not of which name was the right one**: only the annex says that,
+and it has to be read.
 
-**Y una quinta, que es la que se ve desde fuera:** la clave `text` fallaba el criterio que esta misma
-decisión escribió para elegir palabras —que la use la configuración, la documentación o los nombres de
-acción de **dos o más** de WezTerm, Kitty, Ghostty, tmux y Zellij—. Los tres primeros publican esa clave
-como `foreground`. Pasa a `foreground`, y con ella el campo, que es como el pintor ya la llamaba.
+**And a fifth one, which is the one that is visible from outside:** the key `text` failed the
+criterion this very decision wrote for choosing words —that it be used by the configuration, the
+documentation or the action names of **two or more** of WezTerm, Kitty, Ghostty, tmux and Zellij—.
+The first three publish that key as `foreground`. It becomes `foreground`, and with it the field,
+which is what the painter already called it.
 
-##### El documento y el código, enfrentados por segunda y tercera vez
+##### The document and the code, set against each other for the second and third time
 
-Los once atajos ya tenían sus dos guardas. Las **ocho claves de la tabla** no tenían ninguna, y los
-**bloques de ejemplo** tampoco: son lo que alguien copia y pega, y nada los interpretaba. Medido antes de
-escribirlas: cambiarle al documento el prefijo `key.` o el valor `none` dejaba **las 873 pruebas en
-verde**. Ahora la tabla se le pasa al intérprete clave por clave, y cada línea `clave = valor` de cada
-bloque se interpreta de verdad, con suelo por si el recorrido deja de enganchar y afirmando además que la
-línea **aplica algo** —`version` aparte, que por definición no guarda ningún valor—.
+The eleven shortcuts already had their two guards. The **eight keys of the table** had none, and the
+**example blocks** neither: they are what somebody copies and pastes, and nothing interpreted them.
+Measured before writing them: changing the document's `key.` prefix or the `none` value left **the
+873 tests green**. Now the table is passed to the parser key by key, and every `key = value` line of
+every block is really parsed, with a floor in case the walk stops latching on and asserting as well
+that the line **applies something** —`version` apart, which by definition stores no value—.
 
-Y la mitad que **no** se puede derivar, dicha para que nadie la lea como cubierta: una clave que el
-código acepta y el documento calla no la caza nada. El `match` no se puede recorrer, y copiarlo a la
-prueba sería volver a tener la lista dos veces.
+And the half that **cannot** be derived, said so that nobody reads it as covered: a key the code
+accepts and the document is silent about is caught by nothing. The `match` cannot be walked, and
+copying it into the test would be having the list twice again.
 
-##### Cuatro citas que ya mentían, y de quién eran
+##### Four citations that were already lying, and whose they were
 
-Traducir este módulo destapó **cuatro comentarios de `session.rs`** que nombraban `interpretar`,
-`ruta_de` y `Problema` — **sus propios nombres viejos**, renombrados por la entrega anterior. Pasaban
-porque la guarda pregunta por la caja entera y `settings.rs` todavía declaraba esas palabras. Es
-exactamente lo que el anexo anterior anunció —«las entregas que quedan van a encontrar más, no menos»— y
-la primera confirmación con números: **la última entrega mecánica del hito arregla citas de la
-penúltima**.
+Translating this module uncovered **four comments in `session.rs`** that named `interpretar`,
+`ruta_de` and `Problema` — **their own old names**, renamed by the previous delivery. They passed
+because the guard asks about the whole crate and `settings.rs` still declared those words. It is
+exactly what the previous annex announced —«the remaining deliveries are going to find more, not
+fewer»— and the first confirmation with numbers: **the milestone's last mechanical delivery fixes
+citations from the second to last**.
 
 ## D28 — A module has a ceiling, and a guard holds it
 

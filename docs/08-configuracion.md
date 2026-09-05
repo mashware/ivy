@@ -1,160 +1,165 @@
-# El fichero de configuración
+# The settings file
 
-Dónde va: **`$XDG_CONFIG_HOME/agent-terminal/config`** — o `~/.config/agent-terminal/config` si no tienes
-esa variable puesta. Al lado de `layout.json`, que es donde el terminal guarda solo cómo dejaste las
-ventanas; éste lo escribes tú.
+Where it goes: **`$XDG_CONFIG_HOME/agent-terminal/config`** — or `~/.config/agent-terminal/config` if
+you do not have that variable set. Next to `layout.json`, which is where the terminal saves only how
+you left the windows; this one you write yourself.
 
-**Si no existe, el terminal abre exactamente como siempre.** No hace falta crearlo.
+**If it does not exist, the terminal opens exactly as always.** You do not have to create it.
 
-## Cómo se escribe
+## How it is written
 
 ```
-# Una línea que empieza por almohadilla es un comentario.
-# Las líneas vacías no son nada.
+# A line starting with a hash is a comment.
+# Empty lines are nothing.
 
 color.1 = #cf6a4c
 background = #1d1f21
 focus      = #6c9ef8
 ```
 
-Una línea es `clave = valor`. Los espacios alrededor no importan.
+A line is `key = value`. The spaces around it do not matter.
 
-**El comentario es de línea completa y no puede ir al final de un valor.** La almohadilla es a la vez el
-carácter de comentario y el principio de un color, así que un comentario al final partiría `color.1 =
-#cf6a4c` por la mitad. Es lo mismo que hacen Kitty y Ghostty.
+**A comment takes the whole line and cannot go at the end of a value.** The hash is both the comment
+character and the start of a colour, so a comment at the end would cut `color.1 = #cf6a4c` in half.
+It is the same thing Kitty and Ghostty do.
 
-## Qué se puede poner hoy
+## What you can set today
 
-| Clave | Qué es |
+| Key | What it is |
 |---|---|
-| `color.0` … `color.15` | los dieciséis colores que un programa puede pedir. Del 0 al 7 los normales, del 8 al 15 los brillantes |
-| `background` | el fondo de la consola |
-| `foreground` | el color con el que se escribe cuando el programa no pide otro |
-| `cursor` | el cursor |
-| `divider` | la línea que separa dos consolas |
-| `focus` | con qué se señala la consola que tiene el teclado |
-| `panel` | el fondo del panel de estado |
-| `size` | el cuerpo de la letra, en puntos |
+| `color.0` … `color.15` | the sixteen colours a program can ask for. 0 to 7 the normal ones, 8 to 15 the bright ones |
+| `background` | the console's background |
+| `foreground` | the colour it writes with when the program does not ask for another |
+| `cursor` | the cursor |
+| `divider` | the line that separates two consoles |
+| `focus` | what marks out the console that has the keyboard |
+| `panel` | the status panel's background |
+| `size` | the font size, in points |
 
-Los colores se escriben **`#rrggbb`**, en hexadecimal, y da igual si en mayúsculas o en minúsculas.
+Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
+lower case.
 
-**El tamaño va de 4 a 96 puntos**, con decimales si quieres. El de siempre son **14**. Fuera de ese rango
-se te avisa y se usa el de siempre: con dos puntos no se lee nada y con doscientos caben tres columnas.
+**The size goes from 4 to 96 points**, with decimals if you want. The usual one is **14**. Outside
+that range you are told and the usual one is used: at two points nothing is legible and at two
+hundred three columns fit.
 
-Cambiar el tamaño **cambia cuántas filas y columnas** te caben en la ventana, así que los programas que
-corren dentro lo notan.
+Changing the size **changes how many rows and columns** fit in your window, so the programs running
+inside notice.
 
-**Lo que no pongas se queda como estaba.** Puedes cambiar un solo color y no escribir los demás.
+**What you do not set stays as it was.** You can change a single colour and not write the rest.
 
-## Los atajos
+## The shortcuts
 
-Los once atajos del terminal se cambian con `key.` y el nombre de lo que hacen:
+The terminal's eleven shortcuts are changed with `key.` and the name of what they do:
 
 ```
 key.split-right = ctrl+shift+e
 key.close-pane = none
 ```
 
-| Nombre | Qué hace | De fábrica |
+| Name | What it does | Out of the box |
 |---|---|---|
-| `split-right` | parte la consola en dos, a lo ancho | `ctrl+shift+d` |
-| `split-down` | la parte a lo alto | `ctrl+shift+b` |
-| `close-pane` | cierra la consola con el foco | `ctrl+shift+x` |
-| `new-tab` | abre una pestaña | `ctrl+shift+t` |
-| `close-tab` | cierra la pestaña | `ctrl+shift+w` |
-| `previous-tab` · `next-tab` | se mueve entre pestañas | `ctrl+shift+←` · `ctrl+shift+→` |
-| `scroll-page-up` · `scroll-page-down` | sube y baja por el historial | `shift+pageup` · `shift+pagedown` |
-| `scroll-to-top` · `scroll-to-bottom` | va a los extremos del historial | `shift+home` · `shift+end` |
+| `split-right` | splits the console in two, across | `ctrl+shift+d` |
+| `split-down` | splits it down | `ctrl+shift+b` |
+| `close-pane` | closes the focused console | `ctrl+shift+x` |
+| `new-tab` | opens a tab | `ctrl+shift+t` |
+| `close-tab` | closes the tab | `ctrl+shift+w` |
+| `previous-tab` · `next-tab` | moves between tabs | `ctrl+shift+←` · `ctrl+shift+→` |
+| `scroll-page-up` · `scroll-page-down` | goes up and down the scrollback | `shift+pageup` · `shift+pagedown` |
+| `scroll-to-top` · `scroll-to-bottom` | goes to the ends of the scrollback | `shift+home` · `shift+end` |
 
-**Un acorde se escribe con `+`**, en cualquier orden y sin importar mayúsculas: `ctrl+shift+e`,
-`shift+prior`, `alt+f4`. Vale `ctrl`, `shift` y `alt`, y **hace falta al menos uno**: si no, te estarías
-quitando una letra de escribir.
+**A chord is written with `+`**, in any order and regardless of case: `ctrl+shift+e`, `shift+prior`,
+`alt+f4`. `ctrl`, `shift` and `alt` are valid, and **at least one is required**: without one you
+would be taking a letter away from yourself.
 
-Las teclas se escriben como las llama el teclado: `e`, `f4`, `space`, `delete`, `home`, `end`, `pageup`,
-`pagedown`, `left`, `right`, `up`, `down`. Valen también las abreviaturas de siempre (`prior`, `next`,
-`pgup`, `pgdn`, `esc`) y las flechas con su símbolo (`←`, `↑`, `→`, `↓`).
+Keys are written the way the keyboard calls them: `e`, `f4`, `space`, `delete`, `home`, `end`,
+`pageup`, `pagedown`, `left`, `right`, `up`, `down`. The usual abbreviations work too (`prior`,
+`next`, `pgup`, `pgdn`, `esc`), and the arrows with their symbol (`←`, `↑`, `→`, `↓`).
 
-**`Ctrl+C` y `Ctrl+V` no se pueden asignar a nada.** El escritorio se los queda antes de que lleguen
-aquí, así que un atajo con esos acordes no se dispararía nunca y no tendrías forma de saber por qué.
+**`Ctrl+C` and `Ctrl+V` cannot be bound to anything.** The desktop takes them before they get here,
+so a shortcut with those chords would never fire and you would have no way of knowing why.
 
-### `none` te devuelve el acorde
+### `none` gives you the chord back
 
 ```
 key.close-pane = none
 ```
 
-A partir de ahí ese acorde **le llega al programa que corre dentro**. Es lo que te permite recuperar
-`Ctrl+Mayúsculas+X` para `vim` o para `tmux`.
+From then on that chord **reaches the program running inside**. It is what lets you get
+`Ctrl+Shift+X` back for `vim` or for `tmux`.
 
-### Si dos atajos se pisan
+### If two shortcuts tread on each other
 
-**Gana el último que escribas**, y se te dice cuál se ha quedado sin acorde:
+**The last one you write wins**, and you are told which one is left with no chord:
 
 ```
 agent-terminal: 'close-pane' is left without a shortcut: its chord goes to 'split-right', which comes later
 ```
 
-### Copiar y pegar no se reasignan: copiar solo se apaga
+### Copy and paste are not rebound: copy is only switched off
 
-`Ctrl+Mayúsculas+C` y `Ctrl+Mayúsculas+V` **no llegan como teclas**: los resuelve el escritorio antes y
-llegan ya convertidos en un copiado y un pegado, **sin decir siquiera si había Mayúsculas**. No hay acorde
-que mover, y por eso no están en la tabla.
+`Ctrl+Shift+C` and `Ctrl+Shift+V` **do not arrive as keys**: the desktop resolves them first and they
+arrive already turned into a copy and a paste, **without even saying whether Shift was held**. There
+is no chord to move, and that is why they are not in the table.
 
-Lo que sí puedes es **apagar copiar**, que es lo que devuelve `Ctrl+Mayúsculas+C` a `vim` o a `tmux`:
+What you can do is **switch copy off**, which is what gives `Ctrl+Shift+C` back to `vim` or to
+`tmux`:
 
 ```
 key.copy = none
 ```
 
-Cualquier otro valor se rechaza y se te dice por qué — asignarle otro acorde se aceptaría y no funcionaría
-nunca:
+Any other value is rejected and you are told why — giving it another chord would be accepted and
+would never work:
 
 ```
 agent-terminal: line 3: the chord for 'key.copy' is the desktop's and cannot be changed; the only thing you can do is turn it off with 'none'
 ```
 
-## Qué pasa si te equivocas
+## What happens if you get it wrong
 
-**Una línea mal escrita no te tumba el fichero.** Se ignora, se te dice cuál es y qué le pasa por la salida
-de error, y **el resto se aplica**:
+**One badly written line does not take the file down.** It is ignored, you are told which one it is
+and what is wrong with it on the error output, and **the rest is applied**:
 
 ```
-agent-terminal: line 7: 'morado' is not valid for 'color.3'
+agent-terminal: line 7: 'purple' is not valid for 'color.3'
 ```
 
-Se dicen hasta veinte líneas con problemas; si hay más, se te dice cuántas quedaron sin listar.
+Up to twenty lines with problems are reported; if there are more, you are told how many were left
+unlisted.
 
-**Una clave repetida gana la última**, y también se te dice — así pegar un tema encima de otro hace lo que
-esperas, y no te pasas media hora cambiando una línea que otra de más abajo está pisando.
+**A repeated key wins with the last one**, and you are told that too — so pasting one theme over
+another does what you expect, and you do not spend half an hour changing a line that another one
+further down is treading on.
 
-**Y si te olvidas del valor** —`background =`— se te dice eso mismo, no que falte el igual: el igual está
-puesto, lo que falta es el color.
+**And if you forget the value** — `background =` — you are told exactly that, not that the equals
+sign is missing: the equals sign is there, what is missing is the colour.
 
-Lo que sí deja el terminal entero de fábrica, avisando de por qué:
+What does leave the terminal entirely as it comes out of the box, saying why:
 
-- que no se pueda leer, o que con ese nombre haya algo que no sea un fichero;
-- que no sea texto;
-- que se pase de 64 KiB;
-- que declare una versión más nueva que la que este terminal entiende.
+- that it cannot be read, or that something with that name is not a file;
+- that it is not text;
+- that it is over 64 KiB;
+- that it declares a version newer than the one this terminal understands.
 
-Que **no exista** es el único caso que no se dice: es lo normal.
+That it **does not exist** is the only case that is not reported: that is the normal one.
 
 ## `version`
 
-Es **opcional**. Si la pones, sirve para una sola cosa: que un terminal más viejo que el formato **no
-aplique** un fichero que no entiende, en vez de aplicar la mitad.
+It is **optional**. If you set it, it is good for one thing: so that a terminal older than the format
+**does not apply** a file it does not understand, instead of applying half of it.
 
 ```
 version = 1
 ```
 
-No hace falta escribirla. El formato es plano, así que una clave que un terminal no conozca simplemente se
-ignora y te lo dice.
+You do not have to write it. The format is flat, so a key a terminal does not know is simply ignored
+and it tells you so.
 
-Si escribes algo que no es un número, se te avisa de esa línea como de cualquier otra y el fichero sigue
-aplicándose.
+If you write something that is not a number, you are warned about that line like any other and the
+file goes on being applied.
 
-## Lo que todavía no se puede configurar
+## What still cannot be configured
 
-La fuente llega en la siguiente entrega de este mismo hito. Recargar el fichero
-sin cerrar el terminal queda para después, y está escrito por qué.
+The font comes in the next delivery of this same milestone. Reloading the file without closing the
+terminal is left for later, and the reason is written down.

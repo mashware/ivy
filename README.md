@@ -1,49 +1,51 @@
 # agent-terminal
 
-> **Nombre en clave.** Aparcado a propósito: el producto se ha redefinido dos veces mientras se
-> escribía esto, y un nombre para algo que aún se mueve suena mal haga lo que haga. Se retoma
-> con el prototipo delante. Renombrar es `mv ~/Mashware/agent-terminal ~/Mashware/<nombre>` más
-> un buscar y reemplazar en `docs/`.
+> **Code name.** Parked on purpose: the product has been redefined twice while this was being
+> written, and a name for something that is still moving sounds wrong whatever it does. It gets
+> picked up again with the prototype in front of us. Renaming is
+> `mv ~/Mashware/agent-terminal ~/Mashware/<name>` plus a find and replace in `docs/`.
 >
-> La marca paraguas ya existe: **Zabri** (`~/Mashware/zabri.io`). Este sería un producto suyo,
-> junto a `rule-engine`.
+> The umbrella brand already exists: **Zabri** (`~/Mashware/zabri.io`). This would be one of its
+> products, alongside `rule-engine`.
 
-Un terminal **anfitrión de agentes**: pestañas, divisiones, y en cada división una consola
-con su propio panel de estado alimentado por un contrato abierto.
+An **agent-hosting terminal**: tabs, panes, and in each pane a console with its own status panel
+fed by an open contract.
 
-## El problema
+## The problem
 
-Trabajar con varios agentes a la vez (Claude Code, opencode, Codex, Gemini CLI) hoy significa
-tener N consolas abiertas y no saber, sin mirarlas una a una, cuál avanza, cuál te espera y
-cuál se ha quedado sin contexto.
+Working with several agents at once (Claude Code, opencode, Codex, Gemini CLI) means having N
+consoles open today and no way to tell, without looking at them one by one, which is making
+progress, which is waiting for you, and which has run out of context.
 
-Cada agente ha empezado a resolverlo por su cuenta dentro de su propia interfaz de texto —
-opencode ya tiene barra lateral con plan, contexto y coste, y peticiones abiertas para
-pestañas y multiventana. Es decir: **cada agente está reimplementando, peor, un gestor de
-ventanas**, porque no existe el anfitrión que debería hacer ese trabajo.
+Every agent has started solving this on its own inside its own text interface — opencode already
+has a sidebar with plan, context and cost, and open requests for tabs and multiple windows. That
+is: **every agent is reimplementing a window manager, worse**, because the host that should be
+doing that job does not exist.
 
-## La propuesta
+## The proposal
 
-El anfitrión pone la estructura (pestañas, divisiones, paneles) y define **un contrato abierto**
-para que cualquiera publique estado en el panel de su división: un agente, un CI, un despliegue,
-un script. Cada agente vuelve a ocuparse solo de ser un agente.
+The host provides the structure — tabs, panes, panels — and defines **an open contract** so that
+anyone can publish state into their pane's panel: an agent, a CI run, a deployment, a script.
+Every agent goes back to being just an agent.
 
-## Estado
+## State
 
 | | |
 |---|---|
-| **Funcionando** | `flow-panel` — el panel de estado y su contrato, corriendo sobre WezTerm ([prototipos/](prototipos/)) |
-| **Decidido** | Stack, arquitectura de canales, modelo económico ([docs/02-decisiones.md](docs/02-decisiones.md)) |
-| **Siguiente** | Fase 1 — prototipo: una ventana, dos divisiones, un panel leyendo el fichero. Desglosada en 7 hitos en [docs/05-roadmap.md](docs/05-roadmap.md) |
+| **Working** | `cargo run -p app --release` opens a terminal that gets used: tabs, panes placed where you want them, a shell inside, colours, `vim`, keyboard, resizing and large dumps without freezing the window. Each pane paints the status panel its producer publishes, is dragged and dropped with the mouse, remembers where you left it, says when the work there is claiming you, and lets you scroll back, select and copy. **Fifteen milestones closed**: F1.0 to F1.6, F2.1 to F2.6, F2.8 and F2.9 |
+| **Also working** | `flow-panel` — the status panel and its contract, over WezTerm ([prototipos/](prototipos/)) |
+| **Decided** | Stack, channel architecture, economic model, and twenty-eight decisions with their reasons ([docs/02-decisiones.md](docs/02-decisiones.md)) |
+| **Next** | **F2.12** — the whole repository moves to English. It goes ahead of everything else, and the reason is written down in D27. Behind it: macOS and Windows, and the per-pane header ([docs/05-roadmap.md](docs/05-roadmap.md)) |
 
-## Documentación
+## Documentation
 
-| Documento | Contenido |
+| Document | Contents |
 |---|---|
-| [01-vision.md](docs/01-vision.md) | Qué es, para quién, y qué no es |
-| [02-decisiones.md](docs/02-decisiones.md) | Decisiones técnicas con su razón y lo que se descartó |
-| [03-arquitectura.md](docs/03-arquitectura.md) | Las piezas y los tres canales |
-| [04-contrato-panel.md](docs/04-contrato-panel.md) | Especificación de `panel.json` |
-| [05-roadmap.md](docs/05-roadmap.md) | Fases, en orden, con lo aparcado |
-| [06-referencias.md](docs/06-referencias.md) | Cómo está construido cada terminal, con datos |
-| [07-panorama.md](docs/07-panorama.md) | Quién hay en el espacio y qué robarle a cada uno |
+| [01-vision.md](docs/01-vision.md) | What it is, who it is for, and what it is not |
+| [02-decisiones.md](docs/02-decisiones.md) | Technical decisions with their reason and what was discarded |
+| [03-arquitectura.md](docs/03-arquitectura.md) | The pieces and the three channels |
+| [04-contrato-panel.md](docs/04-contrato-panel.md) | Specification of `panel.json` |
+| [05-roadmap.md](docs/05-roadmap.md) | Phases, in order, with what is parked |
+| [06-referencias.md](docs/06-referencias.md) | How each terminal is built, with data |
+| [07-panorama.md](docs/07-panorama.md) | Who is in the space and what to steal from each |
+| [09-glosario-de-prosa.md](docs/09-glosario-de-prosa.md) | The crib the English prose is written against |

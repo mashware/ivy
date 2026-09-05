@@ -1254,7 +1254,7 @@ mod tests {
 
         let published: Vec<&str> = DOCUMENT
             .lines()
-            .skip_while(|line| !line.starts_with("| Clave |"))
+            .skip_while(|line| !line.starts_with("| Key |"))
             .skip(2)
             .take_while(|line| line.starts_with('|'))
             .filter_map(|line| line.split('`').nth(1))
@@ -1477,7 +1477,7 @@ mod tests {
         };
         let ours = [
             written_by_the_terminal(3, "key.copy = ctrl+shift+e"),
-            written_by_the_terminal(7, "color.3 = morado"),
+            written_by_the_terminal(7, "color.3 = purple"),
         ];
 
         for said in &ours {

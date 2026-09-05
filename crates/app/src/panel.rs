@@ -277,9 +277,9 @@ impl PanelState {
     fn attention_with(&self, nothing_to_confess: bool) -> Option<AttentionState> {
         let class = self.last_good.as_ref()?.attention?;
         // **The finished needs no one behind it.** Whoever finished stops publishing *by definition*, so
-        // the silence does not belie its «terminó y nadie lo ha mirado»: it is its normal state.
-        // Without this exception, half an hour after finishing everything finished would go out — and
-        // finding in the morning what finished at night is exactly what it is for.
+        // the silence does not belie its «it finished and nobody looked»: it is its normal
+        // state. Without this exception, half an hour after finishing everything finished would go out
+        // — and finding in the morning what finished at night is exactly what it is for.
         // What does belie it is **not being able to read its file**, and that is the only thing looked at
         // here: `problem` is the same thing that separates the two classes of warning in
         // [`PanelState::warning`], from which `nothing_to_confess` comes.
@@ -508,15 +508,15 @@ pub(crate) fn attention_symbol(class: Attention) -> char {
 /// **The symbol does not travel alone**: in the panel there is room, and a loose sign forces recalling a
 /// table.
 ///
-/// The three phrases are **the contract's, word for word**, including the «a ti» of the first — which
-/// is exactly what separates it from the second, «por algo que **no** eres tú». Shortening them
-/// to fit is losing the opposition that tells them apart; what does not fit is wrapped, like everything
-/// else in the panel.
+/// The three phrases are **the contract's, word for word**, including the «for you» of the first —
+/// which is exactly what separates it from the second, «something that is **not** you». Shortening
+/// them to fit is losing the opposition that tells them apart; what does not fit is wrapped, like
+/// everything else in the panel.
 fn attention_text(class: Attention) -> &'static str {
     match class {
-        Attention::Wait => "te espera a ti",
-        Attention::Block => "atascada por algo que no eres tú",
-        Attention::Done => "terminó y nadie lo ha mirado",
+        Attention::Wait => "it is waiting for you",
+        Attention::Block => "stuck on something else, not you",
+        Attention::Done => "it finished and nobody looked",
     }
 }
 
@@ -2557,7 +2557,7 @@ mod tests {
             rows,
             vec![
                 (
-                    "? te espera a ti".to_owned(),
+                    "? it is waiting for you".to_owned(),
                     theme.attention_color(Attention::Wait, true)
                 ),
                 ("  whatever".to_owned(), theme.panel_color(None, None)),
@@ -2577,7 +2577,7 @@ mod tests {
             texts,
             [
                 "a1b2 · build",
-                "∎ terminó y nadie lo ha mirado",
+                "∎ it finished and nobody looked",
                 "  the body"
             ]
         );
@@ -2620,7 +2620,7 @@ mod tests {
         assert_eq!(
             rows[0],
             (
-                "⊘ atascada por algo que no eres tú".to_owned(),
+                "⊘ stuck on something else, not you".to_owned(),
                 theme.attention_color(Attention::Block, false)
             )
         );
@@ -2696,10 +2696,13 @@ mod tests {
         assert_eq!(texts, ["  whatever"]);
     }
 
-    /// **The claim's row wraps like any other.** Its phrases are the contract's, and the block one
-    /// measures thirty-three cells: in a narrow panel —which is a width the user chooses by dragging— it
-    /// has to split, not run off. Without this test, passing its wrapping a wrong width left the whole
-    /// suite green, because the place of the other tests is wide.
+    /// **The claim's row wraps like any other.** Its phrases are the contract's, and the longest of
+    /// them —the `done` one— measures thirty-one cells with its symbol: in a narrow panel —which is a
+    /// width the user chooses by dragging— it has to split, not run off. Without this test, passing its
+    /// wrapping a wrong width left the whole suite green, because the place of the other tests is wide.
+    ///
+    /// **What it does not cover is the width that ships**, and that is the sibling below: a phrase that
+    /// splits at twelve tells nothing about a phrase that splits at thirty-four.
     #[test]
     fn the_claim_row_does_not_run_off_a_narrow_panel() {
         let width = 12;
@@ -2731,6 +2734,52 @@ mod tests {
         }
     }
 
+    /// **At the width that ships, each claim takes one row**, and that is a product property rather
+    /// than a coincidence of wording.
+    ///
+    /// The three phrases are the contract's, and this test is what keeps a translation, or a reword,
+    /// from quietly costing the factory panel a line of body. It cost one already: the first English
+    /// wording measured 36 and 41 cells against a slot of 34, so `block` and `done` each took two rows
+    /// and the second left a single orphaned word on the last one — with nothing failing, because
+    /// [`the_claim_row_does_not_run_off_a_narrow_panel`] measures a width nobody has and the painting
+    /// tests use a rect eleven cells wider than the default.
+    ///
+    /// **The slot is the panel minus both margins** — [`DEFAULT_WIDTH`] is 36 and only the left margin
+    /// is painted, so what the text gets is 34. A row is the symbol, a space and the phrase, which
+    /// leaves the phrase 32 cells.
+    #[test]
+    fn at_the_width_that_ships_every_claim_fits_one_row() {
+        let width = DEFAULT_WIDTH - 2 * MARGIN as usize;
+
+        for class in Attention::ALL {
+            let rows = lay_out(
+                Some(&panel_with(r#"{"header":false,"lines":["whatever"]}"#)),
+                "a1b2",
+                width,
+                &Theme::default(),
+                None,
+                Some(AttentionState {
+                    class,
+                    backed: true,
+                }),
+            );
+
+            // **The claim's rows are the ones before the first blank**, and the blank is what the layout
+            // puts between what the application says and what the producer does. Counting by column
+            // instead does not work: the body's indent lives inside its text, so every row is at zero.
+            let claim = rows.iter().take_while(|row| !row.text.is_empty()).count();
+            assert_eq!(
+                claim,
+                1,
+                "«{} {}» takes {claim} rows at the width the panel ships with ({width} cells of text): \
+                 the factory panel loses a line of body to the claim, and the reader gets a phrase cut \
+                 in two — {rows:?}",
+                attention_symbol(class),
+                attention_text(class)
+            );
+        }
+    }
+
     /// **When only one row fits, the one that survives is the claim's.** Of the two the application puts,
     /// the claim's is the one that answers «do I have to go there?» and the warning is the one that
     /// qualifies «and it is not fresh», so the order is that one and not the reverse. It is tied down here
@@ -2755,16 +2804,16 @@ mod tests {
         let texts: Vec<&str> = rows.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(
             texts,
-            ["? te espera a ti", "… 3 more"],
+            ["? it is waiting for you", "… 3 more"],
             "the claim has to be the first thing painted, and what is missing has to be said"
         );
     }
 
     /// **The finished does not go out by falling silent.** Whoever finished stops publishing by
-    /// definition, so the silence does not belie its «terminó y nadie lo ha mirado»: it is its
-    /// normal state. Without this exception, half an hour after finishing —the default deadline— everything
-    /// finished would be painted dimmed, and finding in the morning what finished at night is exactly what
-    /// it is for.
+    /// definition, so the silence does not belie its «it finished and nobody looked»: it is
+    /// its normal state. Without this exception, half an hour after finishing —the default deadline—
+    /// everything finished would be painted dimmed, and finding in the morning what finished at night
+    /// is exactly what it is for.
     ///
     /// **And the application keeps confessing the silence in its line**: what the exception changes is the
     /// color of the claim, not what the panel tells.
@@ -2932,7 +2981,7 @@ mod tests {
 
         // **It is searched in the row of ITS key, not in the file.** A `contains` over the whole document
         // passes with the three phrases **rotated among classes** —checked by measuring it— and with any
-        // loose fragment: «a ti» is inside «te espera a ti». That is exactly what the message
+        // loose fragment: «for you» is inside «it is waiting for you». That is exactly what the message
         // below says it prevents, so the loose `contains` did not cover its own promise. The row is
         // identified by the contract's key, which goes in the first column.
         for (class, key) in [
@@ -2951,9 +3000,15 @@ mod tests {
                     )
                 });
             // **And the WHOLE phrase is compared, not whether it is inside.** A `contains` over the row
-            // passes with the phrase truncated —«te espera» is inside «te espera a ti»—, and the
-            // long phrase is exactly what its comment defends: the «a ti» is what separates it from the
-            // second. So what the row publishes as a phrase is taken out and they are compared by equality.
+            // passes with the phrase truncated —«it is waiting» is inside «it is waiting for you»—, and
+            // the long phrase is exactly what its comment defends: the «for you» is what separates it from
+            // the second. So what the row publishes as a phrase is taken out and they are compared by equality.
+            //
+            // **What the colon cuts off is the gloss, and that is the row's shape rather than a shortcut.**
+            // The `wait` row reads «**it is waiting for you**: a question, a permission, a decision»: the
+            // phrase is what the panel paints and the rest explains it to whoever writes the file. So a row
+            // growing a gloss is accepted on purpose; a row changing the words before the colon is not.
+            // Whole means whole up to that separator, which is the honest way to say it.
             let published = row
                 .split('|')
                 .nth(2)

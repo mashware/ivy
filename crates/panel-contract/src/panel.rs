@@ -51,7 +51,9 @@ pub struct Panel {
     /// later: its absence is not an error.
     pub version: Option<u64>,
     /// What the producer says about when it published, as is, **as text and uninterpreted**. It is
-    /// painted; it is not used to compute the age — see [`Panel::written_at`].
+    /// neither painted yet nor used to compute the age — the age comes from the file's own date, see
+    /// [`Panel::written_at`], and `docs/04-contrato-panel.md` records that this field is read and not
+    /// painted.
     pub updated_at: Option<String>,
     /// What the producer is working on. Free text of its own, and painted literally: translating it
     /// to a color or an icon would be interpreting its vocabulary, and the vocabulary belongs to
@@ -136,9 +138,9 @@ pub enum Mark {
 pub enum Attention {
     /// **It is waiting for you**: a question, a permission, a decision.
     Wait,
-    /// Blocked by something that is not you.
+    /// Stuck on something else, not you.
     Block,
-    /// Finished, and nobody has looked at it.
+    /// It finished and nobody looked.
     Done,
 }
 

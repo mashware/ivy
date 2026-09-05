@@ -1,768 +1,780 @@
-# Panorama — quién hay y qué robarle
+# Landscape — who is here and what to steal from them
 
-Agosto de 2026. Ordenado por categorías, con lo aprovechable de cada uno.
-Los detalles de *cómo está construido* cada terminal están en [06-referencias.md](06-referencias.md);
-esto es el mapa del territorio.
+August 2026. Sorted by category, with what is worth taking from each one.
+The details of *how* each terminal *is built* are in [06-referencias.md](06-referencias.md);
+this is the map of the territory.
 
-**Si solo vienes a por una cosa, ve a [«En qué nos diferenciamos»](#en-qué-nos-diferenciamos--agosto-2026):**
-el resumen de los ocho análisis de este mes, con lo que ya no nos diferencia y las tres cosas que
-quedan.
+**If you only came for one thing, go to [«How we differ»](#how-we-differ--august-2026):**
+the summary of this month's eight analyses, with what no longer sets us apart and the three things
+that remain.
 
 ---
 
-## A. Terminales con motor y UI propios
+## A. Terminals with their own engine and UI
 
-Máximo control y rendimiento; te toca dibujar cada botón.
+Maximum control and performance; you get to draw every button yourself.
 
-| | Stack | Aprovechable |
+| | Stack | Worth taking |
 |---|---|---|
-| **Alacritty** | Rust, GPU | Su motor (`alacritty_terminal`) **es nuestra dependencia** |
-| **WezTerm** | Rust, GPU | Multiplexor propio con sesiones desacoplables; config en Lua ejecutable; `wezterm cli` como superficie de control |
-| **Kitty** | C + Python | Protocolo gráfico propio (imágenes en el terminal), API de scripting |
-| **Ghostty** | Zig (`libghostty`) + UI nativa por plataforma | **El modelo de separación**: núcleo compartido, interfaz nativa en cada sistema |
-| **Warp** | Rust + UI propia sobre `wgpu` | **Bloques de comando**: cada comando y su salida son un objeto que seleccionas, pliegas y compartes. **Desde 2026 es también orquestador de agentes y open source — ver E5, es el competidor más serio de la lista** |
-| **Rio**, **Contour**, **Foot** | Rust / C++ / C | Nicho; poco que copiar para este caso |
+| **Alacritty** | Rust, GPU | Its engine (`alacritty_terminal`) **is our dependency** |
+| **WezTerm** | Rust, GPU | Its own multiplexer with detachable sessions; config in executable Lua; `wezterm cli` as a control surface |
+| **Kitty** | C + Python | Its own graphics protocol (images in the terminal), scripting API |
+| **Ghostty** | Zig (`libghostty`) + native UI per platform | **The separation model**: shared core, native interface on every system |
+| **Warp** | Rust + its own UI on `wgpu` | **Command blocks**: each command and its output are an object you select, fold and share. **Since 2026 it is also an agent orchestrator and open source — see E5, it is the most serious competitor on the list** |
+| **Rio**, **Contour**, **Foot** | Rust / C++ / C | Niche; little to copy for this case |
 
 ---
 
-## B. Terminales sobre un toolkit
+## B. Terminals on top of a toolkit
 
-Heredan botones, menús y arrastrar-y-soltar. A cambio, atados a una plataforma.
+They inherit buttons, menus and drag-and-drop. In exchange, they are tied to one platform.
 
-| | Stack | Aprovechable |
+| | Stack | Worth taking |
 |---|---|---|
-| **Tilix** | VTE + GTK3 | **El modelo de divisiones que queremos**: árbol de paneles, arrastrar terminales para recolocar, sesiones guardables |
-| **Ptyxis** | VTE (GTK4, GPU) + libadwaita | Integración por contenedor (Podman/Toolbx/Distrobox) como concepto de "entorno por pestaña" |
-| **Konsole** | Qt | Perfiles y divisiones maduras |
+| **Tilix** | VTE + GTK3 | **The pane model we want**: a tree of panes, dragging terminals to rearrange them, saveable sessions |
+| **Ptyxis** | VTE (GTK4, GPU) + libadwaita | Container integration (Podman/Toolbx/Distrobox) as a concept of "one environment per tab" |
+| **Konsole** | Qt | Mature profiles and panes |
 
 ---
 
-## C. Terminales-espacio de trabajo
+## C. Workspace terminals
 
-Aquí el terminal deja de ser una rejilla de caracteres y pasa a ser un lienzo. **La categoría
-más cercana a lo que queremos.**
+Here the terminal stops being a grid of characters and becomes a canvas. **The category
+closest to what we want.**
 
-| | Stack | Aprovechable |
+| | Stack | Worth taking |
 |---|---|---|
-| **Wave Terminal** | Electron | **Bloques**: la ventana se compone de bloques (terminal, editor, previsualización de Markdown/JSON/imagen) y las pestañas se agrupan en *workspaces* desde una barra lateral. Es nuestra estructura con otro nombre |
-| **Extraterm** | Electron | **Lo más interesante de toda la lista** (ver abajo) |
-| **Tabby** | Electron | Gestor de SSH integrado, ecosistema de plugins, buen soporte en Windows |
-| **Hyper** | Electron | Extensiones triviales de escribir; lento y pesado — el aviso de por dónde no ir |
-| **VS Code** | Electron + xterm.js | Terminal integrado con divisiones y pestañas a escala de millones de usuarios |
+| **Wave Terminal** | Electron | **Blocks**: the window is composed of blocks (terminal, editor, Markdown/JSON/image preview) and the tabs are grouped into *workspaces* from a sidebar. It is our structure under another name |
+| **Extraterm** | Electron | **The most interesting thing on the whole list** (see below) |
+| **Tabby** | Electron | Built-in SSH manager, plugin ecosystem, good support on Windows |
+| **Hyper** | Electron | Extensions that are trivial to write; slow and heavy — the warning about where not to go |
+| **VS Code** | Electron + xterm.js | Built-in terminal with panes and tabs at a scale of millions of users |
 
-### Extraterm merece párrafo aparte
+### Extraterm deserves a paragraph of its own
 
-Envuelve **cada comando en un marco** con su salida dentro, coloreado según el resultado: azul
-si funcionó, rojo si falló. Y sobre esos marcos construye cosas que ningún otro terminal tiene:
+It wraps **each command in a frame** with its output inside, colored according to the result: blue
+if it worked, red if it failed. And on top of those frames it builds things no other terminal has:
 
-- La salida de un comando es **editable en el sitio**
-- El comando `from` **reutiliza la salida de un comando anterior como entrada** de otro
-- Modo cursor para navegar el scrollback como un editor de texto
-- `show` para ver ficheros, imágenes y código resaltado dentro del terminal
-- Subida y descarga de ficheros que funciona **incluso a través de SSH**
+- The output of a command is **editable in place**
+- The `from` command **reuses the output of an earlier command as the input** of another
+- A cursor mode to navigate the scrollback like a text editor
+- `show` to view files, images and highlighted code inside the terminal
+- File upload and download that works **even through SSH**
 
-Eso es OSC 133 llevado hasta el final. Y es directamente aplicable: si la app sabe dónde
-empieza y acaba cada comando, el panel puede ofrecer «manda esta salida al agente» o
-«reintenta este comando» sin que nadie copie y pegue nada.
+That is OSC 133 taken all the way. And it is directly applicable: if the app knows where
+each command starts and ends, the panel can offer «send this output to the agent» or
+«retry this command» without anyone copying and pasting anything.
 
 ---
 
-## D. Multiplexores
+## D. Multiplexers
 
-| | Aprovechable |
+| | Worth taking |
 |---|---|
-| **tmux** | El sustrato sobre el que está construido medio espacio de orquestación (categoría E). Sesiones persistentes, `send-keys`, `capture-pane` |
-| **Zellij** | Rust; **su propia interfaz está hecha de plugins WASM**, barra clicable, paneles flotantes movibles con el ratón, arrastrar bordes para redimensionar |
+| **tmux** | The substrate on which half of the orchestration space (category E) is built. Persistent sessions, `send-keys`, `capture-pane` |
+| **Zellij** | Rust; **its own interface is made of WASM plugins**, a clickable bar, floating panes you can move with the mouse, dragging borders to resize |
 
 ---
 
-## E. Orquestadores de agentes — el espacio nuevo
+## E. Agent orchestrators — the new space
 
-Nacido en 2025-2026. **Todos comparten el mismo patrón: un git worktree por agente, un panel
-para ver qué hace cada uno, y revisión de diffs antes de fusionar.**
+Born in 2025-2026. **They all share the same pattern: one git worktree per agent, a panel
+to see what each one is doing, and diff review before merging.**
 
-### E1 — Los que esconden el terminal
+### E1 — The ones that hide the terminal
 
-Presentan tablero o dashboard; la consola queda debajo.
+They present a board or dashboard; the console sits underneath.
 
-| | Qué es | Nota |
+| | What it is | Note |
 |---|---|---|
-| **Conductor** | App de escritorio: agentes Claude Code / Codex / Cursor en paralelo, cada uno en su worktree, con panel visual y revisión de diffs | **Solo macOS y propietario.** Ver abajo |
-| **Crystal → Nimbalyst** | Electron; varias sesiones de Claude Code en worktrees, seguimiento de conversación, operaciones git integradas | Crystal es el nombre antiguo |
-| **Vibe Kanban** | CLI + web, tablero kanban; cada tarea en su worktree; soporta Claude Code, Codex, Amp, Cursor CLI, Gemini | **La empresa detrás cerró en abril de 2026**; sigue como open source comunitario |
-| **Cline Kanban** | Servidor local + tablero en el navegador; cada tarjeta es una tarea con su worktree efímero y su terminal. Agnóstico de agente (Claude Code, Codex, opencode, Cline CLI). Cadenas de dependencias, cron, hooks de aprobación, headless en CI | **El más cercano de toda la lista.** Ver abajo |
+| **Conductor** | Desktop app: Claude Code / Codex / Cursor agents in parallel, each in its own worktree, with a visual panel and diff review | **macOS only and proprietary.** See below |
+| **Crystal → Nimbalyst** | Electron; several Claude Code sessions in worktrees, conversation tracking, built-in git operations | Crystal is the old name |
+| **Vibe Kanban** | CLI + web, kanban board; each task in its own worktree; supports Claude Code, Codex, Amp, Cursor CLI, Gemini | **The company behind it shut down in April 2026**; it continues as community open source |
+| **Cline Kanban** | Local server + board in the browser; each card is a task with its own ephemeral worktree and its own terminal. Agent-agnostic (Claude Code, Codex, opencode, Cline CLI). Dependency chains, cron, approval hooks, headless in CI | **The closest one on the whole list.** See below |
 
-### Conductor merece párrafo aparte, porque es el que obliga a afinar la tesis
+### Conductor deserves a paragraph of its own, because it is the one that forces the thesis to be sharpened
 
-Tres paneles: barra lateral de workspaces (cada uno con nombre de ciudad), **chat en el centro**, y a
-la derecha el diff en vivo más el terminal integrado. El chat no es el TUI real del agente: es
-interfaz propia, así que consumen el **stream** del harness en vez de hospedar su pintado. De ahí que
-esté en E1 — el terminal es un panel secundario.
+Three panels: a workspace sidebar (each one named after a city), **chat in the center**, and on
+the right the live diff plus the built-in terminal. The chat is not the agent's real TUI: it is
+their own interface, so they consume the harness **stream** instead of hosting its painting. Hence it
+sits in E1 — the terminal is a secondary panel.
 
-**Lo que enseña, y por qué importa.** Según reseñas de terceros muestra **recuento de tokens y coste
-debajo de cada respuesta, y un aviso cuando el agente se acerca al límite de contexto**. *(No
-verificado: no aparece en su documentación oficial, sale de Grokipedia y reseñas, y es macOS, así que
-tampoco se ha podido comprobar ejecutándolo.)* Si es cierto, es el único de la lista que enseña esos
-datos concretos.
+**What it shows, and why it matters.** According to third-party reviews it shows **a token count and
+cost under each answer, and a warning when the agent approaches the context limit**. *(Not
+verified: it does not appear in their official documentation, it comes from Grokipedia and reviews,
+and it is macOS, so it could not be checked by running it either.)* If it is true, it is the only one
+on the list that shows those specific data.
 
-**Y aun así no es el panel que queremos, y aquí está la distinción que hay que tener clara.** El eje
-no es **cuánto** dato se enseña, es **quién decide qué se ve**. Conductor elige tres métricas y las
-pinta; aunque eligiera cuarenta, las seguiría eligiendo él. Nuestro panel es texto libre que escribe
-el productor: en qué paso va la tarea, qué la tiene bloqueada, y **lo que al usuario de esa división
-le dé la gana poner** — pidiéndoselo a su propio agente, sin que nadie haya tenido que diseñar antes
-ese campo. Los tokens y el coste son un **extra** del contrato, no su razón de ser.
+**And even so it is not the panel we want, and here is the distinction that has to be kept clear.**
+The axis is not **how much** data is shown, it is **who decides what is seen**. Conductor picks three
+metrics and paints them; even if it picked forty, it would still be the one picking. Our panel is
+free text written by the producer: what step the task is at, what has it blocked, and **whatever the
+user of that pane feels like putting there** — by asking their own agent for it, without anyone
+having had to design that field beforehand. Tokens and cost are an **extra** of the contract, not its
+reason to exist.
 
-Las tres consecuencias de haberlo construido leyendo el stream:
+The three consequences of having built it by reading the stream:
 
-1. **Solo vale para Claude Code, Codex y Cursor.** Un CI, un despliegue o un script propio no
-   aparecen en ningún stream.
-2. **No hay ninguna vía de vuelta.** Su referencia de scripts no documenta **ningún** mecanismo para
-   que un proceso del workspace informe a la interfaz: ni fichero, ni comando, ni endpoint. Es el
-   único de los tres recién analizados que no tiene ni el equivalente a `superset-notify`.
-3. **No expone MCP propio:** *«Conductor does not define a separate MCP config format. It uses the
-   MCP configuration that Claude Code and Codex load for the session.»* Solo pasa la configuración
-   del agente, así que no existe el canal agente → app de **D5**.
+1. **It only works for Claude Code, Codex and Cursor.** A CI, a deployment or a script of your own do
+   not appear in any stream.
+2. **There is no way back.** Their scripting reference documents **no** mechanism at all for
+   a process of the workspace to report to the interface: no file, no command, no endpoint. It is the
+   only one of the three just analyzed that does not even have the equivalent of `superset-notify`.
+3. **It exposes no MCP of its own:** *«Conductor does not define a separate MCP config format. It uses the
+   MCP configuration that Claude Code and Codex load for the session.»* It only passes on the agent's
+   configuration, so the agent → app channel of **D5** does not exist.
 
-**Sus hooks son de worktree, no de agente** — `pre-setup`, `post-setup`, `pre-run`, `post-run`,
-`pre-archive`, `post-archive`, en `.conductor/settings.toml`. Preparar, arrancar y limpiar; nadie
-publica estado ahí. E inyectan `CONDUCTOR_WORKSPACE_PATH`, `CONDUCTOR_ROOT_PATH`,
-`CONDUCTOR_WORKSPACE_NAME` y `CONDUCTOR_PORT`: hay identidad por división, pero para nombrar recursos
-y repartir puertos, no para publicar nada. **D7** confirmado en la forma, no en el propósito.
+**Their hooks are worktree hooks, not agent hooks** — `pre-setup`, `post-setup`, `pre-run`, `post-run`,
+`pre-archive`, `post-archive`, in `.conductor/settings.toml`. Prepare, start and clean up; nobody
+publishes state there. And they inject `CONDUCTOR_WORKSPACE_PATH`, `CONDUCTOR_ROOT_PATH`,
+`CONDUCTOR_WORKSPACE_NAME` and `CONDUCTOR_PORT`: there is identity per pane, but for naming resources
+and handing out ports, not for publishing anything. **D7** confirmed in its shape, not in its purpose.
 
-### E5 — Warp: el que cumple las cinco condiciones
+### E5 — Warp: the one that meets all five conditions
 
-Estaba en la categoría A por sus bloques de comando, y en 2026 se mudó de categoría con dos cambios:
+It was in category A for its command blocks, and in 2026 it changed category with two changes:
 
-- **14 de abril de 2026** — soporte universal de agentes: Claude Code, Codex, Gemini CLI y opencode
-  integrados **como ciudadanos de primera clase**, no como procesos de shell cualesquiera.
-- **30 de abril de 2026** — **open source**. 64.132 estrellas y movimiento diario.
+- **14 April 2026** — universal agent support: Claude Code, Codex, Gemini CLI and opencode
+  integrated **as first-class citizens**, not as just any shell processes.
+- **30 April 2026** — **open source**. 64 132 stars and daily movement.
 
-Y tiene un **Agent Management Panel**: el estado de todos los agentes de todas las sesiones, con cinco
-valores (`Working`, `Blocked`, `Canceled`, `Failed/Errored`, `Success`), cancelar en marcha, ver
-cuáles esperan entrada o han fallado, y **saltar al pane asociado**.
+And it has an **Agent Management Panel**: the state of every agent of every session, with five
+values (`Working`, `Blocked`, `Canceled`, `Failed/Errored`, `Success`), cancelling one mid-flight,
+seeing which ones are waiting for input or have failed, and **jumping to the associated pane**.
 
-**Lo que el punto 3 de las conclusiones llamaba «la casilla libre» era: abierto + multiplataforma +
-el terminal como ciudadano de primera. Warp cumple las tres, y es el único de la lista que lo hace:**
+**What point 3 of the conclusions called «the free square» was: open + cross-platform +
+the terminal as a first-class citizen. Warp meets all three, and it is the only one on the list that
+does:**
 
 | | |
 |---|---|
-| Terminal nativo propio, GPU, no navegador | ✅ |
-| macOS, Linux y Windows — nuestro **D1** | ✅ |
-| Hospeda Claude Code, Codex, Gemini CLI, opencode | ✅ |
-| Panel con el estado de todos y salto a la división | ✅ |
+| Its own native terminal, GPU, not a browser | ✅ |
+| macOS, Linux and Windows — our **D1** | ✅ |
+| Hosts Claude Code, Codex, Gemini CLI, opencode | ✅ |
+| A panel with everyone's state and a jump to the pane | ✅ |
 | Open source | ✅ |
 
-**Lo que sigue faltándoles, verificado en su código y no en su web:**
+**What they are still missing, verified in their code and not on their website:**
 
-1. **La lista de productores es un `enum` compilado en la app.** Hay un `trait ThirdPartyHarness` con
-   una implementación por agente —`harness/claude_code.rs`, `harness/codex.rs`,
-   `harness/gemini.rs`— y un `enum Harness` cerrado. Mismo patrón que Superset, pero dentro del
-   binario: un CI, un despliegue o un script propio no entran sin un *pull request* a Warp.
-2. **Cinco estados y ninguna vía de entrada.** Su documentación no describe fichero, comando ni
-   endpoint por el que un proceso arbitrario publique en ese panel.
-3. **Es un panel de gestión, no un panel por división.** Vive arriba a la derecha y es una lista de
-   sesiones con su semáforo, para decidir a cuál vas. No es un lienzo por división cuyo contenido
-   escriba quien trabaja.
+1. **The list of producers is an `enum` compiled into the app.** There is a `trait ThirdPartyHarness`
+   with one implementation per agent —`harness/claude_code.rs`, `harness/codex.rs`,
+   `harness/gemini.rs`— and a closed `enum Harness`. The same pattern as Superset, but inside the
+   binary: a CI, a deployment or a script of your own do not get in without a *pull request* to Warp.
+2. **Five states and no way in.** Their documentation describes no file, command or
+   endpoint through which an arbitrary process could publish into that panel.
+3. **It is a management panel, not a panel per pane.** It lives in the top right and it is a list of
+   sessions with their traffic light, to decide which one you go to. It is not a canvas per pane
+   whose content is written by whoever does the work.
 
-**Warp Agent CLI es otro producto, y no compite con nosotros.** Es el agente propio de Warp extraído
-a un binario que corre **en cualquier terminal**, incluso por SSH sin instalar nada en el remoto, con
-su propio multiplexor de PTYs «parecido a tmux», enrutado automático de modelos y subagentes locales
-y en la nube. Se factura **inferencia a coste de API, sin margen**. Compite con Claude Code — y es un
-**productor potencial de `panel.json`**, igual que Cline IDE.
+**Warp Agent CLI is another product, and it does not compete with us.** It is Warp's own agent pulled
+out into a binary that runs **in any terminal**, even over SSH without installing anything on the
+remote machine, with its own «tmux-like» PTY multiplexer, automatic model routing and subagents both
+local and in the cloud. **Inference is billed at API cost, with no margin.** It competes with Claude
+Code — and it is a **potential producer of `panel.json`**, just like Cline IDE.
 
-**La oportunidad que trae, y que toca D3.** Lo liberado no es todo igual; textual de su README:
+**The opportunity it brings, and it touches D3.** Not everything released is the same; verbatim from
+their README:
 
 > Warp's UI framework (the `warpui_core` and `warpui` crates) are licensed under the **MIT license**.
 > The rest of the code in this repository is licensed under the **AGPL v3**.
 
-Verificado en el `Cargo.toml` de los dos crates: `license = "MIT"`. Existe por tanto **un framework de
-UI en Rust, con GPU, licencia permisiva y probado en un terminal multiplataforma de verdad**. Es un
-tercer candidato para [02-decisiones.md](02-decisiones.md) → D3, anotado allí con sus dos cautelas:
-no está verificado que `warpui` sea usable de forma independiente —puede arrastrar dependencias de
-crates AGPL del mismo repositorio—, y del resto del código no se copia nada a un proyecto que no sea
-AGPL.
+Verified in the `Cargo.toml` of both crates: `license = "MIT"`. So there exists **a UI framework in
+Rust, with GPU, a permissive license and proven in a real cross-platform terminal**. It is a
+third candidate for [02-decisiones.md](02-decisiones.md) → D3, noted there with its two cautions:
+it is not verified that `warpui` is usable independently —it may drag in dependencies on
+AGPL crates from the same repository—, and nothing from the rest of the code gets copied into a
+project that is not AGPL.
 
-**El riesgo, y es el más alto de todo este panorama.** Con Cline y con Xirp la frase era «si publican
-un formato abierto, se llevan el diferenciador». Con Warp es peor por dos motivos: **ya tienen todo lo
-demás**, y **ya son open source con 64k estrellas**, así que no hace falta que la idea se les ocurra a
-ellos — se la puede proponer cualquiera en un *pull request*. Lo que nos queda es una sola cosa, y
-conviene tenerla clarísima: **que el contenido del panel de cada división lo decida quien trabaja, y
-que quien trabaja pueda ser cualquiera.**
+**The risk, and it is the highest in this whole landscape.** With Cline and with Xirp the sentence
+was «if they publish an open format, they take the differentiator». With Warp it is worse for two
+reasons: **they already have everything else**, and **they are already open source with 64k stars**,
+so the idea does not even have to occur to them — anyone can propose it in a *pull request*. What we
+have left is one single thing, and it is worth being crystal clear about it: **that the content of
+each pane's panel is decided by whoever does the work, and that whoever does the work can be
+anyone.**
 
-### E6 — cmux: el único con el canal abierto, y el que enseña dónde está el límite
+### E6 — cmux: the only one with an open channel, and the one that shows where the limit is
 
-Terminal nativo de macOS en **Swift + AppKit**, usando **`libghostty` como librería** — no un fork.
-Es nuestro **D2** aplicado y el modelo de separación de Ghostty que la categoría A ya elogiaba.
-**GPL-3.0-or-later**, gratis, solo macOS (iOS en TestFlight). Pestañas verticales, divisiones en las
-dos direcciones, navegador integrado, y una barra lateral que muestra por pestaña la rama de git, el
-PR enlazado, el directorio, **los puertos a la escucha** y el texto de la última notificación.
+A native macOS terminal in **Swift + AppKit**, using **`libghostty` as a library** — not a fork.
+It is our **D2** applied and the Ghostty separation model that category A already praised.
+**GPL-3.0-or-later**, free, macOS only (iOS on TestFlight). Vertical tabs, splitting in both
+directions, a built-in browser, and a sidebar that shows per tab the git branch, the
+linked PR, the directory, **the listening ports** and the text of the last notification.
 
-**Dos cosas lo separan de todo lo demás de esta categoría:**
+**Two things separate it from everything else in this category:**
 
-1. **No tiene adaptadores.** *«cmux es un terminal, así que cualquier agente que corra en un terminal
-   funciona»* — Claude Code, Codex, opencode, Gemini CLI, Kiro, Aider, Goose, Amp, Cline, Cursor
-   Agent. Ni el `enum Harness` de Warp ni los diez wrappers de Superset. Y cuando un agente lanza
-   subagentes, los convierte en **panes y divisiones nativas** en vez de procesos ocultos.
-2. **Tiene canal abierto de verdad.** Las notificaciones entran por **OSC 777** (título y cuerpo),
-   **OSC 99** (el de Kitty: además subtítulo e identificadores), el comando `cmux notify` o hooks de
-   agente. **Cualquier proceso puede emitirlas**: un CI, un script, un cron. Es lo más cerca que
-   nadie ha estado de este contrato.
+1. **It has no adapters.** *«cmux is a terminal, so any agent that runs in a terminal
+   works»* — Claude Code, Codex, opencode, Gemini CLI, Kiro, Aider, Goose, Amp, Cline, Cursor
+   Agent. Neither Warp's `enum Harness` nor Superset's ten wrappers. And when an agent launches
+   subagents, it turns them into **native panes, split in the window**, instead of hidden processes.
+2. **It has a genuinely open channel.** Notifications come in through **OSC 777** (title and body),
+   **OSC 99** (Kitty's: with a subtitle and identifiers as well), the `cmux notify` command or agent
+   hooks. **Any process can emit them**: a CI, a script, a cron job. It is the closest anyone
+   has come to this contract.
 
-Y su **socket API** hace lo que nuestro canal MCP: crear workspaces, abrir divisiones, mandar
-entrada, **leer el contenido de la pantalla**, capturas y pilotar el navegador.
+And its **socket API** does what our MCP channel does: creating workspaces, opening panes, sending
+input, **reading the contents of the screen**, screenshots and driving the browser.
 
-**Por qué aun así no es este panel — y el límite es estructural, no de madurez:**
+**Why it is still not this panel — and the limit is structural, not a matter of maturity:**
 
-- **El payload es una línea de texto, y es efímero.** Título, subtítulo, cuerpo. Sin progreso, sin
-  pasos, sin listas, sin bloqueos. Y el ciclo de vida es *recibida → sin leer → leída → borrada*:
-  **desaparece al leerla**. La barra lateral guarda «la última notificación», una línea. Eso contesta
-  «pasó algo», no «por dónde va esto»; a las dos horas no contesta nada.
-- **OSC viaja dentro del flujo del terminal.** Solo lo emite lo que esté dentro de ese PTY, mezclado
-  con la salida del programa. `panel.json` es **fuera de banda**: lo escribe un proceso que no vive
-  en esa división —un CI en otra máquina, un cron, un servicio— sin ensuciar el scrollback ni competir
-  con el pintado de una TUI.
-- **Una notificación no puede decir «sigo vivo».** El `updated_at` con `stale_after_minutes` delata
-  al productor que murió a mitad; OSC no tiene dónde poner eso.
+- **The payload is one line of text, and it is ephemeral.** Title, subtitle, body. No progress, no
+  steps, no lists, no blockers. And the life cycle is *received → unread → read → deleted*:
+  **it disappears when you read it**. The sidebar keeps «the last notification», one line. That
+  answers «something happened», not «where does this stand»; two hours later it answers nothing.
+- **OSC travels inside the terminal's stream.** Only what is inside that PTY emits it, mixed
+  in with the program's output. `panel.json` is **out of band**: it is written by a process that does
+  not live in that pane —a CI on another machine, a cron job, a service— without dirtying the
+  scrollback or competing with a TUI's painting.
+- **A notification cannot say «I am still alive».** The `updated_at` with `stale_after_minutes` gives
+  away the producer that died halfway through; OSC has nowhere to put that.
 
-**Lo que hay que robarles, y es de las mejores ideas del panorama: entender OSC 777 y 99 además del
-contrato propio.** Son estándares que ya emiten Kitty, rxvt y media docena de herramientas, así que
-soportarlos da compatibilidad gratis con todo lo que hoy notifica, sin pedirle a nadie que adopte
-`panel.json`. El contrato para quien quiera un panel; los OSC para que el resto funcione sin cambiar
-nada.
+**What has to be stolen from them, and it is one of the best ideas in the landscape: understanding
+OSC 777 and 99 as well as our own contract.** They are standards that Kitty, rxvt and half a dozen
+tools already emit, so supporting them gives free compatibility with everything that notifies today,
+without asking anyone to adopt `panel.json`. The contract for whoever wants a panel; the OSC
+sequences so that the rest works without changing anything.
 
-### Los siete analizados, en fila
+### The seven analyzed, side by side
 
 | | Xirp (E3) | Superset (E4) | Conductor | **Warp (E5)** | **cmux (E6)** | **Orca (E7)** | **Herdr (E8)** |
 |---|---|---|---|---|---|---|---|
-| El terminal es | de primera clase | dentro del navegador | un panel secundario | **de primera clase** | **de primera clase** | de primera clase, en Electron | **el sustrato: es el multiplexor** |
-| Plataformas | macOS | macOS + AppImage | macOS | **las tres** | macOS | **las tres + móvil** | **las tres, un binario** |
-| Abierto | no | ELv2 | no | **AGPL + UI en MIT** | **GPL-3.0+** | **MIT** | **Apache-2.0** |
-| Agentes que acepta | 3, con adaptador | 10, con adaptador | 3, con adaptador | 5, `enum` compilado | **cualquiera, sin adaptador** | **cualquiera, sin adaptador** | **cualquiera**; 17 con integración |
-| Quién decide qué se ve | la app (3 constantes) | la app (4 eventos) | la app (sus métricas) | la app (5 estados) | **el productor (texto libre)** | la app (6 indicadores) | la app (4 estados) **+ tokens del productor** |
-| Vía para que publique un tercero | hooks del harness | hooks + `superset-notify` | **ninguna** | **ninguna** | **OSC 777/99, `cmux notify`** | **el título OSC, de facto** | **`report-agent --source custom:*`** |
-| Canal para pilotar la app | MCP | MCP | **no** | sin verificar | socket API | CLI + MCP | **socket NDJSON, 70+ métodos** |
-| Lo publicado es | un estado | un evento | métricas | un estado | **una notificación de una línea** | un estado | **un estado + pares clave-valor** |
-| Persiste cuando vuelves | como estado | no | sí | como estado | **no: se borra al leerla** | como estado | **sí, y sobrevive al reinicio** |
-| **Estado estructurado que elige quien trabaja** | **no** | **no** | **no** | **no** | **no** | **no** | **casi: sin listas, sin marcas, sin fase libre** |
+| The terminal is | first-class | inside the browser | a secondary panel | **first-class** | **first-class** | first-class, in Electron | **the substrate: it is the multiplexer** |
+| Platforms | macOS | macOS + AppImage | macOS | **all three** | macOS | **all three + mobile** | **all three, one binary** |
+| Open | no | ELv2 | no | **AGPL + UI under MIT** | **GPL-3.0+** | **MIT** | **Apache-2.0** |
+| Agents it accepts | 3, with an adapter | 10, with an adapter | 3, with an adapter | 5, compiled `enum` | **any, with no adapter** | **any, with no adapter** | **any**; 17 with an integration |
+| Who decides what is seen | the app (3 constants) | the app (4 events) | the app (its metrics) | the app (5 states) | **the producer (free text)** | the app (6 indicators) | the app (4 states) **+ the producer's tokens** |
+| Way for a third party to publish | harness hooks | hooks + `superset-notify` | **none** | **none** | **OSC 777/99, `cmux notify`** | **the OSC title, de facto** | **`report-agent --source custom:*`** |
+| Channel for driving the app | MCP | MCP | **no** | not verified | socket API | CLI + MCP | **NDJSON socket, 70+ methods** |
+| What is published is | a state | an event | metrics | a state | **a one-line notification** | a state | **a state + key-value pairs** |
+| Persists when you come back | as state | no | yes | as state | **no: it is deleted when read** | as state | **yes, and it survives a restart** |
+| **Structured state chosen by whoever does the work** | **no** | **no** | **no** | **no** | **no** | **no** | **almost: no lists, no marks, no free-text phase** |
 
-La última fila es el proyecto, y las dos de encima explican por qué. Seis de los siete tienen estado
-pero con vocabulario que elige la app; **cmux tiene el canal abierto de verdad y por eso enseña dónde
-está el límite**: lo que cabe por ahí es un aviso de una línea que se borra al leerlo. Nadie tiene lo
-de en medio — un cuerpo estructurado, persistente y escrito en el vocabulario del productor
+The last row is the project, and the two above it explain why. Six of the seven have state
+but with a vocabulary the app picks; **cmux has a genuinely open channel and that is why it shows
+where the limit is**: what fits through there is a one-line notice that is deleted when read. Nobody
+has the thing in between — a structured, persistent body written in the producer's vocabulary
 (**D6**).
 
-**La última columna es la que obliga a afinar todo lo demás.** Herdr sí tiene canal documentado,
-identidad por división y un productor que puede ser cualquiera; lo que no tiene es **cuerpo**: cuatro
-estados suyos y pares clave-valor «solo para mostrar». La casilla vacía se ha estrechado desde
-«nadie abre el canal» hasta **«nadie deja que por el canal viaje algo con forma»**.
+**The last column is the one that forces everything else to be sharpened.** Herdr does have a
+documented channel, identity per pane and a producer that can be anyone; what it does not have is a
+**body**: four states of its own and key-value pairs «for display only». The empty square has
+narrowed from «nobody opens the channel» to **«nobody lets anything with shape travel down the
+channel»**.
 
-**Y Orca obliga a matizar la fila del tercero.** Su canal no lo diseñaron para esto: leen el título
-del terminal, y resulta que un título lo puede escribir cualquiera. Así que un CI **sí** puede
-teñirle un punto de color sin adaptador ninguno, igual que en cmux — pero solo puede decir una de las
-palabras que Orca ya conocía. **Un canal abierto con un vocabulario cerrado sigue siendo un semáforo**,
-y eso es exactamente el límite que este proyecto existe para pasar.
+**And Orca forces the third-party row to be qualified.** They did not design their channel for this:
+they read the terminal title, and it turns out anyone can write a title. So a CI **can** indeed
+tint a colored dot for it with no adapter at all, just as in cmux — but it can only say one of the
+words Orca already knew. **An open channel with a closed vocabulary is still a traffic light**,
+and that is exactly the limit this project exists to get past.
 
-### Cline merece párrafo aparte
+### Cline deserves a paragraph of its own
 
-Son dos productos y solo uno nos toca. **Cline IDE** es un agente dentro del editor: no compite,
-compite con Claude Code. Es un *productor* potencial de `panel.json` — y el ejemplo de siempre de
-panel cerrado, porque su estado solo lo sabe Cline.
+They are two products and only one of them concerns us. **Cline IDE** is an agent inside the editor:
+it does not compete with us, it competes with Claude Code. It is a potential *producer* of
+`panel.json` — and the usual example of a closed panel, because only Cline knows its state.
 
-**Cline Kanban** sí es competencia, y llegó a dos de nuestras conclusiones por su cuenta:
+**Cline Kanban** is competition, and it reached two of our conclusions on its own:
 
-- **Diagnostica lo mismo**: que el cuello de botella ya no es el agente sino el humano que no
-  sabe por cuál de sus ocho terminales va cada cosa.
-- **Confirma D4 desde fuera**: construyeron la orquestación lanzando los binarios oficiales de
-  cada agente en un proceso, no llamando a modelos por API. Es la única vía que preserva la
-  suscripción, y la tomó una empresa con dinero encima. **Verificado en agosto de 2026, y era
-  cierto:** desde el **4 de abril de 2026** las suscripciones Pro, Max y Team **no cubren** el uso a
-  través de herramientas de terceros —opencode, OpenClaw y cualquiera que enrute por OAuth—, y quien
-  integre Claude necesita clave de API con facturación por uso. La cronología entera y lo que
-  significa para este proyecto, en [02-decisiones.md](02-decisiones.md) → D4.
+- **It diagnoses the same thing**: that the bottleneck is no longer the agent but the human who does
+  not know which of their eight terminals each thing is in.
+- **It confirms D4 from outside**: they built the orchestration by launching each agent's official
+  binaries in a process, not by calling models through the API. It is the only route that preserves
+  the subscription, and it was taken by a company with money behind it. **Verified in August 2026,
+  and it was true:** since **4 April 2026** the Pro, Max and Team subscriptions **do not cover** use
+  through third-party tools —opencode, OpenClaw and anything that routes through OAuth—, and anyone
+  integrating Claude needs an API key with pay-per-use billing. The whole timeline and what it
+  means for this project, in [02-decisiones.md](02-decisiones.md) → D4.
 
-Y dejan el hueco por escrito: *«We're not trying to replace your terminal.»* Son una capa encima.
-Nosotros somos la capa de abajo. Las tres diferencias que quedan, y que son la razón de ser del
-proyecto:
+And they put the gap in writing: *«We're not trying to replace your terminal.»* They are a layer on
+top. We are the layer underneath. The three differences that remain, and that are the project's
+reason to exist:
 
-1. **Su terminal está dentro del navegador.** El tablero es un servidor local que abres en una
-   pestaña. Sea cual sea el emulador que embeban, no es una consola con divisiones, ratón y
-   rendimiento medido: es un visor dentro de una tarjeta.
-2. **El estado lo define Cline, no el que trabaja.** Muestran «estado de la tarjeta + última
-   salida del agente»: un vocabulario cerrado, uno por runtime soportado. Un CI, un despliegue o
-   un script tuyo no tiene dónde publicar «me quedan 12k de contexto» o «estoy bloqueado
-   esperando aprobación» — justo lo que no se deduce desde fuera (D6).
-3. **Es tarea-céntrico, no sesión-céntrico.** El modelo es «suelta la tarjeta, dale al play». No
-   cabe ahí una sesión larga de exploración, ni un shell normal al lado de un agente.
+1. **Their terminal is inside the browser.** The board is a local server you open in a
+   tab. Whatever emulator they embed, it is not a console with panes, mouse and
+   measured performance: it is a viewer inside a card.
+2. **The state is defined by Cline, not by whoever does the work.** They show «card state + the
+   agent's last output»: a closed vocabulary, one per supported runtime. A CI, a deployment or
+   a script of yours has nowhere to publish «I have 12k of context left» or «I am blocked
+   waiting for approval» — precisely what cannot be deduced from outside (D6).
+3. **It is task-centric, not session-centric.** The model is «drop the card, hit play». A long
+   exploration session does not fit in there, nor does a normal shell next to an agent.
 
-**El riesgo, dicho claro:** si Cline publica un formato abierto para que cualquier proceso escriba
-en su tarjeta, se lleva nuestro diferenciador de contrato en una release. Lo que no pueden copiar
-barato es el terminal nativo de debajo: el navegador es una decisión estructural suya.
+**The risk, said plainly:** if Cline publishes an open format so that any process can write
+into its card, it takes our contract differentiator in one release. What they cannot copy
+cheaply is the native terminal underneath: the browser is a structural decision of theirs.
 
-### E2 — Los que mantienen el terminal en el centro
+### E2 — The ones that keep the terminal at the center
 
-Interfaz de texto sobre tmux. **Más cerca de nuestra idea**, pero heredan los límites de tmux.
+A text interface on top of tmux. **Closer to our idea**, but they inherit tmux's limits.
 
-| | Qué es |
+| | What it is |
 |---|---|
-| **Claude Squad** | TUI para varias sesiones de agente en paralelo, sobre tmux + worktrees. Claude Code, Codex, opencode, Amp |
-| **amux** (dos proyectos distintos con el mismo nombre) | Uno es un multiplexor de agentes sobre tmux; el otro, un plano de control con dashboard web y móvil para decenas de sesiones |
-| **dmux** | Agentes en paralelo con tmux + worktrees, con hooks en todo el ciclo de vida del worktree |
+| **Claude Squad** | A TUI for several agent sessions in parallel, on top of tmux + worktrees. Claude Code, Codex, opencode, Amp |
+| **amux** (two different projects with the same name) | One is an agent multiplexer on top of tmux; the other, a control plane with a web and mobile dashboard for dozens of sessions |
+| **dmux** | Agents in parallel with tmux + worktrees, with hooks across the whole worktree life cycle |
 
-### E3 — Xirp (Spotify): la casilla de al lado
+### E3 — Xirp (Spotify): the square next door
 
-Beta pública el **10 de agosto de 2026**, salido de **+36.000 sesiones internas** y miles de
-ingenieros. App de escritorio con **sesiones de terminal persistentes** —se cambia de una a otra sin
-perder estado—, vista de rejilla, un worktree por tarea, y Claude Code, Codex y Gemini CLI
-autenticados **por su CLI nativa**. No es E1, porque el terminal no está escondido; no es E2, porque
-no es una TUI sobre tmux. **Es lo más cerca que nadie ha estado de nuestra casilla**, y conviene
-decirlo sin adornos.
+Public beta on **10 August 2026**, out of **36 000+ internal sessions** and thousands of
+engineers. A desktop app with **persistent terminal sessions** —you switch from one to another
+without losing state—, a grid view, one worktree per task, and Claude Code, Codex and Gemini CLI
+authenticated **through their native CLI**. It is not E1, because the terminal is not hidden; it is
+not E2, because it is not a TUI on top of tmux. **It is the closest anyone has come to our square**,
+and that is worth saying without embellishment.
 
-Confirma tres decisiones de golpe:
+It confirms three decisions at once:
 
 | | |
 |---|---|
-| **D4** | Autentica por la CLI oficial de cada agente, no por API — con factura de empresa detrás, que es donde pagar API aparte habría costado menos justificar |
-| **D5** | MCP como canal para meterle contexto a la sesión: *«A session launched from a catalog entity or Portal Workspace can receive relevant context through MCP»* |
-| **D6** | El estado se lo declaran por hooks del harness; no lo deducen del pintado |
+| **D4** | It authenticates through each agent's official CLI, not through the API — with a company invoice behind it, which is exactly where paying for the API separately would have been easiest to justify |
+| **D5** | MCP as the channel for feeding context into the session: *«A session launched from a catalog entity or Portal Workspace can receive relevant context through MCP»* |
+| **D6** | The state is declared to them through harness hooks; they do not deduce it from the painting |
 
-Y lo que **no** hace, que es donde seguimos solos:
+And what it does **not** do, which is where we are still alone:
 
-1. **Tres estados y se acabó.** `Working`, `Idle`, `Waiting for input`, más el nombre de la rama. Ni
-   el paso de la tarea, ni el bloqueo, ni nada que el productor decida poner por su cuenta. Es el
-   nivel 2 del anexo de D6, y no puede crecer al 3 con más hooks: el harness no conoce esa semántica.
-2. **No hay contrato.** El productor de estado tiene que ser un harness que Xirp ya soporte. Un CI,
-   un despliegue o un script propio no tienen dónde escribir.
-3. **macOS solo, cerrado y con cuenta de Spotify obligatoria.**
-4. **Su eje es otro.** El valor gordo es el *contexto organizativo* de Portal/Backstage —catálogo de
-   servicios, ownership, decisiones, documentación autogenerada que realimenta sesiones futuras—.
-   Es una jugada de plataforma de empresa, y buena parte se apaga sin Portal.
+1. **Three states and that is it.** `Working`, `Idle`, `Waiting for input`, plus the branch name.
+   Not the step of the task, not the blocker, not anything the producer decides to put there on its
+   own. It is level 2 of D6's annex, and it cannot grow to level 3 with more hooks: the harness does
+   not know that semantics.
+2. **There is no contract.** The state producer has to be a harness that Xirp already supports. A CI,
+   a deployment or a script of your own have nowhere to write.
+3. **macOS only, closed and with a mandatory Spotify account.**
+4. **Its axis is another one.** The big value is the *organizational context* of Portal/Backstage
+   —service catalog, ownership, decisions, autogenerated documentation that feeds back into future
+   sessions—. It is an enterprise platform play, and much of it switches off without Portal.
 
-**El riesgo, y es el más serio de toda esta lista.** Spotify ya hizo esta jugada exacta: abrió
-Backstage en 2020 y se convirtió en el estándar de facto de los portales de desarrollo. Si repiten
-—abrir Xirp y publicar un formato para que cualquier proceso publique estado— se llevan el
-diferenciador de contrato **y** además tienen el terminal nativo, que es lo que Cline no puede
-copiar barato. Lo que hoy nos deja sitio no es tecnología: es que su producto está atado a Portal y
-a macOS, y que su modelo de estado son tres constantes.
+**The risk, and it is the most serious on this whole list.** Spotify already made this exact play:
+they opened Backstage in 2020 and it became the de facto standard for developer portals. If they
+repeat it —opening Xirp and publishing a format so that any process can publish state— they take the
+contract differentiator **and** on top of that they have the native terminal, which is what Cline
+cannot copy cheaply. What leaves us room today is not technology: it is that their product is tied to
+Portal and to macOS, and that their state model is three constants.
 
-**Fiabilidad de esta ficha.** Los tres estados y los hooks están en sus docs
-([getting-started](https://backstage.spotify.com/docs/xirp/getting-started)); el detalle de interfaz
-viene de prensa secundaria y de documentación de beta escueta. **Nadie del proyecto ha ejecutado la
-app** — es macOS y pide cuenta. Si alguien puede instalarla, el dato que hay que traer es si existe
-algún campo de estado más allá de esos tres.
+**Reliability of this entry.** The three states and the hooks are in their docs
+([getting-started](https://backstage.spotify.com/docs/xirp/getting-started)); the interface detail
+comes from secondary press coverage and from sparse beta documentation. **Nobody on the project has
+run the app** — it is macOS and it asks for an account. If anyone can install it, the fact to bring
+back is whether there is any state field beyond those three.
 
-### E4 — Superset: el producto más completo, sobre el suelo que descartamos
+### E4 — Superset: the most complete product, on the ground we discarded
 
-App de escritorio, **Electron + React + `@xterm/xterm`**, source-available bajo **Elastic License
-2.0** y gratis. Es el más avanzado en producto de toda esta lista: worktree por tarea, revisión de
-diffs con comentarios y edición en línea, terminales persistentes que sobreviven al reinicio,
-divisiones y pestañas, navegador integrado con detección de puertos **por workspace**, agentes
-lanzados **en cron**, servidor MCP para pilotarlo desde otro agente, y workspaces remotos. Soporta
-diez harnesses: Claude Code, Codex, opencode, Cursor Agent, Copilot, Grok, Amp, Gemini, Pi y Mistral
-Vibe.
+A desktop app, **Electron + React + `@xterm/xterm`**, source-available under **Elastic License
+2.0** and free. It is the most advanced in product terms on this whole list: a worktree per task, diff
+review with comments and inline editing, persistent terminals that survive a restart, panes and
+tabs, a built-in browser with port detection **per workspace**, agents launched **on cron**, an MCP
+server for driving it from another agent, and remote workspaces. It supports ten harnesses: Claude
+Code, Codex, opencode, Cursor Agent, Copilot, Grok, Amp, Gemini, Pi and Mistral Vibe.
 
-**Confirma cuatro decisiones, y una de ellas al pie de la letra.** Todo por CLI del agente sin tocar
-API (**D4**); servidor MCP como canal agente → app (**D5**); mecanismo para que el agente declare
-estado en vez de adivinarlo (**D6**); y **inyecta `SUPERSET_TERMINAL_ID` en el entorno del terminal**,
-con los hooks saliendo antes si no está — que es **D7** con otro nombre y la misma función.
+**It confirms four decisions, and one of them to the letter.** Everything through the agent's CLI
+without touching the API (**D4**); an MCP server as the agent → app channel (**D5**); a mechanism for
+the agent to declare state instead of the app guessing it (**D6**); and **it injects
+`SUPERSET_TERMINAL_ID` into the terminal's environment**, with the hooks bailing out early if it is
+not there — which is **D7** under another name and with the same job.
 
-**Dónde no llega:**
+**Where it does not reach:**
 
-1. **Cuatro eventos, y están en su código:** `eventType: "Start" | "Stop" | "PermissionRequest" |
-   "PendingQuestion"`. El payload que viaja es `{terminalId, eventType, agent:{agentId, sessionId}}`.
-   No hay hueco para el paso de la tarea, el bloqueo, ni nada que el productor quiera añadir.
-2. **No hay panel, hay semáforo con campanita.** Indicador naranja en la barra lateral, distintivo en
-   el dock, sonido al terminar y notificación del sistema. Resuelve «a qué división voy», no «por
-   dónde va». Lo más cerca de un contrato es `superset-notify review "…"`: un estado de cuatro más una
-   frase libre, que viaja como texto de notificación y no como contenido de la división.
-3. **Un adaptador por harness, no un contrato.** Instalan un wrapper distinto por agente —
-   `~/.cursor/hooks.json`, un plugin en `~/.config/opencode/plugin/`, un
-   `.github/hooks/superset-notify.json` dentro del worktree que además añaden a `.git/info/exclude`.
-   Diez agentes, diez integraciones que mantener; y un CI o un script propio no entra por esa puerta.
-   Ese mantenimiento es exactamente lo que un contrato abierto se ahorra.
-4. **El suelo es el que ya descartamos.** Electron + xterm.js es el stack de Orca, con medida propia
-   en el anexo «Medido — 8 agosto» de [02-decisiones.md](02-decisiones.md) → D3: escalado negativo,
-   7,1 MiB/s agregados con cuatro divisiones frente a 8,6 con una.
+1. **Four events, and they are in its code:** `eventType: "Start" | "Stop" | "PermissionRequest" |
+   "PendingQuestion"`. The payload that travels is `{terminalId, eventType, agent:{agentId,
+   sessionId}}`. There is no room for the step of the task, for the blocker, or for anything the
+   producer wants to add.
+2. **There is no panel, there is a traffic light with a little bell.** An orange indicator in the
+   sidebar, a badge on the dock, a sound when it finishes and a system notification. It solves «which
+   pane do I go to», not «how is it going». The closest thing to a contract is `superset-notify
+   review "…"`: one state out of four plus a free sentence, which travels as notification text and
+   not as the pane's content.
+3. **One adapter per harness, not a contract.** They install a different wrapper per agent —
+   `~/.cursor/hooks.json`, a plugin in `~/.config/opencode/plugin/`, a
+   `.github/hooks/superset-notify.json` inside the worktree that they also add to
+   `.git/info/exclude`. Ten agents, ten integrations to maintain; and a CI run or a script of your own
+   does not get in through that door. That maintenance is exactly what an open contract saves.
+4. **The ground is the one we already discarded.** Electron + xterm.js is Orca's stack, with a
+   measurement of our own in the «Measured — 8 August 2026» annex of
+   [02-decisiones.md](02-decisiones.md) → D3: negative scaling, 7.1 MiB/s aggregate with four panes
+   against 8.6 with one.
 
-**Y aquí está la evidencia empírica ajena de D6**, que es lo más valioso de esta ficha. Dos
-hallazgos, los dos en su repositorio:
+**And here is somebody else's empirical evidence for D6**, which is the most valuable thing on this
+card. Two findings, both in their own repository:
 
-- **El bug [#5259](https://github.com/superset-sh/superset/issues/5259), abierto.** La notificación
-  de «Task complete» salta **en cada turno del modelo**: una tarea con 63 turnos produjo 63 avisos.
-  La causa es literal — el hook `stop` de Cursor Agent significa *«acabé este turno»* y Superset lo
-  leyó como *«acabé la tarea»*. Ya les pasó (#1785) y el arreglo por *debounce* (#1786) se cerró sin
-  fusionar. **Un evento declarado no basta si la app le pone encima una semántica que el harness no
-  tenía**: falla igual que adivinando. Y no se arregla con un *debounce*, porque el dato que falta no
-  está en ninguna parte del sistema.
-- **Su propio `HOOKS_INVESTIGATION.md`** documenta que el camino de compatibilidad v1 se salta el
-  acotado por identidad: basta que el `session_id` venga del payload del propio agente para que el
-  guard pase, y entonces una sesión ajena hace `curl` al servidor local de notificaciones con los
-  identificadores de panel y terminal vacíos. Es el fallo que **D7** nombra como su razón de ser,
-  documentado por ellos.
+- **Bug [#5259](https://github.com/superset-sh/superset/issues/5259), open.** The «Task complete»
+  notification fires **on every turn of the model**: a task with 63 turns produced 63 alerts. The
+  cause is literal — Cursor Agent's `stop` hook means *«I finished this turn»* and Superset read it as
+  *«I finished the task»*. It had already happened to them (#1785) and the *debounce* fix (#1786) was
+  closed without merging. **A declared event is not enough if the app puts on top of it a semantics
+  the harness never had**: it fails just the same as guessing. And it is not fixed with a *debounce*,
+  because the missing datum is nowhere in the system.
+- **Their own `HOOKS_INVESTIGATION.md`** documents that the v1 compatibility path skips the scoping by
+  identity: it is enough for the `session_id` to come from the agent's own payload for the guard to
+  pass, and then a foreign session `curl`s the local notification server with the pane and terminal
+  identifiers empty. It is the failure **D7** names as its reason for existing, documented by them.
 
-**El riesgo, comparado con Xirp: distinto y menor.** Xirp preocupa por quién está detrás y porque
-tiene el terminal nativo; Superset, por lo lejos que ha llegado en producto. Pero la ELv2 les cierra
-la puerta a volverse estándar como fue Backstage, y su emulador vive en el navegador — la misma
-decisión estructural que ya señalamos en Cline, y que no se cambia sin rehacer el producto.
+**The risk, compared with Xirp: different and smaller.** Xirp is worrying because of who is behind it
+and because it has the native terminal; Superset, because of how far it has got in product terms. But
+the ELv2 closes the door on them becoming a standard the way Backstage was, and their emulator lives
+in the browser — the same structural decision we already pointed out in Cline, and one that does not
+change without redoing the product.
 
-### E7 — Orca: el que ya ganó la adopción, y donde se queda corto
+### E7 — Orca: the one that already won adoption, and where it falls short
 
-App de escritorio **Electron + TypeScript**, licencia **MIT**, de Stably AI (YC W22). Repositorio
-creado el **17 de marzo de 2026**; a 24 de agosto lleva **52.261 estrellas y 3.612 forks**, con
-empujes diarios. En adopción no hay color con nadie más de esta lista, y eso pesa más que cualquier
-ficha técnica: **es el que está definiendo lo que la gente espera de la categoría.**
+A desktop app, **Electron + TypeScript**, **MIT** licence, from Stably AI (YC W22). The repository was
+created on **17 March 2026**; as of 24 August it has **52 261 stars and 3 612 forks**, with daily
+pushes. On adoption there is no contest with anyone else on this list, and that weighs more than any
+technical card: **it is the one defining what people expect from the category.**
 
-**El producto.** Un worktree por tarea; **25-30 agentes** preconfigurados y «cualquiera que corra en
-un terminal» apuntando a su binario; terminales «clase Ghostty» con WebGL, divisiones infinitas y
-scrollback que sobrevive al reinicio; *Design Mode*, que abre una ventana Chromium real por worktree
-para señalar un elemento de la interfaz y mandárselo al agente; diff con anotaciones, GitHub y
-Linear; worktrees por SSH con reconexión; app móvil de acompañamiento; y una CLI para guionizar la
-app desde cualquier shell.
+**The product.** One worktree per task; **25-30 agents** preconfigured and «anything that runs in a
+terminal» pointed at its binary; «Ghostty-class» terminals with WebGL, infinite panes and scrollback
+that survives a restart; *Design Mode*, which opens a real Chromium window per worktree so you can
+point at an interface element and send it to the agent; diffs with annotations, GitHub and Linear;
+worktrees over SSH with reconnection; a companion mobile app; and a CLI for scripting the app from any
+shell.
 
-**Lo que enseña de cada división, que es lo que aquí importa:**
+**What it shows of each pane, which is what matters here:**
 
-| Lo que ves | Qué significa |
+| What you see | What it means |
 |---|---|
-| girando | trabajando |
-| interrogación ámbar | **te espera**: permiso o respuesta |
-| punto esmeralda | terminado, o activo y callado |
-| punto rojo | bloqueado, interrumpido o fallido |
-| punto gris | inactivo |
-| nada | shell sin agente reconocido |
+| spinning | working |
+| amber question mark | **it is waiting on you**: permission or an answer |
+| emerald dot | finished, or active and quiet |
+| red dot | blocked, interrupted or failed |
+| grey dot | idle |
+| nothing | a shell with no recognized agent |
 
-Seis indicadores, los mismos en la pestaña del agente y en la ficha de su worktree, con marca de
-tiempo. Es un semáforo mejor pintado que el de Superset, y con más estados; sigue contestando **«a
-qué división voy»** y no **«por dónde va»**.
+Six indicators, the same ones on the agent's tab and on its worktree's card, with a timestamp. It is a
+better-painted traffic light than Superset's, and with more states; it still answers **«which pane do
+I go to»** and not **«how is it going»**.
 
-**De dónde sale ese estado, y aquí está la parte que hay que leer con cuidado:** *«del OSC title del
-terminal y de los hooks del agente»*. Tiene dos consecuencias opuestas y las dos importan.
+**Where that state comes from, and here is the part to read carefully:** *«from the terminal's OSC
+title and from the agent's hooks»*. It has two opposite consequences and both matter.
 
-- **A su favor, y hay que reconocerlo: el canal está abierto de facto.** El título de un terminal lo
-  emite **cualquier** proceso — un CI, un despliegue, un `printf` en un script. No hace falta ser un
-  agente soportado ni instalar un adaptador. Eso coloca a Orca **al lado de cmux, no al lado de
-  Conductor**: es el segundo de la lista por el que un tercero puede decir algo. Pero lo que cabe por
-  esa puerta es **una palabra del vocabulario que eligió Orca** (`working`, `idle`), y ni siquiera
-  está documentada como contrato: es una consecuencia de mirar el título.
-- **En su contra: para el agente que de verdad les importa no se fían de eso.** A Claude Code le
-  instalan un **hook de status line** que emite los OSC, y además **leen `~/.claude`** para pintar el
-  consumo y la cercanía al límite de tasa. Ir a buscar el estado al **disco privado del harness** es
-  D6 al revés: no lo declara quien trabaja, lo va a espiar la app. Funciona hoy, es un adaptador por
-  agente, y se rompe el día que Anthropic cambie ese formato — que no le debe nada a nadie.
+- **In its favour, and it has to be acknowledged: the channel is de facto open.** A terminal's title is
+  emitted by **any** process — a CI run, a deployment, a `printf` in a script. You do not have to be a
+  supported agent or install an adapter. That puts Orca **alongside cmux, not alongside Conductor**: it
+  is the second on the list through which a third party can say something. But what fits through that
+  door is **one word of the vocabulary Orca chose** (`working`, `idle`), and it is not even documented
+  as a contract: it is a consequence of looking at the title.
+- **Against it: for the agent they really care about, they do not trust that.** For Claude Code they
+  install a **status line hook** that emits the OSC sequences, and on top of that they **read
+  `~/.claude`** to paint the consumption and the closeness to the rate limit. Going to fetch the state
+  from the harness's **private disk** is D6 in reverse: it is not declared by whoever works, the app
+  goes and spies on it. It works today, it is one adapter per agent, and it breaks the day Anthropic
+  changes that format — which it owes nobody.
 
-**Su CLI va en la dirección contraria a la nuestra.** `orca worktree create`, `terminal send`, `wait`,
-`split`, `goto`, `click`, `fill`, `artifacts share`: sirve para que un script **mande** en Orca, no
-para que un proceso de dentro **cuente** lo suyo. No hay comando para publicar estado. Sí tienen
-registro de skills y **MCP**, así que el canal agente → app de **D5** existe.
+**Their CLI goes in the opposite direction from ours.** `orca worktree create`, `terminal send`,
+`wait`, `split`, `goto`, `click`, `fill`, `artifacts share`: it is for a script to **command** Orca,
+not for a process inside to **tell** its own story. There is no command for publishing state. They do
+have a skill registry and **MCP**, so the agent → app channel of **D5** exists.
 
-**Tres cosas que dejan de diferenciarnos por su culpa, y están anotadas arriba:** multiplataforma de
-verdad (las tres, más móvil), hospedar cualquier agente CLI sin adaptador, y **enseñar coste y
-cercanía al límite** — que hasta ahora solo le atribuíamos a Conductor y sin verificar. Orca lo hace
-y se puede comprobar.
+**Three things that stop setting us apart because of it, and they are noted above:** genuinely
+cross-platform (all three, plus mobile), hosting any CLI agent without an adapter, and **showing cost
+and closeness to the limit** — which until now we only attributed to Conductor, and unverified. Orca
+does it and it can be checked.
 
-**Lo que sigue en pie contra él, y son las mismas tres de siempre:** el cuerpo del panel es un
-semáforo de seis y lo elige la app, no hay forma de que el productor escriba una lista de pasos con
-sus marcas, y lo que publica un tercero es una palabra sin persistencia propia. Un CI que quiera
-decir «bloqueado esperando aprobación desde hace 40 minutos» solo puede poner `working`.
+**What still stands against it, and it is the same three as always:** the panel's body is a
+six-state traffic light and the app picks it, there is no way for the producer to write a list of
+steps with their marks, and what a third party publishes is one word with no persistence of its own. A
+CI run that wants to say «blocked waiting for approval for 40 minutes» can only put `working`.
 
-**El suelo es el que ya medimos y descartamos.** Electron + `xterm.js` con WebGL, con medida propia
-en el anexo «Medido — 8 agosto» de [02-decisiones.md](02-decisiones.md) → D3: **escalado negativo**,
-7,1 MiB/s agregados con cuatro divisiones frente a 8,6 con una. A eso se le suma, según reseñas de
-terceros, **400-800 MiB de RAM en reposo** con unos pocos agentes, ~250 MB de instalador, y Linux
-**solo en AppImage**. Su producto esquiva ese techo porque abanica agentes que piensan; el nuestro no
-puede, y por eso D3 sigue decidida.
+**The ground is the one we already measured and discarded.** Electron + `xterm.js` with WebGL, with a
+measurement of our own in the «Measured — 8 August 2026» annex of
+[02-decisiones.md](02-decisiones.md) → D3: **negative scaling**, 7.1 MiB/s aggregate with four panes
+against 8.6 with one. On top of that, according to third-party reviews, **400-800 MiB of RAM at rest**
+with a handful of agents, ~250 MB of installer, and Linux **only as an AppImage**. Their product
+dodges that ceiling because it fans out agents that think; ours cannot, and that is why D3 stays
+decided.
 
-**El riesgo, y es el mayor de toda la lista.** Es el único que junta **adopción masiva + MIT + un
-canal por el que ya entra cualquier proceso**. Lo que le falta para llevarse las patas 1 y 2 no es
-tecnología: es **decidir que el cuerpo del panel lo escriba el productor**. Eso cabe en un *pull
-request* de cualquiera, y con 3.612 forks la probabilidad de que a alguien se le ocurra no es baja.
-Lo que no pueden copiar barato es el suelo nativo: Electron es una decisión estructural suya, igual
-que el navegador lo es en Cline y en Superset.
+**The risk, and it is the biggest on the whole list.** It is the only one that puts together **mass
+adoption + MIT + a channel any process already gets in through**. What it lacks to take legs 1 and 2
+is not technology: it is **deciding that the panel's body is written by the producer**. That fits in a
+*pull request* from anyone, and with 3 612 forks the probability of somebody thinking of it is not
+low. What they cannot copy cheaply is the native ground: Electron is a structural decision of theirs,
+just as the browser is in Cline and in Superset.
 
-**Nota de nombres, para quien busque después:** hay otro proyecto llamado `orca` en GitHub
-(`orca-cli/orca`, un binario Go con cola de revisión unificada). No es este. El de aquí es
+**A note on names, for whoever searches later:** there is another project called `orca` on GitHub
+(`orca-cli/orca`, a Go binary with a unified review queue). It is not this one. The one here is
 [stablyai/orca](https://github.com/stablyai/orca), `onorca.dev`.
 
-### E8 — Herdr: el más cercano de toda la lista, y hay que decirlo sin adornos
+### E8 — Herdr: the closest of the whole list, and it has to be said without embellishment
 
-**No es un orquestador con tablero: es el sustrato.** Multiplexor escrito en **Rust**, TUI dentro de
-tu propio terminal, **Apache-2.0**, arquitectura **cliente-servidor** —el servidor es dueño de todo
-el estado y sobrevive a que te desconectes, así que los agentes siguen corriendo—, sesiones con
-nombre, adjuntar en remoto por SSH y worktrees envolviendo `git worktree`. Su lema es literal: *«the
-runtime your coding agents live on»*. Es tmux con conciencia de agentes, y por eso está aquí y no en
-la categoría D.
+**It is not an orchestrator with a board: it is the substrate.** A multiplexer written in **Rust**, a
+TUI inside your own terminal, **Apache-2.0**, a **client-server** architecture —the server owns all
+the state and survives you disconnecting, so the agents keep running—, named sessions, remote attach
+over SSH, and worktrees wrapping `git worktree`. Its tagline is literal: *«the runtime your coding
+agents live on»*. It is tmux with agent awareness, and that is why it is here and not in category D.
 
-Repositorio creado el **27 de marzo de 2026** — diez días después que Orca — y a 24 de agosto lleva
-**31.888 estrellas y 2.281 forks**, con empujes diarios. **Un solo binario para las tres
-plataformas**, Windows incluido con su propio ConPTY empaquetado.
+The repository was created on **27 March 2026** — ten days after Orca — and as of 24 August it has
+**31 888 stars and 2 281 forks**, with daily pushes. **A single binary for the three platforms**,
+Windows included with its own bundled ConPTY.
 
-**Sus estados, y de dónde salen.** `idle`, `working`, `blocked` —más un `done` que aparece en el API
-y en la barra lateral y su propia documentación marca como raro—, con **acumulación hacia arriba**:
-agente → panel → pestaña → workspace, con prioridad `blocked > working > idle > done`. Un agente
-bloqueado en un workspace de diez pinta el workspace entero de bloqueado. La detección va en capas:
+**Its states, and where they come from.** `idle`, `working`, `blocked` —plus a `done` that appears in
+the API and in the sidebar and that their own documentation marks as rare—, with **accumulation
+upwards**: agent → pane → tab → workspace, with priority `blocked > working > idle > done`. One
+blocked agent in a workspace of ten paints the whole workspace as blocked. The detection goes in
+layers:
 
-1. **Procesos**: reconoce el binario en primer plano (`claude`, `codex`, `pi`…) y marca que ahí vive
-   un agente.
-2. **Heurísticas de pantalla**: sin integración instalada, contrasta **el recorte vivo del buffer de
-   abajo** contra reglas en TOML, mirando además el título del terminal y las secuencias OSC.
-3. **Integraciones**: hooks instalados en la configuración del agente que reportan estado semántico
-   por el socket, y **mandan sobre** lo que dijeron las heurísticas.
+1. **Processes**: it recognizes the foreground binary (`claude`, `codex`, `pi`…) and marks that an
+   agent lives there.
+2. **Screen heuristics**: with no integration installed, it contrasts **the live crop of the buffer at
+   the bottom** against rules in TOML, also looking at the terminal's title and the OSC sequences.
+3. **Integrations**: hooks installed in the agent's configuration that report semantic state over the
+   socket, and that **override** what the heuristics said.
 
-**La capa 2 es exactamente lo que D6 prohíbe, y ellos mismos publican el precio.** Su documentación
-advierte que *«unusual new agent prompts may initially show as idle instead of blocked»* y que la
-detección de bloqueo es «deliberadamente estricta» para los agentes que solo se leen por pantalla. Es
-**la segunda evidencia ajena de D6**, después del bug de los 63 avisos de Superset, y esta vez
-escrita por el propio fabricante en su manual. Y tiene coste medible: la detección pollea cada panel
-**cada 300-500 ms** en su propia tarea, y las reseñas reportan CPU alta con muchos paneles
-desplazándose rápido, con «instala las integraciones» como remedio recomendado.
+**Layer 2 is exactly what D6 forbids, and they publish the price themselves.** Their documentation
+warns that *«unusual new agent prompts may initially show as idle instead of blocked»* and that the
+blocking detection is «deliberately strict» for the agents that are only read off the screen. It is
+**the second piece of outside evidence for D6**, after Superset's bug of the 63 alerts, and this time
+written by the maker itself in its own manual. And it has a measurable cost: the detection polls each
+pane **every 300-500 ms** in its own task, and reviews report high CPU with many panes scrolling fast,
+with «install the integrations» as the recommended remedy.
 
-**Y ahora la parte incómoda: su canal es el más parecido al nuestro que existe.** Esto no es un
-matiz, es el hallazgo de la ficha.
+**And now the uncomfortable part: their channel is the most similar to ours that exists.** This is not
+a nuance, it is the finding of the card.
 
 ```
 herdr pane report-agent "$HERDR_PANE_ID" \
   --source custom:my-agent \
   --agent my-agent \
   --state working \
-  [--seq N] [--message "por qué está bloqueado"] \
+  [--seq N] [--message "why it is blocked"] \
   [--agent-session-id …] [--agent-session-path …]
 ```
 
-- **Inyectan identidad por división en el entorno** — `HERDR_PANE_ID`, `HERDR_BIN_PATH`. Es **D7**,
-  con otro nombre y el mismo propósito, y es el tercero de la lista que lo hace (Superset, Conductor,
-  Herdr).
-- **`--source custom:*` está documentado y abierto a cualquier proceso**, no solo a un agente
-  soportado. Un CI, un despliegue o un script propio entran por la puerta principal, sin adaptador y
-  sin pedirle permiso a nadie. **Esto es la pata 2 del proyecto, hecha por otro y publicada.**
-- **Resuelven dos problemas que nosotros todavía no tenemos resueltos:** `--source` da **autoridad
-  por fuente** —cada integración manda sobre lo suyo y la suelta al salir, así que dos productores
-  sobre la misma división no se pisan— y `--seq` es un número estrictamente creciente con el que
-  **descartan reportes que llegan tarde**. Nuestro `panel.json` es hoy un fichero por división donde
-  gana el último que escribe, sin autoridad ni orden. Ver «Cosas concretas para robar».
-- Su socket es **NDJSON con más de 70 métodos**, versión de protocolo negociada y esquema publicado
-  (`herdr api schema --json`), con eventos de suscripción como `pane.agent_status_changed`. El canal
-  agente → app de **D5** existe, y es el más completo de toda la lista.
+- **They inject identity per pane into the environment** — `HERDR_PANE_ID`, `HERDR_BIN_PATH`. That is
+  **D7**, under another name and with the same purpose, and it is the third on the list to do it
+  (Superset, Conductor, Herdr).
+- **`--source custom:*` is documented and open to any process**, not just to a supported agent. A CI
+  run, a deployment or a script of your own get in through the front door, with no adapter and without
+  asking anybody's permission. **This is the project's leg 2, done by somebody else and published.**
+- **They solve two problems we still have not solved:** `--source` gives **authority per source** —each
+  integration commands its own and releases it on leaving, so two producers on the same pane do not
+  tread on each other— and `--seq` is a strictly increasing number with which they **discard reports
+  that arrive late**. Our `panel.json` is today one file per pane where the last writer wins, with no
+  authority and no order. See «Concrete things to steal».
+- Their socket is **NDJSON with more than 70 methods**, a negotiated protocol version and a published
+  schema (`herdr api schema --json`), with subscription events such as `pane.agent_status_changed`.
+  The agent → app channel of **D5** exists, and it is the most complete on the whole list.
 
-**Dónde para, que es donde seguimos solos. Tres cosas, y solo tres:**
+**Where it stops, which is where we go on alone. Three things, and only three:**
 
-1. **El vocabulario del estado sigue siendo suyo.** El productor **declara** —eso lo cumplen— pero
-   solo puede decir una de cuatro palabras que eligió Herdr. Nuestra `phase` en texto libre y la
-   lista con seis marcas (`done`, `current`, `pending`, `wait`, `block`, `info`) no caben en ese
-   `--state`. El `--message` es una frase, y solo para explicar un bloqueo.
-2. **El cuerpo son pares clave-valor y son «solo para mostrar».** `report-metadata` añade *tokens* al
-   panel, declaradamente sin autoridad sobre el estado; el documentado es `summary`, que se pinta
-   como `$summary` en la fila de la barra lateral. **Escalares y mapas: no hay listas de pasos, ni
-   referencias, ni enlaces, ni coste, ni contexto restante como campos.** *(Un límite de 32 claves de
-   80 caracteres aparece en una guía de terceros y no en su documentación oficial: sin verificar.)*
-3. **No hay panel, hay una fila.** La barra lateral agrega todos los agentes de todos los workspaces
-   con un punto de color y una línea. Es la mejor respuesta de la lista a **«a qué división voy»** —
-   mejor que la nuestra, porque suma entre workspaces— y no intenta contestar **«por dónde va»**. Y
-   no puede: vive dentro de un TUI, donde el espacio disponible es una fila de texto, no la mitad
-   derecha de la consola.
+1. **The vocabulary of the state is still theirs.** The producer **declares** —that they do meet— but
+   it can only say one of four words that Herdr chose. Our free-text `phase` and the list with six
+   marks (`done`, `current`, `pending`, `wait`, `block`, `info`) do not fit in that `--state`. The
+   `--message` is one sentence, and only for explaining a block.
+2. **The body is key-value pairs and they are «display only».** `report-metadata` adds *tokens* to the
+   panel, declaredly without authority over the state; the documented one is `summary`, which is
+   painted as `$summary` in the sidebar's row. **Scalars and maps: there are no lists of steps, no
+   references, no links, no cost, no remaining context as fields.** *(A limit of 32 keys of 80
+   characters appears in a third-party guide and not in their official documentation: unverified.)*
+3. **There is no panel, there is a row.** The sidebar aggregates every agent of every workspace with a
+   coloured dot and a line. It is the best answer on the list to **«which pane do I go to»** — better
+   than ours, because it adds up across workspaces — and it does not try to answer **«how is it
+   going»**. And it cannot: it lives inside a TUI, where the space available is a row of text, not the
+   right-hand half of the console.
 
-**Lo que además nos deja de diferenciar:** multiplataforma de verdad (un binario, Windows incluido),
-open source, hospedar cualquier agente sin adaptador, y **que el productor declare en vez de que la
-app deduzca**. Esa última llevaba en el discurso desde el principio y hoy tiene dueño.
+**What it also stops setting us apart on:** genuinely cross-platform (one binary, Windows included),
+open source, hosting any agent without an adapter, and **the producer declaring instead of the app
+deducing**. That last one had been in the pitch from the beginning and today it has an owner.
 
-**Y lo que sigue siendo nuestro frente a él, con precisión:** su canal es **un socket local**
-(`/tmp/herdr-<sesión>.sock`). Un fichero en un directorio no lo es: un contenedor con el directorio
-montado, un CI en otra máquina escribiendo por un volumen compartido o un `scp` publican en
-`panel.json` sin poder hablar con ningún proceso nuestro. Ahí está la diferencia real entre «fuera de
-banda» y «fuera del proceso».
+**And what is still ours against it, precisely:** their channel is **a local socket**
+(`/tmp/herdr-<session>.sock`). A file in a directory is not: a container with the directory mounted, a
+CI run on another machine writing over a shared volume, or an `scp` publish into `panel.json` without
+being able to talk to any process of ours. That is the real difference between «out of band» and
+«outside the process».
 
-**Un riesgo de seguridad que conviene anotar, y refuerza D7.** Su documentación **no describe
-autenticación ni control de acceso** sobre el socket: el acceso parece implícito para cualquier
-proceso local que lo alcance, y el `pane_id` viaja como parámetro. Si es así, cualquier proceso de la
-máquina puede reportar sobre **cualquier** panel, que es el mismo agujero que Superset documentó en
-su `HOOKS_INVESTIGATION.md`. *(No verificado ejecutándolo, y con Windows usan tuberías con nombre,
-que tienen otro modelo de permisos.)*
+**A security risk worth noting, and it reinforces D7.** Their documentation **does not describe
+authentication or access control** over the socket: access appears to be implicit for any local
+process that reaches it, and the `pane_id` travels as a parameter. If that is so, any process on the
+machine can report on **any** pane, which is the same hole Superset documented in its
+`HOOKS_INVESTIGATION.md`. *(Not verified by running it, and on Windows they use named pipes, which
+have a different permission model.)*
 
-**El riesgo de producto, y es el más alto de toda la lista junto con el de Orca.** La distancia entre
-`report-metadata` y nuestro contrato **es un campo, no una arquitectura**. Ya tienen identidad por
-división, socket con esquema, autoridad por fuente y número de secuencia; les falta aceptar un cuerpo
-estructurado en vez de pares de cadenas. Eso cabe en una release. Lo que no pueden hacer barato es el
-panel al lado de la consola: viven dentro de un terminal ajeno, y esa es una decisión estructural
-suya igual que Electron lo es en Orca y el navegador en Superset y en Cline.
+**The product risk, and it is the highest of the whole list along with Orca's.** The distance between
+`report-metadata` and our contract **is one field, not an architecture**. They already have identity
+per pane, a socket with a schema, authority per source and a sequence number; what they lack is
+accepting a structured body instead of pairs of strings. That fits in a release. What they cannot do
+cheaply is the panel next to the console: they live inside somebody else's terminal, and that is a
+structural decision of theirs just as Electron is in Orca and the browser is in Superset and in Cline.
 
-**Nota de nombres:** el repositorio se movió de `ogulcancelik/herdr` a
-[herdrdev/herdr](https://github.com/herdrdev/herdr) (el primero redirige); la documentación está en
-`herdr.dev`. No confundir con `wmux`, otro multiplexor de agentes.
-
----
-
-## Lo que este panorama dice del proyecto
-
-**1. El patrón «un worktree por agente» ya está estandarizado.** Todo el mundo lo hace, y `flow`
-ya lo hace. No hay que inventarlo: hay que apoyarse en él. La identidad de división (D7) encaja
-exactamente ahí — un worktree, una división, un `PANEL_ID`.
-
-**2. Nuestra casilla tiene vecinos, y uno de ellos es Spotify.** Los de E1 esconden el terminal; los
-de E2 lo mantienen pero lo construyen *sobre tmux*, heredando lo que tmux no da (ratón decente,
-botones, arrastrar paneles). Eso dejaba la casilla vacía hasta que aparecieron dos, por lados
-distintos: **Xirp** (E3) es app nativa con terminal de primera clase y sesiones persistentes, y
-**Superset** (E4) llega mucho más lejos en producto —divisiones, pestañas, diffs, puertos, cron—
-pero con el emulador dentro del navegador. Y **Warp** (E5), que ya no es un vecino: cumple las cinco
-condiciones —terminal nativo, las tres plataformas, cinco harnesses hospedados, panel de estado con
-salto a la división, y open source con 64k estrellas—. Ya no se puede decir «nadie hospeda agentes
-como terminal de primera clase», ni «nadie lo hace abierto y multiplataforma». Y **cmux** (E6) tumba
-media frase más: **sí hay uno con el canal abierto**, porque cualquier proceso puede emitirle OSC
-777/99. Lo que queda en pie hay que decirlo con precisión, porque la versión corta ya no es cierta:
-**nadie define un contrato abierto para publicar estado estructurado y persistente.** Los cuatro
-primeros tienen estado con vocabulario que elige la app —tres constantes, cuatro eventos, unas
-métricas, cinco estados—; cmux deja elegir el texto pero solo caben un título y un cuerpo que se
-borran al leerse. Ninguno tiene un panel por división cuyo cuerpo escriba quien trabaja.
-
-**3. El hueco de Conductor ya no existe: lo cerró Warp.** Era el más pulido del grupo y es **macOS y
-propietario**, así que multiplataforma y abierto era espacio libre. Cline Kanban lo tapó por un lado
-—abierto, multiplataforma, agnóstico de agente—, Xirp por el otro —terminal de primera clase, con el
-respaldo de Spotify, aunque macOS y cerrado— y **Warp lo cerró entero**: abierto, las tres
-plataformas y el terminal como ciudadano de primera, las tres cosas a la vez. Lo que queda sin ocupar
-**ya no es una combinación de plataforma y licencia**, porque esa combinación existe. Es **el contrato
-abierto**, y nada más. Conviene no engañarse con esto: cualquier argumento de venta que no sea el
-contrato, hoy lo cumple Warp mejor que nosotros.
-
-**4. Aviso serio: el espacio está lleno y con rotación.** Hay comparativas de doce herramientas,
-Crystal ha tenido que renombrarse, y la empresa de Vibe Kanban cerró. Que haya demanda no
-significa que sea fácil monetizar. Entra sabiéndolo: para uso propio esto es inversión segura;
-como producto, la diferenciación tiene que ser evidente en treinta segundos.
-
-**5. La diferenciación en una frase.** «El anfitrión donde cualquiera publica estado» ya no se
-distingue en treinta segundos de «tablero agnóstico de agentes» —Cline Kanban dice algo parecido—, ni
-por hospedar terminales, que hace Xirp, ni por ser un terminal nativo abierto y multiplataforma que
-hospeda cinco agentes, que es Warp. Se distingue por el *cualquiera*, y por **qué** se publica. La
-distinción que aguanta:
-
-**Ellos te dicen si el agente trabaja o espera. Nosotros dejamos que quien trabaja diga por dónde
-va — y quien trabaja no tiene que ser un agente.**
-
-Debajo siguen valiendo las patas de siempre: contrato abierto para cualquier productor, terminal de
-primera clase, multiplataforma, y sin pagar API sobre lo que ya pagas por suscripción. Lo que ha
-cambiado es el peso: **la primera ha pasado de ser una de tres a ser la que sostiene a las demás.**
-
-**Y una precisión que Conductor obliga a hacer, porque es fácil equivocarse aquí.** El eje **no es
-cuánto dato se enseña**. Conductor ya enseña tokens, coste y aviso de límite de contexto, y eso no le
-da nuestro panel: los eligió él. El eje es **quién decide qué se ve**. Nuestro panel es texto libre
-del productor —el paso de la tarea, lo que la bloquea, y lo que al usuario de esa división le
-interese poner pidiéndoselo a su propio agente— sin que nadie haya tenido que diseñar antes ese
-campo. Las métricas de la IA son un **extra** del contrato; confundirlas con el objetivo nos
-llevaría a competir en un terreno donde ya hay cuatro productos por delante.
-
-**6. Y la carrera real, dicha sin adornos — con dos rivales de distinta clase.** Superset (E4) es el
-más completo de los orquestadores y está sobre Electron + xterm.js, el stack que D3 midió y descartó:
-**tiene que cambiar de suelo para alcanzarnos, y eso obliga a rehacer la app.** Con **Warp (E5) esa
-ventaja no existe**: su suelo es Rust con GPU propia, igual de bueno que el nuestro, y encima ya
-funciona en las tres plataformas. Frente a Superset la carrera es «nosotros construimos producto
-mientras ellos rehacen los cimientos». Frente a Warp no hay carrera de cimientos: **solo nos separa
-haber decidido que la app no es la dueña de la semántica.** Es una decisión de diseño, no una ventaja
-técnica, y una decisión se copia en una release — más aún siendo ellos open source, donde la idea
-puede llegar en un *pull request* de cualquiera. El reloj corre más rápido de lo que parecía.
+**A note on names:** the repository moved from `ogulcancelik/herdr` to
+[herdrdev/herdr](https://github.com/herdrdev/herdr) (the first one redirects); the documentation is at
+`herdr.dev`. Not to be confused with `wmux`, another agent multiplexer.
 
 ---
 
-## En qué nos diferenciamos — agosto 2026
+## What this landscape says about the project
 
-El resumen de los ocho análisis de este mes. Se escribe aquí porque la respuesta cambió: hace un mes
-eran tres patas y hoy es una, y quien vuelva a esta pregunta dentro de tres meses necesita la versión
-de hoy, no la de la primera semana.
+**1. The «one worktree per agent» pattern is already standardized.** Everybody does it, and `flow`
+already does it. It does not have to be invented: it has to be leaned on. Pane identity (D7) fits
+exactly there — one worktree, one pane, one `PANEL_ID`.
 
-### Lo que ya NO nos diferencia
+**2. Our square has neighbours, and one of them is Spotify.** The E1 ones hide the terminal; the E2
+ones keep it but build it *on top of tmux*, inheriting what tmux does not give (a decent mouse,
+buttons, dragging panes). That left the square empty until two appeared, from different sides:
+**Xirp** (E3) is a native app with a first-class terminal and persistent sessions, and **Superset**
+(E4) goes much further in product terms —panes, tabs, diffs, ports, cron— but with the emulator
+inside the browser. And **Warp** (E5), which is no longer a neighbour: it meets the five conditions
+—a native terminal, the three platforms, five hosted harnesses, a status panel with a jump to the
+pane, and open source with 64k stars—. You can no longer say «nobody hosts agents as a first-class
+terminal», nor «nobody does it open and cross-platform». And **cmux** (E6) knocks down half another
+sentence: **there is one with an open channel**, because any process can emit OSC 777/99 at it. What
+is left standing has to be said precisely, because the short version is no longer true: **nobody
+defines an open contract for publishing structured, persistent state.** The first four have state with
+a vocabulary the app picks —three constants, four events, a few metrics, five states—; cmux lets you
+pick the text but only a title and a body fit, and they are erased on being read. None of them has a
+panel per pane whose body is written by whoever does the work.
 
-Esto es lo importante de asumir, porque estaba en el discurso y hoy tiene dueño:
+**3. Conductor's gap no longer exists: Warp closed it.** It was the most polished of the group and it
+is **macOS and proprietary**, so cross-platform and open was free space. Cline Kanban covered it from
+one side —open, cross-platform, agent-agnostic—, Xirp from the other —a first-class terminal, with
+Spotify behind it, though macOS and closed— and **Warp closed it entirely**: open, the three platforms
+and the terminal as a first-class citizen, all three at once. What is left unoccupied **is no longer a
+combination of platform and licence**, because that combination exists. It is **the open contract**,
+and nothing else. It is worth not fooling ourselves about this: any selling point that is not the
+contract, Warp today meets better than we do.
 
-| | Quién lo tiene ya |
+**4. A serious warning: the space is full and it has churn.** There are comparisons of twelve tools,
+Crystal has had to rename itself, and the company behind Vibe Kanban shut down. That there is demand
+does not mean it is easy to monetize. Go in knowing it: for one's own use this is a safe investment;
+as a product, the differentiation has to be obvious in thirty seconds.
+
+**5. The differentiation in one sentence.** «The host where anybody publishes state» is no longer
+distinguishable in thirty seconds from «agent-agnostic board» —Cline Kanban says something similar—,
+nor by hosting terminals, which Xirp does, nor by being a native, open, cross-platform terminal that
+hosts five agents, which is Warp. It is distinguished by the *anybody*, and by **what** gets published.
+The distinction that holds:
+
+**They tell you whether the agent is working or waiting. We let whoever does the work say how it is
+going — and whoever does the work does not have to be an agent.**
+
+Underneath, the usual legs still hold: an open contract for any producer, a first-class terminal,
+cross-platform, and not paying for the API on top of what you already pay by subscription. What has
+changed is the weight: **the first has gone from being one of three to being the one that holds up the
+rest.**
+
+**And a precision Conductor forces us to make, because it is easy to get this wrong.** The axis is
+**not how much data gets shown**. Conductor already shows tokens, cost and a context-limit warning, and
+that does not give it our panel: it chose them. The axis is **who decides what is seen**. Our panel is
+free text from the producer —the step of the task, what is blocking it, and whatever the user of that
+pane cares to put there by asking their own agent for it— without anybody having had to design that
+field beforehand. The AI's metrics are an **extra** of the contract; confusing them with the goal would
+take us to compete on ground where there are already four products ahead of us.
+
+**6. And the real race, said without embellishment — with two rivals of different classes.** Superset
+(E4) is the most complete of the orchestrators and it sits on Electron + xterm.js, the stack D3
+measured and discarded: **it has to change its ground to catch us, and that means redoing the app.**
+With **Warp (E5) that advantage does not exist**: its ground is Rust with its own GPU work, just as
+good as ours, and on top of that it already runs on the three platforms. Against Superset the race is
+«we build product while they redo the foundations». Against Warp there is no race on foundations:
+**the only thing separating us is having decided that the app is not the owner of the semantics.** It
+is a design decision, not a technical advantage, and a decision is copied in a release — all the more
+so with them being open source, where the idea can arrive in a *pull request* from anyone. The clock
+runs faster than it looked.
+
+---
+
+## How we differ — August 2026
+
+The summary of this month's eight analyses. It is written here because the answer changed: a month ago
+it was three legs and today it is one, and whoever comes back to this question in three months needs
+today's version, not the first week's.
+
+### What no longer sets us apart
+
+This is the important thing to accept, because it was in the pitch and today it has an owner:
+
+| | Who already has it |
 |---|---|
-| Terminal nativo, no navegador | Warp, cmux, Xirp, **Herdr** (es el propio multiplexor) |
-| Multiplataforma real | **Warp**, **Orca** (también móvil), **Herdr** (un binario, con Windows) |
+| A native terminal, not a browser | Warp, cmux, Xirp, **Herdr** (it is the multiplexer itself) |
+| Genuinely cross-platform | **Warp**, **Orca** (mobile too), **Herdr** (one binary, with Windows) |
 | Open source | Warp, cmux, Superset, **Orca** (MIT), **Herdr** (Apache-2.0) |
-| Un worktree por agente | **todos** |
-| Hospedar cualquier agente CLI | **cmux**, **Orca** y **Herdr** (sin adaptadores), Warp (cinco) |
-| Avisar cuando un agente espera | **todos** |
-| Coste, tokens, contexto restante | Conductor (sin verificar), **Orca** (verificado: lee `~/.claude`) |
-| Canal para pilotar la app desde el agente | Superset y Xirp (MCP), cmux (socket), Orca (CLI + MCP), **Herdr** (socket, 70+ métodos) |
-| Que cualquier proceso pueda publicar algo | **cmux** (OSC 777/99), Orca (título OSC, de facto), **Herdr** (`--source custom:*`, documentado) |
-| **Que lo declare quien trabaja en vez de deducirlo la app** | **Herdr** (su capa de hooks manda sobre las heurísticas) |
+| One worktree per agent | **all of them** |
+| Hosting any CLI agent | **cmux**, **Orca** and **Herdr** (with no adapters), Warp (five) |
+| Warning when an agent is waiting | **all of them** |
+| Cost, tokens, remaining context | Conductor (unverified), **Orca** (verified: it reads `~/.claude`) |
+| A channel for driving the app from the agent | Superset and Xirp (MCP), cmux (socket), Orca (CLI + MCP), **Herdr** (socket, 70+ methods) |
+| Any process being able to publish something | **cmux** (OSC 777/99), Orca (the OSC title, de facto), **Herdr** (`--source custom:*`, documented) |
+| **It being declared by whoever works instead of deduced by the app** | **Herdr** (its hook layer overrides the heuristics) |
 
-Diez cosas. Ninguna sirve ya para explicar el proyecto en treinta segundos, y la última —que llevaba
-en el discurso desde el principio— cayó en agosto. **De las diez, Orca tiene seis y Herdr siete.**
-Ninguno de los dos tiene la que falta: **qué cabe por ese canal.**
+Ten things. None of them serves any longer to explain the project in thirty seconds, and the last one
+—which had been in the pitch from the beginning— fell in August. **Of the ten, Orca has six and Herdr
+seven.** Neither of the two has the one that is missing: **what fits through that channel.**
 
-### Lo que sí queda, y son tres
+### What does remain, and it is three things
 
-**1. El cuerpo del panel lo decide quien trabaja, y es estructurado.** Los demás tienen estado rico
-con vocabulario que elige la app. cmux abre el canal pero solo transporta una línea, Orca lo abre sin
-querer para transportar una palabra suya, y **Herdr, que es el que más lejos llega, transporta cuatro
-estados suyos más pares clave-valor «solo para mostrar»**.
-Nadie tiene lo de en medio: **una lista con marcas** (`done`, `current`, `pending`, `wait`, `block`,
-`info`), referencias, enlaces y una `phase` en texto libre, escrita por el productor en su propio
-vocabulario, sin que nadie haya tenido que diseñar antes ese campo.
+**1. The panel's body is decided by whoever does the work, and it is structured.** The others have
+rich state with a vocabulary the app picks. cmux opens the channel but only carries one line, Orca
+opens it without meaning to so as to carry a word of its own, and **Herdr, which is the one that gets
+furthest, carries four states of its own plus «display only» key-value pairs**.
+Nobody has the thing in between: **a list with marks** (`done`, `current`, `pending`, `wait`, `block`,
+`info`), references, links and a free-text `phase`, written by the producer in its own vocabulary,
+without anybody having had to design that field beforehand.
 
-**2. El productor puede ser cualquiera, y por un canal fuera de banda.** Ni un `enum` compilado
-(Warp), ni un wrapper por agente (Superset), ni un harness soportado (Xirp, Conductor), ni «lo que
-viva dentro de ese PTY» (cmux, por OSC). Un fichero que escribe quien sea desde donde sea: un agente,
-un CI en otra máquina, un despliegue, un cron, un script propio.
+**2. The producer can be anybody, and through an out-of-band channel.** Not a compiled `enum` (Warp),
+not a wrapper per agent (Superset), not a supported harness (Xirp, Conductor), not «whatever lives
+inside that PTY» (cmux, over OSC). A file that anybody writes from anywhere: an agent, a CI run on
+another machine, a deployment, a cron job, a script of your own.
 
-> **Media pata, desde agosto de 2026.** Herdr documenta `--source custom:*` y admite explícitamente a
-> un productor que no sea un agente. Lo que queda nuestro de este punto es **el medio**: su canal es
-> un socket local, y un fichero no lo es. Un contenedor con el directorio montado, un CI en otra
-> máquina escribiendo por un volumen compartido o un `scp` publican sin poder hablar con ningún
-> proceso de la nuestra.
+> **Half a leg, since August 2026.** Herdr documents `--source custom:*` and explicitly admits a
+> producer that is not an agent. What is left ours on this point is **the medium**: their channel is a
+> local socket, and a file is not. A container with the directory mounted, a CI run on another machine
+> writing over a shared volume, or an `scp` publish without being able to talk to any process of ours.
 
-**3. Es estado persistente, no un evento.** Sigue ahí cuando vuelves, y **sabe caducar**
-(`updated_at` + `stale_after_minutes`). Herdr persiste y sobrevive al reinicio, pero **nadie declara
-cuándo su estado deja de valer**. La diferencia práctica: los otros siete te dicen *a qué división ir
-ahora*; este te dice *por dónde va cada una* cuando llegas.
+**3. It is persistent state, not an event.** It is still there when you come back, and it **knows how
+to expire** (`updated_at` + `stale_after_minutes`). Herdr persists and survives a restart, but **nobody
+declares when its state stops being valid**. The practical difference: the other seven tell you *which
+pane to go to now*; this one tells you *how each one is going* when you arrive.
 
-### Dicho en una frase
+### Said in one sentence
 
-**Ellos te dicen si el agente trabaja o espera. Nosotros dejamos que quien trabaja diga por dónde va
-— y quien trabaja no tiene que ser un agente.**
+**They tell you whether the agent is working or waiting. We let whoever does the work say how it is
+going — and whoever does the work does not have to be an agent.**
 
-### La posición real en el mapa
+### The real position on the map
 
-Los rivales serios tienen mitades distintas de esta casilla, y ninguno las dos:
+The serious rivals have different halves of this square, and none of them both:
 
-| | Tiene | Le falta |
+| | Has | Lacks |
 |---|---|---|
-| **Warp** (E5) | nativo + multiplataforma + abierto | **el contrato** |
-| **cmux** (E6) | nativo + abierto + canal abierto de una línea | **multiplataforma** y el contrato estructurado |
-| **Orca** (E7) | multiplataforma + MIT + canal abierto de facto + **la adopción** | **el suelo nativo** y el contrato estructurado |
-| **Herdr** (E8) | nativo + multiplataforma + abierto + **canal documentado con identidad por división** | **el cuerpo del contrato** y el sitio donde pintarlo |
+| **Warp** (E5) | native + cross-platform + open | **the contract** |
+| **cmux** (E6) | native + open + an open one-line channel | **cross-platform** and the structured contract |
+| **Orca** (E7) | cross-platform + MIT + a de facto open channel + **the adoption** | **the native ground** and the structured contract |
+| **Herdr** (E8) | native + cross-platform + open + **a documented channel with identity per pane** | **the contract's body** and the place to paint it |
 
-La combinación completa —nativo, multiplataforma, abierto **y** contrato estructurado— sigue vacía.
-Pero es un hueco **de una decisión de diseño de ancho, no de tecnología**, y los cuatro que lo rodean
-son open source, así que la idea puede llegarles en un *pull request* de cualquiera. **Con Orca y
-Herdr eso deja de ser hipotético:** casi 6.000 forks entre los dos y empujes diarios es mucha gente
-mirando el mismo problema, uno con el canal abierto por accidente y el otro con el canal abierto a
-propósito, con identidad por división y esquema publicado. **A Herdr le falta un campo; a nosotros nos
-falta el producto.** Esa es la carrera, dicha en una línea.
+The complete combination —native, cross-platform, open **and** a structured contract— is still empty.
+But it is a gap **one design decision wide, not one technology wide**, and the four surrounding it are
+open source, so the idea can reach them in a *pull request* from anyone. **With Orca and Herdr that
+stops being hypothetical:** almost 6 000 forks between the two and daily pushes is a lot of people
+looking at the same problem, one with the channel open by accident and the other with the channel open
+on purpose, with identity per pane and a published schema. **Herdr is missing one field; we are
+missing the product.** That is the race, said in one line.
 
-**Y contra quién se compite de verdad, desde D19:** contra **emuladores de terminal**, no contra los
-ocho de este panorama. Este documento sigue siendo el mapa de la liga de al lado —hay que saber qué
-hacen y qué robarles— pero **el listón que decide si se publica lo pone un usuario de WezTerm, no uno
-de Orca**. La lista de lo que queda fuera, con quién lo tiene, está en
+**And who the real competition is, since D19:** **terminal emulators**, not the eight in this
+landscape. This document is still the map of the league next door —you have to know what they do and
+what to steal from them— but **the bar that decides whether this ships is set by a WezTerm user, not
+by an Orca one**. The list of what is left out, with who has it, is in
 [02-decisiones.md](02-decisiones.md) → D19.
 
-**Consecuencia para priorizar, y es la razón de que este resumen esté escrito:** el contrato no es la
-última pata que implementar cuando el terminal esté pulido. Es **la única que sostiene el proyecto**,
-y todo lo que se haga antes que ella se hace sabiendo que no diferencia.
+**The consequence for prioritizing, and it is the reason this summary is written:** the contract is not
+the last leg to implement once the terminal is polished. It is **the only one that holds the project
+up**, and everything done before it is done knowing it does not differentiate.
 
 ---
 
-## Cosas concretas para robar
+## Concrete things to steal
 
-| De | Qué |
+| From | What |
 |---|---|
-| **Extraterm** | Marcos por comando, coloreados por resultado; reutilizar la salida de un comando como entrada |
-| **Warp** | Bloques de comando plegables y compartibles. Y del panel global de agentes: **saltar desde la lista al pane concreto** — el resumen global no solo informa, es navegación (ver E5) |
-| **Wave** | Composición por bloques heterogéneos (terminal, editor, previsualización) y workspaces en barra lateral |
-| **Tilix** | Árbol de divisiones y arrastrar terminales para recolocarlos |
-| **Zellij** | Interfaz hecha de plugins; paneles flotantes movibles con el ratón |
-| **WezTerm** | `wezterm cli` como superficie de control externa; sesiones desacoplables |
-| **Ghostty** | Separar núcleo de interfaz para poder ir a Mac y Windows sin rehacer el motor |
-| **cmux** | **Entender OSC 777 y 99 además del contrato propio** — son estándares que ya emiten Kitty, rxvt y media docena de herramientas, así que soportarlos da compatibilidad gratis con todo lo que hoy notifica, sin pedirle a nadie que adopte `panel.json`. Y convertir los subagentes en **panes nativos** en vez de dejarlos como procesos ocultos |
-| **opencode** | Bloque de contexto y coste; indicador de sesión ocupada en otro sitio |
-| **Conductor / Vibe Kanban** | Revisión de diffs antes de fusionar como parte del flujo, no como paso aparte |
-| **Conductor** | **Reservar un rango de puertos por división** (`CONDUCTOR_PORT` a `+9`) en vez de detectar en qué puerto ha levantado algo. Encaja con `PANEL_ID`/`PANEL_DIR` de D7 y le quita a la app un trabajo de deducción, que es justo lo que D6 prohíbe |
-| **Cline Kanban** | Cadenas de dependencias entre tareas: al terminar una arranca sola la siguiente, sin escribir un script (ver «Ideas sin fase» en [05-roadmap.md](05-roadmap.md)) |
-| **Xirp** | **Notificar** al pasar a «esperando entrada», no solo pintarlo: resuelve «a qué división voy ahora» sin tener las cuatro a la vista (ver «Pendiente» en [04-contrato-panel.md](04-contrato-panel.md)) |
-| **Orca** | Un **hook de status line** como forma de que un agente que no sabe nada de ti emita estado sin tocar su código: se lo instalas en su configuración y él pinta el título. Vale para cualquier harness que tenga línea de estado configurable, y no obliga a mantener un wrapper por agente |
-| **Herdr** | **Autoridad por fuente y número de secuencia.** `--source custom:<nombre>` identifica a cada productor, le da mando sobre lo suyo y lo suelta al salir; `--seq` es un contador estrictamente creciente con el que **descartan reportes que llegan tarde**. Nuestro `panel.json` es un fichero por división donde gana el último que escribe: con dos productores sobre la misma división —un agente y el CI que lanzó— o con escrituras desordenadas, no hay forma de saber cuál vale. **Es el hueco más concreto que este panorama le encuentra al contrato.** Y la segunda: **acumular el estado hacia arriba** (agente → panel → pestaña → workspace, con `blocked` ganando a todo), que es lo que hace que su barra lateral conteste «a qué división voy» mejor que la nuestra |
-| **Superset** | Navegador integrado con **detección de puertos por división** — y el productor ya sabe en qué puerto levantó su servidor, así que puede publicarlo. Agentes lanzados en cron: un `panel.json` con productor programado no pide nada nuevo al contrato. Y **distinguir dos esperas**: un permiso que se concede en un segundo (`PermissionRequest`) no es una pregunta que exige pensar (`PendingQuestion`); nuestro contrato tiene un solo `wait` |
+| **Extraterm** | Frames per command, coloured by result; reusing a command's output as input |
+| **Warp** | Foldable, shareable command blocks. And from the global agent panel: **jumping from the list to the specific pane** — the global summary does not only inform, it is navigation (see E5) |
+| **Wave** | Composition out of heterogeneous blocks (terminal, editor, preview) and workspaces in a sidebar |
+| **Tilix** | A tree of panes and dragging terminals to rearrange them |
+| **Zellij** | An interface made of plugins; floating panels movable with the mouse |
+| **WezTerm** | `wezterm cli` as an external control surface; detachable sessions |
+| **Ghostty** | Separating core from interface so as to go to Mac and Windows without redoing the engine |
+| **cmux** | **Understanding OSC 777 and 99 as well as our own contract** — they are standards that Kitty, rxvt and half a dozen tools already emit, so supporting them gives free compatibility with everything that notifies today, without asking anybody to adopt `panel.json`. And turning subagents into **native panes** instead of leaving them as hidden processes |
+| **opencode** | The context and cost block; an indicator for a session busy somewhere else |
+| **Conductor / Vibe Kanban** | Diff review before merging as part of the flow, not as a separate step |
+| **Conductor** | **Reserving a range of ports per pane** (`CONDUCTOR_PORT` to `+9`) instead of detecting which port something came up on. It fits with `PANEL_ID`/`PANEL_DIR` from D7 and takes a deduction job away from the app, which is exactly what D6 forbids |
+| **Cline Kanban** | Chains of dependencies between tasks: when one finishes the next starts on its own, with no script to write (see «Ideas with no phase» in [05-roadmap.md](05-roadmap.md)) |
+| **Xirp** | **Notifying** on going to «waiting for input», not just painting it: it solves «which pane do I go to now» without having all four in view (see «Pending» in [04-contrato-panel.md](04-contrato-panel.md)) |
+| **Orca** | A **status line hook** as a way for an agent that knows nothing about you to emit state without touching its code: you install it in its configuration and it paints the title. It works for any harness with a configurable status line, and it does not force you to maintain a wrapper per agent |
+| **Herdr** | **Authority per source and a sequence number.** `--source custom:<name>` identifies each producer, gives it command over its own and releases it on leaving; `--seq` is a strictly increasing counter with which they **discard reports that arrive late**. Our `panel.json` is one file per pane where the last writer wins: with two producers on the same pane —an agent and the CI run it launched— or with out-of-order writes, there is no way to know which one holds. **It is the most concrete gap this landscape finds in the contract.** And the second one: **accumulating the state upwards** (agent → pane → tab → workspace, with `blocked` beating everything), which is what makes their sidebar answer «which pane do I go to» better than ours |
+| **Superset** | A built-in browser with **port detection per pane** — and the producer already knows which port it brought its server up on, so it can publish it. Agents launched on cron: a `panel.json` with a scheduled producer asks nothing new of the contract. And **telling two waits apart**: a permission granted in a second (`PermissionRequest`) is not a question that demands thinking (`PendingQuestion`); our contract has a single `wait` |

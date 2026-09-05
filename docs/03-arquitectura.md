@@ -1,93 +1,92 @@
-# Arquitectura
+# Architecture
 
-## Las piezas
+## The pieces
 
 ```
-┌─ Ventana ──────────────────────────────────────────────────┐
-│  Pestañas                                                   │
-│  ┌─ División ────────────────┬─ División ─────────────────┐ │
+┌─ Window ───────────────────────────────────────────────────┐
+│  Tabs                                                       │
+│  ┌─ Pane ────────────────────┬─ Pane ──────────────────────┐│
 │  │  Terminal    │  Panel     │  Terminal   │  Panel       │ │
 │  │  (PTY)       │            │  (PTY)      │              │ │
 │  │  PANEL_ID=a3f2           │  PANEL_ID=b7c1              │ │
 │  └───────────────────────────┴────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
          ▲                ▲                    ▲
-         │ PTY            │ lee panel.json     │ MCP
+         │ PTY            │ reads panel.json   │ MCP
          │                │                    │
-   botones/teclado   $PANEL_DIR/panel.json   servidor MCP
+   buttons/keyboard  $PANEL_DIR/panel.json    MCP server
                             ▲
-                            │ escribe
-                     el agente, flow, un CI, un script…
+                            │ writes
+                     the agent, flow, a CI run, a script…
 ```
 
-## Los tres canales
+## The three channels
 
-### 1. Estado — el documento de panel (productor → app)
+### 1. State — the panel document (producer → app)
 
-Lo publica quien hace el trabajo. **La fuente de verdad es el estado que la app tiene por división**,
-y los transportes lo alimentan ([02-decisiones.md](02-decisiones.md) → D17):
+Published by whoever does the work. **The source of truth is the state the app holds per pane**,
+and the transports feed it ([02-decisiones.md](02-decisiones.md) → D17):
 
-| Transporte | Estado | Para quién |
+| Transport | State | Who it is for |
 |---|---|---|
-| **Fichero** — `$PANEL_DIR/panel.json`, machacado entero, observado por la app | funcionando | todo el mundo: el listón de entrada es cero |
-| **MCP** — `panel_set` entrega el documento sin escribir el fichero | Fase 3 | el agente que además pilota la app |
-| **OSC por el PTY** | candidato, tras F2.7 | el que está tras un `ssh` o en un contenedor sin volumen |
+| **File** — `$PANEL_DIR/panel.json`, overwritten whole, watched by the app | working | everybody: the barrier to entry is zero |
+| **MCP** — `panel_set` hands the document over without writing the file | Phase 3 | the agent that also drives the app |
+| **OSC over the PTY** | candidate, after F2.7 | whoever is behind an `ssh` or in a container with no volume |
 
-Especificación completa: [04-contrato-panel.md](04-contrato-panel.md).
+Full specification: [04-contrato-panel.md](04-contrato-panel.md).
 
-**Por qué el fichero es el de serie:** es el único donde el productor más tonto posible publica sin
-escribir código —`cat >` desde un script— y el único donde el estado sobrevive a que el productor
-muera sin que nadie programe nada. Además se lee con `cat` y cruza un volumen montado sin protocolo
-propio. **Lo que no da:** no sabe quién escribe, y no le dice a quien publica que su documento estaba
-roto.
+**Why the file is the default one:** it is the only one where the dumbest possible producer publishes
+without writing code — `cat >` from a script — and the only one where the state survives the producer
+dying without anybody programming anything. It is also read with `cat` and crosses a mounted volume
+with no protocol of its own. **What it does not give:** it does not know who writes, and it does not
+tell whoever published that their document was broken.
 
-### 2. Control — MCP (agente → app)
+### 2. Control — MCP (agent → app)
 
-Servidor MCP que expone herramientas al agente que corre en la división:
+An MCP server exposing tools to the agent running in the pane:
 
-| Herramienta | Qué hace |
+| Tool | What it does |
 |---|---|
-| `panel_set` | Publicar el estado de su división |
-| `split_open` | Abrir una división nueva |
-| `split_read` | Leer la salida de una división |
-| `split_close` | Cerrarla |
+| `panel_set` | Publish its pane's state |
+| `split_open` | Open a new pane |
+| `split_read` | Read a pane's output |
+| `split_close` | Close it |
 
-**Regla de seguridad:** por defecto, un agente solo alcanza **su propia división** (la de su
-`PANEL_ID`). Ampliar ese alcance es una decisión explícita del usuario, no el comportamiento
-por defecto.
+**Security rule:** by default, an agent reaches **its own pane** only (the one of its `PANEL_ID`).
+Widening that reach is an explicit decision by the user, not the default behaviour.
 
-### 3. Entrada — PTY (app → agente)
+### 3. Input — PTY (app → agent)
 
-Los botones del panel escriben en el PTY de su división. Es el respaldo universal: funciona con
-cualquier programa, hable MCP o no.
+The panel's buttons write into their pane's PTY. It is the universal fallback: it works with any
+program, whether it speaks MCP or not.
 
-**Riesgo asumido:** un fichero que declara comandos y un botón que los ejecuta es ejecución de
-código en el shell del usuario. Ver Seguridad, abajo.
+**Accepted risk:** a file that declares commands and a button that runs them is code execution in the
+user's shell. See Security, below.
 
 ---
 
-## Lectura de la salida
+## Reading the output
 
-Para lo que no habla MCP, hay que leer la pantalla. La pieza que lo hace viable son las
-**marcas de shell (OSC 133)**: delimitan dónde empieza el prompt, dónde el comando y dónde su
-salida. Sin ellas la app solo ve un río de texto; con ellas puede acotar «la salida del último
-comando».
+For whatever does not speak MCP, the screen has to be read. The piece that makes that viable is
+**shell marks (OSC 133)**: they delimit where the prompt starts, where the command does, and where
+its output does. Without them the app sees only a river of text; with them it can bound «the last
+command's output».
 
-Se activan cargando el script de integración del shell (WezTerm ya trae uno; en la app propia
-será equivalente).
+They are switched on by loading the shell's integration script (WezTerm already ships one; in the
+app's own it will be equivalent).
 
-**Lo que no se debe hacer:** parsear el pintado de una interfaz de texto para deducir estado.
-Se rompe en cada versión del agente. Para eso está el canal 1.
+**What must not be done:** parsing the painting of a text interface to deduce state. It breaks with
+every version of the agent. That is what channel 1 is for.
 
 ---
 
-## Seguridad
+## Security
 
-| Riesgo | Mitigación |
+| Risk | Mitigation |
 |---|---|
-| `actions` del panel ejecutan comandos en el shell | El comando debe verse antes de ejecutarse; `send` es texto plano sin interpolación ni plantillas |
-| Un `panel.json` de origen no confiable (repo clonado, contenedor) | Tratar el fichero como no confiable; nunca ejecutar nada sin confirmación visible |
-| Un agente escribiendo en la división de otro | El servidor MCP acota por `PANEL_ID`. **Por el fichero no hay acotado**: quien pueda escribir en el directorio es el productor (D17) |
-| Leer el buffer y mandarlo a un modelo | Exfiltra lo que haya en pantalla: tokens, claves, respuestas de API. La selección de qué se envía debe ser explícita, nunca automática |
-| Definir `ANTHROPIC_API_KEY` al lanzar un panel | Prohibido: cambiaría la facturación del usuario (ver D4) |
-| Secretos en el panel | El panel es texto persistido; no es sitio para credenciales |
+| The panel's `actions` run commands in the shell | The command must be visible before it runs; `send` is plain text with no interpolation and no templates |
+| A `panel.json` of untrusted origin (cloned repo, container) | Treat the file as untrusted; never run anything from it without visible confirmation |
+| An agent writing into somebody else's pane | The MCP server scopes by `PANEL_ID`. **Through the file there is no scoping**: whoever can write in the directory is the producer (D17) |
+| Reading the buffer and sending it to a model | It exfiltrates whatever is on screen: tokens, keys, API responses. Choosing what gets sent must be explicit, never automatic |
+| Setting `ANTHROPIC_API_KEY` when launching a panel | Forbidden: it would change the user's billing (see D4) |
+| Secrets in the panel | The panel is persisted text; it is no place for credentials |

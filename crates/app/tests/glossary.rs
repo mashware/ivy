@@ -229,7 +229,7 @@ fn fold(text: &str) -> String {
 
 fn glossary() -> Glossary {
     let annex = DECISIONS
-        .split_once("### El glosario, y las dos fronteras")
+        .split_once("### The glossary, and the two borders that order it")
         .expect("the decisions record no longer carries the glossary annex")
         .1;
 
@@ -256,9 +256,12 @@ fn glossary() -> Glossary {
     // heading is what makes this safe to widen: the `Stored*` table also has a name in its first
     // column, but that name is already English, and reading it as Spanish would break the build for
     // every crate that adopted it.
-    for heading in ["| Tipo | Primer nombre", "| Hoy | Qué es"] {
+    for heading in [
+        "| Type | First name, and why it falls",
+        "| Today | What it is",
+    ] {
         // **The heading row is looked up WHOLE**, not with `split_once` over the text: splitting on
-        // the prefix leaves half a row — from «| Queda |» onwards — and the column index taken from
+        // the prefix leaves half a row — from «| Ends up |» onwards — and the column index taken from
         // that half points at the first column, which is the Spanish one. The first version of this
         // put the Spanish names into the **English** set, exempting them: worse than the defect it
         // came to fix. Its own `reparto` test case caught it.
@@ -283,9 +286,9 @@ fn glossary() -> Glossary {
         // and in the other the last one is a Spanish name quoted inside the prose.
         let kept = head
             .iter()
-            .position(|c| c.trim() == "Queda")
+            .position(|c| c.trim() == "Ends up")
             .unwrap_or_else(|| {
-                panic!("the table headed «{heading}» no longer has a «Queda» column")
+                panic!("the table headed «{heading}» no longer has an «Ends up» column")
             });
 
         for line in rows.skip(1) {
@@ -631,7 +634,7 @@ fn the_glossary_is_still_where_this_test_reads_it_from() {
     );
     assert!(
         glossary.from_tables >= TABLES_AT_LEAST,
-        "the two tables with a «Queda» column yielded {} rows and there are at least \
+        "the two tables with a «Ends up» column yielded {} rows and there are at least \
          {TABLES_AT_LEAST}: their eight names are the ones no arrow in the annex carries, so losing \
          them is invisible in any total",
         glossary.from_tables
@@ -869,7 +872,7 @@ fn the_three_rules_answer_what_they_promise() {
         verdict("CELDA_ALTA").is_some(),
         "a five-letter retired name, which a floor of five would skip"
     );
-    // The three names that live only in the table with a «Queda» column, which no arrow carries.
+    // The three names that live only in the table with a «Ends up» column, which no arrow carries.
     assert!(
         verdict("reparto").is_some(),
         "a name only the Layout table names"

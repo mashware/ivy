@@ -1,366 +1,371 @@
 # Roadmap
 
-En orden. **Cada fase vale por sí sola aunque se abandone la siguiente** — esa es la regla que
-decide qué entra en cada una.
+In order. **Every phase is worth having on its own even if the next one is abandoned** — that is the
+rule that decides what goes into each of them.
 
-Las fases 1 y 2 están desglosadas en hitos porque son las que se van a construir. De la 3 en
-adelante son titulares a propósito: detallar lo que aún no se ha tocado es inventar.
+Phases 1 and 2 are broken down into milestones because they are the ones that are going to be built.
+From 3 onwards they are headlines on purpose: spelling out what has not been touched yet is making
+things up.
 
 ---
 
-# Parte I — Qué tienes al final de cada fase
+# Part I — What you have at the end of each phase
 
-Sin nada técnico. Esta es la parte que hay que releer cuando no se sepa si algo entra en una
-fase o en la siguiente: **si no aparece descrito aquí, no entra**.
+Nothing technical here. This is the part to reread whenever it is not clear whether something
+belongs in one phase or the next: **if it is not described here, it does not go in**.
 
-## Fase 1 — «Esto existe»
+## Phase 1 — «This exists»
 
-**Lo que ves:** una ventana con dos consolas lado a lado. A la derecha de cada una, una franja
-estrecha que muestra en qué va esa tarea: la fase, el paso actual, lo que esté bloqueado.
+**What you see:** a window with two consoles side by side. To the right of each one, a narrow strip
+showing where that task stands: the phase, the current step, whatever is blocked.
 
-**Lo que puedes hacer:** un agente en la izquierda trabajando en una tarea, otro en la derecha
-en otra, y saber de un vistazo cuál avanza y cuál te está esperando sin leer lo que escriben.
+**What you can do:** an agent on the left working on one task, another on the right on a different
+one, and know at a glance which is making progress and which is waiting for you without reading what
+they write.
 
-**Lo que falta:** todo lo demás. Ni pestañas, ni copiar y pegar, ni historial, ni mover nada de
-sitio. Dos consolas fijas.
+**What is missing:** everything else. No tabs, no copy and paste, no scrollback, nothing that can be
+moved around. Two fixed consoles.
 
-**Por qué vale igual:** es la única fase que puede decir que no. Si con esto delante la sensación
-es «no aporta nada que no me diera tener dos ventanas», el proyecto se para aquí habiendo gastado
-poco. Si es «no quiero volver atrás», el resto es trabajo, no apuesta.
+**Why it is worth having anyway:** it is the only phase that can say no. If with this in front of
+you the feeling is «it gives me nothing that two windows would not have given me», the project stops
+here having spent little. If it is «I do not want to go back», the rest is work, not a bet.
 
-## Fase 2 — «Esto es mi terminal»
+## Phase 2 — «This is my terminal»
 
-**Lo que ves:** la app entera, la del mockup. Pestañas arriba, y dentro de cada una las
-divisiones que quieras, colocadas como quieras.
+**What you see:** the whole app, the one in the mockup. Tabs along the top, and inside each of them
+however many panes you want, arranged however you want.
 
-**Lo que puedes hacer:** una pestaña por proyecto o por contexto, y dentro tantas tareas en
-paralelo como quepan. **Arrastrar una división y soltarla en otro sitio** cuando el trabajo
-cambia de forma — lo que no da ningún terminal actual y lo que originó este proyecto. Copiar,
-pegar, buscar, subir por el historial. Plegar el panel, o darle el ancho que quieras. Cerrar y encontrártelo como lo dejaste.
-**Y cuando algo te reclama en una pestaña que no estás mirando, la ficha de esa pestaña te lo dice** —
-si te espera a ti, si está atascada, o si terminó y nadie lo ha visto.
+**What you can do:** one tab per project or per context, and inside it as many tasks in parallel as
+will fit. **Drag a pane and drop it somewhere else** when the work changes shape — which no current
+terminal offers and which is what started this project. Copy, paste, search, go up through the
+scrollback. Fold the panel away, or give it whatever width you want. Close it and find it as you
+left it. **And when something claims you in a tab you are not looking at, that tab's card says so**
+— if it is waiting for you, if it is stuck on something else, or if it finished and nobody looked.
 
-**Y lo que un terminal da por hecho, porque es contra terminales contra quien se compite** (**D19**):
-que se vean tus fuentes —los iconos de un `ls` y el japonés, no cuadros vacíos—, que puedas cambiarle
-la fuente, el tamaño, los colores y los atajos, y que el ratón llegue al programa de dentro para
-poder hacer clic en `vim`.
+**And what a terminal takes for granted, because terminals are what this competes against**
+(**D19**): that your fonts show up —the icons of an `ls` and Japanese, not empty boxes—, that you
+can change its font, its size, its colors and its shortcuts, and that the mouse reaches the program
+inside so you can click inside `vim`.
 
-**Y que se pueda leer fuera de aquí**: el terminal habla **inglés** — sus claves de configuración, sus
-mensajes y su código.
+**And that it can be read outside of here**: the terminal speaks **English** — its configuration
+keys, its messages and its code.
 
-**Lo que falta:** el panel sigue siendo de solo lectura. Cuenta cosas, no puedes hacer nada
-desde él.
+**What is missing:** the panel is still read-only. It tells you things, you cannot do anything from
+it.
 
-**Por qué es el hito de verdad:** aquí se desinstala WezTerm. Y es la primera versión que se le
-puede enseñar a alguien en Mac o Windows.
+**Why this is the real milestone:** this is where WezTerm gets uninstalled. And it is the first
+version that can be shown to somebody on Mac or Windows.
 
-## Fase 3 — «El panel responde»
+## Phase 3 — «The panel answers back»
 
-**Lo que ves:** lo mismo, pero el panel tiene botones. «Continuar», «lanzar los tests», «abrir
-la MR» — lo que la propia tarea declare que tiene sentido en ese momento.
+**What you see:** the same thing, but the panel has buttons. «Continue», «run the tests», «open the
+MR» — whatever the task itself declares makes sense at that moment.
 
-**Lo que puedes hacer:** contestarle al agente sin escribir. Y en la otra dirección, el agente
-puede pedirle cosas a la app: abrirse una división para lanzar los tests aparte, sin tocar la
-que tiene delante.
+**What you can do:** answer the agent without typing. And in the other direction, the agent can ask
+the app for things: open itself a pane to run the tests separately, without touching the one it has
+in front of it.
 
-**Lo que cambia de fondo:** hasta aquí la app era una pantalla donde mirar; desde aquí es un
-sitio donde trabajar. Y el trabajo deja de ser solo el de los agentes: **cualquier herramienta
-—un despliegue, un CI, un script de la empresa— puede publicar ahí su estado y sus botones.**
+**What changes underneath:** up to here the app was a screen to look at; from here on it is a place
+to work in. And the work stops being only the agents': **any tool —a deployment, a CI, a company
+script— can publish its state and its buttons there.**
 
-## Fase 4 — «¿Qué necesita algo de mí?»
+## Phase 4 — «What needs something from me?»
 
-**Lo que ves:** una pantalla nueva por encima de las pestañas. No consolas: una lista. Arriba lo
-que espera una decisión tuya; debajo lo bloqueado; al final lo que avanza solo.
+**What you see:** a new screen above the tabs. Not consoles: a list. At the top whatever is waiting
+on a decision from you; below it whatever is blocked; at the end whatever is moving along by itself.
 
-**Lo que puedes hacer:** empezar el día ahí. Con ocho tareas repartidas en cuatro pestañas el
-problema deja de ser hacerlas y pasa a ser saber a cuál ir.
+**What you can do:** start the day there. With eight tasks spread across four tabs the problem stops
+being doing them and becomes knowing which one to go to.
 
-> **Corregido en agosto de 2026.** Aquí decía «ninguna herramienta del panorama tiene esto: todas
-> enseñan las tareas, ninguna las ordena por lo que te reclama», y **dejó de ser cierto**: la barra
-> lateral de Herdr acumula el estado de agente a panel, a pestaña y a workspace, y ordena por quién
-> necesita atención ([07-panorama.md](07-panorama.md) → E8). Lo que sigue sin tener nadie no es el
-> **orden**, es el **cuerpo**: por qué está atascada, en qué paso va y cuánto le queda. La lista de
-> esta fase se ordena con `attention` (D18) y se lee con lo que publique el productor.
+> **Corrected in August 2026.** This used to say «no tool in the landscape has this: they all show
+> the tasks, none of them order them by what claims you», and it **stopped being true**: Herdr's
+> sidebar accumulates state from agent to panel, to tab and to workspace, and orders by who needs
+> attention ([07-panorama.md](07-panorama.md) → E8). What still nobody has is not the **order**, it
+> is the **body**: why it is stuck, which step it is on and how much is left. This phase's list is
+> ordered with `attention` (D18) and read from whatever the producer publishes.
 
-**Por qué está aparcada:** solo funciona si el estado que llega es fiable, y eso se sabe después
-de usar la Fase 3 un tiempo. Antes es maquetar una lista bonita con datos en los que no confías.
+**Why it is parked:** it only works if the state that arrives is trustworthy, and that is known
+after using Phase 3 for a while. Before that it is laying out a pretty list with data you do not
+trust.
 
-## Fase 5 — «Alguien vigila por ti»
+## Phase 5 — «Somebody watches for you»
 
-**Lo que ves:** la lista de la Fase 4, pero ordenada y anotada sola.
+**What you see:** Phase 4's list, but ordered and annotated by itself.
 
-**Lo que puedes hacer:** delegar el mirar. Un agente que no programa — solo observa a los demás
-y avisa: «esta lleva veinte minutos parada», «esta ha terminado y nadie la ha revisado», «a esta
-le queda poco contexto».
+**What you can do:** delegate the watching. An agent that does not program — it only observes the
+others and reports: «this one has been stopped for twenty minutes», «this one has finished and
+nobody has reviewed it», «this one is running low on context».
 
-**Por qué está lejos y da igual:** no necesita ninguna pieza nueva, es la Fase 3 usada de otra
-manera. Si nunca se hace, no se ha construido nada de más para llegar. Eso es a propósito.
+**Why it is far off and it does not matter:** it needs no new piece, it is Phase 3 used a different
+way. If it is never done, nothing extra will have been built to get there. That is on purpose.
 
-## Dónde está el corte
+## Where the cut is
 
 | | |
 |---|---|
-| **Fase 1** | Para saber si merece la pena |
-| **Fase 2** | Para uso diario — y lo primero enseñable |
-| **Fase 3** | Deja de ser una pantalla y pasa a ser un sitio de trabajo |
-| **Fase 4** | Lo que nadie más tiene |
-| **Fase 5** | Regalo, si llega |
+| **Phase 1** | To find out whether it is worth it |
+| **Phase 2** | For daily use — and the first thing that can be shown |
+| **Phase 3** | It stops being a screen and becomes a place to work |
+| **Phase 4** | What nobody else has |
+| **Phase 5** | A gift, if it arrives |
 
 ---
 
-# Parte II — Cómo se construye
+# Part II — How it gets built
 
 ---
 
-## Fase 0 — Hecho
+## Phase 0 — Done
 
-- [x] Panel de estado funcionando sobre WezTerm (`prototipos/flow-panel`)
-- [x] Contrato `panel.json` definido y con un productor real (`flow`)
-- [x] Dos vistas: global (todas las tareas) y foco (una tarea, fijada)
-- [x] Maqueta visual de la app para juzgar proporciones (`prototipos/mockup-terminal.html`)
-- [x] Decisiones de stack y arquitectura ([02-decisiones.md](02-decisiones.md))
+- [x] Status panel working on top of WezTerm (`prototipos/flow-panel`)
+- [x] `panel.json` contract defined and with a real producer (`flow`)
+- [x] Two views: global (every task) and focus (one task, pinned)
+- [x] Visual mockup of the app to judge proportions (`prototipos/mockup-terminal.html`)
+- [x] Stack and architecture decisions ([02-decisiones.md](02-decisiones.md))
 
 ---
 
-## Punto de partida
+## Starting point
 
-Comprobado en la máquina de desarrollo (2026-08-07):
+Checked on the development machine (2026-08-07):
 
 | | |
 |---|---|
-| `rustc` / `cargo` | **1.97.1** — actualizado al empezar F1.3 (ver abajo) |
+| `rustc` / `cargo` | **1.97.1** — upgraded when F1.3 started (see below) |
 | `git` | 2.53.0 |
-| `inotify-tools` | no instalado — y ya no hace falta (ver F1.6) |
+| `inotify-tools` | not installed — and no longer needed (see F1.6) |
 
-> **Corregido el 2026-08-07, al arrancar F1.3.** Esta tabla decía «1.94.0 — listo, no hay nada que
-> instalar», y era incompatible con la versión de `eframe` fijada abajo: `eframe 0.36.1` exige
-> `rustc 1.95`. Se comprobó con `cargo check` sobre un crate de prueba, y no había forma de escribir
-> una línea del crate `app` sin resolverlo. Se subió el toolchain a 1.97.1 —lo que `rustup` ofrecía—
-> en vez de bajar `eframe` a 0.35: la versión del framework la elige el proyecto y el toolchain es
-> lo barato de mover. Tras la subida, `clippy` y los 8 tests del workspace siguen limpios.
+> **Corrected on 2026-08-07, when F1.3 started.** This table used to say «1.94.0 — ready, there is
+> nothing to install», and it was incompatible with the `eframe` version pinned below: `eframe
+> 0.36.1` demands `rustc 1.95`. It was checked with `cargo check` over a throwaway crate, and there
+> was no way to write a single line of the `app` crate without resolving it. The toolchain was
+> raised to 1.97.1 —what `rustup` was offering— instead of dropping `eframe` to 0.35: the framework
+> version is the project's choice and the toolchain is the cheap thing to move. After the upgrade,
+> `clippy` and the 8 tests of the workspace are still clean.
 
-Versiones de los crates resueltas hoy contra crates.io:
+Crate versions resolved today against crates.io:
 
 ```toml
-alacritty_terminal = "0.26"   # parser VT + estado del terminal
-portable-pty       = "0.9"    # PTY Unix + ConPTY Windows
-eframe             = "0.36"   # egui + ventana nativa
-notify             = "8.2"    # cambios de fichero, multiplataforma
-serde / serde_json = "1"      # el contrato
+alacritty_terminal = "0.26"   # VT parser + terminal state
+portable-pty       = "0.9"    # Unix PTY + Windows ConPTY
+eframe             = "0.36"   # egui + native window
+notify             = "8.2"    # file changes, cross-platform
+serde / serde_json = "1"      # the contract
 ```
 
-### La UI del prototipo se hace con egui, no con GPUI
+### The prototype's UI is done with egui, not with GPUI
 
-D3 dejaba GPUI para el producto y egui como *opción* para prototipar. Para la Fase 1 se elige
-**egui**, y conviene dejar escrito por qué, porque es una decisión con fecha de caducidad:
+D3 left GPUI for the product and egui as an *option* for prototyping. For Phase 1 **egui** is
+chosen, and it is worth writing down why, because it is a decision with an expiry date:
 
-- Lo que la Fase 1 tiene que responder es **si el conjunto se sostiene en las manos** — un
-  terminal de verdad con un panel al lado. Eso no depende del framework.
-- egui se publica en crates.io con versiones y documentación. GPUI vive dentro del repo de Zed,
-  con API inestable y sin más documentación que su propio código.
-- Todo lo caro de la Fase 1 —el PTY, la rejilla, el contrato— vive **fuera** de la capa de
-  pintado (ver la estructura de abajo). Cambiar de framework después es reescribir el crate
-  `app`, no el proyecto.
+- What Phase 1 has to answer is **whether the whole thing holds up in your hands** — a real terminal
+  with a panel beside it. That does not depend on the framework.
+- egui is published on crates.io with versions and documentation. GPUI lives inside Zed's
+  repository, with an unstable API and no documentation beyond its own code.
+- Everything expensive in Phase 1 —the PTY, the grid, the contract— lives **outside** the painting
+  layer (see the structure below). Changing framework afterwards means rewriting the `app` crate,
+  not the project.
 
-**Cuándo saltar a GPUI:** cuando egui deje de dar el rendimiento o el control necesario, y no
-antes. Los dos síntomas concretos a vigilar están en los riesgos de F1.3.
+**When to jump to GPUI:** when egui stops giving the necessary performance or control, and not
+before. The two concrete symptoms to watch for are in F1.3's risks.
 
-> **Medidos en F1.3, ago 2026: ninguno de los dos aparece.** El repintado completo escala lineal
-> —dos consolas cuestan 1,96× una y el fotograma gasta el 36 % de su hueco— y escribir cuesta 36 µs.
-> El salto no toca. Lo que queda por comprobar es la carga que estos números **no** cubren: cuatro
-> divisiones y los paneles pintando a la vez, o sea F1.4 y F1.6. Los números, con lo que prueban y
-> lo que no, están en el anexo «Medido — 9 agosto» de [D3](02-decisiones.md).
+> **Measured in F1.3, Aug 2026: neither of the two shows up.** The full repaint scales linearly —two
+> consoles cost 1.96× one and the frame spends 36 % of its slot— and typing costs 36 µs. The jump is
+> not due. What is left to check is the load these numbers do **not** cover: four panes and the
+> panels painting at the same time, which is to say F1.4 and F1.6. The numbers, with what they prove
+> and what they do not, are in the «Measured — 9 August 2026» annex of [D3](02-decisiones.md).
 
-### Estructura
+### Structure
 
 ```
 agent-terminal/
 ├── Cargo.toml              workspace
 ├── crates/
-│   ├── panel-contract/     tipos de panel.json, lectura, validación  ← no depende de nada visual
-│   ├── term-core/          una división = PTY + rejilla              ← no depende de nada visual
-│   └── app/                ventana, divisiones, pintado              ← la única pieza atada a egui
+│   ├── panel-contract/     panel.json types, reading, validation   ← depends on nothing visual
+│   ├── term-core/          one pane = PTY + grid                   ← depends on nothing visual
+│   └── app/                window, panes, painting                 ← the only piece tied to egui
 ├── docs/
 └── prototipos/
 ```
 
-Las dos primeras cajas son las que hay que proteger. Si `app` se tira a la basura y se reescribe
-en GPUI, `panel-contract` y `term-core` siguen sirviendo tal cual.
+The first two boxes are the ones to protect. If `app` gets thrown away and rewritten in GPUI,
+`panel-contract` and `term-core` keep working exactly as they are.
 
 ---
 
-## Fase 1 — Prototipo mínimo
+## Phase 1 — Minimal prototype
 
-**Objetivo:** ver si el conjunto se sostiene en las manos. Sin pestañas, sin botones.
+**Goal:** find out whether the whole thing holds up in your hands. No tabs, no buttons.
 
-**Criterio de éxito:** usarlo **media hora de trabajo real** sin echar de menos WezTerm por algo
-que no sea pestañas.
+**Success criterion:** using it for **half an hour of real work** without missing WezTerm for
+anything other than tabs.
 
-Tamaño: **S** = una sentada · **M** = varias · **L** = va a doler.
+Size: **S** = one sitting · **M** = several · **L** = this is going to hurt.
 
-| Hito | Qué se construye | Cómo se comprueba | Tamaño |
+| Milestone | What gets built | How it is checked | Size |
 |---|---|---|---|
-| **F1.0** ✅ | `git init` y el workspace con las tres cajas vacías | `cargo build` limpio | S |
-| **F1.1** ✅ | `term-core`: `portable-pty` lanza el shell, hilo lector, escritura al PTY | Un binario de prueba lanza `zsh -l`, escribe `ls\n`, imprime la salida cruda | S |
-| **F1.2** ✅ | `term-core`: los bytes entran en `alacritty_terminal::Term`; volcar la rejilla a texto | `vim` y `htop` producen una rejilla coherente; al redimensionar, refluye | M |
-| **F1.3** ✅ | `app`: pintar la rejilla en egui — fuente monoespaciada, colores ANSI, cursor. Teclado → PTY | Se puede usar `ls`, `vim` y **`claude`** dentro de la ventana | L |
-| **F1.4** ✅ | Dos divisiones lado a lado, foco por clic, divisor arrastrable | Dos shells vivos a la vez sin que se pisen | M |
-| **F1.5** ✅ | `PANEL_ID` / `PANEL_DIR` inyectados al lanzar cada shell; el directorio se crea y se limpia al cerrar | `echo $PANEL_ID` da valores distintos en cada división | S |
-| **F1.6** ✅ | `panel-contract` + `notify`: panel a la derecha de cada división, repintado al cambiar el fichero, y aviso cuando lo que se ve es viejo o no se pudo leer | `flow` escribe en una división y solo esa repinta | M |
+| **F1.0** ✅ | `git init` and the workspace with the three empty boxes | a clean `cargo build` | S |
+| **F1.1** ✅ | `term-core`: `portable-pty` launches the shell, reader thread, writing to the PTY | A test binary launches `zsh -l`, writes `ls\n`, prints the raw output | S |
+| **F1.2** ✅ | `term-core`: the bytes go into `alacritty_terminal::Term`; dumping the grid to text | `vim` and `htop` produce a coherent grid; on resizing, it reflows | M |
+| **F1.3** ✅ | `app`: painting the grid in egui — monospaced font, ANSI colors, cursor. Keyboard → PTY | `ls`, `vim` and **`claude`** can be used inside the window | L |
+| **F1.4** ✅ | Two panes side by side, focus by click, draggable divider | Two live shells at once without treading on each other | M |
+| **F1.5** ✅ | `PANEL_ID` / `PANEL_DIR` injected when each shell is launched; the directory is created and cleaned up on closing | `echo $PANEL_ID` gives different values in each pane | S |
+| **F1.6** ✅ | `panel-contract` + `notify`: a panel to the right of each pane, repainted when the file changes, and a warning when what is shown is stale or could not be read | `flow` writes in one pane and only that one repaints | M |
 
-### Lo que la Fase 1 deja fuera a propósito
+### What Phase 1 leaves out on purpose
 
-Scrollback largo, selección con ratón, copiar, búsqueda, ligaduras de fuente, protocolo
-gráfico de Kitty, pestañas, botones, MCP. Todo eso es Fase 2 o posterior. Meterlo aquí convierte
-un prototipo de una semana en uno de tres meses y no responde mejor la pregunta.
+Long scrollback, mouse selection, copying, search, font ligatures, Kitty's graphics protocol, tabs,
+buttons, MCP. All of that is Phase 2 or later. Putting it in here turns a one-week prototype into a
+three-month one and does not answer the question any better.
 
-### Riesgos concretos
+### Concrete risks
 
-| Riesgo | Dónde aparece | Qué hacer |
+| Risk | Where it shows up | What to do |
 |---|---|---|
-| **Ancho de glifo** — CJK, emoji y caracteres combinantes descolocan la rejilla | F1.3 | **No hay nada que portar** (corregido, ago 2026): el parser ya resuelve el ancho y marca la celda acompañante, y el lector de `term-core` lo expone como `CellWidth`. Lo que le queda a quien pinta es **respetar** las dos columnas, no calcularlas |
-| **Repintado completo** — egui es modo inmediato: repinta todo cada frame | F1.3 | **RESPONDIDO (ago 2026): el síntoma no aparece.** Dos consolas cuestan 1,96× una —escala lineal— y el fotograma gasta el 36 % de su hueco con el pintor más ingenuo posible. Se repinta solo cuando el PTY produce cambios, como estaba previsto. **Remedido en F1.4 con dos divisiones de verdad (ago 2026), y el sospechoso cambia:** con las dos consolas volcando a la vez el fotograma cuesta 5,92 ms y cabe en el hueco de 120 Hz, pero **de eso solo 0,74 ms son atribuibles al framework** — 3,35 los gasta el parser tragando su presupuesto y el resto un pintor propio sin optimizar. El teclado sigue respondiendo mientras dura: 3,42 ms de la tecla al byte, frente a los 36 µs sin volcado. **No compara con el 36 % del banco**: aquel medía pantallas llenas y repintado continuo, y esto un volcado sobre casi el doble de celdas. **El peor caso con dos divisiones sigue sin medirse**, y el p95 del volcado doble ya se sale de 120 Hz. Números y límites en el anexo «Medido — 11 agosto» de [D3](02-decisiones.md) |
-| **Latencia de tecla** — un terminal que se nota lento al escribir es inservible | F1.3 | **RESPONDIDO (ago 2026): 36 µs** de la tecla en el fotograma al byte en el programa. **No existe un número «tecla→píxel»**: los eventos de egui no traen sello propio y el reloj de su entrada es «relativo a lo que sea», así que ese tramo no es medible desde el proceso — publicarlo con ese nombre habría sido inventarlo. Lo que sí se mide, y con desglose, está en [D3](02-decisiones.md) |
-| **Teclas muertas e IME** | F1.3 | Aceptar que quede regular en el prototipo; es Fase 2 |
-| **Rendimiento del volcado masivo** (`cat` de un fichero grande) | F1.2 | Acotar cuántos bytes se procesan por frame |
-| **Windows** — ConPTY se comporta distinto | fuera de Fase 1 | No se toca hasta la Fase 2. `portable-pty` lo abstrae, pero abstraer no es probar |
+| **Glyph width** — CJK, emoji and combining characters knock the grid out of place | F1.3 | **There is nothing to port** (corrected, Aug 2026): the parser already resolves the width and marks the companion cell, and `term-core`'s reader exposes it as `CellWidth`. What is left for whoever paints is to **respect** the two columns, not to compute them |
+| **Full repaint** — egui is immediate mode: it repaints everything every frame | F1.3 | **ANSWERED (Aug 2026): the symptom does not show up.** Two consoles cost 1.96× one —linear scaling— and the frame spends 36 % of its slot with the most naive painter possible. It only repaints when the PTY produces changes, as was foreseen. **Measured again in F1.4 with two real panes (Aug 2026), and the suspect changes:** with both consoles dumping at once the frame costs 5.92 ms and fits in the 120 Hz slot, but **only 0.74 ms of that is attributable to the framework** — 3.35 are spent by the parser swallowing its budget and the rest by an unoptimized painter of our own. The keyboard keeps responding while it lasts: 3.42 ms from the key to the byte, against the 36 µs with no dump. **It does not compare with the bench's 36 %**: that one measured full screens and continuous repainting, and this one a dump over nearly twice as many cells. **The worst case with two panes is still unmeasured**, and the p95 of the double dump already falls outside 120 Hz. Numbers and limits in the «Measured — 11 August 2026» annex of [D3](02-decisiones.md) |
+| **Key latency** — a terminal that feels slow to type in is useless | F1.3 | **ANSWERED (Aug 2026): 36 µs** from the key in the frame to the byte in the program. **There is no «key→pixel» number**: egui's events carry no stamp of their own and the clock of its input is «relative to whatever», so that span is not measurable from inside the process — publishing it under that name would have been making it up. What is measured, and broken down, is in [D3](02-decisiones.md) |
+| **Dead keys and IME** | F1.3 | Accept that it comes out mediocre in the prototype; it is Phase 2 |
+| **Performance of the massive dump** (`cat` of a big file) | F1.2 | Cap how many bytes get processed per frame |
+| **Windows** — ConPTY behaves differently | outside Phase 1 | Not touched until Phase 2. `portable-pty` abstracts it, but abstracting is not testing |
 
 ---
 
-## Fase 2 — Anfitrión de verdad
+## Phase 2 — A real host
 
-Lo que convierte el prototipo en algo que se usa a diario.
+What turns the prototype into something used daily.
 
-| Hito | Qué |
+| Milestone | What |
 |---|---|
-| **F2.1** ✅ | Pestañas — **cerrado el 16 de agosto de 2026**. Ocho entregas; el fotograma medido con una y dos pestañas en el anexo de [D13](02-decisiones.md) |
-| **F2.2** ✅ | Divisiones arbitrarias — **cerrado el 17 de agosto de 2026**. Siete entregas; el árbol n-ario con pesos y los tres acordes en [D14](02-decisiones.md), y el fotograma medido con dos y con cuatro divisiones en su anexo |
-| **F2.3** ✅ | **Arrastrar divisiones con el ratón** para recolocarlas — **cerrado el 18 de agosto de 2026**. Tres entregas; el gesto, su atomicidad y la identidad del arrastre en [D15](02-decisiones.md), y el fotograma medido arrastrando sin parar en su anexo |
-| **F2.4** ✅ | Plegar el panel por división y **estrechar su ancho arrastrando** — **cerrado el 19 de agosto de 2026**. Tres entregas; el ancho por división, el mínimo del gesto y el plegado como estado aparte en [D10](02-decisiones.md), y lo que cuesta el gesto medido en su anexo |
-| **F2.5** ✅ | Guardar y restaurar la disposición al abrir — **cerrado el 24 de agosto de 2026**. Ocho entregas; el fichero propio, su versión y lo que no se entiende en [D16](02-decisiones.md), y en su anexo lo que cuesta abrir con las consolas que dejaste: **5,42 ms una sola vez y antes del primer fotograma**, con la tanda `L` midiéndolo y `H` de control |
-| **F2.6** ✅ | Scrollback, selección y **copiar**, y el reenvío del ratón al programa de dentro — **cerrado el 25 de agosto de 2026**. Cuatro entregas; el techo del historial elegido con las medidas delante en [D21](02-decisiones.md), el reparto del botón izquierdo en [D20](02-decisiones.md), qué es «el texto» que se copia en [D22](02-decisiones.md), y quién se queda cada gesto —con la codificación del informe, que la librería no trae— en [D23](02-decisiones.md). Pegar se había adelantado fuera de fase ([#46](https://github.com/mashware/agent-terminal/issues/46)), ver D11. En los anexos: el historial cuesta **+39 % de interpretar y +1,2 % de vuelta**, tener texto marcado **50–60 µs por fotograma y consola** —declarado **sin aislar**— y codificarle un gesto al programa y escribírselo **5,1–5,3 µs**, ése sí aislado en su propia serie |
-| **F2.7** | Primera compilación y prueba real en **macOS y Windows** |
-| **F2.8** ✅ | **El panel dice cuándo te reclama, y la pestaña lo acumula** — **cerrado el 24 de agosto de 2026**. Tres entregas; el campo `attention` y quién lo declara en [D18](02-decisiones.md), los tres símbolos medidos y la tabla de color propia en el anexo de [D9](02-decisiones.md), y en el anexo de D18 lo que cuesta la barra desde que su ficha acumula: **entre 2,35 y 2,69 µs por fotograma**, medido con dos pestañas y los cuatro productores reclamando. El aviso del sistema se quedó fuera a propósito, hasta que el campo tenga productores |
-| **F2.9** ✅ | **Las fuentes del sistema** — **cerrado el 25 de agosto de 2026**. Cuatro entregas; CJK, los iconos de un `ls` y **los emojis a color** dejan de salir como cuadros. Que se busquen **cuando hacen falta** y no al arrancar lo decidió una medida ([D24](02-decisiones.md): 23,5–31,0 ms al arranque contra 4,0–5,7 perezoso), y el emoji a color va por su cuenta porque **epaint no sabe rasterizar color** ([D25](02-decisiones.md)). Dos hallazgos que reordenaron trabajo: `Fonts::has_glyph` **miente** —devuelve `false` para la `'a'`—, y una fuente de iconos puesta delante le quitaba **tres de cada cinco letras** al terminal. En los anexos: dibujar con emojis en pantalla cuesta **356 µs contra 269 del control**, después de que el atlas y la pasada propia lo bajaran desde 743. `COLR` —lo que usa Windows— y los tonos de piel quedan fuera, con su razón |
-| **F2.10** | **Configuración** — fuente, tamaño, colores y atajos. Es la primera cosa que hace cualquiera al instalar un terminal, y hasta **D19** no aparecía en este roadmap |
-| **F2.12** | **Todo el repositorio en inglés** — el código propio, los comentarios, las pruebas y los documentos están **en español desde el primer commit**, y esa decisión **no está escrita en ninguna parte**, que es lo que la dejó crecer. Pasa todo a inglés, claves de configuración y mensajes incluidos, **sin compatibilidad hacia atrás**: nadie tiene este terminal instalado, así que no hay ningún fichero ahí fuera al que respetarle nada, y es la única ventana en la que sale gratis. Commits, ramas y PR pasan a inglés **desde ya**, sin esperar al hito. **Se ejecuta el primero de la fase que queda** — ver abajo. [#122](https://github.com/mashware/agent-terminal/issues/122), **D27** |
-| **F2.11** | **Una cabecera por división** — al estilo de Tilix: el asidero para arrastrarla, su botón de cerrar, y de un vistazo cuál tiene el foco. Sale de **D20**, donde se descartó **como parte de F2.6** y no como idea: cuesta alto a **todas** las consolas siempre, y eso deja de comparar con nada las tandas de control ya publicadas. Su hito tiene que empezar por decidir qué se hace con esas medidas |
+| **F2.1** ✅ | Tabs — **closed on 16 August 2026**. Eight deliveries; the frame measured with one and two tabs in [D13](02-decisiones.md)'s annex |
+| **F2.2** ✅ | Arbitrary panes — **closed on 17 August 2026**. Seven deliveries; the n-ary tree with weights and the three chords in [D14](02-decisiones.md), and the frame measured with two and with four panes in its annex |
+| **F2.3** ✅ | **Dragging panes with the mouse** to rearrange them — **closed on 18 August 2026**. Three deliveries; the gesture, its atomicity and the identity of the drag in [D15](02-decisiones.md), and the frame measured while dragging non-stop in its annex |
+| **F2.4** ✅ | Folding the panel away per pane and **narrowing its width by dragging** — **closed on 19 August 2026**. Three deliveries; the per-pane width, the gesture's minimum and folding as a separate state in [D10](02-decisiones.md), and what the gesture costs measured in its annex |
+| **F2.5** ✅ | Saving and restoring the layout on opening — **closed on 24 August 2026**. Eight deliveries; the file of its own, its version and what is not understood in [D16](02-decisiones.md), and in its annex what it costs to open with the consoles you left: **5.42 ms once only and before the first frame**, with batch `L` measuring it and `H` as the control |
+| **F2.6** ✅ | Scrollback, selection and **copying**, and forwarding the mouse to the program inside — **closed on 25 August 2026**. Four deliveries; the scrollback's ceiling chosen with the measurements in front of us in [D21](02-decisiones.md), how the left button is shared out in [D20](02-decisiones.md), what «the text» that gets copied is in [D22](02-decisiones.md), and who keeps each gesture —with the report's encoding, which the library does not bring— in [D23](02-decisiones.md). Pasting had been brought forward out of phase ([#46](https://github.com/mashware/agent-terminal/issues/46)), see D11. In the annexes: the scrollback costs **+39 % more interpreting and +1.2 % of the full round trip**, having text marked **50–60 µs per frame and console** —declared **without isolating it**— and encoding a gesture for the program and writing it to it **5.1–5.3 µs**, that one isolated in a series of its own |
+| **F2.7** | First compilation and real test on **macOS and Windows** |
+| **F2.8** ✅ | **The panel says when it claims you, and the tab accumulates it** — **closed on 24 August 2026**. Three deliveries; the `attention` field and who declares it in [D18](02-decisiones.md), the three measured symbols and the color table of its own in [D9](02-decisiones.md)'s annex, and in D18's annex what the bar costs now that its card accumulates: **between 2.35 and 2.69 µs per frame**, measured with two tabs and the four producers claiming. The system notification was left out on purpose, until the field has producers |
+| **F2.9** ✅ | **The system fonts** — **closed on 25 August 2026**. Four deliveries; CJK, the icons of an `ls` and **color emoji** stop coming out as boxes. That they be looked up **when they are needed** and not at startup was decided by a measurement ([D24](02-decisiones.md): 23.5–31.0 ms at startup against 4.0–5.7 lazily), and color emoji goes its own way because **epaint cannot rasterize color** ([D25](02-decisiones.md)). Two findings that reordered work: `Fonts::has_glyph` **lies** —it returns `false` for `'a'`—, and an icon font placed in front took **three letters out of every five** away from the terminal. In the annexes: drawing with emoji on screen costs **356 µs against the control's 269**, after the atlas and the pass of its own brought it down from 743. `COLR` —what Windows uses— and skin tones are left out, with their reason |
+| **F2.10** | **Configuration** — font, size, colors and shortcuts. It is the first thing anybody does on installing a terminal, and until **D19** it did not appear in this roadmap |
+| **F2.12** | **The whole repository in English** — the project's own code, the comments, the tests and the documents have been **in Spanish since the first commit**, and that decision **is not written down anywhere**, which is what let it grow. It moves everything to English, configuration keys and messages included, **with no backwards compatibility**: nobody has this terminal installed, so there is no file out there whose anything has to be respected, and it is the only window in which it comes free. Commits, branches and PRs move to English **from now on**, without waiting for the milestone. **It is run first of what is left of the phase** — see below. [#122](https://github.com/mashware/agent-terminal/issues/122), **D27** |
+| **F2.11** | **A header per pane** — Tilix style: the handle to drag it by, its close button, and at a glance which one has the focus. It comes out of **D20**, where it was discarded **as part of F2.6** and not as an idea: it costs height to **every** console always, and that leaves the control batches already published comparing with nothing. Its milestone has to start by deciding what to do with those measurements |
 
-**De dónde sale esta lista, desde D19.** El listón que hay que pasar antes de publicar es el de un
-usuario de WezTerm, Ghostty o Kitty — **no** el de un usuario de Orca. Eso es lo que mete a F2.9 y
-F2.10 en la fase y lo que deja fuera el navegador integrado, la app móvil, el editor y el abanico de
-agentes: la lista entera de lo que queda fuera, con quién lo tiene, está en **D19**.
+**Where this list comes from, since D19.** The bar to clear before publishing is that of a WezTerm,
+Ghostty or Kitty user — **not** that of an Orca user. That is what puts F2.9 and F2.10 into the
+phase and what leaves out the built-in browser, the mobile app, the editor and the spread of agents:
+the whole list of what is left out, with who has it, is in **D19**.
 
-**F2.12 se hace antes que F2.10, F2.7 y F2.11, y el número tampoco se recicla** — por la misma razón que
-F2.8 más abajo. Va delante porque **cuanto más código haya, más caro sale**: 43.860 líneas propias hoy, y
-cada hito las aumenta. Y porque durante la migración cualquier rama abierta da conflicto en todo, así que
-pide el árbol limpio — que es como quedó al mezclarse F2.10. **F2.10 se queda con tres entregas de
-cuatro**: elegir la fuente por su nombre espera a que esto termine.
+**F2.12 is done before F2.10, F2.7 and F2.11, and its number is not recycled either** — for the same
+reason as F2.8 further down. It goes in front because **the more code there is, the more expensive
+it gets**: 43 860 lines of our own today, and every milestone adds to them. And because during the
+migration any open branch conflicts on everything, so it demands a clean tree — which is how it was
+left when F2.10 was merged. **F2.10 keeps three deliveries out of four**: choosing the font by its
+name waits until this is finished.
 
-**F2.8 se hace antes que F2.6 y F2.7, y el número no se recicla.** Los identificadores de hito viven
-en commits, decisiones y en el almacén de conocimiento, así que renumerar sale más caro que aceptar
-que la tabla no esté en orden. La razón de adelantarlo: es lo único de la Fase 2 que toca **la pata
-que diferencia**, y el panorama de agosto dejó a dos competidores a un solo campo de distancia
-([07-panorama.md](07-panorama.md) → E7 y E8). Scrollback y portabilidad son terminal, y el terminal
-ya no es lo que hay que defender.
+**F2.8 is done before F2.6 and F2.7, and the number is not recycled.** Milestone identifiers live in
+commits, decisions and in the knowledge store, so renumbering costs more than accepting that the
+table is out of order. The reason for bringing it forward: it is the only thing in Phase 2 that
+touches **the leg that differentiates**, and August's landscape left two competitors a single field
+away ([07-panorama.md](07-panorama.md) → E7 and E8). Scrollback and portability are terminal, and
+the terminal is no longer what has to be defended.
 
-F2.3 es la razón de ser de la fase: es la carencia que llevó a plantearse esto, y es la que
-justifica no haber cogido un multiplexor ya hecho.
+F2.3 is the whole reason the phase exists: it is the gap that led to considering this, and it is
+what justifies not having taken an off-the-shelf multiplexer.
 
-F2.7 no se puede retrasar más allá de aquí. Cuanto más tarde se pruebe en las otras dos
-plataformas, más caro sale cada supuesto que resultó ser de Linux.
-
----
-
-## Fase 3 — Bidireccional
-
-- [ ] `actions`: botones declarados en el contrato que escriben en el PTY de su división
-- [ ] Servidor **MCP** con `panel_set`, `split_open`, `split_read`, `split_close`
-- [ ] Acotado por `PANEL_ID`: cada agente alcanza su división y no las demás
-
-**No empezar sin releer la tabla de seguridad de [03-arquitectura.md](03-arquitectura.md).**
-Un fichero que declara comandos y un botón que los ejecuta es ejecución de código en el shell
-del usuario; el comando tiene que verse antes de ejecutarse.
+F2.7 cannot be delayed any further than here. The later it is tested on the other two platforms, the
+more expensive every assumption that turned out to be a Linux one gets.
 
 ---
 
-## Fase 4 — Vista resumen
+## Phase 3 — Bidirectional
 
-**Aparcado a propósito.** Depende de que las divisiones y el contrato estén rodados.
+- [ ] `actions`: buttons declared in the contract that write to their pane's PTY
+- [ ] **MCP** server with `panel_set`, `split_open`, `split_read`, `split_close`
+- [ ] Scoped by `PANEL_ID`: each agent reaches its own pane and no other
 
-La pantalla que responde a *«¿qué requiere algo de mí ahora mismo?»*: todas las tareas de todas
-las pestañas, ordenadas por lo que espera una decisión, lo que está bloqueado, y lo que avanza
-solo. El germen ya existe — es la vista global de `flow-panel` — pero la versión buena necesita
-el indicador de actividad y el estado de todas las divisiones a la vez.
-
----
-
-## Fase 5 — Supervisor
-
-**Lejos, y está bien que lo esté.** Un agente que observa el estado de todas las divisiones y
-dirige a los demás.
-
-Lo importante: **la infraestructura es la misma que la Fase 3**. Los botones y el supervisor usan
-el mismo canal. Si nunca se hace, no se ha perdido nada.
-
-> **Y ahora hay una razón externa para que siga siendo así.** El supervisor **no puede ser una
-> llamada nuestra a un modelo**: desde el **4 de abril de 2026** las suscripciones de Claude no
-> cubren las herramientas de terceros, así que un agente que la app llamara por API lo pagaría el
-> usuario aparte — justo lo que **D4** existe para evitar. El supervisor tiene que ser **otro agente
-> de consola**, en su división, hablando por MCP como cualquier otro. Ver
-> [02-decisiones.md](02-decisiones.md) → D4.
+**Do not start without rereading the security table in [03-arquitectura.md](03-arquitectura.md).** A
+file that declares commands and a button that runs them is code execution in the user's shell; the
+command has to be seen before it is run.
 
 ---
 
-## Pendientes sueltos
+## Phase 4 — Summary view
 
-- [ ] Decidir nombre del proyecto — aparcado hasta tener el prototipo delante
-- [ ] `flow-note "texto"` — comando corto para escribir en el panel de la tarea de la rama actual
-- [ ] Hook que publique el estado automáticamente al final de cada paso, en vez de a mano
-- [ ] Cerrar dos cabos del contrato: `actions`, y que `header: false` no dependa de `meta.json`
-      (ver [04-contrato-panel.md](04-contrato-panel.md))
-- [ ] Revisar términos de uso antes de distribuir a terceros (automatizar sesiones de
-      suscripción es zona gris; ver [02-decisiones.md](02-decisiones.md) → D4). **Más agudo desde
-      abril de 2026**: hospedar el binario oficial está claramente dentro —él usa su propia sesión y
-      nosotros no tocamos su token— pero **automatizarlo** desde fuera no está resuelto por escrito
-- [ ] **Un puente entre opencode y `panel.json`** — su backend expone HTTP con eventos y su barra
-      lateral ya calcula lo que el panel quiere pintar. Sería el segundo productor del contrato sin
-      tocarle una línea a su código (ver [06-referencias.md](06-referencias.md))
+**Parked on purpose.** It depends on the panes and the contract being well worn in.
 
-~~Instalar `inotify-tools`~~ — cae con F1.6: el crate `notify` hace lo mismo y además en macOS
-y Windows. Mientras el panel siga corriendo sobre WezTerm, el sondeo por `mtime` cada segundo
-funciona y no molesta.
+The screen that answers *«what requires something from me right now?»*: every task in every tab,
+ordered by what is waiting on a decision, what is blocked, and what is moving along by itself. The
+seed already exists — it is `flow-panel`'s global view — but the good version needs the activity
+indicator and the state of every pane at once.
 
 ---
 
-## Ideas sin fase
+## Phase 5 — Supervisor
 
-Cosas que gustan y **no tienen fase asignada**. No son deuda ni compromiso: están escritas para no
-perderlas y para que nadie las cuele en una fase «ya que estamos». Si alguna entra algún día, será
-por la puerta de delante — con su hueco en la Parte I y su decisión en `02-decisiones.md`.
+**Far off, and it is fine that it is.** An agent that observes the state of every pane and directs
+the others.
 
-### Tareas y tablero
+The important part: **the infrastructure is the same as Phase 3's**. The buttons and the supervisor
+use the same channel. If it is never done, nothing has been lost.
 
-**La idea.** Que una tarea sea una cosa con nombre propio, no solo «lo que hay corriendo en esa
-división»: se crea antes de tener consola, se encola, se enlaza con otra («cuando termine esta,
-arranca esa»), y se ve en un tablero por columnas. Es lo que hace Cline Kanban, y la parte de las
-**cadenas de dependencias** es genuinamente buena — resuelve encadenar trabajo sin escribir un
-script.
+> **And now there is an external reason for it to stay that way.** The supervisor **cannot be a call
+> of ours to a model**: since **4 April 2026** Claude subscriptions do not cover third-party tools,
+> so an agent the app called over the API would be paid for by the user separately — exactly what
+> **D4** exists to avoid. The supervisor has to be **another console agent**, in its own pane,
+> speaking MCP like any other. See [02-decisiones.md](02-decisiones.md) → D4.
 
-**Por qué no entra ahora.** Choca de frente con la forma de las fases 1–3, y el choque es de
-fondo, no de calendario:
+---
 
-- Aquí la unidad es **la división** — una consola viva, con su `PANEL_ID` y su `panel.json`
-  (D7). Una tarea encolada todavía no tiene consola, así que no tiene división, así que no tiene
-  dónde publicar. Meter tareas obliga a inventar una segunda unidad por encima de la división, y
-  eso es un modelo de datos nuevo, no una pantalla nueva.
-- «Cuando termine esta, arranca esa» exige que la app **sepa** que algo terminó. Eso solo puede
-  venir del contrato, publicado por quien trabaja — nunca deducido (D6). Antes de la Fase 3
-  rodada no hay estado en el que confiar para disparar nada, y disparar procesos con una señal
-  poco fiable es peor que no disparar.
-- La Fase 4 ya cubre el 80% del valor sin nada de esto: **ordenar por lo que te reclama** es más
-  útil que un tablero, y no necesita modelo de tareas — solo el estado que ya llega.
+## Loose ends
 
-**Qué la haría entrar.** Que después de usar la Fase 4 un tiempo siga faltando algo, y ese algo
-sea concreto: encolar trabajo que aún no tiene consola, o encadenar sin script. Si lo que falta se
-puede resolver ordenando mejor la lista de la Fase 4, no hace falta un tablero.
+- [ ] Decide the project's name — parked until the prototype is in front of us
+- [ ] `flow-note "text"` — a short command to write into the panel of the current branch's task
+- [ ] A hook that publishes the state automatically at the end of every step, instead of by hand
+- [ ] Tie off two loose ends of the contract: `actions`, and making `header: false` not depend on
+      `meta.json` (see [04-contrato-panel.md](04-contrato-panel.md))
+- [ ] Review the terms of use before distributing to third parties (automating subscription sessions
+      is a gray area; see [02-decisiones.md](02-decisiones.md) → D4). **Sharper since April 2026**:
+      hosting the official binary is clearly inside —it uses its own session and we do not touch its
+      token— but **automating it** from outside is not resolved in writing
+- [ ] **A bridge between opencode and `panel.json`** — its backend exposes HTTP with events and its
+      sidebar already computes what the panel wants to paint. It would be the contract's second
+      producer without touching a line of its code (see [06-referencias.md](06-referencias.md))
+
+~~Install `inotify-tools`~~ — it falls with F1.6: the `notify` crate does the same thing and on
+macOS and Windows too. As long as the panel keeps running on top of WezTerm, polling by `mtime`
+every second works and does not get in the way.
+
+---
+
+## Ideas with no phase
+
+Things we like that **have no phase assigned**. They are neither debt nor commitment: they are
+written down so as not to lose them and so that nobody sneaks them into a phase «while we are at
+it». If one of them ever goes in, it will be through the front door — with its slot in Part I and
+its decision in `02-decisiones.md`.
+
+### Tasks and board
+
+**The idea.** That a task be a thing with a name of its own, not just «whatever is running in that
+pane»: it is created before having a console, it is queued, it is linked to another one («when this
+one finishes, start that one»), and it is seen on a board with columns. It is what Cline Kanban
+does, and the **dependency chains** part is genuinely good — it solves chaining work without writing
+a script.
+
+**Why it does not go in now.** It clashes head-on with the shape of phases 1–3, and the clash is a
+deep one, not one of scheduling:
+
+- Here the unit is **the pane** — a live console, with its `PANEL_ID` and its `panel.json` (D7). A
+  queued task does not have a console yet, so it does not have a pane, so it has nowhere to publish.
+  Putting tasks in forces inventing a second unit above the pane, and that is a new data model, not
+  a new screen.
+- «When this one finishes, start that one» demands that the app **know** that something finished.
+  That can only come from the contract, published by whoever does the work — never deduced (D6).
+  Before Phase 3 is worn in there is no state to trust for triggering anything, and triggering
+  processes off an unreliable signal is worse than not triggering.
+- Phase 4 already covers 80% of the value without any of this: **ordering by what claims you** is
+  more useful than a board, and it needs no task model — only the state that already arrives.
+
+**What would make it go in.** That after using Phase 4 for a while something is still missing, and
+that something is concrete: queuing work that does not have a console yet, or chaining without a
+script. If what is missing can be solved by ordering Phase 4's list better, no board is needed.

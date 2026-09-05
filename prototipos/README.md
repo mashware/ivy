@@ -1,30 +1,30 @@
-# Prototipos
+# Prototypes
 
 ## `flow-panel`
 
-El panel de estado funcionando, en Python, sobre WezTerm. **Es la implementación de referencia
-del contrato** ([../docs/04-contrato-panel.md](../docs/04-contrato-panel.md)).
+The status panel working, in Python, over WezTerm. **It is the contract's reference
+implementation** ([../docs/04-contrato-panel.md](../docs/04-contrato-panel.md)).
 
-Copia de trabajo instalada en `~/.local/bin/flow-panel`. Esta es la del repositorio — si tocas
-una, sincroniza la otra.
+The working copy is installed at `~/.local/bin/flow-panel`. This is the repository's — if you
+touch one, sync the other.
 
 ```
-flow-panel [ruta]                 vista global: todos los trabajos del repo
-flow-panel --focus [ruta]         solo el trabajo de la rama actual
-flow-panel --work MT-1234 [ruta]  fijado a un trabajo concreto
-flow-panel --json [ruta]          lista de trabajos abiertos (para el selector)
+flow-panel [path]                 global view: every work in the repo
+flow-panel --focus [path]         only the work of the current branch
+flow-panel --work MT-1234 [path]  pinned to one work
+flow-panel --json [path]          list of open works (for the picker)
 ```
 
-Atajos en WezTerm: `Ctrl+Alt+F` vista global · `Ctrl+Alt+G` elegir tarea y fijarla.
+Shortcuts in WezTerm: `Ctrl+Alt+F` global view · `Ctrl+Alt+G` pick a task and pin it.
 
-**Qué vale de aquí para la app:** el render adaptativo (ancho y alto), la degradación de la
-barra de fases, los enlaces cortos con OSC 8, la alineación por bloques y el aviso de resumen
-rancio. Todo eso hay que reimplementarlo, pero las decisiones ya están tomadas y probadas.
+**What is worth taking from here for the app:** the adaptive rendering (width and height), the way
+the phase bar degrades, the short links with OSC 8, the alignment by blocks and the stale-summary
+warning. All of it has to be reimplemented, but the decisions are already made and tried.
 
 ## `mockup-terminal.html`
 
-Maqueta visual de la app: pestañas, divisiones, panel por división, contexto y coste,
-indicador de actividad y plegado. Datos falsos, paleta real.
+A visual mock-up of the app: tabs, panes, a panel per pane, context and cost, an activity indicator
+and folding. Fake data, real palette.
 
-Sirve para juzgar proporciones antes de escribir Rust. Ábrelo en el navegador y toca los
-controles de arriba.
+It is for judging proportions before writing Rust. Open it in a browser and play with the controls
+at the top.

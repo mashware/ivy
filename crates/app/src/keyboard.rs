@@ -1300,8 +1300,9 @@ mod keymap_tests {
     /// files by hand. That chord is one of the fourteen this test walks.
     ///
     /// **A chord is recognized by its shape and not by where it is**, so this guard anchors on no
-    /// phrase. That matters because this document's prose is in Spanish and **another delivery translates it**:
-    /// a guard that hooked by the text would die that day without anyone noticing.
+    /// phrase. That is what carried it through the delivery that translated this document: three of
+    /// its sibling guards hooked on Spanish headings and column names, and all three came back red
+    /// the day the document turned English. This one did not notice, which is the point.
     #[test]
     fn each_chord_the_document_publishes_the_code_understands() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
@@ -1371,5 +1372,89 @@ mod keymap_tests {
              Whoever reads the document would not know they exist, and whoever follows it would write a key that \
              the application rejects"
         );
+    }
+
+    /// **The shortcut table is read out of the document, row by row, and confronted with the code.**
+    ///
+    /// It is the half the other three leave open, and both of its directions were measured green
+    /// before it was written:
+    ///
+    /// - [`the_document_publishes_exactly_the_shortcuts_the_code_has`] copies the table **by hand and
+    ///   on purpose**, so its `published.len() == ALL.len()` counts the copy in this file and never
+    ///   the document. Adding a twelfth row — `zoom-pane`, a name the code does not have — left the
+    ///   whole suite green.
+    /// - [`each_action_is_published_in_the_configuration_document`] goes the other way, code to
+    ///   document, so a name the document invents is nothing to it.
+    /// - [`each_chord_the_document_publishes_the_code_understands`] asks only whether a chord
+    ///   **parses**, never which action it belongs to. Changing the «Out of the box» cell of
+    ///   `split-right` from `ctrl+shift+d` to `ctrl+shift+g` also left the suite green, and that cell
+    ///   is the one somebody reads to find out what their terminal does today.
+    ///
+    /// **The names and the chords are paired by position inside the row**, because two of the rows
+    /// carry two of each — `previous-tab` · `next-tab` — and pairing them any other way would be
+    /// asserting on a set instead of on the mapping, which is the whole thing being published.
+    #[test]
+    fn the_document_publishes_the_shortcut_table_the_code_really_has() {
+        const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
+
+        // Every backticked token of a cell, in the order the cell writes them.
+        fn backticked(cell: &str) -> Vec<&str> {
+            cell.split('`').skip(1).step_by(2).collect()
+        }
+
+        let mut published: Vec<(&str, &str)> = Vec::new();
+        let rows = DOCUMENT
+            .lines()
+            .skip_while(|line| !line.starts_with("| Name | What it does | Out of the box |"))
+            .skip(2)
+            .take_while(|line| line.starts_with('|'));
+        for row in rows {
+            let cells: Vec<&str> = row.split('|').collect();
+            let names = backticked(cells.get(1).unwrap_or(&""));
+            let chords = backticked(cells.get(3).unwrap_or(&""));
+            assert_eq!(
+                names.len(),
+                chords.len(),
+                "the row «{row}» publishes {} names and {} chords: whoever reads it cannot tell which \
+                 chord is which shortcut's",
+                names.len(),
+                chords.len()
+            );
+            published.extend(names.into_iter().zip(chords));
+        }
+
+        // **The floor is an equality against the code and not a count written here**, which is what
+        // makes this the guard the hand copy cannot be: a row invented in the document fails it, and
+        // so does a shortcut the code grows and the table does not.
+        assert_eq!(
+            published.len(),
+            ALL.len(),
+            "the document's shortcut table publishes {} shortcuts and the code has {}: either the \
+             document names one the application does not, or this walk stopped finding the table — \
+             {published:?}",
+            published.len(),
+            ALL.len()
+        );
+
+        let keymap = Keymap::default();
+        for (name, written) in published {
+            let action = Action::from_written(name).unwrap_or_else(|| {
+                panic!(
+                    "the document publishes the shortcut «{name}» and the code does not understand \
+                     it: whoever follows the document writes «key.{name} = …» and the terminal \
+                     ignores the line"
+                )
+            });
+            let chord = Chord::from_written(written).unwrap_or_else(|| {
+                panic!("the document publishes «{written}» for «{name}» and the code rejects it")
+            });
+            assert_eq!(
+                keymap.action_for(chord),
+                Some(action),
+                "the document says «{name}» comes as «{written}» out of the box, and pressing that \
+                 chord does {:?}",
+                keymap.action_for(chord)
+            );
+        }
     }
 }
