@@ -383,14 +383,14 @@ fn is_a_missing_file(problem: &Problem) -> bool {
 /// What is said about a panel that has been quiet longer than its due.
 ///
 /// **Without a how-much when the deadline is under a minute**: the contract allows a `stale_after_minutes`
-/// of zero, and «sin noticias desde hace 0 min» a second after publishing reads as an application failure, not as a
+/// of zero, and «no news for 0 min» a second after publishing reads as an application failure, not as a
 /// confession.
 fn no_news(panel: &Panel, now: SystemTime) -> String {
     match now.duration_since(panel.written_at.unwrap_or(now)) {
         Ok(silence) if silence.as_secs() >= 60 => {
-            format!("sin noticias desde hace {}", in_words(silence))
+            format!("no news for {}", in_words(silence))
         }
-        _ => "sin noticias".to_owned(),
+        _ => "no news".to_owned(),
     }
 }
 
@@ -1077,7 +1077,7 @@ mod tests {
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            painted.iter().any(|row| row.contains("sin noticias")),
+            painted.iter().any(|row| row.contains("no news")),
             "the panel has gone 45 minutes untouched and is shown as if from now: {painted:?}"
         );
         assert!(
@@ -1093,7 +1093,7 @@ mod tests {
         // long panel, the warning that it is not trustworthy would be the first to disappear.
         let where_at = |text: &str| painted.iter().position(|row| row.contains(text));
         assert!(
-            where_at("sin noticias") < where_at("what it said"),
+            where_at("no news") < where_at("what it said"),
             "the warning is painted behind the producer's body: {painted:?}"
         );
     }
@@ -1110,7 +1110,7 @@ mod tests {
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            !painted.iter().any(|row| row.contains("sin noticias")),
+            !painted.iter().any(|row| row.contains("no news")),
             "a panel from ten seconds ago announces itself as old: {painted:?}"
         );
     }
@@ -1260,7 +1260,7 @@ mod tests {
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            painted.iter().any(|row| row.contains("sin noticias")),
+            painted.iter().any(|row| row.contains("no news")),
             "turning off the header hid the app's warning: {painted:?}"
         );
         assert!(
@@ -1286,9 +1286,9 @@ mod tests {
             SystemTime::now() + Duration::from_secs(30 * 60),
         ));
 
-        assert!(!fresh.iter().any(|row| row.contains("sin noticias")));
+        assert!(!fresh.iter().any(|row| row.contains("no news")));
         assert!(
-            stale.iter().any(|row| row.contains("sin noticias")),
+            stale.iter().any(|row| row.contains("no news")),
             "the panel aged and the layout from when it was fresh kept being painted: {stale:?}"
         );
     }
@@ -1316,7 +1316,7 @@ mod tests {
 
     /// **And a panel that is already old still asks for an alarm, because its warning carries a number
     /// that advances.** Without this, the agent that dies at 10:00 with a deadline of five minutes leaves
-    /// on screen «sin noticias desde hace 5 min», and at 13:00 it still says five: right about the qualitative and
+    /// on screen «no news for 5 min», and at 13:00 it still says five: right about the qualitative and
     /// lying about the datum that serves to decide whether it is dead or only slow.
     #[test]
     fn an_already_old_panel_wakes_again_when_its_number_changes() {
@@ -1409,7 +1409,7 @@ mod tests {
     }
 
     /// With a deadline under a minute —which the contract allows— the warning **does not say a number**:
-    /// «sin noticias desde hace 0 min» a second after publishing reads as an application failure.
+    /// «no news for 0 min» a second after publishing reads as an application failure.
     #[test]
     fn with_a_deadline_of_zero_the_warning_does_not_say_zero_minutes() {
         let mut state = published_ago(
@@ -1420,7 +1420,7 @@ mod tests {
         let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
 
         assert!(
-            painted.iter().any(|row| row.contains("sin noticias")),
+            painted.iter().any(|row| row.contains("no news")),
             "with a deadline of zero the panel is old from the first second: {painted:?}"
         );
         assert!(
@@ -2630,7 +2630,7 @@ mod tests {
             "with no one holding it it has to look different, or the dimming says nothing"
         );
         assert!(
-            rows[1].0.contains("sin noticias"),
+            rows[1].0.contains("no news"),
             "the claim does not replace the confession, both go: {rows:?}"
         );
     }
@@ -2791,7 +2791,7 @@ mod tests {
             "an hour quiet, and the finished is still whole: {rows:?}"
         );
         assert!(
-            rows[1].0.contains("sin noticias"),
+            rows[1].0.contains("no news"),
             "the silence is still confessed, which is another thing: {rows:?}"
         );
     }

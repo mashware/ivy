@@ -38,7 +38,7 @@ feature_id: feat_panel-contract_8y2gc0
 
 **Por qué hacen falta las dos llamadas, y no vale con mover la única al final.** `Context::run_logic` —leído en la fuente— **empieza poniendo `repaint_delay = Duration::MAX`**, y es la única mitad que corre con la ventana **minimizada u ocluida**. Sin la llamada en `logic`, cada vuelta de ventana tapada borra la alarma y nadie la rearma: el aviso de un productor muerto no volvería a aparecer **ni al desminimizar**. Sin la de `ui`, no se ve el panel recién leído. Hay una prueba por cada una, y la segunda hizo falta añadirla en la validación: quitar la de `logic` dejaba las 286 en verde.
 
-**El hermano pequeño del mismo fallo: el número congelado.** «sin noticias desde hace 5 min» se quedaba en 5 durante horas, porque una vez cumplido el plazo ya nadie pedía repintado. Un panel viejo tiene que **seguir** pidiendo despertador para el momento en que su número vaya a cambiar — al minuto siguiente, o a la hora siguiente cuando el aviso ya se cuenta en horas.
+**El hermano pequeño del mismo fallo: el número congelado.** «no news for 5 min» se quedaba en 5 durante horas, porque una vez cumplido el plazo ya nadie pedía repintado. Un panel viejo tiene que **seguir** pidiendo despertador para el momento en que su número vaya a cambiar — al minuto siguiente, o a la hora siguiente cuando el aviso ya se cuenta en horas.
 
 **Coste acotado por construcción:** un despertar cuando un panel cumple su plazo, y después uno por minuto mientras siga viejo. Con la ventana en reposo y ningún panel viejo, la ventana sigue durmiendo.
 

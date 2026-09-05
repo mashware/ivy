@@ -42,7 +42,7 @@
 #              concentrates: measured with four in a row over 1,200 points, the first console goes
 #              from 298.5 to 119.4 points in a single cycle. Every frame would be measuring a
 #              different window and the mean would describe none of them. Held by
-#              `el_ciclo_de_dos_gestos_vuelve_a_la_forma_de_partida_solo_con_dos_consolas`.
+#              `the_cycle_of_two_gestures_returns_to_the_starting_shape_only_with_two_consoles`.
 #              With ONE tab and TWO panes, and the PANEL'S DIVIDER being dragged, the one F2.4 adds
 #              — also in C's regime:
 #                K = like C, and on top of that the window grabs the panel divider of the left

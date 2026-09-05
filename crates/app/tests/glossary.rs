@@ -346,13 +346,18 @@ fn identifiers(src: &str) -> Vec<(usize, String)> {
     let mut i = 0usize;
     let mut word = String::new();
     let mut word_line = 1usize;
-    // Set by the attribute `#[test]`, cleared by the next `fn`: what it skips is that one
-    // function's **name**.
+    // Set by the attribute `#[test]`, cleared by the next `fn`.
     //
-    // **It has to match the attribute, not the word.** The first version raised this flag on any
-    // bare `test`, and `#[cfg(test)]` opens every test module in this repository — so the first
-    // function of each one had its name skipped, silently. A mutation found it: a helper renamed
-    // back to Spanish stayed green because it happened to be that first function.
+    // **It used to skip that function's name, and it does not any more.** Test names were the one
+    // prose this guard was told to walk past, because they were Spanish while production was being
+    // renamed and judging them would have broken the build on work that had not been done yet.
+    // The delivery that translated the 366 of `lib.rs` is what retires the exemption: removing it
+    // leaves every file of the crate green, so the skip now protects nothing and hides the class of
+    // name this milestone is most likely to see come back.
+    //
+    // **It still has to match the attribute and not the bare word.** The first version raised this
+    // flag on any `test`, and `#[cfg(test)]` opens every test module in this repository — so the
+    // first function of each one had its name skipped, silently. A mutation found it.
     let mut inside_a_test_attribute = false;
     let mut previous_word = String::new();
 
@@ -491,9 +496,8 @@ fn identifiers(src: &str) -> Vec<(usize, String)> {
             let done = std::mem::take(&mut word);
             if previous_word == "fn" && inside_a_test_attribute {
                 inside_a_test_attribute = false;
-            } else {
-                found.push((word_line, done.clone()));
             }
+            found.push((word_line, done.clone()));
             previous_word = done;
         }
         i += 1;
@@ -1696,11 +1700,15 @@ fn ayudante_espanol() {}
         !found.contains(&"celda"),
         "the scanner read prose or a literal as code: {found:?}"
     );
-    // And the test names, which are another delivery's prose.
-    for skipped in ["nombre_de_prueba_en_espanol", "otro_nombre_de_prueba"] {
+    // **And the test names, which this guard used to walk past and now judges.** They were exempt
+    // while they were still Spanish; with them translated the exemption only hid the easiest way for
+    // Spanish to come back into the crate. The `#[ignore]` between the attribute and the `fn` is
+    // here on purpose: it is what tells «cleared by the next `fn`» from «cleared by the next word».
+    for judged in ["nombre_de_prueba_en_espanol", "otro_nombre_de_prueba"] {
         assert!(
-            !found.contains(&skipped),
-            "`{skipped}` is a test name and has to be skipped: {found:?}"
+            found.contains(&judged),
+            "`{judged}` is a test name and is no longer skipped, so the scanner has to report it: \
+             {found:?}"
         );
     }
 

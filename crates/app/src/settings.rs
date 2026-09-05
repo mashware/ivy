@@ -1628,8 +1628,8 @@ mod tests {
 
     /// **The sibling above walks the thirteen settings messages, and until here nothing walked the rest.**
     /// Measured: replacing every on-screen sentence of `session` and `watcher` with a placeholder left the
-    /// whole suite green — they are what someone reads when their layout file is corrupt or the watcher
-    /// cannot arm, and no test asserted one word of them.
+    /// whole suite green — they are what someone reads when their layout file is corrupt, the watcher
+    /// cannot arm, or the window will not split, and no test asserted one word of them.
     ///
     /// **Two halves, because one alone does not cover it.**
     ///
@@ -1639,17 +1639,18 @@ mod tests {
     /// that — a duplicate variant in the array kept the count at its number and the suite green. Producing
     /// the index and demanding the set be whole is what makes the array's omission fail.
     ///
-    /// The second walks **every sentence-shaped literal of both files, from the source**, and not the
-    /// arguments of `eprintln!`. Checked: scraping that one macro missed `go_blind`'s template, its two
-    /// reasons and the five prefixes of `session`, and reverting any of them to Spanish left the test
-    /// green. Reading the literals instead cannot be evaded by moving a sentence to `writeln!` or
+    /// The second walks **every sentence-shaped literal of the three files, from the source**, and not
+    /// the arguments of `eprintln!`. Checked: scraping that one macro missed `go_blind`'s template, its
+    /// two reasons and the five prefixes of `session`, and reverting any of them to Spanish left the
+    /// test green. Reading the literals instead cannot be evaded by moving a sentence to `writeln!` or
     /// `format!`.
     ///
-    /// **What it does not reach, named rather than left implicit**: `SaveFailure::WontOverwrite`
-    /// renders `"what is saved is not overwritten: {reason}"`, and that template is checked — but the
-    /// `reason` itself is a `&'static str` handed in by `lib.rs` (`forbid_overwrite`), so the sentence
-    /// the user actually reads is half here and half in a file this delivery does not touch. When
-    /// `lib.rs` comes around, add it to `SOURCES`.
+    /// **`lib.rs` joined the walk with the delivery that translated it**, which closes the hole this
+    /// doc used to name: `SaveFailure::WontOverwrite` renders
+    /// `"what is saved is not overwritten: {reason}"` and the template was checked here, but the
+    /// `reason` is a `&'static str` handed in by `lib.rs` (`forbid_overwrite`), so the sentence the
+    /// user reads was half checked and half not. Both halves are walked now — and with them the other
+    /// 45 sentences that file prints, which nothing had ever looked at.
     ///
     /// **What the oracle cannot do, with the sentences that prove it.** It was attacked deliberately and
     /// three ASCII-folded Spanish sentences walked through: «cero pestanas abiertas» — a **plural** of a
@@ -1746,9 +1747,15 @@ mod tests {
         // message is prose but it is not on screen, and it uses the project's angle quotes for
         // emphasis — which the non-ASCII half would report as Spanish. Checked: without the cut, the
         // walk failed on an English assertion message quoting «not measured».
-        const SOURCES: [(&str, &str); 2] = [
+        /// The one character this crate writes in English and is not ASCII: the rule that opens
+        /// each pane's block in the measurement report. Flattening it would change a published
+        /// artifact to satisfy a test, which is the tail wagging the dog.
+        const DRAWN_RULE: char = '\u{2500}';
+
+        const SOURCES: [(&str, &str); 3] = [
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
+            ("lib.rs", include_str!("lib.rs")),
         ];
         let mut sentences: Vec<(&str, String)> = Vec::new();
         for (name, source) in SOURCES {
@@ -1774,17 +1781,17 @@ mod tests {
             }
         }
         // Same floor and for the same reason as its siblings: without it a walk that stopped finding
-        // literals leaves this test passing by looking at nothing. The two files hold **32** today —
-        // 27 and 5 — so the floor is set just below, tight enough that a broken walk cannot hide behind
-        // it and loose enough that deleting a message is not a failure.
+        // literals leaves this test passing by looking at nothing. The three files hold **78** today
+        // — 27, 5 and 46 — so the floor is set just below, tight enough that a broken walk cannot hide
+        // behind it and loose enough that deleting a message is not a failure.
         //
-        // **The cut at `mod tests` rests on there being nothing after it**, and there is not: neither
-        // file declares a top-level item below its test module. If one ever does, its sentences leave
-        // this walk in silence — which is why the floor is stated as a number and not as «some».
+        // **The cut at `mod tests` rests on there being nothing after it**, and there is not: none of
+        // the three declares a top-level item below its test module. If one ever does, its sentences
+        // leave this walk in silence — which is why the floor is stated as a number and not as «some».
         assert!(
-            sentences.len() >= 30,
-            "only {} sentence-shaped literals were found before `mod tests` in the two files: the walk \
-             stopped working",
+            sentences.len() >= 74,
+            "only {} sentence-shaped literals were found before `mod tests` in the three files: the \
+             walk stopped working",
             sentences.len()
         );
 
@@ -1805,16 +1812,30 @@ mod tests {
             .chain(sentences)
         {
             let (where_from, message) = message;
+            // **One character is allowed not to be ASCII, and it is a horizontal rule.** Adding
+            // `lib.rs` to this walk brought in three English sentences that are not ASCII, and the
+            // first attempt exempted that file from `is_ascii()` altogether. **That was a hole, and
+            // it was demonstrated**: `is_ascii()` was carrying a third thing nobody had named —
+            // « », — and the accents are all how this repository writes Spanish, and a sentence
+            // like «esto» no responde; cierra su division y vuelve a intentarlo carries no listed
+            // word and no accent, so it passed in `lib.rs` and failed in `session.rs`.
+            //
+            // Two of the three sentences did not need the exemption at all: the launch failure now
+            // cites the program with ASCII quotes, the way `lib.rs` already cites a name elsewhere,
+            // and the window-size warning writes `x` — which is what the measurement script folds
+            // `×` to anyway. What is left is the report's rule, `── tab n, pane n ──`, whose
+            // character is drawn and never Spanish.
             assert!(
-                message.is_ascii(),
-                "«{message}» ({where_from}) carries a character that is not ASCII: the angle quotes and \\
-                 the accents only come from the Spanish version of this message"
+                message.chars().all(|c| c.is_ascii() || c == DRAWN_RULE),
+                "«{message}» ({where_from}) carries a character that is neither ASCII nor the \
+                 report's rule: the angle quotes, the dashes and the accents are how this \
+                 repository writes Spanish"
             );
             assert_eq!(
                 spanish_word_in(&message),
                 None,
-                "the message «{message}» ({where_from}) is still in Spanish, and it is what appears on \\
-                 screen"
+                "the message «{message}» ({where_from}) is still in Spanish, and it is what appears \
+                 on screen"
             );
         }
     }
