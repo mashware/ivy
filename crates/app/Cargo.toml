@@ -8,115 +8,100 @@ eframe.workspace = true
 term-core = { path = "../term-core" }
 panel-contract = { path = "../panel-contract" }
 
-# Para enterarse de que un productor ha publicado sin preguntarle al disco sesenta veces por segundo.
-# Se leyó su fuente antes de elegirlo, y de ahí salen dos decisiones que no son negociables: se vigila
-# el **directorio** de cada consola y no su fichero, y el aviso solo levanta una bandera.
-# Sus features de serie son todas de macOS y llegan detrás de un `cfg` de plataforma, así que en Linux
-# no añaden nada: lo que entra es `inotify`, `mio`, `walkdir` y `notify-types`.
+# To find out that a producer has published without asking the disk sixty times a second.
+# Its source was read before choosing it, and two decisions come out of that reading which are not
+# negotiable: what is watched is each console's **directory** and not its file, and the notice only
+# raises a flag.
+# Its default features are all macOS ones and arrive behind a platform `cfg`, so on Linux they add
+# nothing: what comes in is `inotify`, `mio`, `walkdir` and `notify-types`.
 notify = "8.2"
 
-# Para el formato con el que la disposición de la ventana va y vuelve de disco.
+# For the format the window's layout goes to disk and comes back in.
 #
-# **No añaden ni un paquete al árbol, y conviene decirlo porque la intuición dice lo contrario.** El
-# `Cargo.toml` de la raíz razona feature por feature lo que quita para que `clippy --workspace
-# --all-targets` no se alargue, así que «meter `derive`» suena a ir contra esa política. No lo es: la
-# política razona sobre **lo que entra al árbol**, y `serde` con `derive` ya se compila aquí por rebote
-# del motor de terminal — comprobado con `cargo tree -i serde_derive`, que da
-# `serde_derive → serde → alacritty_terminal → term-core → app`. `serde_json` también, por
+# **They do not add a single package to the tree, and that is worth saying because intuition says the
+# opposite.** The root `Cargo.toml` reasons feature by feature about what it strips so that
+# `clippy --workspace --all-targets` does not drag on, so «pulling in `derive`» sounds like going
+# against that policy. It is not: the policy reasons about **what enters the tree**, and `serde` with
+# `derive` is already compiled here, pulled in by the terminal engine — checked with
+# `cargo tree -i serde_derive`, which gives
+# `serde_derive → serde → alacritty_terminal → term-core → app`. `serde_json` too, through
 # `panel-contract`.
 #
-# **Y se usa `derive`, al contrario que en `panel-contract`, por una razón y no por gusto.** Aquella caja
-# lee con `Value` porque tolera **por campo** —siete opcionales, y líneas que son cadena o objeto—; este
-# fichero lo escribe siempre la aplicación y **se tolera por documento**, así que no hay nada que tolerar
-# a mano. Lo único que se compraría escribiéndolo a mano es el recorrido de un árbol recursivo, que es
-# justo donde un intérprete a mano falla.
+# **And `derive` is used, unlike in `panel-contract`, for a reason and not out of taste.** That crate
+# reads with `Value` because it tolerates **per field** — seven optionals, and lines that are either a
+# string or an object; this file is always written by the application and is tolerated **per
+# document**, so there is nothing to tolerate by hand. The only thing writing it by hand would buy is
+# the walk of a recursive tree, which is exactly where a hand-written interpreter fails.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# No se usa desde el código: está solo para reponer una feature que se cayó al quitar los defaults
-# de eframe. Sin ella, en Wayland la ventana la decora el marco de reserva de SCTK —que su propio
-# autor llama «el marco feo por defecto»— y este hito existe para juzgar cómo pinta egui, así que
-# un marco degradado ensucia justo lo que hay que mirar.
-# La versión tiene que seguir a la que arrastre eframe: si se desincronizan, aparece un segundo
-# winit en el árbol y esta línea deja de surtir efecto en silencio.
+# Not used from the code: it is only here to put back a feature that fell when eframe's defaults were
+# stripped. Without it, on Wayland the window is decorated by SCTK's fallback frame — which its own
+# author calls «the ugly default frame» — and this milestone exists to judge how egui paints, so a
+# degraded frame dirties exactly what has to be looked at.
+# The version has to follow whatever eframe drags in: if the two drift apart, a second winit appears
+# in the tree and this line silently stops having any effect.
 winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
 
-# **Quién sabe qué caracteres son emoji y con qué presentación.** No es una tabla que se pueda escribir a
-# mano ni deducir de un rango: `Emoji_Presentation` es una propiedad de Unicode que cambia con cada
-# versión del estándar, y de ella depende que `☁` salga en texto y `☁️` a color.
+# **Who knows which characters are emoji and with which presentation.** It is not a table anybody can
+# write by hand or derive from a range: `Emoji_Presentation` is a Unicode property that changes with
+# every version of the standard, and whether `☁` comes out as text and `☁️` in colour depends on it.
 #
-# **Ojo con su enumerado: es `#[non_exhaustive]`.** Una categoría que añadan mañana cae en el caso por
-# defecto y sale monocromo, sin que la compilación diga nada. Se acepta a sabiendas — ese carácter saldría
-# **como sale hoy** — y está escrito en `fonts.rs`, que es donde se decide.
+# **Watch out for its enum: it is `#[non_exhaustive]`.** A category added tomorrow falls into the
+# default arm and comes out monochrome, without the compilation saying a word. It is accepted
+# knowingly — that character would come out **the way it comes out today** — and it is written down in
+# `fonts.rs`, which is where the decision is made.
 unicode-properties = { version = "0.1.4", features = ["emoji"] }
 
-# **Quién sabe qué fuentes tiene la máquina, y cuál de ellas cubre un carácter.** Entró como dependencia
-# de desarrollo cuando solo la usaba el banco de medida; desde que el terminal descubre fuentes de verdad
-# es de producción.
+# **Who knows which fonts the machine has, and which of them covers a character.** It came in as a
+# development dependency when only the measurement bench used it; since the terminal really discovers
+# fonts, it belongs to production.
 #
-# Es de los mismos autores que `skrifa` —que ya está en el árbol porque el motor de texto de egui la usa
-# por debajo— así que las dos hablan el mismo modelo de fuente en vez de convivir dos. Y usa las APIs
-# nativas de cada plataforma: fontconfig en Linux, DirectWrite en Windows, CoreText en macOS, que es lo
-# que hace falta para no dejarle deuda a **F2.7**.
+# It is by the same authors as `skrifa` — which is already in the tree because egui's text engine uses
+# it underneath — so the two speak the same font model instead of two of them coexisting. And it uses
+# each platform's native APIs: fontconfig on Linux, DirectWrite on Windows, CoreText on macOS, which
+# is what it takes not to leave debt for **F2.7**.
 #
-# **`fontconfig` se carga en EJECUCIÓN, no se enlaza al compilar.** Sin esa feature, compilar este repo en
-# Linux pasa a exigir `pkg-config` y las cabeceras de fontconfig — comprobado: la máquina donde se escribió
-# esto no las tiene y la compilación falla en el guion de construcción, no en el código. Es la misma
-# técnica, y la misma razón, que el `dlopen` con el que `libwayland` llega de rebote. El precio es que la
-# ausencia de fontconfig se descubre **al arrancar** y no al compilar — que es justo el caso que **AC9**
-# obliga a aguantar.
+# **`fontconfig` is loaded at RUN TIME, it is not linked at compile time.** Without that feature,
+# compiling this repository on Linux starts demanding `pkg-config` and fontconfig's headers — checked:
+# the machine where this was written does not have them and the compilation fails in the build script,
+# not in the code. It is the same technique, and the same reason, as the `dlopen` that `libwayland`
+# arrives by. The price is that fontconfig's absence is discovered **at start-up** and not at compile
+# time — which is exactly the case **AC9** requires the application to survive.
 fontique = { version = "0.11", features = ["fontconfig-dlopen"] }
 
-# **Para comprobar que el motor de texto va a poder abrir una fuente ANTES de dársela.** Es la misma caja
-# que epaint usa por debajo, así que lo que aquí se abra, allí se abre. Sin esta comprobación, un fichero
-# de fuente corrupto —una actualización de paquete a medias, unos desplazamientos viejos de fontconfig—
-# mata el proceso: el único modo de fallo que epaint tiene para bytes que no entiende es un pánico, y
-# ocurre dentro de su pasada, donde no hay nada que pueda recogerlo.
+# **To check that the text engine is going to be able to open a font BEFORE handing it over.** It is
+# the same crate epaint uses underneath, so whatever opens here opens there. Without that check, a
+# corrupt font file — a half-finished package update, some stale fontconfig offsets — kills the
+# process: epaint's only failure mode for bytes it does not understand is a panic, and it happens
+# inside its own pass, where there is nothing that can catch it.
 skrifa = "0.44"
 
-# **Para decodificar el mapa de bits de un emoji y reducirlo al tamaño de una celda.** Los glifos de color
-# de `Noto Color Emoji` vienen dentro de la fuente como **PNG indexado por paleta** de 136×128 —comprobado
-# ejecutándolo—, así que hay que expandirlos a RGBA y reescalarlos; `skrifa` entrega los bytes tal cual y
-# no hace ni lo uno ni lo otro.
+# **To decode an emoji's bitmap and shrink it to the size of a cell.** `Noto Color Emoji`'s colour
+# glyphs come inside the font as **palette-indexed PNG** of 136×128 — checked by running it — so they
+# have to be expanded to RGBA and rescaled; `skrifa` hands the bytes over as they are and does neither.
 #
-# **No añade ni un paquete ni una feature al árbol, y conviene decirlo porque la intuición dice lo
-# contrario.** `image` con la feature `png` **ya se compila aquí** por rebote del portapapeles —comprobado
-# con `cargo tree -e features -i image`, que da `image/png → arboard → egui-winit → eframe → app`—. Es el
-# mismo argumento con el que `serde` con `derive` está justificado más arriba: la política del manifiesto
-# de la raíz razona sobre **lo que entra al árbol**, no sobre cuántas líneas tiene el manifiesto.
+# **It adds neither a package nor a feature to the tree, and that is worth saying because intuition
+# says the opposite.** `image` with the `png` feature **is already compiled here**, pulled in by the
+# clipboard — checked with `cargo tree -e features -i image`, which gives
+# `image/png → arboard → egui-winit → eframe → app`. It is the same argument that justifies `serde`
+# with `derive` above: the root manifest's policy reasons about **what enters the tree**, not about
+# how many lines the manifest has.
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-
-# **Solo para el banco de fuentes, y a propósito.** Esta entrega mide qué cuesta descubrir las fuentes
-# del sistema y rasterizar un glifo a color; hasta que esos números decidan cómo se hace, nada de esto
-# entra en producción. Es el mismo criterio con el que el banco del historial midió el motor por debajo
-# de la fachada de `term-core`: primero el número, y el número decide qué API hace falta.
-#
-# `fontique` es de los mismos autores que `skrifa` —que **ya está en el árbol** porque el motor de texto
-# de egui la usa por debajo— así que las dos hablan el mismo modelo de fuente en vez de convivir dos. Y
-# usa las APIs nativas de cada plataforma: fontconfig en Linux, DirectWrite en Windows, CoreText en
-# macOS, que es lo que hace falta para no dejarle deuda a **F2.7**.
-# **Y `fontconfig` se carga en EJECUCIÓN, no se enlaza al compilar.** Sin esa feature, compilar este
-# repo en Linux pasa a exigir `pkg-config` y las cabeceras de fontconfig — comprobado: la máquina donde
-# se escribió esto no las tiene y la compilación **falla en el guion de construcción**, no en el código.
-# Es la misma técnica, y la misma razón, que el `dlopen` con el que `libwayland` llega de rebote y que
-# está razonada arriba: sin ella el binario dejaría de compilar donde hoy compila. El precio es que la
-# ausencia de fontconfig se descubre **al arrancar** y no al compilar — que es justo el caso que AC9
-# obliga a aguantar.
-#
-# **Y «de desarrollo» no significa «no toca el binario».** Las dependencias de desarrollo participan en la
-# resolución de versiones: añadir `fontique` movió `windows-sys` de 0.59 a 0.60 para `arboard` —el
-# portapapeles, que **sí** va en el binario publicado— y metió la pila de `windows 0.62`. En Linux no
-# cambia nada; **en Windows, que es la plataforma de F2.7, ya cambia lo que se compila**. Queda dicho aquí
-# porque el comentario de arriba, tal como estaba, prometía lo contrario.
+# **A development dependency is not «it does not touch the binary», and this is where that was
+# learnt.** They take part in version resolution: adding `fontique` here — before it moved up to
+# production, above — pushed `windows-sys` from 0.59 to 0.60 for `arboard`, the clipboard, which
+# **does** ship in the published binary, and pulled in the `windows 0.62` stack. On Linux nothing
+# changed; on Windows, which is F2.7's platform, it already changed what gets compiled.
 [dev-dependencies]
 host-load = { path = "../host-load" }
 
-# **Para que las pruebas del banco corran con `cargo test`, y no solo si alguien se acuerda de pedir
-# `--examples`.** Un `example` de cargo no es un objetivo de prueba de serie: el módulo `tests` de
-# `examples/fonts.rs` se compilaría y no se ejecutaría nunca, que es peor que no tenerlo — una prueba
-# que no corre se lee como cobertura y no lo es. Con esto entra en la suite del taller y en la de CI por
-# el mismo camino que las demás.
+# **So that the bench's tests run with `cargo test`, and not only if somebody remembers to ask for
+# `--examples`.** A cargo example is not a test target by default: the `tests` module of
+# `examples/fonts.rs` would be compiled and never run, which is worse than not having it — a test that
+# does not run reads as coverage and is not. With this it joins the workshop's suite and CI's by the
+# same path as the rest.
 [[example]]
 name = "fonts"
 test = true

@@ -1,5 +1,5 @@
 [toolchain]
-# eframe 0.36 exige 1.95 o superior. Se fija la versión exacta y no un rango porque los números
-# que este hito publica solo son comparables entre sí si el compilador es el mismo.
+# eframe 0.36 demands 1.95 or above. The exact version is pinned rather than a range because the
+# numbers this milestone publishes are only comparable with each other if the compiler is the same.
 channel = "1.97.1"
 components = ["rustfmt", "clippy"]
