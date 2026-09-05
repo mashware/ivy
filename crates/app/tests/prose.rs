@@ -1318,7 +1318,11 @@ fn record_headline(front: &str) -> String {
     };
     // `>-`, `>`, `|` and `|-` are the block styles the store writes; what follows on that same line
     // is the whole value in the four records that do not use one.
-    let mut headline = first.trim().trim_matches(['>', '|', '-', '+']).trim().to_string();
+    let mut headline = first
+        .trim()
+        .trim_matches(['>', '|', '-', '+'])
+        .trim()
+        .to_string();
     for line in lines {
         if !line.starts_with(char::is_whitespace) {
             break;
@@ -1624,6 +1628,74 @@ fn no_record_points_at_a_file_that_is_not_there() {
          something that was renamed:\n{}",
         missing.len(),
         missing.join("\n")
+    );
+}
+
+/// No record lists the same thing twice, in any of its frontmatter blocks.
+///
+/// **This one is not about language, and it is here because a duplicate broke the store outright.**
+/// The index the MCP server answers from has a unique key over `(entry, symbol)`, so a record whose
+/// `symbols:` names the same thing twice makes `domain-memory reindex` abort with
+/// `UNIQUE constraint failed` — and `--fresh` deletes the index **before** it rebuilds, so the store
+/// is left with **no index at all** and every lookup answers nothing.
+///
+/// It happened on the delivery that translated the store: two different Spanish names — «repartir»
+/// and «colocar», in guillemets because the tree no longer has either and a backtick here would be
+/// a citation of nothing — were repointed at what the code calls them today and both landed on
+/// `place`. The
+/// suite was green, the guards were green, the PR merged, and the failure only appeared when
+/// somebody ran the rebuild.
+///
+/// **All three list blocks are checked and not just `symbols:`**, because the reason is the shape
+/// and not the key: a repeated `file_paths:` entry makes the same guard downstream count a citation
+/// twice, and a repeated tag is a lie about what the record is about. Only `symbols:` can abort the
+/// rebuild today; the other two are free to check and there is no argument for waiting until one of
+/// them acquires a constraint of its own.
+#[test]
+fn no_record_lists_the_same_thing_twice() {
+    let mut reported = Vec::new();
+    let mut checked = 0usize;
+    for (name, md) in store_records() {
+        let (front, _, _) = record_halves(&md);
+        let mut block = "";
+        let mut seen: Vec<(&str, String)> = Vec::new();
+        for line in front.lines() {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("- ") {
+                if !block.is_empty() {
+                    let value = rest.trim().trim_matches('\'').to_owned();
+                    checked += 1;
+                    if seen.contains(&(block, value.clone())) {
+                        reported.push(format!("  {name}: {block} lists «{value}» twice"));
+                    } else {
+                        seen.push((block, value));
+                    }
+                }
+            } else if !line.starts_with(char::is_whitespace) {
+                block = line
+                    .split(':')
+                    .next()
+                    .filter(|key| matches!(*key, "symbols" | "file_paths" | "tags"))
+                    .unwrap_or_default();
+            }
+        }
+    }
+    // **A floor, because this loop passes by finding nothing to compare.** The three blocks carry
+    // 174 paths, 234 symbols and their tags between them; if the walk stops finding the dash, it
+    // reports every record unique without having read one.
+    assert!(
+        checked >= 500,
+        "this guard compared {checked} frontmatter entries and the store lists over 500: the walk \
+         stopped finding them and no record is being checked"
+    );
+    assert!(
+        reported.is_empty(),
+        "{} record(s) list the same thing twice. A repeated `symbols:` entry aborts \
+         `domain-memory reindex` on a unique-key violation, and `--fresh` clears the index before \
+         it rebuilds — so the store is left with no index and every lookup answers \
+         nothing:\n{}",
+        reported.len(),
+        reported.join("\n")
     );
 }
 

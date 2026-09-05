@@ -18,7 +18,6 @@ symbols:
   - absorb
   - place
   - DIVIDER_THICKNESS
-  - place
 content_hashes:
   crates/app/src/lib.rs: 'sha256:d7688143658df12a548b8eb3bd4e0e7fc0ce9966b7a5e14a6e7d7a8e8835ba9d'
 tags:
