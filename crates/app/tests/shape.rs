@@ -70,15 +70,16 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        2_819,
+        2_804,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 15 302 lines of tests reach \
-         into its private items. **It came in at 3 119 and the bench's injected gestures were the \
-         first piece out**",
+         into its private items. **It came in at 3 119; the bench's injected gestures were the \
+         first piece out and reading the settings file the second, which left for `settings.rs` \
+         with the delivery that added the font by name**",
     ),
     (
         "src/lib.rs::impl Window",
-        1_110,
+        1_108,
         "47 methods, a third of the file. Mouse routing, the tab bar, the report and saving all \
          leave it, and each has a module that already owns that vocabulary",
     ),

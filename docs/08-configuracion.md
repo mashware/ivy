@@ -35,6 +35,7 @@ It is the same thing Kitty and Ghostty do.
 | `focus` | what marks out the console that has the keyboard |
 | `panel` | the status panel's background |
 | `size` | the font size, in points |
+| `font` | the font family it paints with, by its name |
 
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.
@@ -45,6 +46,35 @@ hundred three columns fit.
 
 Changing the size **changes how many rows and columns** fit in your window, so the programs running
 inside notice.
+
+### The font, by its name
+
+```
+font = JetBrains Mono
+```
+
+Write it **as the font calls itself** — `JetBrains Mono`, not `JetBrainsMono` — with its spaces.
+Upper and lower case make no difference.
+
+**What that font does not carry, the built-in ones still paint.** They stay behind it as a net, so a
+kanji or an emoji your font does not have keeps showing.
+
+**The icons of a `Nerd Font` are the exception**: there the font you installed for them keeps
+winning, not the one you set here. That is where the drawings live and only whoever installed one
+knows which is the right one.
+
+If the family is not installed you are told and the terminal opens with the built-in ones. If it is
+installed and its files cannot be read — a half-finished package update leaves them like that — you
+are told **that** instead, so you do not go looking for a typo that is not there.
+
+**It has to be a fixed-width font.** In a terminal every cell is the same width, taken from the `M`,
+so a font whose letters measure different amounts leaves the columns out of line and the wide
+letters spilling into the cell next door. You are told when that happens and the font is used
+anyway: it is your file.
+
+> **This is the only setting that costs anything on start-up.** Finding a font by its name means
+> going through every font on your machine, which takes a few hundredths of a second. **If you do not
+> write this line, nothing is searched** and the terminal opens exactly as fast as it does today.
 
 **What you do not set stays as it was.** You can change a single colour and not write the rest.
 

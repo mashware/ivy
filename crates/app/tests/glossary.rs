@@ -1098,6 +1098,9 @@ const NOT_OURS: &[&str] = &[
     "InputState",
     "interact_radius",
     "LineWriter",
+    // The key `fontique` looks a family name up by, which is what makes asking for one by name
+    // work however it is capitalized. Cited where that is explained.
+    "NameKey",
     "NaN",
     "NonZeroUsize",
     "on_hover_cursor",

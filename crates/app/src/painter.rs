@@ -25,6 +25,31 @@ const CEILING: Size = Size {
     cols: 1000,
 };
 
+/// Whether the font being painted with has letters of different widths.
+///
+/// **The grid is derived from ONE letter** —the `M` in [`CellMetrics::measure`]— because in a
+/// monospaced font they all measure the same, so asking about one stands for all. Since the settings
+/// file can name any installed family, a proportional one can reach here: whoever asked for it is
+/// entitled to it, and this is what stops the consequence being silent. Every cell would keep the
+/// width of the `M` while each glyph carries its own advance, so the columns stop lining up and the
+/// wide ones spill into the cell next door — which `paint` deliberately does not clip.
+///
+/// **It is measured HERE and not where the font is chosen**, and that is not a preference: what
+/// throws the grid out is what the text engine ends up laying out, and `set_fonts` takes effect a
+/// pass later, so asked at choosing time this question still answers for the previous font.
+///
+/// **It decides and does not print**, like its siblings across this crate: printing cannot be
+/// observed from inside the process, so what a test can hold on to is the decision.
+///
+/// The margin is half a point over a cell of about eight: no monospaced font differs at all —the two
+/// advances are the same number— and a proportional one differs by two to four.
+fn the_letters_do_not_all_measure_the_same(wide: f32, narrow: f32) -> bool {
+    (wide - narrow).abs() > 0.5
+}
+
+/// Whether the sentence above has been said already.
+static SAID_THE_LETTERS_DIFFER: std::sync::Once = std::sync::Once::new();
+
 /// How much a cell takes up on screen.
 #[derive(Debug, Clone)]
 pub struct CellMetrics {
@@ -48,8 +73,23 @@ impl CellMetrics {
     /// **It is asked for on every pass, not cached.** When the desktop zoom changes the font changes
     /// size, and a cached measurement would throw the whole grid out of line without warning.
     pub fn measure(ctx: &Context, font: FontId) -> Self {
-        let (width, height) =
-            ctx.fonts_mut(|fonts| (fonts.glyph_width(&font, 'M'), fonts.row_height(&font)));
+        let (width, narrow, height) = ctx.fonts_mut(|fonts| {
+            (
+                fonts.glyph_width(&font, 'M'),
+                fonts.glyph_width(&font, 'i'),
+                fonts.row_height(&font),
+            )
+        });
+        if the_letters_do_not_all_measure_the_same(width, narrow) {
+            // **Said once and not per pass**: this runs on every frame, and a line per frame would
+            // bury the error output of a program that has done nothing wrong.
+            SAID_THE_LETTERS_DIFFER.call_once(|| {
+                eprintln!(
+                    "agent-terminal: the font in use is not of fixed width, so the columns will not \
+                     line up: every cell keeps the width of an 'M' and each letter carries its own."
+                );
+            });
+        }
         Self {
             width,
             height,
@@ -438,6 +478,32 @@ fn paint_cursor(
 mod tests {
     use super::*;
     use term_core::Screen;
+
+    #[test]
+    fn a_font_whose_letters_do_not_measure_the_same_is_caught_and_a_monospaced_one_is_not() {
+        // **In a monospaced font the two advances are the SAME NUMBER**, not a close one: that is
+        // what being monospaced means, and it is why this guard can be strict.
+        assert!(
+            !the_letters_do_not_all_measure_the_same(8.0, 8.0),
+            "a monospaced font would be reported as proportional, and every start-up would say so"
+        );
+        // A proportional face differs by whole points: Arial at 14 measures 11.7 for the M and 3.1
+        // for the i.
+        assert!(
+            the_letters_do_not_all_measure_the_same(11.7, 3.1),
+            "a proportional font goes through unsaid, and the columns stop lining up in silence"
+        );
+        // **Both sides of the margin**, so it is a threshold and not a decoration: half a point over
+        // a cell of eight is half a column of drift by the sixteenth character.
+        assert!(the_letters_do_not_all_measure_the_same(8.0, 7.4));
+        assert!(!the_letters_do_not_all_measure_the_same(8.0, 7.6));
+        // **And it is a distance, not a subtraction.** Without the absolute value a face whose `i`
+        // is the wider of the two —they exist: a slab serif with a serifed `i`— goes through unsaid.
+        assert!(
+            the_letters_do_not_all_measure_the_same(3.1, 11.7),
+            "the difference is only seen in one direction, so half the proportional fonts pass"
+        );
+    }
 
     /// A metric with round measurements, so the test's arithmetic reads on its own. It deliberately
     /// does not go through the font: asking it requires a window, and what is tested here is the

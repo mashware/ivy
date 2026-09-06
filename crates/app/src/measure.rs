@@ -912,6 +912,39 @@ pub enum ReadingSettings {
     },
 }
 
+/// What choosing the font cost, **and whether it was chosen at all**.
+///
+/// **It is named for the act, like its siblings** —`Restoring`, `Discovery`, `Rasterizing`— and it is
+/// declared here rather than in the module that does the work, for the same reason as
+/// [`ReadingSettings`]: what a span is worth to the report is the report's word. `fonts.rs` says what
+/// happened to the face; this says what the run has to publish about it.
+///
+/// **Every state that looked carries its time, including the ones that found nothing.** Looking for a
+/// family the machine does not have pays the same enumeration as one it does —the expensive half is
+/// building the collection— so a search that failed is **not** a search that cost nothing. Publishing
+/// only the successful one would leave those milliseconds inside the nameless start-up.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ChoosingTheFont {
+    /// The file named no family, so the machine was never enumerated.
+    #[default]
+    NotAsked,
+    /// The family was found and is what the terminal paints with, under the machine's own name for it.
+    Found { family: String, how_long: Duration },
+    /// The machine does not have that family.
+    Missing {
+        asked_for: String,
+        how_long: Duration,
+    },
+    /// The machine **has** it and none of its files can be opened.
+    ///
+    /// **It is its own state and not a flavour of the one above**, because the two send whoever reads
+    /// them to different places: one to fix what they typed, the other to fix what is installed.
+    Unusable {
+        asked_for: String,
+        how_long: Duration,
+    },
+}
+
 /// The drag gestures a measurement batch injected into itself, as they are declared.
 #[derive(Clone, Copy)]
 pub struct Drags {
@@ -988,9 +1021,11 @@ pub struct Drags {
 ///
 /// **It is a struct with names and not four parameters in a row**, for the same reason as [`Spans`]:
 /// when these were positional arguments, swapping two compiled without a complaint and published a lying
-/// report. And they are four things that grow —every milestone that declares a new span adds its own—,
-/// so the signature's days were numbered.
-#[derive(Clone, Copy, Default)]
+/// report. And they are a list that grows —every milestone that declares a new span adds its own; it
+/// came in at four and this one makes six—, so the signature's days were numbered.
+// **`Copy` falls away here, and the docblock above already saw it coming**: the chosen font travels
+// with its name, and a name is a `String`. It is built once per report and moved into it.
+#[derive(Clone, Default)]
 pub struct SessionHeader {
     /// The gestures a batch injected, if it injected any.
     pub drags: Option<Drags>,
@@ -998,6 +1033,8 @@ pub struct SessionHeader {
     pub restoring: Option<Restoring>,
     /// What it cost to read the configuration, and whether it was read.
     pub settings: ReadingSettings,
+    /// What choosing the font cost, and whether one was asked for.
+    pub chosen_font: ChoosingTheFont,
     /// What it cost to paint the tab bar.
     pub tab_bar: TabBar,
     /// What it cost to reflow the text when a console's width changed.
@@ -1015,6 +1052,7 @@ pub fn header(
         drags,
         restoring,
         settings,
+        chosen_font,
         tab_bar,
         reflow,
     } = session;
@@ -1126,6 +1164,43 @@ pub fn header(
             a,
             "settings:     the user's · {how_long:?} to read it · {warnings} line(s) that could not be \
              applied (before the first frame, subtracted from none)"
+        )?,
+    }
+    // **It is ALWAYS declared, like the line above and for its same reason.** Asking for a family by
+    // name is the only thing that makes the terminal enumerate the machine's fonts at start-up —
+    // between 17.3 and 23.2 ms (**D24**)— and the script invalidates any run whose batch searched for
+    // fonts without dumping Japanese. Every measurement batch has the file vetoed, so here it must
+    // always read "none": if it ever says otherwise, the veto broke and that run is compared with
+    // none.
+    //
+    // **The three states are told apart by the first word**, so the script can read them, and the one
+    // that found nothing carries its time too: looking for a family that is not installed pays the
+    // same enumeration as one that is.
+    match &chosen_font {
+        ChoosingTheFont::NotAsked => writeln!(
+            a,
+            "chosen font:  none (no family was asked for, so the machine was not enumerated)"
+        )?,
+        ChoosingTheFont::Found { family, how_long } => writeln!(
+            a,
+            "chosen font:  {family} · {how_long:?} to find it in the machine (before the first frame, \
+             subtracted from none)"
+        )?,
+        ChoosingTheFont::Missing {
+            asked_for,
+            how_long,
+        } => writeln!(
+            a,
+            "chosen font:  missing '{asked_for}' · {how_long:?} spent looking for it (not installed; \
+             painting with the built-in ones)"
+        )?,
+        ChoosingTheFont::Unusable {
+            asked_for,
+            how_long,
+        } => writeln!(
+            a,
+            "chosen font:  unusable '{asked_for}' · {how_long:?} spent looking for it (installed and \
+             its files cannot be opened; painting with the built-in ones)"
         )?,
     }
     // **Only when there was one.** With a single tab there is no bar to paint, and publishing "0 frames"
@@ -1277,6 +1352,7 @@ mod tests {
                 drags: None,
                 restoring: None,
                 settings,
+                chosen_font: ChoosingTheFont::NotAsked,
                 tab_bar: TabBar::default(),
                 reflow: Reflow::default(),
             },
@@ -1331,6 +1407,107 @@ mod tests {
         );
     }
 
+    /// The header with a concrete chosen-font state, which is the other line the script reads.
+    fn with_chosen_font(chosen_font: ChoosingTheFont) -> String {
+        let mut salida = Vec::new();
+        header(
+            &mut salida,
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
+            },
+            &[(0, vec![(0, grid(49, 39))])],
+            0,
+            SessionHeader {
+                drags: None,
+                restoring: None,
+                settings: ReadingSettings::default(),
+                chosen_font,
+                tab_bar: TabBar::default(),
+                reflow: Reflow::default(),
+            },
+        )
+        .expect("writing to memory does not fail");
+        String::from_utf8(salida).expect("the report is text")
+    }
+
+    #[test]
+    fn the_four_chosen_font_states_are_distinguished_where_the_script_looks() {
+        // **The script invalidates a run by reading the FIRST WORD of this line**, exactly like its
+        // sibling above, and it is the only guard that can see this path: asking for a family by name
+        // enumerates the machine —between 17.3 and 23.2 ms— and **does not go through the discovery
+        // counters**, so the guard that catches a batch searching for fonts without dumping Japanese
+        // does not notice it.
+        //
+        // **Each state is asserted by the word only IT carries, and that is the whole point of this
+        // test.** Written the obvious way —«it does not start with none» plus the family name— the
+        // four lines are interchangeable: every one of them carries the name, so swapping two bodies
+        // left the suite green and the report could say a font was found when it was not. A reviewer
+        // caught it by swapping them.
+        let word_of = |line: &str| {
+            line.split_whitespace()
+                .nth(2)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let line_of = |report: &str| {
+            report
+                .lines()
+                .find(|l| l.starts_with("chosen font:"))
+                .expect("there is no chosen-font line the script can read")
+                .to_owned()
+        };
+
+        let asked_for = "JetBrains Mono".to_owned();
+        let none = line_of(&with_chosen_font(ChoosingTheFont::NotAsked));
+        let found = line_of(&with_chosen_font(ChoosingTheFont::Found {
+            family: asked_for.clone(),
+            how_long: Duration::from_millis(21),
+        }));
+        let missing = line_of(&with_chosen_font(ChoosingTheFont::Missing {
+            asked_for: asked_for.clone(),
+            how_long: Duration::from_millis(19),
+        }));
+        let unusable = line_of(&with_chosen_font(ChoosingTheFont::Unusable {
+            asked_for,
+            how_long: Duration::from_millis(17),
+        }));
+
+        assert_eq!(
+            word_of(&none),
+            "none",
+            "the line for «no font was asked for» no longer starts the way the script reads it: '{none}'"
+        );
+        // **The four first words have to differ**, which is what makes the line readable at all: the
+        // script decides with the first, and a person decides what to go and fix with it.
+        let words = [
+            word_of(&none),
+            word_of(&found),
+            word_of(&missing),
+            word_of(&unusable),
+        ];
+        let distinct: std::collections::BTreeSet<_> = words.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            4,
+            "two of the four states are published under the same word, so they cannot be told apart: {words:?}"
+        );
+        // And each still says what it is worth: which family, and what looking for it cost.
+        assert!(
+            found.contains("JetBrains Mono") && found.contains("21"),
+            "the found line says neither which family is being painted with nor what it cost: '{found}'"
+        );
+        assert!(
+            missing.contains("JetBrains Mono") && missing.contains("19"),
+            "the search that found nothing publishes no time, so its milliseconds fall into the \
+             nameless start-up: '{missing}'"
+        );
+        assert!(
+            unusable.contains("JetBrains Mono") && unusable.contains("17"),
+            "the family that is installed and cannot be opened publishes no time either: '{unusable}'"
+        );
+    }
+
     fn with_tab_bar(
         window: SizeInPoints,
         grids: &[(usize, Vec<(usize, term_core::Size)>)],
@@ -1349,6 +1526,7 @@ mod tests {
                 drags,
                 restoring,
                 settings: ReadingSettings::default(),
+                chosen_font: ChoosingTheFont::NotAsked,
                 tab_bar,
                 reflow: Reflow::default(),
             },
@@ -2283,6 +2461,10 @@ mod tests {
                     drags: Some(drags),
                     restoring: Some(restoring),
                     settings,
+                    // **Always `None` here, and it is what the bench really publishes**: every batch
+                    // has the file vetoed, so no batch can ask for a family. A reference report with
+                    // a font would be teaching the script to accept a run that broke the veto.
+                    chosen_font: ChoosingTheFont::NotAsked,
                     tab_bar,
                     reflow,
                 },

@@ -203,6 +203,14 @@ pub struct Colors {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
     pub colors: Colors,
+    /// The family the file asks to paint with. `None` if it asks for none.
+    ///
+    /// **The name arrives as it was written, and it is not laziness.** Whether that family exists is
+    /// something only the machine can answer, and answering it costs between 17.3 and 23.2 ms
+    /// (**D24**) — the very cost this project decided never to pay at start-up. Checking it here
+    /// would move that cost into reading the file, where nobody asked for it, and would pay it for
+    /// **any** value, including the ones nothing will ever be painted with.
+    pub font: Option<String>,
     /// The font body, in points. `None` if the file does not request it.
     ///
     /// **It is named the same as in the window and different from in the file, on purpose.** `size` is the key
@@ -287,6 +295,96 @@ pub fn path_from(
     home: Option<&std::ffi::OsStr>,
 ) -> Option<PathBuf> {
     crate::session::directory_from(config, home).map(|directory| directory.join(FILE))
+}
+
+/// Which door this session comes in through.
+///
+/// **An enum and not a boolean**, because in the call a loose `false` does not say what it is that
+/// it is not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Entry {
+    /// The normal one: whoever opens the terminal to use it.
+    Normal,
+    /// A batch of the measurement bench.
+    Measuring,
+}
+
+/// The settings that have to be used: the file's, **or none if this is a measurement batch**.
+///
+/// **The veto holds up more than it seems.** The measurement script already launches with the
+/// configuration directory isolated, but **whoever launches the binary by hand with the measurement
+/// variables** —which is how the documentation says to open a particular layout— would read theirs.
+/// Their font size would change the grid, and **every** figure published by this project depends on
+/// the grid.
+///
+/// And there is a second consequence: the script **invalidates a run** if a batch that does not
+/// dump in Japanese looks for fonts. With a configured font read under measurement, every batch
+/// would enumerate and **every run would come out invalid**.
+///
+/// **The whole file is vetoed, not «the settings that affect the measurement».** That list would be
+/// a list that forgets to grow; this one is read at a glance.
+pub(crate) fn to_use(
+    entry: Entry,
+    path: Option<&Path>,
+) -> (Settings, crate::measure::ReadingSettings) {
+    if entry == Entry::Measuring {
+        return (Settings::default(), crate::measure::ReadingSettings::Vetoed);
+    }
+    let Some(path) = path else {
+        // **With nowhere to trust it is not read either, and it is said.** Whoever has the
+        // environment without an absolute path would write a file that is never applied; the
+        // sibling module already has that same verb.
+        eprintln!(
+            "agent-terminal: there is nowhere to look for the settings (neither $XDG_CONFIG_HOME nor $HOME \
+             gives an absolute path). Opening with the factory ones."
+        );
+        return (
+            Settings::default(),
+            crate::measure::ReadingSettings::Missing,
+        );
+    };
+    let started = std::time::Instant::now();
+    match read(path) {
+        Ok((settings, warnings)) => {
+            // **Every one that was kept is said, and how many were left out.** Keeping quiet about
+            // the extra ones without saying how many they were would make you believe that beyond
+            // the ceiling the file is fine.
+            for warning in warnings.kept() {
+                eprintln!("agent-terminal: {warning}");
+            }
+            if warnings.unlisted() > 0 {
+                eprintln!(
+                    "agent-terminal: and {} more line(s) with problems, which are not listed",
+                    warnings.unlisted()
+                );
+            }
+            (
+                settings,
+                crate::measure::ReadingSettings::Applied {
+                    how_long: started.elapsed(),
+                    warnings: warnings.total(),
+                },
+            )
+        }
+        Err(problem) => {
+            // **That there is no file is the normal case and is not said**; the type itself decides
+            // it, so that this branch and any other that reads the file do not stop agreeing.
+            if problem.warrants_warning() {
+                eprintln!(
+                    "agent-terminal: {} could not be used: {problem}. Opening with the factory ones.",
+                    path.display()
+                );
+            }
+            // **It is declared that it WAS looked at, even though nothing was applied.** «Factory
+            // because the file was broken» and «factory because a batch vetoed it» are two
+            // different things, and the report only tells batches apart if this line does not
+            // confuse them.
+            (
+                Settings::default(),
+                crate::measure::ReadingSettings::Missing,
+            )
+        }
+    }
 }
 
 /// Reads the file at that path. Returns what was understood **and** what was not.
@@ -433,6 +531,10 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
             })?)
         };
         settings.shortcuts.push((action, chord));
+        return Ok(());
+    }
+    if key == "font" {
+        settings.font = Some(value.to_owned());
         return Ok(());
     }
     if key == "size" {
@@ -984,22 +1086,47 @@ mod tests {
 
     #[test]
     fn a_value_with_an_equals_inside_is_not_split_on_the_second() {
-        // Today no setting carries an equals in the value, but the font of the next delivery may
-        // carry it in its name. Splitting on the **first** equals is what makes that not bite later.
-        let (_, warnings) = parsed("font = Iosevka Term = Extended");
+        // A family name can carry an equals — `Iosevka Term = Extended` is written that way on the
+        // page it is copied from. Splitting on the **first** equals is what keeps the name whole.
+        let (settings, warnings) = parsed("font = Iosevka Term = Extended");
 
+        assert_eq!(warnings.total(), 0, "the line gave a warning");
+        // **The whole tail, not just that it starts with the name.** Splitting on the last equals
+        // leaves the value as «Extended», and splitting on the first but trimming the tail leaves
+        // «Iosevka Term»: both are wrong and only the whole comparison tells them apart.
         assert_eq!(
-            warnings.total(),
-            1,
-            "it warned more than once, so the line was split on more than one equals"
-        );
-        // **The key has to be EXACTLY «font».** Checking only that the warning «contains font»
-        // ties nothing down: splitting on the last equals, the key comes out as «font = Iosevka Term», which
-        // also contains it. It was checked by mutating it.
-        assert_eq!(
-            warnings.kept()[0].missing,
-            Missing::UnknownKey("font".to_owned()),
+            settings.font.as_deref(),
+            Some("Iosevka Term = Extended"),
             "the line was split on an equals that is not the first"
+        );
+    }
+
+    #[test]
+    fn the_font_is_read_by_its_name_and_is_not_interpreted() {
+        // **It arrives as written, spaces inside and all.** A family is named JetBrains Mono, with
+        // its space, and whoever strips it here ends up asking the machine for a family nobody has
+        // installed.
+        let (settings, warnings) = parsed("  font   =   JetBrains Mono  ");
+
+        assert_eq!(warnings.total(), 0, "«font» gave a warning");
+        assert_eq!(
+            settings.font.as_deref(),
+            Some("JetBrains Mono"),
+            "the name did not arrive as it was written"
+        );
+    }
+
+    #[test]
+    fn without_a_font_line_nothing_is_asked_of_the_machine() {
+        // **This is the half that keeps D24 standing**: enumerating the system's fonts costs between
+        // 17.3 and 23.2 ms, and the decision is that it is only paid when somebody asks for it. What
+        // is asserted here is the datum whoever searches reads: no line, no name.
+        let (settings, warnings) = parsed("size = 14\ncolor.1 = #ff0000");
+
+        assert_eq!(warnings.total(), 0, "a good line gave a warning");
+        assert_eq!(
+            settings.font, None,
+            "a file that names no font left a family to look for anyway"
         );
     }
 
@@ -1261,10 +1388,10 @@ mod tests {
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
-        // left to check. Eight is what the table publishes today.
+        // left to check. Nine is what the table publishes today.
         assert_eq!(
             published.len(),
-            8,
+            9,
             "the document's key table gave {} rows: either the document changed shape, or this \
              walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()
@@ -1320,7 +1447,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            8,
+            9,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()

@@ -4417,6 +4417,7 @@ Written down so the next delivery does not have to rediscover it. Sizes are prod
 | What | Lines | Where it goes | Why it is separable |
 |---|---|---|---|
 | ~~The injected drags of the measurement bench~~ | 300 | **done** — `injected.rs`, 311 lines | Instrumentation living in the core. **Not `measure.rs`**: that module is at 540 lines and the ceiling is 600, so it can absorb 60 — the guard's own arithmetic ruled out the obvious home |
+| ~~Reading the settings file, and the measurement veto~~ | 50 | **done** — `settings.rs`, which went from 291 to 349 | The module that already owns that vocabulary. **It was not on this table**: the delivery that added the font by name needed room in `lib.rs` and this was the piece it was already touching — the ceiling decided where the code went, which is what the table below says a ceiling is for |
 | The layout tree — `Node`, `Tab`, tiling | 455 | a module of its own | A closed data structure; its serialisation already lives outside, in `session.rs` |
 | Routing the mouse, 15 methods of `Window` | ~350 | `mouse.rs` | It fits: 99 lines today, 449 after |
 | Publishing the report and measuring what is out of sight | ~150 | with the injected drags | Same reason as the first row, and the same owner: everything the bench needs from the window |
@@ -4446,4 +4447,11 @@ written here rather than left to be rediscovered by whoever takes the layout tre
 
 That leaves `lib.rs` at about 1 400 production lines and `impl Window` at about 480 — over the
 ceiling still, and the ratchet is what keeps it moving.
+
+**The second piece came out sideways, and that is the entry's own lesson working.** The delivery that
+added the font by name had to add ten lines to `lib.rs`, the ratchet refused them, and the way
+through was to take out a piece the delivery was already touching: reading the settings file left for
+`settings.rs`. `lib.rs` is at **2 804** and `impl Window` at **1 108**. A ceiling that only fires when
+somebody sets out to refactor fires almost never; this one fired on an ordinary delivery and cost it
+one function's move.
 

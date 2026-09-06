@@ -10,6 +10,13 @@
 //! **23.5 and 31.0 ms** —more than four times the only stretch of startup this project has measured— and
 //! would be paid **always**; looking when needed costs between **4.0 and 5.7 ms** and is only paid if the
 //! character actually appears. The numbers and the full subtraction are in **D24**.
+//!
+//! **With one exception, and it is asked for out loud.** A settings file that names a family —`font =
+//! JetBrains Mono`— has that name resolved **at start-up**, before the first frame, and resolving a
+//! name is exactly the enumeration above. That is the whole of the exception: the file has to say it.
+//! A file that names no family, or no file at all, never reaches [`Discoverer::use_the_family`] and
+//! the start-up is the one described in the paragraph above, bit for bit. The report declares which
+//! of the two happened, so a measurement run that paid it cannot be mistaken for one that did not.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -147,6 +154,10 @@ const MAX_PENDING: usize = 40;
 /// **Eight, and it is not a round number for taste:** it covers the cases this milestone pursues —CJK, hangul,
 /// icons, emoji— with plenty of margin, and leaves the worst case bounded. On reaching the ceiling it stops
 /// registering: whatever appears afterward comes out as a box, which is exactly what came out before the milestone.
+///
+/// **It counts what the terminal registers ON ITS OWN.** The family asked for by name in the settings
+/// file is not one of these — it is one, it was asked for out loud, and it is the point of the
+/// setting — so with a configured font the chain holds nine faces at its widest.
 const MAX_FAMILIES: usize = 8;
 
 /// The name of the family by which the icons of the private-use areas are requested.
@@ -176,13 +187,25 @@ fn is_private_use(c: char) -> bool {
 /// review found it, searching for paths instead of reading the happy one.
 const SYSTEM_PREFIX: &str = "sistema:";
 
+/// What is prepended to the name of the family **whoever configures asked for**.
+///
+/// **It is a prefix of its own, and not the absence of one the design wrote.** Not reusing
+/// [`SYSTEM_PREFIX`] is the part that matters —the chosen face goes in front, and the discovered ones
+/// behind, so they cannot share a name— but registering it under its bare name would put the same
+/// defect back that the prefix above exists to avoid, and it would bite the built-in font this very
+/// delivery leaves as the net: whoever asks for `Hack`, which ships built in, would **replace the
+/// built-in one's bytes** with the machine's copy, and the net that is supposed to stay behind for
+/// what the chosen face does not carry would be the chosen face itself.
+const CHOSEN_PREFIX: &str = "chosen:";
+
 /// A system face, and whether it goes in the icon family.
 struct SystemFace {
     /// **Already prefixed**: it is the name the text engine knows it by, not the one the system gives it.
     family: String,
     data: Arc<egui::FontData>,
-    /// **Only the icon ones go in front**, and it is a named exception to the rule that the factory ones
-    /// rule. See `Discoverer::hand_over_the_faces`.
+    /// **Among the DISCOVERED ones, only the icon ones go in front**, and it is a named exception to
+    /// the rule that the factory ones rule. The face asked for by name goes in front too and does
+    /// **not** set this: it rules the letters, not the icons. See `Discoverer::hand_over_the_faces`.
     for_icons: bool,
 }
 
@@ -204,9 +227,20 @@ pub struct Discoverer {
     /// **They need to be kept** because registering in egui is not adding: it is handing it the **whole**
     /// configuration again. Without this list, each new face would erase the previous one.
     faces: Vec<SystemFace>,
+    /// The face **whoever configures asked for by name**, if the machine had it.
+    ///
+    /// **It is kept apart from `faces` because it is the only one that goes in FRONT of the built-in
+    /// ones**, and because it does not count against [`MAX_FAMILIES`]: that ceiling bounds what the
+    /// terminal registers **on its own**, hunting for a character nobody asked about. This one was
+    /// asked for out loud, it is one, and it is the whole point of the setting.
+    chosen: Option<SystemFace>,
     /// The system collection, **created the first time it is needed and not before**. It is what makes
     /// discovery lazy: as long as only characters that the factory fonts cover appear,
     /// this is never built and nothing is paid.
+    ///
+    /// **Unless the settings file names a family**, which is the one thing that builds it at
+    /// start-up — asked for out loud, once, by whoever wrote that line. See
+    /// [`Discoverer::use_the_family`].
     collection: Option<Collection>,
     sources: SourceCache,
     /// Whether enumerating already failed. Without this it would be retried on every round on a machine without fontconfig.
@@ -254,6 +288,52 @@ pub struct ColorCost {
     pub failed: usize,
 }
 
+/// How asking the machine for a family by name ended.
+///
+/// **Four states and not two, because three different things all look like «it did not work» from
+/// outside** and only one of them is the user's doing. Telling a family the machine does not have
+/// from one whose files cannot be opened is what stops the terminal blaming a name that is written
+/// perfectly well.
+///
+/// **It carries no time and it does not name the report's vocabulary**: what this module knows is
+/// what happened to the face. What that is worth to the measurement report is the report's word,
+/// and [`crate::measure::ChoosingTheFont`] is where it is said — the same seam `Round` already has
+/// with `Discovery`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Chosen {
+    /// Handed to the text engine, carrying **the name the machine gives the family** and not the one
+    /// typed. What the engine is keyed by adds [`CHOSEN_PREFIX`] in front of it, so the family cannot
+    /// take the place of a built-in one with the same name.
+    Registered(String),
+    /// The machine has no such family.
+    NotInstalled,
+    /// The machine **has** it and not one of its faces can be opened: a truncated file, a
+    /// half-finished package update. Saying «it is not installed» here sends whoever suffers it to
+    /// reinstall a font that is already there.
+    Unusable,
+    /// There are no system fonts at all to look among. It is said by whoever finds that out, so
+    /// whoever reports this one keeps quiet instead of blaming the name.
+    NoFontsOnTheMachine,
+}
+
+/// Leaves the Regular face of a family first.
+///
+/// **It is shared by the two searches on purpose.** Measured by a review on the discovery path: `日`
+/// came out of face **index 5** of its family, chosen for being enumerated first, and in a family
+/// whose Bold is enumerated first **all** the terminal's CJK would come out bold. The same is true of
+/// a family asked for by name, and having the criterion written twice is how the two stop agreeing.
+/// The tiebreak by index keeps the order stable, so the answer does not change between start-ups.
+fn regular_first(faces: &mut [fontique::FontInfo]) {
+    faces.sort_by_key(|face| {
+        (
+            face.style() != fontique::FontStyle::Normal,
+            (face.weight().value() - fontique::FontWeight::NORMAL.value()).abs() as i32,
+            ((face.width().ratio() - fontique::FontWidth::NORMAL.ratio()).abs() * 100.0) as i32,
+            face.index(),
+        )
+    });
+}
+
 /// What a discovery round cost, so the report can declare it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Round {
@@ -274,7 +354,9 @@ impl Discoverer {
     /// What family the text engine has to be asked for to paint that character.
     ///
     /// The characters of the private-use areas go by the icon family, where the font the user
-    /// installed rules; everything else by the usual monospaced one, where the factory ones rule.
+    /// installed for them rules; everything else by the usual monospaced one — where the factory
+    /// fonts rule over what the terminal discovered by itself, and the family named in the settings
+    /// file rules over both.
     ///
     /// **And it is asked here, not in a loose function, because the icon family DOES NOT EXIST until the
     /// engine is remade**: epaint panics —"is not bound to any fonts"— if asked for a named
@@ -404,7 +486,12 @@ impl Discoverer {
         // **First of all: the family declared in the PREVIOUS round is already known to the engine.** Between
         // that round and this one a whole frame has passed, which is what `set_fonts` needs to
         // take effect. It goes here and not at the end so it does not get ahead of itself.
-        self.icon_family_ready = self.faces.iter().any(|face| face.for_icons);
+        // **The same list `icon_ones` builds from, chosen face included.** With two readers walking
+        // different lists, a face that reached the icon family through one of them and not through
+        // the other would have the painter asking epaint for a family it does not know, which is a
+        // panic and not a warning.
+        let some_icon_face = self.every_face().any(|face| face.for_icons);
+        self.icon_family_ready = some_icon_face;
 
         if self.pending.is_empty() {
             return Round::default();
@@ -483,6 +570,88 @@ impl Discoverer {
         round
     }
 
+    /// Paints with the family whoever configures asked for **by its name**.
+    ///
+    /// **It is only called when the file names one, and that is what keeps D24 standing.** Resolving a
+    /// name forces building the system collection — between 17.3 and 23.2 ms, the very cost D24
+    /// decided never to pay at start-up. Whoever configures no font never reaches this line and their
+    /// start-up is the one of always, bit for bit.
+    ///
+    /// **It runs before the first frame**, like restoring the layout: `set_fonts` takes effect on the
+    /// next pass, and there has been no pass yet.
+    ///
+    /// The name is matched **the way `fontique` matches it**, which lowercases both sides
+    /// (`family_name.rs`, `NameKey::from_str`), so `jetbrains mono` finds `JetBrains Mono`.
+    pub fn use_the_family(&mut self, name: &str, ctx: &egui::Context) -> Chosen {
+        let found = self.look_for_the_family(name);
+        // **The file cache is emptied right away, and it is not optional**: it keeps a live `Blob` for
+        // each font file the search got to open, and what is really needed has already been copied.
+        // Same reason as in `resolve`.
+        self.sources.prune(0, true);
+        let (family, data) = match found {
+            Ok(face) => face,
+            Err(why) => return why,
+        };
+        self.chosen = Some(SystemFace {
+            family: format!("{CHOSEN_PREFIX}{family}"),
+            data,
+            // **Not for the icons.** Those are the one place where the installed font rules over
+            // everything, and it is the font that carries the drawing that has to win there — not the
+            // one somebody picked to read code with.
+            for_icons: false,
+        });
+        self.hand_over_the_faces(ctx);
+        Chosen::Registered(family)
+    }
+
+    /// Whether the machine's fonts have been enumerated at all.
+    ///
+    /// **It exists so the laziness can be asserted on, and that is not a detour**: what D24 decided is
+    /// that nobody pays the enumeration without asking, and the only observable difference between
+    /// paying it and not is whether this collection exists.
+    pub fn has_searched_the_machine(&self) -> bool {
+        self.collection.is_some()
+    }
+
+    /// The face of that family the text engine can open, or **why there is none**.
+    ///
+    /// **The failure carries its reason and that is the whole point of the signature.** A bare
+    /// `Option` here made three different endings —no fonts at all, no such family, a family whose
+    /// files cannot be opened— arrive as the same `None`, and the terminal then told whoever
+    /// configured it that their name was wrong in all three.
+    fn look_for_the_family(&mut self, name: &str) -> Result<(String, Arc<egui::FontData>), Chosen> {
+        if !self.ensure_the_collection() {
+            return Err(Chosen::NoFontsOnTheMachine);
+        }
+        let collection = self
+            .collection
+            .as_mut()
+            .ok_or(Chosen::NoFontsOnTheMachine)?;
+        let id = collection.family_id(name).ok_or(Chosen::NotInstalled)?;
+        // **The name is taken from the collection and not from what was typed**, so what the report
+        // declares is the family that is really being painted with: asking for `jetbrains mono` and
+        // publishing that lowercase name would have the report saying something the machine does not.
+        let (real_name, mut faces) = collection
+            .family(id)
+            .map(|family| (family.name().to_owned(), family.fonts().to_vec()))
+            .ok_or(Chosen::NotInstalled)?;
+        regular_first(&mut faces);
+        let sources = &mut self.sources;
+        let face = faces.into_iter().find_map(|face| {
+            let blob = sources.get(face.source())?;
+            // Same check and for the same reason as in `first_that_covers`: bytes epaint cannot parse
+            // are a `panic!` **inside its pass**, and these are files from outside.
+            skrifa::FontRef::from_index(blob.data(), face.index()).ok()?;
+            let mut data = egui::FontData::from_owned(blob.data().to_vec());
+            data.index = face.index();
+            Some(Arc::new(data))
+        });
+        // **The family is here and none of its files can be opened.** It is a different answer from
+        // «it is not installed» and it has to stay different: whoever gets the wrong one reinstalls a
+        // font that was already there and reads the very same line again.
+        face.map(|data| (real_name, data)).ok_or(Chosen::Unusable)
+    }
+
     /// Looks for who covers that character and adds its face to the list. `true` if it added one.
     fn record_who_covers(&mut self, which_char: char) -> bool {
         if self.faces.len() >= MAX_FAMILIES {
@@ -557,8 +726,8 @@ impl Discoverer {
 
     /// Builds the system collection if it does not yet exist. Returns whether there is anything to search with.
     ///
-    /// **It comes out of `look_for` so the two searches —the coverage one and the color one— share a single
-    /// collection.** Enumerating costs between 15.9 and 31.0 ms (**D24**): doing it twice for having two
+    /// **It comes out of `look_for` so the searches —the coverage one, the color one and the family
+    /// asked for by name— share a single collection.** Enumerating costs between 17.3 and 23.2 ms (**D24**): doing it twice for having two
     /// functions would be paying the module's most expensive stretch twice over.
     fn ensure_the_collection(&mut self) -> bool {
         if self.no_system_fonts {
@@ -568,7 +737,9 @@ impl Discoverer {
             return true;
         }
         // **It is built here and not at startup: that is what makes discovery lazy.**
-        // As long as only characters that the factory fonts cover appear, this line never runs.
+        // As long as only characters that the factory fonts cover appear, this line never runs —
+        // **and the exception is a settings file that names a family**, which reaches here through
+        // `use_the_family` before the first frame, because somebody asked for it.
         let mut collection = Collection::new(CollectionOptions {
             system_fonts: true,
             ..Default::default()
@@ -590,9 +761,11 @@ impl Discoverer {
 
     /// Gives the text engine **all** the faces discovered so far.
     ///
-    /// **Behind the factory ones, and that is Contract 2 of the design**: the fallback chain is traversed in
-    /// order, so a system face placed in front would steal glyphs from the terminal font —and the
-    /// terminal would stop looking as it looks today in what already works today—.
+    /// **The DISCOVERED ones behind the factory ones, and that is Contract 2 of the design**: the
+    /// fallback chain is traversed in order, so a system face placed in front would steal glyphs from
+    /// the terminal font —and the terminal would stop looking as it looks today in what already works
+    /// today—. **The face asked for by name is the named exception and goes in front**: it was chosen
+    /// by a person, for everything, and behind the factory font it would not paint one letter.
     ///
     /// **And the icon ones go to a SEPARATE FAMILY, not in front of the factory ones.** That was the first
     /// version and it was wrong: egui orders the fallback chain **by whole family**, not by range of
@@ -619,7 +792,7 @@ impl Discoverer {
             egui::FontFamily::Name(ICON_FAMILY.into()),
             self.icon_ones(&factory),
         );
-        for face in &self.faces {
+        for face in self.every_face() {
             definitions
                 .font_data
                 .insert(face.family.clone(), Arc::clone(&face.data));
@@ -627,16 +800,34 @@ impl Discoverer {
         ctx.set_fonts(definitions);
     }
 
-    /// The monospaced family: **the factory ones first and the system ones behind**, no exceptions.
+    /// Every face this discoverer holds: the chosen one first, then the ones it found by itself.
+    ///
+    /// **One walk for the three readers.** The chosen face and the discovered ones live in separate
+    /// fields —only one of them goes in front of the factory fonts— and that is exactly the shape in
+    /// which two readers drift apart. Whether a face rules the icons is decided by `for_icons`, in
+    /// all three, and never by which field it was stored in.
+    fn every_face(&self) -> impl Iterator<Item = &SystemFace> {
+        self.chosen.iter().chain(&self.faces)
+    }
+
+    /// The monospaced family: **the chosen one in front, then the factory ones, and the system ones
+    /// behind**.
+    ///
+    /// **The one in front is the named exception, and without it the setting cannot work.** The chain
+    /// is traversed in order and the built-in font already covers the whole Latin range, so a face
+    /// placed behind it would not paint a single letter — see [`Discoverer::use_the_family`]. The
+    /// difference that justifies it: the ones behind are chosen **by the terminal, to cover a gap**;
+    /// this one is chosen **by a person, and for everything**.
     ///
     /// **It is set apart so it can be asserted on**, and it is not a detour: this list **is** what egui
     /// consumes. Asserting instead on the drawing that comes out does not distinguish the cases — registering a face
     /// remakes the atlas and **all** the glyphs change place, so the comparison passes the same with the
     /// defect in and out. Mutating it exposed it.
     fn monospaced(&self, factory: &[String]) -> Vec<String> {
-        factory
+        self.chosen
             .iter()
-            .cloned()
+            .map(|c| c.family.clone())
+            .chain(factory.iter().cloned())
             .chain(self.faces.iter().map(|c| c.family.clone()))
             .collect()
     }
@@ -644,10 +835,16 @@ impl Discoverer {
     /// The icon family: **the system ones first, and the factory ones behind as a net**.
     ///
     /// Only the faces discovered **looking for a private-use character** enter: one found
-    /// by a kanji does not sneak in here even if it also carries icons.
+    /// by a kanji does not sneak in here even if it also carries icons — **and neither does the one
+    /// whoever configures asked for**. Those areas are the one place where the installed font rules,
+    /// and the one that rules there is the one that carries the drawing, not the one somebody picked
+    /// to read code with.
+    ///
+    /// **It walks the same list as [`Discoverer::monospaced`]**, chosen one included, so that the
+    /// only thing deciding who paints an icon is `for_icons` and not which of the two lists a face
+    /// happened to be stored in.
     fn icon_ones(&self, factory: &[String]) -> Vec<String> {
-        self.faces
-            .iter()
+        self.every_face()
             .filter(|c| c.for_icons)
             .map(|c| c.family.clone())
             .chain(factory.iter().cloned())
@@ -698,17 +895,10 @@ fn first_that_covers(
         // **The Regular face is preferred, not the first the system enumerates.** Measured by a review:
         // `日` came out of face **index 5** of its family, chosen because it happened to go first. In a
         // family whose Bold or Thin is enumerated first, **all the terminal's CJK would come out bold**,
-        // permanently and with no way to fix it. The tiebreak by index leaves the order stable, so
-        // the answer does not change between startups either.
+        // permanently and with no way to fix it. See [`regular_first`], which is shared with the
+        // search by name so that the two cannot stop agreeing.
         let mut faces = faces;
-        faces.sort_by_key(|face| {
-            (
-                face.style() != fontique::FontStyle::Normal,
-                (face.weight().value() - fontique::FontWeight::NORMAL.value()).abs() as i32,
-                ((face.width().ratio() - fontique::FontWidth::NORMAL.ratio()).abs() * 100.0) as i32,
-                face.index(),
-            )
-        });
+        regular_first(&mut faces);
         for face in faces {
             let Some(blob) = sources.get(face.source()) else {
                 continue;
@@ -1469,6 +1659,370 @@ mod tests {
             );
         }
     }
+    /// A family this machine really has, or `None` when it has none.
+    ///
+    /// **It is asked of the machine instead of being written down**, because a name written here
+    /// —`JetBrains Mono`, `DejaVu Sans Mono`— turns the test into "is that font installed on the
+    /// machine running the suite", which is a question about the machine and not about this code.
+    ///
+    /// **With a capital in it**, because the tests that ask for it in lowercase have nothing to say
+    /// about a family that is already lowercase — and which family `family_names()` hands back first
+    /// is not something a test gets to choose.
+    fn an_installed_family() -> Option<String> {
+        let mut collection = Collection::new(CollectionOptions {
+            system_fonts: true,
+            ..Default::default()
+        });
+        // **Sorted, and that is what makes these tests deterministic.** `fontique` backs that
+        // iterator with a hash map seeded per process, so «the first family» is a **different one on
+        // every run** — which is how one of these guards came out intermittent before a review
+        // measured it. `Discoverer::look_for` sorts for this same reason, in production.
+        let mut names: Vec<String> = collection.family_names().map(str::to_owned).collect();
+        names.sort();
+        names.into_iter().find(|name| name.to_lowercase() != *name)
+    }
+
+    /// The family the chosen face was registered under, or `None` if none was.
+    fn registered_family(discoverer: &Discoverer) -> Option<&str> {
+        discoverer.chosen.as_ref().map(|face| face.family.as_str())
+    }
+
+    #[test]
+    fn the_configured_font_goes_in_front_of_the_factory_ones_and_they_stay_as_the_net() {
+        // **AC1, and the named exception of Contract 7.** The fallback chain is traversed in order and
+        // the factory font covers the whole Latin range: a chosen face placed behind it would not paint
+        // a single letter, and the setting would do nothing while looking like it works.
+        //
+        // **It asserts on the list and not on the drawing**, for the reason the sibling guard above
+        // states: registering a face remakes the atlas and **every** glyph changes place, so comparing
+        // drawings passes the same with the defect in and out.
+        let ctx = context();
+        let Some(installed) = an_installed_family() else {
+            return;
+        };
+        let mut discoverer = Discoverer::default();
+
+        let chosen = discoverer.use_the_family(&installed, &ctx);
+
+        // **A family the machine lists and cannot open is the machine's business, not this code's**:
+        // a stale fontconfig entry or a half-written file leaves nothing to register. That is not a
+        // failure of what this test claims, so it stops instead of failing — but being told the
+        // family is MISSING would be this code's fault, and that still fails.
+        let Chosen::Registered(family) = chosen else {
+            assert_ne!(
+                chosen,
+                Chosen::NotInstalled,
+                "the family '{installed}' came from the machine itself and was reported as missing"
+            );
+            return;
+        };
+        let factory = ["Hack".to_owned(), "emoji-icon-font".to_owned()];
+        let mono = discoverer.monospaced(&factory);
+        assert_eq!(
+            mono.first().map(String::as_str),
+            Some(format!("{CHOSEN_PREFIX}{family}").as_str()),
+            "the configured font did not end up in front, so the factory one keeps winning every letter"
+        );
+        // **And the factory ones stay, in their order**: they are the net for what the chosen face does
+        // not carry. A version that replaced them instead of pushing them back would pass the assertion
+        // above and leave the terminal without a net.
+        assert_eq!(
+            mono[1..],
+            factory,
+            "the factory fonts stopped being behind the chosen one as a net"
+        );
+        // **And the engine really has the bytes.** Naming a family in the list without handing over its
+        // `font_data` is not a wrong drawing: it is `is not bound to any fonts`, a **panic inside
+        // epaint's own pass**, on the frame after this one. Nothing but taking a pass here sees it —
+        // checked by dropping the chosen face from the registration loop, which left the suite green.
+        pass(&ctx);
+        assert!(
+            glyph_size(&ctx, 'a').is_some(),
+            "the chosen family was named to the engine without its bytes, which panics on the next pass"
+        );
+    }
+
+    #[test]
+    fn the_configured_font_does_not_rule_over_the_icons() {
+        // **The private-use areas are the one place where the INSTALLED font rules**, and the one that
+        // rules there is the one that carries the drawing —a `Nerd Font`—, not the one somebody picked
+        // to read code with. Without this, asking for a font would take the icons away from whoever
+        // installed one for them.
+        let ctx = context();
+        let Some(installed) = an_installed_family() else {
+            return;
+        };
+        let mut discoverer = Discoverer::default();
+
+        let chosen = discoverer.use_the_family(&installed, &ctx);
+
+        // **The registration is asserted first, and without this the test proves nothing**: a
+        // `use_the_family` that did nothing at all leaves the icon family untouched too, and the
+        // assertion below would pass for the wrong reason.
+        if !matches!(chosen, Chosen::Registered(_)) {
+            // Same as its sibling above: nothing registered means nothing to assert on, and the one
+            // answer that WOULD be this code's fault is the family being called missing.
+            assert_ne!(
+                chosen,
+                Chosen::NotInstalled,
+                "the family '{installed}' came from the machine itself and was reported as missing"
+            );
+            return;
+        }
+        let factory = ["Hack".to_owned(), "emoji-icon-font".to_owned()];
+        assert_eq!(
+            discoverer.icon_ones(&factory),
+            factory,
+            "the configured font sneaked into the icon family"
+        );
+    }
+
+    #[test]
+    fn a_font_the_machine_does_not_have_leaves_everything_as_it_was_and_says_so() {
+        // **The name comes from outside and is not validated when reading the file**: whether it exists
+        // is something only the machine can answer. What matters is that the answer «it is not here»
+        // changes nothing —the terminal keeps painting— and that it is **told apart from the found
+        // one**, because from the outside both look identical: the window opens the same.
+        let ctx = context();
+        let mut discoverer = Discoverer::default();
+
+        let chosen = discoverer.use_the_family("no family is called like this 4f7a2b", &ctx);
+
+        assert!(
+            matches!(chosen, Chosen::NotInstalled | Chosen::NoFontsOnTheMachine),
+            "a family nobody has was reported as something other than missing: {chosen:?}"
+        );
+        let factory = ["Hack".to_owned()];
+        assert_eq!(
+            discoverer.monospaced(&factory),
+            factory,
+            "a font that was not found changed the family the terminal paints with"
+        );
+    }
+
+    #[test]
+    fn the_family_is_found_however_it_is_capitalized() {
+        // **Whoever configures types the name by hand**, and a name typed by hand does not carry the
+        // capitals of the file it came from. Getting «it is not installed» for having written
+        // `jetbrains mono` would be a failure whoever suffers it cannot even see.
+        //
+        // **What is asserted is the family, not its exact name.** A machine can have two entries
+        // under the same name in different capitalizations, and which of the two the collection hands
+        // back is its business; that they are the same family is ours. Asserting on the name itself
+        // was intermittent for exactly that reason.
+        let ctx = context();
+        let Some(installed) = an_installed_family() else {
+            return;
+        };
+        let mut discoverer = Discoverer::default();
+
+        let chosen = discoverer.use_the_family(&installed.to_lowercase(), &ctx);
+
+        let Chosen::Registered(family) = chosen else {
+            assert_ne!(
+                chosen,
+                Chosen::NotInstalled,
+                "'{installed}' was not found when asked for in lowercase, and the machine has it"
+            );
+            return;
+        };
+        assert_eq!(
+            family.to_lowercase(),
+            installed.to_lowercase(),
+            "asking for it in lowercase registered a different family"
+        );
+    }
+
+    #[test]
+    fn the_family_is_registered_under_the_machines_name_and_not_the_one_typed() {
+        // **The report says which family the terminal paints with**, and a report that echoes back
+        // what was typed says nothing: whoever wrote `jetbrains mono` would read `jetbrains mono`
+        // whatever the machine actually resolved.
+        //
+        // **Two discoverers and not one assertion on a literal**, because the machine's own spelling
+        // is not something this test may assume. Asking for the same family twice, once as it is
+        // spelled and once in lowercase, has to register **the same** name; echoing the typed string
+        // is exactly what makes the two differ.
+        let ctx = context();
+        let Some(installed) = an_installed_family() else {
+            return;
+        };
+        let mut as_spelled = Discoverer::default();
+        let mut in_lowercase = Discoverer::default();
+
+        as_spelled.use_the_family(&installed, &ctx);
+        in_lowercase.use_the_family(&installed.to_lowercase(), &ctx);
+
+        if registered_family(&as_spelled).is_none() {
+            // Nothing registered: the machine lists a family whose files it cannot open. Same
+            // reasoning as the guards above.
+            return;
+        }
+        assert_eq!(
+            registered_family(&as_spelled),
+            registered_family(&in_lowercase),
+            "the family is registered under the name that was typed, so the report tells you what you \
+             wrote instead of what the terminal paints with"
+        );
+    }
+
+    /// Whether that face is the family's Regular: upright, normal weight, normal width.
+    ///
+    /// **The three attributes are written out here instead of being asked of `regular_first`**,
+    /// because a test that decides what «Regular» means by calling the thing under test agrees with
+    /// it whatever either of them says.
+    fn is_the_regular_one(face: &fontique::FontInfo) -> bool {
+        face.style() == fontique::FontStyle::Normal
+            && face.weight() == fontique::FontWeight::NORMAL
+            && face.width() == fontique::FontWidth::NORMAL
+    }
+
+    #[test]
+    fn the_regular_face_of_a_family_is_the_one_that_gets_picked_however_they_come_enumerated() {
+        // **A family is not one face, and which of them is taken is not a detail.** Measured on the
+        // discovery path by a review: `日` came out of face **index 5** of its family, taken for
+        // being enumerated first, and in a family whose Bold happens to come first **every** letter
+        // the terminal painted with it would be bold. Since this delivery the same rule decides the
+        // family somebody asks for by name, where it is not one character but **all** of them.
+        //
+        // **The faces are handed in the worst order on purpose**, with a non-Regular one first. The
+        // order the machine enumerates them in is its business and changes between machines, so a
+        // test that took it as it comes would be green here and asleep elsewhere: what has to be
+        // caught is a criterion that no longer reorders anything.
+        let mut collection = Collection::new(CollectionOptions {
+            system_fonts: true,
+            ..Default::default()
+        });
+        let mut names: Vec<String> = collection.family_names().map(str::to_owned).collect();
+        names.sort();
+        // **Every family that has a Regular AND something that is not one, and not the first one
+        // found.** That is the only shape that says anything —in a family of one face any criterion
+        // leaves it first— and going through all of them is what makes the criterion's four terms
+        // meet a family that separates them: one machine's first candidate differs only in slope,
+        // another's only in weight, and a test that stopped at one would be asleep about the rest.
+        let candidates: Vec<Vec<fontique::FontInfo>> = names
+            .iter()
+            .filter_map(|name| {
+                let id = collection.family_id(name)?;
+                let faces = collection.family(id)?.fonts().to_vec();
+                let regular = faces.iter().filter(|face| is_the_regular_one(face)).count();
+                (regular == 1 && faces.len() > regular).then_some(faces)
+            })
+            .collect();
+        // Same as its neighbours: on a machine with no fonts installed there is nothing to sort,
+        // and that is a fact about the machine and not about this code.
+        if candidates.is_empty() {
+            return;
+        }
+
+        for mut faces in candidates {
+            // **Handed in the worst order**, with a non-Regular first, so what is caught is a
+            // criterion that no longer reorders anything and not a machine that happened to
+            // enumerate them well.
+            faces.sort_by_key(is_the_regular_one);
+
+            regular_first(&mut faces);
+
+            assert!(
+                is_the_regular_one(&faces[0]),
+                "the Regular of a family did not end up first, so whichever face the machine \
+                 enumerates first is what the whole terminal gets painted with: {:?}",
+                faces
+                    .iter()
+                    .map(|face| (face.style(), face.weight(), face.width()))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn on_a_machine_with_no_fonts_at_all_the_name_that_was_typed_is_not_blamed() {
+        // **Three of the four endings look identical from outside** —the window opens with the
+        // factory fonts either way— and telling them apart is the whole reason [`Chosen`] has four
+        // variants instead of a `bool`. This is the one that is **nobody's typing**: a machine with
+        // no fontconfig has no family to offer, so answering «that family is not installed» sends
+        // whoever configured it to check a name that is written perfectly well, and the caller
+        // prints that very sentence for `NotInstalled`.
+        //
+        // **The state is forced instead of uninstalling fontconfig**, the same way its neighbour
+        // below does it: there is no way to take the machine's fonts away from inside a test.
+        let ctx = context();
+        let mut discoverer = Discoverer {
+            no_system_fonts: true,
+            ..Default::default()
+        };
+
+        let chosen = discoverer.use_the_family("JetBrains Mono", &ctx);
+
+        assert_eq!(
+            chosen,
+            Chosen::NoFontsOnTheMachine,
+            "with no fonts on the machine the answer blames the family that was asked for, and \
+             whoever reads it goes off to fix a name that is fine"
+        );
+        // **And nothing was enumerated on the way there.** The answer above could also be reached by
+        // building the collection and finding it empty, which is the 17.3–23.2 ms of D24 paid to
+        // learn what was already known.
+        assert!(
+            !discoverer.has_searched_the_machine(),
+            "the machine was enumerated again after having already found out it has no fonts"
+        );
+    }
+
+    #[test]
+    fn the_chosen_face_shares_its_name_with_neither_a_factory_one_nor_a_discovered_one() {
+        // **This is why the chosen face carries a prefix of its own instead of its bare name.**
+        // egui's keys are ordinary family names —`Hack` ships built in and is installed on very many
+        // development machines— so registering the chosen one bare would **replace the built-in
+        // one's bytes**, and the net this delivery leaves behind the chosen face for what it does
+        // not carry would be the chosen face itself.
+        //
+        // **And the prefix cannot be the discovered ones' either.** Those go behind the factory
+        // fonts and this one in front; sharing a key would leave the same name twice in the chain,
+        // with one of the two positions holding the other one's bytes.
+        //
+        // **The collision is manufactured rather than waited for**, like its sibling below: whether
+        // a family called `Hack` is installed on the machine running the suite is a question about
+        // the machine and not about this code.
+        let mut discoverer = Discoverer {
+            chosen: Some(SystemFace {
+                family: format!("{CHOSEN_PREFIX}Hack"),
+                data: Arc::new(egui::FontData::from_static(&[])),
+                for_icons: false,
+            }),
+            ..Default::default()
+        };
+        discoverer.faces.push(SystemFace {
+            family: format!("{SYSTEM_PREFIX}Hack"),
+            data: Arc::new(egui::FontData::from_static(&[])),
+            for_icons: false,
+        });
+
+        let factory = ["Hack".to_owned(), "emoji-icon-font".to_owned()];
+        let mono = discoverer.monospaced(&factory);
+
+        assert_eq!(
+            mono.iter().filter(|name| *name == "Hack").count(),
+            1,
+            "the chosen font named Hack took the place of the factory Hack, so the net behind it is \
+             itself: {mono:?}"
+        );
+        assert!(
+            mono.contains(&"Hack".to_owned()),
+            "the factory Hack stopped being in the chain at all: {mono:?}"
+        );
+        // **Three distinct keys for three faces**: the engine is handed one `font_data` entry per
+        // name, so two faces under one name means the chain names a face whose bytes are somebody
+        // else's.
+        let distinct: BTreeSet<_> = mono.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            mono.len(),
+            "two of the three faces are registered under the same name, so one of them is painting \
+             with the other's bytes: {mono:?}"
+        );
+    }
+
     #[test]
     fn without_fonts_on_the_machine_enumerating_is_not_retried_per_character() {
         // **AC9.** Enumerating is the most expensive of the whole path —between 17 and 23 ms, **D24**—, so on a

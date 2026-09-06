@@ -734,6 +734,30 @@ with grids that may have nothing to do with each other"
     fi
 fi
 
+# **The chosen-font guard, and it is the twin of the one above for a path the one above cannot see.**
+# Asking for a family by name is the ONLY thing that makes the terminal enumerate the machine's fonts
+# at start-up — between 17.3 and 23.2 ms — and it does **not** go through the discovery counters, so
+# the guard that invalidates a batch which searched for fonts without dumping Japanese would not
+# notice it. Reading the settings is vetoed under these variables, so no batch can ask for a family
+# and this line must **always** say «none»:
+#
+#   - anything else means the veto broke and that run mixes an enumeration into a start-up it
+#     declares as clean;
+#   - and no line at all means the binary does not declare this path, so the run cannot be judged.
+#
+# The `grep` goes inside the `if` for the same `set -e` reason spelled out just above.
+if ! grep -q "^chosen font: *none" "$REPORT"; then
+    if grep -q "^chosen font:" "$REPORT"; then
+        invalidate "this run asked the machine for a font family by name, which enumerates every font \
+installed —between 17.3 and 23.2 ms— inside a start-up this report declares as clean. Reading the \
+settings is vetoed under the measurement gate, so the veto has been broken"
+    else
+        invalidate "the report does not declare whether a font family was asked for by name. Without \
+that datum, a run that enumerated the machine's fonts at start-up and one that did not publish \
+indistinguishable reports"
+    fi
+fi
+
 if [ "$BATCH" != A ] && [ ! -f "$WITNESS" ]; then
     invalidate "nobody got to publish a panel, so this is a batch A under another name"
 fi

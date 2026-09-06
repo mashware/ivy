@@ -1151,96 +1151,58 @@ enum OpenWith {
     Restored(session::Validated),
 }
 
-/// Which door this session comes in through.
+/// Hands the text engine the family the settings ask for, and says what the report has to publish.
 ///
-/// **An enum and not a boolean**, because in the call a loose `false` does not say what it is that
-/// it is not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Entry {
-    /// The normal one: whoever opens the terminal to use it.
-    Normal,
-    /// A batch of the measurement bench.
-    Measuring,
-}
-
-/// The settings that have to be used: the file's, **or none if this is a measurement batch**.
+/// **Nothing is asked of the machine when they ask for nothing, and that is the whole of D24.**
+/// Resolving a name forces enumerating every font installed —between 17.3 and 23.2 ms— which is the
+/// cost D24 decided never to pay at start-up. The `None` branch here is what keeps that decision
+/// standing, and it is the branch every start-up without a settings file takes.
 ///
-/// **The veto holds up more than it seems.** The measurement script already launches with the
-/// configuration directory isolated, but **whoever launches the binary by hand with the measurement
-/// variables** —which is how the documentation says to open a particular layout— would read theirs.
-/// Their font size would change the grid, and **every** figure published by this project depends on
-/// the grid.
-///
-/// And there is a second consequence: the script **invalidates a run** if a batch that does not
-/// dump in Japanese looks for fonts. With a configured font read under measurement, every batch
-/// would enumerate and **every run would come out invalid**.
-///
-/// **The whole file is vetoed, not «the settings that affect the measurement».** That list would be
-/// a list that forgets to grow; this one is read at a glance.
-fn settings_to_use(
-    entry: Entry,
-    path: Option<&std::path::Path>,
-) -> (settings::Settings, measure::ReadingSettings) {
-    if entry == Entry::Measuring {
-        return (
-            settings::Settings::default(),
-            measure::ReadingSettings::Vetoed,
-        );
-    }
-    let Some(path) = path else {
-        // **With nowhere to trust it is not read either, and it is said.** Whoever has the
-        // environment without an absolute path would write a file that is never applied; the
-        // sibling module already has that same verb.
-        eprintln!(
-            "agent-terminal: there is nowhere to look for the settings (neither $XDG_CONFIG_HOME nor $HOME \
-             gives an absolute path). Opening with the factory ones."
-        );
-        return (
-            settings::Settings::default(),
-            measure::ReadingSettings::Missing,
-        );
+/// **It is a function of its own and not four lines inside the window's constructor**, because
+/// inside that closure no test can reach it: the laziness would rest on reading the code.
+fn choose_the_font(
+    family: Option<&str>,
+    discoverer: &mut fonts::Discoverer,
+    ctx: &egui::Context,
+) -> measure::ChoosingTheFont {
+    let Some(asked_for) = family else {
+        return measure::ChoosingTheFont::NotAsked;
     };
     let started = Instant::now();
-    match settings::read(path) {
-        Ok((settings, warnings)) => {
-            // **Every one that was kept is said, and how many were left out.** Keeping quiet about
-            // the extra ones without saying how many they were would make you believe that beyond
-            // the ceiling the file is fine.
-            for warning in warnings.kept() {
-                eprintln!("agent-terminal: {warning}");
+    let chosen = discoverer.use_the_family(asked_for, ctx);
+    let how_long = started.elapsed();
+    let asked_for = asked_for.to_owned();
+    match chosen {
+        fonts::Chosen::Registered(family) => measure::ChoosingTheFont::Found { family, how_long },
+        // **Each one is said with its own cause, and that is not politeness.** From outside the three
+        // look identical —the window opens exactly as always— and each sends whoever reads it
+        // somewhere different: to fix what they typed, to fix what is installed, or nowhere at all.
+        fonts::Chosen::NotInstalled => {
+            eprintln!(
+                "agent-terminal: the font '{asked_for}' is not installed on this machine. Painting \
+                 with the built-in ones."
+            );
+            measure::ChoosingTheFont::Missing {
+                asked_for,
+                how_long,
             }
-            if warnings.unlisted() > 0 {
-                eprintln!(
-                    "agent-terminal: and {} more line(s) with problems, which are not listed",
-                    warnings.unlisted()
-                );
-            }
-            (
-                settings,
-                measure::ReadingSettings::Applied {
-                    how_long: started.elapsed(),
-                    warnings: warnings.total(),
-                },
-            )
         }
-        Err(problem) => {
-            // **That there is no file is the normal case and is not said**; the type itself decides
-            // it, so that this branch and any other that reads the file do not stop agreeing.
-            if problem.warrants_warning() {
-                eprintln!(
-                    "agent-terminal: {} could not be used: {problem}. Opening with the factory ones.",
-                    path.display()
-                );
+        fonts::Chosen::Unusable => {
+            eprintln!(
+                "agent-terminal: the font '{asked_for}' is installed and none of its files can be \
+                 read. Painting with the built-in ones."
+            );
+            measure::ChoosingTheFont::Unusable {
+                asked_for,
+                how_long,
             }
-            // **It is declared that it WAS looked at, even though nothing was applied.** «Factory
-            // because the file was broken» and «factory because a batch vetoed it» are two
-            // different things, and the report only tells batches apart if this line does not
-            // confuse them.
-            (
-                settings::Settings::default(),
-                measure::ReadingSettings::Missing,
-            )
         }
+        // **Nothing is said here**: whoever found out there are no system fonts already said so, and
+        // a second line blaming the name would send the reader to fix a name that is fine.
+        fonts::Chosen::NoFontsOnTheMachine => measure::ChoosingTheFont::Missing {
+            asked_for,
+            how_long,
+        },
     }
 }
 
@@ -1438,11 +1400,11 @@ pub fn run() -> eframe::Result {
     // it; the whole file is vetoed all the same, because the rule is read at a glance and «only
     // these settings» would be a list that forgets to grow.
     let entry = if measuring {
-        Entry::Measuring
+        settings::Entry::Measuring
     } else {
-        Entry::Normal
+        settings::Entry::Normal
     };
-    let (settings, what_it_cost) = settings_to_use(entry, settings::path().as_deref());
+    let (settings, what_it_cost) = settings::to_use(entry, settings::path().as_deref());
 
     let mut options = eframe::NativeOptions::default();
     // **The size is only asked for if somebody asked for it**, and that is why there is no default
@@ -1476,6 +1438,15 @@ pub fn run() -> eframe::Result {
             // constructors with thirty-three calls among tests, and none of them configures
             // anything.
             window.apply_the_settings(&settings);
+            // **The font goes apart from the rest of the settings, and it is not tidiness.** The
+            // others put a value on the window; this one talks to the text engine and **costs
+            // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
+            // machine. It needs the context, which only exists here.
+            window.chosen_font = choose_the_font(
+                settings.font.as_deref(),
+                &mut window.discoverer,
+                &cc.egui_ctx,
+            );
             window.reading_settings = what_it_cost;
             Ok(Box::new(window))
         }),
@@ -3567,6 +3538,8 @@ struct Window {
     /// What it cost to read the settings of whoever uses the terminal, and whether they were read
     /// at all.
     reading_settings: measure::ReadingSettings,
+    /// What choosing the font cost, and whether one was asked for at all.
+    chosen_font: measure::ChoosingTheFont,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -3850,7 +3823,11 @@ impl Window {
         })
     }
 
-    /// Puts on the window whatever whoever uses it configured.
+    /// Puts on the window whatever whoever uses it configured, **except the font**.
+    ///
+    /// The family named in the file is applied by [`choose_the_font`] instead, and it is not tidiness:
+    /// everything here puts a value on the window, while that one talks to the text engine, needs the
+    /// context and can cost tens of milliseconds. It runs beside this, at start-up.
     ///
     /// **It goes here and not in the constructor**, just like the injected drags and the restoring
     /// span: taking it inside would force passing it through three constructors with dozens of
@@ -3859,12 +3836,8 @@ impl Window {
         self.theme = Theme::from_colors(&settings.colors);
         // **What the file does not ask for stays as it is**, which is what makes it possible to
         // configure just one color without inheriting along the way a font size nobody wrote.
-        if let Some(font_size) = settings.font_size {
-            self.font_size = font_size;
-        }
-        if let Some(enabled) = settings.copy {
-            self.copy_enabled = enabled;
-        }
+        self.font_size = settings.font_size.unwrap_or(self.font_size);
+        self.copy_enabled = settings.copy.unwrap_or(self.copy_enabled);
         // **They are applied in the order they were written, and that is why they arrive as a
         // list.** «The last one wins» can only be decided that way, and it is what makes pasting
         // one set of shortcuts on top of another do what is expected.
@@ -3924,6 +3897,7 @@ impl Window {
             persistence: session::Persistence::at(None),
             restoring: None,
             reading_settings: measure::ReadingSettings::default(),
+            chosen_font: measure::ChoosingTheFont::default(),
             last_seen: None,
             last_written: None,
             save_due: None,
@@ -4176,6 +4150,7 @@ impl Window {
                     }),
                 restoring: self.restoring,
                 settings: self.reading_settings,
+                chosen_font: self.chosen_font.clone(),
                 tab_bar: self.tab_bar_cost,
                 reflow: self.reflow,
             },
@@ -7194,6 +7169,7 @@ mod tests {
             persistence: session::Persistence::at(None),
             restoring: None,
             reading_settings: measure::ReadingSettings::default(),
+            chosen_font: measure::ChoosingTheFont::default(),
             last_seen: None,
             last_written: None,
             save_due: None,
@@ -8997,6 +8973,57 @@ mod tests {
         assert!(
             report.contains("window:       903×701 points"),
             "the report does not publish the size the window had:\n{report}"
+        );
+    }
+
+    #[test]
+    fn the_report_publishes_the_font_the_window_was_really_opened_with() {
+        // **Asking for a family by name is the only thing that enumerates the machine at start-up**
+        // —between 17.3 and 23.2 ms, **D24**— and it does **not** go through the discovery counters,
+        // so the guard that invalidates a batch for searching fonts without dumping Japanese cannot
+        // see it. What the script reads instead is this line, and it invalidates any run that does
+        // not say `none`.
+        //
+        // **The state is set on the window and read back out of the report, which is the join the
+        // two halves lack.** That the four states are worded apart is already tied down where they
+        // are written, and that choosing one produces its state where it is chosen; what nothing
+        // held was the wire between them. Hardcoding the header's field to «none» —which is what
+        // every batch publishes, so it looks harmless— left the whole suite green and would have
+        // turned the script's guard into a line that is always satisfied.
+        let mut window = window_with("printf something", "sleep 30");
+        wait_for_it_to_die(window.tabs[0].panes()[0]);
+        window.chosen_font = measure::ChoosingTheFont::Found {
+            family: "Sample Grotesk Mono".to_owned(),
+            how_long: std::time::Duration::from_millis(21),
+        };
+        window.pump_them_all();
+        ui_pass(
+            &mut window,
+            &egui::Context::default(),
+            area_of(1200.0),
+            egui::RawInput::default(),
+        );
+        window.close_the_frame(std::time::Duration::from_millis(10));
+
+        let report = report_of(&window);
+
+        assert!(
+            report.contains("Sample Grotesk Mono"),
+            "the report does not say which family the window was opened with, so a run that paid \
+             the enumeration is published as one that did not:\n{report}"
+        );
+        // **And the word the script decides with must stop being `none`.** That word is the third
+        // of the line, which is where the script looks; a header that names the family further
+        // along but still opens with «none» would have the run averaged with the ones that never
+        // touched the machine.
+        let line = report
+            .lines()
+            .find(|line| line.starts_with("chosen font:"))
+            .expect("there is no chosen-font line for the script to read");
+        assert_ne!(
+            line.split_whitespace().nth(2),
+            Some("none"),
+            "the window asked for a family and the word the script reads is still «none»: '{line}'"
         );
     }
 
@@ -14448,7 +14475,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create the test's directory");
 
-        let (_, cost) = settings_to_use(Entry::Normal, Some(&dir.join("config")));
+        let (_, cost) = settings::to_use(settings::Entry::Normal, Some(&dir.join("config")));
         assert_eq!(
             cost,
             measure::ReadingSettings::Missing,
@@ -14457,6 +14484,68 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_a_font_in_the_settings_the_machine_is_never_touched() {
+        // **This is the half of D24 that this milestone could have broken without anyone noticing.**
+        // Resolving a family name enumerates every font installed —between 17.3 and 23.2 ms— and D24
+        // decided that cost is never paid at start-up. The way that decision survives a settings file
+        // that can ask for a font is this branch: no `font` line, no enumeration.
+        //
+        // **It asserts on the machine being untouched, not on the field being `None`.** Asserting
+        // that the settings carry no family says only that the parser did its job; the defect this
+        // guards against lives one step later, in the caller, and a caller that asked anyway would
+        // leave that assertion green. Checked by removing the `None` branch.
+        let ctx = egui::Context::default();
+        let mut discoverer = fonts::Discoverer::default();
+
+        let published = choose_the_font(None, &mut discoverer, &ctx);
+
+        assert_eq!(
+            published,
+            measure::ChoosingTheFont::NotAsked,
+            "a start-up that asked for no font published something other than «none»"
+        );
+        assert!(
+            !discoverer.has_searched_the_machine(),
+            "the machine's fonts were enumerated without the settings asking for a family, which is \
+             the cost D24 decided is never paid at start-up"
+        );
+    }
+
+    #[test]
+    fn a_font_the_machine_does_not_have_is_published_with_what_looking_for_it_cost() {
+        // **A search that finds nothing is not a search that cost nothing**: it pays the same
+        // enumeration as one that succeeds, because the expensive half is building the collection.
+        // Publishing it without its time would drop those milliseconds into the nameless start-up,
+        // which is the mislabelled number D13 exists about.
+        let ctx = egui::Context::default();
+        let mut discoverer = fonts::Discoverer::default();
+
+        let published = choose_the_font(
+            Some("no family is called like this 4f7a2b"),
+            &mut discoverer,
+            &ctx,
+        );
+
+        let (measure::ChoosingTheFont::Missing {
+            asked_for,
+            how_long,
+        }
+        | measure::ChoosingTheFont::Unusable {
+            asked_for,
+            how_long,
+        }) = published
+        else {
+            panic!("a family nobody has was published as found: {published:?}");
+        };
+        assert_eq!(asked_for, "no family is called like this 4f7a2b");
+        assert!(
+            how_long > std::time::Duration::ZERO,
+            "the failed search publishes no time at all, so what it cost falls into the start-up \
+             nobody measures"
+        );
     }
 
     #[test]
@@ -14483,7 +14572,7 @@ mod tests {
 
         // Without measurement it is read whole: if this failed, the test below would pass for there
         // being no file.
-        let (loaded, cost) = settings_to_use(Entry::Normal, Some(&file));
+        let (loaded, cost) = settings::to_use(settings::Entry::Normal, Some(&file));
         assert_eq!(
             loaded.font_size,
             Some(42.0),
@@ -14495,7 +14584,7 @@ mod tests {
             "the settings were applied and the report would not declare it: {cost:?}"
         );
 
-        let (under_measurement, cost) = settings_to_use(Entry::Measuring, Some(&file));
+        let (under_measurement, cost) = settings::to_use(settings::Entry::Measuring, Some(&file));
         assert_eq!(
             cost,
             measure::ReadingSettings::Vetoed,
@@ -14513,7 +14602,8 @@ mod tests {
         // user's» publishes a number with the label changed**: a machine with no file and another
         // that applied a different font size have grids that may have nothing to do with each
         // other. A review caught it.
-        let (_, without_file) = settings_to_use(Entry::Normal, Some(&dir.join("does-not-exist")));
+        let (_, without_file) =
+            settings::to_use(settings::Entry::Normal, Some(&dir.join("does-not-exist")));
         assert_eq!(
             without_file,
             measure::ReadingSettings::Missing,
