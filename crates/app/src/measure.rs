@@ -240,12 +240,18 @@ pub struct Timings {
 }
 
 impl Timings {
-    /// Records how long the way out took: from starting the interface pass to writing to the program.
+    /// Records how long the way out took: from starting the interface pass to **handing the keys
+    /// over** to the thread that writes them.
+    ///
+    /// **It stopped at the write itself until the write stopped blocking.** The byte reaches the
+    /// program on a thread nobody times, so what this series covers is shorter than the name it
+    /// carried when D3 published it.
     pub fn record_outbound(&mut self, how_long: Duration) {
         self.outbound.record(how_long);
     }
 
-    /// Records how long it took to encode a mouse gesture and write it to the program.
+    /// Records how long it took to encode a mouse gesture and **hand it over** to the thread that
+    /// writes it. Same shortening as its sibling above, and for the same reason.
     pub fn record_mouse_outbound(&mut self, how_long: Duration) {
         self.mouse.record(how_long);
     }
@@ -372,7 +378,7 @@ impl Timings {
         if self.outbound.has_samples() {
             writeln!(
                 a,
-                "\nkey in the frame → byte in the program   ({} keystrokes)",
+                "\nkey in the frame → handed over to be written   ({} keystrokes)",
                 self.outbound.total
             )?;
             writeln!(a, "  {}", self.outbound)?;
@@ -385,7 +391,7 @@ impl Timings {
         if self.mouse.has_samples() {
             writeln!(
                 a,
-                "\nencoding the mouse gesture → byte in the program   ({} mouse reports)",
+                "\nencoding the mouse gesture → handed over to be written   ({} mouse reports)",
                 self.mouse.total
             )?;
             writeln!(a, "  {}", self.mouse)?;

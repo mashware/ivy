@@ -4455,3 +4455,66 @@ through was to take out a piece the delivery was already touching: reading the s
 somebody sets out to refactor fires almost never; this one fired on an ordinary delivery and cost it
 one function's move.
 
+
+---
+
+## D29 — Writing to the program does not wait for it, and what it does not take is said out loud
+
+**Writing to a pseudoterminal blocks when the program inside is not reading its input.** That is not a
+defect of anybody's: it is the mechanism, and **D8** uses it deliberately as the terminal's only real
+brake on the output side — stop draining, the kernel's ~20 KiB fill, the program stops.
+
+**The same fact, on the input side, was a hang.** `Pty::write` was `write_all` on the thread that
+paints. With the program inside busy —a `cargo build` in the foreground, an editor mid-save, a
+stopped process— the window stopped repainting for as long as it took, and `Ctrl+C`, which travels
+that same thread, could not interrupt it. Typing never got near the 20 KiB; **pasting did**, and
+pasting shipped in F2.6.
+
+**The project held the correct knowledge, verified and measured, and had applied it in one direction
+only.** That is the shape of this entry: not a missing measurement, not an unread API — a fact used
+as a tool going out and never read as a risk coming in.
+
+### The decision
+
+- **The write is handed to a thread of its own**, one per console, and `Pty::write` returns without
+  waiting. It is the shape Alacritty uses for the same problem, minus its non-blocking descriptor.
+- **In order and dropping nothing** while the console lives.
+- **The queue carries no ceiling.** The reason is volume, not principle: what arrives is what
+  somebody's hands produced. There is no producer here to outrun a consumer the way a program
+  dumping hundreds of MiB/s does on the other side, which is why D8's ceiling is not copied over.
+- **What the program is not taking is published**, and the frame says it once. `Pty::backlog` answers
+  how many bytes are owed and since when.
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **A non-blocking descriptor** (Alacritty's model, and the first candidate) | Read in `portable-pty` 0.9 rather than assumed: the writer and the reader are both `dup`s of the master, so they share one open file description. `O_NONBLOCK` on one lands on the other — and the reader's blocking `read` **is** the output chain, D8's brake included. It would mean rewriting the side that works |
+| **A ceiling with backpressure to the caller** (what D8 really did) | It is the honest ceiling and it is not discarded for ever: it is deferred. It needs an answer to «what does the window do when it cannot accept a keystroke», and that is a product question, not an implementation detail |
+| **Discarding when full** | The failure that takes longest to understand from the other side of the screen. D8 refused it on the output side and this refuses it too |
+| **Giving `Ctrl+C` a path of its own** (a signal to the process group) | Measured over a real pty in three termios states: in raw mode `0x03` **is not a signal** — the program asked to read that byte — so signalling would interrupt the very TUI agents this terminal exists to host. WezTerm, Alacritty, Kitty and xterm all write the byte. And in canonical mode the interrupt was never broken: the queue cannot jam there, because the line discipline discards instead of blocking |
+| **Moving the output pump to its own thread** | It is the literal reading of the first draft of the root cause, and a challenger showed it cures the deadlock and leaves the freeze |
+
+### What it cost, and what it bought
+
+| | |
+|---|---|
+| The write that stopped for **5.71 s** | returns in **3.62 µs** |
+| The mouse path, batch `O`, four runs alternating with `main` built minutes earlier | **5.5–6.0 µs** against **8.2–9.1** |
+
+**And a published span changed meaning, which is declared rather than left to be noticed.** «From a
+key in the frame to the byte in the program» — D3's 36 µs and 3.42 ms, D23's 5.1–5.3 µs per gesture —
+now stops **at the queue**: the byte reaches the program on a thread nobody times. The names in the
+report say so. The second figure existed *because* the write waited.
+
+### What it left open, with its measurement
+
+- **A console whose program stops reading for good goes deaf and its writer thread leaks.** Measured:
+  fifteen seconds after dropping such a `Pty`, the thread was still there — killing the child does
+  **not** unblock a write to the master. One thread and its payload per console closed in that state,
+  for the life of the process. Undoing it needs an interruptible write, which is the discarded row
+  above coming back.
+- **Why a blocked write does not end when the child dies is not explained.** Measured at ≥19 s in one
+  run and 54 s in another, with a child that never wrote a byte. The slave end *is* dropped at spawn,
+  so the obvious answer is already ruled out. It is written here so nobody closes it with a guess:
+  this investigation was caught doing exactly that once.

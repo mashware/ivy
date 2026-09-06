@@ -1917,8 +1917,14 @@ impl Pane {
 
     /// Sends the program what the mouse has just done over this console.
     ///
-    /// Returns what it cost to reach the pseudoterminal, or nothing if there was nothing to send —
+    /// Returns what it cost to **hand the gesture over**, or nothing if there was nothing to send —
     /// which is the normal case: the program only receives what it has asked for.
+    ///
+    /// **It used to be «to reach the pseudoterminal», and it is not any more.** Since the write is
+    /// handed to a thread of its own, this stopwatch stops at the queue: the byte reaches the
+    /// program afterwards, on a thread nobody times. D23 published this span as 5.1–5.3 µs per
+    /// gesture when it still included the write; what it covers now is a shorter stretch under the
+    /// same name.
     fn send_mouse_to_the_program(
         &mut self,
         gesture: mouse::MouseReport,
@@ -1976,12 +1982,15 @@ impl Pane {
     /// Returns whether the budget cut the pumping short and left a queue to swallow.
     fn pump(&mut self) -> bool {
         self.received.clear();
-        let pickup = self.pty_output.pick_up(&mut self.received, PUMP_BUDGET);
+        let pickup = self
+            .pty_output
+            .pick_up(&mut self.received, PUMP_BUDGET, self.pty.backlog());
+        // **One clock and not two.** The stamp of when the bytes were collected is also the start of
+        // interpreting them: between the two there was nothing, and a second `Instant::now()` only
+        // added a reading of its own to the span it was meant to measure.
         let collected_at = Instant::now();
-
-        let before = Instant::now();
         self.screen.advance(&self.received);
-        let interpreted = before.elapsed();
+        let interpreted = collected_at.elapsed();
 
         // Queueing the painting is measured in the UI pass, which comes afterwards; here what is
         // already known is noted down and there it is completed.
@@ -2026,11 +2035,7 @@ impl Pane {
     /// With no directory there is nothing to read: it is the case of the console that could not
     /// create its own, which has to keep looking as it did before the panel existed.
     fn refresh_its_panel(&mut self) {
-        if !self.to_reread.take() {
-            return;
-        }
-
-        if let Some(dir) = self.panel.as_ref() {
+        if let (true, Some(dir)) = (self.to_reread.take(), self.panel.as_ref()) {
             self.panel_state.refresh(dir.path());
         }
     }
@@ -2590,13 +2595,18 @@ impl Pane {
             return requests;
         }
 
-        // **A paste does not go into this series, and it is not a tidiness detail.** What this
-        // number measures is the stretch from a key to the byte, and D3 publishes it: 36 µs at
-        // rest, 3.42 ms with the two consoles dumping. A one-megabyte clipboard written at once
-        // adds a sample of hundreds of milliseconds there —and with no ceiling if the program does
-        // not read, see issue #50—, which would move the percentile that decision uses to judge the
-        // UI framework. It is exactly the failure of the span with the changed label that this file
-        // already documents having paid for once.
+        // **What this number measures changed the day the write stopped blocking, and saying so is
+        // not optional.** It used to be *from a key in the frame to the byte written into the
+        // program* — D3 published it as 36 µs at rest and 3.42 ms with the two consoles dumping, and
+        // that second figure existed **because** the write waited for the program. Now the write
+        // hands the bytes to a queue and returns, so this stopwatch stops at *the key being handed
+        // over*. The byte reaches the program later, on a thread nobody times. It is a **shorter
+        // span under the same name**, and this file already documents having paid once for exactly
+        // that.
+        //
+        // **A paste still stays out of the series**, for what is left of the old reason: a
+        // one-megabyte clipboard is one allocation and one send, which is not what a keystroke costs,
+        // and mixing them moves the percentile that judges the framework.
         if !pasted {
             self.timings.record_outbound(frame_started.elapsed());
         }
@@ -4665,9 +4675,8 @@ impl Window {
         // [`DragIntent::from_chord`] and [`Self::chord_of_the_last_press`]. It is looked at before
         // the loop because the answer belongs to the window, not to each console: only one of them
         // receives the press.
-        if let Some(chord) = Self::chord_of_the_press(ui) {
-            self.chord_of_the_last_press = chord;
-        }
+        self.chord_of_the_last_press =
+            Self::chord_of_the_press(ui).unwrap_or(self.chord_of_the_last_press);
 
         // **Presses and releases are routed here, before the loop**, and not inside with each
         // console's response: egui gives `clicked()` **on release**, so the program would find out

@@ -13,8 +13,8 @@
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -60,7 +60,20 @@ impl Default for Size {
 pub struct Pty {
     child: Box<dyn Child + Send + Sync>,
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// What is waiting to be written, on its way to the writer thread.
+    ///
+    /// **The write does not happen on the caller's thread, and that is the whole of it.**
+    /// Writing to a pseudoterminal blocks when the program inside is not reading its input —which is
+    /// exactly the brake this crate uses on the *output* side, on purpose— and the caller here is the
+    /// thread that paints. Handing the bytes to a thread of its own is what keeps the window alive
+    /// while the program catches up.
+    to_write: Option<Sender<Vec<u8>>>,
+    /// What has been handed over and not yet written, shared with the writer thread.
+    input: Arc<Input>,
+    /// **Kept although it is never joined**, and the difference matters: with the handle discarded,
+    /// «we choose not to wait for it» is not a choice anybody can see in the code, and no test can
+    /// reach the thread. See [`Pty::drop`] for why it is not joined.
+    writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     /// What pulls the reader thread out of a wait for room in the channel when it has to close.
     ///
@@ -69,6 +82,109 @@ pub struct Pty {
     /// the thread.
     stop: Arc<AtomicBool>,
 }
+
+/// What has been handed over for the program to read, and how much of it has not gone in yet.
+///
+/// **It exists because the fix for the blocking write traded a visible failure for an invisible
+/// one.** With the write on a thread of its own the window no longer freezes — but a program that
+/// stops reading for good leaves that thread stuck inside a single `write_all`, and everything typed
+/// afterwards queues behind it, `Ctrl+C` included. `Pty::write` keeps answering «taken», the console
+/// keeps repainting, and it simply stops listening.
+///
+/// **The old bug was at least legible.** This is what makes the new one legible too: whoever hosts
+/// this crate can ask how much is owed and since when, and say so. Declaring it rather than deducing
+/// it is what this project does everywhere else.
+#[derive(Default)]
+struct Input {
+    /// Bytes handed over and not yet written. It only ever goes down when a write really lands.
+    owed: AtomicUsize,
+    /// When the oldest unwritten byte was handed over, in milliseconds since the epoch of
+    /// [`Input::since`]. Zero means nothing is owed.
+    waiting_since: AtomicU64,
+    /// Whether the writer gave up, which means the program or the pseudoterminal is gone.
+    gave_up: AtomicBool,
+}
+
+/// What the program has not taken yet, for whoever wants to say it out loud.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Backlog {
+    /// How many bytes were handed over and have not been written.
+    pub bytes: usize,
+    /// How long the oldest of them has been waiting.
+    pub waiting: Duration,
+    /// Whether the writer gave up: nothing else will ever go in through this pseudoterminal.
+    pub gave_up: bool,
+}
+
+impl Input {
+    /// The clock these two numbers share. Monotonic, so a change of the wall clock cannot make a
+    /// backlog look like it has been waiting for a negative amount of time.
+    fn now() -> u64 {
+        std::time::Instant::now()
+            .duration_since(*STARTED)
+            .as_millis() as u64
+    }
+
+    /// Notes that these bytes were handed over.
+    fn handed_over(&self, bytes: usize) {
+        // **The stamp is only set by the first one waiting**, which is what makes `waiting` mean «how
+        // long the oldest has been stuck» instead of «how long since the last keystroke».
+        let _ = self.waiting_since.compare_exchange(
+            0,
+            Self::now().max(1),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+        self.owed.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Notes that a write finished, well or badly.
+    fn settle(&self, bytes: usize, failure: Option<&std::io::Error>) {
+        if failure.is_some() {
+            // **What is owed is NOT cleared here.** The bytes of this write and everything queued
+            // behind it are never going in, and saying «nothing is owed» would be exactly the silence
+            // this type exists against.
+            self.gave_up.store(true, Ordering::Relaxed);
+            return;
+        }
+        let left = self.owed.fetch_sub(bytes, Ordering::Relaxed) - bytes;
+        if left == 0 {
+            self.waiting_since.store(0, Ordering::Relaxed);
+        } else {
+            self.waiting_since
+                .store(Self::now().max(1), Ordering::Relaxed);
+        }
+    }
+
+    /// Whether the writer gave up: nothing else will ever go in through this pseudoterminal.
+    fn gave_up(&self) -> bool {
+        self.gave_up.load(Ordering::Relaxed)
+    }
+
+    /// What is owed right now, or nothing when the program is keeping up.
+    fn backlog(&self) -> Option<Backlog> {
+        let bytes = self.owed.load(Ordering::Relaxed);
+        let gave_up = self.gave_up.load(Ordering::Relaxed);
+        if bytes == 0 && !gave_up {
+            return None;
+        }
+        let since = self.waiting_since.load(Ordering::Relaxed);
+        let waiting = if since == 0 {
+            Duration::ZERO
+        } else {
+            Duration::from_millis(Self::now().saturating_sub(since))
+        };
+        Some(Backlog {
+            bytes,
+            waiting,
+            gave_up,
+        })
+    }
+}
+
+/// The origin of the monotonic clock the backlog is measured with.
+static STARTED: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
 
 /// How many reads fit in the channel before the reader thread stops reading.
 ///
@@ -165,10 +281,45 @@ impl Pty {
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
+        let mut writer = pair.master.take_writer()?;
+
+        // **A thread of its own for writing, and it is not symmetry for its own sake.** `write_all`
+        // on a pseudoterminal whose program is not reading blocks until somebody reads, and there are
+        // cases measured in this repository where that is never. Here it blocks a thread that paints
+        // nothing and reads nothing, so the window keeps answering and the bytes go in when the
+        // program comes back for them.
+        let (to_write, waiting) = channel::<Vec<u8>>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let input = Arc::new(Input::default());
+        let input_for_thread = Arc::clone(&input);
+        let stop_for_writer = Arc::clone(&stop);
+        let writer = thread::spawn(move || {
+            while let Ok(bytes) = waiting.recv() {
+                // **Abandoned on close, not drained into a pseudoterminal that is being killed.**
+                // The sender is dropped first and the child killed right after, so without this the
+                // last chunks would be written into a program that is already going away.
+                if stop_for_writer.load(Ordering::Relaxed) {
+                    break;
+                }
+                let outcome = writer
+                    .write_all(&bytes)
+                    // **The `flush` travels with the write, error included.** It is a no-op on Unix
+                    // for this writer —and on Windows's ConPTY too— but discarding its `Result`
+                    // would leave the loop happily writing into something that is not delivering, on
+                    // the one platform where it could ever say so.
+                    .and_then(|()| writer.flush());
+                input_for_thread.settle(bytes.len(), outcome.as_ref().err());
+                if outcome.is_err() {
+                    // **There is nobody left to write to** —the program died, the pseudoterminal is
+                    // gone— and retrying would spin. What was queued behind this is **not** thrown
+                    // away in silence: it stays counted as owed, and [`Pty::backlog`] is what
+                    // says so out loud.
+                    break;
+                }
+            }
+        });
 
         let (tx, output) = sync_channel(READS_IN_FLIGHT);
-        let stop = Arc::new(AtomicBool::new(false));
         let stop_for_thread = Arc::clone(&stop);
         let reader = thread::spawn(move || {
             let mut buf = [0u8; 8192];
@@ -192,7 +343,9 @@ impl Pty {
                 // reader thread's end of file: that depends on nobody holding the slave end open,
                 // and the only one who holds it is the child.
                 master: pair.master,
-                writer,
+                to_write: Some(to_write),
+                input,
+                writer: Some(writer),
                 reader: Some(reader),
                 stop,
             },
@@ -216,10 +369,57 @@ impl Pty {
     }
 
     /// Writes bytes to the program, as if they had been typed.
+    ///
+    /// **It returns without waiting for the program to accept them**, and that is the point: the
+    /// caller is the thread that paints, and a pseudoterminal whose program is not reading its input
+    /// blocks the writer for as long as it takes — measured in this repository as *never*, in more
+    /// than one shape. What is handed over here is written **in order**, by a thread that blocks
+    /// nothing anybody is looking at.
+    ///
+    /// **«Taken» is not «written», and the difference is visible**: what has been handed over and
+    /// has not gone in is [`Pty::backlog`], and a program that stops reading for good leaves it
+    /// growing. Whoever hosts this crate is expected to say so — otherwise the console simply stops
+    /// listening without a word, which is a worse failure than the freeze this replaced.
+    ///
+    /// **The queue carries no ceiling.** The reason is volume, not principle: what arrives here is
+    /// what somebody's hands produced —a keystroke, a paste the desktop already holds whole in
+    /// memory— so there is no producer to outrun a consumer the way a program dumping hundreds of
+    /// MiB/s does on the output side. That asymmetry is why **D8**'s ceiling is not copied here: D8
+    /// chose ceilings *with backpressure* for a producer that had to be braked, and there is nothing
+    /// to brake on this side. What a ceiling here would buy is bounded memory in one case —a program
+    /// that never reads again— at the price of choosing what to throw away, and it would have to be
+    /// backpressure rather than discarding. It is written up as a decision of its own.
+    ///
+    /// The error is returned when the writer thread is gone, which means the console is closing.
     pub fn write(&mut self, bytes: &[u8]) -> Result<()> {
-        self.writer.write_all(bytes)?;
-        self.writer.flush()?;
+        // **A writer that gave up is reported here and not left to be discovered.** Once it has
+        // broken out of its loop nothing else will ever reach the program, and answering «taken» to
+        // every write after that would be the silence this whole fix exists against. Measured before
+        // this line existed: four writes after the program had died all returned `Ok`.
+        if self.input.gave_up() {
+            return Err("the program is no longer taking what is written to it".into());
+        }
+        // **`Option` only so that `Drop` can close the channel**; no caller can observe the `None`,
+        // because a value being dropped no longer answers `&mut self`.
+        let Some(to_write) = self.to_write.as_ref() else {
+            return Err("the console is closing".into());
+        };
+        self.input.handed_over(bytes.len());
+        to_write
+            .send(bytes.to_vec())
+            .map_err(|_| -> Error { "the console is closing".into() })?;
         Ok(())
+    }
+
+    /// What has been handed over to the program and it has not taken yet, or nothing when it is
+    /// keeping up.
+    ///
+    /// **This is the half that keeps the fix honest.** Moving the write off the interface thread
+    /// stopped the window freezing, and in exchange a program that stops reading for good leaves a
+    /// console that repaints and no longer listens, with `Pty::write` answering «taken» every time.
+    /// Nothing else in this crate can see that state; this is what lets whoever hosts it say so.
+    pub fn backlog(&self) -> Option<Backlog> {
+        self.input.backlog()
     }
 }
 
@@ -261,6 +461,28 @@ impl Drop for Pty {
         // room, and neither killing the child nor closing the pseudoterminal pulls it out of there.
         // Without this, the `join` below waits forever and **closing the window hangs** — confirmed.
         self.stop.store(true, Ordering::Relaxed);
+        // **The sender is dropped and the writer thread is NEVER joined**, and both halves matter.
+        // Dropping it is what ends the loop; not joining is because that thread may be blocked
+        // inside a `write_all` that will not return, so waiting for it would hang closing the
+        // console — the very failure the flag above exists to prevent. The flag is what it reads to
+        // abandon what is still queued instead of writing it into a pseudoterminal about to be
+        // killed.
+        //
+        // **And killing the child does NOT unblock that write, which is measured and not assumed.**
+        // Fifteen seconds after dropping a `Pty` whose writer was blocked, the thread was still
+        // there. So a console closed while its program had stopped reading **leaks that thread and
+        // what it was holding, for the life of the process** — once per such console. It is not
+        // fixed here: undoing it needs the write to be interruptible, which is a different shape of
+        // write, and it is ticketed with this measurement.
+        //
+        // **What is queued at this point is abandoned, and that is an exception to what `write`
+        // promises.** It is stated here rather than left to be discovered: closing a console throws
+        // away what had been handed over and not yet written. There is nowhere for those bytes to go
+        // — the program they were for is being killed on the next line.
+        drop(self.to_write.take());
+        // Not joined, on purpose — see above. Taking it here says so where somebody looking for the
+        // `join` will find it.
+        let _ = self.writer.take();
         // And then the usual order: killing the child is what closes its end of the
         // pseudoterminal and triggers the end of file in the reader thread. Waiting for the thread
         // before that would hang it, because it would still be blocked inside `read`.
@@ -303,6 +525,43 @@ mod tests {
 
     fn contains(output: &[u8], text: &str) -> bool {
         String::from_utf8_lossy(output).contains(text)
+    }
+
+    /// How much the tests that write hand over: more than the kernel's headroom, on purpose.
+    ///
+    /// The pseudoterminal takes some 20 KiB before a write blocks —measured on Linux— and the
+    /// reproduction blocked at around 13 KiB cumulative. That difference is not explained,
+    /// so instead of picking a number next to the boundary these tests write 64 KiB: past it by a
+    /// margin wide enough that they do not depend on which side of it this machine falls.
+    const PAYLOAD: usize = 64 * 1024;
+
+    /// The byte the tests hand over, repeated.
+    ///
+    /// **A single repeated byte and a count, not a phrase.** What goes through a pseudoterminal
+    /// crosses the line discipline, which translates and echoes; a payload whose journey can be
+    /// verified *exactly* is worth more than one that reads nicely in a diff. The letter chosen is
+    /// special to none of the modes involved.
+    const FILLER: u8 = b'z';
+
+    /// Waits until the program announces, through its own output, that it is already in the state
+    /// the test needs.
+    ///
+    /// **It is a marker and not a `sleep` because the state is what makes the bug reproduce.** With
+    /// the echo still on, the kernel echoes back what is written, our reader thread empties the
+    /// output and that round trip drains the input buffer on its own: the diagnosis' first attempt
+    /// put 128 000 bytes through without blocking. A test that wrote before `stty` had applied would
+    /// go green on a build that still carries the bug.
+    fn wait_for_marker(pty_output: &Receiver<Vec<u8>>, marker: &str) {
+        let mut seen = Vec::new();
+        while !contains(&seen, marker) {
+            match pty_output.recv_timeout(DEADLINE) {
+                Ok(bytes) => seen.extend_from_slice(&bytes),
+                Err(_) => panic!(
+                    "the program never announced {marker:?} in {DEADLINE:?}: {:?}",
+                    String::from_utf8_lossy(&seen)
+                ),
+            }
+        }
     }
 
     // Mind the `_pty` in the tests: it is not a leftover variable. As long as it lives, the child
@@ -502,5 +761,148 @@ mod tests {
         // it is needed for the test to be correct.
         let _ = drop_thread.join();
         drop(output);
+    }
+
+    /// **The regression test of the blocking write.** `Pty::write` was a `write_all` + `flush` on a blocking
+    /// descriptor, run on the caller's thread — which in this application is the thread that paints.
+    /// When the program inside stops reading its input, the kernel's buffer fills and that write
+    /// does not return: the window stops repainting and the `Ctrl+C` that travels the same thread
+    /// cannot interrupt it. Measured in the diagnosis, the write that crossed 13 312 bytes took
+    /// **5.71 s** — not a property of the bug, but what the program had left to live. With a shell
+    /// inside a console, which lives as long as the console does, that is *never*.
+    ///
+    /// **The write is done on a thread of its own, and that is the whole shape of this test.** On a
+    /// build with the bug, calling `Pty::write` from here would not return and would hang the suite
+    /// along with it — the bug itself, published as an eternal green. The deadline plus the
+    /// `recv_timeout` are what turn it into a red test, the same reason `drain_until_closed` carries
+    /// one.
+    #[test]
+    fn the_write_returns_even_though_the_program_never_reads_its_input() {
+        use std::sync::mpsc;
+
+        /// Well below the six seconds the program has left to live, and that is the load-bearing
+        /// half: on a build with the bug the write returns **when the program dies**, so a deadline
+        /// past that would watch the write «return» and publish the bug as fixed. The other half is
+        /// not tight either — three seconds are some eight hundred thousand times what the fixed
+        /// write measures (3.62 µs).
+        const HANDOVER_DEADLINE: Duration = Duration::from_secs(3);
+        const MARKER: &str = "raw-and-deaf";
+
+        // A program in raw mode with no echo that never reads its input: `vim`, `htop`, `less` or a
+        // TUI agent, which is precisely what somebody pastes into. `sleep` and not something
+        // endless on purpose — on a build with the bug the write thread this test leaves behind
+        // stays blocked inside `write_all`, and a bounded program is what lets it end on its own
+        // instead of leaving an orphan behind for as long as the machine is up.
+        // **Chained with `&&` and not with `;`, and it is the difference between a guard and a
+        // decoration.** With `;` the marker prints even when `stty` failed, so on a machine without
+        // it —or on the platforms F2.7 is heading for— this test would find its marker, write into a
+        // terminal that still echoes, and pass **in hundredths of a second over a live bug**.
+        // Measured: bug restored plus `stty` missing gave a green in 0.02 s.
+        let script = format!("stty raw -echo && printf {MARKER} && sleep 6");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+
+        wait_for_marker(&output, MARKER);
+
+        let (handed_over, notice) = mpsc::channel();
+        thread::spawn(move || {
+            let payload = vec![FILLER; PAYLOAD];
+            let _ = handed_over.send(pty.write(&payload));
+        });
+
+        match notice.recv_timeout(HANDOVER_DEADLINE) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => panic!("the write failed instead of being handed over: {error}"),
+            Err(_) => panic!(
+                "handing over {PAYLOAD} bytes did not return in {HANDOVER_DEADLINE:?}: the write is \
+                 blocking on the caller's thread, which is the thread that paints"
+            ),
+        }
+    }
+
+    /// The other half of the fix: **the write stopped waiting, and it did not start losing.** A
+    /// queue that returns straight away and drops what does not fit would pass the test above and
+    /// silently swallow what somebody typed — the failure that takes longest to understand from the
+    /// other side of the screen, and the reason **D8** refuses to discard on the output side too.
+    ///
+    /// `cat` copies its input back out, so what comes back through the channel of [`Pty::spawn`] is
+    /// the payload itself and the check is a count. It starts reading **a second late** on purpose:
+    /// the bytes have to be handed over while nobody is reading, which is the only state in which
+    /// the queue holds anything at all.
+    ///
+    /// Raw mode is not decoration here either, and for a second reason: canonical mode **silently
+    /// discards past 4 095 bytes with no newline** —a separate bug, found on the way and with an
+    /// issue of its own— so a 64 KiB payload would come back short for a reason that has nothing to
+    /// do with the one this test hunts.
+    #[test]
+    fn nothing_handed_over_is_lost_when_the_program_reads_late() {
+        use std::sync::mpsc;
+
+        const MARKER: &str = "raw-and-late";
+        /// Printed when the program is about to start reading, a second before it does.
+        const READING: &str = "now-reading";
+
+        // `&&` for the same reason as its sibling above, and **a second marker for a second
+        // reason**: with the echo still on, the terminal hands the payload back by itself and the
+        // count reaches its total **without `cat` ever running**. Measured: a correct build with
+        // `stty` missing passed in 0.10 s instead of the ~1.1 s the `sleep` imposes, and the
+        // «nothing foreign arrived» assertion cannot see it — echoed bytes are the same filler.
+        // The second marker is what says the reader really took over.
+        let script =
+            format!("stty raw -echo && printf {MARKER} && sleep 1 && printf {READING} && exec cat");
+        let (mut pty, output) =
+            Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+
+        wait_for_marker(&output, MARKER);
+
+        // The write goes on a thread of its own for the reason the previous test explains, plus one
+        // of this test's own: on a build with the bug, writing from here would **deadlock** rather
+        // than block for a while — the write waits for `cat` to read, `cat` waits for room in the
+        // output channel, and the only one who could make room is this thread, stuck in the write.
+        let (handed_over, notice) = mpsc::channel();
+        let (counted, wait_for_the_count) = mpsc::channel::<()>();
+        let writer = thread::spawn(move || {
+            let payload = vec![FILLER; PAYLOAD];
+            let _ = handed_over.send(pty.write(&payload));
+            // The `Pty` is held until the count is done. Dropping it here kills `cat` mid-flight
+            // and whatever was still queued would never be handed over: the test would go red for a
+            // reason that is not the one it covers.
+            let _ = wait_for_the_count.recv();
+        });
+
+        match notice.recv_timeout(DEADLINE) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => panic!("the write failed instead of being handed over: {error}"),
+            Err(_) => panic!("handing over {PAYLOAD} bytes did not return in {DEADLINE:?}"),
+        }
+
+        // **The handover has to have happened while nobody was reading, or this test measures
+        // nothing.** Its whole premise is that 64 KiB go in with the program not taking them; if the
+        // machine were loaded enough for `cat` to be running already, what would be verified is that
+        // a pseudoterminal delivers bytes, which nobody doubts.
+        wait_for_marker(&output, READING);
+
+        let mut arrived = 0usize;
+        let mut foreign = 0usize;
+        while arrived < PAYLOAD {
+            match output.recv_timeout(DEADLINE) {
+                Ok(bytes) => {
+                    arrived += bytes.iter().filter(|byte| **byte == FILLER).count();
+                    foreign += bytes.iter().filter(|byte| **byte != FILLER).count();
+                }
+                Err(_) => panic!(
+                    "only {arrived} of the {PAYLOAD} bytes handed over came back in {DEADLINE:?}, \
+                     plus {foreign} that were not the payload's: what was written is being lost"
+                ),
+            }
+        }
+        assert_eq!(
+            foreign, 0,
+            "{foreign} bytes nobody wrote came back: the journey is not the exact one this count is \
+             measured against, so the count proves less than it claims"
+        );
+
+        let _ = counted.send(());
+        let _ = writer.join();
     }
 }

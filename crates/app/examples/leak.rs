@@ -157,7 +157,7 @@ fn pump_through_bridge(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Ver
 
     loop {
         received.clear();
-        bridge.pick_up(&mut received, BUDGET);
+        bridge.pick_up(&mut received, BUDGET, None);
         collected += received.len() as u64;
 
         let resident = resident_kib().unwrap_or(resident_at_start);

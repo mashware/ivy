@@ -62,6 +62,12 @@ pub struct Pickup {
 /// What the program has written and has not been picked up yet, plus the signal of whether it is
 /// still alive.
 pub struct PtyOutput {
+    /// Whether it has already been said that this console's program stopped taking what is typed.
+    ///
+    /// **It lives here and not beside the pseudoterminal** because this is the type the pump already
+    /// asks on every frame, and the alternative was one more line inside the window's core — which
+    /// **D28**'s ratchet does not admit. See [`DeafConsole`].
+    deaf: std::cell::RefCell<DeafConsole>,
     /// A double-ended queue and not a vector: it is appended at the end and taken from the
     /// beginning, and taking from the beginning of a vector copies everything left behind it. With
     /// a dump in progress that would be megabytes copied on each frame, and that cost would end up
@@ -168,6 +174,7 @@ impl PtyOutput {
         });
 
         Self {
+            deaf: std::cell::RefCell::default(),
             queue,
             room,
             stop,
@@ -189,7 +196,18 @@ impl PtyOutput {
     ///
     /// It receives the destination instead of returning a new one so that the frame can always
     /// reuse the same one and not allocate memory once per frame.
-    pub fn pick_up(&self, destination: &mut Vec<u8>, max: usize) -> Pickup {
+    pub fn pick_up(
+        &self,
+        destination: &mut Vec<u8>,
+        max: usize,
+        input: Option<term_core::Backlog>,
+    ) -> Pickup {
+        // **What the program is NOT taking is looked at here**, where the frame already asks this
+        // type what it has. It says it once and never fixes anything: there is nothing to fix from
+        // here, the bytes are owed to a program that is not asking for them.
+        if let Some(sentence) = self.deaf.borrow_mut().look(input) {
+            eprintln!("{sentence}");
+        }
         let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
 
         // The queue keeps its bytes in two stretches —it wraps around on reaching the end—, so we
@@ -275,7 +293,7 @@ mod tests {
 
         let mut received = Vec::new();
         let arrived = wait_for(|| {
-            pty_output.pick_up(&mut received, usize::MAX);
+            pty_output.pick_up(&mut received, usize::MAX, None);
             received.windows(4).any(|v| v == b"hola")
         });
 
@@ -365,7 +383,7 @@ mod tests {
 
         let mut received = Vec::new();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut received, usize::MAX);
+            pty_output.pick_up(&mut received, usize::MAX, None);
             !received.is_empty()
         }));
         assert!(
@@ -386,13 +404,13 @@ mod tests {
         assert!(wait_for(|| !pty_output.is_alive()));
 
         let mut first = Vec::new();
-        pty_output.pick_up(&mut first, usize::MAX);
+        pty_output.pick_up(&mut first, usize::MAX, None);
         assert!(!first.is_empty(), "nothing arrived to pick up");
 
         // What is already picked up is not delivered again: if it repeated, the screen would show
         // the same text twice without the program having written it twice.
         let mut second = Vec::new();
-        pty_output.pick_up(&mut second, usize::MAX);
+        pty_output.pick_up(&mut second, usize::MAX, None);
         assert!(second.is_empty(), "the queue returned the same thing twice");
     }
 
@@ -411,14 +429,14 @@ mod tests {
         assert!(wait_for(|| !pty_output.is_alive()));
 
         let mut first = Vec::new();
-        let pickup = pty_output.pick_up(&mut first, 4);
+        let pickup = pty_output.pick_up(&mut first, 4, None);
         assert_eq!(first, b"0123", "the maximum was not respected");
         assert!(pickup.left_a_queue, "bytes were left and it said no");
 
         // And what was left over is still there, in its order, without having been lost or
         // repeated: it is what makes a dump be seen whole even if it takes several frames.
         let mut rest = Vec::new();
-        let pickup = pty_output.pick_up(&mut rest, usize::MAX);
+        let pickup = pty_output.pick_up(&mut rest, usize::MAX, None);
         assert_eq!(
             rest, b"456789",
             "what was left over did not come out whole nor in order"
@@ -489,7 +507,7 @@ mod tests {
         let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
         let mut destination = Vec::new();
-        let pickup = pty_output.pick_up(&mut destination, usize::MAX);
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX, None);
 
         assert_eq!(
             destination, b"0123456789",
@@ -507,14 +525,14 @@ mod tests {
 
         let mut destination = Vec::new();
         assert!(
-            pty_output.pick_up(&mut destination, 4).left_a_queue,
+            pty_output.pick_up(&mut destination, 4, None).left_a_queue,
             "six bytes were left"
         );
         assert_eq!(destination, b"0123", "the maximum was not respected");
 
         // And what was left is still astride the wrap, whole and in its order.
         let mut rest = Vec::new();
-        assert!(!pty_output.pick_up(&mut rest, usize::MAX).left_a_queue);
+        assert!(!pty_output.pick_up(&mut rest, usize::MAX, None).left_a_queue);
         assert_eq!(rest, b"456789");
     }
 
@@ -524,7 +542,7 @@ mod tests {
 
         let mut destination = Vec::new();
         assert!(
-            pty_output.pick_up(&mut destination, 8).left_a_queue,
+            pty_output.pick_up(&mut destination, 8, None).left_a_queue,
             "two bytes were left"
         );
 
@@ -533,7 +551,7 @@ mod tests {
         assert_eq!(destination, b"01234567");
 
         let mut rest = Vec::new();
-        assert!(!pty_output.pick_up(&mut rest, usize::MAX).left_a_queue);
+        assert!(!pty_output.pick_up(&mut rest, usize::MAX, None).left_a_queue);
         assert_eq!(rest, b"89");
     }
 
@@ -550,7 +568,7 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(50));
         let mut destination = Vec::new();
-        let pickup = pty_output.pick_up(&mut destination, usize::MAX);
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX, None);
 
         let waiting_since = pickup
             .waiting_since
@@ -571,7 +589,7 @@ mod tests {
         let pty_output = PtyOutput::new(output, || {});
 
         let mut destination = Vec::new();
-        let pickup = pty_output.pick_up(&mut destination, usize::MAX);
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX, None);
 
         assert!(destination.is_empty());
         assert!(pickup.waiting_since.is_none());
@@ -591,7 +609,7 @@ mod tests {
 
         let mut destination = Vec::new();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut destination, usize::MAX);
+            pty_output.pick_up(&mut destination, usize::MAX, None);
             destination.len() == 200
         }));
 
@@ -616,7 +634,7 @@ mod tests {
 
         let mut destination = b"antes".to_vec();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut destination, usize::MAX);
+            pty_output.pick_up(&mut destination, usize::MAX, None);
             destination.len() > b"antes".len()
         }));
         assert!(
@@ -684,7 +702,7 @@ mod tests {
         drop(pty);
         let mut rest = Vec::new();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut rest, usize::MAX);
+            pty_output.pick_up(&mut rest, usize::MAX, None);
             !pty_output.is_alive()
         }));
     }
@@ -735,5 +753,62 @@ mod tests {
             "the thread is still alive after destroying the bridge: it stayed waiting for a room \
              that no one is going to make for it any more"
         );
+    }
+}
+
+/// Says it, once per console, when the program has stopped taking what was typed into it.
+///
+/// **This exists because writing stopped blocking, and the failure it replaced was at least
+/// visible.** Since the write is handed to a thread of its own, a program that stops reading for
+/// good no longer freezes the window: it leaves a console that repaints and quietly ignores
+/// everything typed, `Ctrl+C` included. Nothing on screen says so, and from the outside it reads as
+/// the terminal being broken.
+///
+/// **It decides and it says it; it does not fix it.** There is nothing to fix from here — the bytes
+/// are owed to a program that is not asking for them — so what is owed is what gets published.
+///
+/// **Once, and only once per console.** It runs on every frame, and a line per frame would bury the
+/// error output of a program that has done nothing wrong. The same rule the family ceiling and the
+/// clashing shortcut already follow.
+#[derive(Default)]
+pub struct DeafConsole {
+    said: bool,
+}
+
+/// How long the oldest unwritten byte has to have been waiting before it is worth saying.
+///
+/// **A second, and it is chosen against the numbers this project already measured**, not for taste:
+/// a program that is merely busy takes milliseconds to come back for its input —a full paste of
+/// 5 MiB was measured going in in 24 ms once the reader drained— so a whole second of a byte sitting
+/// unwritten is not a busy program, it is one that has stopped listening.
+const WORTH_SAYING: Duration = Duration::from_secs(1);
+
+impl DeafConsole {
+    /// Looks at what the program has not taken, and returns the sentence to say the first time it
+    /// deserves saying.
+    ///
+    /// **It returns the sentence instead of printing it**, like the rest of this crate's decisions:
+    /// printing cannot be observed from inside the process, so what a test can hold on to is what
+    /// was decided.
+    pub fn look(&mut self, backlog: Option<term_core::Backlog>) -> Option<String> {
+        let backlog = backlog?;
+        if self.said || (backlog.waiting < WORTH_SAYING && !backlog.gave_up) {
+            return None;
+        }
+        self.said = true;
+        Some(if backlog.gave_up {
+            format!(
+                "agent-terminal: this console can no longer be typed into: the program stopped \
+                 accepting input with {} byte(s) still owed to it",
+                backlog.bytes
+            )
+        } else {
+            format!(
+                "agent-terminal: the program in this console is not taking what you type: {} \
+                 byte(s) have been waiting {:?}. Everything typed since then, Ctrl+C included, is \
+                 queued behind it",
+                backlog.bytes, backlog.waiting
+            )
+        })
     }
 }
