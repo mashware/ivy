@@ -1879,7 +1879,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 6] = [
+        const SOURCES: [(&str, &str); 7] = [
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),
@@ -1889,6 +1889,7 @@ mod tests {
             // 63 against a floor of 74. A module split silently narrows every list that names
             // files, which is why the guard counts and does not just judge.
             ("injected.rs", include_str!("injected.rs")),
+            ("pointer.rs", include_str!("pointer.rs")),
             ("tiling.rs", include_str!("tiling.rs")),
             ("tree.rs", include_str!("tree.rs")),
         ];
@@ -1916,8 +1917,8 @@ mod tests {
             }
         }
         // Same floor and for the same reason as its siblings: without it a walk that stopped finding
-        // literals leaves this test passing by looking at nothing. The six files hold **76** today
-        // — 27, 5, 25, 6, 3 and 10 — and the floor sits four below, tight enough that a broken walk
+        // literals leaves this test passing by looking at nothing. The seven files hold **76** today
+        // — 27, 5, 25, 6, 3, 10 and, for now, not one in `pointer.rs` — and the floor sits four below, tight enough that a broken walk
         // cannot hide behind it and loose enough that deleting a message is not a failure.
         //
         // **It was left at 74 when the corpus dropped from 78 to 76 and the claim above stopped
@@ -1931,7 +1932,7 @@ mod tests {
         // which is why the floor is stated as a number and not as «some».
         assert!(
             sentences.len() >= 72,
-            "only {} sentence-shaped literals were found before `mod tests` in the six files: the \
+            "only {} sentence-shaped literals were found before `mod tests` in the seven files: the \
              walk stopped working",
             sentences.len()
         );

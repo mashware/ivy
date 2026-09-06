@@ -2,7 +2,7 @@
 //!
 //! Its sibling [`glossary`](../glossary.rs) guards *identifiers* and says so in its own header —
 //! «comments, rustdoc and string literals, for the same reason: prose has its own delivery». That
-//! delivery has now landed for all twenty files of this crate, and nothing was left watching it.
+//! delivery has now landed for all twenty-one files of this crate, and nothing was left watching it.
 //! AC3 of the milestone («comments and rustdoc in English») is marked `test` and had no test: a
 //! later delivery could put a Spanish comment back into any of these files and the suite would
 //! stay green, which is the exact shape of hole this milestone keeps paying for.
@@ -13,7 +13,7 @@
 //! is the criterion the two sibling guards already use — short words, closed set, compared as
 //! whole words — extended from function words to the grammar and the domain nouns that make up
 //! Spanish prose. The threshold is three and not one because this repository **quotes Spanish on
-//! purpose**: comment lines of these twenty files carry a Spanish literal inside an English
+//! purpose**: comment lines of these twenty-one files carry a Spanish literal inside an English
 //! sentence, and at one marker every one of them would break the build.
 //!
 //! **What it does not see, with the sentences that prove it.** A Spanish sentence carrying no word
@@ -25,7 +25,7 @@
 //!
 //! **The non-ASCII half of the sibling oracle is deliberately absent, and it was measured before
 //! being dropped.** `settings.rs` judges thirteen short on-screen messages and can afford
-//! `is_ascii()`; here **2 009 of the 13 644 comment lines are not pure ASCII** — angle quotes, em
+//! `is_ascii()`; here **2 012 of the 13 671 comment lines are not pure ASCII** — angle quotes, em
 //! dashes, `µs`, Japanese, emoji — so that test reports a seventh of the corpus. The narrower
 //! variant — a Spanish accent or `ñ` anywhere in the line — leaves **five** lines, and it would
 //! need a line-by-line exemption for every one of them: two are deliberate Spanish citations
@@ -34,7 +34,7 @@
 //! an eñe. It was eight until this delivery translated the panel's three claim phrases. A line-level exemption is a hole: it would also excuse a fresh Spanish sentence written
 //! on that same line. One oracle, with its limits stated, was chosen over two with an escape hatch.
 //!
-//! **What a green here means, exactly**: no comment line in these twenty files carries three
+//! **What a green here means, exactly**: no comment line in these twenty-one files carries three
 //! different common Spanish words. It does **not** mean every comment is good English.
 
 use std::collections::BTreeSet;
@@ -47,7 +47,7 @@ use std::collections::BTreeSet;
 /// left four tests green. Here the same mistake does not compile.
 ///
 /// **`src/lib.rs` is here, and adding it was the one line an earlier delivery promised it would
-/// be.** It is more than half the crate's prose on its own — 6 462 of the 13 644 comment lines —
+/// be.** It is nearly half the crate's prose on its own — 6 046 of the 13 671 comment lines —
 /// and it is why the list is written as data and every floor below is a lower bound rather than an
 /// exact count: the file it watches will keep growing. It carried 7 319 until the module ceiling
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
@@ -66,6 +66,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/watcher.rs", include_str!("../src/watcher.rs")),
     ("src/theme.rs", include_str!("../src/theme.rs")),
     ("src/mouse.rs", include_str!("../src/mouse.rs")),
+    ("src/pointer.rs", include_str!("../src/pointer.rs")),
     ("src/tiling.rs", include_str!("../src/tiling.rs")),
     ("src/tree.rs", include_str!("../src/tree.rs")),
     ("src/main.rs", include_str!("../src/main.rs")),
@@ -82,7 +83,7 @@ const SOURCES: &[(&str, &str)] = &[
 ///
 /// **Without a floor this test passes by being empty**, which is how the guards of this suite die:
 /// somebody reshapes the comment detection, the walk finds nothing, every file looks clean and
-/// nothing says otherwise. Measured as this delivery leaves the tree: **13 644** comment lines, the
+/// nothing says otherwise. Measured as this delivery leaves the tree: **13 671** comment lines, the
 /// thinnest file being `src/main.rs` with **one** — it is four lines of `fn main`, and a floor that
 /// demanded more of it would have to be a table instead of a number.
 ///
@@ -90,8 +91,8 @@ const SOURCES: &[(&str, &str)] = &[
 /// `src/lib.rs` is what makes it matter: `src/main.rs`, `examples/leak.rs` and
 /// `examples/screen_demo.rs` together carry 94 lines, so losing all three sits inside the total
 /// floor's slack — reported by nothing but the per-file one. That is the case the second floor is
-/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 6 462 of the
-/// 13 644, so losing it drops the corpus to 7 182 and the total fires loudly. The two floors answer
+/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 6 046 of the
+/// 13 671, so losing it drops the corpus to 7 625 and the total fires loudly. The two floors answer
 /// different halves, which is why there are two.
 ///
 /// **The floor is a number over the corpus, so a split has to raise it.** The tiling and the tree
@@ -101,11 +102,12 @@ const SOURCES: &[(&str, &str)] = &[
 /// floor left where it was is what turns that into silence.
 ///
 /// **13 300 and not a rounder number, and the slack was measured rather than chosen.** With the
-/// corpus at 13 644 the slack is 344, so every file carrying more than that is defended by the total
-/// alone; the **eleven** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
+/// corpus at 13 671 the slack is 371, so every file carrying more than that is defended by the total
+/// alone; the **twelve** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
 /// `examples/leak.rs` (59), `src/mouse.rs` (94), `examples/sweep.rs` (134), `examples/fonts.rs`
 /// (168), `src/theme.rs` (202), `src/watcher.rs` (203), `src/tiling.rs` (272),
-/// `src/pty_output.rs` (282) and `src/injected.rs` (287) — and that is what the per-file floor is
+/// `src/pty_output.rs` (282) and `src/injected.rs` (287) — `src/pointer.rs` (443) rose above the slack
+/// when the delivery that created it was re-cut — and that is what the per-file floor is
 /// for and why it is stated here rather than left to be discovered. A floor loose enough to let a
 /// mid-sized file be gutted was checked by doing exactly that, on the number this replaced.
 const COMMENT_LINES_AT_LEAST: usize = 13_300;
@@ -136,7 +138,7 @@ const MARKERS_TO_CALL_IT_SPANISH: usize = 3;
 /// They were the Spanish comment fixtures of the settings parser; the prose delivery translated them
 /// to `# a comment` and `# only comments`, so there is nothing left to exempt.
 /// [`no_island_is_stale`] is what makes that a fact instead of a claim: an entry naming text the
-/// twenty files no longer contain fails, so this list cannot keep exempting what left the tree.
+/// twenty-one files no longer contain fails, so this list cannot keep exempting what left the tree.
 ///
 /// The whole payload of `examples/screen_demo.rs` — «pantalla de prueba del pintor», «Colores con
 /// nombre», the rows of `rojo verde amarillo` — is Spanish and needs no entry: it is **exempt by
@@ -186,7 +188,7 @@ const ISLANDS: &[(&str, &str)] = &[
 ///
 /// The list is closed, and the threshold above is what covers its remaining softness: a handful of
 /// entries — «con», «la», «es» — do exist in some corner of English, and one of them alone is never
-/// a verdict. Measured over all 13 644 comment lines of the twenty files: **zero** English lines
+/// a verdict. Measured over all 13 671 comment lines of the twenty-one files: **zero** English lines
 /// reach three markers.
 const SPANISH_WORDS: &[&str] = &[
     // ── The function words, from the sibling list in src/settings.rs ──
@@ -460,7 +462,7 @@ fn fold(text: &str) -> String {
 /// a naive walk drops and which is where the longest prose in this crate lives.
 ///
 /// **It is a line walk and not a lexer, and the price is stated rather than hidden.** A `//` inside
-/// a string literal reads as a comment: there is exactly one in the twenty files,
+/// a string literal reads as a comment: there is exactly one in the twenty-one files,
 /// `src/settings.rs:1778` asserting `code.starts_with("//")`, and it is English. A `/*` inside a
 /// literal would be worse — it would open a comment that never closes and hand the rest of the file
 /// over as prose — so the leftover depth comes back with the lines and every file is asserted to
@@ -468,7 +470,7 @@ fn fold(text: &str) -> String {
 /// difference here is that a false positive on an English literal costs nothing while a missed
 /// block-comment line costs the guard.
 ///
-/// **Not one of the twenty files uses `/* */` today**, and that has a consequence worth writing
+/// **Not one of the twenty-one files uses `/* */` today**, and that has a consequence worth writing
 /// down: replacing the block-comment arm with `if false` left the corpus at its full count and every
 /// floor green — measured, and it was the one mutation of eleven that stayed green.
 /// [`the_walk_finds_a_block_comment_and_notices_one_that_never_closes`] is what covers that arm, on
@@ -511,7 +513,7 @@ fn spanish_markers(line: &str) -> BTreeSet<String> {
 
 /// A file whose Spanish lives on a **continuation** line, carrying no `//` of its own.
 ///
-/// The shape exists nowhere in the twenty files, so the walk's block-comment arm has no subject in
+/// The shape exists nowhere in the twenty-one files, so the walk's block-comment arm has no subject in
 /// the tree and no floor can defend it. This is its subject.
 const A_FILE_WITH_A_BLOCK_COMMENT: &str = "fn one() {}\n\
                                            /*\n\
@@ -557,8 +559,8 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
 #[test]
 fn the_walk_still_reads_the_comments_of_every_file() {
     assert!(
-        SOURCES.len() >= 20,
-        "the list of translated files has {} entries and this delivery left twenty, which is \
+        SOURCES.len() >= 21,
+        "the list of translated files has {} entries and this delivery left twenty-one, which is \
          every file of the crate: it only ever grows, so this is somebody emptying it and every \
          check downstream going quiet",
         SOURCES.len()
@@ -581,7 +583,7 @@ fn the_walk_still_reads_the_comments_of_every_file() {
     }
     assert!(
         total >= COMMENT_LINES_AT_LEAST,
-        "the walk found {total} comment lines and there are 13 644: the detection stopped matching \
+        "the walk found {total} comment lines and there are 13 671: the detection stopped matching \
          and this guard is judging almost nothing"
     );
 }
@@ -614,7 +616,7 @@ const REAL_SPANISH: &[&str] = &[
 /// **The list went from six entries to two, and shrinking is what it is supposed to do.** Four of
 /// the six quoted the panel's three claim phrases; this delivery translated those phrases — the
 /// contract's own table publishes them in English now — so the lines stopped quoting Spanish and
-/// stopped being examples of anything. Sweeping the twenty files for a replacement found none:
+/// stopped being examples of anything. Sweeping the twenty-one files for a replacement found none:
 /// **two** lines are all the tree still has that are English and cite Spanish, and both are in
 /// `src/settings.rs`, where the citations are the evidence for its own oracle being evadable. An
 /// invented third would be the failure this list was written against.
@@ -723,7 +725,7 @@ fn the_oracle_answers_what_it_promises() {
 /// Every declared island is still in the tree, and none of them is Spanish enough to fail on its own.
 ///
 /// **The first half is what keeps this list from rotting into a blanket exemption.** An entry naming
-/// text the twenty files no longer contain excuses nothing and is read by the next reader as
+/// text the twenty-one files no longer contain excuses nothing and is read by the next reader as
 /// «still Spanish on purpose» — which is how `// celda` and `/* celda */` were nearly kept here
 /// after the prose delivery had already translated those fixtures to `# a comment`.
 ///
@@ -746,7 +748,7 @@ fn no_island_is_stale() {
         let folded = fold(island);
         assert!(
             SOURCES.iter().any(|(_, src)| fold(src).contains(&folded)),
-            "«{island}» is exempted here as «{why}» and no longer appears in any of the twenty \
+            "«{island}» is exempted here as «{why}» and no longer appears in any of the twenty-one \
              files: it was translated, or reworded, and what is left is a standing permission for \
              Spanish that nothing needs"
         );
@@ -768,7 +770,7 @@ fn no_island_is_stale() {
 ///
 /// **It sweeps the corpus, and it used to sweep a list of fixtures.** Until this delivery the count
 /// came from [`ENGLISH_QUOTING_SPANISH`] — two hand-written strings — so the test named after a
-/// property of the twenty files never opened one, and emptying [`ISLANDS`] did not fail it. The
+/// property of the twenty-one files never opened one, and emptying [`ISLANDS`] did not fail it. The
 /// number it published was arrived at by hand and then written into the prose as if measured. Now
 /// the walk the file already owns does the counting, which is also what makes the figure below true
 /// rather than asserted.
@@ -834,8 +836,8 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
     // one would go on passing.
     assert!(
         examined >= COMMENT_LINES_AT_LEAST,
-        "this guard judged {examined} comment lines and there are 13 644: whatever it reports, it is \
-         not reporting on the prose of these twenty files"
+        "this guard judged {examined} comment lines and there are 13 671: whatever it reports, it is \
+         not reporting on the prose of these twenty-one files"
     );
 
     assert!(
