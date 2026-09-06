@@ -22169,7 +22169,7 @@ mod tests {
         case: &str,
     ) -> Window {
         let mut window = window_with(
-            "stty -echo -icanon; printf '\\033[?1000h\\033[?1002h\\033[?1006h'; echo ready; cat -v",
+            "stty -echo -icanon && printf '\\033[?1000h\\033[?1002h\\033[?1006h' && echo ready && cat -v",
             "sleep 30",
         );
         for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(rects) {
@@ -22212,12 +22212,22 @@ mod tests {
             left_pane.screen.mouse_reporting().wants_mouse(),
             "the test's program never got to ask for the mouse"
         );
+        confirm_the_console_is_in_the_mode_it_asked_for(left_pane);
         window
     }
 
     /// Pumps the console until it shows that, or gives up saying what there is.
     fn wait_for_the_pane_to_say(window: &mut Window, which: usize, text: &str) {
-        let pane = &mut window.active_mut().panes_mut()[which];
+        wait_for_this_console_to_say(window.active_mut().panes_mut()[which], text);
+    }
+
+    /// The same wait over a loose console, **without clearing the grid**.
+    ///
+    /// The difference with [`wait_for_the_screen_to_say`] is the one that matters here: that one
+    /// starts by replacing the `Screen`, which throws away everything already parsed into it —the
+    /// mouse modes among it—, so waiting with it after the program has asked for the mouse would
+    /// take the answer away along with the question.
+    fn wait_for_this_console_to_say(pane: &mut Pane, text: &str) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while !pane.screen.to_text().contains(text) {
             assert!(
@@ -22228,6 +22238,40 @@ mod tests {
             pane.pump();
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// Confirms the program's terminal really is in the mode its script asked for, by writing a
+    /// byte whose fate **depends on that mode**.
+    ///
+    /// **The ready marker does not prove it, and neither does the exit status.** What these tests
+    /// read as «the program got the gesture» is a text the **kernel's own echo** can put there,
+    /// character for character the same one — measured: with `stty` missing, fourteen of the
+    /// fifteen tests hanging off these two scripts stayed green.
+    ///
+    /// **So the probe has to be a byte the echo cannot forge, and no control character is one.**
+    /// `ECHOCTL` and `cat -v` both write a control character in caret notation, so they are
+    /// indistinguishable: `0x1b` comes back `^[` from either. `0x7f` looks like an exception —
+    /// canonical mode eats it as the erase key — and it is not: **move the erase key and the echo
+    /// renders it `^?` like anything else**, so the probe would pass over the very terminal it
+    /// exists to reject. Measured over three pseudoterminals, one per mode.
+    ///
+    /// A byte **above** `0x7f` has no such twin. `cat -v` writes it in meta notation, `M-^@`, and
+    /// the line discipline echoes the raw byte instead — so those four characters on screen can
+    /// only have been printed by the `cat -v` that received it, whatever the erase key is. That
+    /// matters for F2.7 before it matters here: the erase key is configuration, and the milestone
+    /// heading for macOS and Windows is where somebody else's default arrives.
+    /// **And the grid is wiped afterwards**, so the probe leaves the console exactly as clean as
+    /// the tests below expect. Two columns of residue are not cosmetic here: the screen wraps, and
+    /// a report split across two rows stops matching what the test looks for — measured, it broke
+    /// two of them.
+    fn confirm_the_console_is_in_the_mode_it_asked_for(pane: &mut Pane) {
+        pane.pty
+            .write(&[0x80])
+            .expect("write the byte that probes the mode");
+        wait_for_this_console_to_say(pane, "M-^@");
+        // Through the parser and not by replacing the `Screen`: what has been parsed into it —the
+        // mouse modes, the alternate screen— is precisely what the tests below are about.
+        pane.screen.advance(b"\x1b[H\x1b[2J");
     }
 
     /// Turns the wheel over that console, with whatever chord it is told.
@@ -22428,7 +22472,7 @@ mod tests {
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = window_with(
-            "stty -echo -icanon; printf '\\033[?1049h'; echo ready; cat -v",
+            "stty -echo -icanon && printf '\\033[?1049h' && echo ready && cat -v",
             "sleep 30",
         );
         // With no gesture asked for there is no counter to look at, and the assertion below would
@@ -22443,6 +22487,7 @@ mod tests {
             window.active().panes()[0].screen.wheel_acts_as_arrows(),
             "the test's program never reached the alternate screen"
         );
+        confirm_the_console_is_in_the_mode_it_asked_for(window.active_mut().panes_mut()[0]);
 
         turn_the_wheel(
             &mut window,

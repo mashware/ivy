@@ -139,6 +139,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/examples/sweep.rs", "app"),
     ("app/tests/prose.rs", "app"),
     ("app/tests/shape.rs", "app"),
+    ("app/tests/scripts.rs", "app"),
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
@@ -1046,11 +1047,14 @@ const NOT_OURS: &[&str] = &[
     "yes",
     "cat",
     "clear",
+    "ECHO",
+    "ECHOCTL",
     "emacs",
     "exec",
     "exit",
     "fork",
     "htop",
+    "ICANON",
     "ioctl",
     "less",
     "ls",
