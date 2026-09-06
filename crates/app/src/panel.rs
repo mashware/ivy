@@ -70,7 +70,7 @@ const MARGIN: f32 = 1.0;
 
 /// How a pane's rectangle ends up divided among what is shown.
 ///
-/// It has a name, and is not a tuple, for the same reason [`crate::Tiling`] has one, which does the same
+/// It has a name, and is not a tuple, for the same reason [`crate::tiling::Tiling`] has one, which does the same
 /// between the two consoles: two divisions in the same frame that read differently would be two
 /// languages for a single idea.
 pub struct PanelTiling {

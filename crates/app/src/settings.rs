@@ -1879,15 +1879,18 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 4] = [
+        const SOURCES: [(&str, &str); 6] = [
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),
-            // **It arrived because this walk noticed it leaving.** D28 took the bench's injected
-            // gestures out of `lib.rs`, and six sentence-shaped literals went with them — the walk
-            // dropped from 78 to 72 and said so. A module split silently narrows every list that
-            // names files, which is why the guard counts and does not just judge.
+            // **They arrived because this walk noticed them leaving**, twice now. D28 took the
+            // bench's injected gestures out of `lib.rs` and six sentence-shaped literals went with
+            // them; the tiling and the tree left next and took thirteen more, dropping the walk to
+            // 63 against a floor of 74. A module split silently narrows every list that names
+            // files, which is why the guard counts and does not just judge.
             ("injected.rs", include_str!("injected.rs")),
+            ("tiling.rs", include_str!("tiling.rs")),
+            ("tree.rs", include_str!("tree.rs")),
         ];
         let mut sentences: Vec<(&str, String)> = Vec::new();
         for (name, source) in SOURCES {
@@ -1913,16 +1916,22 @@ mod tests {
             }
         }
         // Same floor and for the same reason as its siblings: without it a walk that stopped finding
-        // literals leaves this test passing by looking at nothing. The three files hold **78** today
-        // — 27, 5 and 46 — so the floor is set just below, tight enough that a broken walk cannot hide
-        // behind it and loose enough that deleting a message is not a failure.
+        // literals leaves this test passing by looking at nothing. The six files hold **76** today
+        // — 27, 5, 25, 6, 3 and 10 — and the floor sits four below, tight enough that a broken walk
+        // cannot hide behind it and loose enough that deleting a message is not a failure.
         //
-        // **The cut at `mod tests` rests on there being nothing after it**, and there is not: none of
-        // the three declares a top-level item below its test module. If one ever does, its sentences
-        // leave this walk in silence — which is why the floor is stated as a number and not as «some».
+        // **It was left at 74 when the corpus dropped from 78 to 76 and the claim above stopped
+        // being true**: at two lines of slack, deleting a pair of messages *is* a failure. The floor
+        // moves with the corpus or it stops meaning what it says.
+        //
+        // **The cut at `mod tests` rests on there being nothing after it**, and there is not: the
+        // three that declare a test module put nothing below it, and the other three declare none —
+        // the tiling and the tree are covered by the behavioural tests that stayed in `lib.rs`. If a
+        // top-level item ever lands below a test module, its sentences leave this walk in silence —
+        // which is why the floor is stated as a number and not as «some».
         assert!(
-            sentences.len() >= 74,
-            "only {} sentence-shaped literals were found before `mod tests` in the three files: the \
+            sentences.len() >= 72,
+            "only {} sentence-shaped literals were found before `mod tests` in the six files: the \
              walk stopped working",
             sentences.len()
         );

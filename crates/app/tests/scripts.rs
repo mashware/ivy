@@ -63,6 +63,11 @@ use std::collections::BTreeSet;
 /// already moved out of `app/src/lib.rs` once — the injected gestures to `src/injected.rs`, reading
 /// the settings to `src/settings.rs` — and a script that moved with them would leave the guard
 /// reporting on nothing.
+///
+/// **And that is exactly what happened next, in silence.** The delivery that took the tiling and the
+/// tree out of `app/src/lib.rs` paid the four sibling lists — each of them fails when a file goes
+/// missing — and did not pay this one, because this one had no way to complain. It has one now:
+/// [`the_list_still_names_every_module`] counts the files and the reviewers no longer have to.
 const MODULES: &[(&str, &str)] = &[
     ("app/src/lib.rs", include_str!("../src/lib.rs")),
     ("app/src/injected.rs", include_str!("../src/injected.rs")),
@@ -80,6 +85,8 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/watcher.rs", include_str!("../src/watcher.rs")),
     ("app/src/theme.rs", include_str!("../src/theme.rs")),
     ("app/src/mouse.rs", include_str!("../src/mouse.rs")),
+    ("app/src/tiling.rs", include_str!("../src/tiling.rs")),
+    ("app/src/tree.rs", include_str!("../src/tree.rs")),
     ("app/src/main.rs", include_str!("../src/main.rs")),
     (
         "term-core/src/lib.rs",
@@ -118,6 +125,26 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../../term-core/examples/throughput.rs"),
     ),
 ];
+
+/// The files [`MODULES`] has to keep naming.
+///
+/// **A floor over the count, and it is the one thing its four siblings had and this list did not.**
+/// They fail when a file leaves them — one walks the tree and cross-checks, three carry a number —
+/// and this one just went on reporting on whatever was left. Two modules came out of `app/src/lib.rs`
+/// and the suite stayed green with the guard blind to both.
+///
+/// **It counts and does not judge**, for the same reason `shape.rs` gives: a list that only ever
+/// grows cannot be narrowed by accident if the narrowing itself is the failure.
+#[test]
+fn the_list_still_names_every_module() {
+    assert!(
+        MODULES.len() >= 25,
+        "`MODULES` names {} files and this delivery left twenty-five: a piece came out of a module \
+         and its new home was not added, so whatever this guard reports, it is not reporting on \
+         every script these crates run",
+        MODULES.len()
+    );
+}
 
 /// The commands that put the terminal into a mode.
 ///

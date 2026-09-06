@@ -6,9 +6,11 @@
 //! without opening a pseudoterminal**, and leaves the `fork` in a single place.
 //!
 //! **And the types here are a mirror, not those of the live layout.** Changing a field on the
-//! [`crate::Node`] tree must not change what is written on anyone's disk; the price is one conversion
-//! each way, and what it buys is that the two shapes evolve separately. The only exception, and for its
-//! reason, is the weight: see [`StoredChild::weight`].
+//! [`crate::tree::Node`] tree must not change what is written on anyone's disk; the price is one
+//! conversion each way, and what it buys is that the two shapes evolve separately. The only exception,
+//! and for its reason, is the weight: see [`StoredChild::weight`]. **The conversions themselves live in
+//! `crate::tree` and not here**, because the shape written down is the tree's own: this module owns
+//! what the file looks like, and the tree owns how it becomes a tree.
 //!
 //! **The second half of the module does touch the disk**, and also without opening any console: where
 //! the file lives ([`path_from`]), how it is read ([`read`]) and how it is replaced without being able
@@ -87,7 +89,7 @@ pub struct StoredLeaf {
 
 /// In which direction a branch divides.
 ///
-/// **It is a type of its own and not [`crate::Orientation`], on purpose.** The names of this enum are
+/// **It is a type of its own and not [`crate::tiling::Orientation`], on purpose.** The names of this enum are
 /// **the format**: they appear literally in the file of everyone who uses the application. Reusing the
 /// live type would tie the file to a name that the code may want to change tomorrow for reasons that
 /// have nothing to do with the disk. The price is four lines of conversion.
@@ -121,9 +123,9 @@ pub enum StoredNode {
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct StoredChild {
     /// **A bare number, and not the live weight type, and this one is deliberate.** Deriving the reading
-    /// over [`crate::Weight`] **would skip its constructor**, which is the only thing that makes a sum of
+    /// over [`crate::tiling::Weight`] **would skip its constructor**, which is the only thing that makes a sum of
     /// weights equal to zero impossible — the `NaN` in a rectangle that that type exists to avoid. So the
-    /// wire carries `f32` and the validation passes it through `crate::Weight::new`: **a single
+    /// wire carries `f32` and the validation passes it through `crate::tiling::Weight::new`: **a single
     /// implementation of the invariant**, the one that was already tested.
     pub weight: f32,
     pub node: StoredNode,
@@ -152,7 +154,7 @@ pub struct StoredDocument {
 ///
 /// **The field is private and there is no way to construct it other than [`validate`]**, so «this tree
 /// is well formed» is a property of the type and not of someone remembering to check it beforehand. It
-/// is the same doctrine as [`crate::Weight`] one level up, and for the same reason: this project has
+/// is the same doctrine as [`crate::tiling::Weight`] one level up, and for the same reason: this project has
 /// counted with numbers what happens to invariants that depend on the memory of whoever writes.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Validated {
@@ -431,7 +433,7 @@ fn check(
         // what it preserves is the **sum of the pair**, so a weight rises up to 99 % of what two
         // neighbors summed. What the tiling really needs is not a bounded weight: it is **a finite
         // branch sum**, and that is checked below.
-        if crate::Weight::new(child.weight).is_none() {
+        if crate::tiling::Weight::new(child.weight).is_none() {
             return Err(LayoutProblem::InvalidWeight { tab });
         }
         leaves += check(&child.node, Some(*orientation), tab)?;
@@ -1246,11 +1248,11 @@ mod ceiling_tests {
         // **underflows**: checked by running it, `1e-40 · 1e-40 / 2e-40` gives **zero**— but closing it
         // here, rejecting the document, was closing it in the wrong place: **these numbers are reached by
         // dragging**, so what this rejection threw away was the layout of whoever had used the
-        // application. The answer now lives where the product happens, in `crate::Weight::scaled`, and
+        // application. The answer now lives where the product happens, in `crate::tiling::Weight::scaled`, and
         // that is why they are accepted here.
         let tiny = 1.0e-40_f32;
         assert!(
-            crate::Weight::new(tiny).is_some(),
+            crate::tiling::Weight::new(tiny).is_some(),
             "each weight on its own has to be valid, or this test proves nothing"
         );
         assert_eq!(
@@ -1266,7 +1268,7 @@ mod ceiling_tests {
     fn two_finite_weights_whose_sum_is_not_a_number_are_rejected() {
         let at_limit = 3.0e38_f32;
         assert!(
-            crate::Weight::new(at_limit).is_some(),
+            crate::tiling::Weight::new(at_limit).is_some(),
             "each weight on its own has to be valid"
         );
         assert!(

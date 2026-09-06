@@ -6,6 +6,8 @@
 //! costs a milestone. «The code is in Spanish» was never written down and reached 43 860 lines.
 //! «A module does not grow past a few hundred lines» was never written down either, and one file of
 //! this crate reached **3 119 production lines** while the other eleven stayed between 97 and 542.
+//! That count is the one the rule was written against; the crate has gained modules since, every one
+//! of them a piece coming *out* of that file.
 //!
 //! # What it counts, and what it deliberately does not
 //!
@@ -21,11 +23,20 @@
 //!
 //! # The one exception, and why it is a number rather than a name
 //!
-//! `src/lib.rs` is over the ceiling today and cannot come under it in one change: it is 24 000 lines
-//! with 15 302 of tests reaching into private items. So it is declared here **with the number it has
+//! `src/lib.rs` is over the ceiling today and cannot come under it in one change: it is 22 237 lines
+//! with 16 952 of tests reaching into private items. So it is declared here **with the number it has
 //! now**, and the guard fails if that number **grows**. An exception with no number is an exemption,
 //! and the next reader cannot tell «too big, being worked on» from «fine». D28 carries the order the
 //! pieces come out in.
+//!
+//! **The tests are what makes the order slow, not the code.** A piece leaves as a module of its own
+//! and `lib.rs` re-imports it by name, so those 16 952 lines reach the moved items exactly where
+//! they reached them before and not one test is edited by a move. A guard list that names files is
+//! the one thing a split does break, and there are **six** of them across this suite —
+//! `MODULES` here, the file list and the corpus floor in `prose`, two lists in `glossary`, the
+//! sentence walk inside `settings.rs`, and `MODULES` in `scripts`. The last of those went unpaid by
+//! the delivery that wrote this line, in silence, because it was the one list with no count floor;
+//! it has one now.
 
 /// Every module of the crate, pulled in **at compile time** for the same reason its siblings give:
 /// a directory walk turns a renamed or deleted file into a target that is silently skipped, and a
@@ -44,15 +55,23 @@ const MODULES: &[(&str, &str)] = &[
     ("src/watcher.rs", include_str!("../src/watcher.rs")),
     ("src/theme.rs", include_str!("../src/theme.rs")),
     ("src/mouse.rs", include_str!("../src/mouse.rs")),
+    ("src/tiling.rs", include_str!("../src/tiling.rs")),
+    ("src/tree.rs", include_str!("../src/tree.rs")),
     ("src/main.rs", include_str!("../src/main.rs")),
 ];
 
 /// Production lines a module may hold.
 ///
-/// **600 and not a rounder number, because it is the measured shape of this crate.** The eleven
-/// modules that are not `src/lib.rs` run from 97 to 542, so 600 leaves the largest of them room to
-/// grow by a tenth and stops the next one becoming a second `lib.rs`. A ceiling below 542 would fail
-/// on work nobody has been asked to do; one far above it would never fire.
+/// **600 and not a rounder number, because it was the measured shape of this crate.** When the rule
+/// landed, the eleven modules that are not `src/lib.rs` ran from 97 to 542, so 600 left the largest
+/// of them room to grow by a tenth and stopped the next one becoming a second `lib.rs`. A ceiling
+/// below 542 would have failed on work nobody had been asked to do; one far above it would never
+/// have fired.
+///
+/// **Today the largest is `src/fonts.rs`, at exactly 600.** The margin the number was chosen for is
+/// spent, and that is said here rather than fixed by raising it: a ceiling that moves whenever
+/// something reaches it is not a ceiling. The next line `fonts.rs` gains fails this guard, and what
+/// it will need is a piece taken out — the same answer `lib.rs` is getting.
 const MODULE_CEILING: usize = 600;
 
 /// Production lines an `impl` block may hold.
@@ -70,16 +89,17 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        2_803,
+        2_111,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
-         in; it cannot come under the ceiling in one change because 15 302 lines of tests reach \
+         in; it cannot come under the ceiling in one change because 16 952 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
          first piece out and reading the settings file the second, which left for `settings.rs` \
          with the delivery that added the font by name**. **And the number carried three lines of \
          slack nobody had noticed**: it read 2 804 while the file was at 2 801, so a delivery could \
          grow the file and pass. The one that held a paste spent two of them, said so, and closed \
          the gap by recording what the file actually is — a ratchet with slack is a ratchet that \
-         ratchets late",
+         ratchets late. **Then the tiling and the tree came out together, 692 lines, and this is \
+         the first number the order actually moved**",
     ),
     (
         "src/lib.rs::impl Window",
@@ -168,14 +188,19 @@ fn ceiling_for(name: &str) -> Option<usize> {
 fn no_module_is_over_its_ceiling() {
     // **A floor first, because this whole file passes by looking at nothing otherwise.** It is how
     // the guards of this suite die: somebody reshapes the walk, it finds no lines, every module
-    // looks tiny and nothing says so. Measured as this lands: 6 393 production lines over thirteen
-    // modules, the thinnest being `src/main.rs` with three.
+    // looks tiny and nothing says so. Measured today: 6 595 production lines over sixteen modules,
+    // the thinnest being `src/main.rs` with three.
+    //
+    // **Splitting a module does not raise the total and that is the point** — it moves lines from
+    // one entry to two — so a floor over the sum survives every delivery of D28's order. What has to
+    // be raised with each split is the module *count*, and a split that forgets to add its new files
+    // to `MODULES` fails right here instead of quietly exempting them.
     let total: usize = MODULES
         .iter()
         .map(|(_, src)| production_lines(src).len())
         .sum();
     assert!(
-        MODULES.len() >= 14 && total >= 6_000,
+        MODULES.len() >= 16 && total >= 6_000,
         "the walk found {total} production lines over {} modules: it stopped matching, and this \
          guard is measuring nothing",
         MODULES.len()

@@ -4418,7 +4418,7 @@ Written down so the next delivery does not have to rediscover it. Sizes are prod
 |---|---|---|---|
 | ~~The injected drags of the measurement bench~~ | 300 | **done** — `injected.rs`, 311 lines | Instrumentation living in the core. **Not `measure.rs`**: that module is at 540 lines and the ceiling is 600, so it can absorb 60 — the guard's own arithmetic ruled out the obvious home |
 | ~~Reading the settings file, and the measurement veto~~ | 50 | **done** — `settings.rs`, which went from 291 to 349 | The module that already owns that vocabulary. **It was not on this table**: the delivery that added the font by name needed room in `lib.rs` and this was the piece it was already touching — the ceiling decided where the code went, which is what the table below says a ceiling is for |
-| The layout tree — `Node`, `Tab`, tiling | 455 | a module of its own | A closed data structure; its serialisation already lives outside, in `session.rs` |
+| ~~The layout tree — `Node`, `Tab`, tiling~~ | 455 estimated, **692 real** | **done** — **two** modules, `tiling.rs` (208 lines) and `tree.rs` (504) | A closed data structure; its serialisation already lives outside, in `session.rs` |
 | Routing the mouse, 15 methods of `Window` | ~350 | `mouse.rs` | It fits: 99 lines today, 449 after |
 | Publishing the report and measuring what is out of sight | ~150 | with the injected drags | Same reason as the first row, and the same owner: everything the bench needs from the window |
 | The tab bar | ~76 | a module of its own | Painting and hit-testing one strip, coupled to nothing else |
@@ -4445,8 +4445,11 @@ So the checklist for taking a piece out is four lists, not one: `shape.rs`, `pro
 `glossary.rs` (twice — the clean-files list and the citations list) and `settings.rs`'s walk. It is
 written here rather than left to be rediscovered by whoever takes the layout tree out next.
 
+**It is six, and the two that were missing are the lesson of the third piece.** See below.
+
 That leaves `lib.rs` at about 1 400 production lines and `impl Window` at about 480 — over the
-ceiling still, and the ratchet is what keeps it moving.
+ceiling still, and the ratchet is what keeps it moving. **Re-derived by reading the extents rather
+than estimating them, the whole order moves about 1 226 lines and lands the file nearer 1 577.**
 
 **The second piece came out sideways, and that is the entry's own lesson working.** The delivery that
 added the font by name had to add ten lines to `lib.rs`, the ratchet refused them, and the way
@@ -4454,6 +4457,76 @@ through was to take out a piece the delivery was already touching: reading the s
 `settings.rs`. `lib.rs` is at **2 804** and `impl Window` at **1 108**. A ceiling that only fires when
 somebody sets out to refactor fires almost never; this one fired on an ordinary delivery and cost it
 one function's move.
+
+### The third piece, and the two things this table had wrong about it
+
+**`lib.rs` went from 2 803 production lines to 2 111** — 692 out, the first number the order actually
+moved. Two corrections come with it, both worth more than the row they fix.
+
+**One piece was two.** The table said «the layout tree, 455 lines, a module of its own», and reading
+the real extents said 692 into two: the arithmetic that shares an area out knows no console, and the
+tree that uses it knows no rectangle. A single module would have landed at 712 and been over the
+ceiling this entry exists to hold: 712 in one file against a ceiling of 600. The estimate was not
+just low, it was pointing at a file that could not have been written. **Extents are read, not summed from memory**: three separate figures in
+this milestone's own planning were produced by adding up line ranges, and each of the three was wrong.
+
+**The checklist was four lists and it is six.** The two that were missing are the two that could not
+complain:
+
+- **`crates/app/tests/scripts.rs` names every module of both crates** so a shell script that moves
+  with a piece cannot leave the guard reporting on nothing — the exact accident it was written for,
+  in the delivery before. It was not paid, the two new files went unwatched, and the suite stayed
+  green, because it was **the one list with no floor over its own length**. It has one now, and that
+  is the general rule this entry can offer: *a list that names files defends nothing until a number
+  defends the list*.
+- **`crates/app/tests/prose.rs`'s corpus floor** is a number over the total comment lines of the
+  files it names. The two new files carried 713 lines of argument out of it and the floor stayed
+  where it was, so the guard read 12 908 against 12 500 and passed while blind to all of them. A
+  floor stated over a corpus has to move when the corpus does.
+
+#### Measured: what the split costs the frame, which the design had written off without checking
+
+**The design declared this delivery a non-measurement**, on the reason that it «touches no measured
+span». That reason is false, and reading the call sites is all it took: `Node::place` calls
+`tile` and runs **on every frame** — once for the tab being painted and once for each background tab,
+which is a rule of its own that a background tab keeps its real grid. The tiling was never off the
+frame's path.
+
+It matters because a move genuinely can shift a number here. `--release` in this workspace has no
+`[profile.release]`, so it takes the defaults: **sixteen codegen units and no LTO**. Units are
+partitioned from modules, and a call that crosses one only inlines if it is generic or marked. Before
+this delivery `place` and `tile` were the same module; now they are two, with the caller in a third.
+
+**Batch `H` — four panes in a row, the shape that walks the tree most — five runs on the branch and
+five on `origin/main`, same machine, same afternoon, same 1280×800 window and the same 49×20 grid on
+all ten. `compare` says every pair is averageable.**
+
+| | The framework's share, per frame | Walking the tree to see if the layout changed |
+|---|---|---|
+| `origin/main` | **511.9 µs** mean, 481.0–547.6 | **0.972 µs** mean, 0.935–1.019 |
+| This delivery | **549.5 µs** mean, 478.7–635.3 | **1.018 µs** mean, 0.901–1.129 |
+
+**There is nothing here.** The branch's cheapest run is cheaper than main's cheapest, and its own
+spread (157 µs across five runs) is more than four times the 37.6 µs that separates the two means.
+Drop each side's first run — the one that pays for a cold page cache, and on the branch it is the
+635.3 — and the means are 528.0 against 519.7. The span that isolates the moved code says the same
+thing more sharply: the branch's range **contains main's entirely**.
+
+The honest reading is the one D3's annexes already use for this shape: the variation between two runs
+of the same tree is of the same order as the variation between the two trees. **Sixteen codegen units
+did not cost this delivery a frame.**
+
+**Recorded because the next four deliveries inherit the question, not the answer.** This one moved
+code that runs every frame and the boundary cost nothing measurable; that is evidence about *this*
+move, not a licence for the rest. What it does retire is the design's shortcut — «it touches no
+measured span» has to be checked against the call sites, and here it was wrong.
+
+**And a mechanical move widens what it should not.** Making every moved item and every struct field
+crate-visible is what makes a split compile in one pass, and it gave away the field of `Weight`, a
+newtype whose only reason to exist is that its constructor refuses zero, negatives and what is not a
+number. The fix is not judgement but arithmetic: close everything, build, and open only what the
+compiler names. Thirteen fields were opened and twelve were needed; of the items, less than half.
+**The compiler is the cheapest reviewer of visibility there is, and it was never asked.**
 
 
 ---
