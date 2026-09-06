@@ -474,6 +474,86 @@ fn paint_cursor(
     }
 }
 
+/// Paints a console whole: its grid, and over it whatever the **application** has to say.
+///
+/// **It exists so that `paint` can stay what it is** — a pure function from a view and a corner —
+/// which is what the measurement bench and this module's own tests call. What made a second entry
+/// necessary rather than a seventh argument is `lib.rs`: it sits against **D28**'s recorded number,
+/// so the call site had to keep exactly the shape it had.
+pub(crate) fn paint_a_console(
+    painter: &Painter,
+    console: &crate::Pane,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    area: Rect,
+    discoverer: &mut crate::fonts::Discoverer,
+) {
+    paint(
+        painter,
+        &console.screen.view(),
+        theme,
+        metrics,
+        area.left_top(),
+        discoverer,
+    );
+    paint_the_question_over_it(painter, console, theme, metrics, area);
+}
+
+/// Says, over the console, that a paste is being held and what answers it.
+///
+/// **A console with nothing held pays one comparison**, which is the same shape the color pass uses:
+/// the frame must not carry the cost of a thing that is almost never there.
+///
+/// It is painted **over the grid and not into it**. Writing the sentence into the screen would put
+/// words in the program's mouth — the grid is what the program wrote — and it would survive in the
+/// scrollback as if it had. This is the application speaking, and it goes where the application can
+/// take it back.
+fn paint_the_question_over_it(
+    painter: &Painter,
+    console: &crate::Pane,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    area: Rect,
+) {
+    let Some(held) = console.held.as_ref() else {
+        return;
+    };
+    let margin = metrics.width();
+    let sentence = painter.layout(
+        format!(
+            "Escape discards it · Ctrl+Enter sends it anyway\n\n{}",
+            held.sentence()
+        ),
+        metrics.font(),
+        theme.foreground(),
+        (area.width() - 4.0 * margin).max(metrics.width()),
+    );
+    // **Clamped to the console, and what the clamp does and does not do is worth being exact about.**
+    // A pane can be three rows tall and twenty columns wide, and an unclamped box runs off it. The
+    // clamp keeps the **box** inside the console so its border is not stroked where the console is
+    // not; it does **not** shorten the text, which the painter's own clip cuts wherever it ends.
+    // What protects the answer is not this line: it is that **the keys are the first thing in the
+    // galley**, so the line that survives a clip is the one saying how to get out. A question whose
+    // answer is off-screen is worse than no question.
+    let box_of_it = Rect::from_min_size(
+        area.left_top() + vec2(margin, margin),
+        sentence.size() + vec2(2.0 * margin, 2.0 * margin),
+    )
+    .intersect(area);
+    painter.rect_filled(box_of_it, margin, theme.panel_background());
+    painter.rect_stroke(
+        box_of_it,
+        margin,
+        Stroke::new(1.0, theme.focus()),
+        StrokeKind::Inside,
+    );
+    painter.galley(
+        box_of_it.left_top() + vec2(margin, margin),
+        sentence,
+        theme.foreground(),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

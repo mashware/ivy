@@ -11,7 +11,7 @@
 //! tables blind. What is left out returns silence, never an approximate byte: a wrong
 //! byte is understood by the program inside as a different key, and that is worse than receiving nothing.
 
-use eframe::egui::{Event, Key, Modifiers};
+use eframe::egui::{Context, Event, Key, Modifiers};
 use std::borrow::Cow;
 
 /// The bytes that correspond to an event, or nothing if that event does not translate.
@@ -100,7 +100,11 @@ pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
 ///
 /// It is filtered **also when it is not wrapped**: the mode is consulted when composing and the program may
 /// have changed it right after; and the kernel's danger does not depend on the wrapper.
-pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
+///
+/// **It is not `pub`, and that is the point.** Composing a paste without going through the gate is
+/// exactly the bug: an ungated door sitting beside the gated one, equally reachable and better
+/// named, is one autocomplete away from being used. [`paste_or_hold`] is the only way out.
+fn paste(text: &str, bracketed: bool) -> Vec<u8> {
     const OPENS: &[u8] = b"\x1b[200~";
     const CLOSES: &[u8] = b"\x1b[201~";
 
@@ -146,6 +150,316 @@ pub fn paste(text: &str, bracketed: bool) -> Vec<u8> {
         body.extend_from_slice(CLOSES);
     }
     body
+}
+
+/// How long a line may be before the line discipline stops keeping it, or **nothing** on a platform
+/// that does not answer the question.
+///
+/// **It is not `MAX_CANON`**, which is what this project called it until somebody ran `getconf`:
+/// that is **255**, and `linux/limits.h` defines it as 255. What actually bounds a canonical line on
+/// Linux is `N_TTY_BUF_SIZE`, a **compile-time constant of the kernel's `n_tty` driver** — not a
+/// POSIX limit, not reachable through `termios`, and different on other kernels.
+///
+/// **So it is declared per platform and it is never a contract.** It is the threshold for asking a
+/// question, not an assertion about what will arrive: getting it slightly wrong asks once too often
+/// or once too seldom, and that is all it can cost. Anything that treated it as the truth — a test
+/// asserting on it, a message quoting it as a guarantee — would be the mislabelled number this
+/// project forbids.
+///
+/// Everything that is not Linux gets `None`, and there are two different reasons:
+/// - **Windows has no such question.** ConPTY does its own input handling in `conhost`; there is no
+///   line discipline, and `portable-pty` exposes no `termios` there at all — every one of its
+///   accessors is `#[cfg(unix)]`.
+/// - **macOS has a boundary and nobody has measured it.** Its headers name a different figure, and
+///   copying a number out of a header nobody ran is exactly what the paragraph above refuses. F2.7 is
+///   the milestone that has a Mac to measure it on.
+pub const fn the_longest_line_a_reader_keeps() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        // `N_TTY_BUF_SIZE` is 4 096 and the terminator has to fit inside it, so 4 095 **bytes** are
+        // what survives — bytes and not characters, which is the unit the kernel counts and the one
+        // this module measures. Measured, not read: a line of 4 095 arrives whole and one of 4 096
+        // arrives as 4 095 plus its terminator.
+        Some(4_095)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// The longest run of bytes in a composed paste with no line terminator in it.
+///
+/// **Both terminators count.** An unwrapped paste sends a break as `\r` and a wrapped one as `\n`,
+/// and the line discipline closes a line on either — `ICRNL` maps the first to the second, measured
+/// on a fresh pseudoterminal. So a paste that carries breaks of either kind is delivered line by
+/// line and only its longest line is at risk.
+///
+/// It is measured on the **composed** bytes and not on the text, because the paste markers are bytes
+/// in the same line as the body: measured, a wrapped paste is truncated with its closing marker
+/// inside the part that is dropped.
+fn the_longest_line(composed: &[u8]) -> usize {
+    composed
+        .split(|byte| *byte == b'\n' || *byte == b'\r')
+        .map(<[u8]>::len)
+        .max()
+        .unwrap_or(0)
+}
+
+/// A paste that was **not** sent, because one of its lines is longer than a program reading lines
+/// would keep.
+///
+/// **It carries the TEXT and not the bytes**, and the first version carried the bytes with a
+/// docblock arguing for it: *«so that saying yes sends exactly what would have been sent, and not a
+/// second composition that could differ from the first»*. That reasoning was backwards, and a
+/// reviewer found it.
+///
+/// A paste is composed against the mode the program is in — wrapped or not, and a break sent as
+/// `\n` or as `\r` accordingly. The answer can come many frames later, and **the mode changes
+/// underneath**: `bash` turns bracketed paste off while a command runs and on again at its prompt.
+/// Bytes composed unwrapped carry `\r` between their lines; delivered to a prompt that has since
+/// turned the wrapping on, the line editor **executes each line as it arrives** — which is this
+/// ticket's own bug, reintroduced by the fix for it.
+///
+/// So the text is kept and composed **at the moment it is sent**, against the mode as it is then.
+pub struct HeldPaste {
+    text: String,
+    longest: usize,
+    /// The paste mode the question was asked in.
+    ///
+    /// **Only the tests read it**, and it is here so the claim above is checkable rather than
+    /// trusted: a test that could not see the mode had moved could not prove the paste is composed
+    /// against the one it goes out in.
+    #[cfg(test)]
+    bracketed_when_it_was_held: bool,
+    /// The boundary this one was measured against, **kept rather than asked for again**.
+    ///
+    /// It makes the type's invariant sayable — `longest > ceiling` — instead of leaving it in the
+    /// head of whoever built it, and it stops the sentence re-querying a platform value to describe
+    /// something that was fixed when the paste was held.
+    ceiling: usize,
+    /// How many further pastes arrived while this one was waiting and were **not** taken.
+    ///
+    /// It exists because the first version of this feature reintroduced its own bug one layer up: a
+    /// second over-long paste replaced the first, and the first went **without a word** — the exact
+    /// silent loss the whole thing was built to stop. Found in review. Now the first question stands
+    /// and the later ones are counted into it, so nothing goes without being said.
+    turned_away: usize,
+}
+
+impl HeldPaste {
+    /// What the person in front of the screen is told: **how long the line is** and **that the loss
+    /// would be silent**. Which key answers is added by whoever paints it — it is a fact about this
+    /// application's keys, not about this paste.
+    ///
+    /// It does not quote the boundary as a promise. The threshold is one platform's kernel constant
+    /// (see [`the_longest_line_a_reader_keeps`]), and a sentence that said «only 4 095 will arrive»
+    /// would be asserting something this application cannot know: what reaches the program depends
+    /// on the mode it is in **when the bytes land**, and that changes at every command boundary.
+    ///
+    /// **It counts bytes and says bytes.** The kernel's boundary is in bytes, and calling them
+    /// characters would overstate the loss on anything that is not ASCII — a mislabelled number is
+    /// the thing this project forbids, and a mislabelled unit is the same defect.
+    pub fn sentence(&self) -> String {
+        let also = match self.turned_away {
+            0 => String::new(),
+            1 => " Another paste arrived while this one was waiting and was not taken.".to_owned(),
+            more => format!(
+                " {more} further pastes arrived while this one was waiting and were not taken."
+            ),
+        };
+        format!(
+            "this paste has a line of {} bytes, and a program that reads lines the plain way keeps \
+             only about {} of them — the rest would be dropped with nothing said, and what is left \
+             can be a different command from the one you can read.{also}",
+            self.longest, self.ceiling
+        )
+    }
+
+    /// Records that another paste arrived and was not taken, so the standing question can say so.
+    fn and_another(&mut self) {
+        self.turned_away += 1;
+    }
+
+    /// How long the offending line is.
+    ///
+    /// **Only the tests call it.** Its docblock used to say «for whoever paints» and the painter
+    /// never did: a comment naming a caller that does not exist is the same defect as a comment
+    /// naming a symbol that does not exist, which this crate has a guard for.
+    #[cfg(test)]
+    fn longest(&self) -> usize {
+        self.longest
+    }
+
+    /// Yes: compose it **now**, against the mode the program is in at this moment.
+    ///
+    /// Not the mode it was in when the question was asked — see this type's own docblock for why
+    /// that is the difference between a paste and an execution.
+    pub fn send_anyway(self, bracketed: bool) -> Vec<u8> {
+        paste(&self.text, bracketed)
+    }
+
+    /// Whether the paste mode has changed since the question was asked.
+    ///
+    /// Only the tests care today; it exists so that the fact above is checkable rather than trusted.
+    #[cfg(test)]
+    fn the_mode_moved(&self, bracketed: bool) -> bool {
+        self.bracketed_when_it_was_held != bracketed
+    }
+}
+
+/// What the person in front of the screen said about a held paste.
+enum Answer {
+    /// Send it, boundary and all.
+    Send,
+    /// Throw it away.
+    Discard,
+    /// Nothing yet.
+    Waiting,
+}
+
+/// Reads the answer to a held paste, **consuming the key that gives it**.
+///
+/// Consuming matters: with the question open, a chord that also reached the program would run
+/// whatever is on the shell's line, which is the opposite of what somebody answering «discard»
+/// meant. Everything else is left where it was — a held paste does not deafen the console, so what
+/// is running keeps receiving whatever else is typed.
+///
+/// **The yes needs `Ctrl`, and a bare `Enter` is deliberately not it.** A reviewer found the
+/// accident that decides this, and it runs the other way from the obvious one: with the question
+/// standing, somebody types a command at the prompt and presses `Enter` to run it — and instead of
+/// running, the held paste is appended onto the line they just typed. That combined line is over the
+/// boundary **by construction**, so the kernel truncates it and the incident this whole thing exists
+/// to prevent happens anyway, in silence. A bare `Enter` therefore stays the program's, and saying
+/// yes costs a deliberate gesture. The notice names it.
+fn answer_to_a_held(ctx: &Context) -> Answer {
+    ctx.input_mut(|state| {
+        if state.consume_key(Modifiers::CTRL, Key::Enter) {
+            Answer::Send
+        } else if state.consume_key(Modifiers::NONE, Key::Escape) {
+            Answer::Discard
+        } else {
+            Answer::Waiting
+        }
+    })
+}
+
+/// Empties the buffer this pass writes its bytes into, and puts in it the answer to a held paste if
+/// there is one: the bytes on a yes, nothing on a no, and the paste stays held while nobody answers.
+///
+/// **The emptying belongs here** and not at the call site, because the answer to a held paste is the
+/// first thing a pass can produce: leaving the two apart is one order away from a pass that resolves
+/// a paste and then wipes it.
+///
+/// Returns whether a paste came out, which the caller needs in order to keep it out of the keystroke
+/// series — see the comment on the `Send` arm.
+///
+/// **And it lives in this module** because it is the same vocabulary as the rest of it — an event
+/// in, bytes out — and because `lib.rs` carries **D28**'s ratchet: what goes into that file has to
+/// fit under a recorded number, and this delivery's lines were paid for out of the very file they
+/// were going into.
+pub fn start_the_keys(
+    ctx: &Context,
+    held: &mut Option<HeldPaste>,
+    keystrokes: &mut Vec<u8>,
+    bracketed: bool,
+) -> bool {
+    keystrokes.clear();
+    let Some(paste) = held.take() else {
+        return false;
+    };
+    match answer_to_a_held(ctx) {
+        Answer::Send => {
+            keystrokes.extend_from_slice(&paste.send_anyway(bracketed));
+            // **It says a paste came out, and the caller needs to be told.** The frame keeps a series
+            // of what a keystroke costs from the key to the queue, and a paste is deliberately left
+            // out of it so that a multi-kilobyte write does not distort the percentile **D3** judges
+            // the framework by. On the frame that releases a held paste the walk sees no paste event,
+            // so without this the released bytes would be timed as a keystroke.
+            true
+        }
+        Answer::Discard => false,
+        Answer::Waiting => {
+            *held = Some(paste);
+            false
+        }
+    }
+}
+
+/// Composes a paste and either **appends it** to what this pass sends, or hands it back held.
+///
+/// It writes into a destination rather than returning the bytes, the way this crate's other
+/// producer does, so that the caller is one line: with `lib.rs` under **D28**'s ratchet, where the
+/// lines go is decided by the ceiling and not by taste. **D28**'s ratchet fails above the number it
+/// records, and this delivery had two lines of slack in that record to spend — see D31 and the
+/// entry's own reason, where that slack is now closed.
+///
+/// `None` means it was appended. `Some` is a paste that was **not** appended and has to be put to
+/// the person in front of the screen first. On a platform with no boundary to compare against
+/// —Windows has none— nothing is ever held.
+///
+/// **Why holding rather than warning**, recorded here because it is the whole decision: nothing
+/// reaches the program until the line closes, and once it closes the shell has already run the
+/// truncated command. A warning would arrive after the incident and label it; this is the only one
+/// of the two that prevents it.
+///
+/// **What it does NOT see, declared rather than left to be discovered.** The measurement is of this
+/// paste alone. Whatever is **already** unterminated on the other side — text the user typed at the
+/// prompt, or an earlier paste — is counted by the kernel and not by this: a short paste on top of a
+/// long line still truncates, exactly as before. Reading that state is not possible from here, and
+/// the honest framing is the one the investigation reached: this narrows the window, it does not
+/// close it.
+pub fn paste_or_hold(
+    text: &str,
+    bracketed: bool,
+    destination: &mut Vec<u8>,
+    held: &mut Option<HeldPaste>,
+) {
+    let composed = paste(text, bracketed);
+    // **A wrapped paste is never held, and that is the difference between a gate and a nuisance.**
+    // A program only turns the paste markers on if it handles pastes itself, and every program that
+    // does is a line editor running in raw mode — `readline`, `zle`, `vim`, an agent's own console.
+    // Raw mode has no canonical line buffer, so the boundary this gate exists for **cannot bite
+    // there**. `readline` even turns the markers off before running a foreground command, which is
+    // exactly the moment the shell goes canonical: the correlation is not a coincidence, it is the
+    // same switch.
+    //
+    // It matters more here than anywhere: this is a terminal for hosting agents, and **pasting a
+    // long prompt into an agent's console is the paste**. Holding those would put a false warning on
+    // the one path that matters most, about a loss that cannot happen.
+    //
+    // What it gives up, said plainly: a canonical program that asked for the markers anyway would go
+    // unguarded. Nothing does that, and if something ever does, the gate is one condition away.
+    if bracketed {
+        destination.extend_from_slice(&composed);
+        return;
+    }
+    let longest = the_longest_line(&composed);
+    let Some(ceiling) = the_longest_line_a_reader_keeps().filter(|ceiling| longest > *ceiling)
+    else {
+        // **A short paste goes through even with a question standing**, so the held bytes will land
+        // *after* it if the answer is yes — the reverse of the order they were pasted in. It is the
+        // price of not freezing the console over a question, and it is said here rather than left
+        // for somebody to meet.
+        destination.extend_from_slice(&composed);
+        return;
+    };
+    // **A question already standing is not replaced.** Replacing it would drop the paste it was
+    // about without a word, which is this feature's own bug one layer up — found in review, on the
+    // line that used to read `paste_or_hold(…).or(self.held.take())`.
+    match held {
+        Some(standing) => standing.and_another(),
+        none => {
+            *none = Some(HeldPaste {
+                text: text.to_owned(),
+                #[cfg(test)]
+                bracketed_when_it_was_held: bracketed,
+                longest,
+                ceiling,
+                turned_away: 0,
+            });
+        }
+    }
 }
 
 fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
@@ -628,6 +942,675 @@ mod tests {
     #[test]
     fn an_event_that_is_not_from_the_keyboard_is_ignored() {
         assert!(bytes(&Event::WindowFocused(true)).is_none());
+    }
+
+    // ── The paste that is held instead of sent ───────────────────────────────────────────────────
+
+    /// The boundary this platform declares, or **nothing** — and on nothing every test below stands
+    /// down instead of inventing a number.
+    ///
+    /// **Not one of them writes `4 095`.** That figure is one kernel's compile-time constant (see
+    /// [`the_longest_line_a_reader_keeps`], which says at length that it is not a contract): a test
+    /// that spelled it out would be asserting the platform instead of the fix, and it would go green
+    /// on a machine where the gate does nothing at all. Every size below is derived from this
+    /// function, so on a kernel with another number they still say the same thing.
+    fn the_boundary_or_stand_down() -> Option<usize> {
+        let boundary = the_longest_line_a_reader_keeps();
+        if boundary.is_none() {
+            eprintln!(
+                "this platform declares no boundary, so there is no gate here: standing down"
+            );
+        }
+        if let Some(boundary) = boundary {
+            assert!(
+                boundary > "\x1b[200~\x1b[201~".len() * 2,
+                "the declared boundary is {boundary}, which is too small to build a paste around: \
+                 the tests below would be measuring their own arithmetic"
+            );
+        }
+        boundary
+    }
+
+    /// **That Linux has a gate at all**, which is the one thing no other test in this module can
+    /// say: they all stand down when there is no boundary, so a
+    /// [`the_longest_line_a_reader_keeps`] that quietly answered «nothing» would turn the whole
+    /// feature off and leave every one of them green.
+    ///
+    /// It still writes no number. It asks the two questions that matter — that a boundary is
+    /// declared, and that going over it really holds — and derives the size from the answer.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn on_linux_the_gate_is_declared_and_it_fires() {
+        let boundary = the_longest_line_a_reader_keeps()
+            .expect("Linux was measured and has a boundary: with none, this module tests nothing");
+
+        let mut destination = Vec::new();
+        assert!(
+            hold_from(&"x".repeat(boundary + 1), false, &mut destination).is_some(),
+            "the boundary is declared and going over it changes nothing: the gate is dead"
+        );
+        assert!(
+            destination.is_empty(),
+            "the over-long paste was written anyway"
+        );
+    }
+
+    /// A paste put through the gate with **no question already standing**, and what it left held.
+    ///
+    /// The tests that care about a question already standing call [`paste_or_hold`] themselves.
+    fn hold_from(text: &str, bracketed: bool, destination: &mut Vec<u8>) -> Option<HeldPaste> {
+        let mut held = None;
+        paste_or_hold(text, bracketed, destination, &mut held);
+        held
+    }
+
+    /// One pass of the loop, with a key pressed in it or with nobody touching anything.
+    fn a_pass_with(
+        ctx: &Context,
+        key: Option<(Key, Modifiers)>,
+        held: &mut Option<HeldPaste>,
+        keystrokes: &mut Vec<u8>,
+    ) {
+        let events = key
+            .map(|(key, modifiers)| {
+                vec![Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }]
+            })
+            .unwrap_or_default();
+        let input = eframe::egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        // **`run_ui` and not `run_logic`.** The logic-only pass documents that it does not interpret
+        // the ui input at all: the key would never reach `InputState` and every assertion below
+        // would be met by a pass where nobody pressed anything.
+        //
+        // And the body runs once, the way this crate's other pass helper does it: `run_ui` takes an
+        // `FnMut` and egui may repeat the pass, and a second run would empty the buffer the first
+        // one had just filled.
+        let mut once = Some(());
+        ctx.run_ui(input, |_ui| {
+            if once.take().is_some() {
+                start_the_keys(ctx, held, keystrokes, false);
+            }
+        })
+        .drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn a_line_that_a_reader_keeps_whole_is_appended_and_nothing_is_held() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // Exactly as long as a reader keeps: the last size that must **not** be interfered with.
+        // One character less and the gate could be off by one without a test noticing.
+        let text = "x".repeat(boundary);
+        let mut destination = b"what this pass already had".to_vec();
+
+        let held = hold_from(&text, false, &mut destination);
+
+        assert!(
+            held.is_none(),
+            "a line that fits was held: the gate asks a question where there is nothing to ask"
+        );
+        assert_eq!(
+            destination,
+            [b"what this pass already had".as_slice(), text.as_bytes()].concat(),
+            "what fits has to be appended to what the pass was already sending, not replace it"
+        );
+    }
+
+    #[test]
+    fn one_character_over_the_boundary_and_not_a_byte_reaches_the_program() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **This is the whole bug in one line.** At one character over, the line discipline keeps the
+        // first ones and closes the line as if it had ended there, so a shell runs a different
+        // command from the one on screen. The effect the fix has to have is not that a value comes
+        // back: it is that **the destination never sees the bytes**.
+        let text = "x".repeat(boundary + 1);
+        let untouched = b"what this pass already had".to_vec();
+        let mut destination = untouched.clone();
+
+        let held = hold_from(&text, false, &mut destination);
+
+        assert!(
+            destination == untouched,
+            "the paste was written anyway: the destination grew from {} to {} bytes, and those are \
+             the bytes that get truncated into another command",
+            untouched.len(),
+            destination.len()
+        );
+        let held = held.expect("a line over the boundary went through with nothing asked");
+        assert_eq!(
+            held.longest(),
+            boundary + 1,
+            "the held paste misreports how long its offending line is, which is what is put to the \
+             person deciding"
+        );
+    }
+
+    #[test]
+    fn a_second_over_long_paste_does_not_take_the_first_one_away_in_silence() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **This is the bug one layer up.** If the second question replaced the first, the first
+        // paste would go without a word — which is the silent loss the whole thing exists to stop.
+        // The standing question keeps its own bytes and counts the ones turned away.
+        let first = "a".repeat(boundary + 1);
+        let second = "b".repeat(boundary + 1);
+        let mut held = None;
+        let mut destination = Vec::new();
+
+        paste_or_hold(&first, false, &mut destination, &mut held);
+        paste_or_hold(&second, false, &mut destination, &mut held);
+
+        assert!(
+            destination.is_empty(),
+            "one of the two was written to the program anyway: {} bytes",
+            destination.len()
+        );
+        let standing = held.expect("nothing is being asked about at all");
+        // **The second half of this test's own name.** Keeping the first paste is only half of «not
+        // in silence»: the second one did not happen either, and if nothing says so it has gone the
+        // same way. Measured — without this assertion, making the counting a no-op left the whole
+        // file green over a live silent loss.
+        let said = standing.sentence();
+        assert!(
+            said.contains("not taken"),
+            "a paste arrived while this one was waiting and nothing says it did: {said:?}"
+        );
+        assert!(
+            standing.send_anyway(false) == paste(&first, false),
+            "the second paste replaced the first, and the first went with nothing said"
+        );
+    }
+
+    #[test]
+    fn each_paste_turned_away_is_counted_and_not_just_the_first() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // A count that saturates at one is the same silence for everything after it.
+        let long = "a".repeat(boundary + 1);
+        let mut held = None;
+        let mut destination = Vec::new();
+        for _ in 0..3 {
+            paste_or_hold(&long, false, &mut destination, &mut held);
+        }
+        let said = held
+            .expect("nothing is being asked about at all")
+            .sentence();
+        assert!(
+            // **The rendered count and not a loose digit.** The sentence also carries the line's
+            // length and the boundary, so `contains('2')` would pass on a kernel whose numbers
+            // happen to hold a two — whatever the counter did.
+            said.contains("2 further pastes") && said.contains("not taken") && !said.contains("20"),
+            "two pastes were turned away and the question does not say how many: {said:?}"
+        );
+    }
+
+    #[test]
+    fn a_paste_that_fits_goes_through_while_a_question_stands_and_leaves_it_where_it_was() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **A standing question does not deafen the console.** Whatever else is pasted while it
+        // waits is an ordinary paste and has to arrive; and because it arrived, it is **not** one of
+        // the ones turned away — a count that took it in would tell the person a paste was lost that
+        // was never lost, which is the same defect the other way round.
+        let long = "a".repeat(boundary + 1);
+        let short = "echo short\n";
+        let mut held = None;
+        let mut destination = Vec::new();
+
+        paste_or_hold(&long, false, &mut destination, &mut held);
+        paste_or_hold(short, false, &mut destination, &mut held);
+
+        assert!(
+            destination == paste(short, false),
+            "the paste that fits did not arrive as an ordinary paste: {} bytes instead of {}",
+            destination.len(),
+            paste(short, false).len()
+        );
+        let standing = held.expect("the standing question was taken away by a paste that fits");
+        let said = standing.sentence();
+        assert!(
+            !said.contains("not taken"),
+            "a paste that went through was counted as turned away: {said:?}"
+        );
+        assert!(
+            standing.send_anyway(false) == paste(&long, false),
+            "the standing question no longer holds the paste it was asked about"
+        );
+    }
+
+    #[test]
+    fn saying_yes_sends_exactly_what_would_have_been_sent() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // With a control character in it and with a break: saying yes hands over a **properly
+        // composed** paste — filtered and wrapped — and never the raw text.
+        let text = format!("{}\x03\techo\nand more", "x".repeat(boundary + 1));
+
+        // Only an unwrapped paste is ever held — a wrapped one cannot be truncated — so this is the
+        // only mode a question can be asked in.
+        for sent_in in [false, true] {
+            let held = hold_from(&text, false, &mut Vec::new())
+                .expect("a line over the boundary was not held");
+
+            assert!(
+                held.send_anyway(sent_in) == paste(&text, sent_in),
+                "saying yes sent something other than the paste itself (sent in: {sent_in})"
+            );
+        }
+    }
+
+    #[test]
+    fn the_paste_is_composed_against_the_mode_it_goes_out_in_and_not_the_one_it_waited_in() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **This is the difference between a paste and an execution.** A break is composed as `\r`
+        // when the program has not asked for bracketed paste and as `\n` when it has, and the mode
+        // moves underneath a standing question: `bash` turns the wrapping off while a command runs
+        // and on again at its prompt. Bytes composed unwrapped and delivered to a prompt that has
+        // since turned it on make the line editor **execute each line as it arrives**, which is this
+        // ticket's own bug arriving through its fix.
+        let text = format!("{}\nsecond line", "x".repeat(boundary + 1));
+
+        // Held unwrapped — the only mode a question is ever asked in — and answered at a prompt that
+        // has since turned the wrapping on, which is what `readline` does when a command finishes.
+        let (held_in, sent_in) = (false, true);
+        {
+            let held = hold_from(&text, held_in, &mut Vec::new())
+                .expect("a line over the boundary was not held");
+            assert!(
+                held.the_mode_moved(sent_in),
+                "the test is not exercising a mode change at all"
+            );
+
+            let sent = held.send_anyway(sent_in);
+
+            assert!(
+                sent == paste(&text, sent_in),
+                "the paste went out composed for the mode it was held in, not the one it was sent in"
+            );
+            assert!(
+                sent != paste(&text, held_in),
+                "the two modes compose the same bytes, so this test proves nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_paste_of_many_lines_goes_through_however_much_of_it_there_is() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **This is what separates «too long» from «too much».** The line discipline delivers a line
+        // on each break, so eight lines of the boundary's length are eight deliveries and not one
+        // truncation. A gate that looked at the paste's size instead of at its longest line would
+        // hold this — and holding an ordinary multi-line paste is a worse product than the bug.
+        let line = "x".repeat(boundary);
+        let text = [line.as_str(); 8].join("\n");
+        let mut destination = Vec::new();
+
+        let held = hold_from(&text, false, &mut destination);
+
+        assert!(
+            held.is_none(),
+            "«too much» was taken for «too long»: a paste of {} bytes whose every line fits was held",
+            text.len()
+        );
+        assert!(
+            destination == paste(&text, false),
+            "the paste went through changed: {} bytes instead of {}",
+            destination.len(),
+            paste(&text, false).len()
+        );
+        assert!(
+            destination.len() > boundary * 4,
+            "the load did not end up far over the boundary, so this test proves nothing"
+        );
+    }
+
+    #[test]
+    fn a_break_closes_a_line_whichever_of_the_two_terminators_it_comes_out_as() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **The two directions, and each one is a different mutation.** An unwrapped paste sends a
+        // break as `\r` and a wrapped one as `\n`, and the line discipline closes a line on either —
+        // `ICRNL` maps the first to the second. Measuring only one of the two terminators is a hold
+        // on an entirely ordinary paste.
+        // Short of the boundary by the two markers, so the wrapped case fits too and the only thing
+        // this test can fail on is the terminator. Whether the boundary itself is off by one is the
+        // business of the two tests above, and that the markers count is the business of the one
+        // below.
+        let half = "x".repeat(boundary - "\x1b[200~\x1b[201~".len());
+        for (bracketed, in_the_text, comes_out_as) in [(false, '\n', "\\r"), (true, '\r', "\\n")] {
+            let text = format!("{half}{in_the_text}{half}");
+            let mut destination = Vec::new();
+
+            let held = hold_from(&text, bracketed, &mut destination);
+
+            assert!(
+                held.is_none(),
+                "the break was not counted as one: composed it comes out as {comes_out_as}, and the \
+                 two halves were measured as a single line of {}",
+                held.map_or(0, |paste| paste.longest())
+            );
+            assert!(
+                !destination.is_empty(),
+                "nothing was sent at all (bracketed: {bracketed})"
+            );
+        }
+
+        // The control that gives the two assertions above their meaning: **the same two halves with
+        // no break between them are one line, and that one is held.** Without this, a gate that never
+        // holds anything would pass the loop.
+        let with_no_break = "x".repeat(boundary * 2);
+        let mut destination = Vec::new();
+        assert!(
+            hold_from(&with_no_break, false, &mut destination).is_some(),
+            "the halves are not long enough together to be over the boundary: the loop above proves \
+             nothing"
+        );
+        assert!(destination.is_empty(), "the held paste was written anyway");
+    }
+
+    #[test]
+    fn the_line_that_decides_is_the_longest_one_and_not_the_first() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **A live silent truncation, found by mutating `.max()` into `.next()`.** Every other test
+        // here puts the long line first or makes them all equal, so nothing distinguished «the first
+        // line» from «the longest» — and a paste of `ls` followed by five thousand characters would
+        // have sailed through the gate and had its second line cut, which is the whole bug.
+        let text = format!("ls\n{}", "x".repeat(boundary + 1));
+        let mut destination = Vec::new();
+        let mut held = None;
+
+        paste_or_hold(&text, false, &mut destination, &mut held);
+
+        assert!(
+            held.is_some(),
+            "the long line was not the first one, so the gate never looked at it"
+        );
+        assert!(
+            destination.is_empty(),
+            "it went to the program anyway: {} bytes",
+            destination.len()
+        );
+    }
+
+    #[test]
+    fn the_question_carries_the_two_numbers_somebody_decides_with() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **The numbers, not just the words.** Reporting both as zero — «a line of 0 bytes… keeps
+        // only about 0» — used to leave every test green: `longest()` was asserted and the sentence
+        // built from it was not, which is this project's first disguise exactly.
+        let over = boundary + 7;
+        let mut held = None;
+        paste_or_hold(&"x".repeat(over), false, &mut Vec::new(), &mut held);
+        let said = held.expect("nothing was held").sentence();
+
+        assert!(
+            said.contains(&over.to_string()),
+            "the question does not say how long the line is: {said:?}"
+        );
+        assert!(
+            said.contains(&boundary.to_string()),
+            "the question does not say what a reader keeps: {said:?}"
+        );
+    }
+
+    #[test]
+    fn a_lone_held_paste_does_not_claim_another_one_was_turned_away() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // Only the presence of that clause was ever pinned, never its absence — so a sentence that
+        // always claimed a paste had been turned away passed every test.
+        let mut held = None;
+        paste_or_hold(&"x".repeat(boundary + 1), false, &mut Vec::new(), &mut held);
+        let said = held.expect("nothing was held").sentence();
+
+        assert!(
+            !said.contains("not taken"),
+            "one paste was held and the question says another was turned away: {said:?}"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_paste_is_never_held_however_long_its_line_is() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **The gate must not fire where the loss cannot happen.** A program only turns the paste
+        // markers on if it handles pastes itself, and every program that does is a line editor in
+        // raw mode — where there is no canonical line buffer to truncate anything. Holding those
+        // would put a false warning on the path that matters most in a terminal for hosting agents:
+        // pasting a long prompt into an agent's console.
+        let text = "x".repeat(boundary * 4);
+        let mut destination = Vec::new();
+        let mut held = None;
+
+        paste_or_hold(&text, true, &mut destination, &mut held);
+
+        assert!(
+            held.is_none(),
+            "a wrapped paste was held, and its line cannot be truncated at all"
+        );
+        assert!(
+            destination == paste(&text, true),
+            "the wrapped paste did not go through whole"
+        );
+        // And the same text unwrapped IS held, so this test is about the wrapping and not about the
+        // text being somehow acceptable.
+        let mut also = Vec::new();
+        let mut unwrapped = None;
+        paste_or_hold(&text, false, &mut also, &mut unwrapped);
+        assert!(
+            unwrapped.is_some() && also.is_empty(),
+            "the same text unwrapped was not held, so the wrapping is not what this proves"
+        );
+    }
+
+    #[test]
+    fn every_pass_starts_with_an_empty_buffer_even_with_nothing_held() {
+        // The emptying lives inside this function and not at the call site, so it is this function
+        // that has to be caught not doing it. Without a held paste it is the only thing it does.
+        let ctx = Context::default();
+        let mut held = None;
+        let mut keystrokes = b"what the previous pass sent".to_vec();
+
+        a_pass_with(&ctx, None, &mut held, &mut keystrokes);
+
+        assert!(
+            keystrokes.is_empty(),
+            "the previous pass's bytes were sent a second time: {keystrokes:?}"
+        );
+    }
+
+    #[test]
+    fn saying_yes_puts_the_paste_in_the_pass_and_nothing_else() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        let text = "x".repeat(boundary + 1);
+        let mut held = hold_from(&text, false, &mut Vec::new());
+        assert!(held.is_some(), "there is nothing held to answer");
+        let ctx = Context::default();
+        let mut keystrokes = b"what the previous pass sent".to_vec();
+
+        a_pass_with(
+            &ctx,
+            Some((Key::Enter, Modifiers::CTRL)),
+            &mut held,
+            &mut keystrokes,
+        );
+
+        // **Both halves in one assertion, and that is the point.** Equal to the composed paste means
+        // the buffer was emptied *and* the answer was resolved into it; the two apart are one
+        // reordering away from a pass that resolves a paste and then wipes it.
+        assert!(
+            keystrokes == paste(&text, false),
+            "the pass sent {} bytes and the paste is {}: either the previous pass's bytes are still \
+             there, or the answer never landed",
+            keystrokes.len(),
+            paste(&text, false).len()
+        );
+        assert!(held.is_none(), "the paste stayed held after being sent");
+    }
+
+    #[test]
+    fn saying_no_throws_the_paste_away_and_sends_nothing() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        let text = "x".repeat(boundary + 1);
+        let mut held = hold_from(&text, false, &mut Vec::new());
+        let ctx = Context::default();
+        let mut keystrokes = b"what the previous pass sent".to_vec();
+
+        a_pass_with(
+            &ctx,
+            Some((Key::Escape, Modifiers::NONE)),
+            &mut held,
+            &mut keystrokes,
+        );
+
+        assert!(
+            keystrokes.is_empty(),
+            "discarding sent {} bytes to the program",
+            keystrokes.len()
+        );
+        assert!(
+            held.is_none(),
+            "the discarded paste is still being asked about"
+        );
+    }
+
+    #[test]
+    fn a_paste_nobody_has_answered_stays_held_and_is_not_sent() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        let text = "x".repeat(boundary + 1);
+        let mut held = hold_from(&text, false, &mut Vec::new());
+        let ctx = Context::default();
+        let mut keystrokes = b"what the previous pass sent".to_vec();
+
+        // A key that is neither of the two answers: the question is still open.
+        a_pass_with(
+            &ctx,
+            Some((Key::A, Modifiers::NONE)),
+            &mut held,
+            &mut keystrokes,
+        );
+
+        assert!(
+            held.is_some(),
+            "the paste was dropped without anybody having answered"
+        );
+        assert!(
+            keystrokes.is_empty(),
+            "the pass sent something on its own: {keystrokes:?}"
+        );
+    }
+
+    #[test]
+    fn a_bare_enter_stays_the_programs_even_with_a_question_standing() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **The accident this chord exists to stop**, and it runs the other way from the obvious
+        // one: with the question standing, somebody types a command at the prompt and presses Enter
+        // to run it. If that Enter answered «send», the held paste would be appended onto the line
+        // they just typed — a line over the boundary by construction, truncated by the kernel, which
+        // is the incident this whole thing exists to prevent arriving through its own cure.
+        let text = "x".repeat(boundary + 1);
+        let mut held = hold_from(&text, false, &mut Vec::new());
+        let ctx = Context::default();
+        let mut keystrokes = Vec::new();
+
+        a_pass_with(
+            &ctx,
+            Some((Key::Enter, Modifiers::NONE)),
+            &mut held,
+            &mut keystrokes,
+        );
+
+        assert!(
+            held.is_some(),
+            "a bare Enter answered the question, so it is not the program's any more"
+        );
+        assert!(
+            keystrokes.is_empty(),
+            "a bare Enter released the held paste: {keystrokes:?}"
+        );
+    }
+
+    #[test]
+    fn the_enter_that_answers_does_not_also_reach_the_program() {
+        let Some(boundary) = the_boundary_or_stand_down() else {
+            return;
+        };
+        // **With the question open, the chord that answers must not also get through** — it would run
+        // whatever is on the shell's line, the opposite of what somebody answering meant. The answer
+        // has to consume the key.
+        let text = "x".repeat(boundary + 1);
+        let mut held = hold_from(&text, false, &mut Vec::new());
+        let ctx = Context::default();
+        let mut keystrokes = Vec::new();
+        let input = eframe::egui::RawInput {
+            events: vec![Event::Key {
+                key: Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::CTRL,
+            }],
+            ..Default::default()
+        };
+
+        let mut arrived = false;
+        let mut still_there = true;
+        let mut once = Some(());
+        ctx.run_ui(input, |_ui| {
+            if once.take().is_none() {
+                return;
+            }
+            // The control: without it, a pass where the key never arrived would satisfy the
+            // assertion below and publish «it was consumed» about an event nobody sent.
+            arrived = ctx.input(|state| state.key_pressed(Key::Enter));
+            start_the_keys(&ctx, &mut held, &mut keystrokes, false);
+            still_there = ctx.input(|state| state.key_pressed(Key::Enter));
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            arrived,
+            "the Enter never reached the pass: this test proves nothing"
+        );
+        assert!(
+            !still_there,
+            "the Enter that answered the question is still in the pass, so the loop will send a \
+             carriage return behind the paste"
+        );
     }
 }
 

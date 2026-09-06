@@ -4568,3 +4568,96 @@ the effect it has— in its sharpest form: **the effect was real and the author 
 - **The guard reads a shape it cannot parse in two cases** — a literal continued across lines, and a
   raw string carrying a quote of its own. Both leave the same footprint, and a test fails on any line
   that names a mode command and yields no literal at all. Declared rather than papered over.
+
+---
+
+## D31 — A pasted line that does not fit is held and asked about, never sent to be cut
+
+**An over-long pasted line is not lost by the far side: a different command is executed, and the
+screen shows the one that was not.** The line discipline **closes** a line at its buffer limit
+instead of refusing it, so a program reading lines receives something syntactically complete and runs
+it. Measured with the shell's stdout going to a file, where the echo cannot forge it: a 4 200-character
+`echo …_TAIL_OK` produced 4 090 characters and no tail, while the terminal echoed all 4 200 followed
+by a normal prompt. **No error, no mark, and the visible line is the one that did not run.**
+
+**The ticket called it data loss and it is worse than that.** The everyday shape needs nobody's
+malice: a long command whose trailing flag falls off. The cut is also **aimable** — padding puts the
+boundary on any byte — which makes it the clipboard-hijack class through a vector no filter can see,
+because there is nothing in the text to filter. That is recorded for completeness; **the argument is
+the everyday case**.
+
+**And it reaches more than it looks.** `bash` and `zsh` are in raw mode at their prompt and
+**canonical while any foreground command runs**, so it reaches anybody who pastes while something is
+running. The first version of this investigation concluded the opposite from a measurement taken only
+at the prompt; a challenger overturned it.
+
+### The number is not `MAX_CANON`, and that matters more than it sounds
+
+`getconf MAX_CANON /` is **255**. What bounds a canonical line on Linux is `N_TTY_BUF_SIZE`, a
+**compile-time constant of the kernel's `n_tty` driver** — not POSIX, not reachable through `termios`,
+and different on other kernels. The project called it `MAX_CANON` in the ticket, in the code and in
+its knowledge store. **A mislabelled constant is the same defect as a mislabelled measurement**, and
+the consequence is concrete: `4 095` must never be written into code or a test as if it were a
+contract, because **F2.7 goes to a platform with another number**.
+
+### The decision
+
+- **A paste whose longest line is over the threshold is not written.** It is held, the question is
+  painted over the console, and the person decides. **Holding and not warning**: nothing reaches the
+  program until the line closes, and once it closes the shell has already run the truncated command —
+  a warning would arrive after the incident and label it.
+- **A wrapped paste is never held.** A program turns the paste markers on only if it handles pastes
+  itself, and every program that does is a line editor in raw mode, where the canonical buffer does
+  not exist. `readline` turns the markers off before running a foreground command, which is the exact
+  moment the shell goes canonical: the correlation is the same switch. **This matters most of all
+  here** — in a terminal for hosting agents, pasting a long prompt into an agent's console *is* the
+  paste, and holding those would put a false warning on the one path that matters.
+- **The threshold is declared per platform and is never a contract.** It is what decides whether to
+  ask a question, not an assertion about what will arrive. Linux gets its measured number; everything
+  else gets **no gate**.
+- **Saying yes costs `Ctrl+Enter`; a bare `Enter` stays the program's.** The accident that decides
+  this runs the other way from the obvious one: with the question standing, somebody types a command
+  and presses `Enter` to run it, and a bare-`Enter` yes would append the held paste onto the line they
+  just typed — over the boundary by construction, truncated by the kernel, the incident arriving
+  through its own cure.
+- **The paste is composed when it is SENT, not when it was held.** The mode moves underneath a
+  standing question, and bytes composed unwrapped delivered to a prompt that has since turned the
+  wrapping on make the line editor execute each line as it arrives.
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **Keeping silent** (what it did) | Silence **is** the incident: the far side runs a different command and the screen shows the one that did not run. **D8** refused silent discarding on the output side and **D29** on the input side; this was the third path and it had been discarding all along |
+| **Splitting the line at the boundary** | Measured: in a shell the tail then **runs as a command of its own**. It is the right fix for `cat` and a catastrophe for a shell, and **no mode query separates them** — both are canonical |
+| **Warning after sending** | Arrives after the shell has executed the wrong command. It labels the incident instead of preventing it |
+| **Reading the terminal's mode as the gate** | It can be read — `portable-pty` exposes it, 254 ns, proven end to end — and it is **not a gate**: the mode flips at every command boundary and **D29**'s queue puts an unbounded gap between the reading and the write. Worth only as «raw, therefore no limit», which is what the wrapped-paste rule uses indirectly |
+| **Copying Darwin's number out of a header** | Nobody has run it on a Mac. A number taken from a header and published as measured is exactly what the paragraph above forbids |
+| **A bare `Enter` for the affirmative** | See the accident above. It is also the key people press to dismiss anything, which would hand the risky action to the habitual reflex |
+| **Doing what the other emulators do** | **They do nothing.** None of WezTerm, Kitty or Ghostty chunks a paste, none warns by size by default, and **none has an issue of this shape in its tracker**. The rule says look it up rather than re-invent; looking it up said there is nothing to copy, which is why this is a position and is argued rather than cited |
+
+### What it leaves open, declared rather than discovered later
+
+- **The gate is stateless.** It measures the paste alone and cannot see what is already unterminated
+  on the other side — text typed at the prompt before it. A short paste on top of a long line still
+  truncates. **It narrows the window; it does not close it**, and it must not be described otherwise.
+- **Windows has no such question.** Every termios accessor of `portable-pty` is `#[cfg(unix)]` and
+  ConPTY has no line discipline. F2.7 needs a branch that cannot ask and can only assume.
+- **A short paste goes through while a question stands**, so held bytes land *after* it if the answer
+  is yes — the reverse of the order they were pasted in. The price of not freezing the console.
+- **Every pane paints its own notice and only the focused one can answer it.** The keyboard half of
+  the same gap the mouse already has: the notice has no clickable answer either.
+
+### The sentence D6 needs, and why it is here
+
+**D6** forbids deducing state *«by reading the screen or by parsing third-party files»*, and its
+reason is three prototype failures about what «closed» meant: **D6 is about meaning**. This
+investigation asked the kernel for a file descriptor's `termios` — one bit the program itself set,
+read back from the kernel's own record, with one correct answer and no interpretation — and the
+literal reading of D6's own table (level 1 is *«the app, looking at the painting or at the PTY»*)
+covers it, while its subject does not.
+
+**So D6 is amended here rather than argued about again: what D6 forbids is deducing the STATE OF THE
+WORK. The program's own I/O configuration is not that.** Reading it supplies no vocabulary to the
+panel and answers no question about how a task is going. What is still forbidden is what D6 always
+meant: inferring from someone's output what their work means.

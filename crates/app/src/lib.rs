@@ -1521,6 +1521,13 @@ struct Pane {
     received: Vec<u8>,
     /// The bytes the keys of this pass send to the program. Reused for the same reason.
     keystrokes: Vec<u8>,
+    /// A paste that was **not** sent, waiting for the person in front of the screen to say whether
+    /// it should be.
+    ///
+    /// It survives between frames because the question does: the bytes are held, not written, and
+    /// nothing reaches the program until somebody answers. Holding rather than warning is the whole
+    /// point — once the line closes, the shell has already run the truncated command.
+    held: Option<keyboard::HeldPaste>,
     /// The size the last UI pass measured.
     ///
     /// It is measured where there is a rectangle —`ui`— and applied where the effects live
@@ -1681,6 +1688,7 @@ impl Pane {
             screen: Screen::new(INITIAL_GRID),
             received: Vec::new(),
             keystrokes: Vec::new(),
+            held: None,
             measured: INITIAL_GRID,
             timings: Timings::default(),
             pending_measurement: None,
@@ -2331,12 +2339,19 @@ impl Pane {
         keymap: &keyboard::Keymap,
         copy_enabled: bool,
     ) -> Vec<WindowRequest> {
-        self.keystrokes.clear();
         // It is asked once and not per event because **the mode cannot change halfway through a
         // pass**: it is set by the program inside with what it writes, and what it writes is
         // interpreted in the other half of the frame. (Asking it inside the closure would compile
         // as well —the two fields are disjoint borrows—, so this is a choice, not a wall.)
         let bracketed = self.screen.bracketed_paste();
+        // **With a paste held, its answer is read before anything else.** The bytes are not written
+        // and the question owns `Enter` and `Escape` until it is answered; everything else still
+        // reaches the program, because a held paste is not a frozen console. It is composed against
+        // the mode read just above, which is the mode **now** and not the one the question was asked
+        // in — see `HeldPaste`, where that difference is the difference between a paste and an
+        // execution.
+        let released =
+            keyboard::start_the_keys(ctx, &mut self.held, &mut self.keystrokes, bracketed);
         let mut pasted = false;
         let mut requests = Vec::new();
         let mut scrolls: Vec<Scroll> = Vec::new();
@@ -2428,11 +2443,15 @@ impl Pane {
                 // can be separated, and separating them is what makes Ctrl+V go on reaching the
                 // program inside: for vim it is the visual block, and for a shell «the next thing,
                 // literally».
+                // **And it is not written if one of its lines does not fit.** The line discipline
+                // closes an over-long line instead of refusing it, so the program receives
+                // something syntactically complete and runs it — a different command from the one
+                // on screen, with nothing said. Measured. The bytes are held and the question is
+                // put; nothing reaches the program until it is answered.
                 if let egui::Event::Paste(text) = event
                     && chord.shift
                 {
-                    self.keystrokes
-                        .extend_from_slice(&keyboard::paste(text, bracketed));
+                    keyboard::paste_or_hold(text, bracketed, &mut self.keystrokes, &mut self.held);
                     paste_seen = true;
                     return false;
                 }
@@ -2555,7 +2574,7 @@ impl Pane {
             });
 
             *modifiers = chord;
-            pasted = paste_seen;
+            pasted = paste_seen || released;
             requests = asked;
             scrolls = scrolled;
             to_the_clipboard = to_copy;
@@ -6034,12 +6053,12 @@ impl Window {
         pane.measured = metrics.cells_in(panel_split.console.size());
 
         let before = Instant::now();
-        painter::paint(
+        painter::paint_a_console(
             &ui.painter_at(panel_split.console),
-            &pane.screen.view(),
+            pane,
             theme,
             metrics,
-            panel_split.console.left_top(),
+            panel_split.console,
             discoverer,
         );
         // **Rasterizing a color glyph runs INSIDE the painting, so it is subtracted from the
@@ -6773,6 +6792,105 @@ mod tests {
     }
 
     #[test]
+    fn a_console_holding_a_paste_paints_the_question_over_it() {
+        // **The user-visible half, and without this test there is none.** Deleting the line that
+        // paints the notice leaves the whole suite green and turns the product into something worse
+        // than the bug it fixes: you paste, nothing reaches the program, nothing appears, and the
+        // chord that would answer is eaten by a question nobody can see.
+        //
+        // **It counts what the painter enqueues**, the way this crate's other painting tests do.
+        // Asserting that the field is set would pass with the painting deleted, which is the exact
+        // shape this project calls a test that covers nothing.
+        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
+            return;
+        };
+        let mut pane = pane_with("sleep 30", 0);
+        let theme = theme::Theme::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 400.0));
+
+        let quiet = shapes_painting(&pane, &theme, rect);
+        keyboard::paste_or_hold(
+            &"x".repeat(boundary + 1),
+            false,
+            &mut Vec::new(),
+            &mut pane.held,
+        );
+        assert!(
+            pane.held.is_some(),
+            "the paste was not held, so nothing is being asked"
+        );
+        let asking = shapes_painting(&pane, &theme, rect);
+
+        assert!(
+            asking > quiet,
+            "a console holding a paste painted no more than one holding none ({asking} against \
+             {quiet}): the question is invisible and its chord is eaten by nothing on screen"
+        );
+    }
+
+    /// How many shapes the painter enqueues for that console, painted onto a layer of its own.
+    fn shapes_painting(pane: &Pane, theme: &theme::Theme, rect: egui::Rect) -> usize {
+        let ctx = egui::Context::default();
+        // An empty pass first: the text engine does not exist until there has been one.
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut discoverer = fonts::Discoverer::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("the console"),
+            ));
+            let metrics =
+                painter::CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer);
+        });
+        let painted = output.shapes.len();
+        output.drop_without_applying_deltas();
+        painted
+    }
+
+    #[test]
+    fn a_pasted_line_that_does_not_fit_reaches_the_program_as_nothing_at_all() {
+        // **The wiring, and without this test there is none.** Every other paste test here uses
+        // short text, so reverting `send_keys` to the composition it had before this fix restores the
+        // bug in full and nothing goes red: all the holding coverage calls the module directly. What
+        // this pins is the thing the user meets — the bytes do not reach the program — and not that
+        // some field was set.
+        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
+            return;
+        };
+        let ctx = egui::Context::default();
+        let mut pane = pane_with("sleep 30", 0);
+        let mut modifiers = egui::Modifiers::NONE;
+
+        enqueue(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(with_shift()),
+                egui::Event::Paste("x".repeat(boundary + 1)),
+            ],
+        );
+        pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            2,
+            &keyboard::Keymap::default(),
+            true,
+        );
+
+        assert!(
+            pane.keystrokes.is_empty(),
+            "an over-long line was handed to the program anyway: {} bytes",
+            pane.keystrokes.len()
+        );
+        assert!(
+            pane.held.is_some(),
+            "nothing was written and nothing is being asked about either: the paste just vanished"
+        );
+    }
+
+    #[test]
     fn with_shift_the_text_is_pasted_and_without_it_the_control_byte_goes() {
         // The two shortcuts arrive as the SAME event and with no modifiers: the desktop resolves
         // them first and swallows the key. Telling them apart here is what makes Ctrl+V keep
@@ -7099,6 +7217,7 @@ mod tests {
             folded: false,
             received: Vec::new(),
             keystrokes: Vec::new(),
+            held: None,
             measured: INITIAL_GRID,
         }
     }
