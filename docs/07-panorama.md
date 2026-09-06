@@ -599,6 +599,51 @@ structural decision of theirs just as Electron is in Orca and the browser is in 
 
 ---
 
+### E9 — Gentle: the agent that grew a face, and the marker that has no wall to hang on
+
+Two repositories of the same author (Alan Buscaglia, *Gentleman Programming*), announced together in
+September 2026 and worth separating, because **only one of them is on our square** and it is not the
+one being announced.
+
+| | What it is | Numbers, 6 September 2026 |
+|---|---|---|
+| **gentle-pi** («Gentle Shell») | An MIT package installed **inside Pi**, an agent CLI by Earendil (MIT, 15+ providers) that runs in **your** terminal. It is not a terminal and it is not a multiplexer: it is **the face of an agent**. It ships a status bar with context gauges, model and **subscription usage**, a git diff overlay on `alt+g`, and subagents as `pi --mode rpc` child processes | 432 ★ · 81 forks · pushed the same day |
+| **gentle-agent-state** | An MIT shell layer that paints an agent's state **in tmux's tab bar**, in Zellij, or in Ghostty's title. Three states, `working` / `blocked` / `idle`, declared by the agent through hooks and plugins — **not deduced**. The tab shows the **worst state of its panes**: `blocked > working > idle` | 54 ★ · 6 forks · **last push 1 July 2026** |
+
+**The one that touches us is the small one, and it touches the pane we thought was ours.** The
+rollup by worst state onto the tab is, line for line, what **F2.8** does with `attention` — and this
+repository has had it since June, two months before that milestone closed. It also belongs on the
+list of what no longer sets us apart, in the row that fell in August: **the state is declared by
+whoever works, not deduced by the app** (`~/.claude/settings.json` hooks, an opencode plugin, a Pi
+extension).
+
+**And it has a de facto third-party channel, undocumented as such.** Every adapter ends in a single
+neutral dispatcher, `~/.config/agent-state/scripts/agent-report.sh`. Nothing stops a CI run, a
+deployment or a script of your own from calling it — exactly the way Orca's OSC title ended up open
+without meaning to. What it does **not** have is a body: the vocabulary is *«deliberately small»*,
+three words and a coloured dot, less than Herdr's four states plus its key-value pairs.
+
+**What it does not have at all is a wall to hang the marker on.** It needs tmux, Zellij or Ghostty
+to paint, and what it can paint there is a character in a tab title. That is the same limit this
+landscape already attributes to Herdr —*«the place to paint it»*— and the reason none of them can
+show, next to the console, what the producer wanted to say.
+
+> **The detail that says the most about the map**, and it is one line of its README:
+> `HERDR_ENV=1` **disables every adapter so Herdr can own the integration**. The two of them already
+> know about each other and one steps aside for the other. This square is no longer empty of people:
+> it is empty of the contract.
+
+**No expiry, and it shows in the workaround.** Nothing declares when a state stops being valid, so
+the project self-heals: a heartbeat in tmux's `status-right` and a script that **clears stale
+`blocked` states when a pane becomes visible**. That is repairing a deduction after the fact, which
+is the opposite of `updated_at` + `stale_after_minutes`.
+
+**What to steal:** the sound on the transition to `blocked` and back to `idle`, which this project
+does not have and costs nothing; and the honesty of the three-state table, which reads in five
+seconds.
+
+---
+
 ## What this landscape says about the project
 
 **1. The «one worktree per agent» pattern is already standardized.** Everybody does it, and `flow`
@@ -688,14 +733,19 @@ This is the important thing to accept, because it was in the pitch and today it 
 | One worktree per agent | **all of them** |
 | Hosting any CLI agent | **cmux**, **Orca** and **Herdr** (with no adapters), Warp (five) |
 | Warning when an agent is waiting | **all of them** |
-| Cost, tokens, remaining context | Conductor (unverified), **Orca** (verified: it reads `~/.claude`) |
+| Cost, tokens, remaining context | Conductor (unverified), **Orca** (verified: it reads `~/.claude`), **gentle-pi** (its status bar publishes the subscription's usage) |
 | A channel for driving the app from the agent | Superset and Xirp (MCP), cmux (socket), Orca (CLI + MCP), **Herdr** (socket, 70+ methods) |
 | Any process being able to publish something | **cmux** (OSC 777/99), Orca (the OSC title, de facto), **Herdr** (`--source custom:*`, documented) |
-| **It being declared by whoever works instead of deduced by the app** | **Herdr** (its hook layer overrides the heuristics) |
+| **It being declared by whoever works instead of deduced by the app** | **Herdr** (its hook layer overrides the heuristics) and **gentle-agent-state** (hooks and plugins, four agents, since June 2026) |
 
 Ten things. None of them serves any longer to explain the project in thirty seconds, and the last one
 —which had been in the pitch from the beginning— fell in August. **Of the ten, Orca has six and Herdr
 seven.** Neither of the two has the one that is missing: **what fits through that channel.**
+
+> **September 2026 adds an eleventh, and it was ours until F2.8 closed:** rolling the state of the panes
+> up onto the tab by the worst of them. `gentle-agent-state` has done it in tmux since June (E9), and it
+> paints the same three words this project paints — with a colour and a letter, and with no body behind
+> them.
 
 ### What does remain, and it is three things
 
