@@ -4518,3 +4518,53 @@ report say so. The second figure existed *because* the write waited.
   run and 54 s in another, with a child that never wrote a byte. The slave end *is* dropped at spawn,
   so the obvious answer is already ruled out. It is written here so nobody closes it with a guess:
   this investigation was caught doing exactly that once.
+
+---
+
+## D30 — A test that needs a terminal mode proves it has one, and no control character can prove it
+
+**The tests that hold D23 up were passing over a terminal they had never managed to configure.** Their
+script asked for a mode, printed a marker and let the test start; chained with `;`, the marker was
+printed **even when the mode command failed**. Measured with `stty` missing: **744 passed, 1 failed** —
+fourteen of the fifteen tests hanging off those two scripts stayed green.
+
+**They stayed green because the evidence they read can be written by somebody other than the program.**
+With `ICANON` on, the line discipline delivers nothing to the program without a newline, and a mouse
+report has none — so the `cat -v` inside received nothing. With `ECHO` on, the line discipline printed
+those same bytes itself, and `ECHOCTL` renders an escape `^[`, character for character what `cat -v`
+would have printed. The kernel forged exactly what the assertion looked for.
+
+This is the project's first recorded disguise —asserting on the place a value is recorded instead of on
+the effect it has— in its sharpest form: **the effect was real and the author of it was wrong**.
+
+### The decision
+
+- **A script that sets a mode chains strictly to its marker.** `&&` and nothing else, so the marker
+  cannot be reached when the mode command failed.
+- **And the test proves the mode took, because an exit status is not a mode.** It writes a byte and
+  requires the answer only the program can give.
+- **The probe byte is above `0x7f`.** `cat -v` writes it in meta notation, `M-^@`; the line discipline
+  echoes the raw byte. Those four characters have no second author.
+- **A guard holds the first half over the source, in both crates.** `crates/app/tests/scripts.rs`
+  judges a literal only when it both sets a mode and later prints a text some test waits for, so loop
+  syntax and scripts whose failure already shows red are let through by construction.
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **The marker alone, chained with `&&`** | Necessary and not sufficient, and the gap is not theoretical: replace `stty` with `true` —exits zero, changes nothing— and the chain sees nothing wrong. Measured: **15 of 15 green** without the probe, **15 of 15 red** with it |
+| **`0x7f`, the erase character** (what shipped first, and a review caught it) | It looked like the one control character canonical mode eats. **The erase key is configuration, not a property**: measured over three pseudoterminals, with it moved to `^H` a canonical terminal returns `^?` exactly like a raw one. The old probe passed **all fifteen** over the very terminal it exists to reject |
+| **Any other control character** | `ECHOCTL` and `cat -v` both use caret notation, so they are indistinguishable by construction: `0x1b` comes back `^[` from either |
+| **A tab** (`0x09`), proposed as the remedy for the row above | Measured before it was applied: `cat -v` leaves a tab alone, so the wait would never be satisfied and all fifteen tests would have gone permanently red |
+| **Banning `;` in a shell literal** | It fires on four scripts measured safe — loop syntax, and scripts whose failure already shows red — and a guard that fires on correct code gets deleted |
+| **A guard over `app` only** | The identical defect was fixed in `term-core` by the work on the blocking write, comment and measured number included, and nobody carried it across. A guard watching one crate would repeat the mistake it exists to stop |
+
+### What it left open
+
+- **`stty` and `cat -v` are still the assumption.** D1's other two platforms have neither in that
+  shape. What changes is that the assumption now **fails loudly** instead of publishing a green: that
+  is what makes the port findable rather than silent.
+- **The guard reads a shape it cannot parse in two cases** — a literal continued across lines, and a
+  raw string carrying a quote of its own. Both leave the same footprint, and a test fails on any line
+  that names a mode command and yields no literal at all. Declared rather than papered over.
