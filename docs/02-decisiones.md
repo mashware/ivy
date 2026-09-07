@@ -1711,7 +1711,8 @@ behind it:
   50.7 ms** —a tab of two consoles, around 101 ms; and **404 ms that same console** if the program
   inside ignores the hang-up signal— and it can hang it
   ([#62](https://github.com/mashware/agent-terminal/issues/62)). Saving only on the way out would
-  have lost the whole session in the normal case.
+  have lost the whole session in the normal case. **The «can hang it» half stopped being true with
+  D32**, which bounds the wait; the freeze this annex measures is the other half and is still paid.
 - **The identity is new because keeping it would be deducing the state.** A panel restored with
   yesterday's `panel.json` would paint **as current** the last state of an agent that no longer
   exists: «compiling» from a build that died last night. The app does not deduce the state (**D6**),
@@ -4852,3 +4853,114 @@ covers it, while its subject does not.
 WORK. The program's own I/O configuration is not that.** Reading it supplies no vocabulary to the
 panel and answers no question about how a task is going. What is still forbidden is what D6 always
 meant: inferring from someone's output what their work means.
+
+## D32 — Closing gives the reader thread a deadline and then abandons it, and does not signal a process group
+
+**Closing a console could freeze the window for ever, and the destructor runs inside the interface
+pass.** The reader thread sits blocked inside `read()` on a descriptor cloned from the pseudoterminal
+master, and it was joined with no deadline. When the program inside leaves behind something that
+outlives it — a `sleep &`, a development server, anything that made a session of its own — that
+survivor inherited the **slave** end, so there is no end of file, the `read` never returns and the
+join never returned either: no repaint and no keyboard for as long as the survivor lived. Measured: a
+`Drop` that had not returned after eight seconds. **#62.**
+
+**The shape is as old as the crate; F2.1 is what made it reachable**, by letting a tab be closed hot.
+And two accidents were hiding it — the terminal's echo returning the bytes `portable-pty`'s master
+writer emits on drop, and **#157** having moved that writer out of `Pty`'s fields into the write
+thread, where it drops *before* the join instead of after. So it only showed with the echo off, which
+is the first thing `vim`, `htop` or a TUI agent does. The whole autopsy is in the work's artifacts;
+what belongs here is the decision.
+
+**The thread cannot be woken.** That is the fact everything else follows from: it is blocked on a
+descriptor a survivor holds **by design**, and the stop flag it already has is only consulted after a
+`read` returns — which is exactly what never happens. There is nothing to signal, nothing to close and
+nothing to interrupt that gets the descriptor back. So the only thing that can bound the wait is the
+wait itself.
+
+### The decision
+
+- **The reader thread is joined with a deadline of 100 ms and abandoned if it does not come.** The
+  thread owns the sending half of a channel it never writes to; the channel goes quiet exactly when
+  the thread ends, whichever way it ends, so the ordinary close reads `Disconnected` at once and joins
+  as before. `READER_GIVE_UP` in `crates/term-core/src/lib.rs`.
+- **The number separates «microseconds» from «never» and is not a measurement of anything.** It is
+  three orders of magnitude above what the ordinary case needs and it is deliberately **not** a
+  threshold for how long a frozen window is tolerable: nobody measured that here and no number in the
+  code claims it.
+- **It is spent per console, not per gesture.** Closing a tab drops every pane it had, in series,
+  inside the same interface pass, so four consoles each over a survivor is four times this. That is
+  the number to quote.
+- **Abandoning costs a thread and a descriptor while the survivor stays silent.** The stop flag is
+  already raised, so the survivor's **next byte** ends the thread: the read returns, the delivery sees
+  the flag and it leaves. Only a survivor that never writes again holds them for the life of the
+  process. It is the same trade **D29** already records for the writer thread (**#159**) and it is
+  audited with it.
+- **No signal goes to a process group.** Not because it would do nothing — see the table — but because
+  it would not be enough and because sending one is a decision about what closing *means*, which this
+  fix does not take. **`Ctrl+C` stays a byte** either way: in raw mode `0x03` is data a TUI agent asked
+  to read, and signalling on **close** is a different act from signalling on a **key** (**D12**,
+  **D23**). The fix does not blur them.
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **Signalling the process group instead of the pid**, which is what the issue proposed first | It is **insufficient, not useless**, and the weaker claim shipped in a comment before a review caught it. A plain `sleep &` does hold the slave end and *does* stay in the child's group, so a group signal would close it; a survivor that called `setsid` is in a group of its own and is exactly what it does not reach. So a deadline is needed anyway — and adding the signal would additionally kill the background jobs of whoever closed the pane, which nobody has decided. Left open, deliberately |
+| **Waking the reader instead of bounding the wait** — the store's own rule asks for a stop flag *and its own trigger* | There is no trigger to give it. `close()` on our clone does not unblock a `read` already in flight, the master stays open for resizing, and no signal takes back a descriptor another process holds. Measured indirectly: the only thing that ever woke it was the echo, by accident |
+| **Killing the survivor** — `killpg`, or walking `/proc` for holders of the slave | It is somebody's `nohup`ed build, dev server or daemon. A terminal that kills what you deliberately detached, because you closed the pane it was started from, is worse than one that takes 150 ms |
+| **Closing the master to force `EIO`** | The reader thread owns its **own** descriptor from `try_clone_reader()`, so dropping ours changes nothing for it — and the master is kept on purpose, for `resize` |
+| **Doing the close off the interface pass** (a thread, a queue of dying consoles) | It removes the freeze without bounding anything, so the leak becomes unbounded and invisible instead of bounded and declared. It is also a bigger change than the defect, and the ~101 ms that F1 is about would still be paid somewhere |
+| **`JoinHandle::is_finished()` plus a bounded poll**, which a reviewer argued for and which would remove a field, an unused sender and an unreachable match arm | A fair reading, and the module already polls elsewhere for exactly this class of reason. Kept the channel because `recv_timeout` blocks and wakes **on the event**, where the poll wakes a hundred times to look at a boolean inside the interface pass — and the version that would need a comment explaining why it busy-waits there is the poll. The reviewer's better idea, a small `Ended` guard type whose «did it end within this?» *is* the question, is left open |
+| **A number chosen from what a person tolerates** (the ~600 ms where a delay stops reading as a delay) | It shipped in a comment for one afternoon and was removed: nobody measured it in this project, and a mislabelled number is worse than no number |
+
+### What it left open
+
+- **The ~101 ms that was already being paid** is untouched: it is `portable-pty`'s fixed 50 ms poll per
+  console, and it needs a different change — SIGHUP then an immediate SIGKILL, or moving the close off
+  the interface pass. Confirmed with ten samples in the work's diagnosis.
+- **Nobody is told.** The window publishes a line when a console's program stops taking what is typed
+  (**D29**); abandoning a reader says nothing — no line, no counter — so a trade taken knowingly is
+  unauditable from outside. It is a product question first: what does the window tell somebody whose
+  console left a thread behind.
+- **Whether closing should signal the group at all**, per the table above.
+- **`F2.7` inherits one concrete thing rather than a worry.** Every mechanism here is Linux-specific —
+  the kernel hangup, `EIO`, the `VEOF` echo, `setsid(1)` itself — and the regression test is written so
+  that a host without `setsid(1)`, which is every macOS, **fails loudly instead of passing quietly**.
+  That is the right failure, and it gives the first run on another platform a named thing to fix.
+
+### Measured
+
+`cargo run --release --example closing -p term-core`, seven rows, same machine and same day. Each row
+**declares** what it measures — that comes from the scenario, which is known — and its elapsed time is
+checked against the band that claim implies; a row outside its band says so and the run exits
+non-zero. Reading a cause off the clock was the first version's mistake and it would have published
+this crate's own deadline as the library's poll the first time the machine was busy.
+
+| Row | Before | After |
+|---|---|---|
+| a live shell | 50.76 ms | 50.38 ms |
+| already dead | 0.07 ms | 0.03 ms |
+| ignores SIGHUP | 201.80 ms | 201.90 ms |
+| grandchild, echo on | 50.72 ms | 50.75 ms |
+| **grandchild, `-echo`** | **no return** | **150.65 ms** |
+| **grandchild, `raw -echo`** | **no return** | **150.86 ms** |
+| stopped child | — | 202.52 ms |
+
+**The two that never returned now return, and the rest did not get more expensive**: the deadline is
+only spent when somebody outlived the program, because with nobody holding the slave end the thread
+has already gone by the time it is consulted. That is asserted and not read off a table —
+`closing_an_ordinary_console_does_not_spend_the_abandon_deadline` fails if the healthy close ever
+starts paying it.
+
+**And the sibling wait is bounded too**, which was the adjacent risk: a *stopped* child never dies of
+a signal it can hold, so `child.wait()` beside the join has the same unbounded shape. It does not
+happen — after its grace period the library's `kill` falls through to a real `SIGKILL`, which nobody
+holds — and the `stopped child` row is that reading turned into a number. What the row shows is the
+grace period; what it proves is that the wait is reached and returns.
+
+**The regression test is mutated, twice.** Five deliberate breaks of it, each run against a tree with
+the deadline reverted to the unbounded join: **all five red** — 2.06 s with no mutation, 0.10 s with
+the echo left on (it comes back in 50.7 ms, under the floor), 2.01 s without the drain, 2.06 s with
+the receiver released early, and 5.01 s with the survivor's command made nonexistent. A first round,
+before the test had its floor and before the survivor announced itself, had **two of those passing in
+hundredths of a second** — green over a live bug. That is what the two rounds are for.

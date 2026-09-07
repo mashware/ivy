@@ -1064,12 +1064,17 @@ const NOT_OURS: &[&str] = &[
     "exit",
     "fork",
     "htop",
+    // The two survivors this crate's closing path is written against: a program that puts itself in
+    // a session of its own, and the one that is *named* for outliving the shell that launched it.
+    "setsid",
+    "nohup",
     // The kernel constants and tools this tree names but does not own. `MAX_CANON` is here to be
     // *contradicted*: it is 255, and the 4 096 that bounds a canonical line is `N_TTY_BUF_SIZE`,
     // a compile-time constant of the `n_tty` driver. A comment that could not name the wrong one
     // could not correct it.
     "ICANON",
     "ICRNL",
+    "ISIG",
     "MAX_CANON",
     "conhost",
     "getconf",
@@ -1085,6 +1090,7 @@ const NOT_OURS: &[&str] = &[
     "O_APPEND",
     "OPOST",
     "printf",
+    "SIGKILL",
     "sh",
     "strace",
     "stty",
@@ -1133,6 +1139,9 @@ const NOT_OURS: &[&str] = &[
     "on_hover_cursor",
     "or_else",
     "portable_pty",
+    // The writer `portable-pty` hands out for the master, cited because *its* destructor is what
+    // used to rescue this crate's closing path by accident.
+    "UnixMasterWriter",
     "prepare_raw_input",
     "recv",
     "serde",

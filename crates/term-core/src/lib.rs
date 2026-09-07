@@ -14,7 +14,9 @@ use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
+use std::sync::mpsc::{
+    Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError, channel, sync_channel,
+};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -75,6 +77,13 @@ pub struct Pty {
     /// reach the thread. See [`Pty::drop`] for why it is not joined.
     writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
+    /// Goes quiet when the reader thread ends, which is how closing waits for it **with a deadline**.
+    ///
+    /// **Nothing is ever sent on it.** The thread owns the other half and never uses it; what says
+    /// «the thread is gone» is that half being dropped, which turns a `recv` here into
+    /// `Disconnected` at once. A channel is used and not the `JoinHandle` because `join` has no
+    /// timed form, and waiting for that thread without a deadline is the whole of this defect.
+    reader_ended: Receiver<()>,
     /// What pulls the reader thread out of a wait for room in the channel when it has to close.
     ///
     /// Without this, destroying the `Pty` while the channel is full **hangs the close**: the thread
@@ -186,6 +195,29 @@ impl Input {
 static STARTED: std::sync::LazyLock<std::time::Instant> =
     std::sync::LazyLock::new(std::time::Instant::now);
 
+/// How long closing waits for the reader thread before abandoning it.
+///
+/// **It separates «microseconds» from «never», and it is only ever spent when somebody outlived the
+/// program and kept the slave end open.** With nobody holding it, the child's death gives the reader
+/// end of file and the thread is gone before this is consulted — measured: the ordinary close costs
+/// what the library's poll costs and not a millisecond more.
+///
+/// **It is spent per console, not per gesture**, and that is the number to quote: closing a tab drops
+/// every pane it had, in series, inside the same interface pass. Four consoles each holding a
+/// survivor is four times this, on top of four of the library's polls.
+///
+/// **What survives, precisely**, because the obvious examples are not all right: a plain `sleep 60 &`
+/// does inherit the slave end and does keep the read from ending — and it stays in the child's own
+/// process group, so a signal to the group *would* reach it. What escapes a group signal is a process
+/// that made a session of its own, `setsid` or a program that daemonises itself. `nohup` is **not** an
+/// example of either: it replaces the terminal on all three descriptors with a file, so a `nohup`'d
+/// survivor holds no slave end and cannot cause this at all.
+///
+/// A tenth of a second is three orders of magnitude above what the ordinary case needs, and it is
+/// **not** a threshold anybody measured for how long a frozen window is tolerable: no number here
+/// claims that. It is chosen to be plainly inside «a delay» and plainly outside «microseconds».
+const READER_GIVE_UP: Duration = Duration::from_millis(100);
+
 /// How many reads fit in the channel before the reader thread stops reading.
 ///
 /// **This number is the terminal's brake, not a performance tuning knob.** While the channel has
@@ -275,9 +307,11 @@ impl Pty {
         }
         let child = pair.slave.spawn_command(cmd)?;
 
-        // The slave end is only needed by the child. Dropping it here is what makes the read of the
-        // master reach end of file when the child dies; if it were kept open, the reader thread
-        // would stay blocked forever.
+        // The slave end is only needed by the child. Dropping it here is **necessary** for the read
+        // of the master to reach end of file when the child dies — keeping it would block the reader
+        // thread for ever — but it is not sufficient, and reading it as sufficient is the mistake
+        // this crate paid for: anything the child launches inherits these same descriptors, so while
+        // one of those lives there is no end of file either. See [`READER_GIVE_UP`].
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader()?;
@@ -321,7 +355,10 @@ impl Pty {
 
         let (tx, output) = sync_channel(READS_IN_FLIGHT);
         let stop_for_thread = Arc::clone(&stop);
+        let (ended, reader_ended) = channel::<()>();
         let reader = thread::spawn(move || {
+            // Moved in and never used: what closing reads is this being dropped when the thread ends.
+            let _ended = ended;
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
@@ -339,14 +376,21 @@ impl Pty {
         Ok((
             Self {
                 child,
-                // The master is kept so it can be resized. Keeping it open does not prevent the
-                // reader thread's end of file: that depends on nobody holding the slave end open,
-                // and the only one who holds it is the child.
+                // The master is kept so it can be resized.
+                //
+                // **And the sentence that used to be here was false, which is what let a hang live
+                // for a month.** It said the reader's end of file «depends on nobody holding the
+                // slave end open, and the only one who holds it is the child». The second half stops
+                // being true the moment the program inside launches something that outlives it —
+                // which is what a shell is for. That survivor inherits the slave's descriptors, so
+                // there is no end of file while it lives, and see [`Pty::drop`] for what closing does
+                // about it.
                 master: pair.master,
                 to_write: Some(to_write),
                 input,
                 writer: Some(writer),
                 reader: Some(reader),
+                reader_ended,
                 stop,
             },
             output,
@@ -487,9 +531,49 @@ impl Drop for Pty {
         // pseudoterminal and triggers the end of file in the reader thread. Waiting for the thread
         // before that would hang it, because it would still be blocked inside `read`.
         let _ = self.child.kill();
+        // Bounded, and the bound is the library's: after its grace period that `kill` falls through
+        // to a real `SIGKILL`, which nobody holds — not even a stopped process, the shape that would
+        // otherwise never be reaped. The one hole is that the library gives up early if the SIGHUP
+        // itself could not be delivered, and this call discards that: with the child already gone
+        // there is nothing to wait for anyway.
         let _ = self.child.wait();
+        // **The reader is waited for with a deadline, and abandoned if it does not come.** Killing
+        // the child closes *the child's* end of the pseudoterminal and nothing else: anything the
+        // program launched that outlived it —a `sleep &`, a development server— inherited those same
+        // descriptors, so while it lives there is no end of file, and this thread is parked inside
+        // `read` where the stop flag above cannot reach it. It used to be joined without a deadline,
+        // and this destructor runs **inside the interface pass**, so the whole window stayed frozen
+        // with no repaint and no keyboard, for as long as that program lived.
+        //
+        // **Signalling the process group would not be enough**, which is worth writing down because
+        // it is the obvious idea and because the weaker claim —that it would do nothing— is false. A
+        // plain background job stays in the child's group and a group signal would reach it; a
+        // survivor that made a session of its own is exactly what it does not reach. So a group
+        // signal would close some of these and not others, and it would also kill the background
+        // jobs of whoever closed the pane, which is a decision about what closing *means*. A deadline
+        // bounds every case without taking that decision.
         if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
+            match self.reader_ended.recv_timeout(READER_GIVE_UP) {
+                // The thread is gone and its half of the channel went with it. Gone, not necessarily
+                // gone well: a reader that panicked looks exactly like this, and the `join` here
+                // discards that too.
+                Err(RecvTimeoutError::Disconnected) => {
+                    let _ = reader.join();
+                }
+                // **Abandoned on purpose, and it costs a thread and a descriptor for as long as the
+                // survivor stays silent.** Dropping the handle detaches it; the thread is still
+                // inside `read`, but the stop flag above is already raised, so **the survivor's next
+                // byte ends it** — the read returns, the delivery sees the flag and the thread
+                // leaves. A survivor that never writes again holds them until the process ends. That
+                // is the same trade the writer thread already makes for the same reason, and a better
+                // one than the window freezing for ever, which is what the alternative was.
+                Err(RecvTimeoutError::Timeout) => drop(reader),
+                // **Unreachable, and spelled out rather than folded into the arm above.** Nothing is
+                // ever sent on that channel, so this cannot happen; if somebody ever gives it a
+                // payload, abandoning a thread that just spoke would be a live thread thrown away in
+                // silence, and this arm is where that has to be reconsidered.
+                Ok(()) => drop(reader),
+            }
         }
     }
 }
@@ -498,7 +582,7 @@ impl Drop for Pty {
 mod tests {
     use super::*;
     use std::sync::mpsc::RecvTimeoutError;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     /// A generous margin: what is checked is that the channel ends up closing, not how fast it does
     /// so. Any bounded wait serves as long as it is not infinite.
@@ -904,5 +988,219 @@ mod tests {
 
         let _ = counted.send(());
         let _ = writer.join();
+    }
+
+    /// **The regression test of closing a console whose program left a survivor behind.** `Drop for
+    /// Pty` used to join the reader thread with no deadline at all. That thread sits blocked inside
+    /// `read` on a descriptor cloned from the master, and the `stop` flag the destructor raises is
+    /// only ever consulted **after** a `read` returns — so it cannot reach a thread parked inside
+    /// one. Killing the child closes *the child's* end of the pseudoterminal and nothing else:
+    /// anything the program launched that outlives it inherited those same descriptors, so while
+    /// that survivor lives there is no end of file, the `read` never returns and neither did the
+    /// `join`. Measured: a `Drop` that had still not returned after eight seconds. And this
+    /// destructor runs inside the interface pass, so the whole window stayed frozen — no repaint, no
+    /// keyboard — for as long as that program lived.
+    ///
+    /// **Two conditions at once are what make it reproduce, and either one missing hides it
+    /// completely.**
+    ///
+    /// The first is the survivor, which is why the shell here launches one that **announces itself**
+    /// — see [`HELD`]. It holds the slave end open, and by making a session of its own it is exactly
+    /// what a signal to the child, or to the child's group, does not reach. **The brace group around
+    /// it is load-bearing.** Written as `stty -echo && … & exec sleep 5`, the `&` backgrounds the
+    /// *whole* `&&` list: `stty` would run in a subshell while the main shell was already `exec`ing,
+    /// the echo would never go off, and this test would quietly exercise the easy case while claiming
+    /// the hard one. That mistake was made and measured while the example beside this crate was
+    /// being written.
+    ///
+    /// The second is the echo being off. On drop, `portable-pty`'s own master writer puts a `\n` and
+    /// the terminal's EOF character into the pseudoterminal; while the line discipline echoes, that
+    /// comes straight back out of the master, the parked `read` returns **by accident**, and only
+    /// then does the reader look at its stop flag and leave. With `-echo` there is nothing to come
+    /// back — which is the state a real console's program is in, because turning the echo off is the
+    /// first thing `vim`, `htop` or a TUI agent does.
+    ///
+    /// **The `stty` sits before the survivor in the same `&&` chain, so the marker proves the mode
+    /// changed too**: it cannot arrive unless `stty` exited 0. That is not decoration — a test over a
+    /// terminal that never set the mode it needs is satisfied by the kernel instead of by its
+    /// subject, and would pass in hundredths of a second over a live bug.
+    ///
+    /// **The channel is drained to empty and its receiver is kept alive.** Both are escape routes the
+    /// reader has that are not the pseudoterminal: a delivery that fails and a wait for room both end
+    /// up somewhere the stop flag *does* reach, and the thread then leaves without ever issuing
+    /// another `read`. What the drain reproduces is what the window actually does when it takes a
+    /// console out of the tree — it stops draining the channel, it does not drop it.
+    ///
+    /// **Which parts actually make this test bind was mutated rather than argued**, because a
+    /// scenario that prevents the defect by itself is how this bug survived four attempts. Each row
+    /// is one deliberate break, run against a tree with the deadline in `Drop` reverted to the
+    /// unbounded `join`:
+    ///
+    /// | Mutation | Result on the broken tree |
+    /// |---|---|
+    /// | none — the test as written | **FAILED in 2.06 s** — the close never came back |
+    /// | echo left on (`stty -echo` removed) | **FAILED in 0.10 s** — the close came back in 50.7 ms, under the floor |
+    /// | the drain to quiet removed | **FAILED in 2.01 s** |
+    /// | the receiver released before the close | **FAILED in 2.06 s** |
+    /// | the survivor's command made nonexistent | **FAILED in 5.01 s** — nobody printed the marker |
+    ///
+    /// **Every one of them is red, and two of them are red because of the floor**, not because of the
+    /// close: a mutation that removes the hang's premise now fails for saying so rather than passing
+    /// quietly. An earlier version of this test had no floor and no survivor marker, and the first
+    /// two rows above passed on it in hundredths of a second. What is left as insurance rather than
+    /// as proof is the drain and the receiver's lifetime — with this marker the reader is parked
+    /// inside `read` either way — and they stay because they are what the window does.
+    ///
+    /// On the fixed tree it passes in 0.20 s, which is the library's 50 ms poll plus the 100 ms
+    /// abandoned deadline plus the drain: the deadline really was spent.
+    ///
+    /// The drop itself runs on a thread of its own, answering through a channel, for the same reason
+    /// `drain_until_closed` carries a deadline: on a build with the bug a direct `join` would never
+    /// return and would take the suite down with it, publishing the hang as an eternal green.
+    #[test]
+    fn closing_does_not_hang_when_a_survivor_holds_the_pseudoterminal() {
+        use std::sync::mpsc;
+
+        /// **Both bounds carry weight, and the band between them is where this test binds.**
+        /// Measured after the fix, this shape returns in some 150 ms — 50 ms of the library's fixed
+        /// poll after its SIGHUP, plus the 100 ms this crate gives the reader before abandoning it —
+        /// so a deadline anywhere near that would go red because the machine was busy. And the
+        /// survivor only lives five seconds: a deadline past that would watch the close «return»
+        /// because the program died on its own rather than because `Drop` came back, and publish the
+        /// hang as fixed. Two seconds is more than ten times the cost and well under half the
+        /// survivor's life. It is deliberately not a performance figure: what is asserted is
+        /// «bounded, not never».
+        const CLOSE_DEADLINE: Duration = Duration::from_secs(2);
+        /// What the **survivor** prints once it is up.
+        ///
+        /// **It is the survivor's own and not the shell's, and that is the difference between
+        /// assuming the premise and proving it.** `{ … & }` is a backgrounded list: it exits 0
+        /// whatever happens inside it, so a missing `setsid` — every macOS, and F2.7 is next — would
+        /// let the `&&` chain reach the `exec` with nobody holding the slave end, and this test would
+        /// pass on a build that hangs, measuring the easy case. Seeing this marker come out of the
+        /// master proves the survivor exists *and* that it can write through the descriptor it
+        /// inherited, which is the whole premise. And it is printed last in the chain, so it also
+        /// proves the `stty` before it exited 0.
+        const HELD: &str = "held";
+        /// How long the shell and its survivor live. Long enough that neither ends inside the
+        /// deadline above — otherwise the close would finish for a reason that is not the fix.
+        const SECONDS_ALIVE: u32 = 5;
+
+        let script = format!(
+            "stty -echo && {{ setsid sh -c 'printf {HELD}; sleep {SECONDS_ALIVE}' & }} && exec sleep {SECONDS_ALIVE}"
+        );
+        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+
+        // A marker somebody prints, never a `sleep`: what makes the bug reproduce is the state, and a
+        // fixed wait would time the close against a shell that had not got there yet.
+        wait_for_marker(&output, HELD);
+
+        // And then drained until the program goes quiet, so the channel is **empty** when the close
+        // happens. See the doc comment: a full channel parks the reader somewhere the stop flag
+        // reaches it, and the hang needs it parked inside `read`.
+        let quiet = Duration::from_millis(50);
+        while output.recv_timeout(quiet).is_ok() {}
+
+        let (done, answer) = mpsc::channel();
+        let closing = thread::spawn(move || {
+            let started = Instant::now();
+            drop(pty);
+            // If the close hangs this send never arrives, and the `recv_timeout` below is what turns
+            // that into a red test instead of a hang of the suite.
+            let _ = done.send(started.elapsed());
+        });
+
+        let took = match answer.recv_timeout(CLOSE_DEADLINE) {
+            Ok(took) => took,
+            Err(RecvTimeoutError::Timeout) => panic!(
+                "closing the Pty did not return in {CLOSE_DEADLINE:?} with a survivor holding the \
+                 slave end and the echo off: the destructor is waiting for a reader thread that \
+                 will never come out of its `read`"
+            ),
+            // Told apart from the timeout on purpose: a `Drop` that panicked would otherwise be
+            // reported as a hang, and somebody would go looking for the wrong defect.
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!("the closing thread ended without answering: `Drop` panicked")
+            }
+        };
+
+        // **And a floor, which is what makes this test about the deadline rather than about closing
+        // in general.** Anything under it means the close came back *without* spending the abandon
+        // deadline, and in this shape there is only one way that happens: the reader was woken by
+        // something — the echo left on by accident, a survivor that was never there — so the row is
+        // measuring the easy case under this one's name. Measured: with the echo on it returns in
+        // 0.10 s, and with no survivor in 0.05 s. The bound is the constant itself, so a future
+        // delivery that makes abandoning cheaper moves it instead of going red.
+        assert!(
+            took >= READER_GIVE_UP,
+            "the close came back in {took:?}, under the {READER_GIVE_UP:?} it has to spend when a \
+             holder survives: something woke the reader, so this is not the case this test is named \
+             after"
+        );
+
+        // Immediate — the close already answered. On the failing path above the thread is left
+        // behind on purpose: it is inside the very wait this test is about.
+        let _ = closing.join();
+        // The receiver is only released here, after the close. Dropping it any earlier is the
+        // disguise the doc comment describes.
+        drop(output);
+    }
+
+    /// **The other half of the claim, and without it the whole deadline can be deleted green.**
+    ///
+    /// The test above proves closing comes back when a survivor holds the slave end. It says nothing
+    /// about what closing costs when nobody does — and that is the case every console goes through,
+    /// so a delivery that made *every* close wait out the deadline would be a real regression with a
+    /// green suite. Measured: swapping the timed wait for a plain sleep, or zeroing nothing at all
+    /// and simply always abandoning, leaves the whole workspace passing while every closed console
+    /// costs a tenth of a second more, inside the interface pass, multiplied by the panes of the tab.
+    ///
+    /// **The bound is [`READER_GIVE_UP`] itself, not a number typed here.** With nothing holding the
+    /// slave end the child's death gives the reader end of file, so the thread has already gone and
+    /// the wait returns at once: what is left is the library's own fixed poll, some 50 ms. Asserting
+    /// «under the deadline» therefore has two-fold headroom over what this costs and still fails the
+    /// moment the deadline starts being paid on a healthy close — and it moves on its own if the
+    /// constant ever changes, which a literal would not.
+    ///
+    /// It is **not** a performance assertion: nothing here claims 50 ms is fast, only that the
+    /// hundred milliseconds this crate reserves for a survivor are not spent when there is none.
+    #[test]
+    fn closing_an_ordinary_console_does_not_spend_the_abandon_deadline() {
+        use std::sync::mpsc;
+
+        const HOW_LONG_IT_LIVES: u32 = 5;
+        const MARKER: &str = "up";
+
+        let script = format!("printf {MARKER} && exec sleep {HOW_LONG_IT_LIVES}");
+        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+
+        // The same discipline as the test above, and for the same reasons: the program says when it
+        // is up, and the channel is drained to empty so the reader is parked inside `read` rather
+        // than somewhere the stop flag reaches it. Without the drain this test would be measuring a
+        // reader that left through the delivery path, which is not the path it is about.
+        wait_for_marker(&output, MARKER);
+        while output.recv_timeout(Duration::from_millis(50)).is_ok() {}
+
+        let (done, answer) = mpsc::channel();
+        let closing = thread::spawn(move || {
+            let started = Instant::now();
+            drop(pty);
+            let _ = done.send(started.elapsed());
+        });
+
+        // Generous, because this is not the assertion — it only keeps a hang from taking the suite
+        // with it, exactly as above.
+        let took = answer
+            .recv_timeout(Duration::from_secs(2))
+            .expect("closing an ordinary console returned");
+        let _ = closing.join();
+        drop(output);
+
+        assert!(
+            took < READER_GIVE_UP,
+            "closing a console nobody outlived took {took:?}, which is at least the \
+             {READER_GIVE_UP:?} reserved for abandoning a reader: the deadline is being paid on \
+             every close, and a tab pays it once per pane inside the interface pass"
+        );
     }
 }
