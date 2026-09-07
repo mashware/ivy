@@ -7,8 +7,10 @@
 //! it. **Not into `measure.rs`, which is the module whose name matches it**: that module is at 540
 //! production lines of its 600, so the ceiling ruled out the obvious home before the move was made.
 //!
-//! What it does not own is the *measuring*: the spans, the report and the guards that read it stay
-//! in `measure.rs`. This is the half that pretends to be a hand.
+//! What it does not own is the *measuring*: the spans and the guards that read them stay in
+//! `measure.rs`, and **publishing the report left for [`crate::report`]** with the delivery that took
+//! it out of `lib.rs` — this line said `measure.rs` until then, and it was the design of that
+//! delivery that spotted it rather than a reader. This is the half that pretends to be a hand.
 
 use crate::{
     CELLS_THE_DIVIDER_GESTURE_CROSSES, CELLS_THE_GESTURE_MARKS, CELLS_THE_PANEL_GESTURE_CROSSES,
