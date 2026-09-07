@@ -25,7 +25,7 @@
 //!
 //! **The non-ASCII half of the sibling oracle is deliberately absent, and it was measured before
 //! being dropped.** `settings.rs` judges thirteen short on-screen messages and can afford
-//! `is_ascii()`; here **2 041 of the 13 833 comment lines are not pure ASCII** — angle quotes, em
+//! `is_ascii()`; here **2 041 of the 13 844 comment lines are not pure ASCII** — angle quotes, em
 //! dashes, `µs`, Japanese, emoji — so that test reports a seventh of the corpus. The narrower
 //! variant — a Spanish accent or `ñ` anywhere in the line — leaves **five** lines, and it would
 //! need a line-by-line exemption for every one of them: two are deliberate Spanish citations
@@ -47,7 +47,7 @@ use std::collections::BTreeSet;
 /// left four tests green. Here the same mistake does not compile.
 ///
 /// **`src/lib.rs` is here, and adding it was the one line an earlier delivery promised it would
-/// be.** It is nearly half the crate's prose on its own — 5 806 of the 13 833 comment lines —
+/// be.** It is nearly half the crate's prose on its own — 5 809 of the 13 844 comment lines —
 /// and it is why the list is written as data and every floor below is a lower bound rather than an
 /// exact count: the file it watches will keep growing. It carried 7 319 until the module ceiling
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
@@ -85,7 +85,7 @@ const SOURCES: &[(&str, &str)] = &[
 ///
 /// **Without a floor this test passes by being empty**, which is how the guards of this suite die:
 /// somebody reshapes the comment detection, the walk finds nothing, every file looks clean and
-/// nothing says otherwise. Measured as this delivery leaves the tree: **13 833** comment lines, the
+/// nothing says otherwise. Measured as this delivery leaves the tree: **13 844** comment lines, the
 /// thinnest file being `src/main.rs` with **one** — it is four lines of `fn main`, and a floor that
 /// demanded more of it would have to be a table instead of a number.
 ///
@@ -93,8 +93,8 @@ const SOURCES: &[(&str, &str)] = &[
 /// `src/lib.rs` is what makes it matter: `src/main.rs`, `examples/leak.rs` and
 /// `examples/screen_demo.rs` together carry 94 lines, so losing all three sits inside the total
 /// floor's slack — reported by nothing but the per-file one. That is the case the second floor is
-/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 5 806 of the
-/// 13 833, so losing it drops the corpus to 8 027 and the total fires loudly. The two floors answer
+/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 5 809 of the
+/// 13 844, so losing it drops the corpus to 8 035 and the total fires loudly. The two floors answer
 /// different halves, which is why there are two.
 ///
 /// **The floor is a number over the corpus, so a split has to raise it.** The tiling and the tree
@@ -104,13 +104,12 @@ const SOURCES: &[(&str, &str)] = &[
 /// floor left where it was is what turns that into silence.
 ///
 /// **13 300 and not a rounder number, and the slack was measured rather than chosen.** With the
-/// corpus at 13 833 the slack is 533, so every file carrying more than that is defended by the total
+/// corpus at 13 844 the slack is 544, so every file carrying more than that is defended by the total
 /// alone; the **seventeen** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
 /// `examples/leak.rs` (59), `src/mouse.rs` (94), `src/report.rs` (134), `examples/sweep.rs` (134),
 /// `examples/fonts.rs` (168), `src/tab_bar.rs` (171), `src/theme.rs` (202), `src/watcher.rs` (203),
 /// `src/tiling.rs` (272), `src/pty_output.rs` (282), `src/injected.rs` (289), `src/painter.rs` (355),
-/// `src/tree.rs` (451), `src/pointer.rs` (458) and `src/settings.rs` (526) — and that is what the
-/// per-file floor is for and
+/// `src/tree.rs` (451), `src/pointer.rs` (458) and `src/settings.rs` (530) — and that is what the per-file floor is for and
 /// why it is stated here rather than left to be discovered. A floor loose enough to let a mid-sized
 /// file be gutted was checked by doing exactly that, on the number this replaced.
 ///
@@ -198,7 +197,7 @@ const ISLANDS: &[(&str, &str)] = &[
 ///
 /// The list is closed, and the threshold above is what covers its remaining softness: a handful of
 /// entries — «con», «la», «es» — do exist in some corner of English, and one of them alone is never
-/// a verdict. Measured over all 13 833 comment lines of the twenty-three files: **zero** English lines
+/// a verdict. Measured over all 13 844 comment lines of the twenty-three files: **zero** English lines
 /// reach three markers.
 const SPANISH_WORDS: &[&str] = &[
     // ── The function words, from the sibling list in src/settings.rs ──
@@ -593,7 +592,7 @@ fn the_walk_still_reads_the_comments_of_every_file() {
     }
     assert!(
         total >= COMMENT_LINES_AT_LEAST,
-        "the walk found {total} comment lines and there are 13 833: the detection stopped matching \
+        "the walk found {total} comment lines and there are 13 844: the detection stopped matching \
          and this guard is judging almost nothing"
     );
 }
@@ -846,7 +845,7 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
     // one would go on passing.
     assert!(
         examined >= COMMENT_LINES_AT_LEAST,
-        "this guard judged {examined} comment lines and there are 13 833: whatever it reports, it is \
+        "this guard judged {examined} comment lines and there are 13 844: whatever it reports, it is \
          not reporting on the prose of these twenty-three files"
     );
 

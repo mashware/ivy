@@ -4416,7 +4416,7 @@ Written down so the next delivery does not have to rediscover it. Sizes are prod
 
 | What | Lines | Where it goes | Why it is separable |
 |---|---|---|---|
-| ~~The injected drags of the measurement bench~~ | 300 | **done** — `injected.rs`, 311 lines | Instrumentation living in the core. **Not `measure.rs`**: that module is at 540 lines and the ceiling is 600, so it can absorb 60 — the guard's own arithmetic ruled out the obvious home |
+| ~~The injected drags of the measurement bench~~ | 300 | **done** — `injected.rs`, 311 lines | Instrumentation living in the core. **Not `measure.rs`**: that module was at 540 lines of its 600 when this row was written and is at 583 today, so it could absorb 60 then and cannot now — the guard's own arithmetic ruled out the obvious home |
 | ~~Reading the settings file, and the measurement veto~~ | 50 | **done** — `settings.rs`, which went from 291 to 349 | The module that already owns that vocabulary. **It was not on this table**: the delivery that added the font by name needed room in `lib.rs` and this was the piece it was already touching — the ceiling decided where the code went, which is what the table below says a ceiling is for |
 | ~~The layout tree — `Node`, `Tab`, tiling~~ | 455 estimated, **692 real** | **done** — **two** modules, `tiling.rs` (208 lines) and `tree.rs` (504) | A closed data structure; its serialisation already lives outside, in `session.rs` |
 | ~~Routing the mouse~~ | ~350 estimated, **430 real** | **done** — `pointer.rs`, 448 lines in two blocks. **Not `mouse.rs`**, and that was a close call: see below | The whole path from the queue to the effect, which is what D23 divides |
@@ -4425,8 +4425,9 @@ Written down so the next delivery does not have to rediscover it. Sizes are prod
 | ~~Saving~~ — **the watcher did not move** | ~50 estimated, **50 real** | **done** — `session.rs`, from 418 lines to 471 | Same vocabulary. The watcher stayed: `watcher.rs` is deliberately window-free and thirty lines earn no module |
 
 **Every estimate in this table was low, and by the end the pattern is the point.** 300 → 311, 455 → 692,
-~350 → 430, ~150 → 96 and ~76 → 100: five of the six finished rows came in over, one under, and the two
-largest were out by 52 % and 23 %. **Three of the six also went somewhere other than where this table
+~350 → 430, ~150 → 96, ~76 → 100 and ~50 → 50: **six of the seven** finished rows came in over, one
+exactly on and none under, and the two largest were out by 52 % and 23 %. **Three of the seven also
+went somewhere other than where this table
 sent them** — the injected gestures, the router and the report — and each time the reason was the same:
 the ceiling or the seam was consulted *before* the move and the named destination did not survive it.
 Read this table as the order the pieces come out in, which it gets right, and not as their sizes or
@@ -4583,8 +4584,14 @@ row calls it.
 #### The order is finished, and what it actually cost
 
 **`lib.rs` came in at 3 119 production lines and ends at 1 434** — **54 % gone**, in five deliveries
-over one day. `impl Window` went from 1 110 to 489. The ticket asked for «about 1 400» and never showed
-its arithmetic; the plan re-derived it by reading and said ~1 577; the real answer is **1 546**, and it
+over one day. **`impl Window`'s block in this file went from 1 105 to 487 — and the type did not shrink
+at all.** Its methods left for satellite `impl Window` blocks in `pointer.rs`, `report.rs`, `tab_bar.rs`
+and `session.rs`, so summed across the crate the type went **1 124 → 1 138 production lines, over seven
+blocks in five files**: it grew by fourteen. The order published «1 110 → 489» and that figure is a
+**block**, not a type; the guard measures blocks and cannot see a type at all, which is
+[#187](https://github.com/mashware/agent-terminal/issues/187). What is true without qualification is the
+module: this file went from 3 119 to 1 434. The ticket asked for «about 1 400» and never showed
+its arithmetic; the plan re-derived it by reading and said ~1 577; the real answer is **1 434**, and it
 is lower than the re-derivation because two of the five pieces came out bigger than they were priced.
 
 | Piece | Priced | Real |

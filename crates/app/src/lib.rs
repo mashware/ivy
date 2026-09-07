@@ -51,17 +51,20 @@ mod tiling;
 mod tree;
 pub mod watcher;
 
-// **Brought back by name, and the names are the point.** The four modules named below — and the
-// fifth, `report`, which this file calls but imports nothing from — came out of this file under
-// **D28**, and re-importing what they hold is what keeps every call site, and the 16 952 lines of
-// tests that reach into them, exactly as they were. A move that had to edit its own behavioural
+// **Brought back by name, and the names are the point.** The four modules named below came out of
+// this file under **D28** and hold items it still uses. **They are not the whole order**, and the
+// sentence below used to imply they were: `report`, `session` and `injected` also received pieces of
+// this file and appear here in no `use` line, because what they took reaches back into the window
+// rather than the other way round. Re-importing what the four hold is what keeps every call site, and
+// the 16 952 lines of tests that reach into them, exactly as they were. A move that had to edit its own behavioural
 // tests would not be a move, and across the whole order not one of them was touched.
 //
 // **By name and not with a glob**, which was the first shape of this and is the wrong one: a glob
 // is **shadowed in silence** by a later item of this file that happens to share a name, so the
 // day somebody writes a second `Divider` here the compiler says nothing and half the file starts
 // meaning the other one. Named, that same day is a duplicate definition and the build stops. It
-// also gives the reader the one thing the glob takes away — the list of what actually left.
+// also gives the reader the one thing the glob takes away — the list of what this file still needs
+// back. For the list of what left, the order is in **D28**, not here.
 use pointer::{DragIntent, WheelInput, WheelOutcome};
 use tab_bar::set_the_tab_bar_aside;
 use tiling::{DIVIDER_THICKNESS, Orientation, Side, can_split};

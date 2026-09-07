@@ -1920,19 +1920,23 @@ mod tests {
         }
         // Same floor and for the same reason as its siblings: without it a walk that stopped finding
         // literals leaves this test passing by looking at nothing. The nine files hold **77** today
-        // — 27 in `session.rs`, 19 in `lib.rs`, 10, 6, 5, 5, 3, 1 and 1 — and the floor sits five below, tight enough that a broken walk
-        // cannot hide behind it and loose enough that deleting a message is not a failure.
+        // — 27 in `session.rs`, 19 in `lib.rs`, 10, 6, 5, 5, 3, 1 and 1 — and the floor sits five
+        // below, tight enough that a broken walk cannot hide behind it and loose enough that
+        // deleting a message is not a failure.
         //
         // **It was left at 74 when the corpus dropped from 78 to 76 and the claim above stopped
         // being true**: at two lines of slack, deleting a pair of messages *is* a failure. The floor
         // moves with the corpus or it stops meaning what it says.
         //
-        // **The cut at `mod tests` rests on there being nothing after it**, and there is not: the
-        // ones that declare a test module put nothing below it, and seven of this crate's modules
-        // declare none at all — the pieces D28 took out of `lib.rs` are covered by the behavioural
-        // tests that stayed there. If a
-        // top-level item ever lands below a test module, its sentences leave this walk in silence —
-        // which is why the floor is stated as a number and not as «some».
+        // **The cut at `mod tests` rests on there being nothing after it, and for two of the nine
+        // files walked here that is FALSE** — it read «there is not» until somebody checked. Six of
+        // this crate's modules declare no test module at all; of the ones that do, `keyboard.rs`
+        // keeps `Action`, `Chord` and `Keymap` below its own (about two hundred production lines) and
+        // `pty_output.rs` keeps `DeafConsole` there. Neither file is walked by this test, so nothing
+        // of theirs is lost here — but **`shape.rs` cannot see those lines either**, which is the
+        // same invisibility D28 records as costing one delivery fifty lines, and it is filed rather
+        // than fixed. Whenever a top-level item lands below a test module its sentences leave this
+        // walk in silence, which is why the floor is stated as a number and not as «some».
         assert!(
             sentences.len() >= 72,
             "only {} sentence-shaped literals were found before `mod tests` in the nine files: the \

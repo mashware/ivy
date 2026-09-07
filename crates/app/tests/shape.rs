@@ -329,7 +329,11 @@ fn no_entry_of_the_ratchet_is_stale() {
         // 199 lines out, forget to lower the number, and pass in silence, which is the precise
         // failure the `src/lib.rs` entry's own prose says was closed when its three lines of slack
         // were found. It was closed for that one number and left open for every future one. The
-        // guard fired on this train only because the deltas were 296 and 255.
+        // guard fired on this train not because of the slack at all: walking every commit of the
+        // order, the largest recorded-minus-real gaps were 134 and 111 — both comfortably under the
+        // old 200 — and what actually fired, once, was the **growth** assertion above (recorded
+        // 1 462 against a real 1 485). The tolerance was never what caught anything; it was what
+        // let a stale number sit for weeks.
         //
         // **What zero costs is one edit per delivery, which is the point**: the number is the
         // measurement or it is not a measurement.

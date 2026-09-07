@@ -3,13 +3,17 @@
 //! **Nothing here opens a console**, and that sentence used to read «there is not a single console
 //! here» — it narrowed on purpose with the delivery that brought the window's saving in. This module
 //! describes shapes, validates them, and now also decides *when* what is on screen is written down;
-//! materializing a shape —which is forking one process per leaf— still happens elsewhere, in
-//! [`crate::tree`]. The boundary is not a matter of taste: it keeps this half **testable without
-//! opening a pseudoterminal**, and leaves the `fork` in a single place.
+//! materializing a shape —which ends in forking one process per leaf— still happens elsewhere:
+//! [`crate::tree::Node::materialize`] walks the shape, and the `fork` itself is one call in
+//! [`crate::Pane`]'s launching. **This sentence named only `crate::tree` and that sent the reader to
+//! the wrong file**; the version it replaced said «at the root» and was right. The boundary is not a
+//! matter of taste: it keeps this half **testable without opening a pseudoterminal**, and leaves the
+//! `fork` in a single place.
 //!
 //! **The watcher did not come with the saving, and that is a decision rather than an omission.**
-//! `watcher.rs` declares that it knows nothing of windows, and arming or re-arming one is thirty-odd
-//! lines that would earn no module and would cost that boundary. They stay in `lib.rs`, said here so
+//! `watcher.rs` declares that it knows nothing of windows, and arming or re-arming one is **twenty
+//! production lines** —forty-two with their docs, which is where «thirty-odd» came from— that would
+//! earn no module and would cost that boundary. They stay in `lib.rs`, said here so
 //! that nobody looks for them in the obvious place and concludes they were forgotten.
 //!
 //! **And the types here are a mirror, not those of the live layout.** Changing a field on the
