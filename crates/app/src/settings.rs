@@ -1920,7 +1920,7 @@ mod tests {
         }
         // Same floor and for the same reason as its siblings: without it a walk that stopped finding
         // literals leaves this test passing by looking at nothing. The nine files hold **77** today
-        // — 27 in `session.rs`, 5, 19, 6, 1, 5, 1, 3 and 10 — and the floor sits five below, tight enough that a broken walk
+        // — 27 in `session.rs`, 19 in `lib.rs`, 10, 6, 5, 5, 3, 1 and 1 — and the floor sits five below, tight enough that a broken walk
         // cannot hide behind it and loose enough that deleting a message is not a failure.
         //
         // **It was left at 74 when the corpus dropped from 78 to 76 and the claim above stopped
@@ -1928,8 +1928,9 @@ mod tests {
         // moves with the corpus or it stops meaning what it says.
         //
         // **The cut at `mod tests` rests on there being nothing after it**, and there is not: the
-        // three that declare a test module put nothing below it, and the other three declare none —
-        // the tiling and the tree are covered by the behavioural tests that stayed in `lib.rs`. If a
+        // ones that declare a test module put nothing below it, and seven of this crate's modules
+        // declare none at all — the pieces D28 took out of `lib.rs` are covered by the behavioural
+        // tests that stayed there. If a
         // top-level item ever lands below a test module, its sentences leave this walk in silence —
         // which is why the floor is stated as a number and not as «some».
         assert!(

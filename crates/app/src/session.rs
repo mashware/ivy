@@ -1,9 +1,16 @@
 //! The format in which the window layout goes to and comes back from disk, and what is required of it.
 //!
-//! **There is not a single console here.** This module describes shapes and validates them;
-//! materializing them —which is forking one process per leaf— happens at the root, which is where the
-//! fields of a pane live. The boundary is not a matter of taste: it keeps this half **pure and testable
-//! without opening a pseudoterminal**, and leaves the `fork` in a single place.
+//! **Nothing here opens a console**, and that sentence used to read «there is not a single console
+//! here» — it narrowed on purpose with the delivery that brought the window's saving in. This module
+//! describes shapes, validates them, and now also decides *when* what is on screen is written down;
+//! materializing a shape —which is forking one process per leaf— still happens elsewhere, in
+//! [`crate::tree`]. The boundary is not a matter of taste: it keeps this half **testable without
+//! opening a pseudoterminal**, and leaves the `fork` in a single place.
+//!
+//! **The watcher did not come with the saving, and that is a decision rather than an omission.**
+//! `watcher.rs` declares that it knows nothing of windows, and arming or re-arming one is thirty-odd
+//! lines that would earn no module and would cost that boundary. They stay in `lib.rs`, said here so
+//! that nobody looks for them in the obvious place and concludes they were forgotten.
 //!
 //! **And the types here are a mirror, not those of the live layout.** Changing a field on the
 //! [`crate::tree::Node`] tree must not change what is written on anyone's disk; the price is one
@@ -23,7 +30,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How many leaves are accepted in a whole document.
 ///
@@ -647,6 +654,29 @@ impl std::fmt::Display for SaveFailure {
     }
 }
 
+/// How long is waited from the first change without writing until the layout is written.
+///
+/// **Half a second, and the number has two reasons.** It is the same order as the breather of the
+/// watcher's degraded mode, which is already in the code and for the same motive: it is what is
+/// barely noticed and does not keep the window awake. And with it, **a continuous drag writes twice
+/// per second instead of sixty**, while what is lost on dying —half a second of placing— is not
+/// missed.
+///
+/// **It is a cap counted from the first change, not a postponement.** The difference decides
+/// whether the milestone works: rearming the deadline on every change, a ten-second drag would not
+/// write even once.
+///
+/// **It lives beside the deadline it arms, and it used to live in the crate root.** The delivery that
+/// brought the deciding of *when* to write into this module left the number that says *when* on the
+/// other side and imported it back for its single use; a seam that makes a module reach into the
+/// crate root for its own constant is the seam being one item short. Its reasoning travelled with it
+/// rather than being rewritten — the two paragraphs above are the ones that were always here.
+///
+/// **`pub(crate)` and never `pub`**: nine tests in `lib.rs`'s test module assert against this exact
+/// number, and that is the reach it already had as a crate-root `const` — nothing outside the crate
+/// can see it either way.
+pub(crate) const SAVE_DELAY: Duration = Duration::from_millis(500);
+
 /// The saving policy **of a session**: where it goes, whether it can be written, and what has already
 /// been warned about.
 ///
@@ -822,7 +852,7 @@ impl Persistence {
     /// cannot be removed—, and yet nothing prevents opening more tabs than fit there. Without this
     /// warning, whoever reaches that number would lose their layout **with no signal at all**: saving
     /// would stop and they would notice it on reopening, a day later, with no visible cause.
-    pub fn warn_cannot_save(&mut self, problem: &LayoutProblem) {
+    fn warn_cannot_save(&mut self, problem: &LayoutProblem) {
         if self.should_warn(&SaveFailure::DoesntFit) {
             eprintln!("the current layout cannot be saved: {problem}");
         }
@@ -955,6 +985,118 @@ fn create_exclusive(path: &Path) -> std::io::Result<std::fs::File> {
 /// would say two things of which only one can be fixed.
 fn remove(temp_path: &Path) {
     let _ = std::fs::remove_file(temp_path);
+}
+
+/// The window's own saving, which is the other half of this format.
+///
+/// **It came here rather than to a module of its own** because these three methods say nothing that
+/// is not already this file's vocabulary: when the layout has moved, when the deadline is due, and
+/// how the file is replaced without ever being left half written. A `saving.rs` beside a `session.rs`
+/// would be two names for one subject, and **D28** asks for a ceiling, not for a module per method.
+///
+/// **They are `Window`'s and they stay `Window`'s.** What crosses the boundary is only that this file
+/// now holds them; the tree they walk is [`crate::tree`]'s and the shapes they write are the ones
+/// declared above.
+impl crate::Window {
+    /// Builds the mirror of the layout and **arms the deadline if anything changed**.
+    ///
+    /// **What it costs is timed and declared in both places**: it goes into the accumulator the
+    /// window subtracts —or its work would be published as framework cost, the figure D3 decides
+    /// with— and it also has a series of its own in the report, because that accumulator
+    /// **subtracts but publishes no row at all**. They are two mechanisms and both are needed.
+    pub(crate) fn check_whether_the_layout_moved(&mut self) {
+        let started = Instant::now();
+
+        let current = self.describe();
+        if self.last_seen.as_ref() != Some(&current) {
+            self.last_seen = Some(current);
+            // **Only if it was empty**, which is the difference between a cap and a postponement:
+            // during a drag the layout changes on every frame, and by rearming here it would never
+            // be written.
+            if self.save_due.is_none() {
+                self.save_due = Some(Instant::now() + SAVE_DELAY);
+            }
+        }
+
+        self.mirror_this_frame += started.elapsed();
+    }
+
+    /// Writes the layout if the deadline fell due and there is something different from the last
+    /// thing that reached the disk.
+    ///
+    /// **It is called in the logic half and AFTER closing the frame**, and the order matters:
+    /// closing empties what the window timed separately, so writing before would charge its cost to
+    /// the previous frame — which is exactly the kind of error this instrument is after.
+    pub(crate) fn save_if_due(&mut self) {
+        let Some(due) = self.save_due else {
+            return;
+        };
+        if Instant::now() < due {
+            return;
+        }
+        self.save_now();
+    }
+
+    /// Writes what is pending **without looking at the clock**.
+    ///
+    /// **It exists for the clean closing of the window, and a review asked for it.** The delay
+    /// accepts losing half a second «on dying», and closing the window by hand **is not dying**: it
+    /// is the only ending in which the loss can be avoided, and avoiding it costs nothing because
+    /// by then there is no frame left to measure.
+    pub(crate) fn save_now(&mut self) {
+        if self.save_due.is_none() {
+            return;
+        }
+        self.save_due = None;
+
+        // **The clock starts here, before copying and comparing.** Copying the whole document and
+        // comparing it thoroughly costs something, happens on every deadline that falls due —twice
+        // a second while it is being dragged— and on the path where there is nothing to write **it
+        // is the whole cost**: leaving it outside the clock would publish it as framework cost,
+        // which is the leak the project's hard rule names.
+        let started = Instant::now();
+
+        // What is going to be written is the last thing seen: it has just been built in the
+        // interface pass, so walking the tree again would be paying twice for the same datum.
+        let Some(document) = self.last_seen.clone() else {
+            self.mirror_this_frame += started.elapsed();
+            return;
+        };
+        if self.last_written.as_ref() == Some(&document) {
+            // **It goes to the mirror's span and not to the write's, because it is what it is**:
+            // comparing two mirrors. Counting it as a write would put into that average some
+            // samples that wrote nothing.
+            self.mirror_this_frame += started.elapsed();
+            return;
+        }
+        // **Through the validated type, which is what makes it impossible to write something that
+        // cannot be read back.** And what does not pass validation **is warned about once**: the
+        // real case is having more consoles open than the format admits —the ceiling exists to
+        // bound the start-up `fork`, so it cannot be removed—, and without this warning the user
+        // would lose their layout with no signal at all.
+        let validated = match validate(document.clone()) {
+            Ok(validated) => validated,
+            Err(problem) => {
+                self.persistence.warn_cannot_save(&problem);
+                // **This is not a write and is not counted as one, not even as an attempt.** No
+                // path was resolved and the disk was not touched: what ran was validating, which is
+                // the same kind of work as comparing the mirror. Counting it in the write's span
+                // would put into that average some samples that are **all** validation, and the
+                // number would stop describing what writing costs.
+                self.mirror_this_frame += started.elapsed();
+                return;
+            }
+        };
+
+        let written = self.persistence.save(&validated);
+        let how_much = started.elapsed();
+        self.timed_separately += how_much;
+        self.saving.record_write(how_much, written);
+
+        if written {
+            self.last_written = Some(document);
+        }
+    }
 }
 
 #[cfg(test)]

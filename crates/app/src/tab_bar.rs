@@ -28,8 +28,10 @@ use std::time::{Instant, SystemTime};
 /// **Both are worth it for the report, and that is why they travel together**: the cost is
 /// subtracted from the frame and the marked cards are what tells apart a batch that measured the
 /// bar **with** its new work from one that measured it without it.
-#[must_use = "it carries the cost the frame has to subtract and the cards the report has to declare; \
-              dropping it publishes both as somebody else's"]
+#[must_use = "it carries the cost the frame has to subtract and the cards the report has to declare. \
+              Dropping the cost publishes it as the framework's, which is the figure D3 judges egui \
+              by; dropping the count publishes ZERO marked cards, and the measurement script \
+              invalidates a whole run over a bar that marked none"]
 pub(crate) struct TabBarOutcome {
     pub(crate) cost: std::time::Duration,
     /// How many cards carried a symbol in this pass.
@@ -57,7 +59,7 @@ pub(crate) const TAB_BAR_MARGIN: f32 = 4.0;
 /// **The cut is bounded, because [`egui::Rect::split_top_bottom_at_y`] does not do it** — read in
 /// its source (`emath-0.36.1/src/rect.rs:671`), where it builds the two rectangles with the cut as
 /// it comes. With the window lower than the bar, a cut below the area would leave the consoles'
-/// rectangle **inverted**, with its top edge below its bottom one. It is the same care [`tile`]
+/// rectangle **inverted**, with its top edge below its bottom one. It is the same care [`crate::tiling::tile`]
 /// already takes with the width, and the same edge case that is tested there.
 pub(crate) fn set_the_tab_bar_aside(
     area: egui::Rect,

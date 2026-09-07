@@ -4419,10 +4419,10 @@ Written down so the next delivery does not have to rediscover it. Sizes are prod
 | ~~The injected drags of the measurement bench~~ | 300 | **done** — `injected.rs`, 311 lines | Instrumentation living in the core. **Not `measure.rs`**: that module is at 540 lines and the ceiling is 600, so it can absorb 60 — the guard's own arithmetic ruled out the obvious home |
 | ~~Reading the settings file, and the measurement veto~~ | 50 | **done** — `settings.rs`, which went from 291 to 349 | The module that already owns that vocabulary. **It was not on this table**: the delivery that added the font by name needed room in `lib.rs` and this was the piece it was already touching — the ceiling decided where the code went, which is what the table below says a ceiling is for |
 | ~~The layout tree — `Node`, `Tab`, tiling~~ | 455 estimated, **692 real** | **done** — **two** modules, `tiling.rs` (208 lines) and `tree.rs` (504) | A closed data structure; its serialisation already lives outside, in `session.rs` |
-| ~~Routing the mouse, 15 methods of `Window`~~ | ~350 estimated, **430 real** | **done** — `pointer.rs`, 448 lines. **Not `mouse.rs`**, which the estimate named and which is still at its 99 lines: the piece is the *router*, and `mouse.rs` is what a pane asks for and reads. The delivery was re-cut in review along that seam | A closed concern: everything from the gesture arriving to the effect it has |
-| ~~Publishing the report~~, and measuring what is out of sight | ~150 estimated, **96 real** | **done** — `report.rs`, 105 lines. **Not «with the injected drags»**: `measure.rs` holds no `impl Window` at all, so the seam was already there. And **«measuring what is out of sight» did not move**: its review sent it back, because what it measures is a *grid*, not a cost — it stays in `lib.rs` | What the window is able to *say* it did, which is not what it does |
-| ~~The tab bar~~ | ~76 estimated, **100 real** | **done** — `tab_bar.rs`, 116 lines | Painting and hit-testing one strip, coupled to nothing else |
-| Saving and the watcher | ~50 | `session.rs`, `watcher.rs` | Both modules exist |
+| ~~Routing the mouse~~ | ~350 estimated, **430 real** | **done** — `pointer.rs`, 448 lines in two blocks. **Not `mouse.rs`**, and that was a close call: see below | The whole path from the queue to the effect, which is what D23 divides |
+| ~~Publishing the report~~ — **and *not* measuring what is out of sight** | ~150 estimated, **96 real** | **done** — `report.rs`, 105 lines. **Neither with the injected drags nor in `measure.rs`**: see below | The window's accounting of itself. The row bundled a second method with it and that was wrong — the audit that unbundled them is below |
+| ~~The tab bar~~ | ~76 estimated, **100 real** | **done** — `tab_bar.rs`, 118 lines, with `TabBarOutcome`, the `#[must_use]` it never had and the two guards that hold it | Painting and hit-testing one strip, coupled to nothing else. Its rectangle arithmetic came with it |
+| ~~Saving~~ — **the watcher did not move** | ~50 estimated, **50 real** | **done** — `session.rs`, from 418 lines to 471 | Same vocabulary. The watcher stayed: `watcher.rs` is deliberately window-free and thirty lines earn no module |
 
 **Every estimate in this table was low, and by the end the pattern is the point.** 300 → 311, 455 → 692,
 ~350 → 430, ~150 → 96 and ~76 → 100: five of the six finished rows came in over, one under, and the two
@@ -4534,12 +4534,110 @@ code that runs every frame and the boundary cost nothing measurable; that is evi
 move, not a licence for the rest. What it does retire is the design's shortcut — «it touches no
 measured span» has to be checked against the call sites, and here it was wrong.
 
-**And a mechanical move widens what it should not.** Making every moved item and every struct field
-crate-visible is what makes a split compile in one pass, and it gave away the field of `Weight`, a
-newtype whose only reason to exist is that its constructor refuses zero, negatives and what is not a
-number. The fix is not judgement but arithmetic: close everything, build, and open only what the
-compiler names. Thirteen fields were opened and twelve were needed; of the items, less than half.
-**The compiler is the cheapest reviewer of visibility there is, and it was never asked.**
+#### The mouse went to a module of its own, and `mouse.rs` was the alternative
+
+**The table above sent this piece to `mouse.rs` and it did not go there.** That is a changed decision,
+so it is written down here with what it cost rather than left in a `//!` comment — a reviewer had to
+point out that it had been, which is the whole failure mode this file exists to prevent.
+
+**The arithmetic did not decide it.** `mouse.rs` is 99 production lines, so 430 more would have left
+it at 529 of its 600 — under the ceiling, and the planned home was viable. What decided it is what
+`mouse.rs` says it is: it holds **the encoding a program asks for** — which bytes an `SGR` report is,
+which modes exist, what `Shift` overrides. That is a translator. The mouse piece is a **router**: it
+reads a frame's queue, works out whose the gesture is, and carries that out. Putting them together
+would give one module two subjects and one name, and the name already belongs to the translator.
+
+**And the first cut of the router was wrong**, which is worth more than the destination. It moved only
+the deciding and left the six methods that act on the verdict behind, under a header claiming «it
+decides; it does not do» — a line the code did not draw, because the router itself reports to the
+program. A blind idiom audit found it, and **the visibility surface settled it without anybody's
+opinion**: with the doers outside, **eighteen** items and fields had to be crate-visible for them;
+with the doers inside, **two**. *A seam that forces a module to open itself is the wrong seam*, and
+that is a test anybody can run.
+
+The cost is that the two halves are **two `impl` blocks**, because together they are over the 300-line
+block ceiling. That is a real price of the ceiling, and the honest place for it is here.
+
+#### The report went to a module of its own too, and its row bundled a method that is not the report
+
+**The table sent this piece to `injected.rs`, «with the injected drags», on the reasoning that
+everything the bench needs from the window belongs together.** It did not go there, and the reason is
+the same shape as the mouse's: `injected.rs` is *the half that pretends to be a hand* — instrumentation
+that reaches into the window through one method. The report is the window **accounting for itself**,
+which runs whether anybody is measuring or not. Two subjects, and the name already belongs to the
+hand. `measure.rs` was the other candidate and it holds **no `impl Window` at all**, so the seam was
+already drawn; that it is also at 583 production lines of its 600 only agrees.
+
+**And the row bundled `measure_the_ones_out_of_sight` into «the report», which it is not.** That
+method gives the consoles of an unseen tab the width they really have, so a program running in a tab
+nobody is looking at formats for its own columns instead of the eighty it started with — the
+milestone's promise that a background tab keeps running *properly*. Only the stopwatch inside it is
+accounting. A blind idiom audit caught it after it had already been moved, and it went back.
+
+**The lesson is about the name, and it is the second time in this order.** «Measure the ones out of
+sight» measures a **grid**, not a cost; «routing the mouse» turned out to be the whole path from the
+queue to the effect. **A row of this table is a name, and a name is exactly what a piece can be
+misfiled by.** What settled both was the same thing: reading what the code does rather than what the
+row calls it.
+
+#### The order is finished, and what it actually cost
+
+**`lib.rs` came in at 3 119 production lines and ends at 1 434** — **54 % gone**, in five deliveries
+over one day. `impl Window` went from 1 110 to 489. The ticket asked for «about 1 400» and never showed
+its arithmetic; the plan re-derived it by reading and said ~1 577; the real answer is **1 546**, and it
+is lower than the re-derivation because two of the five pieces came out bigger than they were priced.
+
+| Piece | Priced | Real |
+|---|---|---|
+| tiling and tree | 455 | **692** |
+| the mouse | ~350 | 430 |
+| the report | ~150 | 96 |
+| the tab bar | ~76 | 100 |
+| saving | ~50 | 50 |
+
+**Not one behavioural test was edited across the five**, which was the invariant the design set and
+the only one that could have been quietly broken. Every piece left as it was, became visible to the
+crate, and `lib.rs` re-imported it by name — so the 16 953 lines of tests reaching into its private
+items reached them where they always had.
+
+**Three practices came out of this order and are worth more than the split:**
+
+1. **Ask the compiler what should be visible.** A mechanical move opens everything, which is how the
+   first delivery put `pub(crate)` on the field of `Weight` and spent the one thing a module boundary
+   buys — a field the rest of the crate cannot reach. Close it all, build, open only what the compiler
+   names: across the five deliveries that answer was consistently **fewer than half** the items it
+   started with, and in one delivery it was **nothing at all**.
+2. **Re-import by name, never with a glob.** A glob is shadowed in silence by a later item of `lib.rs`
+   sharing a name; named, that same day is a duplicate definition and the build stops.
+3. **A number over a list is what defends the list.** The sixth guard list went unpaid in silence
+   because it was the only one without a floor over its own length, and the prose corpus went blind
+   for the same reason. Both now carry one.
+
+**And one that cost fifty lines of invisibility to learn.** The saving delivery first appended its
+`impl Window` block to the *end* of `session.rs` — **after the file's test modules**. Everything
+compiled and every guard passed, because the walk that measures a module's size stops at `mod tests`:
+fifty lines of production code had landed where no ceiling could see them. **Where a moved block is
+placed inside its destination is not cosmetic**, and the rule is one line: production code goes above
+the tests, or it is not measured.
+
+**And a mechanical move opens what it need not — but «it widened the invariant» was the wrong way to
+say it, and the correction is worth more than the finding.** Making every moved item and every struct
+field crate-visible is what makes a split compile in one pass, and it put `pub(crate)` on the field of
+`Weight`, a newtype whose only reason to exist is that its constructor refuses zero, negatives and
+what is not a number.
+
+**What that did NOT do is widen anything.** A private field of a type defined in the crate root is
+already visible to every module of the crate — the crate root's descendants are all of them — so
+`session.rs` could construct a bad `Weight` before this delivery and after it alike. Measured with a
+four-line program rather than argued. The first telling of this entry said the move «gave it away»,
+and a later reviewer took that apart; the true statement is smaller and better: **the split is the
+first moment the compiler could hold that invariant, and the mechanical pass declined to.** A module
+boundary is the only thing in Rust that can make a field private *from the rest of the crate*, and a
+sweep that opens everything spends that the moment it is bought.
+
+The fix is not judgement but arithmetic: close everything, build, and open only what the compiler
+names. Thirteen fields were opened and twelve were needed; of the items, less than half. **The
+compiler is the cheapest reviewer of visibility there is, and it was never asked.**
 
 
 ---

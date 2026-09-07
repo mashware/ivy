@@ -23,14 +23,14 @@
 //!
 //! # The one exception, and why it is a number rather than a name
 //!
-//! `src/lib.rs` is over the ceiling today and cannot come under it in one change: it is 20 933 lines
-//! with 16 952 of tests reaching into private items. So it is declared here **with the number it has
+//! `src/lib.rs` is over the ceiling today and cannot come under it in one change: it is 20 820 lines
+//! with 16 953 of tests reaching into private items. So it is declared here **with the number it has
 //! now**, and the guard fails if that number **grows**. An exception with no number is an exemption,
 //! and the next reader cannot tell «too big, being worked on» from «fine». D28 carries the order the
 //! pieces come out in.
 //!
 //! **The tests are what makes the order slow, not the code.** A piece leaves as a module of its own
-//! and `lib.rs` re-imports it by name, so those 16 952 lines reach the moved items exactly where
+//! and `lib.rs` re-imports it by name, so those 16 953 lines reach the moved items exactly where
 //! they reached them before and not one test is edited by a move. A guard list that names files is
 //! the one thing a split does break, and there are **six** of them across this suite —
 //! `MODULES` here, the file list and the corpus floor in `prose`, two lists in `glossary`, the
@@ -81,7 +81,9 @@ const MODULE_CEILING: usize = 600;
 ///
 /// A type whose behaviour does not fit in 300 lines is more than one type, or its seams are in the
 /// wrong place. Measured as this guard lands: the largest block outside `src/lib.rs` is
-/// `impl Discoverer` at 223, so this ceiling asks nothing of the code that is already in shape.
+/// `impl Discoverer` at 269, so this ceiling asks nothing of the code that is already in shape. It
+/// read 223 until somebody counted again: a number in a comment decays on its own, and the ones this
+/// file states about the crate are re-measured by every delivery that touches it.
 const IMPL_CEILING: usize = 300;
 
 /// What is over a ceiling today, with the number it is at and the reason it is not fixed here.
@@ -92,25 +94,26 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        1_485,
+        1_434,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
-         in; it cannot come under the ceiling in one change because 16 952 lines of tests reach \
+         in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
          first piece out and reading the settings file the second, which left for `settings.rs` \
          with the delivery that added the font by name**. **And the number carried three lines of \
          slack nobody had noticed**: it read 2 804 while the file was at 2 801, so a delivery could \
          grow the file and pass. The one that held a paste spent two of them, said so, and closed \
          the gap by recording what the file actually is — a ratchet with slack is a ratchet that \
-         ratchets late. **Then the tiling and the tree came out together, 692 lines, and this is \
-         the first number the order actually moved. The mouse took 430 more, and publishing \
-         the report 96, and the tab bar 100**",
+         ratchets late. **Then the order moved it for real**, in five deliveries out of 2 803: the \
+         tiling and the tree 692, the mouse 430, publishing the report 96, the tab bar 100 and \
+         saving 51 into `session.rs`. That is 1 369, and **1 434 is what is left — against the \
+         3 119 this file came in at**",
     ),
     (
         "src/lib.rs::impl Window",
-        539,
-        "28 methods, and the pieces the order names have almost all gone: mouse routing, the \
-         report and the tab bar have left, and **only saving is still to come**. It was 47 methods \
-         across 1 110 lines when this entry was written",
+        489,
+        "25 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
+         tab bar, the report and saving have all left it, each to a module that owns that \
+         vocabulary; what is left is opening, painting and the shortcuts",
     ),
     (
         "src/lib.rs::impl Pane",
@@ -193,7 +196,7 @@ fn ceiling_for(name: &str) -> Option<usize> {
 fn no_module_is_over_its_ceiling() {
     // **A floor first, because this whole file passes by looking at nothing otherwise.** It is how
     // the guards of this suite die: somebody reshapes the walk, it finds no lines, every module
-    // looks tiny and nothing says so. Measured today: 6 638 production lines over nineteen modules,
+    // looks tiny and nothing says so. Measured today: 6 642 production lines over nineteen modules,
     // the thinnest being `src/main.rs` with three.
     //
     // **Splitting a module does not raise the total and that is the point** — it moves lines from
@@ -248,7 +251,7 @@ fn no_impl_block_is_over_its_ceiling() {
         }
     }
     // The same floor, for the same reason: a scanner that stops recognising `impl` reports nothing
-    // and reads exactly like a crate in good shape. There are fifty-six of them today.
+    // and reads exactly like a crate in good shape. There are fifty-seven of them today.
     assert!(
         seen >= 30,
         "the scanner found {seen} impl blocks in the whole crate: it stopped recognising them"
@@ -321,10 +324,19 @@ fn no_entry_of_the_ratchet_is_stale() {
             "`{what}` is at {real} lines, under every ceiling: it does not need an entry any more, \
              and leaving one reads as «still too big»"
         );
-        assert!(
-            *at - real <= 200,
-            "`{what}` is at {real} and the ratchet still records {at}: a delivery took a piece out \
-             and did not lower the number, so the table says less than the code does"
+        // **Zero tolerance, and it used to be two hundred.** A ratchet that allows slack is a
+        // ratchet that ratchets late: at 200 — two thirds of `IMPL_CEILING` — a delivery could take
+        // 199 lines out, forget to lower the number, and pass in silence, which is the precise
+        // failure the `src/lib.rs` entry's own prose says was closed when its three lines of slack
+        // were found. It was closed for that one number and left open for every future one. The
+        // guard fired on this train only because the deltas were 296 and 255.
+        //
+        // **What zero costs is one edit per delivery, which is the point**: the number is the
+        // measurement or it is not a measurement.
+        assert_eq!(
+            *at, real,
+            "`{what}` is at {real} and the ratchet records {at}: a delivery moved the code and did \
+             not re-measure. The number here is the measurement, not an approximation of it"
         );
     }
 }

@@ -400,7 +400,7 @@ impl Node {
     ///
     /// **The geometric floor is not checked here**, and it is not an oversight: the tree does not
     /// know the area. It is looked at by whoever has the rectangles in front of them, just as the
-    /// splitting chord does with [`can_split`].
+    /// splitting chord does with [`crate::tiling::can_split`].
     pub(crate) fn move_pane(mut self, moved: usize, target: usize, side: Side) -> (Self, bool) {
         if moved == target || !self.has_leaf(moved) || !self.has_leaf(target) {
             return (self, false);
@@ -644,7 +644,7 @@ impl Node {
 ///
 /// **The console comes out of the tree without being dropped yet**, and that is deliberate: on
 /// dropping it its program dies and its directory disappears, and before that what it had measured
-/// of this frame has to be taken. If it left with its [`measure::Timings`] inside, the subtraction
+/// of this frame has to be taken. If it left with its [`crate::measure::Timings`] inside, the subtraction
 /// would hand its work to the UI framework — the figure D3 decides with. It is the same thing
 /// closing a tab already does, and it cannot be done from inside the tree because the stopwatch
 /// belongs to the window.
@@ -657,14 +657,14 @@ pub(crate) struct Closing {
 /// A layout of consoles: what is seen inside a tab.
 ///
 /// **It exists to separate what belongs to a layout from what belongs to the process.** The three
-/// fields in here were fields of [`Window`] when the window was a single layout; the ones that
+/// fields in here were fields of [`crate::Window`] when the window was a single layout; the ones that
 /// stayed up there —the theme, the watcher, the modifiers, the measurement— do not describe how
 /// some consoles are tiled, but how the program is.
 ///
 /// **It is a transparent container on purpose, with no border of methods.** The seam that is needed
 /// is given by the type itself: when the panes stop being two and become a tree, what changes is
 /// the inside of this, and the list of tabs does not notice. Hiding it behind methods as well would
-/// force putting [`Window::handle_the_mouse`] and [`Window::drag_the_divider`] inside the painting,
+/// force putting [`crate::Window::handle_the_mouse`] and [`crate::Window::drag_the_divider`] inside the painting,
 /// and those were taken out precisely so they could be checked without opening any window.
 pub(crate) struct Tab {
     /// How its consoles are tiled. See [`Node`].
@@ -723,7 +723,7 @@ impl Tab {
         Ok(Self::with_panes(panes, layout, name))
     }
 
-    /// How a tab is opened: the focus on the left and the divider where [`INITIAL_FRACTION`] says.
+    /// How a tab is opened: the focus on the left and the divider where [`crate::tiling::INITIAL_FRACTION`] says.
     ///
     /// It exists apart from [`Tab::new`] so that the tests come in through here with consoles of
     /// their own instead of building the struct by hand — otherwise, the day opening a tab means

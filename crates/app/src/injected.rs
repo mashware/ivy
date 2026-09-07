@@ -18,7 +18,7 @@ use crate::{
 };
 use eframe::egui;
 
-/// The drag gestures the measurement batch does to itself. See [`DRAGS_VARIABLE`].
+/// The drag gestures the measurement batch does to itself. See [`crate::DRAGS_VARIABLE`].
 ///
 /// **It alternates the side it drops by, and the reason is NOT geometry** — that was checked by
 /// mutating it. With two consoles of the same weight, always dropping by the same side leaves
@@ -80,9 +80,9 @@ pub(crate) struct InjectedDrags {
     /// is rebuilt all the same —remove, insert and redo the tiling— and that is the work the batch
     /// measures. What does not count is the one that **does not happen**.
     pub(crate) with_effect: usize,
-    /// On how many **frames** the gesture left text marked. See [`measure::Drags::marked`].
+    /// On how many **frames** the gesture left text marked. See [`crate::measure::Drags::marked`].
     pub(crate) selected: usize,
-    /// How many mouse reports went out to the program. See [`measure::Drags::reported`].
+    /// How many mouse reports went out to the program. See [`crate::measure::Drags::reported`].
     pub(crate) reported: usize,
     /// Which gesture is injected. See [`InjectedGesture`].
     pub(crate) which: InjectedGesture,
@@ -262,7 +262,7 @@ impl InjectedDrags {
     ///
     /// **The divider is derived from the two rectangles, it is not tiled again.** The gap that is
     /// left between the right edge of one console and the left edge of the next **is** the divider:
-    /// [`tile`] builds it right there and with that thickness. Tiling a second time would be a copy
+    /// [`crate::tiling::tile`] builds it right there and with that thickness. Tiling a second time would be a copy
     /// of the computation that decides where each console is, and the two could disagree precisely
     /// in the batch that measures.
     ///

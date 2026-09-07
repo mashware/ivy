@@ -52,7 +52,7 @@ pub(crate) struct MouseOutcome {
 
 /// What the wheel has asked for in a frame, **before converting it to whole movement**.
 ///
-/// **Raw and not already in [`Scroll`], and that is where the defect the review found was.** A
+/// **Raw and not already in [`term_core::Scroll`], and that is where the defect the review found was.** A
 /// trackpad sends **points**, and a brush of it is a few: divided by the height of a cell they give
 /// **less than one line**. Converting right here to an integer, that fraction was truncated to
 /// zero, the remainder was thrown away and the event was consumed all the same — that is,
@@ -60,7 +60,7 @@ pub(crate) struct MouseOutcome {
 /// frame was lost, always against the movement. Whoever looks at it has no way of noticing except
 /// by trying to turn very hard.
 ///
-/// It comes out of here raw so that [`Pane::handle_wheel`] adds it up, which is the one that keeps
+/// It comes out of here raw so that [`crate::Pane::handle_wheel`] adds it up, which is the one that keeps
 /// one frame's remainder for the next.
 ///
 /// **Two named fields and not a pair of numbers**, for the same reason as the rest of this file:

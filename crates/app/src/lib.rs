@@ -40,23 +40,22 @@ pub mod measure;
 pub mod mouse;
 pub mod painter;
 pub mod panel;
+mod pointer;
 pub mod pty_output;
 mod report;
 pub mod session;
 pub mod settings;
 mod tab_bar;
-
-pub mod pointer;
-
 pub mod theme;
 mod tiling;
 mod tree;
 pub mod watcher;
 
-// **Brought back by name, and the names are the point.** The two modules below came out of this
-// file under D28, and re-importing what they hold is what keeps every call site — and the 16 946
-// lines of tests that reach into them — exactly as they were. A move that had to edit its own
-// behavioural tests would not be a move.
+// **Brought back by name, and the names are the point.** The four modules named below — and the
+// fifth, `report`, which this file calls but imports nothing from — came out of this file under
+// **D28**, and re-importing what they hold is what keeps every call site, and the 16 952 lines of
+// tests that reach into them, exactly as they were. A move that had to edit its own behavioural
+// tests would not be a move, and across the whole order not one of them was touched.
 //
 // **By name and not with a glob**, which was the first shape of this and is the wrong one: a glob
 // is **shadowed in silence** by a later item of this file that happens to share a name, so the
@@ -86,19 +85,6 @@ const APP_NAME: &str = "agent-terminal";
 ///
 /// It exists on every system where this can run, which is what is asked of a fallback.
 const FALLBACK_SHELL: &str = "/bin/sh";
-
-/// How long is waited from the first change without writing until the layout is written.
-///
-/// **Half a second, and the number has two reasons.** It is the same order as the breather of the
-/// watcher's degraded mode, which is already in the code and for the same motive: it is what is
-/// barely noticed and does not keep the window awake. And with it, **a continuous drag writes twice
-/// per second instead of sixty**, while what is lost on dying —half a second of placing— is not
-/// missed.
-///
-/// **It is a cap counted from the first change, not a postponement.** The difference decides
-/// whether the milestone works: rearming the deadline on every change, a ten-second drag would not
-/// write even once.
-const SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The font size, in points.
 const DEFAULT_FONT_SIZE: f32 = 14.0;
@@ -149,7 +135,7 @@ const PANEL_GRIP: f32 = 4.0;
 
 /// What the window takes away from having painted a pane.
 ///
-/// **It has a name and is not a loose pair**, for the same reason as [`Tiling`] and
+/// **It has a name and is not a loose pair**, for the same reason as [`crate::tiling::Tiling`] and
 /// [`crate::panel::PanelTiling`]: two values that are returned together and mean different things
 /// get swapped in the call without the compiler saying anything, and here one of the two feeds the
 /// report of a measurement batch.
@@ -421,7 +407,7 @@ enum WindowRequest {
 /// measured. **Both axes are strictly positive, and the type guarantees it** — that is why the
 /// constructor returns `Option` instead of correcting a zero. Zero columns or zero rows is not a
 /// small layout: it is a tab with no console at all, and out of that comes a branch with no
-/// children whose sum of weights is zero. It is the same criterion as [`Weight`], and for the same
+/// children whose sum of weights is zero. It is the same criterion as [`crate::tiling::Weight`], and for the same
 /// reason.
 struct OpeningLayout {
     columns: usize,
@@ -2638,106 +2624,6 @@ impl Window {
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(how_much));
     }
 
-    /// Builds the mirror of the layout and **arms the deadline if anything changed**.
-    ///
-    /// **What it costs is timed and declared in both places**: it goes into the accumulator the
-    /// window subtracts —or its work would be published as framework cost, the figure D3 decides
-    /// with— and it also has a series of its own in the report, because that accumulator
-    /// **subtracts but publishes no row at all**. They are two mechanisms and both are needed.
-    fn check_whether_the_layout_moved(&mut self) {
-        let started = Instant::now();
-
-        let current = self.describe();
-        if self.last_seen.as_ref() != Some(&current) {
-            self.last_seen = Some(current);
-            // **Only if it was empty**, which is the difference between a cap and a postponement:
-            // during a drag the layout changes on every frame, and by rearming here it would never
-            // be written.
-            if self.save_due.is_none() {
-                self.save_due = Some(Instant::now() + SAVE_DELAY);
-            }
-        }
-
-        self.mirror_this_frame += started.elapsed();
-    }
-
-    /// Writes the layout if the deadline fell due and there is something different from the last
-    /// thing that reached the disk.
-    ///
-    /// **It is called in the logic half and AFTER closing the frame**, and the order matters:
-    /// closing empties what the window timed separately, so writing before would charge its cost to
-    /// the previous frame — which is exactly the kind of error this instrument is after.
-    fn save_if_due(&mut self) {
-        let Some(due) = self.save_due else {
-            return;
-        };
-        if Instant::now() < due {
-            return;
-        }
-        self.save_now();
-    }
-
-    /// Writes what is pending **without looking at the clock**.
-    ///
-    /// **It exists for the clean closing of the window, and a review asked for it.** The delay
-    /// accepts losing half a second «on dying», and closing the window by hand **is not dying**: it
-    /// is the only ending in which the loss can be avoided, and avoiding it costs nothing because
-    /// by then there is no frame left to measure.
-    fn save_now(&mut self) {
-        if self.save_due.is_none() {
-            return;
-        }
-        self.save_due = None;
-
-        // **The clock starts here, before copying and comparing.** Copying the whole document and
-        // comparing it thoroughly costs something, happens on every deadline that falls due —twice
-        // a second while it is being dragged— and on the path where there is nothing to write **it
-        // is the whole cost**: leaving it outside the clock would publish it as framework cost,
-        // which is the leak the project's hard rule names.
-        let started = Instant::now();
-
-        // What is going to be written is the last thing seen: it has just been built in the
-        // interface pass, so walking the tree again would be paying twice for the same datum.
-        let Some(document) = self.last_seen.clone() else {
-            self.mirror_this_frame += started.elapsed();
-            return;
-        };
-        if self.last_written.as_ref() == Some(&document) {
-            // **It goes to the mirror's span and not to the write's, because it is what it is**:
-            // comparing two mirrors. Counting it as a write would put into that average some
-            // samples that wrote nothing.
-            self.mirror_this_frame += started.elapsed();
-            return;
-        }
-        // **Through the validated type, which is what makes it impossible to write something that
-        // cannot be read back.** And what does not pass validation **is warned about once**: the
-        // real case is having more consoles open than the format admits —the ceiling exists to
-        // bound the start-up `fork`, so it cannot be removed—, and without this warning the user
-        // would lose their layout with no signal at all.
-        let validated = match session::validate(document.clone()) {
-            Ok(validated) => validated,
-            Err(problem) => {
-                self.persistence.warn_cannot_save(&problem);
-                // **This is not a write and is not counted as one, not even as an attempt.** No
-                // path was resolved and the disk was not touched: what ran was validating, which is
-                // the same kind of work as comparing the mirror. Counting it in the write's span
-                // would put into that average some samples that are **all** validation, and the
-                // number would stop describing what writing costs.
-                self.mirror_this_frame += started.elapsed();
-                return;
-            }
-        };
-
-        let written = self.persistence.save(&validated);
-        let how_much = started.elapsed();
-        self.timed_separately += how_much;
-        self.saving.record_write(how_much, written);
-
-        if written {
-            self.last_written = Some(document);
-        }
-    }
-
     /// Closes the previous frame: each console closes its spans and the window keeps whatever none
     /// of them timed.
     fn close_the_frame(&mut self, cpu_cost: std::time::Duration) {
@@ -3985,6 +3871,7 @@ mod tests {
     // the window itself only ever asks for the result.
     use super::*;
     use crate::injected::{InjectedGesture, gesture_of};
+    use crate::session::SAVE_DELAY;
     use crate::tab_bar::{TAB_BAR_MARGIN, tab_rect};
     use crate::tiling::{Divider, INITIAL_FRACTION, Weight, side_of, tile, weights_of};
     use crate::tree::Child;

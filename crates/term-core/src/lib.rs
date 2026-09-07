@@ -99,7 +99,7 @@ struct Input {
     /// Bytes handed over and not yet written. It only ever goes down when a write really lands.
     owed: AtomicUsize,
     /// When the oldest unwritten byte was handed over, in milliseconds since the epoch of
-    /// [`Input::since`]. Zero means nothing is owed.
+    /// [`Input::now`]. Zero means nothing is owed.
     waiting_since: AtomicU64,
     /// Whether the writer gave up, which means the program or the pseudoterminal is gone.
     gave_up: AtomicBool,

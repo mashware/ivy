@@ -25,7 +25,7 @@
 //!
 //! **The non-ASCII half of the sibling oracle is deliberately absent, and it was measured before
 //! being dropped.** `settings.rs` judges thirteen short on-screen messages and can afford
-//! `is_ascii()`; here **2 037 of the 13 804 comment lines are not pure ASCII** — angle quotes, em
+//! `is_ascii()`; here **2 041 of the 13 833 comment lines are not pure ASCII** — angle quotes, em
 //! dashes, `µs`, Japanese, emoji — so that test reports a seventh of the corpus. The narrower
 //! variant — a Spanish accent or `ñ` anywhere in the line — leaves **five** lines, and it would
 //! need a line-by-line exemption for every one of them: two are deliberate Spanish citations
@@ -47,7 +47,7 @@ use std::collections::BTreeSet;
 /// left four tests green. Here the same mistake does not compile.
 ///
 /// **`src/lib.rs` is here, and adding it was the one line an earlier delivery promised it would
-/// be.** It is nearly half the crate's prose on its own — 5 857 of the 13 804 comment lines —
+/// be.** It is nearly half the crate's prose on its own — 5 806 of the 13 833 comment lines —
 /// and it is why the list is written as data and every floor below is a lower bound rather than an
 /// exact count: the file it watches will keep growing. It carried 7 319 until the module ceiling
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
@@ -85,7 +85,7 @@ const SOURCES: &[(&str, &str)] = &[
 ///
 /// **Without a floor this test passes by being empty**, which is how the guards of this suite die:
 /// somebody reshapes the comment detection, the walk finds nothing, every file looks clean and
-/// nothing says otherwise. Measured as this delivery leaves the tree: **13 804** comment lines, the
+/// nothing says otherwise. Measured as this delivery leaves the tree: **13 833** comment lines, the
 /// thinnest file being `src/main.rs` with **one** — it is four lines of `fn main`, and a floor that
 /// demanded more of it would have to be a table instead of a number.
 ///
@@ -93,8 +93,8 @@ const SOURCES: &[(&str, &str)] = &[
 /// `src/lib.rs` is what makes it matter: `src/main.rs`, `examples/leak.rs` and
 /// `examples/screen_demo.rs` together carry 94 lines, so losing all three sits inside the total
 /// floor's slack — reported by nothing but the per-file one. That is the case the second floor is
-/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 5 857 of the
-/// 13 804, so losing it drops the corpus to 7 947 and the total fires loudly. The two floors answer
+/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 5 806 of the
+/// 13 833, so losing it drops the corpus to 8 027 and the total fires loudly. The two floors answer
 /// different halves, which is why there are two.
 ///
 /// **The floor is a number over the corpus, so a split has to raise it.** The tiling and the tree
@@ -104,12 +104,13 @@ const SOURCES: &[(&str, &str)] = &[
 /// floor left where it was is what turns that into silence.
 ///
 /// **13 300 and not a rounder number, and the slack was measured rather than chosen.** With the
-/// corpus at 13 804 the slack is 504, so every file carrying more than that is defended by the total
-/// alone; the **sixteen** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
+/// corpus at 13 833 the slack is 533, so every file carrying more than that is defended by the total
+/// alone; the **seventeen** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
 /// `examples/leak.rs` (59), `src/mouse.rs` (94), `src/report.rs` (134), `examples/sweep.rs` (134),
 /// `examples/fonts.rs` (168), `src/tab_bar.rs` (171), `src/theme.rs` (202), `src/watcher.rs` (203),
 /// `src/tiling.rs` (272), `src/pty_output.rs` (282), `src/injected.rs` (289), `src/painter.rs` (355),
-/// `src/tree.rs` (451) and `src/pointer.rs` (458) — and that is what the per-file floor is for and
+/// `src/tree.rs` (451), `src/pointer.rs` (458) and `src/settings.rs` (526) — and that is what the
+/// per-file floor is for and
 /// why it is stated here rather than left to be discovered. A floor loose enough to let a mid-sized
 /// file be gutted was checked by doing exactly that, on the number this replaced.
 ///
@@ -124,7 +125,7 @@ const COMMENT_LINES_PER_FILE_AT_LEAST: usize = 1;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///
-/// One is unusable and two is not enough margin: `src/settings.rs:1664` cites «pestañas» and
+/// One is unusable and two is not enough margin: `src/settings.rs:1791` cites «pestañas» and
 /// «válido» inside an English sentence and scores exactly two. Three is the smallest threshold that
 /// leaves that line alone without an exemption of its own — and a real Spanish sentence of comment
 /// length clears it easily: the shortest positive case asserted below scores five.
@@ -136,7 +137,7 @@ const MARKERS_TO_CALL_IT_SPANISH: usize = 3;
 /// the whole line would also excuse a fresh Spanish sentence written beside the citation, and these
 /// citations sit in the middle of the densest prose in the crate.
 ///
-/// **One of them earns its place on its own today** — `src/settings.rs:1358` scores 7 markers with
+/// **One of them earns its place on its own today** — `src/settings.rs:1485` scores 7 markers with
 /// the list empty, and [`the_islands_are_what_keeps_the_english_prose_green`] asserts that. It was
 /// two until this delivery translated the claim phrases: `src/panel.rs:512` quoted one of them and
 /// now scores nothing. The rest are cheap insurance with a real scenario: `partir-al-lado`,
@@ -197,7 +198,7 @@ const ISLANDS: &[(&str, &str)] = &[
 ///
 /// The list is closed, and the threshold above is what covers its remaining softness: a handful of
 /// entries — «con», «la», «es» — do exist in some corner of English, and one of them alone is never
-/// a verdict. Measured over all 13 804 comment lines of the twenty-three files: **zero** English lines
+/// a verdict. Measured over all 13 833 comment lines of the twenty-three files: **zero** English lines
 /// reach three markers.
 const SPANISH_WORDS: &[&str] = &[
     // ── The function words, from the sibling list in src/settings.rs ──
@@ -472,7 +473,7 @@ fn fold(text: &str) -> String {
 ///
 /// **It is a line walk and not a lexer, and the price is stated rather than hidden.** A `//` inside
 /// a string literal reads as a comment: there is exactly one in the twenty-three files,
-/// `src/settings.rs:1778` asserting `code.starts_with("//")`, and it is English. A `/*` inside a
+/// `src/settings.rs:1911` asserting `code.starts_with("//")`, and it is English. A `/*` inside a
 /// literal would be worse — it would open a comment that never closes and hand the rest of the file
 /// over as prose — so the leftover depth comes back with the lines and every file is asserted to
 /// end at zero. The sibling `glossary.rs` does own a lexer, and it is 180 lines of one; the whole
@@ -592,7 +593,7 @@ fn the_walk_still_reads_the_comments_of_every_file() {
     }
     assert!(
         total >= COMMENT_LINES_AT_LEAST,
-        "the walk found {total} comment lines and there are 13 804: the detection stopped matching \
+        "the walk found {total} comment lines and there are 13 833: the detection stopped matching \
          and this guard is judging almost nothing"
     );
 }
@@ -785,7 +786,7 @@ fn no_island_is_stale() {
 /// rather than asserted.
 ///
 /// **One line is what the sweep returns, and it fell from two with this delivery** —
-/// `src/settings.rs:1358`, scoring 7. It used to be that line and `src/panel.rs:512` scoring 3; the
+/// `src/settings.rs:1485`, scoring 7. It used to be that line and `src/panel.rs:512` scoring 3; the
 /// second quoted a claim phrase, this delivery translated the three phrases, and it stopped citing
 /// anything. The day this reaches zero the message below is the instruction: the islands, or the
 /// threshold, should go.
@@ -845,7 +846,7 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
     // one would go on passing.
     assert!(
         examined >= COMMENT_LINES_AT_LEAST,
-        "this guard judged {examined} comment lines and there are 13 804: whatever it reports, it is \
+        "this guard judged {examined} comment lines and there are 13 833: whatever it reports, it is \
          not reporting on the prose of these twenty-three files"
     );
 
