@@ -44,6 +44,7 @@ pub mod pty_output;
 mod report;
 pub mod session;
 pub mod settings;
+mod tab_bar;
 
 pub mod pointer;
 
@@ -63,6 +64,7 @@ pub mod watcher;
 // meaning the other one. Named, that same day is a duplicate definition and the build stops. It
 // also gives the reader the one thing the glob takes away — the list of what actually left.
 use pointer::{DragIntent, WheelInput, WheelOutcome};
+use tab_bar::set_the_tab_bar_aside;
 use tiling::{DIVIDER_THICKNESS, Orientation, Side, can_split};
 use tree::{Closing, Node, Tab};
 
@@ -144,17 +146,6 @@ const INITIAL_GRID: Size = Size { rows: 24, cols: 80 };
 /// Widening **discounts nothing** from the tiling, because this rectangle is not painted: it is
 /// only where the mouse counts.
 const PANEL_GRIP: f32 = 4.0;
-
-/// What the window takes away from having painted the tab bar.
-///
-/// **Both are worth it for the report, and that is why they travel together**: the cost is
-/// subtracted from the frame and the marked cards are what tells apart a batch that measured the
-/// bar **with** its new work from one that measured it without it.
-struct TabBarOutcome {
-    cost: std::time::Duration,
-    /// How many cards carried a symbol in this pass.
-    marked: usize,
-}
 
 /// What the window takes away from having painted a pane.
 ///
@@ -371,12 +362,6 @@ const FRAMES_INSISTING_ON_SIZE: u8 = 32;
 /// difference that does not move a single pixel, let alone a cell of the grid, which is what the
 /// measurement compares.
 const SIZE_TOLERANCE: f32 = 0.5;
-
-/// How much air the bar leaves above and below the tab's number.
-///
-/// It is the only constant thing about its height: the rest comes from the font's metric, so the
-/// bar grows with the font size instead of falling short when it is raised.
-const TAB_BAR_MARGIN: f32 = 4.0;
 
 /// How often the window looks again when it has been left with nobody to warn it.
 ///
@@ -650,54 +635,6 @@ fn how_many_drags(value: Option<&str>) -> usize {
 /// What the environment variable says, already resolved.
 fn drags_at_startup() -> usize {
     how_many_drags(std::env::var(DRAGS_VARIABLE).ok().as_deref())
-}
-
-/// Sets aside the bar's place at the top, and returns what is left to the consoles.
-///
-/// **With a single tab there is no bar, and that is not an aesthetic convenience.** It is what
-/// leaves the grid identical to the one from before the tabs, and that equality is the control
-/// batch of D3's annex: without it, the bar would take height off the consoles just as the panel
-/// took columns off them, the frame would come out **cheaper** by painting fewer cells and the
-/// annex would publish an improvement that does not exist.
-///
-/// **The cut is bounded, because [`egui::Rect::split_top_bottom_at_y`] does not do it** — read in
-/// its source (`emath-0.35.0/src/rect.rs:671`), where it builds the two rectangles with the cut as
-/// it comes. With the window lower than the bar, a cut below the area would leave the consoles'
-/// rectangle **inverted**, with its top edge below its bottom one. It is the same care [`tile`]
-/// already takes with the width, and the same edge case that is tested there.
-fn set_the_tab_bar_aside(
-    area: egui::Rect,
-    tabs: usize,
-    metrics: &CellMetrics,
-) -> (Option<egui::Rect>, egui::Rect) {
-    if tabs < 2 {
-        return (None, area);
-    }
-
-    let height = metrics.height() + 2.0 * TAB_BAR_MARGIN;
-    let cut_along = (area.top() + height).min(area.bottom());
-    let (tab_bar, consoles) = area.split_top_bottom_at_y(cut_along);
-
-    (Some(tab_bar), consoles)
-}
-
-/// Where a tab's card falls inside the bar.
-///
-/// **All of the same width, and with no scrolling.** The number is clipped when they stop fitting
-/// —hence whoever paints it clips to this rectangle—, which leaves it legible up to some fifteen or
-/// twenty tabs. Beyond that you navigate by shortcut, which is how you navigate anyway as soon as
-/// there are more than three.
-///
-/// There is no need to guard against `how_many` being zero: there are only cards when there is a
-/// bar, and there is only a bar with two tabs or more.
-fn tab_rect(tab_bar: egui::Rect, which: usize, how_many: usize) -> egui::Rect {
-    let width = tab_bar.width() / how_many as f32;
-    let left_x = tab_bar.left() + width * which as f32;
-
-    egui::Rect::from_min_max(
-        egui::pos2(left_x, tab_bar.top()),
-        egui::pos2(left_x + width, tab_bar.bottom()),
-    )
 }
 
 /// Opens the window and does not come back until it is closed.
@@ -2980,141 +2917,6 @@ impl Window {
         pump
     }
 
-    /// Changes tab when a tab card is clicked.
-    ///
-    /// It lives apart from the painting for the same reason as [`Self::handle_the_mouse`], and it
-    /// uses `Sense::CLICK` for the same reason too: `Sense::click()` adds `FOCUSABLE`, that is, the
-    /// card **would ask for egui's keyboard focus** and would compete with the application's
-    /// routing, which is geographic.
-    fn handle_tab_bar_clicks(&mut self, ui: &egui::Ui, tab_bar: egui::Rect, metrics: &CellMetrics) {
-        for which_tab in 0..self.tabs.len() {
-            let id = ui.id().with(("tab", which_tab));
-            if ui
-                .interact(
-                    tab_rect(tab_bar, which_tab, self.tabs.len()),
-                    id,
-                    egui::Sense::CLICK,
-                )
-                .clicked()
-            {
-                // **Through the same door as the keyboard, instead of writing `active` by hand.**
-                // They are the same transition, and having it in two places already cost a defect:
-                // the click did not ask for a frame, so with two quiet consoles —this milestone's
-                // case— the tab just shown was stuck with the start-up grid until input from
-                // something else arrived.
-                self.apply(
-                    WindowRequest::Go(which_tab as isize - self.active as isize),
-                    ui.ctx(),
-                    ui.max_rect(),
-                    metrics,
-                );
-            }
-        }
-    }
-
-    /// Paints the bar: one card per tab, with its number inside.
-    ///
-    /// **The numbers that are seen start at one**, not at zero like the consoles' in the report:
-    /// that is an instrument and this is what whoever has the window in front of them reads.
-    ///
-    /// The clip to the card is what holds up the equal-shares tiling with no scrolling: when the
-    /// number stops fitting it is cut off inside its own card instead of invading the neighbor's.
-    ///
-    /// **And each card says whether that tab claims you**, with the same symbol and the same color
-    /// as the panel of the pane that claims it. **The symbol goes flush left and the number stays
-    /// where it was**: centring the two together would move the number every time a producer
-    /// publishes or stops publishing, and a card whose number dances reads worse than one with a
-    /// gap on the left.
-    ///
-    /// **A single clock for all the cards**, passed in from outside. It is not the same one as the
-    /// panels' —each pane takes its own when it is painted, and the background ones share another—,
-    /// and it does not need to be: what this avoids is **two cards on the same bar** disagreeing
-    /// about the minute in which one of them turns stale.
-    ///
-    /// **It returns what it cost, and the stopwatch lives in here and not in the caller.** This
-    /// project has already turned down the clock in the caller twice, with the reason measured:
-    /// from outside, the span covers the whole call whatever is done inside, so **taking work out
-    /// of the measured region breaks no test**. Checked again here — with the clock outside, moving
-    /// the walk over the claims out left the whole suite green, and that walk is the half this
-    /// milestone added.
-    fn paint_the_tab_bar(
-        &self,
-        ui: &egui::Ui,
-        tab_bar: egui::Rect,
-        metrics: &CellMetrics,
-        now: SystemTime,
-    ) -> TabBarOutcome {
-        let started = Instant::now();
-        let mut marked = 0;
-        ui.painter_at(tab_bar)
-            .rect_filled(tab_bar, 0.0, self.theme.background());
-
-        for which_tab in 0..self.tabs.len() {
-            let tab_area = tab_rect(tab_bar, which_tab, self.tabs.len());
-            let painter = ui.painter_at(tab_area);
-            let is_the_active_one = which_tab == self.active;
-
-            // The active one is filled with the same color that marks the console with focus: both
-            // say «the keyboard goes here», at two different scales, and giving them two colors
-            // would say they are two states with nothing to do with each other.
-            if is_the_active_one {
-                painter.rect_filled(tab_area, 0.0, self.theme.focus());
-            }
-
-            painter.text(
-                tab_area.center(),
-                egui::Align2::CENTER_CENTER,
-                // The number is passed **without converting it to text**: `Painter::text` takes an
-                // `impl ToString` and calls `to_string` inside, so giving it a ready-made `String`
-                // clones it and allocates twice per tab and per frame.
-                which_tab + 1,
-                metrics.font(),
-                if is_the_active_one {
-                    self.theme.background()
-                } else {
-                    self.theme.foreground()
-                },
-            );
-
-            // **The active one is marked too.** In the tab you are looking at the claim can come
-            // from the pane next door, and not marking it would be one more conditional rule to
-            // maintain.
-            if let Some(attention) = self.tabs[which_tab].attention(now) {
-                // **The symbol is painted over the bar's background, in the active card too.**
-                // That card is filled with the focus color, and on top of it these colors **cannot
-                // be seen**: measured, the blocking red gives 1.01 of contrast and the dimmed
-                // yellow 1.02 — that is, the same color as far as reading it goes. The number
-                // beside it is already inverted for this very reason, but inverting the symbol
-                // would be no good: **its color is the class**, and changing it would say something
-                // else. What is changed is what lies behind.
-                if is_the_active_one {
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(
-                            tab_area.left_top(),
-                            egui::vec2(2.0 * TAB_BAR_MARGIN + metrics.width(), tab_area.height()),
-                        ),
-                        0.0,
-                        self.theme.background(),
-                    );
-                }
-                painter.text(
-                    egui::pos2(tab_area.left() + TAB_BAR_MARGIN, tab_area.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    panel::attention_symbol(attention.class),
-                    metrics.font(),
-                    self.theme
-                        .attention_color(attention.class, attention.backed),
-                );
-                marked += 1;
-            }
-        }
-
-        TabBarOutcome {
-            cost: started.elapsed(),
-            marked,
-        }
-    }
-
     /// Sends what was typed in this pass to **one single** console, the one that has the focus.
     ///
     /// It lives apart from the painting for the same reason as [`Self::handle_the_mouse`]: sending
@@ -4183,6 +3985,7 @@ mod tests {
     // the window itself only ever asks for the result.
     use super::*;
     use crate::injected::{InjectedGesture, gesture_of};
+    use crate::tab_bar::{TAB_BAR_MARGIN, tab_rect};
     use crate::tiling::{Divider, INITIAL_FRACTION, Weight, side_of, tile, weights_of};
     use crate::tree::Child;
     use std::time::{Duration, Instant};
@@ -6802,7 +6605,7 @@ mod tests {
 
     #[test]
     fn a_window_shorter_than_the_bar_leaves_no_inverted_rectangle() {
-        // `split_top_bottom_at_y` **does not clamp** —read in `emath-0.35.0/src/rect.rs:671`, which
+        // `split_top_bottom_at_y` **does not clamp** —read in `emath-0.36.1/src/rect.rs:671`, which
         // builds the two rectangles with the cut just as it comes—, so a cut below the area returns
         // the bottom one with its top edge below its bottom one. It is the same edge case the width
         // already has covered.

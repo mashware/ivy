@@ -1879,7 +1879,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 8] = [
+        const SOURCES: [(&str, &str); 9] = [
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),
@@ -1891,6 +1891,7 @@ mod tests {
             ("injected.rs", include_str!("injected.rs")),
             ("pointer.rs", include_str!("pointer.rs")),
             ("report.rs", include_str!("report.rs")),
+            ("tab_bar.rs", include_str!("tab_bar.rs")),
             ("tiling.rs", include_str!("tiling.rs")),
             ("tree.rs", include_str!("tree.rs")),
         ];
@@ -1918,8 +1919,8 @@ mod tests {
             }
         }
         // Same floor and for the same reason as its siblings: without it a walk that stopped finding
-        // literals leaves this test passing by looking at nothing. The eight files hold **76** today
-        // — 27, 5, 20, 6, 5, 3, 10 and, for now, not one in `pointer.rs` — and the floor sits four below, tight enough that a broken walk
+        // literals leaves this test passing by looking at nothing. The nine files hold **77** today
+        // — 27 in `session.rs`, 5, 19, 6, 1, 5, 1, 3 and 10 — and the floor sits five below, tight enough that a broken walk
         // cannot hide behind it and loose enough that deleting a message is not a failure.
         //
         // **It was left at 74 when the corpus dropped from 78 to 76 and the claim above stopped
@@ -1933,7 +1934,7 @@ mod tests {
         // which is why the floor is stated as a number and not as «some».
         assert!(
             sentences.len() >= 72,
-            "only {} sentence-shaped literals were found before `mod tests` in the eight files: the \
+            "only {} sentence-shaped literals were found before `mod tests` in the nine files: the \
              walk stopped working",
             sentences.len()
         );

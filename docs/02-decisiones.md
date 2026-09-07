@@ -4419,10 +4419,23 @@ Written down so the next delivery does not have to rediscover it. Sizes are prod
 | ~~The injected drags of the measurement bench~~ | 300 | **done** — `injected.rs`, 311 lines | Instrumentation living in the core. **Not `measure.rs`**: that module is at 540 lines and the ceiling is 600, so it can absorb 60 — the guard's own arithmetic ruled out the obvious home |
 | ~~Reading the settings file, and the measurement veto~~ | 50 | **done** — `settings.rs`, which went from 291 to 349 | The module that already owns that vocabulary. **It was not on this table**: the delivery that added the font by name needed room in `lib.rs` and this was the piece it was already touching — the ceiling decided where the code went, which is what the table below says a ceiling is for |
 | ~~The layout tree — `Node`, `Tab`, tiling~~ | 455 estimated, **692 real** | **done** — **two** modules, `tiling.rs` (208 lines) and `tree.rs` (504) | A closed data structure; its serialisation already lives outside, in `session.rs` |
-| Routing the mouse, 15 methods of `Window` | ~350 | `mouse.rs` | It fits: 99 lines today, 449 after |
-| Publishing the report and measuring what is out of sight | ~150 | with the injected drags | Same reason as the first row, and the same owner: everything the bench needs from the window |
-| The tab bar | ~76 | a module of its own | Painting and hit-testing one strip, coupled to nothing else |
+| ~~Routing the mouse, 15 methods of `Window`~~ | ~350 estimated, **430 real** | **done** — `pointer.rs`, 448 lines. **Not `mouse.rs`**, which the estimate named and which is still at its 99 lines: the piece is the *router*, and `mouse.rs` is what a pane asks for and reads. The delivery was re-cut in review along that seam | A closed concern: everything from the gesture arriving to the effect it has |
+| ~~Publishing the report~~, and measuring what is out of sight | ~150 estimated, **96 real** | **done** — `report.rs`, 105 lines. **Not «with the injected drags»**: `measure.rs` holds no `impl Window` at all, so the seam was already there. And **«measuring what is out of sight» did not move**: its review sent it back, because what it measures is a *grid*, not a cost — it stays in `lib.rs` | What the window is able to *say* it did, which is not what it does |
+| ~~The tab bar~~ | ~76 estimated, **100 real** | **done** — `tab_bar.rs`, 116 lines | Painting and hit-testing one strip, coupled to nothing else |
 | Saving and the watcher | ~50 | `session.rs`, `watcher.rs` | Both modules exist |
+
+**Every estimate in this table was low, and by the end the pattern is the point.** 300 → 311, 455 → 692,
+~350 → 430, ~150 → 96 and ~76 → 100: five of the six finished rows came in over, one under, and the two
+largest were out by 52 % and 23 %. **Three of the six also went somewhere other than where this table
+sent them** — the injected gestures, the router and the report — and each time the reason was the same:
+the ceiling or the seam was consulted *before* the move and the named destination did not survive it.
+Read this table as the order the pieces come out in, which it gets right, and not as their sizes or
+their homes, which it does not.
+
+**And the rows were struck late.** Until the tab bar's delivery, three finished pieces still read as
+pending here and two of them named modules the code never reached, while the working record claimed the
+table had been closed with each piece's real cost. A table that is only right after somebody checks it
+is a table nobody can read.
 
 **That correction is worth keeping rather than editing out.** The first version of this table sent two
 pieces to `measure.rs` because that is the module whose name matches them. Doing the arithmetic the
