@@ -3920,7 +3920,7 @@ mod tests {
         let theme = theme::Theme::default();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 400.0));
 
-        let quiet = shapes_painting(&pane, &theme, rect);
+        let quiet = shapes_painting(&mut pane, &theme, rect);
         keyboard::paste_or_hold(
             &"x".repeat(boundary + 1),
             false,
@@ -3931,7 +3931,7 @@ mod tests {
             pane.held.is_some(),
             "the paste was not held, so nothing is being asked"
         );
-        let asking = shapes_painting(&pane, &theme, rect);
+        let asking = shapes_painting(&mut pane, &theme, rect);
 
         assert!(
             asking > quiet,
@@ -3941,7 +3941,11 @@ mod tests {
     }
 
     /// How many shapes the painter enqueues for that console, painted onto a layer of its own.
-    fn shapes_painting(pane: &Pane, theme: &theme::Theme, rect: egui::Rect) -> usize {
+    ///
+    /// **It lends the console mutably because painting a question records where its notice landed**,
+    /// which is what a click is judged against. A helper that could not do that would be measuring
+    /// a painter that does not exist.
+    fn shapes_painting(pane: &mut Pane, theme: &theme::Theme, rect: egui::Rect) -> usize {
         let ctx = egui::Context::default();
         // An empty pass first: the text engine does not exist until there has been one.
         ctx.run_ui(egui::RawInput::default(), |_| {})
@@ -3959,6 +3963,760 @@ mod tests {
         let painted = output.shapes.len();
         output.drop_without_applying_deltas();
         painted
+    }
+
+    /// Everything a console's painter put on screen as text, concatenated.
+    ///
+    /// **It reads the galleys the painter enqueued**, so what it asserts on is what a person would
+    /// read. Asserting on the string a helper returns would prove the helper and not that anybody
+    /// calls it — a disguise this project has on file nine times over.
+    fn text_painted(pane: &Pane, theme: &theme::Theme, rect: egui::Rect) -> String {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut discoverer = fonts::Discoverer::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("the console"),
+            ));
+            let metrics =
+                painter::CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer);
+        });
+        let read = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        output.drop_without_applying_deltas();
+        read
+    }
+
+    /// The two things a notice can say, so an assertion can check the box fits **both**.
+    ///
+    /// **It lives here and not beside the painter, and that is not tidiness.** The shape guard counts
+    /// a file's production lines and stops only at a module literally called `tests`, so two
+    /// `#[cfg(test)]` helpers left next to the painter's own items were charged against
+    /// `painter.rs`'s ceiling — and wrapping them in a module of another name made it worse, by four
+    /// lines. A reviewer found it by counting the file with the guard's own rules; here they cost
+    /// nothing, because this module is the one the walk stops at.
+    fn both_ways_to_answer() -> [&'static str; 2] {
+        [painter::ANSWERED_BY_HAND, painter::ANSWERED_BY_CLICK]
+    }
+
+    /// How tall that answer sentence lays out over the console, at the width the box is measured with.
+    fn the_sentence_laid_out(
+        pane: &Pane,
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        rect: egui::Rect,
+        how: &str,
+    ) -> egui::Vec2 {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut size = egui::Vec2::ZERO;
+        let margin = metrics.width();
+        let body = pane
+            .held
+            .as_ref()
+            .expect("that console has a question to measure")
+            .sentence();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            size = ui
+                .painter()
+                .layout(
+                    format!("{how}\n\n{body}"),
+                    metrics.font(),
+                    theme.foreground(),
+                    (rect.width() - 4.0 * margin).max(metrics.width()),
+                )
+                .size()
+                + egui::vec2(2.0 * margin, 2.0 * margin);
+        })
+        .drop_without_applying_deltas();
+        size
+    }
+
+    /// Where that console's notice goes, asked of **the same function the painter and the mouse pass
+    /// both call**. Nothing is stored between frames any more, so this is the only way to know.
+    fn the_notice_box(
+        pane: &Pane,
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        rect: egui::Rect,
+    ) -> egui::Rect {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::the_question_box(ui.painter(), pane, theme, metrics, rect);
+        })
+        .drop_without_applying_deltas();
+        found.expect("that console has a question with a box worth pressing")
+    }
+
+    /// Holds a paste on that console, and says so if the platform has no boundary to exceed.
+    ///
+    /// **The `false` return is not a pass.** Every caller turns it into an early `return`, which on
+    /// a platform without a boundary makes the test a silent no-op — said here because **F2.7** is
+    /// the next milestone and that is where it will happen.
+    fn hold_a_paste_on(pane: &mut Pane) -> bool {
+        let Some(boundary) = keyboard::the_longest_line_a_reader_keeps() else {
+            return false;
+        };
+        keyboard::paste_or_hold(
+            &"x".repeat(boundary + 1),
+            false,
+            &mut Vec::new(),
+            &mut pane.held,
+        );
+        pane.held.is_some()
+    }
+
+    /// Runs the mouse pass twice over that input: egui resolves an interaction against what was
+    /// registered on the previous pass, so a gesture delivered on the first finds nobody to take it.
+    /// The first pass carries no events.
+    fn deliver_to_the_mouse(
+        window: &mut Window,
+        ctx: &egui::Context,
+        rects: &[egui::Rect],
+        metrics: &CellMetrics,
+        events: Vec<egui::Event>,
+    ) {
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            window.handle_the_mouse(ui, rects, metrics);
+        })
+        .drop_without_applying_deltas();
+        ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                window.handle_the_mouse(ui, rects, metrics);
+            },
+        )
+        .drop_without_applying_deltas();
+    }
+
+    /// **The user-visible half.** A console paints its own question and the keys are read for one
+    /// console only, so the notice has to name what would work **there** — asserted against the text
+    /// that was really painted, both ways round.
+    ///
+    /// **The two readings are taken in one frame each with the focus really moved**, not with the
+    /// mark set by hand: a review found that setting it by hand hid a defect where the mark was
+    /// written against the *previous* frame's focus.
+    #[test]
+    fn the_notice_names_the_keys_only_where_they_would_arrive() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        let theme = window.theme;
+
+        // The focus is put on the right-hand console **by the gesture**, in the same pass that marks
+        // the questions.
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(rects[1].center()),
+        );
+        let out_of_reach = text_painted(window.active().panes()[0], &theme, rects[0]);
+
+        // And back to the left one, which is where the question stands.
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(rects[0].right_bottom() - egui::vec2(metrics.width(), metrics.height())),
+        );
+        let within_reach = text_painted(window.active().panes()[0], &theme, rects[0]);
+
+        assert!(
+            !out_of_reach.contains("Escape") && !out_of_reach.contains("Ctrl+Enter"),
+            "a console the keyboard does not reach painted a key anyway: {out_of_reach:?}"
+        );
+        assert!(
+            out_of_reach.contains("click"),
+            "a console the keyboard does not reach said nothing that works there: {out_of_reach:?}"
+        );
+        assert!(
+            within_reach.contains("Escape") && within_reach.contains("Ctrl+Enter"),
+            "the console the keyboard does reach stopped naming the keys that answer: \
+             {within_reach:?}"
+        );
+    }
+
+    /// **A press inside the console but outside the notice leaves the question standing**, and
+    /// without this the box is load-bearing in no assertion at all: a review measured that hard-wiring
+    /// the hit test to «yes» left every other test of this fix green.
+    #[test]
+    fn a_press_next_to_the_notice_does_not_answer_it() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        let theme = window.theme;
+        let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
+        // The far corner of the same console: inside the pane, outside the box. Asserted, so that a
+        // box that grew to fill the console turns this test red instead of making it vacuous.
+        let beside_it = rects[0].right_bottom() - egui::vec2(metrics.width(), metrics.height());
+        assert!(
+            !notice.contains(beside_it) && rects[0].contains(beside_it),
+            "the point this test presses is not beside the notice: box {notice:?}, point \
+             {beside_it:?}"
+        );
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(beside_it));
+
+        assert!(
+            window.active().panes()[0].held.is_some(),
+            "a press that missed the notice answered the question anyway"
+        );
+    }
+
+    /// **The other gap of the report: there was nothing to click.** A click on the notice of a
+    /// console that does not have the focus discards its question — the only way a hand on the mouse
+    /// could get rid of a question it did not ask for.
+    #[test]
+    fn a_click_on_its_notice_discards_the_question_of_an_unfocused_console() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 1);
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        let theme = window.theme;
+        let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
+
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(notice.center()),
+        );
+
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the notice says a click discards it, and the click did not"
+        );
+    }
+
+    /// **The box fits whichever sentence is shown**, and without that the two passes can judge
+    /// different rectangles on the frame the focus moves — the mouse pass hit-testing one box while
+    /// the painter draws another.
+    ///
+    /// **Measuring by the longer STRING was the first attempt and it was wrong**: the two answer
+    /// sentences are exactly the same length in characters, and what sets the height is **wrapping**.
+    ///
+    /// **And the widths are measured, not picked.** Walking 20 to 60 cells, the two only ever wrap
+    /// differently in five of them, and they do it in **both directions**: at 20 cells the clicking
+    /// sentence is the taller one (384.9 against 368.9) and at 26 the keyboard's is (288.9 against
+    /// 272.9). Both are asserted, because measuring against either sentence alone passes at the
+    /// width where that one happens to be the taller — the first version of this test used 34
+    /// cells, where they wrap the same, and stayed green under the exact mutation it was written
+    /// for. Twenty cells is also this application's floor for a console, so it is not a contrived
+    /// width.
+    #[test]
+    fn the_notice_box_does_not_shrink_when_the_keyboard_leaves() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        for cells in [20.0, 26.0] {
+            let narrow = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(metrics.width() * cells, metrics.height() * 40.0),
+            );
+            let box_of_it = the_notice_box(&pane, &theme, &metrics, narrow);
+
+            // **Asserted against BOTH sentences laid out, and not against the other box.** Comparing
+            // the two boxes proves nothing: measuring them both with one sentence makes them equal
+            // too, which is the mutation the comparison stayed green under.
+            for how in both_ways_to_answer() {
+                let laid_out = the_sentence_laid_out(&pane, &theme, &metrics, narrow, how);
+                assert!(
+                    laid_out.y <= box_of_it.height(),
+                    "at {cells} cells the box is {:?} tall and «{how}» lays out {:?}: that sentence \
+                     would be painted outside its own border, and the box a click is judged by is \
+                     smaller than the drawing",
+                    box_of_it.height(),
+                    laid_out.y
+                );
+            }
+        }
+    }
+
+    /// **A console too small has no notice to press.** The box is clamped to the console, and a
+    /// three-row pane flattens it to something whose text is entirely clipped — a rectangle that
+    /// still answers `contains` on its edge, so a press there would discard a paste while showing
+    /// nothing that could be read as a question.
+    #[test]
+    fn a_console_too_small_for_the_notice_has_no_box_to_press() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        let sliver = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(metrics.width() * 20.0, metrics.height() * 1.2),
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            found.is_none(),
+            "a console of one row offered a box to press: {found:?}"
+        );
+    }
+
+    /// **A press on the panel's strip does not answer the question**, because the box is clamped to
+    /// the console and the strip is not the console.
+    ///
+    /// **It pins the clamp, and not the frame a panel first appears on** — an earlier version of
+    /// this docblock claimed the second and a mutation proved it did not: the guard it credited read
+    /// the same unrefreshed state it was written for. That frame is accepted with its reason, in
+    /// `answer_a_clicked_question`.
+    #[test]
+    fn a_press_on_the_panel_beside_it_does_not_answer_the_question() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = a_pane_that_asks_for_the_mouse(
+            &rects,
+            &metrics,
+            "a_press_on_the_panel_beside_it_does_not_answer_the_question",
+        );
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        // The strip the panel occupies: inside the pane, outside the console. Asserted, so that a
+        // pane whose panel stopped taking columns turns this test red instead of vacuous.
+        let console = window.active_mut().panes_mut()[0]
+            .tile_with_its_panel(rects[0], metrics.width(), SystemTime::now())
+            .console;
+        let on_the_panel = egui::pos2(
+            (console.right() + rects[0].right()) / 2.0,
+            rects[0].top() + metrics.height(),
+        );
+        assert!(
+            rects[0].contains(on_the_panel) && !console.contains(on_the_panel),
+            "the point this test presses is not on the panel's strip: pane {:?}, console \
+             {console:?}, point {on_the_panel:?}",
+            rects[0]
+        );
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(on_the_panel));
+
+        assert!(
+            window.active().panes()[0].held.is_some(),
+            "a press on the panel beside the console threw its held paste away"
+        );
+    }
+
+    /// **Answering a question takes one press out of the queue and leaves the rest**, and the event
+    /// that proves it is a **release**.
+    ///
+    /// **This is the adversarial case a review named and reasoning alone was closing.** Replacing the
+    /// removal of that one press with clearing the queue left the whole suite green: nothing carried
+    /// a second event, so there was nothing to lose. Here the batch carries the release of a press
+    /// already live for a program *and* the press that answers a notice. Lose the release and the
+    /// program is left believing the button is still down — for ever, per the routing's own comment,
+    /// and it then steals the next release.
+    #[test]
+    fn answering_a_question_does_not_swallow_the_rest_of_the_queue() {
+        let ctx = egui::Context::default();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        // **Wider panes than the other tests use, and that is not a convenience.** With the narrow
+        // console `two_wide_panes` gives — narrower still once a panel takes its columns — the
+        // notice's box fills the console top to bottom, so there is nowhere to press that is not the
+        // notice. Measured while writing this: console 168.6 pt wide, box 8.4 to 300.0 tall. This
+        // test needs a press that reaches the program, so it needs a console with room beside the
+        // question.
+        let rects = [
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0)),
+            egui::Rect::from_min_size(egui::pos2(910.0, 0.0), egui::vec2(900.0, 600.0)),
+        ];
+        let mut window = a_pane_that_asks_for_the_mouse(
+            &rects,
+            &metrics,
+            "answering_a_question_does_not_swallow_the_rest_of_the_queue",
+        );
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        let theme = window.theme;
+        let console = window.active_mut().panes_mut()[0]
+            .tile_with_its_panel(rects[0], metrics.width(), SystemTime::now())
+            .console;
+        let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, console);
+        let on_the_notice = notice.center();
+        let elsewhere =
+            console.left_bottom() + egui::vec2(metrics.width() * 2.5, -metrics.height());
+        // Asserted, because the whole test turns on that press reaching the program: inside the
+        // notice it would answer the question instead, which is how the first version of this test
+        // measured nothing at all.
+        assert!(
+            !notice.contains(elsewhere) && console.contains(elsewhere),
+            "the press meant for the program is on the notice: console {console:?}, notice \
+             {notice:?}, point {elsewhere:?}"
+        );
+
+        // **The press only, with no release**, on a frame of its own: it has to still be live when
+        // the batch below arrives. Sending a whole click here would put its own release on screen and
+        // the assertion at the end would find *that* one — which is how the first version of this
+        // test stayed green with the queue being cleared.
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            vec![
+                egui::Event::PointerMoved(elsewhere),
+                egui::Event::PointerButton {
+                    pos: elsewhere,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        let its_cell = window.active().panes()[0]
+            .cell_under(rects[0], elsewhere, &metrics)
+            .expect("the press landed on a cell of the console");
+        wait_for_the_pane_to_say(
+            &mut window,
+            0,
+            &format!("^[[<0;{};{}M", its_cell.col + 1, its_cell.row + 1),
+        );
+
+        // And now one batch with **both**: that button coming up, and a press on the notice.
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            vec![
+                egui::Event::PointerButton {
+                    pos: elsewhere,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+                egui::Event::PointerMoved(on_the_notice),
+                egui::Event::PointerButton {
+                    pos: on_the_notice,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the press on the notice did not answer the question"
+        );
+        // The release is reported with a lower-case ending, which is the only thing that separates
+        // it from the press in this encoding.
+        wait_for_the_pane_to_say(
+            &mut window,
+            0,
+            &format!("^[[<0;{};{}m", its_cell.col + 1, its_cell.row + 1),
+        );
+    }
+
+    /// **Only the primary button answers, and nothing pinned that.** Accepting any button leaves the
+    /// whole suite green, and the middle one is X11's paste — this file's own comment calls that
+    /// button «not theoretical». A middle press on a notice would have destroyed the held paste.
+    #[test]
+    fn only_the_primary_button_answers_the_question() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        let theme = window.theme;
+        let at = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]).center();
+
+        for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+            deliver_to_the_mouse(
+                &mut window,
+                &ctx,
+                &rects,
+                &metrics,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button,
+                        pressed: true,
+                        modifiers: egui::Modifiers::default(),
+                    },
+                ],
+            );
+            assert!(
+                window.active().panes()[0].held.is_some(),
+                "a press of {button:?} on the notice threw the held paste away"
+            );
+        }
+    }
+
+    /// **One click answers one question, not every standing one.** Every other test of this fix holds
+    /// a paste on a single console, so two questions never stand at once and a loop that cleared them
+    /// all would pass — measured.
+    #[test]
+    fn a_click_answers_only_the_question_it_landed_on() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        assert!(hold_a_paste_on(window.active_mut().panes_mut()[1]));
+        let theme = window.theme;
+        let at = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]).center();
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(at));
+
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the question the click landed on is still standing"
+        );
+        assert!(
+            window.active().panes()[1].held.is_some(),
+            "the click answered the question of a console it never touched"
+        );
+    }
+
+    /// **A console too narrow for the notice has no box to press either**, and the width half of that
+    /// floor was untested while the height half was.
+    #[test]
+    fn a_console_too_narrow_for_the_notice_has_no_box_to_press() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        let sliver = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(metrics.width() * 3.0, metrics.height() * 40.0),
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            found.is_none(),
+            "a console three cells wide offered a box to press: {found:?}"
+        );
+    }
+
+    /// **The press is judged where the button went down, not where the pointer ended up.** egui's
+    /// «interact position» is the *latest* one in the batch, and a batch that carries the press and
+    /// then a move — a flicked click, or any frame that batches, and this window can freeze for a
+    /// tenth of a second — would test a point the person never pressed: it would let the real press
+    /// through to the program and could answer a question nobody aimed at.
+    ///
+    /// The move that follows the press here is what no other test of this fix delivers.
+    #[test]
+    fn the_press_is_judged_where_the_button_went_down() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        let theme = window.theme;
+        let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
+        let on_the_notice = notice.center();
+        let far_away = rects[1].center();
+
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            vec![
+                egui::Event::PointerMoved(on_the_notice),
+                egui::Event::PointerButton {
+                    pos: on_the_notice,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+                // The pointer leaves the notice **in the same batch**, which is what makes the
+                // frame's «latest position» the wrong thing to read.
+                egui::Event::PointerMoved(far_away),
+            ],
+        );
+
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the press landed on the notice and was judged somewhere else, so the question stands \
+             and the press went to the console instead"
+        );
+    }
+
+    /// **`Ctrl+Shift` on a notice must not answer it**, because that chord moves the console
+    /// (**D20**): letting it through would move a pane **and destroy the held paste in silence**,
+    /// which is the precise failure this whole feature exists to stop. The bare escape hatch that
+    /// takes the selection back (**D23**) must not answer either.
+    #[test]
+    fn a_chorded_press_on_the_notice_does_not_destroy_the_paste() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = window_with("sleep 30", "sleep 30").theme;
+
+        for chord in [MOVE_CHORD, egui::Modifiers::SHIFT] {
+            let mut window = window_with("sleep 30", "sleep 30");
+            if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+                return;
+            }
+            let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, rects[0]);
+            let at = notice.center();
+
+            deliver_to_the_mouse(
+                &mut window,
+                &ctx,
+                &rects,
+                &metrics,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: chord,
+                    },
+                ],
+            );
+
+            assert!(
+                window.active().panes()[0].held.is_some(),
+                "a press with {chord:?} on the notice threw the held paste away without a word"
+            );
+        }
+    }
+
+    /// **The half of the click that no assertion about the notice can see**: it is answered and
+    /// **does not reach the program underneath**. It needs a console whose program really asked for
+    /// the mouse — with a `sleep 30` inside, no report would be sent either way, so every assertion
+    /// would hold with the suppression removed. Measured: that mutation left the other tests green.
+    ///
+    /// **The absence is clocked by an arrival, not by a timer.** An earlier version waited a fixed
+    /// half second, which on a slower pseudoterminal would pass over a live defect; the control's own
+    /// wait is five seconds. Now the two clicks are aimed at **different cells**, so the report that
+    /// does arrive proves the round trip works *and* names its own cell — and the cell of the click
+    /// that answered the question is asserted absent from a screen that already carries the other.
+    #[test]
+    fn a_click_on_the_notice_does_not_reach_the_program_that_asked_for_the_mouse() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = a_pane_that_asks_for_the_mouse(
+            &rects,
+            &metrics,
+            "a_click_on_the_notice_does_not_reach_the_program_that_asked_for_the_mouse",
+        );
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+
+        // The notice goes over the **console**, which is not the whole pane here: this one has a
+        // panel published beside it.
+        let theme = window.theme;
+        let console = window.active_mut().panes_mut()[0]
+            .tile_with_its_panel(rects[0], metrics.width(), SystemTime::now())
+            .console;
+        let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, console);
+        let on_the_notice = notice.center();
+        // A cell of the console that is **not** the notice's, so the two reports would be told apart
+        // by their coordinates rather than by counting.
+        let elsewhere =
+            console.left_bottom() + egui::vec2(metrics.width() * 2.5, -metrics.height());
+        let its_cell = window.active().panes()[0]
+            .cell_under(rects[0], on_the_notice, &metrics)
+            .expect("the notice sits over a cell of the console");
+        let the_other_cell = window.active().panes()[0]
+            .cell_under(rects[0], elsewhere, &metrics)
+            .expect("the control's point sits over a cell of the console");
+        assert_ne!(
+            (its_cell.row, its_cell.col),
+            (the_other_cell.row, the_other_cell.col),
+            "both clicks land on the same cell, so their reports cannot be told apart"
+        );
+        // What the answered click's report WOULD look like, if it had been sent.
+        let would_be = format!("^[[<0;{};{}M", its_cell.col + 1, its_cell.row + 1);
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(on_the_notice));
+        assert!(
+            window.active().panes()[0].held.is_none(),
+            "the click did not answer the question it was aimed at"
+        );
+
+        // The control, and it is what clocks the assertion below: a click elsewhere on the same
+        // console does reach the program. When its report is on screen, the round trip has
+        // demonstrably happened — so the other one's absence is an absence and not a wait.
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(elsewhere));
+        let control = format!(
+            "^[[<0;{};{}M",
+            the_other_cell.col + 1,
+            the_other_cell.row + 1
+        );
+        wait_for_the_pane_to_say(&mut window, 0, &control);
+
+        assert!(
+            !window.active().panes()[0]
+                .screen
+                .to_text()
+                .contains(&would_be),
+            "the click that answered the notice was ALSO reported to the program: looked for \
+             {would_be:?} and the screen says {:?}",
+            window.active().panes()[0].screen.to_text()
+        );
     }
 
     #[test]

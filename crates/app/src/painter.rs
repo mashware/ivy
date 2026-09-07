@@ -499,6 +499,92 @@ pub(crate) fn paint_a_console(
     paint_the_question_over_it(painter, console, theme, metrics, area);
 }
 
+/// What a notice says about how to answer it, **when the keyboard reaches that console**.
+///
+/// **A click discards and never sends**, and the asymmetry is deliberate: sending a line the program
+/// will cut in half is the irreversible half of this question, so it keeps costing a deliberate
+/// chord. Dismissing a question you did not ask for is the safe half, and it is the one somebody
+/// with a hand on the mouse actually wants.
+pub(crate) const ANSWERED_BY_HAND: &str =
+    "Escape or a click discards it · Ctrl+Enter sends it anyway";
+
+/// What it says **when the keys would go to another console**, which is every pane of the tab but
+/// the focused one.
+///
+/// **It names no key, and that is the defect this replaced.** Every pane paints its own question and
+/// the keys are read for one of them, so «Escape discards it» was an instruction that went to a
+/// different program. It does not go quiet either: a paste held in silence is the failure this whole
+/// feature exists to stop.
+pub(crate) const ANSWERED_BY_CLICK: &str =
+    "A click discards it · focus this console to send it anyway";
+
+/// Where a held paste's notice goes on that console, or nothing if it holds none.
+///
+/// **The one place that decides it, called by the two passes that need it**: this module to draw the
+/// box, and the mouse pass to know whether a press landed on it. **Nothing is stored**, so there is no
+/// rectangle kept on the paste to go stale — an earlier shape of this fix kept one and it was wrong in
+/// four separate ways, all of them found in review.
+///
+/// **That is not the same as the press being judged against this frame's geometry, and a review was
+/// right to say so.** The mouse pass runs before anything is painted, so the console rectangle it
+/// hands in is the one the previous frame drew with; on the frame a panel first appears they differ.
+/// The press is answered where the person aimed it, which is what they could see. What is gone is the
+/// *stored* rectangle, not the one-frame-old geometry — those are different claims and only the first
+/// one is made here.
+///
+/// **It is laid out against BOTH answer sentences and takes the taller box, whichever one will be
+/// shown.** Otherwise the box would change size on the very frame the focus moves, and the mouse pass
+/// would be hit-testing a rectangle different from the one the painter is about to draw.
+///
+/// **Taking the longer string was the first attempt and a review took it apart**: the two are exactly
+/// the same length in characters, and what sets the height is **wrapping**, not counting. At a narrow
+/// console one of them takes two lines and the other three, so measuring by length made an unfocused
+/// pane's box one line short — text painted outside its own border, and a hit target smaller than the
+/// drawing.
+///
+/// `None` unless the box is at least one row tall and a few cells wide. A console three rows tall
+/// flattens it, a degenerate rectangle still answers `contains` for the points on its edge, and a box
+/// whose text is entirely clipped would take a press while showing nothing to press.
+pub(crate) fn the_question_box(
+    painter: &Painter,
+    console: &crate::Pane,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    area: Rect,
+) -> Option<Rect> {
+    let held = console.held.as_ref()?;
+    let margin = metrics.width();
+    let wrap = (area.width() - 4.0 * margin).max(metrics.width());
+    let taller = [ANSWERED_BY_HAND, ANSWERED_BY_CLICK]
+        .into_iter()
+        .map(|how| {
+            painter
+                .layout(
+                    format!("{how}\n\n{}", held.sentence()),
+                    metrics.font(),
+                    theme.foreground(),
+                    wrap,
+                )
+                .size()
+        })
+        .reduce(|one, other| one.max(other))?;
+    // **Clamped to the console, and what the clamp does and does not do is worth being exact about.**
+    // A pane can be three rows tall and twenty columns wide, and an unclamped box runs off it. The
+    // clamp keeps the **box** inside the console so its border is not stroked where the console is
+    // not; it does **not** shorten the text, which the painter's own clip cuts wherever it ends.
+    // What protects the answer is not this line: it is that **the keys are the first thing in the
+    // galley**, so the line that survives a clip is the one saying how to get out. A question whose
+    // answer is off-screen is worse than no question.
+    let box_of_it = Rect::from_min_size(
+        area.left_top() + vec2(margin, margin),
+        taller + vec2(2.0 * margin, 2.0 * margin),
+    )
+    .intersect(area);
+    let worth_pressing =
+        box_of_it.height() >= metrics.height() && box_of_it.width() >= 4.0 * margin;
+    worth_pressing.then_some(box_of_it)
+}
+
 /// Says, over the console, that a paste is being held and what answers it.
 ///
 /// **A console with nothing held pays one comparison**, which is the same shape the color pass uses:
@@ -515,31 +601,31 @@ fn paint_the_question_over_it(
     metrics: &CellMetrics,
     area: Rect,
 ) {
-    let Some(held) = console.held.as_ref() else {
+    let (Some(held), Some(box_of_it)) = (
+        console.held.as_ref(),
+        the_question_box(painter, console, theme, metrics, area),
+    ) else {
         return;
     };
     let margin = metrics.width();
+    let how_to_answer = if held.reached_by_the_keyboard() {
+        ANSWERED_BY_HAND
+    } else {
+        ANSWERED_BY_CLICK
+    };
     let sentence = painter.layout(
-        format!(
-            "Escape discards it · Ctrl+Enter sends it anyway\n\n{}",
-            held.sentence()
-        ),
+        format!("{how_to_answer}\n\n{}", held.sentence()),
         metrics.font(),
         theme.foreground(),
         (area.width() - 4.0 * margin).max(metrics.width()),
     );
-    // **Clamped to the console, and what the clamp does and does not do is worth being exact about.**
-    // A pane can be three rows tall and twenty columns wide, and an unclamped box runs off it. The
-    // clamp keeps the **box** inside the console so its border is not stroked where the console is
-    // not; it does **not** shorten the text, which the painter's own clip cuts wherever it ends.
-    // What protects the answer is not this line: it is that **the keys are the first thing in the
-    // galley**, so the line that survives a clip is the one saying how to get out. A question whose
-    // answer is off-screen is worse than no question.
-    let box_of_it = Rect::from_min_size(
-        area.left_top() + vec2(margin, margin),
-        sentence.size() + vec2(2.0 * margin, 2.0 * margin),
-    )
-    .intersect(area);
+    debug_assert!(
+        sentence.size().y <= box_of_it.height() - 2.0 * margin + 1.0
+            || box_of_it.height() >= area.height() - 2.0 * margin,
+        "the sentence being drawn is taller than the box measured for it, so it will be painted \
+         outside its own border: {:?} in {box_of_it:?}",
+        sentence.size()
+    );
     painter.rect_filled(box_of_it, margin, theme.panel_background());
     painter.rect_stroke(
         box_of_it,

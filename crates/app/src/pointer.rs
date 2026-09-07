@@ -33,7 +33,7 @@ use crate::tiling::{DIVIDER_THICKNESS, Divider, Orientation, Side, can_split, ha
 use crate::tree::Node;
 use crate::{Window, mouse};
 use eframe::egui;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 use term_core::Cell;
 
 /// What the mouse's pass over the consoles leaves for the rest of the frame.
@@ -226,10 +226,23 @@ impl Window {
         // the user gave one**: a double click nobody made. The keyboard defends itself by
         // consuming; here the count has to be kept. `cumulative_frame_nr` goes up once per frame;
         // `cumulative_pass_nr` goes up per pass and would filter nothing.
+        // **A press aimed at a standing question is answered before the press is routed**, because
+        // below it is handed to whichever program asked for the mouse: dismissing a notice must not
+        // also send a button press into somebody's `vim`.
+        //
+        // **The queue is collected once and handed on already filtered**, and that shape is a
+        // review's: passing «which press to skip» and re-deriving it by value meant comparing events
+        // that are not identities — two presses at the same point in one queue matched each other —
+        // and it collected the queue twice. What goes to the routing is the rest of it, releases
+        // included: dropping the whole queue was the first shape of this and it left a program
+        // believing a button was still down for ever, stealing the next release.
+        let queue = Self::collect_the_buttons(ui);
+        let queue = self.answer_a_clicked_question(ui, rects, metrics, queue);
+
         let frame_nr = ui.ctx().cumulative_frame_nr();
         if self.last_frame_with_buttons != Some(frame_nr) {
             self.last_frame_with_buttons = Some(frame_nr);
-            self.route_the_buttons(ui, rects, &names, metrics);
+            self.route_the_buttons(rects, &names, metrics, queue);
         }
         // **Where the button went down, which is where a selection starts.** egui keeps it while
         // the button is still pressed, so it is read on whatever frame is needed.
@@ -388,6 +401,11 @@ impl Window {
             }
         }
 
+        // **The last thing, because the focus is only final now.** The loop above moves it when
+        // somebody presses on another console, and the painting follows in this same frame: marking
+        // the questions any earlier means marking them against the focus of the frame before.
+        self.tell_the_questions_who_has_the_keyboard();
+
         MouseOutcome {
             target,
             the_tree_changed,
@@ -400,12 +418,12 @@ impl Window {
     /// is what the drag's latch needs one frame later. See [`Self::the_press_went_to_the_program`].
     fn route_the_buttons(
         &mut self,
-        ui: &egui::Ui,
         rects: &[egui::Rect],
         names: &[usize],
         metrics: &CellMetrics,
+        queue: Vec<ButtonPress>,
     ) {
-        for button in Self::collect_the_buttons(ui) {
+        for button in queue {
             // **A release goes to the console that kept ITS press, not to the one underneath the
             // pointer.** Releasing over another console, over the panel's strip or outside the
             // window is what normally happens at the end of a drag; resolving it by the pointer,
@@ -684,6 +702,113 @@ impl Window {
 /// hidden: the split is by decide-against-do, which is the same line the module header draws, so a
 /// reader who knows which half they want knows which block to open.
 impl Window {
+    // **These two live in this block and not in the one above, and the seam is the file's own**:
+    // both of them *do* something — one throws a standing question away, the other writes a mark
+    // the painter reads. It is also what keeps the first block under D28's 300 lines, which is the
+    // cost this file's header already declares.
+
+    /// Answers the standing question a press was aimed at, and says which press was spent on it.
+    ///
+    /// **Read off the frame's button queue and not off the pointer's state.** What egui calls the
+    /// interact position is its *latest* one, which is not where the button went down: one batch carrying the
+    /// press and a later move —a flicked click, or any frame that batches, and this window can
+    /// freeze for a tenth of a second— would test the wrong point, answer a question nobody aimed
+    /// at, and let the real press through to the program. The queue's own events carry the position
+    /// they happened at. The module documents that trap twice already.
+    ///
+    /// **Only a completely bare press answers**, which is stricter than the conditions
+    /// [`DragIntent::from_chord`] decides a drag by, and deliberately so: a press carrying anything
+    /// at all is somebody else's gesture and answering it would throw a held paste away in silence,
+    /// which is the failure this feature exists to stop. The sharpest case is the chord that moves a
+    /// console — it would move a pane *and* lose the paste — and the escape hatch that takes the
+    /// selection back is the other one this must not eat, though that one moves nothing.
+    ///
+    /// It runs **before** the routing and returns the press it consumed, so the routing can leave
+    /// that one out instead of dropping the whole queue.
+    fn answer_a_clicked_question(
+        &mut self,
+        ui: &egui::Ui,
+        rects: &[egui::Rect],
+        metrics: &CellMetrics,
+        queue: Vec<ButtonPress>,
+    ) -> Vec<ButtonPress> {
+        // **The press is found by its place in the queue, not by its value.** Two presses of the
+        // same button at the same point in one batch are different events and comparing their
+        // fields cannot tell them apart: the version that did threw both away, which leaves a
+        // release with no press — the mirror of the defect the routing below guards against.
+        let Some(which) = queue.iter().position(|button| {
+            button.pressed
+                && button.button == egui::PointerButton::Primary
+                && button.chord.is_none()
+        }) else {
+            return queue;
+        };
+        let bare = queue[which];
+        let theme = self.theme;
+        let painter = ui.painter();
+        let now = SystemTime::now();
+        // **One walk over the panes, paired with their rectangles.** Asking `pane_called` inside the
+        // loop allocates a vector of every pane once per pane, on every frame, and nothing declares
+        // that cost — which the frame's subtraction would publish as the framework's.
+        for (pane, rect) in self.active_mut().panes_mut().into_iter().zip(rects) {
+            if pane.held.is_none() {
+                continue;
+            }
+            // **The console's rectangle, and this pass works it out without having refreshed the
+            // panel — which a review raised and which is left as it is, on purpose.** On the one
+            // frame a producer publishes a panel for the first time, the box measured here is the
+            // one the *previous* frame drew: as wide as the pane, because there was no panel then
+            // either. That is exactly what the person pressing could see, so the press is answered
+            // where they aimed it. A guard of «the press must resolve to a cell of the console» was
+            // tried here and removed: it reads the same unrefreshed state, so it would have said
+            // yes in the very case it was written for — a guard whose comment promised more than it
+            // did.
+            let console = pane
+                .tile_with_its_panel(*rect, metrics.width(), now)
+                .console;
+            let Some(box_of_it) =
+                crate::painter::the_question_box(painter, pane, &theme, metrics, console)
+            else {
+                continue;
+            };
+            if box_of_it.contains(bare.at) {
+                pane.held = None;
+                let mut rest = queue;
+                rest.remove(which);
+                // **And that press is recorded as not having gone to a program.** The latch this
+                // field feeds decides, one frame later, what the drag beginning at this press means;
+                // leaving the previous press's answer there made it decide by a gesture that is
+                // over.
+                self.the_press_went_to_the_program = false;
+                return rest;
+            }
+        }
+        queue
+    }
+
+    /// Tells every standing question whether the keyboard reaches the console it stands on.
+    ///
+    /// **It runs after the loop that moves the focus, and that is the whole reason it is a function
+    /// of its own.** Reading the focus before that loop meant a press on another console marked
+    /// every question against the *old* focus, and the painting follows in the same frame: the
+    /// console that had just lost the keyboard went on saying «Escape discards it» and the one that
+    /// had just gained it said «focus this console». **It would not have stayed on screen for ever**
+    /// — the desktop layer asks for a repaint on every mouse button event, so the release of that
+    /// same press corrects it on the next frame — but one frame of an instruction that does not work
+    /// is one frame of the defect this work exists to remove, and it is free to not have it.
+    fn tell_the_questions_who_has_the_keyboard(&mut self) {
+        let focused = self.active().focus;
+        // **Each console's own name, not the list taken before the loop.** That loop can reorder the
+        // tree — dropping one console onto another does — and a stale list zipped against the panes
+        // then marks a question with somebody else's name, which paints the wrong instruction.
+        for pane in self.active_mut().panes_mut() {
+            let its_name = pane.name;
+            if let Some(held) = pane.held.as_mut() {
+                held.reached_by_the_keyboard_now(its_name == focused);
+            }
+        }
+    }
+
     /// Tells the program that the button it saw go down was released.
     ///
     /// **The cell is clamped to the grid instead of being rejected**, unlike in the press and for

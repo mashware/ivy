@@ -4838,7 +4838,53 @@ contract, because **F2.7 goes to a platform with another number**.
 - **A short paste goes through while a question stands**, so held bytes land *after* it if the answer
   is yes — the reverse of the order they were pasted in. The price of not freezing the console.
 - **Every pane paints its own notice and only the focused one can answer it.** The keyboard half of
-  the same gap the mouse already has: the notice has no clickable answer either.
+  the same gap the mouse already has: the notice has no clickable answer either. **Closed by the
+  amendment below.**
+
+### Amended: the notice names only what works where it is painted, and a click answers it
+
+**The bullet above shipped as a declared gap and it was worse than it reads.** Every pane of the
+active tab painted «`Escape` discards it · `Ctrl+Enter` sends it anyway», and those keys are read for
+**one** pane — so on every other console the notice named keys that went to a different program. The
+instruction was not merely absent: it was wrong, and it was on screen.
+
+- **The notice says how to answer it only where it can be answered**, and where the keyboard does not
+  reach it says what does. **It does not go quiet there**: a paste held in silence is the failure this
+  whole decision exists to stop, so «paint nothing on an unfocused pane» was refused.
+- **A click discards and never sends.** Sending a line the program will cut in half is the
+  irreversible half of the question and keeps costing a deliberate chord; dismissing a question
+  nobody asked for is the safe half, and it is the one a hand on the mouse wants. It is also what the
+  report asked for in those words.
+- **Only a completely bare press answers**, which is stricter than the conditions a drag is decided
+  by, deliberately: a press carrying any modifier at all belongs to another gesture, and the chord
+  that moves a console would otherwise move a pane **and lose the paste without a word**.
+- **The press is read from the frame's button queue**, not from the pointer's position, and the whole
+  queue is still routed with only that one press taken out.
+- **Where the notice goes is one pure function**, called by the painter to draw it and by the mouse
+  pass to know what was pressed. Nothing is stored between them.
+
+#### What was discarded, and why
+
+| | |
+|---|---|
+| **Routing the keys to an unfocused pane** — «make the instruction true instead of changing it» | Two standing questions would fight over the same `Escape`, and `Escape` has other owners in this window. The notice stops claiming what it cannot deliver instead |
+| **Painting no notice on an unfocused pane** | Cheaper and cleaner on screen, and it restores the exact failure this decision exists to prevent: a paste held where nobody can see it |
+| **Sending by click as well as discarding** | It needs a second target inside the notice and the compose-at-send-time rule applied to it — the rule this feature already broke once. Left open |
+| **Keeping the notice's rectangle on the held paste**, written by the painter and hit-tested a frame later (what shipped first) | Four separate defects, all found in review: a stale rectangle, a painter that mutates its subject, a box whose size moved with the focus, and state that could disagree with itself. Replaced by the pure function |
+| **A guard requiring the press to resolve to a cell of the console** | Written for the frame a panel is first published and **read the same unrefreshed state**, so it would have said yes in exactly that case. Removed rather than kept: a guard whose comment promises more than it does is worse than none |
+| **Judging the press at the pointer's latest position** (what shipped first) | It is not where the button went down. A batch carrying the press and then a move — a flicked click, or any frame that batches — let the real press through to the program and could answer a question nobody aimed at |
+| **Skipping the frame's whole button queue** while a question was answered (what shipped first) | It also carries the **release** of a press already live for a program, and dropping that leaves the program believing the button is still down for ever, then stealing the next release |
+
+#### What it leaves open
+
+- **On a narrow console the notice fills it**, so any bare click there discards the question. Measured
+  with a panel published beside it: the console 168 pt wide and the box its whole height. The
+  direction is safe — discarded, never sent — and what fills the screen *is* the notice, but nobody
+  decided it. Either the box gets a ceiling on how much of a console it may take, or the answer gets
+  a target of its own inside it.
+- **A click on the notice of an unfocused console also focuses it and clears its selection**, because
+  the pass below does that for any click on a pane. Kept: you pressed on that console.
+- **Sending by click**, per the table above.
 
 ### The sentence D6 needs, and why it is here
 
