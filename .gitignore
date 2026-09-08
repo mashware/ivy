@@ -3,6 +3,12 @@ CLAUDE.md
 FLOW.md
 .claude/
 
+# The same, for the other agent tools that write into a checkout. They landed here on their own and
+# were caught only because a commit picked them up.
+AGENTS.md
+.codex/
+.agents/
+
 # Per-branch work directories (git.worktree in FLOW.md)
 .worktrees/
 

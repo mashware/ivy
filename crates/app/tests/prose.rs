@@ -62,6 +62,10 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/settings.rs", include_str!("../src/settings.rs")),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs")),
     ("src/painter.rs", include_str!("../src/painter.rs")),
+    (
+        "src/painter/blocks.rs",
+        include_str!("../src/painter/blocks.rs"),
+    ),
     ("src/pty_output.rs", include_str!("../src/pty_output.rs")),
     ("src/watcher.rs", include_str!("../src/watcher.rs")),
     ("src/theme.rs", include_str!("../src/theme.rs")),

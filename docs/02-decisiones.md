@@ -5142,3 +5142,157 @@ about to build on two new ones. It fits the symptom; the patch fixes the cause.
 - **The day #4065 lands, `vendor/` and the patch section go away together.** That is the exit
   condition, and it is the reason the copy carries its diff in a comment at the changed line rather
   than in a patch file: whoever removes it has to see what it was for.
+
+## D34 — The step between cells is a whole number of pixels
+
+**Decided.** The cell's width and height are taken **down** to a whole device pixel, in
+`painter::CellMetrics`. The font's measurement is not trusted to land there on its own, because it has
+no reason to.
+
+**What was broken, said in product terms.** The logo Claude Code paints out of block characters came
+out crossed by thin dark lines, a progress bar came out speckled, and a run of `─` opened a
+one-pixel gap every few characters. Reported from a screenshot beside the same screen in Tilix, which
+does not have it.
+
+**Measured, and it is what settles the shape of the fix.** With `Ubuntu Sans Mono` at 14.7 points the
+cell came out at **8.232 × 17.625 pixels**; with the built-in font at 14, **8.4287 × 16.3125**. So
+this predates any setting: the fractions are what the text engine answers, not what a configuration
+asked for. The drift is `0.232` of a pixel per column and `0.625` per row, so a whole one accumulates
+every **4.3** columns and every **1.6** rows.
+
+**And the mechanism is not the one this record first gave, which is the correction worth reading.**
+It said antialiasing paints every boundary as a half-covered pixel, and named two cells of different
+background meeting there. **Backgrounds never had it**: epaint aligns every filled rectangle to the
+pixel grid on its own —`round_rects_to_pixels`, on by default, and its own documentation says it is
+what «makes filled rectangles tile perfectly (without feathering)»— so two contiguous cells share a
+rounded boundary whatever fraction they were asked for at.
+
+**What the defect actually is: the engine rounds each glyph's origin, separately.**
+`round_text_to_pixels` is on by default too, and this painter queues **one glyph per cell**, so over a
+step of `8.232` the origins `0, 8.232, 16.464, 24.696…` are each rounded on their own and come out at
+`0, 8, 16, 25, 33, 41` — steps of `8, 8, **9**, 8, 8`. That ninth pixel is a column of nothing between
+two glyphs about eight wide, and it returns every time the accumulated fraction crosses a half. Which
+is exactly «a gap every few characters», and exactly the hairlines through a logo drawn out of block
+characters, because those were glyphs too.
+
+> **Verified by tessellating and reading the vertices**, not by reading the source and reasoning from
+> it — a run of six was painted on a fractional cell and on a whole one, and the quads' left edges
+> came out at those numbers. The guard does the same: a test that reads `output.shapes` looks at the
+> coordinates the painter asked for, which is the one place this defect never was.
+
+> **Only the horizontal period was observed, and the vertical one is arithmetic.** What the report
+> carried is a run of `─` opening a gap every few characters, which matches the 4.3. Nobody counted
+> rows, and this record does not claim they were counted: the 1.6 comes from dividing the row's
+> fraction, and it is written that way rather than as «exactly the period the seams came out at» —
+> which is what the first version of this record said about a number nobody had measured.
+
+**Snapping the corner the grid starts from was in this and came out, and that is the second
+correction.** It reads as the necessary other half — a pane's corner is a fraction by construction,
+since the tree splits the window by weight — and it buys nothing. A fraction shared by every cell of
+the pane survives the engine's rounding as the same offset for all of them: measured, a whole step
+from a corner at `101.37` gives rounded origins `100, 108, 116, 124, 132, 140`, which is one step. What
+has to be whole is the **step**, not where the run starts. It had a guard demanding it, which is how a
+mechanism with no scenario stays: the guard was written from the same wrong model as the code.
+
+**What was discarded, and why.**
+
+- **Rounding up.** It makes the cell **wider than the glyph's own advance**, so a run of `─` stops
+  touching and the gap this exists to close comes back. Going down leaves the cell a fraction
+  narrower than the advance instead, and consecutive glyphs overlap by that fraction.
+- **Rounding to the nearest, which is what this shipped first and is the mistake worth recording.**
+  It reads as the neutral choice and it is not: nearest goes **up** whenever the fraction is at least
+  a half, on each axis independently, which is about half the bodies. Measured with the family in
+  use: at 17 points the advance is `9.52` pixels and nearest gives a cell of **10** — `0.48` of a gap
+  at every column boundary, which is the reported defect reappearing at a body the settings file can
+  ask for. At 14 points it gives 8 against an advance of `7.84`, and at 14.7 it takes a row height of
+  `17.625` to **18** — the same mistake on the other axis, at the body this was reported from.
+  It survived the first round of guards because **«the cell is a whole number of pixels» is satisfied
+  by `floor`, `round` and `ceil` alike** — the second disguise of **D30**, a number where the defect
+  and the fix agree. What pins it down is a separate guard: the cell is never **larger** than what
+  the font measured, with the one-pixel floor as its only declared exception.
+- **Choosing a font body whose cell is already whole.** Swept from 8 to 24 points in steps of 0.05
+  with the family in use: **exactly one** lands on whole pixels, 12.5 → 7 × 15. One body in the whole
+  usable range, and not one anybody asked for. A fix that depends on a magic number is not a fix.
+- **Turning antialiasing off.** It is the framework's, applies to the letters too, and the letters
+  are the thing this terminal exists to draw well.
+- **Merging runs of same-coloured cells into one rectangle.** It would close the seams between
+  backgrounds — and only those: the glyphs and the row boundaries stay where they were. It is an
+  optimization wearing a fix's clothes.
+
+**What is not measured, and it is said rather than guessed.** The cost per frame of this change has
+not been taken. What it adds is two roundings per cell inside the painting stretch the bench already
+measures, so there is no undeclared path for **D13**'s rule to leak into the framework's figure — but
+the grid itself changed size, so the control batches published before this are **not** comparable
+number for number with the ones after.
+
+## D35 — The block elements are drawn by the painter, and the box drawing block is not
+
+**Decided.** The thirty-two characters of Block Elements — `U+2580`–`U+259F`: the full block, the
+halves, the eighths, the quadrants and the three shades — are drawn as rectangles measured against
+the cell, in `painter::blocks`. **In the console's grid** they are never asked of the font — the
+status panel is not the grid and still lays its rows out as text, which is written down further
+below. **`U+2500`–`U+257F`, the box drawing lines and corners, deliberately stay with the font.**
+
+**Why a block is not a letter.** Its whole job is to fill its cell exactly and to meet its neighbour
+with no seam. What a font ships is a glyph drawn for one nominal size, rasterized with antialiasing
+and stamped inside a cell of another — so a run of full blocks comes out with hairlines through it
+even after **D34**, and the shades come out as moiré instead of an even wash.
+
+**The case that brought it in, read and not inferred.** The status line's progress bar is ten `░`
+(`U+2591`) in dim green — verified by dumping the raw bytes it emits, `E2 96 91` behind
+`ESC[32m ESC[2m` — and beside the same bar in Tilix ours was visibly speckled.
+
+**Everybody outside solves it the same way.** Kitty, WezTerm, Ghostty and VTE all draw these
+characters themselves. This is the same answer, kept to the one range where the defect **survived
+D34** — the gap in a run of `─` was in the box drawing range and closed with the step, and what a
+whole step does not close is a glyph rasterized for one nominal size and stamped into a cell of
+another, which is what a block is made of.
+
+**Two rectangles are enough for all thirty-two**, which is not obvious: the three-quadrant characters
+look as though they need three, and `▙` is the left half plus the bottom half. Every one of them
+folds the same way, and the guard checks the **area covered** rather than the shape of the fold —
+written as «upper-left plus lower-right», a plausible-looking slip, `▙` covers half the cell instead
+of three quarters and every assertion about it being two parts still holds.
+
+**A block element is still noted for font discovery, like every other character, and that is a
+correction.** The first version of this skipped the note — no font is asked for these glyphs, so why
+send the machine's families to be walked for one — and it reads as free. **It buys nothing.**
+`resolve`'s oracle discards, before touching the system, anything the loaded faces already show, and
+the factory faces carry this whole range behind whatever family the settings name. So the search never
+fires for a block in the first place; the skip would only add a check on every cell of the grid, on
+the hottest path in the project.
+
+> **It was found by mutation and not by reading.** Deleting the skip left the whole suite green, and
+> the test written to catch that was green too — because what it measured, «did this walk the
+> machine's fonts», is *already* no for a block with the skip in place. The test stayed, turned
+> around: it now pins **the premise** —a row of blocks walks nothing, a row of Japanese does— so the
+> day a build ships without a factory face covering the range, this reasoning is reopened instead of
+> quietly becoming false.
+
+> **And the status panel would not have been covered either way.** It hands each row to the engine in
+> one go instead of cell by cell, and it notes the whole row's text, so a producer that publishes
+> `░░░░░░░░░░` in its summary still gets the font's dither, moiré and all. It is the same shape as
+> [#178](https://github.com/mashware/agent-terminal/issues/178) — the panel is the one surface that
+> lays out text as text — and it is out of this delivery for the same reason: making the panel paint
+> cell by cell is a different piece of work.
+
+**What was discarded, and why.**
+
+- **A real dither for the shades.** A 25 % dot pattern has to land on the pixel lattice to read as
+  even, and at a cell of eight by seventeen there are not enough pixels for it to read as anything but
+  noise — which is the very defect this replaces. A flat wash of a quarter, a half and three quarters
+  of the ink is what the comparison screenshot shows.
+- **Extending it to the box drawing block.** Its lines close with the neighbouring cell because
+  **D34** never lets the cell be larger than what the font measured, so consecutive glyphs overlap by
+  that fraction instead of parting — on both axes, which is precisely the half of **D34** that had to
+  be corrected in review. The visible defect is gone without synthesising the range, and synthesising
+  it means also deciding about heavy, double, rounded and diagonal, which is a different and much
+  larger piece of work. When the day comes that it is wanted, this is the module it goes in.
+- **Rounding a sliver away to zero.** An eighth of a cell of seventeen is a little over two, so the
+  parts are snapped like everything else in **D34** — but a part that would round to nothing is given
+  one pixel, because a vanished mark is not a thinner mark: for `▏` used as a rule, the rule is
+  simply gone.
+
+**What is not measured.** These characters change from a text shape to one or two rectangles per
+cell, and **no batch of `scripts/measure-frame.sh` puts a block element on screen**, so the bench
+cannot see the difference in either direction. That is a gap in the bench, not a number.

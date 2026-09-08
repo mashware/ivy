@@ -128,6 +128,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/injected.rs", "app"),
     ("app/src/main.rs", "app"),
     ("app/src/settings.rs", "app"),
+    ("app/src/painter/blocks.rs", "app"),
     ("app/src/fonts.rs", "app"),
     ("app/src/measure.rs", "app"),
     ("app/src/panel.rs", "app"),
@@ -1189,6 +1190,10 @@ const NOT_OURS: &[&str] = &[
     // The standard library and the language.
     "fsync",
     "read",
+    // A method of `f32`. It is cited by the rounding that decides the grid, as the alternative that
+    // was discarded — so it is named here precisely because the code does **not** call it, and its
+    // siblings `floor` and `round` need no entry only because the code does.
+    "ceil",
     // Other programs, and the shell.
     "echo",
     // From coreutils, which is why the two guards that run the script only run on Linux.
@@ -1220,6 +1225,17 @@ const NOT_OURS: &[&str] = &[
     // `std`, which is not a crate of this tree either.
     "sync_channel",
     "each_ref",
+    // The VT engine this project hosts rather than writes, named where a comment has to say that a
+    // fact about character widths belongs to it and to the table it reads, not to this repository.
+    "alacritty_terminal",
+    // A branch of epaint's tessellator and the marker its author left in it, cited where this crate
+    // has to say which of the library's paths a shape must stay out of. Both belong to the library.
+    "thin_line",
+    "TODO",
+    // Two of the tessellator's options, cited where this crate has to say what the library already
+    // rounds by itself — which is what decides how much of the grid's alignment is ours to do.
+    "round_text_to_pixels",
+    "round_rects_to_pixels",
     // Unicode property names and script codes, which belong to Unicode.
     "Zsym",
     "Emoji_Component",

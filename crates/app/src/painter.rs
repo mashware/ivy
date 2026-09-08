@@ -8,10 +8,12 @@
 //! **The cell's size is asked for, not invented.** The width comes from the font's reference glyph
 //! and the height from its line height. Guessing it by eye is what throws the rows out of line.
 
+mod blocks;
+
 use crate::fonts::Presentation;
 use crate::theme::Theme;
 use eframe::egui::{
-    Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, vec2,
+    Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use term_core::{CellWidth, CursorShape, Size, TermColor, View, ViewCell};
 
@@ -50,6 +52,44 @@ fn the_letters_do_not_all_measure_the_same(wide: f32, narrow: f32) -> bool {
 /// Whether the sentence above has been said already.
 static SAID_THE_LETTERS_DIFFER: std::sync::Once = std::sync::Once::new();
 
+/// A length in points taken **down** to a whole device pixel.
+///
+/// **The engine rounds each cell's drawing to the pixel grid on its own, and a fractional step is
+/// what turns that into a gap.** This painter puts one glyph per cell, so epaint rounds **each
+/// origin separately** — `round_text_to_pixels`, on by default — and a step of `8.232` gives origins
+/// at `0, 8.232, 16.464, 24.696…`, which round to `0, 8, 16, 25, 33, 41`: the steps are `8, 8, 9, 8,
+/// 8`. The ninth pixel is a column of nothing between two glyphs about eight wide, and it comes back
+/// every time the fraction accumulates a half. Verified by tessellating a run of six and reading the
+/// vertices, not inferred.
+///
+/// **So the mechanism is the step and not the antialiasing**, which is the correction this record
+/// carries: the first version of it blamed a half-covered pixel at every boundary and named two cells
+/// of different background meeting there. Backgrounds never had it — `round_rects_to_pixels` is on by
+/// default too, and its own doc says it is what makes filled rectangles tile perfectly — and the
+/// reported defect was in the glyphs.
+///
+/// Measured with `Ubuntu Sans Mono` at 14.7 points, which is what a cell of `8.232 × 17.625` pixels
+/// comes out of: the drift is `0.232` of a pixel per column and `0.625` per row, so a whole pixel
+/// accumulates every **4.3** columns and every **1.6** rows.
+///
+/// **Down and never up**, and that is the half that is not obvious: a cell wider than the glyph's own
+/// advance makes a run of `─` stop touching, which is the gap this exists to close. Going down leaves
+/// the cell a fraction narrower than the advance, and consecutive glyphs overlap by that fraction
+/// instead of parting.
+///
+/// **Nearest is not good enough for that, and it was what this shipped first.** Rounding to the
+/// nearest goes up whenever the fraction is at least a half — with the seventeen-point body it would
+/// take a cell of `9.52` pixels to ten, which is `0.48` of a gap at every column boundary. A guard
+/// asserting only «the cell is a whole number of pixels» is satisfied by all three of `floor`, `round`
+/// and `ceil`; what pins this down is that the cell is never **larger** than what the font measured.
+///
+/// The floor of one pixel is there because a cell of zero makes a grid of no size, and it is the one
+/// case where the result may exceed the measurement: a font under a pixel has no honest cell at all.
+/// **D34** carries the measurements, the discarded alternatives and what is not measured.
+fn on_whole_pixels(points: f32, per_point: f32) -> f32 {
+    ((points * per_point).floor().max(1.0)) / per_point
+}
+
 /// How much a cell takes up on screen.
 #[derive(Debug, Clone)]
 pub struct CellMetrics {
@@ -60,6 +100,10 @@ pub struct CellMetrics {
     width: f32,
     height: f32,
     font: FontId,
+    /// How many device pixels a point is worth, kept so the grid can be pinned to whole ones. It
+    /// travels with the two sizes because it is what they were rounded by: rounded with one scale and
+    /// placed with another, the boundaries land back on fractions.
+    per_point: f32,
 }
 
 impl CellMetrics {
@@ -90,10 +134,12 @@ impl CellMetrics {
                 );
             });
         }
+        let per_point = ctx.pixels_per_point();
         Self {
-            width,
-            height,
+            width: on_whole_pixels(width, per_point),
+            height: on_whole_pixels(height, per_point),
             font,
+            per_point,
         }
     }
 
@@ -138,7 +184,19 @@ impl CellMetrics {
         }
     }
 
+    /// What one device pixel is worth in points, for whoever has to keep a shape from rounding away
+    /// to nothing.
+    pub fn a_pixel(&self) -> f32 {
+        1.0 / self.per_point
+    }
+
     /// The rectangle the cell of a given row and column occupies, from the given origin.
+    ///
+    /// **The origin is used as it arrives, fraction and all**, and that is worth a line because the
+    /// first version of this snapped it and a test demanded it. It buys nothing: the tessellator
+    /// rounds each glyph's origin and each rectangle to the pixel grid itself, and a fraction shared
+    /// by every cell of the pane survives that rounding as the same offset for all of them. What has
+    /// to be whole is the **step** — see [`on_whole_pixels`] — not where the run starts.
     fn cell(&self, origin: Pos2, row: u16, column: u16) -> Rect {
         let corner = origin + vec2(column as f32 * self.width, row as f32 * self.height);
         Rect::from_min_size(corner, vec2(self.width, self.height))
@@ -223,6 +281,12 @@ pub fn paint(
                 // Finding the font and registering it happen outside this pass — see
                 // `Discoverer::resolve`. It runs only on the first of the two: noting the same thing
                 // twice changes nothing, but would be paid for twice.
+                // **A block element is noted like anything else**, even though no font is asked for it.
+                // Skipping it here looks like the obvious saving and it buys nothing: a character the
+                // loaded faces already cover is discarded by `resolve`'s oracle before the machine is
+                // touched, and the factory faces cover this range whatever family the settings name.
+                // The scenario the skip defends against does not exist, and the check would run on
+                // every cell of the grid. **D35** carries the measurement it was discarded on.
                 if pass == Presentation::Text {
                     discoverer.note(cell.c);
                 }
@@ -337,6 +401,13 @@ fn paint_character(
     metrics: &CellMetrics,
     discoverer: &mut crate::fonts::Discoverer,
 ) {
+    // **A block element is drawn here and never asked of the font.** It is not a letter: its whole job
+    // is to fill its cell and meet its neighbour, which a glyph drawn for another size cannot do. See
+    // `blocks`, which carries the reason and what was left out.
+    if let Some(filling) = blocks::filling_of(character) {
+        paint_a_block(painter, &filling, slot, color, metrics);
+        return;
+    }
     // **A wide emoji occupies the TWO columns the engine reserved for it**, not one. The slot that
     // arrives is that of its first column; the drawing is centered on the two, which is what its width
     // declares.
@@ -360,6 +431,74 @@ fn paint_character(
     // live in its own family and be requested only where it belongs. What walks cell by cell is this.
     let font = eframe::egui::FontId::new(metrics.font.size, discoverer.family_of(character));
     painter.text(slot.left_top(), Align2::LEFT_TOP, character, font, color);
+}
+
+/// One axis of a block's part: never thinner than a pixel, and never past the cell's far edge.
+///
+/// **A part that rounds away to nothing is not a thinner mark, it is no mark at all** — for `▏` used
+/// as a rule, the rule is simply gone — so it is given a pixel. **And the pixel is taken from inside
+/// its own cell**: where the far edge leaves no room, the part moves back against that edge instead of
+/// growing over the neighbour, which for a cell a few pixels tall would be a mark in the wrong row.
+///
+/// **The whole pixel has a second job the reasoning above does not reach**, found by reading the
+/// tessellator: a rectangle thinner than `0.9` of a feather takes epaint's `thin_line` branch
+/// (`tessellator.rs:1008`), which draws **no end caps** — its own `TODO` says so — and would give the
+/// part a feathered ramp of its own at both ends. A whole device pixel is exactly one feather, so the
+/// branch is never reached. A part rounded to a fraction would land in it.
+fn at_least_a_pixel(low: f32, high: f32, edge: f32, pixel: f32) -> (f32, f32) {
+    if high - low >= pixel {
+        (low, high)
+    } else if edge - low >= pixel {
+        (low, low + pixel)
+    } else {
+        (edge - pixel, edge)
+    }
+}
+
+/// Draws a block element to the exact measure of its cell.
+///
+/// **The sides are handed over as the fractions give them, and the tessellator rounds them.** Doing
+/// it here as well was in the first version of this and it was taken out: epaint aligns every filled
+/// rectangle to the pixel grid on its own —`round_rects_to_pixels`, on by default, whose own doc says
+/// it is what makes filled rectangles tile perfectly— so two parts that share a boundary land on the
+/// same pixel either way, and a rounding of our own only adds a place for the two to disagree.
+///
+/// **What is NOT the tessellator's to fix is a part that has collapsed** — see [`at_least_a_pixel`],
+/// which also says where its pixel is taken from and which branch of epaint it keeps the part out of.
+///
+/// **A block takes one column and is not widened to two.** `is_wide` is not consulted here because
+/// every character of the range is width 1 — which is a fact of `unicode-width`, reached through
+/// `alacritty_terminal`, and not of this repository. If a future table ever widened one, its tail
+/// column paints nothing by design and half the drawing would be missing.
+fn paint_a_block(
+    painter: &Painter,
+    filling: &blocks::Filling,
+    slot: Rect,
+    color: Color32,
+    metrics: &CellMetrics,
+) {
+    // The shades ask for a fraction of the ink; everything else takes all of it.
+    let ink = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), filling.alpha());
+    let pixel = metrics.a_pixel();
+    for &(left, top, right, bottom) in filling.parts() {
+        let (left, right) = at_least_a_pixel(
+            slot.left() + left * slot.width(),
+            slot.left() + right * slot.width(),
+            slot.right(),
+            pixel,
+        );
+        let (top, bottom) = at_least_a_pixel(
+            slot.top() + top * slot.height(),
+            slot.top() + bottom * slot.height(),
+            slot.bottom(),
+            pixel,
+        );
+        painter.rect_filled(
+            Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
+            0.0,
+            ink,
+        );
+    }
 }
 
 /// Paints that character's color glyph, centered in its slot. Says whether it painted anything.
@@ -679,6 +818,9 @@ mod tests {
             width,
             height,
             font: FontId::monospace(14.0),
+            // One pixel to the point, so the arithmetic of the tests that use this reads as it is
+            // written and the whole-pixel snapping neither moves a corner nor a size.
+            per_point: 1.0,
         }
     }
 
@@ -785,6 +927,145 @@ mod tests {
                  division by zero waiting to happen",
                 grid.cols,
                 grid.rows
+            );
+        }
+    }
+
+    /// Where each glyph of a painted row ends up **after the tessellator has had it**, in the order
+    /// they were queued.
+    ///
+    /// **It has to be after.** epaint rounds every glyph's origin to a whole pixel on its own, and
+    /// that rounding is the mechanism this whole change is about — a test reading `output.shapes`
+    /// looks at the coordinates we asked for, which is the one place the defect never was. Each glyph
+    /// is a quad of four vertices, queued in the order painted, so the left edge of the n-th is the
+    /// x of vertex `4n`.
+    fn glyph_edges(cell: impl Fn(&Context) -> CellMetrics, row: &str) -> Vec<f32> {
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let cell = cell(&ctx);
+        let cell = &cell;
+        let screen = of_text(row);
+        let view = screen.view();
+        let mut discoverer = crate::fonts::Discoverer::default();
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("the grid"),
+            ));
+            paint(
+                &painter,
+                &view,
+                &Theme::default(),
+                cell,
+                Pos2::ZERO,
+                &mut discoverer,
+            );
+        });
+        let meshes = ctx.tessellate(output.shapes.clone(), 1.0);
+        output.drop_without_applying_deltas();
+        let mut edges = Vec::new();
+        for clipped in &meshes {
+            if let eframe::egui::epaint::Primitive::Mesh(mesh) = &clipped.primitive {
+                for quad in mesh.vertices.chunks_exact(4).take(row.chars().count()) {
+                    edges.push(quad[0].pos.x);
+                }
+            }
+        }
+        edges
+    }
+
+    #[test]
+    fn a_row_of_glyphs_keeps_one_step_after_the_engine_rounds_each_one_to_a_pixel() {
+        // **This is the defect, and the mechanism is not the one it looks like.** The report was a run
+        // of `─` opening a gap every few characters and a logo of block characters crossed by
+        // hairlines. It is not antialiasing painting a boundary half: this painter puts one glyph per
+        // cell, epaint rounds **each origin separately**, and over a fractional step the rounded
+        // origins do not keep that step — `0, 8.232, 16.464, 24.696…` become `0, 8, 16, 25`, so the
+        // steps are `8, 8, 9`. The ninth pixel is a column of nothing between two glyphs eight wide.
+        //
+        // **The control comes first and it is the whole test.** A row painted on a cell of `8.232`
+        // has to come out with unequal steps — otherwise this machine's font or this version of the
+        // engine does not have the defect at all, and the assertion below would hold with the fix
+        // deleted.
+        let steps = |cell: fn(&Context) -> CellMetrics| {
+            glyph_edges(cell, "──────")
+                .windows(2)
+                .map(|pair| pair[1] - pair[0])
+                .collect::<Vec<f32>>()
+        };
+        let all_the_same = |steps: &[f32]| steps.windows(2).all(|p| (p[1] - p[0]).abs() < 0.001);
+
+        let fractional = steps(|_| metrics(8.232, 17.625));
+        assert!(
+            !fractional.is_empty() && !all_the_same(&fractional),
+            "a row painted on a cell of 8.232 pixels came out with even steps {fractional:?}, so \
+             this test cannot see the defect it exists for"
+        );
+
+        // **The subject goes through `measure`, not through a hand-written cell.** With the size
+        // written by hand this passes with the rounding deleted, which is the whole thing it guards.
+        let measured =
+            steps(|ctx| CellMetrics::measure(ctx, eframe::egui::FontId::monospace(14.7)));
+        assert!(
+            all_the_same(&measured),
+            "a row painted on the cell `measure` produced came out with steps {measured:?}: the \
+             engine's per-glyph rounding is opening a column of nothing between two of them"
+        );
+    }
+
+    #[test]
+    fn the_cell_is_never_larger_than_what_the_font_measured() {
+        // **The half a whole-pixel guard cannot see, and this shipped the wrong rounding first.**
+        // «The cell is a whole number of pixels» is satisfied by `floor`, by `round` and by `ceil`
+        // alike; what separates them is whether the cell can come out **bigger** than the advance the
+        // engine draws the glyph with, because that is what makes a run of `─` stop touching — the very
+        // gap the change exists to close.
+        //
+        // **Measured, which is why these bodies and not others**: with the family in use, `round` takes
+        // 9.52 pixels to ten at 17 points —0.48 of a gap at every column boundary— and 7.84 to eight at
+        // 14. Nearest goes up about half the time, on each axis independently.
+        let bodies = [12.0f32, 14.0, 14.7, 16.0, 17.0, 18.0];
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+
+        let mut measured = Vec::new();
+        ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            for body in bodies {
+                let font = eframe::egui::FontId::monospace(body);
+                let raw = ui
+                    .ctx()
+                    .fonts_mut(|fonts| (fonts.glyph_width(&font, 'M'), fonts.row_height(&font)));
+                let cell = CellMetrics::measure(ui.ctx(), font);
+                measured.push((body, raw, (cell.width(), cell.height())));
+            }
+        })
+        .drop_without_applying_deltas();
+
+        // **At least one body has to round UP under nearest**, or this test would pass with `round` in
+        // place and cover nothing. Which bodies do depends on the machine's font, so it is asserted
+        // rather than assumed.
+        assert!(
+            measured.iter().any(
+                |(_, (width, height), _)| (width - width.round()).abs() > 0.001
+                    && width.round() > *width
+                    || (height - height.round()).abs() > 0.001 && height.round() > *height
+            ),
+            "no body among {bodies:?} measures a fraction of at least a half on this machine, so \
+             this test cannot tell nearest from down: pick bodies that do"
+        );
+
+        for (body, (raw_width, raw_height), (width, height)) in measured {
+            assert!(
+                width <= raw_width,
+                "at {body} points the cell is {width} wide against an advance of {raw_width}: a cell \
+                 wider than the advance is what opens the gap in a run of `─`"
+            );
+            assert!(
+                height <= raw_height,
+                "at {body} points the cell is {height} tall against a row height of {raw_height}, so \
+                 a band no glyph covers is left at every row boundary"
             );
         }
     }
@@ -901,6 +1182,252 @@ mod tests {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The rectangles that painting that screen enqueued, and how many text shapes went with them.
+    ///
+    /// It exists beside [`shapes_of`] rather than widening it: the rectangles are what the block
+    /// elements come out as, and their color and size are the assertion — which counting cannot carry.
+    fn rectangles_of(screen: &Screen) -> (Vec<eframe::egui::epaint::RectShape>, usize) {
+        let ctx = Context::default();
+        ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let view = screen.view();
+        let mut discoverer = crate::fonts::Discoverer::default();
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("the grid"),
+            ));
+            paint(
+                &painter,
+                &view,
+                &Theme::default(),
+                &metrics(10.0, 20.0),
+                Pos2::ZERO,
+                &mut discoverer,
+            );
+        });
+        let (mut rectangles, mut texts) = (Vec::new(), 0);
+        fn walk(
+            shape: &eframe::egui::Shape,
+            rectangles: &mut Vec<eframe::egui::epaint::RectShape>,
+            texts: &mut usize,
+        ) {
+            match shape {
+                eframe::egui::Shape::Rect(rect) => rectangles.push(rect.clone()),
+                eframe::egui::Shape::Text(_) => *texts += 1,
+                eframe::egui::Shape::Vec(many) => {
+                    for one in many {
+                        walk(one, rectangles, texts);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for shape in &output.shapes {
+            walk(&shape.shape, &mut rectangles, &mut texts);
+        }
+        output.drop_without_applying_deltas();
+        (rectangles, texts)
+    }
+
+    /// The rectangles of a run that its control did not also paint, told apart **by where they are**.
+    ///
+    /// The cursor is painted in both scenarios and it is a rectangle like any other, so it has to come
+    /// out of the comparison. Telling it apart by its color or its opacity would be circular — those
+    /// are what the tests using this assert on — while its position is decided by the text, which is
+    /// the one thing the two runs share.
+    fn only_the_new_ones<'a>(
+        run: &'a [eframe::egui::epaint::RectShape],
+        control: &[eframe::egui::epaint::RectShape],
+    ) -> Vec<&'a eframe::egui::epaint::RectShape> {
+        run.iter()
+            .filter(|drawn| !control.iter().any(|shared| shared.rect == drawn.rect))
+            .collect()
+    }
+
+    #[test]
+    fn a_shade_is_drawn_as_a_wash_of_the_ink_and_never_asked_of_the_font() {
+        // **The defect this covers was reported from a screenshot**: the status line draws its progress
+        // bar out of ten `░`, and against the same bar in Tilix ours came out speckled — the font's
+        // dither pattern rasterized into a cell it was not drawn for.
+        //
+        // **A row of letters is the control inside the test**, and it is what isolates the cursor: it is
+        // painted in both scenarios, so what the subtraction leaves is the ten cells that changed path.
+        // Asserting an absolute count instead would pin down whatever the cursor happens to enqueue.
+        let (shaded, texts_shaded) = rectangles_of(&of_text("░░░░░░░░░░"));
+        let (control, texts_control) = rectangles_of(&of_text("xxxxxxxxxx"));
+
+        assert_eq!(
+            texts_control - texts_shaded,
+            10,
+            "the shades still went to the font: {texts_shaded} text shapes against the control's \
+             {texts_control}"
+        );
+        assert_eq!(
+            shaded.len() - control.len(),
+            10,
+            "ten shades did not become ten rectangles"
+        );
+
+        // **The wash has to be a FRACTION of the ink**, which is the half that decides whether it reads
+        // as a light shade or as a solid block. Painted opaque, every assertion above still holds.
+        let washes: Vec<u8> = only_the_new_ones(&shaded, &control)
+            .iter()
+            .map(|rect| rect.fill.a())
+            .collect();
+        assert!(
+            washes.iter().all(|alpha| *alpha > 0 && *alpha < u8::MAX),
+            "a light shade was painted with {washes:?} of ink: at nothing it is invisible and at all \
+             of it it is a full block"
+        );
+    }
+
+    #[test]
+    fn a_partial_block_is_painted_over_the_part_of_the_cell_its_table_names() {
+        // **This is what connects the table to a rectangle, and without it there was nothing.** The
+        // table's own tests assert the fractions and the painter's asserted the effect only for `░`
+        // and `█` — the two characters whose part **is** the whole cell. A reviewer rebound every part
+        // to the whole cell, so `▄`, `▌`, every eighth and every quadrant painted as a full block, and
+        // all 833 tests stayed green.
+        //
+        // The three chosen cover both axes and the thinnest case: with a cell of ten by twenty, `▏` is
+        // an eighth of ten. **It is asserted at 1.25 and not at a whole pixel**, because rounding it
+        // is the tessellator's — see `paint_a_block`, which used to do it here as well and stopped.
+        for (character, expected) in [
+            ('▄', Rect::from_min_max(pos2(0.0, 10.0), pos2(10.0, 20.0))),
+            ('▌', Rect::from_min_max(pos2(0.0, 0.0), pos2(5.0, 20.0))),
+            ('▏', Rect::from_min_max(pos2(0.0, 0.0), pos2(1.25, 20.0))),
+        ] {
+            let (painted, _) = rectangles_of(&of_text(&character.to_string()));
+            let (control, _) = rectangles_of(&of_text("x"));
+            let drawn = only_the_new_ones(&painted, &control);
+
+            assert_eq!(drawn.len(), 1, "{character} did not become one rectangle");
+            assert_eq!(
+                drawn[0].rect, expected,
+                "{character} was painted over {:?} and its table says {expected:?}",
+                drawn[0].rect
+            );
+        }
+    }
+
+    #[test]
+    fn a_block_element_on_screen_never_walks_the_machines_fonts() {
+        // **This is what makes skipping the note pointless, and it is why this test exists rather than
+        // that skip.** Noting a character is what can walk the machine's families — the search **D24**
+        // keeps out of start-up, 4.0 to 5.7 ms — but `resolve`'s oracle discards beforehand anything
+        // the loaded faces already show, and the factory faces carry this whole range behind whatever
+        // family the settings name. So the saving a per-cell check would buy is zero, and the check
+        // would run on every cell of the grid.
+        //
+        // **It is asserted rather than assumed** because it is the premise of that decision: the day a
+        // build ships without a factory face covering the blocks, this goes red and D35's reasoning
+        // has to be reopened.
+        let searched_the_machine = |text: &str| {
+            let ctx = Context::default();
+            ctx.run_ui(eframe::egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
+            let screen = of_text(text);
+            let view = screen.view();
+            let mut discoverer = crate::fonts::Discoverer::default();
+            ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+                let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                    eframe::egui::Order::Foreground,
+                    eframe::egui::Id::new("the grid"),
+                ));
+                paint(
+                    &painter,
+                    &view,
+                    &Theme::default(),
+                    &metrics(10.0, 20.0),
+                    Pos2::ZERO,
+                    &mut discoverer,
+                );
+            })
+            .drop_without_applying_deltas();
+            discoverer.resolve(&ctx).did_work()
+        };
+
+        // **The control comes first and it is not decoration.** Without it, «the blocks did not
+        // search» is also what a painter that never notes anything at all would report. Japanese is
+        // what no factory face here carries.
+        assert!(
+            searched_the_machine("ぁぁぁ"),
+            "a row of Japanese did not send the machine's fonts to be searched, so this test cannot \
+             tell a character that needs no search from a painter that searches for nothing"
+        );
+        assert!(
+            !searched_the_machine("░▒▓█▌▏▟"),
+            "a row of block elements sent the machine's fonts to be searched: the factory faces no \
+             longer cover the range, and D35's reason for noting them like anything else is gone"
+        );
+    }
+
+    #[test]
+    fn nothing_this_painter_measures_is_allowed_to_round_away_to_nothing() {
+        // **Both floors carry a paragraph of reasoning and neither was exercised**, because the test
+        // metrics are ten by twenty at one pixel to the point, where an eighth is 1.25 and rounds to
+        // one — never to zero. A reviewer deleted both and the suite stayed green.
+        assert_eq!(
+            on_whole_pixels(0.2, 1.0),
+            1.0,
+            "a font measuring a fifth of a pixel gave a cell of no size, and a grid of no size is a \
+             division waiting to happen"
+        );
+
+        // A part that survives on its own is left exactly where it was.
+        assert_eq!(at_least_a_pixel(3.0, 7.0, 10.0, 1.0), (3.0, 7.0));
+        // One that collapsed grows into the room its cell has left.
+        assert_eq!(at_least_a_pixel(3.0, 3.0, 10.0, 1.0), (3.0, 4.0));
+        // **And one collapsed against the far edge moves BACK, it does not grow over the neighbour.**
+        // Growing outwards puts the mark in the next row, which for `▁` in a cell a few pixels tall is
+        // not a thinner mark but a mark in the wrong place.
+        assert_eq!(at_least_a_pixel(10.0, 10.0, 10.0, 1.0), (9.0, 10.0));
+    }
+
+    #[test]
+    fn a_full_block_covers_its_cell_exactly_so_no_seam_shows_between_two_of_them() {
+        // **This is the half that was visible in the logo**: full blocks drawn by the font came out with
+        // hairlines between them, because the glyph is rasterized for one size and stamped in a cell of
+        // another. Drawn here, the rectangle **is** the cell.
+        let (blocks, _) = rectangles_of(&of_text("███"));
+        let (control, _) = rectangles_of(&of_text("xxx"));
+        let cell = metrics(10.0, 20.0);
+        let drawn = only_the_new_ones(&blocks, &control);
+
+        assert_eq!(
+            drawn.len(),
+            3,
+            "three full blocks did not become three rectangles"
+        );
+        for (which, rect) in drawn.iter().enumerate() {
+            assert_eq!(
+                rect.rect.width(),
+                cell.width(),
+                "block {which} is not as wide as its cell, so a gap or an overlap shows beside it"
+            );
+            assert_eq!(
+                rect.rect.height(),
+                cell.height(),
+                "block {which} is not as tall as its cell"
+            );
+            assert_eq!(
+                rect.fill.a(),
+                u8::MAX,
+                "a full block was painted with part of the ink, so what shows through is the background"
+            );
+        }
+        // **And each one starts exactly where the previous one ends.** Two rectangles the right size
+        // that do not touch leave the same seam the font's glyphs did.
+        for pair in drawn.windows(2) {
+            assert_eq!(
+                pair[0].rect.right(),
+                pair[1].rect.left(),
+                "two consecutive blocks do not touch"
+            );
         }
     }
 
