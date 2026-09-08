@@ -24,3 +24,24 @@ eframe = { version = "0.36", default-features = false, features = [
     "x11",
     "wayland",
 ] }
+
+# **The only patched dependency in this repository, and it exists because the fix is not ours to
+# make.** `egui-winit` recognises the paste chord, reads the clipboard as text and, finding none,
+# returns without emitting anything — not the paste, and not the key event either. So `Ctrl+V` over a
+# clipboard holding an image, or holding nothing, reaches the program inside a console as **nothing at
+# all**, and D11's promise —that chord is worth what its control byte is worth— cannot be kept. The
+# copy under `vendor/` changes one `return` into a conditional one; everything else is the published
+# 0.36.1, byte for byte.
+#
+# **Why a copy in the tree and not a fork on a server:** F2.7 is the first build on macOS and Windows,
+# and a path needs neither a fetch nor credentials, so it resolves identically on all three. And a
+# copy sits in the diff, where a reviewer reads it, instead of behind a URL nobody opens.
+#
+# What it is **not** justified by, because it was believed for an afternoon and is false: that a test
+# inside this copy could drive the bug. `KeyEvent`'s field is private to `winit` itself, so being one
+# crate closer buys nothing — no test anywhere can build that event. See `tests/vendor_patch.rs`.
+#
+# Reported upstream as emilk/egui#4065, open since 2024. The day it lands, this section and the
+# directory go away together. **D33.**
+[patch.crates-io]
+egui-winit = { path = "vendor/egui-winit" }

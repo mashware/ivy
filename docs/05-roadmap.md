@@ -153,6 +153,18 @@ notify             = "8.2"    # file changes, cross-platform
 serde / serde_json = "1"      # the contract
 ```
 
+> **Amended on 2026-09-08: one of them is no longer resolved against crates.io.** `egui-winit`, which
+> `eframe` pulls in, is served from a **copy in the tree** (`vendor/egui-winit`) with one `return`
+> made conditional; everything else is the published 0.36.1 byte for byte. It is the first patched
+> dependency in this repository, and it exists because the published version drops the `Ctrl+V`
+> keypress whenever the clipboard holds no text — with an image on it, or empty — so the key reaches
+> the program inside a console as nothing at all. Reported upstream as
+> [emilk/egui#4065](https://github.com/emilk/egui/issues/4065), open since 2024, with the pull
+> request that would settle it unmerged. **D33** carries the reason, what was discarded, and what has
+> to happen for the directory to disappear. The sentence above — *the framework version is the
+> project's choice* — still holds: what changed is that the choice now includes a version of our own
+> when no published one will do.
+
 ### The prototype's UI is done with egui, not with GPUI
 
 D3 left GPUI for the product and egui as an *option* for prototyping. For Phase 1 **egui** is

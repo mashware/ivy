@@ -150,6 +150,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/prose.rs", "app"),
     ("app/tests/shape.rs", "app"),
     ("app/tests/scripts.rs", "app"),
+    ("app/tests/vendor_patch.rs", "app"),
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
@@ -1064,6 +1065,9 @@ const NOT_OURS: &[&str] = &[
     "exit",
     "fork",
     "htop",
+    // The two tools `vendor_patch.rs` names when arguing for the check it chose over the other.
+    "diff",
+    "rustfmt",
     // The two survivors this crate's closing path is written against: a program that puts itself in
     // a session of its own, and the one that is *named* for outliving the shell that launched it.
     "setsid",
@@ -1139,6 +1143,12 @@ const NOT_OURS: &[&str] = &[
     "on_hover_cursor",
     "or_else",
     "portable_pty",
+    // `winit` and `egui_winit`'s own vocabulary, cited in `vendor_patch.rs` to say why no test in
+    // this tree can construct a `KeyEvent` or call `on_window_event` from outside those crates.
+    "winit",
+    "egui_winit",
+    "KeyEvent",
+    "on_window_event",
     // The writer `portable-pty` hands out for the master, cited because *its* destructor is what
     // used to rescue this crate's closing path by accident.
     "UnixMasterWriter",

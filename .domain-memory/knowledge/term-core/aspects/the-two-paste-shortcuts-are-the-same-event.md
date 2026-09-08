@@ -2,29 +2,32 @@
 id: asp_the-two-paste-shortcuts-are-the-same-event_861653
 slug: the-two-paste-shortcuts-are-the-same-event
 name: >-
-  `Ctrl+V` and `Ctrl+Shift+V` arrive as the same event with no modifiers, and
-  the field egui publishes does not tell them apart
+  `Ctrl+V` and `Ctrl+Shift+V` are the same event to the framework, and the edge
+  this card once called unfixable was neither rare nor unfixable
 type: aspect
 status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-08-13T16:42:11.261Z'
-updated_at: '2026-08-13T16:42:11.261Z'
-last_verified: '2026-08-13T16:42:11.261Z'
+updated_at: '2026-09-08T09:11:51.304Z'
+last_verified: '2026-09-08T09:11:51.304Z'
 file_paths:
   - crates/app/src/lib.rs
   - crates/app/src/keyboard.rs
+  - vendor/egui-winit/src/lib.rs
 symbols:
   - 'Pane::send_keys'
   - 'Window::modifiers'
+  - is_paste_command
 content_hashes:
-  crates/app/src/lib.rs: 'sha256:a05a4309b46dd644b5b6a2389c026f7fef94d9e1a7cb1fcde40b75eb39607291'
-  crates/app/src/keyboard.rs: 'sha256:fac665b7c9d92b5de4f79218612a98ba1d6c97b26242a606fd4149487b51b79c'
+  crates/app/src/lib.rs: 'sha256:60da7c8ba51c1fc4bcb6f7b7c8ae54bccc71aa8d350d4bd1e40d40ac53c693ab'
+  crates/app/src/keyboard.rs: 'sha256:345522591ba5b695d69c974a854c72542d5148a73ae1aa0cc9f95cda935ce0c8'
 tags:
   - egui
   - keyboard
   - clipboard
   - D11
+  - D33
 feature_id: feat_term-core_nx0g1r
 ---
 
@@ -42,8 +45,17 @@ feature_id: feat_term-core_nx0g1r
 
 **Why the trouble is worth it, and why not keep `Ctrl+V` for pasting:** that byte has an owner, and it is not the terminal. It is vim's visual block and the shell's *quoted-insert*. Verified with Tilix in front: there `Ctrl+V` does not paste, but **inside that same window** Claude does paste with `Ctrl+V`, because it receives the byte and decides that for it that is what it means. **Who pastes with `Ctrl+V` is each program's decision.**
 
-**An edge that cannot be fixed from here:** with an **empty clipboard** the desktop recognizes the shortcut, finds nothing and does `return` **without emitting any event**. So `Ctrl+V` sends not even the control byte, and vim's visual block does not open in a session with nothing copied.
+## CORRECTED, 8 September 2026 (issue #203, D33)
+
+This card used to close with: *«An edge that cannot be fixed from here: with an empty clipboard the desktop recognizes the shortcut, finds nothing and does `return` without emitting any event.»* **Both halves of that sentence were wrong, and they kept a real defect filed as a limitation for 26 days.**
+
+- **It is not about an EMPTY clipboard, and that is why it was dismissed.** The condition is «holds no **text**», and a clipboard holding **an image** hits the identical path. In a terminal built to host agents, handing an agent a screenshot is an ordinary gesture, not an edge — the frequency argument that made the limit acceptable was judged against the wrong population. See [[a-limit-accepted-because-it-is-rare]] if that card exists; otherwise D33 carries it.
+- **It was fixable, and «cannot be fixed from here» was reasoned rather than tested.** Four routes were read in the dependency's source before the working one was found, and none of that reading had been done when this sentence was written.
+
+**What is true now:** `egui-winit` is served from a copy in the tree (`vendor/egui-winit`) whose only change moves that `return` next to the push it belongs to, so a chord that produced no paste falls through and the key is emitted like any other. The mechanism, the four discarded routes and the upstream situation are in [[ctrl-v-is-discarded-when-the-clipboard-holds-no-text]].
+
+**And the fall-through has a consequence this card's own first paragraph predicts:** because `is_paste_command` ignores Shift, lifting the swallow delivers **both** chords. `Ctrl+Shift+V` — the terminal's own paste shortcut — started reaching the program as `\x16`. `keyboard::bytes` now answers silence for it and deliberately not for `Ctrl+V`. See [[lifting-a-filter-delivers-everything-it-was-catching]].
 
 ## Where it lives
 
-`Pane::send_keys` in `crates/app/src/lib.rs` rebuilds the modifiers; the seed lives in `Window` because they belong to the keyboard, not to a console. Read in `egui-winit-0.36.1/src/lib.rs:1027-1035,1430` and `egui-0.36.1/src/input_state/mod.rs:396,433,442`.
+`Pane::send_keys` in `crates/app/src/lib.rs` rebuilds the modifiers; the seed lives in `Window` because they belong to the keyboard, not to a console. The swallow itself is at `vendor/egui-winit/src/lib.rs:1027` (patched) — read the published shape in `egui-winit-0.36.1/src/lib.rs:1027-1035,1430` and `egui-0.36.1/src/input_state/mod.rs:396,433,442`. The arm that keeps the paste shortcut out of the program is in `keyboard::bytes`.

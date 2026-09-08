@@ -22,11 +22,17 @@ pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
         // the desktop's work.
         Event::Text(text) if !text.is_empty() => Some(Cow::Owned(text.as_bytes().to_vec())),
 
-        // **These three keys do not arrive as keys.** The layer that translates the operating
-        // system's events looks at Ctrl+C, Ctrl+X and Ctrl+V *before* emitting anything and turns them
-        // into copy, cut and paste, without emitting the key event. On a normal desktop that is what is
-        // expected; in a terminal, Ctrl+C is the way to interrupt a hung program, so
-        // they have to be caught through this door or nothing gets interrupted.
+        // **Copy and cut never arrive as keys, and paste arrives as one only when there was nothing
+        // to paste.** The layer that translates the operating system's events looks at Ctrl+C, Ctrl+X
+        // and Ctrl+V *before* emitting anything and turns them into copy, cut and paste, without
+        // emitting the key event. On a normal desktop that is what is expected; in a terminal, Ctrl+C
+        // is the way to interrupt a hung program, so they have to be caught through this door or
+        // nothing gets interrupted.
+        //
+        // The exception is the paste chord over a clipboard holding no text — an image, or nothing.
+        // That case used to be swallowed whole and now falls through as an ordinary key, which is the
+        // whole of **D33**; the arm below is what keeps the application's own paste shortcut from
+        // riding that fall-through into the program.
         //
         // **What this costs, said plainly:** as long as the clipboard does not exist, in this window
         // you cannot copy. These events do not carry the modifiers, so from here there is no
@@ -45,6 +51,24 @@ pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
         // would be removing two things that are used daily. That a program inside decides that for it
         // that byte means paste —Claude does— is its own business, and it keeps working that way.
         Event::Paste(_) => Some(Cow::Borrowed(&[22])),
+
+        // **The application's own paste shortcut is not handed to the program, whatever the
+        // clipboard held.** Since D33 the framework stops swallowing this chord when there is
+        // nothing to paste, so `Ctrl+Shift+V` over a copied image now arrives here as a key — and
+        // `key_bytes` lets Shift through on purpose, because Shift does not change a control code.
+        // Without this arm, pressing the terminal's *paste* shortcut with a screenshot on the
+        // clipboard would open visual block in `vim`: a chord of the application reaching the
+        // program inside, which is the one thing D11 and D13 both refuse.
+        //
+        // **`Ctrl+V` is deliberately not here**: that chord belongs to the program (D11), and
+        // delivering its byte is what lets whoever runs in the pane go and read the clipboard image
+        // for itself. Silence for one and the byte for the other is the whole distinction.
+        Event::Key {
+            key: Key::V,
+            pressed: true,
+            modifiers,
+            ..
+        } if modifiers.shift && (modifiers.ctrl || modifiers.command) => None,
 
         // Releasing a key sends nothing. The repeat of holding it down does: it is what makes
         // holding an arrow down move the cursor.
@@ -693,6 +717,52 @@ mod tests {
             bytes(&Event::Paste("whatever there was".into())).map(|b| b.into_owned()),
             Some(vec![22]),
             "real pasting is for another milestone; here it is worth what it is worth in a terminal"
+        );
+    }
+
+    /// **The chord that pastes must not reach the program, and the one that does not paste must.**
+    ///
+    /// Since D33 the framework stops swallowing the paste chord when the clipboard holds no text, so
+    /// both of them arrive here as ordinary keys. `key_bytes` lets Shift through on purpose — Shift
+    /// does not change a control code — so without the guard the application's own paste shortcut
+    /// would send `\x16` into the program: press it with a screenshot copied, expecting a paste, and
+    /// `vim` opens visual block.
+    ///
+    /// **Both halves in one test, because either alone passes over a live defect.** Asserting only
+    /// the silence would stay green if the byte stopped coming out for `Ctrl+V` too, which is the bug
+    /// D33 exists to fix. Asserting only the byte is what shipped the defect this test was written
+    /// for.
+    #[test]
+    fn the_paste_shortcut_stays_in_the_terminal_and_the_bare_chord_goes_to_the_program() {
+        let key = |modifiers| Event::Key {
+            key: Key::V,
+            physical_key: Some(Key::V),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let ctrl = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        let ctrl_shift = Modifiers {
+            shift: true,
+            ..ctrl
+        };
+
+        assert_eq!(
+            bytes(&key(ctrl_shift)).map(|b| b.into_owned()),
+            None,
+            "the application's paste shortcut reached the program: with an image on the clipboard \
+             the framework now hands this chord over as a key, and letting it through opens visual \
+             block in vim where somebody meant to paste"
+        );
+        assert_eq!(
+            bytes(&key(ctrl)).map(|b| b.into_owned()),
+            Some(vec![22]),
+            "Ctrl+V stopped delivering its control byte, which is the whole of D33: that byte is how \
+             a program hosted in a pane is told to go and read the clipboard itself"
         );
     }
 
@@ -1762,10 +1832,17 @@ impl Chord {
         }
         chord.key = key?;
         // **The copy and paste chords cannot be claimed, and accepting them would be promising something that
-        // does not happen.** The desktop resolves them **before** they arrive: they do not appear as keys, they arrive
-        // already turned into a copy or a paste, and **without saying whether there was Shift**. A
+        // does not happen.** The desktop resolves them **before** they arrive: a copy arrives already
+        // turned into a copy, and **without saying whether there was Shift**. A
         // `key.split-right = ctrl+shift+c` would be accepted, would never work, and whoever wrote it would
         // have no way to know why.
+        //
+        // **Paste is refused for a sharper reason since D33, and the difference matters to whoever
+        // reads this next.** That chord no longer *never* arrives as a key: the vendored framework
+        // stops swallowing it when the clipboard holds no text, so a `key.split-right = ctrl+v` would
+        // now fire — **but only when there happened to be nothing to paste**. A binding that works
+        // depending on what somebody copied last is worse than one that never works, and it cannot be
+        // explained in the settings file. So the refusal stays and its reason has changed.
         if chord.ctrl && matches!(chord.key, eframe::egui::Key::C | eframe::egui::Key::V) {
             return None;
         }

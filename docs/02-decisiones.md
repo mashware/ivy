@@ -398,10 +398,15 @@ that pastes as plain text.
 - **The program inside can ask for what is pasted to reach it marked**, and the terminal asks the
   engine about it. That accessor returns a `bool` and not the engine's type, so that the terminal
   crate carries on without letting its dependencies show through.
-- **With an empty clipboard, `Ctrl+V` sends nothing.** The desktop swallows the key and emits no
-  event when there is nothing to paste, so the control byte does not come out either. It is barely
-  noticeable —an empty clipboard is rare— but it means that vim's visual block does not open in a
-  freshly started session with nothing copied. It cannot be fixed from here.
+- **With a clipboard that holds no text, `Ctrl+V` sent nothing — and this note got both halves
+  wrong.** The desktop swallows the key and emits no event when there is nothing to paste, so the
+  control byte did not come out either. What was written here was that it is *barely noticeable,
+  because an empty clipboard is rare*, and that *it cannot be fixed from here*. **Neither is true.**
+  An **image** on the clipboard hits the same path, and in a terminal built to host agents, handing
+  an agent a screenshot is an ordinary gesture rather than an edge — the promise this very decision
+  makes was unkeepable in exactly the case that matters most. And it was fixable: **D33** carries the
+  fix, a copy of `egui-winit` in the tree with that one `return` made conditional. Corrected on
+  8 September 2026, with the whole autopsy in D33.
 - **On macOS the two shortcuts behave differently** and this rule would break them: there the
   «command» is ⌘, so ⌘+V would give the control byte while `Ctrl+V` arrives as a key. The first
   build on that system is F2.7 and it will have to review this.
@@ -5010,3 +5015,130 @@ the echo left on (it comes back in 50.7 ms, under the floor), 2.01 s without the
 the receiver released early, and 5.01 s with the survivor's command made nonexistent. A first round,
 before the test had its floor and before the survivor announced itself, had **two of those passing in
 hundredths of a second** — green over a live bug. That is what the two rounds are for.
+
+## D33 — The key that never arrived: `egui-winit` is served from a copy in the tree, with one `return` made conditional
+
+**Decided.** The dependency that turns the desktop's events into the framework's — `egui-winit`, which
+`eframe` pulls in — is no longer taken from crates.io. It is served from `vendor/egui-winit`, a copy
+of the published **0.36.1** that differs from it in **one thing**: the `return` that follows the paste
+shortcut only fires when something was actually produced. Everything else is byte for byte the
+published crate. It is the **first patched dependency in this repository's history**, and
+`docs/05-roadmap.md` carries the amendment to the policy that said versions come from published
+releases.
+
+**What was broken, said in product terms.** Pressing `Ctrl+V` with a **screenshot** on the clipboard
+did nothing at all. Not the paste — correctly, that is `Ctrl+Shift+V`'s job — but not the control
+byte either, and not even the keypress. In a terminal built to host agents that is the gesture for
+handing an agent an image: the agent reads `\x16` as «go and look at the clipboard yourself», which is
+how a picture reaches it. The same silence hit an **empty** clipboard, so `vim`'s visual block did not
+open in a freshly started session and a shell's *quoted-insert* did nothing.
+
+**Why the terminal could not fix it in its own code.** The dependency recognises the chord, reads the
+clipboard **as text**, finds none, pushes no event, and returns **unconditionally**
+(`egui-winit-0.36.1/src/lib.rs:1027-1035`) — dropping the key event along with the paste that was
+never built. Nothing downstream can recover it, because **the information is never written**: the
+modifier state records only that Ctrl was held and never which key, and the text branch sits below
+the return. So `eframe`'s `raw_input_hook`, which this application already implements, is not late —
+it is reading a place where the keypress was never put.
+
+**Almost nothing on our side needed changing, and the exception is the interesting part.** With the
+key delivered, `\x16` comes out unchanged: `key_bytes` maps `Key::V => 22` from the event's own
+modifiers, `Chord::from_written` structurally refuses to bind `Ctrl+V` so no shortcut can claim it
+first, and the paste door matches only the paste event.
+
+> **But the fall-through also delivers `Ctrl+Shift+V`, and that one is ours.** `is_paste_command`
+> does not look at Shift, and `key_bytes` lets Shift through on purpose — it does not change a
+> control code, which is what `xterm` does. So with a screenshot on the clipboard, pressing the
+> terminal's **own paste shortcut** would have sent `\x16` into the program: press it expecting a
+> paste and `vim` opens visual block. Before this fix that chord did nothing, and *a chord of the
+> application reaching the program inside* is the one thing D11 and D13 both refuse. **Found in
+> review, not in use.** So `keyboard::bytes` grows one arm that answers silence for
+> `Ctrl+Shift+V` — and deliberately **not** for `Ctrl+V`, because that byte belongs to the program
+> and is the entire point. Silence for one and the byte for the other is the distinction, and it has
+> a test that fails if either half moves.
+
+The rest of the fix is upstream of us — which is
+also why it is **not** a regression: the line that derives the byte from the paste event was born in
+F1.3, when pasting did not exist and that event was merely a convenient way of noticing the chord.
+F2.6 gave it a contract it had never had. **The failure shape worth remembering is that one**: a
+guarantee resting on an event a dependency emits for its own reasons. `Event::Paste` is named after
+the gesture and is emitted for the *payload* — no payload, no event, and the gesture disappears with
+it.
+
+**Measured, and it is the point of the whole thing.** The chain was read in the dependency's source
+and then **observed on a running window**, because a challenger pointed out — correctly — that
+nobody had seen it happen. With an image on the clipboard, `Ctrl+V` produced:
+
+```
+Key { key: ControlLeft, pressed: true,  modifiers: NONE }
+ModifiersChanged(Modifiers { ctrl: true, command: true })
+Key { key: ControlLeft, pressed: false, modifiers: { ctrl: true, command: true } }
+ModifiersChanged(Modifiers::NONE)
+Key { key: V, physical_key: Some(V), pressed: false, repeat: false, modifiers: NONE }
+```
+
+**No paste and no press of the V.** With text on the clipboard the same chord produced a paste
+normally — which is what rules out the other explanation available, a clipboard backend that could
+not see the session's selection at all.
+
+**And the observation showed something the source reading had not: the RELEASE survives.** The
+swallow is inside the pressed branch, so the key-up falls through in both cases. That is a fix with
+no patched dependency at all, and it was **discarded**: it fires after a successful paste too (a
+second byte on every ordinary paste), it arrives with no usable modifiers when the user lets go of
+Ctrl first — which is what both traces did — a terminal must deliver its byte on key **down**, and the
+exact shape of a release event is precisely the kind of thing that differs per platform, with F2.7
+about to build on two new ones. It fits the symptom; the patch fixes the cause.
+
+**What was discarded, and why.**
+
+- **Waiting for upstream.** [emilk/egui#4065](https://github.com/emilk/egui/issues/4065) is the same
+  complaint, **open since 2024**; [#5615](https://github.com/emilk/egui/pull/5615), which would settle
+  it, is unmerged with no maintainer approval; #5618 was closed without landing. `master` has since
+  gained an image branch (`Event::PasteImage`) but is unreleased **and still returns
+  unconditionally**. Sending the change upstream stays worth doing; it is not a plan.
+- **Upgrading.** 0.36.1 (7 August 2026) is the newest published `egui`, `eframe` and `egui-winit`.
+  There is nothing to upgrade to.
+- **Turning the dependency's `clipboard` feature off.** It gates only which backend compiles — there
+  is not one `cfg(feature = "clipboard")` in its whole source — and the interception is unconditional.
+  Without a backend the clipboard read returns nothing **always**, so **every** `Ctrl+V` would be
+  swallowed instead of only some. It makes it worse.
+- **A hook of our own inside `eframe`.** There is none upstream of the translation: `raw_input_hook`
+  runs after the input is assembled, `EpiIntegration::on_window_event` only forwards, and
+  `NativeOptions::event_loop_builder` hands over the builder **before the loop exists**.
+- **Driving our own `winit` loop.** Structurally clean — intercept the window event before the
+  translation sees it — and it means dropping `eframe::run_native` and reimplementing viewport
+  management, surface creation, resizing and redraw scheduling. A rewrite of the application's shell
+  for one key.
+- **A fork on a server instead of a copy in the tree.** **F2.7 is the first build on macOS and
+  Windows**, and a path resolves with no fetch and no credentials on all three. A fork would add one
+  more unverified thing to that milestone.
+- **Reading the image ourselves** and pasting a path to a temporary file. `arboard` is already in the
+  tree with image support, so it would cost no new dependency — and it is the terminal deciding what
+  somebody else's image means (**D6**), plus a file nobody deletes. Delivering the key makes it
+  unnecessary: the program inside reads the clipboard itself.
+
+**What you need to know so as not to get a fright.**
+
+- **This fix carries no regression test, and that is not an oversight.** It cannot: `winit`'s
+  `KeyEvent` has a private field, so **no crate but `winit` can construct one** — being inside the
+  vendored copy does not help, because the privacy is `winit`'s and not `egui-winit`'s. And
+  `on_window_event` demands a real `Window`, which winit creates only from a live event loop bound to
+  a compositor. And `on_keyboard_input`, where the branch lives, is **private** and reachable only
+  through that method. There is no test in this repository that needs a display, and there is no cheap
+  way to add the first one.
+- **What replaces it is a guard over text** — `crates/app/tests/vendor_patch.rs` — which fails if the
+  manifest stops pointing at the copy, if the `return` stops being conditional, or if anything else in
+  the copy drifts. Its own doc comment says what it does not prove, which is anything at all about
+  what pressing the key does. Mutated four ways, red on each.
+- **The verification of the behaviour was done by hand on the real application**, and the observation
+  is worth recording here because it is not the obvious one: in `cat -v`, the first `Ctrl+V` printed
+  `^` and the second completed it to `^V`. That is not half a result — it is the line discipline's
+  *literal-next* running, which cannot happen unless the real `0x16` arrived, and it is exactly what
+  D11 says the chord should mean to a shell.
+- **The whole suite runs against the copy.** On the day of this delivery, 972 tests across 17 suites,
+  three of them the new guard — because the patch replaces the crate for everything that depends on
+  it. What the suite cannot do is *see* the changed line: every keyboard test builds the framework's
+  events by hand, above the layer that was failing.
+- **The day #4065 lands, `vendor/` and the patch section go away together.** That is the exit
+  condition, and it is the reason the copy carries its diff in a comment at the changed line rather
+  than in a patch file: whoever removes it has to see what it was for.
