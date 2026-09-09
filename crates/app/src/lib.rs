@@ -4160,6 +4160,107 @@ mod tests {
         }
     }
 
+    /// **The border of the notice could be deleted outright and every test stayed green**, which is
+    /// the whole of why this exists.
+    ///
+    /// The painting *was* being walked — `text_painted` goes through `painter::paint_a_console`,
+    /// which paints the question — but every test that walked it read `Shape::Text` and nothing
+    /// else, while the ones that reason about the box's size enter through
+    /// `painter::the_question_box`, which measures it and hands the rectangle back without drawing
+    /// anything. So the border had no assertion of any kind on it, and it fails the way the cursor's
+    /// outline did: `Stroke::new(0.0, …)` is queued, carries the right colour and covers the right
+    /// rectangle, and cannot be seen. A console holding a paste would show the question floating
+    /// over whatever the program had written underneath, with nothing separating the two.
+    #[test]
+    fn the_box_of_a_held_paste_is_stroked_over_the_console_holding_it() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        if !hold_a_paste_on(window.active_mut().panes_mut()[0]) {
+            return;
+        }
+        // **The console holding the paste is asked for the keyboard on purpose, not left to a
+        // default.** It is what puts both marks in the same frame in the same colour, and that is
+        // the only scenario in which either lookup's square / rounded discriminator does any work.
+        // Depending on where the focus happens to start would make the whole point of this test an
+        // accident of another function.
+        focus_on(window.active_mut(), 0);
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(area),
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame));
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
+
+        let outline = THE_FOCUS_COLOUR;
+        let (stroked_at, box_of_it) = the_held_pastes_box(&shapes, outline);
+
+        // **The console holding the paste is also the one with the keyboard, so both marks are in
+        // this frame in the same colour** — and that is the only place either lookup's square /
+        // rounded discriminator is exercised at all. Everywhere else only the highlight exists, so
+        // the check that there is exactly one of them holds by there being nothing to confuse it
+        // with.
+        assert_ne!(
+            box_of_it,
+            the_focus_highlight(&shapes, outline),
+            "the notice's box and the border around the focused console came out as the same \
+             rectangle, so one of the two lookups is reading the other's mark"
+        );
+
+        // **The box is filled as well as stroked, and nothing asserted the fill.** Deleting it
+        // leaves the question painted straight over the program's own text, unreadable, with every
+        // assertion here still passing: a border around transparency is not a box.
+        let filled_at = shapes
+            .iter()
+            .enumerate()
+            .find(|(_, clipped)| match &clipped.shape {
+                egui::Shape::Rect(shape) => {
+                    shape.fill == THE_PANEL_BACKGROUND && shape.rect == box_of_it
+                }
+                _ => false,
+            })
+            .map(|(at, _)| at);
+        let Some(filled_at) = filled_at else {
+            panic!(
+                "the notice's box is stroked but not filled, so the question is painted over \
+                 whatever the program had written underneath"
+            );
+        };
+        // **And the fill goes first.** Painted after the border it covers it entirely — same
+        // rectangle, same corner, and a line of one point inside it — so the box loses its edge with
+        // both shapes still on the queue, both the right colour and both the right size. Nothing
+        // else in this crate asserts the order two shapes are queued in.
+        assert!(
+            filled_at < stroked_at,
+            "the notice's box is filled after it is stroked, so the fill covers its own border"
+        );
+
+        // **Where it fell is asserted against the tiling, not against `the_question_box`.** Asking
+        // that function what to expect would put the same call on both sides of the comparison —
+        // the painter reaches the rectangle through it — so the assertion would hold however the
+        // measuring changed.
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let tiling = tile(
+            area,
+            Orientation::Columns,
+            &weights_of(INITIAL_FRACTION),
+            metrics.width(),
+        );
+        assert!(
+            tiling.parts[0].contains_rect(box_of_it),
+            "the box is at {box_of_it:?} and the console holding the paste is {:?}: the question is \
+             drawn outside the console it belongs to",
+            tiling.parts[0]
+        );
+        assert!(
+            !tiling.parts[1].intersects(box_of_it),
+            "the box reaches into the console that is holding nothing, which is a question asked of \
+             the wrong program"
+        );
+    }
+
     /// **A console too small has no notice to press.** The box is clamped to the console, and a
     /// three-row pane flattens it to something whose text is entirely clipped — a rectangle that
     /// still answers `contains` on its edge, so a press there would discard a paste while showing
@@ -16555,6 +16656,111 @@ mod tests {
         );
     }
 
+    /// The one rectangle a frame stroked in `outline`, square or rounded as asked, with **its
+    /// thickness asserted**.
+    ///
+    /// **The width is not decoration, it is whether anything was drawn.** `Stroke::new(0.0, …)` is
+    /// queued, carries the right colour and covers exactly the right rectangle — and cannot be seen.
+    /// The check lives here rather than in each test so that every caller inherits it, this one
+    /// included.
+    ///
+    /// **The corner is what tells the two marks apart**, because both are stroked in `theme.focus()`:
+    /// the highlight around a console is square and the held paste's box is rounded by a margin. By
+    /// colour alone a lookup finds whichever the queue carries first the moment one console is both
+    /// focused and holding a paste, which is the ordinary case.
+    fn the_only_rectangle_stroked_in(
+        shapes: &[egui::epaint::ClippedShape],
+        outline: egui::Color32,
+        rounded: bool,
+        what: &str,
+    ) -> (usize, egui::Rect) {
+        let mut of_that_corner =
+            shapes
+                .iter()
+                .enumerate()
+                .filter_map(|(at, clipped)| match &clipped.shape {
+                    egui::Shape::Rect(shape)
+                        if shape.stroke.color == outline
+                            && (shape.corner_radius != egui::CornerRadius::ZERO) == rounded =>
+                    {
+                        Some((
+                            at,
+                            shape.rect,
+                            shape.stroke.width,
+                            shape.stroke_kind,
+                            clipped.clip_rect,
+                        ))
+                    }
+                    _ => None,
+                });
+        let (at, where_it_fell, thickness, kind, clip) = of_that_corner
+            .next()
+            .unwrap_or_else(|| panic!("{what} was never queued"));
+        assert!(
+            of_that_corner.next().is_none(),
+            "a second shape of that corner carries the same colour, so which one is {what} is \
+             decided by the order of the queue"
+        );
+        // **The exact width, and a floor was not enough.** `>= 1.0` catches the stroke of zero that
+        // is queued and invisible, and calls a fifty-point band correct — a border that eats a sixth
+        // of the console it surrounds. A bound relative to the mark does not close it either: fifty
+        // is a fifth of a three-hundred-point console, so any fraction loose enough to be principled
+        // is loose enough to pass. Every stroked mark in this crate is one point, which is what «a
+        // line» means here; a delivery that wants a thicker one changes this on purpose.
+        assert_eq!(
+            thickness, 1.0,
+            "{what} is {thickness} thick: at zero it is queued and invisible, and above one it \
+             stops being a line and starts eating what it surrounds"
+        );
+        // **`Inside` is not decoration either.** With the stroke centred or outside, the highlight
+        // around a console reaches over the divider and into its neighbour — painted by a window
+        // that says, in the comment above where it draws it, that it does not. Nothing in this
+        // crate read `stroke_kind` before this line.
+        assert_eq!(
+            kind,
+            egui::StrokeKind::Inside,
+            "{what} is stroked {kind:?}, so it spills over whatever is drawn beside it"
+        );
+        // **A shape survives its own clip being taken away, and every assertion above survives with
+        // it.** Putting a shape on the queue does not drop one whose clip is empty: the
+        // `ClippedShape` arrives with its rectangle, its colour, its width and its kind all correct,
+        // and the tessellator is what skips it. Clipping this painter to nothing — or handing the
+        // mark to a neighbour's painter, which is the same defect wearing the wrong console — leaves
+        // nothing on screen and everything here green. Only the cursor's own lookup read a clip
+        // before this.
+        assert!(
+            clip.intersect(where_it_fell).is_positive(),
+            "{what} is clipped to {clip:?} and falls at {where_it_fell:?}, so nothing of it is drawn"
+        );
+        (at, where_it_fell)
+    }
+
+    /// The border the window draws around the console that has the keyboard.
+    fn the_focus_highlight(
+        shapes: &[egui::epaint::ClippedShape],
+        outline: egui::Color32,
+    ) -> egui::Rect {
+        the_only_rectangle_stroked_in(shapes, outline, false, "the focus highlight").1
+    }
+
+    /// The border around the question a console asks about a paste it is holding.
+    fn the_held_pastes_box(
+        shapes: &[egui::epaint::ClippedShape],
+        outline: egui::Color32,
+    ) -> (usize, egui::Rect) {
+        the_only_rectangle_stroked_in(shapes, outline, true, "the held paste's box")
+    }
+
+    /// The colours these tests look the two stroked marks up by, **written out**.
+    ///
+    /// **Not read from the theme, and that is the whole point.** Both marks are found *by*
+    /// `theme.focus()`, so a palette entry given an alpha of one — or swapped for another entry —
+    /// moves the search and the subject together, and every assertion holds over two marks nobody
+    /// can see. It is the disguise **D36** recorded for the cursor, whose colour is the same grey as
+    /// the text in the factory theme; here it is the search key that has to be pinned.
+    const THE_FOCUS_COLOUR: egui::Color32 = egui::Color32::from_rgb(0x75, 0x87, 0xA6);
+    const THE_PANEL_BACKGROUND: egui::Color32 = egui::Color32::from_rgb(0x18, 0x18, 0x18);
+
     #[test]
     fn the_highlight_surrounds_the_console_with_the_focus_and_not_always_the_left_one() {
         // **The only place where the focus decides something and it is invisible in what a console
@@ -16580,15 +16786,7 @@ mod tests {
         let shapes = std::mem::take(&mut output.shapes);
         output.drop_without_applying_deltas();
 
-        let highlight = shapes
-            .iter()
-            .find_map(|clipped| match &clipped.shape {
-                egui::Shape::Rect(shape) if shape.stroke.color == Theme::default().focus() => {
-                    Some(shape.rect)
-                }
-                _ => None,
-            })
-            .expect("the focus highlight had to end up queued");
+        let highlight = the_focus_highlight(&shapes, THE_FOCUS_COLOUR);
 
         let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
         let tiling = tile(
@@ -16728,7 +16926,7 @@ mod tests {
             let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
             focus_on(window.active_mut(), with_the_focus);
             let ctx = egui::Context::default();
-            let outline = window.theme.focus();
+            let outline = THE_FOCUS_COLOUR;
 
             let input = egui::RawInput {
                 screen_rect: Some(area),
@@ -16743,13 +16941,7 @@ mod tests {
             // the two marks fall on the same console, and the highlight's own rectangle answers it:
             // the cursor's clip is inside it or it is not. Deriving the tiling as well would add a
             // second way of being wrong without adding anything to check.
-            let highlighted = shapes
-                .iter()
-                .find_map(|clipped| match &clipped.shape {
-                    egui::Shape::Rect(shape) if shape.stroke.color == outline => Some(shape.rect),
-                    _ => None,
-                })
-                .expect("the focus highlight had to end up queued");
+            let highlighted = the_focus_highlight(&shapes, outline);
             let filled = shapes
                 .iter()
                 .find_map(|clipped| match &clipped.shape {

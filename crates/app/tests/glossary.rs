@@ -1074,6 +1074,10 @@ const NOT_OURS: &[&str] = &[
     // deciding the same thing again.
     "cursor_shape_unfocused",
     "hollow",
+    // egui's own method for putting a shape on the queue, cited where a test explains that it does
+    // **not** drop a shape whose clip is empty — the shape arrives complete and the tessellator is
+    // what skips it, which is how a mark can be asserted in full and drawn nowhere.
+    "add",
     // The two survivors this crate's closing path is written against: a program that puts itself in
     // a session of its own, and the one that is *named* for outliving the shell that launched it.
     "setsid",
