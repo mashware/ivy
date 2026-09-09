@@ -411,12 +411,18 @@ rm -rf /run/user/"$(id -u)"/agent-terminal-* 2>/dev/null || true
 # store, so covering it would be a mechanism with no scenario. If it were ever used, **this line
 # would stop isolating without saying so** and one has to come back here.
 #
-# **No code of ours reads this variable** — checked: the only XDG one the project reads is
-# `XDG_RUNTIME_DIR`, in `panel-contract` — but **the process does read it**, through system
-# libraries that load themselves: `strace` on the binary gives four accesses, to libX11's
-# `XCompose`, to `dconf/user` and to fontconfig's two. It makes no difference to what matters here,
-# and that is **measured, not reasoned**: four runs of batch A, two with this line and two without
-# it, gave the same window and the same grid.
+# **This crate does read this variable, and the sentence that used to sit here said it did not.**
+# `crates/app/src/settings.rs` resolves the settings file through `XDG_CONFIG_HOME`, and
+# `crates/panel-contract` reads `XDG_RUNTIME_DIR`. The claim was true when it was written and stopped
+# being true the day the terminal became configurable, which is the way a comment about present
+# behaviour rots: nothing failed, nobody noticed, and it went on reassuring a reader for two
+# deliveries. **What isolating the directory is worth has not changed** — under the measurement gate
+# the settings file is not read at all, so the isolation protects the layout rather than the
+# settings — and the process still reads the variable through system libraries that load themselves:
+# `strace` on the binary gives four accesses, to libX11's `XCompose`, to `dconf/user` and to
+# fontconfig's two. It makes no difference to what matters here, and that is **measured, not
+# reasoned**: four runs of batch A, two with this line and two without it, gave the same window and
+# the same grid.
 CONFIG="$OUTPUT/.config"
 rm -rf "$CONFIG"
 mkdir -p "$CONFIG"
@@ -731,6 +737,28 @@ figure depends on it. The veto has been broken"
         invalidate "the report does not declare whether the user's settings were read. Without that \
 datum, a run that read them and one that ran with the factory ones publish indistinguishable reports \
 with grids that may have nothing to do with each other"
+    fi
+fi
+
+# **The blink guard, and it is one-directional by construction rather than by preference.** Unlike
+# the ones for emoji, fonts and mouse reports, there is no batch in which this should fire: the
+# cursor blinks by default, so the measurement gate switches it off for every measured run — the same
+# gate that vetoes the settings file — and a repaint on the blink's account is therefore always a
+# broken gate. Written all the same, because D13's rule is about the paths that COULD go undeclared:
+# a repaint nobody names is published as the interface framework's cost, which is the figure D3
+# judges egui by, and a zero somebody can read is what makes the claim checkable.
+#
+# The `grep` goes inside the `if` for the `set -e` reason spelled out just above.
+if ! grep -q "^blink: *0 frame" "$REPORT"; then
+    if grep -q "^blink:" "$REPORT"; then
+        WOKEN=$(sed -n 's/^blink: *\([0-9]*\) frame.*/\1/p' "$REPORT")
+        invalidate "a blinking cursor was painted in $WOKEN frame(s) of this run, so it has work nothing \
+in the load asked for. The blink is switched off for every measured run by the same gate that vetoes \
+the settings file, so that gate has been broken"
+    else
+        invalidate "the report does not declare what a blinking cursor cost. Without that datum a run \
+whose window repainted 1.7 times a second on its own publishes the same report as one that came to \
+rest, and the difference lands in the framework's residue"
     fi
 fi
 

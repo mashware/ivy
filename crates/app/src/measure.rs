@@ -1045,6 +1045,27 @@ pub struct SessionHeader {
     pub tab_bar: TabBar,
     /// What it cost to reflow the text when a console's width changed.
     pub reflow: Reflow,
+    /// What a blinking cursor woke the window for.
+    pub blink: Blinking,
+}
+
+/// What a blinking cursor cost this run, **and why it cost that**.
+///
+/// **It is declared even though every published batch reads zero**, because **D13**'s rule is about
+/// the paths that *could* go undeclared, not the ones that did: a frame's cost is split by
+/// subtraction, so a repaint nobody names is published as the interface framework's cost — the
+/// figure **D3** judges egui by. A zero somebody can read is what makes the claim checkable, and the
+/// second half of the line is what stops that zero being read as «nothing here can blink».
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Blinking {
+    /// Frames in which a blinking cursor **was painted**.
+    ///
+    /// **Painted and not «woken», because that is what is counted.** The two part company when the
+    /// desktop takes the focus away between the painting half and the alarm. **D13** rates a
+    /// mislabelled number worse than none, and this line is read by a script that throws runs away.
+    pub frames: usize,
+    /// What the settings this run read say about the blink, which is what decides the number above.
+    pub ceiling: Option<bool>,
 }
 
 pub fn header(
@@ -1061,6 +1082,7 @@ pub fn header(
         chosen_font,
         tab_bar,
         reflow,
+        blink,
     } = session;
     let profile = if cfg!(debug_assertions) {
         "debug — the number that counts is the one from --release"
@@ -1230,6 +1252,23 @@ pub fn header(
             reflow.frames, reflow.total
         )?;
     }
+    // **Always, and with the reason next to the number.** Since the cursor blinks by default, a
+    // console nobody has spoken to would wake the window 1.7 times a second: the measurement gate
+    // switches it off — the same gate that vetoes the settings file and forbids saving — and this
+    // line is where that is said instead of assumed.
+    writeln!(
+        a,
+        "blink:        {} frame(s) painted with a blinking cursor ({})",
+        blink.frames,
+        match blink.ceiling {
+            Some(false) => "switched off, as every measured run has it",
+            Some(true) => "forced on by the settings",
+            // **Not «left to the program»**: `CONSOLE_NAME` publishes a pane as «left» or
+            // «right», and a guard here refuses a header that says either with more than two
+            // panes. It caught this line, which is what that guard is for.
+            None => "the program decides, and it blinks unless it says otherwise",
+        }
+    )?;
     writeln!(a, "renderer:     glow")?;
     writeln!(a, "profile:      {profile}")?;
     writeln!(a, "machine:      {}", machine())
@@ -1361,6 +1400,7 @@ mod tests {
                 chosen_font: ChoosingTheFont::NotAsked,
                 tab_bar: TabBar::default(),
                 reflow: Reflow::default(),
+                blink: Blinking::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -1431,6 +1471,7 @@ mod tests {
                 chosen_font,
                 tab_bar: TabBar::default(),
                 reflow: Reflow::default(),
+                blink: Blinking::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -1535,6 +1576,7 @@ mod tests {
                 chosen_font: ChoosingTheFont::NotAsked,
                 tab_bar,
                 reflow: Reflow::default(),
+                blink: Blinking::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -2473,6 +2515,12 @@ mod tests {
                     chosen_font: ChoosingTheFont::NotAsked,
                     tab_bar,
                     reflow,
+                    // **What every batch really publishes**: the measurement gate switches the
+                    // blink off, so no measured frame can be woken by one.
+                    blink: Blinking {
+                        frames: 0,
+                        ceiling: Some(false),
+                    },
                 },
             )
             .expect("writing to memory does not fail");
@@ -2919,12 +2967,18 @@ mod tests {
         //
         // Counting the two families separately, losing **a single one** of the two by keyword already
         // fails. And it is still a criterion and not a list, so it holds up as the script grows.
+        //
+        // **The anchored floor was 19 against a real 21 and the blink's guard found the slack**: two
+        // patterns could have been lost in silence. It is raised to what the script actually carries,
+        // for the same reason D28's ratchet has no tolerance — a floor with slack is a floor that
+        // fires late. (Counted with this extractor's own rules, twice: the first telling said 22 and
+        // three, which is the arithmetic of subtracting the wrong number of new patterns.)
         let anclados = patrones.iter().filter(|p| p.patron.contains('^')).count();
         let by_keyword = patrones.len() - anclados;
         assert!(
-            anclados >= 19 && by_keyword >= 2,
+            anclados >= 24 && by_keyword >= 2,
             "the extractor has found {anclados} anchored patterns and {by_keyword} by keyword, and there \
-             are at least 19 and 2: it has stopped recognizing the shape of some, so this test would be \
+             are at least 24 and 2: it has stopped recognizing the shape of some, so this test would be \
              passing vacuously right where it is least noticed"
         );
 

@@ -222,6 +222,13 @@ pub struct Settings {
     /// **A list and not an already resolved table**, because order matters: «the last one wins» can only be
     /// decided by applying them in the order they were written.
     pub shortcuts: Vec<(crate::keyboard::Action, Option<crate::keyboard::Chord>)>,
+    /// Whether the file settles the blink, over the program's head. `None` leaves it to the program.
+    ///
+    /// **It is a ceiling in both directions and not a default**: «on» blinks however steady a shape
+    /// the program asks for, «off» never blinks however loudly it asks. A ceiling a program can climb
+    /// over is not a ceiling, and the reason this is absolute — with the softer rules that were
+    /// discarded — is **D37**.
+    pub blink: Option<bool>,
     /// Whether the file turned off the copy shortcut.
     ///
     /// **Apart from the list, because copy has no chord to move.** Its chord is resolved by the
@@ -328,7 +335,20 @@ pub(crate) fn to_use(
     path: Option<&Path>,
 ) -> (Settings, crate::measure::ReadingSettings) {
     if entry == Entry::Measuring {
-        return (Settings::default(), crate::measure::ReadingSettings::Vetoed);
+        // **The one setting a measured run does get, and it is switched off rather than read.**
+        // The cursor blinks by default (**D37**), so a measured pane — focused, with a cursor, and
+        // nobody having asked for anything — would wake the window 1.7 times a second for the first
+        // fifteen seconds of every batch. The file cannot be the way through: it is vetoed a few
+        // lines above, for reasons that are not reopened here. So the ceiling comes from the
+        // measurement gate itself, which is the same regime that already vetoes the file and forbids
+        // saving, and the report declares it on its own line.
+        return (
+            Settings {
+                blink: Some(false),
+                ..Settings::default()
+            },
+            crate::measure::ReadingSettings::Vetoed,
+        );
     }
     let Some(path) = path else {
         // **With nowhere to trust it is not read either, and it is said.** Whoever has the
@@ -503,6 +523,41 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
     Ok((settings, warnings))
 }
 
+impl crate::Window {
+    /// Puts on the window whatever whoever uses it configured, **except the font**.
+    ///
+    /// The family named in the file is applied by [`choose_the_font`] instead, and it is not tidiness:
+    /// everything here puts a value on the window, while that one talks to the text engine, needs the
+    /// context and can cost tens of milliseconds. It runs beside this, at start-up.
+    ///
+    /// **It goes here and not in the constructor**, just like the injected drags and the restoring
+    /// span: taking it inside would force passing it through three constructors with dozens of
+    /// calls, and none of them configures anything.
+    pub(crate) fn apply_the_settings(&mut self, settings: &Settings) {
+        self.theme = crate::theme::Theme::from_colors(&settings.colors);
+        // **What the file does not ask for stays as it is**, which is what makes it possible to
+        // configure just one color without inheriting along the way a font size nobody wrote.
+        self.font_size = settings.font_size.unwrap_or(self.font_size);
+        self.copy_enabled = settings.copy.unwrap_or(self.copy_enabled);
+        self.blink.ceiling = settings.blink.or(self.blink.ceiling);
+        // **They are applied in the order they were written, and that is why they arrive as a
+        // list.** «The last one wins» can only be decided that way, and it is what makes pasting
+        // one set of shortcuts on top of another do what is expected.
+        for (action, chord) in &settings.shortcuts {
+            if let Some(displaced) = self.keymap.bind(*action, *chord) {
+                // **The clash is said out loud, not resolved in silence.** Without this, whoever
+                // reassigns a chord that already had an owner loses the other shortcut without
+                // noticing, and finds out the day they need it.
+                eprintln!(
+                    "agent-terminal: '{}' is left without a shortcut: its chord goes to '{}', which comes later",
+                    displaced.as_written(),
+                    action.as_written()
+                );
+            }
+        }
+    }
+}
+
 /// Puts the value where it belongs, if the key and the value are valid.
 fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing> {
     if let Some(name) = key.strip_prefix("key.") {
@@ -531,6 +586,24 @@ fn apply(settings: &mut Settings, key: &str, value: &str) -> Result<(), Missing>
             })?)
         };
         settings.shortcuts.push((action, chord));
+        return Ok(());
+    }
+    // **Before the colour table on purpose**: `cursor` on its own is the colour, and `cursor.blink`
+    // would otherwise fall through to `strip_prefix("color.")` and come back as an unknown key.
+    if key == "cursor.blink" {
+        // **«on» and «off», and not the «none» the shortcuts use.** There it means «hand the chord
+        // back to the program»; here the program is exactly who is being overruled, so the same word
+        // would mean the opposite thing in two lines of the same file.
+        settings.blink = Some(match value {
+            _ if value.eq_ignore_ascii_case("on") => true,
+            _ if value.eq_ignore_ascii_case("off") => false,
+            _ => {
+                return Err(Missing::InvalidValue {
+                    key: key.to_owned(),
+                    value: value.to_owned(),
+                });
+            }
+        });
         return Ok(());
     }
     if key == "font" {
@@ -737,6 +810,64 @@ mod tests {
             warnings.kept()[0].to_string().contains("color.1"),
             "the warning does not say which key was repeated: «{}»",
             warnings.kept()[0]
+        );
+    }
+
+    #[test]
+    fn the_blink_is_settled_by_the_file_or_left_to_the_program() {
+        // The three states of the key, and the third is the one that matters: **absent is not
+        // «off»**. Reading `None` as a `false` anywhere downstream turns a ceiling into a default
+        // and takes the blink away from every program that asks for it.
+        assert_eq!(parsed("cursor.blink = on").0.blink, Some(true));
+        assert_eq!(parsed("cursor.blink = off").0.blink, Some(false));
+        assert_eq!(parsed("size = 14").0.blink, None, "absent is not off");
+        assert_eq!(
+            parsed("cursor.blink = ON").0.blink,
+            Some(true),
+            "the rest of this file ignores case and this key would be the exception"
+        );
+    }
+
+    #[test]
+    fn the_blink_key_does_not_eat_the_cursor_colour() {
+        // `cursor` on its own is a colour and `cursor.blink` is not one, and what matters is the
+        // **order** of the two in the same dispatch, not the distance: the blink is matched before
+        // the colour table. Mutated: matching it after sends it to `strip_prefix("color.")` and it
+        // comes back as an unknown key.
+        let (settings, warnings) = parsed("cursor = #ff0000\ncursor.blink = off");
+
+        assert_eq!(settings.colors.cursor, Some(Color32::from_rgb(0xFF, 0, 0)));
+        assert_eq!(settings.blink, Some(false));
+        assert_eq!(
+            warnings.total(),
+            0,
+            "one of the two keys was not understood"
+        );
+    }
+
+    #[test]
+    fn a_blink_nobody_can_read_is_said_with_its_line_and_the_rest_applies() {
+        let (settings, warnings) = parsed("size = 14\ncursor.blink = maybe\nfont = Iosevka");
+
+        assert_eq!(
+            settings.blink, None,
+            "a value nobody understands was applied"
+        );
+        assert_eq!(
+            settings.font_size,
+            Some(14.0),
+            "the line before it was dropped"
+        );
+        assert_eq!(
+            settings.font.as_deref(),
+            Some("Iosevka"),
+            "the line after it was dropped: one bad line is not a bad file"
+        );
+        assert_eq!(warnings.kept().len(), 1);
+        let said = warnings.kept()[0].to_string();
+        assert!(
+            said.contains("cursor.blink") && said.contains("maybe") && said.contains('2'),
+            "the warning has to carry the key, the value and the line number: «{said}»"
         );
     }
 
@@ -1370,7 +1501,7 @@ mod tests {
     /// a configuration file published that the application rejects — which is exactly the failure that
     /// the contract's document describes for the shortcuts, in the list next to it.
     ///
-    /// **The document is read, the table is not copied.** A test that repeated the eight keys fixes
+    /// **The document is read, the table is not copied.** A test that repeated the keys fixes
     /// itself when someone translates them in the code and in the test and forgets the document, which is the
     /// case that has to be caught. The opposite direction —a key the code accepts and the document
     /// keeps quiet about— cannot be derived: the `match` cannot be iterated, and copying it here would be having
@@ -1388,10 +1519,10 @@ mod tests {
             .collect();
         // **Without a floor this test passes by being empty**, which is how a guard that reads another
         // file dies: someone changes the table's header, the walk does not hook, and nothing is
-        // left to check. Nine is what the table publishes today.
+        // left to check. Ten is what the table publishes today.
         assert_eq!(
             published.len(),
-            9,
+            10,
             "the document's key table gave {} rows: either the document changed shape, or this \
              walk stopped finding it and the test is not looking at anything — {published:?}",
             published.len()
@@ -1447,7 +1578,7 @@ mod tests {
         // blocks, this test passes by being empty.
         assert_eq!(
             examples.len(),
-            9,
+            10,
             "the document's example blocks gave {} configuration lines: either the document \
              changed shape, or this walk stopped finding them — {examples:?}",
             examples.len()
@@ -1544,13 +1675,15 @@ mod tests {
     /// that start with `agent-terminal:`, and until here no one picked them up.
     ///
     /// **The two line warnings are reproduced by the real parser**, writing on the line
-    /// the document points to what the document tells happened there. The third is not produced by this
-    /// module but by the window, and since printing cannot be observed from inside the process, the only thing
-    /// that can be confronted without copying it again is **its template in the source**.
+    /// the document points to what the document tells happened there. The third is printed rather
+    /// than returned, and printing cannot be observed from inside the process, so the only thing
+    /// that can be confronted without copying it again is **its template in the source**. That
+    /// source is this file: putting the settings onto the window left `lib.rs` with the delivery
+    /// that made the cursor blink, and the sentence went with it.
     #[test]
     fn the_messages_the_document_publishes_are_the_ones_the_terminal_writes() {
         const DOCUMENT: &str = include_str!("../../../docs/08-configuracion.md");
-        const WINDOW: &str = include_str!("lib.rs");
+        const WINDOW: &str = include_str!("settings.rs");
 
         let mut inside = false;
         let published: Vec<&str> = DOCUMENT

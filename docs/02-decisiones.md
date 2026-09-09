@@ -5332,13 +5332,15 @@ often than moving between consoles, and it is the case those settings exist for.
 egui's own flag (`InputState::focused`, documented as *«false when the user alt-tabs away»*) instead
 of tracked here, so nothing new is kept between frames.
 
-**Why the cursor does not blink, which until this entry lived only in a comment.** A cursor that
-blinks is a timer, and a timer is **work at rest** — exactly what every published control batch of
-`scripts/measure-frame.sh` measures. Blinking is not refused, it is deferred with its price named:
-it needs a settings key of its own, off by default, a declared repaint path in the report, and a
-decision about what the batches do with it.
-[#210](https://github.com/mashware/agent-terminal/issues/210) holds that open. The old comment
-asserted this as a fact about the present; it now points here, which is where a decision belongs.
+**Why the cursor did not blink, and it does now: see D37.** This entry deferred blinking rather than
+refusing it, and named the price: a settings key of its own, a declared repaint path in the report,
+and a decision about what the batches do with it. All three were paid by
+[#210](https://github.com/mashware/agent-terminal/issues/210), so what is left here is the shape of
+the argument — a cursor that blinks is a timer, and a timer is **work at rest**, which is exactly
+what every published control batch of `scripts/measure-frame.sh` measures. **One line of this
+paragraph was wrong and it is worth keeping the correction visible**: it said the key would be «off
+by default». It is not a default in either direction — it is a ceiling, absent by default, over a
+terminal that blinks. D37 says why.
 
 **What was discarded, and why.**
 
@@ -5385,3 +5387,122 @@ report to declare (**D13**), and no control batch stops comparing with the ones 
 > built on the default theme stays green. Every assertion about the cursor's colour runs on a theme
 > whose cursor differs from its text, and that mutation is on the list. Before pinning any colour by
 > its literal, check whether another entry of the palette holds the same one.
+
+## D37 — The cursor blinks by default, the program can switch it off, and `cursor.blink` is a ceiling over both
+
+**Decided.** The console being typed into, in a window that has the desktop's focus, **blinks its
+cursor** — 600 ms lit, 600 ms dark — and it does so with **nobody having asked**. The program inside
+can switch it off (a steady `DECSCUSR` shape, or `CSI ?12l`) and hand it back (`CSI 0 SP q`).
+`cursor.blink` in the settings file is a **ceiling in both directions and not a default**: `on`
+blinks however steady a shape the program asks for, `off` never blinks however loudly it asks, and
+the line absent leaves the program deciding on top of a default of «yes». It **stops after 15 s of
+keyboard silence, ending painted**, and every keystroke puts the phase back to the start, so a cursor
+is lit the instant you type.
+
+**Why by default, which is the half that was decided twice.** The first decision — asked of the user
+at the issue's start, and recorded — was *who wins between the settings file and the program*, and
+that answer stands: the program decides, the key is the ceiling. What that question did not settle is
+what happens when the program says **nothing**, and nothing is what a shell prompt says. The engine's
+own default is steady (`CursorStyle::default()` is `{ Block, false }`), so «the program decides»
+silently meant «no blink, ever, in a shell» — which is where a cursor is looked at most, and is not
+what any other terminal on the machine does. It was caught at the delivery's own scope gate, by the
+user, in one sentence: *the way terminals do it, not only when the program asks for it*. The
+reference implementations agree — kitty, GNOME Terminal and WezTerm all blink out of the box.
+
+**Where the default lives, and why it is one line.** `crates/term-core/src/screen.rs` builds the
+engine's `Config` with `default_cursor_style: CursorStyle { shape: Block, blinking: true }`. **No rule
+of this application's own is added:** `Term::cursor_style()` already falls back to that field, and
+DECSCUSR's `0` is `set_cursor_style(None)`, which restores exactly it. So every sequence keeps the
+meaning its standard gives it and what changes is only what the terminal falls back to. A terminal
+reset (`ESC c`, `tput reset`) clears the style and lands on the same default, which is the behaviour
+one would want and not a coincidence: it was read in the source, not assumed. **One consequence
+reached by another door** is that OSC 50 `CursorShape=` sets the shape alone, so a program that picks
+its shape that way inherits the blink; it follows from the rule and carries a test of its own so
+nobody has to guess. **And a second, found by completing the coverage**: the style is one field on
+the terminal and the alternate screen does not scope it, so what a full-screen program asks for
+**outlives it** — leave an editor that wanted a steady cursor and the shell comes back steady, until
+a reset. xterm and kitty behave the same way, which is why it is pinned as it is rather than worked
+around, and the settings manual says so where somebody would meet it.
+
+**The alarm is armed from what the painting drew, never from what the program asked.** This is the
+defect the design would have shipped. The engine's blink bit is **independent of whether the cursor
+is shown**: a full-screen program sends `CSI ?25l`, keeps reporting that it wants a blink, and with
+`cursor.blink = on` the ceiling forces it — so a window would wake at 1.7 Hz to paint nothing at all.
+The painting is the only place the three guards that leave `paint_cursor` have already run, so the
+painting sets the flag and the deadline reads it. **And the flag has to be asked about twice**: it is
+set by the interface half, which does not run while the window is minimized or covered, so the
+`logic` half — which does run there, alone — was rearming every 600 ms off a stale `true`. The
+deadline asks egui for the desktop's focus as well, from `raw.focused` rather than the processed
+field, because `Context::run_logic` refreshes only the first and says so. Both were found by
+challengers against the code, and both had a failing test before they had a fix. **The size of that
+second one was overstated in the first telling of this entry, and the correction is left visible**:
+it said «for ever», and it is not — the keystroke anchor is refreshed by the same half that is not
+running, so the fifteen-second stop ends it. What the guard removes is on the order of twenty-five
+needless frames per minimize. The defect was real; the number attached to it was not, and in a
+record whose whole worth is that its numbers can be checked, that distinction is the point.
+
+**Why it stops after 15 s, and why that is not a nicety.** This is a terminal for **hosting agents**:
+its panes are left open for hours with an agent's editor sitting in insert mode, which is exactly the
+state that asks for a blink. Without the stop, one such pane keeps the window repainting at 1.7 Hz
+for as long as the machine is on, and **D13**'s «the window is at rest» — the premise every published
+measurement rests on — stops being true permanently. kitty ships
+`cursor_stop_blinking_after 15.0` on by default with the same reasoning. The stop is tested at its
+boundary in both directions: at exactly 15 s the blink is over and the cursor is **painted**, and the
+last deadline before it is clamped to the stop so the frame that repaints it lit is asked for.
+
+**What the measurement does with it, which the design got wrong once.** The report declares
+`blink: N frame(s) woken by a blinking cursor` with the reason next to the number, and
+`scripts/measure-frame.sh` marks a run `.INVALID` when N is not zero. The rule is **one-directional by
+construction**: unlike the guards for emoji, fonts and mouse reports, there is no batch in which it
+should fire. The first plan for keeping it at zero was that the run would write `cursor.blink = off`
+into the configuration directory it already isolates — **and that does not work**, because the same
+measurement gate that isolates the directory also vetoes reading the file at all. The ceiling comes
+from the gate itself instead, which is the regime that already vetoes the settings and forbids
+saving. Without this, every batch would have spent its first fifteen seconds waking the window 1.7
+times a second, and the script's own rule would have marked every measurement this project has ever
+published as invalid.
+
+**What was discarded, and why.**
+
+- **Leaving the engine's default alone** («steady»), which is what this delivery's own design assumed
+  until its scope gate. A shell would never blink, and a shell is the common case.
+- **Writing the default into `crates/app` as a rule of its own** rather than into the `Config` the
+  engine already consults. It would need a second place to read whenever a sequence changed meaning,
+  and `CSI 0 SP q` would have had to be reimplemented to restore it.
+- **Ghostty's softer rule** — an explicit setting still lets `DECSCUSR` through and only DEC mode 12
+  is ignored — and an **asymmetric** third that was named by a challenger: `on` as a floor and `off`
+  as a ceiling, so a program may switch a blink off but never on. A ceiling somebody can set and a
+  program can climb over is not a ceiling; WezTerm's `cursor_blink_rate = 0` and kitty's
+  `cursor_blink_interval 0` are both absolute. And the asymmetric key is rejected on its manual:
+  «`on` means at least, `off` means at most» is a rule nobody can predict from reading one line of a
+  settings file.
+- **A `cursor.blink.rate` key, and reading the desktop's own interval.** The value is checkable
+  rather than invented: `gsettings get org.gnome.desktop.interface cursor-blink-time` answers `1200`
+  on this machine, described as the cycle, so 600 ms per half puts this terminal in step with every
+  other window on it. Reading it at runtime is what is refused, for reasons this repository can
+  check: the application links neither GTK nor gsettings, so the alternative is spawning a process on
+  the start-up path — the one cost **D26** lets only the font-by-name setting pay — and it is a
+  Linux-only answer to a question **F2.7** is about to ask on macOS and Windows. A rate key is
+  something nobody has asked for.
+- **Blinking for ever while the program asks.** See the fifteen-second stop above.
+- **A deadline of its own beside the painting**, instead of inside `Window::set_the_alarm`. That
+  function is already called from both halves of the pass, which is the exact defect the knowledge
+  card `the-heartbeat-was-armed-a-frame-late` records; a new call site would have to earn that fix
+  again, and that card says the second half was only ever found by mutation.
+- **A `blinking` field on `Pane`**, or a second `bool` argument through the painting. Seven call
+  sites of a second `bool` read as two independent questions when it is one, and a field on `Pane`
+  hits that block's own ratchet — the same shape **D36** already discarded for the focus. The focus
+  and the blink travel as one value instead, which is why painting a pane still takes seven
+  arguments.
+- **Having the measurement report declare frames painted with the desktop's focus, and invalidate on
+  zero**, proposed by a challenger so that a zero could not mean «the window never had the focus»
+  rather than «the blink was off». It is unnecessary here because the ceiling is applied in code by
+  the measurement gate: the zero is guaranteed whatever the focus did, and the line says so.
+
+**What it cost in `lib.rs`, because D28's ratchet is part of every delivery's story here.** The blink
+needs fifteen production lines in the window's core, not the nine the previous delivery had pre-paid
+by moving the deadlines out. So a second piece came out in this one: **applying what the settings file
+asks for left for `settings.rs`** — 19 lines, the piece this delivery was already editing, which is
+exactly the way through D28 records. `lib.rs` went 1 367 → **1 362** and `impl Window` 411 → **401**,
+both re-measured. The ratchet's verdict on this delivery is therefore that it **did not** pay for its
+own lines out of what was already free, and the record says so rather than rounding it off.

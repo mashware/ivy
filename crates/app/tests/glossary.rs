@@ -1084,6 +1084,22 @@ const NOT_OURS: &[&str] = &[
     // **not** drop a shape whose clip is empty — the shape arrives complete and the tessellator is
     // what skips it, which is how a mark can be asserted in full and drawn nowhere.
     "add",
+    // Alacritty's own type for the cursor a frame is asked to draw, and its terminal mode for
+    // whether the cursor is shown. Both are cited where this crate explains that the blink bit is
+    // independent of them: the shape comes out `Hidden` under `CSI ?25l` and the style is not
+    // touched, which is why a repaint deadline armed from the program's request would wake the
+    // window to paint nothing.
+    "RenderableCursor",
+    "SHOW_CURSOR",
+    // Alacritty's method for the shape door and the standard-library method it reaches the default
+    // through, both cited where this crate pins that picking a shape by OSC inherits the blink this
+    // terminal defaults to.
+    "set_cursor_shape",
+    "get_or_insert",
+    // Alacritty's own name for entering and leaving the alternate screen, cited where this crate
+    // pins that the trip does not hand the cursor's style back: what it swaps is the grid, the
+    // keyboard modes and the selection, never the style the blink lives in.
+    "swap_alt",
     // The two survivors this crate's closing path is written against: a program that puts itself in
     // a session of its own, and the one that is *named* for outliving the shell that launched it.
     "setsid",

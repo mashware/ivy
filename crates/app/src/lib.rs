@@ -162,6 +162,13 @@ struct PaneOutcome {
     /// is shared; reading it when the frame closes would say how much was spent but not who to take
     /// it from.
     color: fonts::ColorCost,
+    /// Whether this pane painted a cursor **that is in a blink**, either half of it.
+    ///
+    /// **It comes back from the painting because only the painting knows.** Three guards leave
+    /// `paint_cursor` before any ink is chosen — no cursor in the view, a shape of `Hidden`, no cell
+    /// where it stands — and a console that trips one of them wakes nobody however loudly its
+    /// program asks. See [`alarms::BlinkState::painted`].
+    blinking: bool,
 }
 
 /// The environment variable that says how many tabs to open with.
@@ -1983,6 +1990,11 @@ struct Window {
     /// `Ctrl+Shift+C` does not arrive as a key, it arrives already turned into a request to copy.
     /// The same as pasting.
     copy_enabled: bool,
+    /// Everything a blinking cursor needs the window to remember between frames.
+    ///
+    /// **One field for three things**, because this file cannot grow (**D28**) and because the three
+    /// are one subject. See [`alarms::BlinkState`].
+    blink: alarms::BlinkState,
     /// The font size the cell is measured with, in points.
     ///
     /// **It goes stuck to the theme because the two come from the same place**: they are what
@@ -2339,38 +2351,6 @@ impl Window {
         })
     }
 
-    /// Puts on the window whatever whoever uses it configured, **except the font**.
-    ///
-    /// The family named in the file is applied by [`choose_the_font`] instead, and it is not tidiness:
-    /// everything here puts a value on the window, while that one talks to the text engine, needs the
-    /// context and can cost tens of milliseconds. It runs beside this, at start-up.
-    ///
-    /// **It goes here and not in the constructor**, just like the injected drags and the restoring
-    /// span: taking it inside would force passing it through three constructors with dozens of
-    /// calls, and none of them configures anything.
-    fn apply_the_settings(&mut self, settings: &settings::Settings) {
-        self.theme = Theme::from_colors(&settings.colors);
-        // **What the file does not ask for stays as it is**, which is what makes it possible to
-        // configure just one color without inheriting along the way a font size nobody wrote.
-        self.font_size = settings.font_size.unwrap_or(self.font_size);
-        self.copy_enabled = settings.copy.unwrap_or(self.copy_enabled);
-        // **They are applied in the order they were written, and that is why they arrive as a
-        // list.** «The last one wins» can only be decided that way, and it is what makes pasting
-        // one set of shortcuts on top of another do what is expected.
-        for (action, chord) in &settings.shortcuts {
-            if let Some(displaced) = self.keymap.bind(*action, *chord) {
-                // **The clash is said out loud, not resolved in silence.** Without this, whoever
-                // reassigns a chord that already had an owner loses the other shortcut without
-                // noticing, and finds out the day they need it.
-                eprintln!(
-                    "agent-terminal: '{}' is left without a shortcut: its chord goes to '{}', which comes later",
-                    displaced.as_written(),
-                    action.as_written()
-                );
-            }
-        }
-    }
-
     /// The rest of the window, which is the same whether it was restored or not.
     ///
     /// **It exists so that opening factory-fresh and restoring share everything that is not the tab
@@ -2402,6 +2382,7 @@ impl Window {
             theme: Theme::default(),
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
+            blink: alarms::BlinkState::default(),
             font_size: DEFAULT_FONT_SIZE,
             rest_of_frame: RestOfFrame::default(),
             frame_started: Instant::now(),
@@ -2764,7 +2745,22 @@ impl Window {
     /// to be closed, and closing it means splitting this function the way `handle_the_mouse` is
     /// split, so that the timed region is the whole call and shrinking it stops being moving a
     /// line.
+    ///
+    /// **The blinking cursor's anchor added one pass over this frame's events, and it goes in the
+    /// same hole.** It is one `matches!` per event and the batches that inject gestures do pay it —
+    /// so «nobody types» no longer describes the whole of what happens here, even though it still
+    /// describes what reaches a program. Named rather than left to the subtraction (**D13**): the
+    /// hole this docblock already declares is now one line wider, and the day it is closed this pass
+    /// is inside the region that gets timed.
     fn send_keys_to_the_focused(&mut self, ctx: &egui::Context) -> Vec<WindowRequest> {
+        // **The phase goes back to the start whenever a key is pressed**, so the cursor is lit the
+        // instant you type instead of at whatever point of the cycle you caught it — and typing
+        // continuously never leaves it half-drawn. **It is asked BEFORE the keys are handed over**:
+        // sending them consumes the frame's events, so read afterwards this always sees an empty
+        // list and the anchor never moves. Measured — the test for it failed exactly that way.
+        if ctx.input(keyboard::somebody_typed) {
+            self.blink.saw_a_key();
+        }
         let started = self.frame_started;
         // The seed is taken out and put back because the pane and the field are two borrows of the
         // same owner, and the compiler does not let both be held at once.
@@ -3480,6 +3476,10 @@ impl eframe::App for Window {
         // **D36**.
         let the_window_has_the_keyboard = ui.ctx().input(|input| input.focused);
         let with_the_focus = self.tabs[self.active].focus;
+        // **Read once, before the walk**, like the two questions above it: a clock read per pane
+        // would put two consoles of the same frame in different halves of the same blink.
+        let blink = self.blink.now();
+        self.blink.new_frame();
         for (pane, rect) in self.tabs[self.active]
             .panes_mut()
             .into_iter()
@@ -3493,8 +3493,11 @@ impl eframe::App for Window {
                 &self.theme,
                 &metrics,
                 &mut self.discoverer,
-                focused,
+                blink.on(focused),
             );
+            // **What the painting really drew, not what the program asked for**: it is what the
+            // repaint deadline is armed from. See [`alarms::BlinkState::painted`].
+            self.blink.saw(pane_outcome.blinking);
             // **It is noted per pane and not once per frame**, because it belongs to the pane it
             // was subtracted from: two consoles that rasterize in the same frame each pay their
             // own.
@@ -3794,7 +3797,15 @@ mod tests {
             ));
             let metrics =
                 painter::CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer, true);
+            painter::paint_a_console(
+                &painter,
+                pane,
+                theme,
+                &metrics,
+                rect,
+                &mut discoverer,
+                painter::CursorInk::Filled,
+            );
         });
         let painted = output.shapes.len();
         output.drop_without_applying_deltas();
@@ -3818,7 +3829,15 @@ mod tests {
             ));
             let metrics =
                 painter::CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer, true);
+            painter::paint_a_console(
+                &painter,
+                pane,
+                theme,
+                &metrics,
+                rect,
+                &mut discoverer,
+                painter::CursorInk::Filled,
+            );
         });
         let read = output
             .shapes
@@ -5093,6 +5112,7 @@ mod tests {
             theme: Theme::default(),
             keymap: keyboard::Keymap::default(),
             copy_enabled: true,
+            blink: alarms::BlinkState::default(),
             font_size: DEFAULT_FONT_SIZE,
             rest_of_frame: RestOfFrame::default(),
             frame_started: Instant::now(),
@@ -6586,6 +6606,12 @@ mod tests {
         // [`Window::set_the_alarm`].
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
+        // **The blink is switched off for this one, and it has to be said.** What is asked here is
+        // whether the PANEL wakes the window, and a focused console with a blinking cursor wakes it
+        // for a reason of its own — `egui::RawInput::default()` reports the window as focused, so a
+        // test window is always the blinking case. Left on, this test would answer «yes» for the
+        // wrong reason and go on doing so with the panel's alarm deleted.
+        window.blink.ceiling = Some(false);
         for pane in window.tabs[1].panes_mut() {
             pane.panel = Some(PanelDir::create().expect("creating the directory"));
         }
@@ -12214,7 +12240,11 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 discoverer,
-                true,
+                painter::Blink {
+                    ceiling: Some(false),
+                    since_a_key: std::time::Duration::ZERO,
+                    focused: true,
+                },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
                 color.record(
@@ -12529,9 +12559,21 @@ mod tests {
         );
         assert_eq!(
             under_measurement,
-            settings::Settings::default(),
+            settings::Settings {
+                // **The one thing a measured run does carry, and it comes from the gate rather than
+                // from the file.** The cursor blinks by default, so without this every batch would
+                // spend its first fifteen seconds waking the window 1.7 times a second — and the
+                // report's own rule would then mark every published run invalid.
+                blink: Some(false),
+                ..settings::Settings::default()
+            },
             "a measurement batch read the settings of whoever measures: their font size would change \
              the grid, and every published figure depends on the grid"
+        );
+        assert_eq!(
+            under_measurement.font_size, None,
+            "the measured run took a font size from the file, which is the whole of what this veto \
+             is for"
         );
 
         // **«It was looked at and there was none» is a THIRD state, and confusing it with «the
@@ -12710,7 +12752,11 @@ mod tests {
                     &Theme::default(),
                     &metrics,
                     &mut fonts::Discoverer::default(),
-                    true,
+                    painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        focused: true,
+                    },
                 );
                 expected[which] = metrics.cells_in(rect.size());
             }
@@ -12966,7 +13012,11 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                true,
+                painter::Blink {
+                    ceiling: Some(false),
+                    since_a_key: std::time::Duration::ZERO,
+                    focused: true,
+                },
             );
         })
         .drop_without_applying_deltas();
@@ -13102,6 +13152,12 @@ mod tests {
     fn the_window_wakes_up_to_warn_that_a_panel_is_ageing_and_not_if_there_is_none() {
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
+        // **The blink is switched off for this one, and it has to be said.** What is asked here is
+        // whether the PANEL wakes the window, and a focused console with a blinking cursor wakes it
+        // for a reason of its own — `egui::RawInput::default()` reports the window as focused, so a
+        // test window is always the blinking case. Left on, this test would answer «yes» for the
+        // wrong reason and go on doing so with the panel's alarm deleted.
+        window.blink.ceiling = Some(false);
         // With its directory and nothing published: it is the line the milestone promises —the file
         // that does not exist yet is not a notice— and here it also checks that nothing is
         // scheduled because of it.
@@ -13312,7 +13368,11 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                true,
+                painter::Blink {
+                    ceiling: Some(false),
+                    since_a_key: std::time::Duration::ZERO,
+                    focused: true,
+                },
             );
         })
         .drop_without_applying_deltas();
@@ -13364,7 +13424,11 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                true,
+                painter::Blink {
+                    ceiling: Some(false),
+                    since_a_key: std::time::Duration::ZERO,
+                    focused: true,
+                },
             );
             with_panel = pane.measured;
             without_discounting = metrics.cells_in(whole.size());
@@ -13404,7 +13468,11 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                true,
+                painter::Blink {
+                    ceiling: Some(false),
+                    since_a_key: std::time::Duration::ZERO,
+                    focused: true,
+                },
             );
             cut_along = pane
                 .tile_with_its_panel(whole, metrics.width(), SystemTime::now())
@@ -16764,6 +16832,23 @@ mod tests {
         area: egui::Rect,
         the_window_has_the_keyboard: bool,
     ) -> Vec<bool> {
+        maybe_cursors_of_the_two_consoles(window, ctx, area, the_window_has_the_keyboard)
+            .into_iter()
+            .map(|found| found.expect("a console queued no cursor at all"))
+            .collect()
+    }
+
+    /// The same, tolerating a console that queued **no** cursor at all.
+    ///
+    /// **The dark half of a blink is exactly that case**, and it is the one thing the helper above
+    /// cannot express: it treats a missing cursor as the test's own mistake, which it is everywhere
+    /// except here.
+    fn maybe_cursors_of_the_two_consoles(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        the_window_has_the_keyboard: bool,
+    ) -> Vec<Option<bool>> {
         let ink = A_CURSOR_OF_ITS_OWN;
         let input = egui::RawInput {
             screen_rect: Some(area),
@@ -16810,9 +16895,6 @@ mod tests {
             }
         }
         filled
-            .into_iter()
-            .map(|found| found.expect("a console queued no cursor at all"))
-            .collect()
     }
 
     /// The colour these tests put in the theme's cursor entry, **written out**.
@@ -16856,6 +16938,335 @@ mod tests {
                  typed into: the window shows typing happening where the keys do not go"
             );
         }
+    }
+
+    #[test]
+    fn only_the_console_with_the_keyboard_goes_dark_and_the_other_keeps_its_outline() {
+        // **The dark half is the console being typed into and nobody else.** Without the focus
+        // question in front of the phase, a window of four panes would blink in all four — three of
+        // them showing a live cursor where the keys do not go, which is the contradiction #209
+        // exists to prevent, restated 1.7 times a second.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        for with_the_focus in [0, 1] {
+            let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+            focus_on(window.active_mut(), with_the_focus);
+            // Six hundred milliseconds after the last keystroke: the first dark half.
+            window.blink.typed_at = Instant::now() - Duration::from_millis(600);
+            let ctx = egui::Context::default();
+
+            let found = maybe_cursors_of_the_two_consoles(&mut window, &ctx, area, true);
+            let expected: Vec<Option<bool>> = (0..2)
+                .map(|at| (at != with_the_focus).then_some(false))
+                .collect();
+            assert_eq!(
+                found, expected,
+                "with the focus on console {with_the_focus} and the blink dark, the console \
+                 without the keyboard did not keep its outline, or the focused one drew a cursor"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_without_the_desktops_focus_blinks_in_none_of_its_consoles() {
+        // **The blink follows the same rule the fill already follows** (**D36**): alt-tab away and
+        // the terminal stops being where you are typing, so nothing there may pretend otherwise.
+        // Read in the dark half on purpose — that is the half a wrong answer would show as a
+        // console with no cursor at all in a window nobody is looking at.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+        window.blink.typed_at = Instant::now() - Duration::from_millis(600);
+        let ctx = egui::Context::default();
+
+        assert_eq!(
+            maybe_cursors_of_the_two_consoles(&mut window, &ctx, area, false),
+            vec![Some(false), Some(false)],
+            "a window without the desktop's focus did not outline both of its cursors"
+        );
+        assert!(
+            !window.blink.painted,
+            "a window nobody is looking at armed the blink's deadline"
+        );
+    }
+
+    #[test]
+    fn the_console_that_loses_the_focus_mid_blink_is_back_to_its_outline_in_that_same_frame() {
+        // **The focus moves between two frames, and the ink has to move with it in the first of
+        // them.** Read in the **dark** half on purpose: that is where a stale answer is not a
+        // cosmetic lag but a console with **no cursor at all** — the pane you just clicked into
+        // shows nothing and the one you left keeps the mark, which reads as the keys going to the
+        // other console. One frame of it is 600 ms at this period, long enough to see.
+        //
+        // The break it catches is any version that remembers the previous frame's ink instead of
+        // computing it from the focus of this one — a `blinking` field kept on the pane, an ink
+        // cached beside `BlinkState::painted`. `only_the_console_with_the_keyboard_goes_dark_and_the_other_keeps_its_outline`
+        // cannot catch it: it never moves the focus once the window has painted.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+        window.blink.typed_at = Instant::now() - Duration::from_millis(600);
+        let ctx = egui::Context::default();
+
+        assert_eq!(
+            maybe_cursors_of_the_two_consoles(&mut window, &ctx, area, true),
+            vec![None, Some(false)],
+            "the left console was not the one in the dark half to begin with, so moving the focus \
+             below distinguishes nothing"
+        );
+
+        focus_on(window.active_mut(), 1);
+        assert_eq!(
+            maybe_cursors_of_the_two_consoles(&mut window, &ctx, area, true),
+            vec![Some(false), None],
+            "the console that lost the focus did not go back to its outline in the very frame the \
+             focus moved, or the one that took it did not start blinking there"
+        );
+        assert!(
+            window.blink.painted,
+            "the console that took the focus mid-blink did not arm the deadline, so the cursor \
+             goes dark once in its new home and never comes back"
+        );
+    }
+
+    #[test]
+    fn the_window_asks_for_a_frame_to_flip_the_cursor_and_stops_asking_after_fifteen_seconds() {
+        // **The half of this delivery that D13 judges**: a blink is a repaint every 600 ms, and the
+        // premise every published measurement rests on is that a window nobody touches comes to
+        // rest. It does, fifteen seconds after the last keystroke — and this test is the only thing
+        // that says so.
+        let ctx = egui::Context::default();
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+
+        // A few passes first: a freshly made context asks for an immediate frame of its own, and
+        // without letting it settle every delay below reads zero.
+        let mut blinking = Duration::ZERO;
+        for _ in 0..4 {
+            blinking = what_the_window_expects(&mut window, &ctx);
+        }
+        assert!(
+            blinking <= Duration::from_millis(600) && !blinking.is_zero(),
+            "a focused console with a blinking cursor asked for a repaint in {blinking:?}, which is \
+             not the flip it is waiting for"
+        );
+
+        // Fifteen seconds of silence, and the window is exactly as still as it was before this
+        // delivery. `Duration::MAX` is what this window publishes when it has nothing to wait for.
+        window.blink.typed_at = Instant::now() - Duration::from_secs(15);
+        assert_eq!(
+            what_the_window_expects(&mut window, &ctx),
+            Duration::MAX,
+            "the blink went on waking the window past its fifteen-second stop"
+        );
+    }
+
+    #[test]
+    fn a_window_nobody_can_see_stops_flipping_its_cursor() {
+        // **The half of the loop that runs alone.** `logic` is the only one that runs with the
+        // window minimized or covered, and the flag saying «a blinking cursor is on screen» is set
+        // by the painting, which does not run there — so it keeps the last painted frame's answer
+        // for as long as the window stays hidden. Without the focus question in front of it, the
+        // window rearms every 600 ms to flip a cursor nobody can see: **bounded by the
+        // fifteen-second stop, because the anchor is refreshed by that same half**, so about
+        // twenty-five needless frames per minimize rather than an unbounded spin. Which is still the
+        // kind of cost this whole delivery exists to bound (**D13**).
+        let ctx = egui::Context::default();
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+
+        // A painted frame first, so the flag really is set: without this the test would pass with
+        // the blink deleted.
+        let mut blinking = Duration::ZERO;
+        for _ in 0..4 {
+            blinking = what_the_window_expects(&mut window, &ctx);
+        }
+        assert!(
+            blinking <= Duration::from_millis(600) && !blinking.is_zero(),
+            "the window was not blinking to begin with, so what follows says nothing. A zero delay \
+             is some other cause asking for an immediate frame, not the blink"
+        );
+
+        let mut frame = eframe::Frame::_new_kittest();
+        let hidden = egui::RawInput {
+            focused: false,
+            ..Default::default()
+        };
+        for _ in 0..4 {
+            let _ = ctx.run_logic(&hidden, |ctx| {
+                eframe::App::logic(&mut window, ctx, &mut frame);
+            });
+        }
+        assert!(
+            !ctx.has_requested_repaint(),
+            "a window nobody is looking at goes on waking up to flip a cursor, causes: {:?}",
+            ctx.repaint_causes()
+        );
+    }
+
+    #[test]
+    fn a_console_whose_program_wants_a_steady_cursor_wakes_nobody() {
+        // **AC5, and it is what makes this PR safe to leave alone on `main`.** Nothing blinking arms
+        // nothing: a terminal running a program that asked for a steady cursor behaves exactly as it
+        // did before this delivery, down to the number of frames.
+        let ctx = egui::Context::default();
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+        window.blink.ceiling = Some(false);
+
+        let mut settled = Duration::ZERO;
+        for _ in 0..4 {
+            settled = what_the_window_expects(&mut window, &ctx);
+        }
+        assert_eq!(
+            settled,
+            Duration::MAX,
+            "with the blink switched off the window still asked for a frame"
+        );
+    }
+
+    #[test]
+    fn the_window_asks_the_program_and_not_only_the_settings_file() {
+        // **Mutated, and it stayed green**: replacing the program's own request with a hard-coded
+        // `true` on the window path left all 819 tests passing, because the only test that looked at
+        // a steady cursor did it through the settings ceiling. So the whole of «the program decides»
+        // was untied at the one place it is asked. Here nobody writes a settings line: the console's
+        // program sends a steady block, and that alone has to leave the window still.
+        let ctx = egui::Context::default();
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+        assert_eq!(
+            window.blink.ceiling, None,
+            "the ceiling would answer for the program"
+        );
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"\x1b[2 q");
+
+        let mut settled = Duration::ZERO;
+        for _ in 0..4 {
+            settled = what_the_window_expects(&mut window, &ctx);
+        }
+        assert_eq!(
+            settled,
+            Duration::MAX,
+            "the console's program asked for a steady cursor and the window went on blinking it"
+        );
+    }
+
+    #[test]
+    fn a_console_that_stops_blinking_stops_waking_the_window() {
+        // **Mutated, and it stayed green**: deleting the line that clears the «a blink was painted»
+        // flag left the suite passing, and the flag only ever goes up — so a console whose program
+        // asks for a steady cursor mid-session goes on waking the window until the fifteen seconds
+        // run out, every time. What pins it is two painting passes with the answer changing between
+        // them, which no single-frame test can see.
+        let ctx = egui::Context::default();
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+
+        let mut blinking = Duration::ZERO;
+        for _ in 0..4 {
+            blinking = what_the_window_expects(&mut window, &ctx);
+        }
+        assert!(
+            blinking <= Duration::from_millis(600) && !blinking.is_zero(),
+            "it was not blinking to begin with, so what follows says nothing"
+        );
+
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"\x1b[2 q");
+        let mut after = Duration::ZERO;
+        for _ in 0..4 {
+            after = what_the_window_expects(&mut window, &ctx);
+        }
+        assert_eq!(
+            after,
+            Duration::MAX,
+            "the console stopped blinking and the window went on waking up for it"
+        );
+    }
+
+    #[test]
+    fn the_settings_line_reaches_the_window_and_not_only_the_parser() {
+        // **Mutated, and it stayed green**: deleting the line that copies the parsed key onto the
+        // window left `cursor.blink` parsed, warned about, published in the manual — and connected
+        // to nothing. Nothing walked `apply_the_settings` for this field. The window here is asked
+        // through the same door the file comes in by.
+        let ctx = egui::Context::default();
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+        window.apply_the_settings(&settings::Settings {
+            blink: Some(false),
+            ..Default::default()
+        });
+
+        let mut settled = Duration::ZERO;
+        for _ in 0..4 {
+            settled = what_the_window_expects(&mut window, &ctx);
+        }
+        assert_eq!(
+            settled,
+            Duration::MAX,
+            "`cursor.blink = off` was parsed and never reached the window"
+        );
+    }
+
+    #[test]
+    fn the_report_counts_the_frames_a_blink_was_painted_in() {
+        // **Mutated, and it stayed green**: making the counter return a constant zero left the suite
+        // passing *and* `scripts/measure-frame.sh`'s guard satisfied for ever, which is the worst
+        // shape a guard can take — it would go on invalidating nothing while publishing a number
+        // nobody produced. Every measured run forces the ceiling off, so the number is zero by
+        // construction there and only a test with the blink on can say the counter counts.
+        let ctx = egui::Context::default();
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+
+        for _ in 0..3 {
+            let _ = what_the_window_expects(&mut window, &ctx);
+        }
+        let painted = window.blink.frames_painted();
+        assert_eq!(
+            painted, 3,
+            "three painting passes with a blinking cursor were counted as {painted}"
+        );
+
+        window.blink.ceiling = Some(false);
+        for _ in 0..3 {
+            let _ = what_the_window_expects(&mut window, &ctx);
+        }
+        assert_eq!(
+            window.blink.frames_painted(),
+            3,
+            "the counter went on counting with the blink switched off"
+        );
+    }
+
+    #[test]
+    fn typing_puts_the_cursor_back_on() {
+        // **The phase is anchored to a keystroke and not to the process's start**, so the cursor is
+        // lit the instant you type rather than at whatever point of the cycle you caught it. Typing
+        // continuously therefore never leaves it half-drawn, which is what every terminal does.
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+        window.blink.typed_at = Instant::now() - Duration::from_millis(600);
+
+        let input = egui::RawInput {
+            events: vec![egui::Event::Text("a".to_owned())],
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input, |ui| {
+            window.send_keys_to_the_focused(ui.ctx());
+        });
+        output.drop_without_applying_deltas();
+
+        assert!(
+            window.blink.now().since_a_key < Duration::from_millis(600),
+            "typing did not put the blink's phase back to the start: {:?}",
+            window.blink.now().since_a_key
+        );
     }
 
     #[test]
@@ -17912,6 +18323,12 @@ mod tests {
         // minute forever.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        // **The blink is switched off for this one, and it has to be said.** What is asked here is
+        // whether the PANEL wakes the window, and a focused console with a blinking cursor wakes it
+        // for a reason of its own — `egui::RawInput::default()` reports the window as focused, so a
+        // test window is always the blinking case. Left on, this test would answer «yes» for the
+        // wrong reason and go on doing so with the panel's alarm deleted.
+        window.blink.ceiling = Some(false);
         let area = area_of_cells(200.0);
         with_the_panel_in_place(
             &mut window,

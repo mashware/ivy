@@ -99,7 +99,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        1_367,
+        1_362,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -119,15 +119,20 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          lines in this file, so the deadlines the window sets itself left for `alarms.rs` on their \
          own — 16 lines out, one `mod` line back in — leaving **1 367, against the 3 119 this file \
          came in at**. Taking the piece out first is what lets the ratchet say whether the delivery that \
-         follows paid for its own lines",
+         follows paid for its own lines — **and it says the blink did not**: it spent 14 lines here, \
+         not nine, so a second piece went out in the same delivery. Putting the settings the file \
+         asks for onto the window left for `settings.rs`, 19 lines, the piece that delivery was \
+         already editing. Nineteen out and fourteen in against 1 367 leaves **1 362**, which is what \
+         the guard measures. (The first telling said fifteen in and did not reconcile; a comment \
+         audit did the subtraction.)",
     ),
     (
         "src/lib.rs::impl Window",
-        411,
-        "23 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
-         tab bar, the report, saving, painting a pane and the deadlines the window sets itself \
-         have all left it, each to a module that owns that vocabulary; what is left is opening, the frame's own \
-         walk and the shortcuts",
+        401,
+        "22 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
+         tab bar, the report, saving, painting a pane, the deadlines the window sets itself and \
+         applying what the settings file asks for have all left it, each to a module that owns that \
+         vocabulary; what is left is opening, the frame's own walk and the shortcuts",
     ),
     (
         "src/lib.rs::impl Pane",

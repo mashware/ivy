@@ -8,7 +8,7 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::Config;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::vte::ansi::Processor;
+use alacritty_terminal::vte::ansi::{CursorShape as AlacrittyShape, CursorStyle, Processor};
 
 use crate::Size;
 use crate::view::{self, CellWidth, Cursor, View, ViewCell};
@@ -196,6 +196,16 @@ impl Screen {
     pub fn new(size: Size) -> Self {
         let config = Config {
             scrolling_history: SCROLLBACK,
+            // **A terminal nobody has spoken to blinks**, which is what every other terminal on the
+            // machine does and what the engine's own default does not do. This is the only place the
+            // choice is made: `Term::cursor_style` falls back to this field, and `CSI 0 SP q` sets the
+            // style back to `None` and lands here again, so a program keeps both of its doors — a
+            // steady shape or DEC mode 12 to switch the blink off, `CSI 0 SP q` to hand it back.
+            // The reason and what was discarded: **D37**.
+            default_cursor_style: CursorStyle {
+                shape: AlacrittyShape::Block,
+                blinking: true,
+            },
             ..Config::default()
         };
 
@@ -203,6 +213,18 @@ impl Screen {
             term: Term::new(config, &Dims::from(size), VoidListener),
             parser: Processor::new(),
         }
+    }
+
+    /// Whether the program inside is asking for a blinking cursor.
+    ///
+    /// **Apart from [`view`](Screen::view) because it costs a call and the view costs a snapshot of
+    /// the whole grid.** Whoever paints needs this once per pane per frame to decide the ink, long
+    /// before there is any reason to build a view.
+    ///
+    /// **It says what the program wants, never what is on screen.** The bit is independent of
+    /// whether the cursor is shown at all, so a `true` here is not a promise that anything is drawn.
+    pub fn cursor_blinks(&self) -> bool {
+        self.term.cursor_style().blinking
     }
 
     /// Interprets a chunk of the terminal's output.
@@ -1002,6 +1024,146 @@ mod tests {
                 .expect("hidden is not the same as off-screen")
                 .shape,
             CursorShape::Hidden
+        );
+    }
+
+    /// Whether the cursor of a screen that has been sent `bytes` asks to blink.
+    ///
+    /// **It asks the same way the application does**, through [`Screen::cursor_blinks`]. An earlier
+    /// version read the bit off the view instead, on the reasoning that the view is the only thing
+    /// that leaves this crate — which is false, `cursor_blinks` is public and is exactly what the
+    /// painter calls. Two auditors found it independently: every one of these tests passed with
+    /// `cursor_blinks` hard-coded to `false`, because none of them went anywhere near it.
+    fn blinking_after(bytes: &[u8]) -> bool {
+        let mut screen = Screen::new(Size::default());
+        screen.advance(bytes);
+        screen.cursor_blinks()
+    }
+
+    #[test]
+    fn a_terminal_nobody_has_spoken_to_blinks() {
+        // The case a shell prompt is in, and the reason this is not the engine's own default: it
+        // ships `{ Block, false }`, so leaving it alone means a blink nobody ever sees. **D37**.
+        assert!(blinking_after(b""));
+        assert!(
+            blinking_after(b"hola"),
+            "and writing is not asking for anything"
+        );
+    }
+
+    #[test]
+    fn an_even_shape_is_steady_and_an_odd_one_blinks() {
+        // DECSCUSR: 1/3/5 blink, 2/4/6 do not. The three steady ones matter more than the three
+        // blinking ones here, because they are the only way a program can undo the new default.
+        assert!(!blinking_after(b"\x1b[2 q"), "steady block");
+        assert!(!blinking_after(b"\x1b[4 q"), "steady underline");
+        assert!(!blinking_after(b"\x1b[6 q"), "steady beam");
+
+        assert!(blinking_after(b"\x1b[1 q"), "blinking block");
+        assert!(blinking_after(b"\x1b[3 q"), "blinking underline");
+        assert!(blinking_after(b"\x1b[5 q"), "blinking beam");
+    }
+
+    #[test]
+    fn dec_mode_12_is_the_other_door() {
+        assert!(!blinking_after(b"\x1b[?12l"));
+        assert!(blinking_after(b"\x1b[?12h"));
+        assert!(
+            blinking_after(b"\x1b[2 q\x1b[?12h"),
+            "and it wins over a steady shape sent before it, being the later word"
+        );
+    }
+
+    #[test]
+    fn zero_hands_the_default_back() {
+        // `CSI 0 SP q` clears the style rather than setting one, so what comes back is whatever this
+        // crate configured. It is the sequence that makes the new default reversible in both
+        // directions, and the reason no rule of our own was written to implement it.
+        assert!(blinking_after(b"\x1b[2 q\x1b[0 q"));
+    }
+
+    #[test]
+    fn a_shape_picked_through_the_other_door_inherits_the_default() {
+        // **OSC 50 `CursorShape=` sets the shape and nothing else** (`vte-0.15.0/src/ansi.rs:1465`),
+        // reaching `set_cursor_shape` (`alacritty_terminal/src/term/mod.rs:2213`), which does
+        // `get_or_insert(default_cursor_style)` and then writes only the shape. So a program that picks
+        // its shape through that door and never speaks about blinking gets **this terminal's
+        // default**, which since **D37** is «blink» — before it was «steady».
+        //
+        // **Pinned as the decision it is.** It follows from the rule the whole delivery rests on —
+        // the terminal blinks unless the program says otherwise, and picking a shape says nothing
+        // about blinking — but it is reached by a path DECSCUSR does not use, and a reader who finds
+        // a blink they did not ask for deserves to find this test rather than guess.
+        assert!(
+            blinking_after(b"\x1b]50;CursorShape=1\x07"),
+            "beam through OSC 50"
+        );
+        assert!(
+            !blinking_after(b"\x1b[2 q\x1b]50;CursorShape=1\x07"),
+            "and a program that DID say steady first keeps it: the shape door does not undo the \
+             blink door"
+        );
+    }
+
+    #[test]
+    fn hiding_the_cursor_leaves_the_blink_asked_for() {
+        // **The trap the whole repaint design rests on.** The two bits are independent: a full-screen
+        // program sends `CSI ?25l` and keeps reporting that it wants a blink. Arming a repaint from
+        // this bit would wake the window to paint a cursor nobody draws, which is why the alarm reads
+        // what the painting drew instead. Pinned here so the day the engine couples them, it is a
+        // failing test and not a mystery in the frame's cost.
+        let mut screen = Screen::new(Size::default());
+        screen.advance(b"\x1b[?25l");
+        let cursor = screen.view().cursor().expect("hidden is not off-screen");
+
+        assert_eq!(cursor.shape, CursorShape::Hidden);
+        assert!(screen.cursor_blinks());
+    }
+
+    #[test]
+    fn the_alternate_screen_does_not_give_the_cursor_style_back() {
+        // **The blink crosses `CSI ?1049h` and back exactly as the shape does, and neither is
+        // restored on the way out.** Both live in the one `Term::cursor_style`, and `swap_alt`
+        // (`term/mod.rs:714`) swaps the grid, the keyboard modes and the selection — never the
+        // style — while what `?1049` saves and restores is the DEC cursor, which is position and
+        // attributes. So a full-screen editor that asks for a steady beam leaves the shell it came
+        // back to with a steady beam.
+        //
+        // **Pinned because it decides whether the window keeps waking up.** The alarm is armed from
+        // a blink, so if the engine ever started scoping the style to the screen it is on, a shell
+        // would silently get its blink back — or lose it — on every editor that exits, and the
+        // symptom would be a frame count nobody can explain rather than a failing test. That it
+        // matches xterm and kitty is why it is pinned rather than worked around.
+        let mut screen = Screen::new(Size::default());
+        screen.advance(b"\x1b[?1049h\x1b[6 q");
+        assert!(
+            !screen.cursor_blinks(),
+            "a program inside the alternate screen could not switch its blink off"
+        );
+
+        screen.advance(b"\x1b[?1049l");
+        assert!(
+            !screen.cursor_blinks(),
+            "leaving the alternate screen handed the blink back, so a shell starts blinking again \
+             behind an editor that asked for a steady cursor"
+        );
+        assert_eq!(
+            screen
+                .view()
+                .cursor()
+                .expect("the cursor is on the primary screen")
+                .shape,
+            CursorShape::Beam,
+            "the shape did not survive the swap either, so the two are not the one field"
+        );
+
+        // And the other direction, which is the one a shell is in: nothing was said before the
+        // swap, so the terminal's own default has to come back out of it untouched.
+        let mut untouched = Screen::new(Size::default());
+        untouched.advance(b"\x1b[?1049h\x1b[?1049l");
+        assert!(
+            untouched.cursor_blinks(),
+            "a trip through the alternate screen left the terminal's default behind"
         );
     }
 

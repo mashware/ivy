@@ -15,6 +15,7 @@ use crate::theme::Theme;
 use eframe::egui::{
     Align2, Color32, Context, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
+use std::time::Duration;
 use term_core::{CellWidth, CursorShape, Size, TermColor, View, ViewCell};
 
 /// The largest size accepted for a grid.
@@ -221,8 +222,8 @@ pub fn paint(
     metrics: &CellMetrics,
     origin: Pos2,
     discoverer: &mut crate::fonts::Discoverer,
-    focused: bool,
-) {
+    ink: CursorInk,
+) -> bool {
     let grid_size = view.size();
     // The default background is the same for the whole screen: asking for it once per cell would be
     // nearly two thousand queries per pass to always get the same thing.
@@ -342,7 +343,7 @@ pub fn paint(
         }
     }
 
-    paint_cursor(painter, view, theme, metrics, origin, discoverer, focused);
+    paint_cursor(painter, view, theme, metrics, origin, discoverer, ink)
 }
 
 /// The two colors of a cell, with the intensity already applied where it belongs.
@@ -533,6 +534,126 @@ fn paint_in_color(
     true
 }
 
+/// How long each half of a blink lasts.
+///
+/// **1.2 s for the whole cycle, which is the desktop's own number here**:
+/// `gsettings get org.gnome.desktop.interface cursor-blink-time` answers `1200`, described as the
+/// cycle, so a terminal on this machine is in step with every other window on it. WezTerm's 800 ms
+/// is the same order. Reading that setting at runtime is what **D37** refuses, and for reasons this
+/// repository can check rather than cite: this application links neither GTK nor gsettings, the
+/// alternative is spawning a process on the start-up path — the one cost **D26** lets only the
+/// font-by-name setting pay — and it is a Linux-only answer to a question **F2.7** is about to ask
+/// on two other platforms.
+const HALF_A_BLINK: Duration = Duration::from_millis(600);
+
+/// How long after the last keystroke the blink gives up, leaving the cursor **painted**.
+///
+/// **This is what keeps «the window is at rest» true**, which is the premise every published
+/// measurement batch rests on (**D13**). This is a terminal for hosting agents: its panes are left
+/// open for hours with an editor sitting in insert mode, which is exactly the state that asks for a
+/// blink. Without this, one such pane keeps the window repainting at 1.7 Hz for as long as the
+/// machine is on. kitty ships `cursor_stop_blinking_after 15.0` on by default, with the same
+/// reasoning; it is adopted rather than invented.
+const A_BLINK_STOPS_AFTER: Duration = Duration::from_secs(15);
+
+/// What the window knows about the blink when it hands a console over to be painted.
+///
+/// **It travels as one value and not as two arguments** because the two are one question — is this
+/// cursor lit right now — and because the window's core is under a ratchet with no room for the
+/// second argument (**D28**).
+#[derive(Clone, Copy)]
+pub struct Blink {
+    /// What the settings file settles over the program's head, `None` leaving it to the program.
+    pub ceiling: Option<bool>,
+    /// How long since a keystroke last reached a console.
+    ///
+    /// **The anchor is a keystroke and not the process's start**, so a cursor is lit the instant you
+    /// type instead of at whatever point of the cycle you caught it. Every terminal does this, and
+    /// it is why typing continuously never leaves the cursor half-drawn.
+    pub since_a_key: Duration,
+    /// Whether **this** console has the keyboard in a window that has the desktop's focus.
+    ///
+    /// **The only per-console piece, and it rides here rather than as an argument of its own**: a
+    /// console is painted through seven parameters already, and an eighth is where a reader stops
+    /// being able to tell which `bool` is which.
+    pub focused: bool,
+}
+
+impl Blink {
+    /// Whether the cursor is lit, and how long until it flips. `None` once the blink has stopped.
+    ///
+    /// **The deadline is clamped to the stop, and with today's constants that clamp never binds** —
+    /// `A_BLINK_STOPS_AFTER` is exactly twenty-five halves of `HALF_A_BLINK`, so the last flip lands
+    /// on the stop rather than past it. It is written as a constraint and not as a mechanism doing
+    /// something: it keeps this function correct for constants that do not divide, and the test
+    /// below that pins the two constants dividing evenly fails the day either one moves, which is
+    /// when the clamp starts mattering.
+    fn phase(self) -> Option<(bool, Duration)> {
+        // **Exactly fifteen seconds is already stopped**, not one last dark half: `checked_sub`
+        // answers `Some(0)` on the boundary, and a deadline of zero is a frame asked for right
+        // now, for ever.
+        let left = A_BLINK_STOPS_AFTER
+            .checked_sub(self.since_a_key)
+            .filter(|left| !left.is_zero())?;
+        let half = HALF_A_BLINK.as_millis();
+        let elapsed = self.since_a_key.as_millis();
+        let lit = (elapsed / half).is_multiple_of(2);
+        let until_it_flips = HALF_A_BLINK - Duration::from_millis((elapsed % half) as u64);
+        Some((lit, until_it_flips.min(left)))
+    }
+
+    /// The same blink, said of one console.
+    pub(crate) fn on(self, focused: bool) -> Self {
+        Self { focused, ..self }
+    }
+
+    /// The ink a console's cursor is drawn with this frame.
+    ///
+    /// `asked_for` is what the program wants; the ceiling overrules it in both directions, which is
+    /// what makes `cursor.blink` a ceiling instead of a default a program can climb over (**D37**).
+    pub(crate) fn ink(self, asked_for: bool) -> CursorInk {
+        if !self.focused {
+            return CursorInk::Outline;
+        }
+        match self.ceiling.unwrap_or(asked_for).then(|| self.phase()) {
+            Some(Some((lit, _))) => CursorInk::Blinking { lit },
+            // Not blinking at all, or blinking that has stopped: either way it is painted and
+            // nothing is due.
+            _ => CursorInk::Filled,
+        }
+    }
+
+    /// How long until the window has to wake up to flip a cursor, or nothing if none is blinking.
+    ///
+    /// **The caller decides whether anything is blinking, and it decides it from what the painting
+    /// drew.** Asking the engine instead would arm this for a cursor nobody can see: that bit is
+    /// independent of `SHOW_CURSOR`, so a full-screen program — every one of them sends `CSI ?25l` —
+    /// reports a blink it never shows, and the window would wake at 1.7 Hz to paint nothing.
+    pub(crate) fn until_it_flips(self) -> Option<Duration> {
+        self.phase().map(|(_, left)| left)
+    }
+}
+
+/// What a console's cursor is drawn as, this frame.
+///
+/// **«Is this cursor in a blink» is one variant and not a payload spread over two**, so the
+/// contradiction «solid, not blinking, and still owed a repaint» cannot be written down.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CursorInk {
+    /// Solid, and not blinking at all.
+    Filled,
+    /// In a blink, `lit` saying which half. **The dark half draws nothing and still owes a
+    /// repaint**, which is why it is this variant and not a fourth: answering «no blink here» while
+    /// the cursor is merely dark would disarm the deadline on every other flip and the blink would
+    /// stop after one. It is **reachable only through a blink** — a console paints no cursor for
+    /// three other reasons (no cursor in the view, a shape of `Hidden`, no cell where it stands) and
+    /// all three are decided before this is looked at.
+    Blinking { lit: bool },
+    /// The outline every console that does not have the keyboard draws, and every console at all
+    /// when the window has lost the desktop's focus (**D36**).
+    Outline,
+}
+
 fn paint_cursor(
     painter: &Painter,
     view: &View,
@@ -540,8 +661,8 @@ fn paint_cursor(
     metrics: &CellMetrics,
     origin: Pos2,
     discoverer: &mut crate::fonts::Discoverer,
-    focused: bool,
-) {
+    ink: CursorInk,
+) -> bool {
     // **With no cursor, no cursor is painted**, and since there is history that case really happens:
     // scrolling up far enough, the cursor stays in the active area, below what is being looked at. The
     // snapshot says so instead of clamping it, which is what this spot announced since F1.3.
@@ -550,13 +671,13 @@ fn paint_cursor(
     // clamped, so it was always inside the grid and `cell` never returned anything. A phantom cursor
     // would have been painted in the last row.
     let Some(cursor) = view.cursor() else {
-        return;
+        return false;
     };
     if cursor.shape == CursorShape::Hidden {
-        return;
+        return false;
     }
     let Some(under_cursor) = view.cell(cursor.row, cursor.col) else {
-        return;
+        return false;
     };
     let mut slot = metrics.cell(origin, cursor.row, cursor.col);
     // Over a wide character, the cursor covers **the two columns** that character occupies. Covering
@@ -565,15 +686,20 @@ fn paint_cursor(
         slot.max.x += metrics.width;
     }
     let color = theme.color(TermColor::Cursor);
-    // Why this cursor does not blink is **D36**, along with what an unfocused console paints and the
-    // alternatives that were discarded.
-    if !focused {
+    // What an unfocused console paints and the alternatives discarded for it are **D36**; that this
+    // one can blink at all, and on whose word, is **D37**.
+    match ink {
         // The outline is asked for **before** the shape is looked at, so a console that is not being
         // typed into paints the same mark whatever its program asked for. Kitty defaults its
         // `cursor_shape_unfocused` to `hollow` and WezTerm applies only the block outline to
         // inactive panes: this follows them rather than deciding it again.
-        painter.rect_stroke(slot, 0.0, Stroke::new(1.0, color), StrokeKind::Inside);
-        return;
+        CursorInk::Outline => {
+            painter.rect_stroke(slot, 0.0, Stroke::new(1.0, color), StrokeKind::Inside);
+            return false;
+        }
+        // The dark half: nothing is drawn, and the answer is still «this console is blinking».
+        CursorInk::Blinking { lit: false } => return true,
+        CursorInk::Filled | CursorInk::Blinking { lit: true } => {}
     }
     match cursor.shape {
         CursorShape::Block => {
@@ -621,6 +747,7 @@ fn paint_cursor(
         }
         CursorShape::Hidden => {}
     }
+    matches!(ink, CursorInk::Blinking { .. })
 }
 
 /// Paints a console whole: its grid, and over it whatever the **application** has to say.
@@ -637,18 +764,19 @@ pub(crate) fn paint_a_console(
     metrics: &CellMetrics,
     area: Rect,
     discoverer: &mut crate::fonts::Discoverer,
-    focused: bool,
-) {
-    paint(
+    ink: CursorInk,
+) -> bool {
+    let blinking = paint(
         painter,
         &console.screen.view(),
         theme,
         metrics,
         area.left_top(),
         discoverer,
-        focused,
+        ink,
     );
     paint_the_question_over_it(painter, console, theme, metrics, area);
+    blinking
 }
 
 /// Paints a console clipped to its rectangle, and returns what queueing the painting cost.
@@ -665,7 +793,7 @@ pub(crate) fn paint_pane(
     theme: &Theme,
     metrics: &CellMetrics,
     discoverer: &mut crate::fonts::Discoverer,
-    focused: bool,
+    blink: Blink,
 ) -> crate::PaneOutcome {
     // **The panel is timed apart from the console's queueing, with two clocks that are added
     // together: one around reading and tiling, and another around painting it.** They are two
@@ -716,14 +844,17 @@ pub(crate) fn paint_pane(
     pane.measured = metrics.cells_in(panel_split.console.size());
 
     let before = std::time::Instant::now();
-    paint_a_console(
+    // **The engine's bit is asked for here and not in the window's walk**, because reading it costs
+    // one call and reading it through a `View` would cost a snapshot of the whole grid. It says what
+    // the program wants, never what gets drawn: `paint_cursor` answers that.
+    let blinking = paint_a_console(
         &ui.painter_at(panel_split.console),
         pane,
         theme,
         metrics,
         panel_split.console,
         discoverer,
-        focused,
+        blink.ink(pane.screen.cursor_blinks()),
     );
     // **Rasterizing a color glyph runs INSIDE the painting, so it is subtracted from the
     // painting.** It is the only expensive thing this project does in there: looking up and
@@ -775,6 +906,7 @@ pub(crate) fn paint_pane(
         panel_divider,
         width_changed,
         color,
+        blinking,
     }
 }
 
@@ -1100,7 +1232,7 @@ mod tests {
                 cell,
                 Pos2::ZERO,
                 &mut discoverer,
-                true,
+                CursorInk::Filled,
             );
         });
         let meshes = ctx.tessellate(output.shapes.clone(), 1.0);
@@ -1295,7 +1427,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 discoverer,
-                true,
+                CursorInk::Filled,
             );
         });
         let (mut images, mut texts) = (0, 0);
@@ -1349,7 +1481,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut discoverer,
-                true,
+                CursorInk::Filled,
             );
         });
         let (mut rectangles, mut texts) = (Vec::new(), 0);
@@ -1488,7 +1620,7 @@ mod tests {
                     &metrics(10.0, 20.0),
                     Pos2::ZERO,
                     &mut discoverer,
-                    true,
+                    CursorInk::Filled,
                 );
             })
             .drop_without_applying_deltas();
@@ -1712,7 +1844,7 @@ mod tests {
                 &metrics,
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
-                true,
+                CursorInk::Filled,
             );
         });
         let mut drawing = None;
@@ -1789,7 +1921,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
-                true,
+                CursorInk::Filled,
             );
         });
         let shapes = output.shapes.len();
@@ -1867,8 +1999,20 @@ mod tests {
     /// unfocused console that draws no cursor at all: disguise 3, a shape in the queue that nobody
     /// can see.
     fn cursor_rectangles(view: &View, focused: bool) -> Vec<(bool, Rect, f32)> {
+        cursor_rectangles_in(
+            view,
+            if focused {
+                CursorInk::Filled
+            } else {
+                CursorInk::Outline
+            },
+        )
+    }
+
+    /// The same, said in the ink itself, for what only the blink can reach.
+    fn cursor_rectangles_in(view: &View, ink: CursorInk) -> Vec<(bool, Rect, f32)> {
         let theme = theme_whose_cursor_is_its_own();
-        let ink = A_CURSOR_OF_ITS_OWN;
+        let colour = A_CURSOR_OF_ITS_OWN;
         let ctx = Context::default();
         let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
@@ -1882,15 +2026,15 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
-                focused,
+                ink,
             );
         });
         let mut found = Vec::new();
         for shape in &output.shapes {
             if let eframe::egui::Shape::Rect(rect) = &shape.shape {
-                if rect.fill == ink {
+                if rect.fill == colour {
                     found.push((true, rect.rect, rect.stroke.width));
-                } else if rect.stroke.color == ink {
+                } else if rect.stroke.color == colour {
                     found.push((false, rect.rect, rect.stroke.width));
                 }
             }
@@ -2014,6 +2158,252 @@ mod tests {
         );
     }
 
+    /// A blink whose phase is `since` after the last keystroke, with the program left to decide.
+    fn blink_at(millis: u64) -> Blink {
+        Blink {
+            ceiling: None,
+            since_a_key: Duration::from_millis(millis),
+            focused: true,
+        }
+    }
+
+    #[test]
+    fn the_cursor_is_lit_for_six_hundred_milliseconds_and_dark_for_the_next_six_hundred() {
+        // **The boundaries and not the middles**, because a period read from the wrong constant —
+        // 500, 1 200 — gives the same answer in the middle of a half and a different one here.
+        for (millis, lit) in [
+            (0, true),
+            (599, true),
+            (600, false),
+            (1_199, false),
+            (1_200, true),
+            (1_800, false),
+        ] {
+            let (is_lit, _) = blink_at(millis)
+                .phase()
+                .expect("the blink has not stopped yet");
+            assert_eq!(is_lit, lit, "at {millis} ms after the keystroke");
+        }
+    }
+
+    #[test]
+    fn the_deadline_is_what_is_left_of_this_half_and_never_more() {
+        // Arming for a whole half from the middle of one paints the flip late by as much as it is
+        // into it, which is a cursor that stutters instead of blinking.
+        assert_eq!(
+            blink_at(0).phase().map(|(_, left)| left),
+            Some(Duration::from_millis(600))
+        );
+        assert_eq!(
+            blink_at(100).phase().map(|(_, left)| left),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(
+            blink_at(700).phase().map(|(_, left)| left),
+            Some(Duration::from_millis(500))
+        );
+    }
+
+    #[test]
+    fn the_blink_stops_after_fifteen_seconds_of_silence_and_stops_lit() {
+        // **The edge is «stop blinking», never «stop being visible».** A stop that landed in the
+        // dark half would leave the console you are looking at with no cursor at all until you
+        // typed, which is the worst possible way to end a blink.
+        assert_eq!(
+            blink_at(15_000).phase(),
+            None,
+            "the blink went on past its stop"
+        );
+        assert_eq!(blink_at(60_000).phase(), None);
+        assert_eq!(
+            blink_at(15_000).on(true).ink(true),
+            CursorInk::Filled,
+            "a stopped blink has to leave the cursor painted, and asking for no more frames"
+        );
+
+        // And the last deadline before the stop is the stop itself, so the frame that repaints it
+        // lit is asked for and not missed.
+        assert_eq!(
+            blink_at(14_900).phase().map(|(_, left)| left),
+            Some(Duration::from_millis(100))
+        );
+    }
+
+    #[test]
+    fn the_stop_is_a_whole_number_of_halves_and_that_is_why_the_clamp_is_inert() {
+        // **This is the test the clamp deserved, and the one it did not have.** A reviewer showed
+        // that `.min(left)` in `phase` can never bind — 15 000 is exactly 25 halves of 600, so the
+        // last flip lands *on* the stop — and that the assertion above stays green with the clamp
+        // deleted. So the clamp is not covered by testing a deadline; what is worth pinning is the
+        // relationship that makes it inert. The day somebody moves either constant this fails, and
+        // it says where to look. The comment that used to defend the clamp claimed the flip at
+        // 14.9 s «would fall at 15.3»; it falls at 15.0, which is the arithmetic the whole guard
+        // hangs on.
+        assert_eq!(
+            A_BLINK_STOPS_AFTER.as_millis() % HALF_A_BLINK.as_millis(),
+            0,
+            "the stop no longer falls on a flip: `Blink::phase`'s clamp to it now decides something, \
+             and the last half of every blink is cut short"
+        );
+    }
+
+    #[test]
+    fn the_settings_file_overrules_the_program_in_both_directions() {
+        // The whole of what makes `cursor.blink` a ceiling rather than a default: a program that
+        // asks loudly is silenced, and one that asks for a steady cursor is overruled.
+        let dark = Duration::from_millis(600);
+        let lit = Duration::ZERO;
+
+        let forced_off = Blink {
+            ceiling: Some(false),
+            since_a_key: dark,
+            focused: true,
+        };
+        assert_eq!(forced_off.on(true).ink(true), CursorInk::Filled);
+
+        let forced_on = Blink {
+            ceiling: Some(true),
+            since_a_key: dark,
+            focused: true,
+        };
+        assert_eq!(
+            forced_on.on(true).ink(false),
+            CursorInk::Blinking { lit: false }
+        );
+
+        let program_decides = Blink {
+            ceiling: None,
+            since_a_key: dark,
+            focused: true,
+        };
+        assert_eq!(
+            program_decides.on(true).ink(true),
+            CursorInk::Blinking { lit: false }
+        );
+        assert_eq!(program_decides.on(true).ink(false), CursorInk::Filled);
+        assert_eq!(
+            Blink {
+                ceiling: None,
+                since_a_key: lit,
+                focused: true,
+            }
+            .on(true)
+            .ink(true),
+            CursorInk::Blinking { lit: true }
+        );
+    }
+
+    #[test]
+    fn a_console_without_the_keyboard_never_reaches_the_dark_half() {
+        // The dark half is reachable only through a blink **of the console being typed into**.
+        // Without this, a window with four panes would go dark in three of them every 600 ms.
+        for asked_for in [true, false] {
+            for millis in [0, 600, 1_200] {
+                assert_eq!(
+                    blink_at(millis).on(false).ink(asked_for),
+                    CursorInk::Outline,
+                    "an unfocused console at {millis} ms asking {asked_for}"
+                );
+            }
+        }
+    }
+
+    /// What `paint_cursor` **answered**, which is what the repaint deadline is armed from.
+    ///
+    /// **Its own value, and not the shapes it queued.** A test that only counts rectangles is
+    /// satisfied by a dark half that answers «no blink here», and that break — measured — left all
+    /// 819 tests green while shipping a cursor that goes dark once and never comes back.
+    fn what_paint_cursor_answered(view: &View, ink: CursorInk) -> bool {
+        let ctx = Context::default();
+        let mut answer = false;
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("only the cursor"),
+            ));
+            answer = paint_cursor(
+                &painter,
+                view,
+                &Theme::default(),
+                &metrics(10.0, 20.0),
+                Pos2::ZERO,
+                &mut crate::fonts::Discoverer::default(),
+                ink,
+            );
+        });
+        output.drop_without_applying_deltas();
+        answer
+    }
+
+    #[test]
+    fn both_halves_of_a_blink_answer_that_the_window_has_to_wake_up() {
+        // **The dark half draws nothing and still says «I am blinking».** Answering `false` there
+        // would disarm the deadline on every other flip, and the cursor would go dark once and stay
+        // that way until somebody typed — which is a suite-green way of shipping no blink at all.
+        // **Mutated, and the first version of this test did not catch it**: it called `paint_cursor`
+        // for its answer and asserted only how many rectangles came out.
+        let screen = a_screen_asking_for("\x1b[5 q");
+        let view = screen.view();
+
+        let lit = cursor_rectangles_in(&view, CursorInk::Blinking { lit: true });
+        assert_eq!(lit.len(), 1, "the lit half drew no cursor");
+        assert!(
+            cursor_rectangles_in(&view, CursorInk::Blinking { lit: false }).is_empty(),
+            "the dark half drew a cursor"
+        );
+
+        assert!(
+            what_paint_cursor_answered(&view, CursorInk::Blinking { lit: false }),
+            "the dark half answered that nothing is blinking, so the deadline is disarmed and the \
+             cursor never comes back"
+        );
+        assert!(what_paint_cursor_answered(
+            &view,
+            CursorInk::Blinking { lit: true }
+        ));
+        assert!(
+            !what_paint_cursor_answered(&view, CursorInk::Filled),
+            "a cursor that does not blink asked the window to wake up"
+        );
+        assert!(!what_paint_cursor_answered(&view, CursorInk::Outline));
+    }
+
+    #[test]
+    fn a_cursor_nobody_can_see_wakes_nobody_however_loudly_its_program_asks() {
+        // **The trap the deadline is built to avoid.** Every full-screen program sends `CSI ?25l`,
+        // and the blink bit survives it: with `cursor.blink = on` forcing the ceiling, arming from
+        // the request would wake the window at 1.7 Hz to paint nothing at all. The three guards run
+        // first, and the answer they give is what the alarm reads.
+        let mut screen = Screen::new(Size { rows: 2, cols: 8 });
+        screen.advance(b"ab\x1b[5 q\x1b[?25l");
+        assert!(
+            screen.cursor_blinks(),
+            "the test did not manage to leave a program asking for a blink it cannot show"
+        );
+
+        let ctx = Context::default();
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("only the cursor"),
+            ));
+            let woke = paint_cursor(
+                &painter,
+                &screen.view(),
+                &Theme::default(),
+                &metrics(10.0, 20.0),
+                Pos2::ZERO,
+                &mut crate::fonts::Discoverer::default(),
+                CursorInk::Blinking { lit: false },
+            );
+            assert!(
+                !woke,
+                "a hidden cursor asked the window to wake up for its blink"
+            );
+        });
+        output.drop_without_applying_deltas();
+    }
+
     #[test]
     fn a_cursor_scrolled_out_of_the_view_is_not_drawn_by_a_console_without_the_keyboard_either() {
         // The sibling of `with_the_history_scrolled_up_no_cursor_is_painted`, for the branch that
@@ -2031,6 +2421,132 @@ mod tests {
         assert!(
             cursor_rectangles(&screen.view(), false).is_empty(),
             "a phantom cursor was outlined in the last row of a console nobody is typing into"
+        );
+    }
+
+    #[test]
+    fn a_blinking_console_scrolled_up_through_its_history_paints_nothing_and_wakes_nobody() {
+        // **A focused console that paints no cursor is not proof of the dark half of a blink**, and
+        // this is one of the three ways the converse fails. Scrolling up leaves the cursor in the
+        // active area, below what is being looked at, so the view carries no cursor at all — and
+        // the half that would go unnoticed is the **answer**, not the drawing. Arm the deadline
+        // here and the window wakes 1.7 times a second, for ever, to flip a mark that is never
+        // drawn: exactly the cost this whole deadline exists to bound, and invisible on screen.
+        let mut screen = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..40 {
+            screen.advance(format!("line {n}\r\n").as_bytes());
+        }
+        screen.scroll_by(term_core::Scroll::ToTop);
+        assert!(
+            screen.view().cursor().is_none(),
+            "the test did not manage to scroll the cursor out of the view"
+        );
+        assert!(
+            screen.cursor_blinks(),
+            "the program is not even asking for a blink, so what follows distinguishes nothing"
+        );
+
+        for lit in [true, false] {
+            assert!(
+                cursor_rectangles_in(&screen.view(), CursorInk::Blinking { lit }).is_empty(),
+                "a console whose cursor is scrolled out of the view drew one in the lit={lit} half"
+            );
+            assert!(
+                !what_paint_cursor_answered(&screen.view(), CursorInk::Blinking { lit }),
+                "a console with no cursor in its view asked the window to go on waking up, in the \
+                 lit={lit} half, for a blink nobody can see"
+            );
+        }
+    }
+
+    #[test]
+    fn a_blinking_console_whose_program_hid_its_cursor_draws_nothing_in_the_lit_half_either() {
+        // **The second way a focused console paints no cursor without being in a blink's dark
+        // half**, and the half `a_cursor_nobody_can_see_wakes_nobody_however_loudly_its_program_asks`
+        // cannot reach: that one reads the dark half, where drawing nothing is also what a blink
+        // does, so a `Hidden` guard deleted outright leaves it green. Here the ink says «lit», so
+        // any rectangle queued is a cursor the program switched off with `CSI ?25l` coming back to
+        // life every 600 ms — a cursor that flashes in a full-screen editor that asked for none.
+        let mut screen = Screen::new(Size { rows: 2, cols: 8 });
+        screen.advance(b"ab\x1b[5 q\x1b[?25l");
+        assert!(
+            screen.cursor_blinks(),
+            "the test did not manage to leave a program asking for a blink it cannot show"
+        );
+
+        assert!(
+            cursor_rectangles_in(&screen.view(), CursorInk::Blinking { lit: true }).is_empty(),
+            "the lit half of a blink drew a cursor the program had hidden"
+        );
+        assert!(
+            !what_paint_cursor_answered(&screen.view(), CursorInk::Blinking { lit: true }),
+            "the lit half of a hidden cursor asked the window to wake up for its blink"
+        );
+    }
+
+    #[test]
+    fn a_reported_cursor_always_stands_on_a_cell_and_that_is_why_the_third_guard_is_inert() {
+        // **The third of the three guards cannot be reached, and this is the test it deserves.**
+        // The design names «no cell where it stands» beside the other two as a way a focused
+        // console paints no cursor without being in a blink's dark half — but no `Screen` can
+        // produce it: the row is range-checked and the column clamped where the view is built
+        // (`screen.rs`), a grid of no columns is refused by the engine itself
+        // (`grid/row.rs:38`, `assert!(columns >= 1)`), and `View::new` is `pub(crate)` to
+        // `term-core`, so nothing here can fabricate one either. So there is no scenario to write,
+        // and the same reasoning that gave `the_stop_is_a_whole_number_of_halves_and_that_is_why_the_clamp_is_inert`
+        // its test applies: what is worth pinning is the **relationship that keeps the guard
+        // inert** — «whenever the view reports a cursor at all, there is a cell where it stands».
+        //
+        // **The scrolled-up state is the one that carries the mutation**, and it is the reason it
+        // is in this list even though it reports no cursor: `screen.rs` answers `None` there
+        // instead of clamping the row, and turning that `None` into a clamp — the obvious
+        // simplification, and the shape this crate had before F1.3 — puts a cursor outside the grid
+        // and this test goes red on it. The other three are the states around it, so that a change
+        // to the column's clamp is caught by the same assertion rather than by nothing.
+        let mut scrolled = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..40 {
+            scrolled.advance(format!("line {n}\r\n").as_bytes());
+        }
+        scrolled.scroll_by(term_core::Scroll::ToTop);
+        let mut states: Vec<(&str, Screen)> = vec![("the history scrolled to the top", scrolled)];
+
+        let mut at_the_edge = Screen::new(Size { rows: 4, cols: 20 });
+        at_the_edge.advance(b"\x1b[999G");
+        states.push(("the cursor driven past the last column", at_the_edge));
+
+        let mut narrowed = Screen::new(Size { rows: 4, cols: 20 });
+        narrowed.advance(b"\x1b[999G");
+        narrowed.resize(Size { rows: 4, cols: 3 });
+        states.push(("narrowed under a cursor that was to the right", narrowed));
+
+        let mut shortened = Screen::new(Size { rows: 4, cols: 20 });
+        shortened.advance(b"\x1b[4;1H");
+        shortened.resize(Size { rows: 1, cols: 20 });
+        states.push((
+            "shortened under a cursor that was in the last row",
+            shortened,
+        ));
+
+        let mut reported = 0;
+        for (what, screen) in states {
+            let view = screen.view();
+            let Some(cursor) = view.cursor() else {
+                continue;
+            };
+            reported += 1;
+            assert!(
+                view.cell(cursor.row, cursor.col).is_some(),
+                "with {what} the view reports a cursor at ({}, {}) and no cell there: the third \
+                 guard of `paint_cursor` now decides something",
+                cursor.row,
+                cursor.col
+            );
+        }
+        // Without this the whole test is satisfied by four states that report no cursor at all,
+        // which is the vacuous pass every helper in this file is shaped to avoid.
+        assert_eq!(
+            reported, 3,
+            "three of the four states have to report a cursor and the scrolled-up one must not"
         );
     }
 
@@ -2052,7 +2568,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
-                true,
+                CursorInk::Filled,
             );
         });
         let mut order = Vec::new();

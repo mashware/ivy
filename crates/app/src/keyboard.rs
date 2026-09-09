@@ -14,6 +14,21 @@
 use eframe::egui::{Context, Event, Key, Modifiers};
 use std::borrow::Cow;
 
+/// Whether somebody typed in this frame's input.
+///
+/// **A press and a paste, not a release and not a modifier on its own.** What this answers is «is
+/// there a hand on the keyboard right now», which is what puts a blinking cursor's phase back to the
+/// start: releasing a key is the same keystroke ending, and holding Shift while reading is not
+/// typing at all.
+pub fn somebody_typed(input: &eframe::egui::InputState) -> bool {
+    input.events.iter().any(|event| {
+        matches!(
+            event,
+            Event::Key { pressed: true, .. } | Event::Text(_) | Event::Paste(_)
+        )
+    })
+}
+
 /// The bytes that correspond to an event, or nothing if that event does not translate.
 pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
     match event {
@@ -602,6 +617,46 @@ fn with_ctrl(key: Key) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
+    /// One event, asked the way the frame asks it.
+    fn typed(event: Event) -> bool {
+        let mut input = eframe::egui::InputState::default();
+        input.events = vec![event];
+        somebody_typed(&input)
+    }
+
+    #[test]
+    fn a_press_and_a_paste_are_typing_and_a_release_is_not() {
+        // **Mutated, and the only test that reached this seeded a `Text` event alone**, so accepting
+        // key releases and dropping pastes both stayed green. A release is the same keystroke
+        // ending — counting it would restart the blink's phase twice per key — and a paste is a hand
+        // on the keyboard by any reading, so leaving it out would let a pasted command land on a
+        // cursor caught mid-blink.
+        assert!(typed(Event::Text("a".to_owned())));
+        assert!(typed(Event::Paste("a command".to_owned())));
+        assert!(typed(Event::Key {
+            key: Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }));
+
+        assert!(
+            !typed(Event::Key {
+                key: Key::A,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }),
+            "letting go of a key counted as typing, so every keystroke restarts the phase twice"
+        );
+        assert!(
+            !typed(Event::PointerGone),
+            "something that is not the keyboard at all counted as typing"
+        );
+    }
+
     use super::*;
 
     fn chord_of(key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {

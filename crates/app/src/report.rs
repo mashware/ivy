@@ -81,6 +81,10 @@ impl Window {
                 chosen_font: self.chosen_font.clone(),
                 tab_bar: self.tab_bar_cost,
                 reflow: self.reflow,
+                blink: measure::Blinking {
+                    frames: self.blink.frames_painted(),
+                    ceiling: self.blink.ceiling,
+                },
             },
         )?;
 

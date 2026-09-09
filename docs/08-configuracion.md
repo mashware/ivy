@@ -30,12 +30,13 @@ It is the same thing Kitty and Ghostty do.
 | `color.0` … `color.15` | the sixteen colours a program can ask for. 0 to 7 the normal ones, 8 to 15 the bright ones |
 | `background` | the console's background |
 | `foreground` | the colour it writes with when the program does not ask for another |
-| `cursor` | the cursor — both the filled one of the console being typed into and the outline every other console draws |
+| `cursor` | the cursor's **colour** — both the filled one of the console being typed into and the outline every other console draws |
 | `divider` | the line that separates two consoles |
 | `focus` | what marks out the console that has the keyboard |
 | `panel` | the status panel's background |
 | `size` | the font size, in points |
 | `font` | the font family it paints with, by its name |
+| `cursor.blink` | whether the cursor blinks: `on` always, `off` never. Leave the line out and the program inside decides, over a default of «yes» |
 
 Colours are written **`#rrggbb`**, in hexadecimal, and it makes no difference whether in upper or
 lower case.
@@ -46,6 +47,29 @@ hundred three columns fit.
 
 Changing the size **changes how many rows and columns** fit in your window, so the programs running
 inside notice.
+
+### The blink, if you want it settled
+
+```
+cursor.blink = off
+```
+
+**The cursor blinks on its own**, in the console you are typing into and while the window has your
+desktop's focus, and it **stops on its own** fifteen seconds after your last keystroke, staying
+visible. Every other console keeps the still outline it always draws.
+
+**The program inside can change that**, and most of them do: an editor that wants a still cursor asks
+for one and gets it. That is the normal arrangement and you do not have to write anything for it.
+
+This line is for settling the argument. **`off` never blinks and `on` always blinks**, whatever the
+program asks for — leave the line out and the program decides. It is not a default, it is a ceiling:
+a program cannot climb over it in either direction.
+
+**One thing worth knowing before you need it**: what a program asks for **outlives it**. Leave a
+full-screen editor that wanted a still cursor and the shell you come back to has a still cursor too,
+until something asks otherwise — `reset` puts it back, and so does anything that restores the
+terminal's defaults. That is what every other terminal does too, and `cursor.blink = on` is the line
+that makes the question go away for good.
 
 ### The font, by its name
 
@@ -191,5 +215,7 @@ file goes on being applied.
 
 ## What still cannot be configured
 
-The font comes in the next delivery of this same milestone. Reloading the file without closing the
-terminal is left for later, and the reason is written down.
+**How fast the cursor blinks** — it is 600 milliseconds lit and 600 dark, in step with what this
+desktop uses for every other window, and nobody has asked for another number. **What shape the cursor
+is** either: that belongs to the program inside, which is the arrangement every terminal has.
+Reloading the file without closing the terminal is left for later, and the reason is written down.
