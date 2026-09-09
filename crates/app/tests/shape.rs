@@ -43,6 +43,7 @@
 /// guard with no file to look at reads exactly like a clean one.
 const MODULES: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("../src/lib.rs")),
+    ("src/alarms.rs", include_str!("../src/alarms.rs")),
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     ("src/measure.rs", include_str!("../src/measure.rs")),
@@ -98,7 +99,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        1_382,
+        1_367,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -113,14 +114,20 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          second time**: the one that tells the focused console's cursor apart needed ten lines \
          here, so painting a pane left for `painter.rs` — 62 lines, and the piece that delivery \
          was already editing, which is exactly the way through D28 records. Sixty-two out and ten \
-         back in leaves **1 382 — against the 3 119 this file came in at**",
+         back in leaves 1 382. **And then the piece went out BEFORE the delivery that needs the \
+         room, which is the first time that happened here**: the blinking cursor needs about nine \
+         lines in this file, so the deadlines the window sets itself left for `alarms.rs` on their \
+         own — 16 lines out, one `mod` line back in — leaving **1 367, against the 3 119 this file \
+         came in at**. Taking the piece out first is what lets the ratchet say whether the delivery that \
+         follows paid for its own lines",
     ),
     (
         "src/lib.rs::impl Window",
-        427,
-        "24 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
-         tab bar, the report, saving and painting a pane have all left it, each to a module that \
-         owns that vocabulary; what is left is opening, the frame's own walk and the shortcuts",
+        411,
+        "23 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
+         tab bar, the report, saving, painting a pane and the deadlines the window sets itself \
+         have all left it, each to a module that owns that vocabulary; what is left is opening, the frame's own \
+         walk and the shortcuts",
     ),
     (
         "src/lib.rs::impl Pane",
@@ -203,19 +210,24 @@ fn ceiling_for(name: &str) -> Option<usize> {
 fn no_module_is_over_its_ceiling() {
     // **A floor first, because this whole file passes by looking at nothing otherwise.** It is how
     // the guards of this suite die: somebody reshapes the walk, it finds no lines, every module
-    // looks tiny and nothing says so. Measured today: 6 642 production lines over nineteen modules,
-    // the thinnest being `src/main.rs` with three.
+    // looks tiny and nothing says so. Measured today: **twenty-one modules**, the thinnest being
+    // `src/main.rs` with three.
     //
     // **Splitting a module does not raise the total and that is the point** — it moves lines from
     // one entry to two — so a floor over the sum survives every delivery of D28's order. What has to
     // be raised with each split is the module *count*, and a split that forgets to add its new files
     // to `MODULES` fails right here instead of quietly exempting them.
+    //
+    // **And that last sentence was false for two deliveries**, because the count sat at nineteen
+    // while the list held twenty-one: two modules could have been dropped with the suite green, which
+    // is the same slack this file's own ratchet prose warns about. It is tight now, and it stays
+    // tight only if the number is raised in the commit that adds the entry.
     let total: usize = MODULES
         .iter()
         .map(|(_, src)| production_lines(src).len())
         .sum();
     assert!(
-        MODULES.len() >= 19 && total >= 6_000,
+        MODULES.len() >= 21 && total >= 6_000,
         "the walk found {total} production lines over {} modules: it stopped matching, and this \
          guard is measuring nothing",
         MODULES.len()

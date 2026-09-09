@@ -70,6 +70,7 @@ use std::collections::BTreeSet;
 /// [`the_list_still_names_every_module`] counts the files and the reviewers no longer have to.
 const MODULES: &[(&str, &str)] = &[
     ("app/src/lib.rs", include_str!("../src/lib.rs")),
+    ("app/src/alarms.rs", include_str!("../src/alarms.rs")),
     ("app/src/injected.rs", include_str!("../src/injected.rs")),
     ("app/src/panel.rs", include_str!("../src/panel.rs")),
     ("app/src/measure.rs", include_str!("../src/measure.rs")),
@@ -145,8 +146,8 @@ const MODULES: &[(&str, &str)] = &[
 #[test]
 fn the_list_still_names_every_module() {
     assert!(
-        MODULES.len() >= 29,
-        "`MODULES` names {} files and this delivery left twenty-nine: a piece came out of a module \
+        MODULES.len() >= 30,
+        "`MODULES` names {} files and this delivery left thirty: a piece came out of a module \
          and its new home was not added, so whatever this guard reports, it is not reporting on \
          every script these crates run",
         MODULES.len()

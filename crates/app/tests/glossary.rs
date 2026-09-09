@@ -71,6 +71,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/tab_bar.rs",
     "app/src/tiling.rs",
     "app/src/tree.rs",
+    "app/src/alarms.rs",
     "app/src/injected.rs",
     "app/src/measure.rs",
     "app/src/session.rs",
@@ -125,6 +126,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
 /// this file for exactly that — it found two.
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/lib.rs", "app"),
+    ("app/src/alarms.rs", "app"),
     ("app/src/injected.rs", "app"),
     ("app/src/main.rs", "app"),
     ("app/src/settings.rs", "app"),
@@ -582,11 +584,15 @@ fn guarded_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
     // files» guard is never asked of a list with no entries. The two lists only ever grow, so a floor
     // here gets in nobody's way: it is there to notice one of them being emptied.
     assert!(
-        FINISHED_CRATES.len() >= 3 && GLOSSARY_CLEAN_FILES.len() >= 5,
-        "the two lists this guard reads have {} crates and {} files: they only ever grow, so this is \
-         one of them being emptied and every check downstream going quiet",
+        FINISHED_CRATES.len() >= 3
+            && GLOSSARY_CLEAN_FILES.len() >= 23
+            && CITATIONS_CHECKED.len() >= 29,
+        "the three lists this guard reads have {} crates, {} files and {} citation entries: they \
+         only ever grow, so this is one of them being emptied and every check downstream going \
+         quiet",
         FINISHED_CRATES.len(),
-        GLOSSARY_CLEAN_FILES.len()
+        GLOSSARY_CLEAN_FILES.len(),
+        CITATIONS_CHECKED.len()
     );
     let mut out = Vec::new();
     for crate_name in FINISHED_CRATES {

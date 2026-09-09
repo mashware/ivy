@@ -33,6 +33,7 @@
 //! window hidden, the input `logic` sees is the one of the last shown pass, so reading the keyboard
 //! there would resend the last key pressed thousands of times per second during a dump.
 
+mod alarms;
 pub mod fonts;
 mod injected;
 pub mod keyboard;
@@ -2525,63 +2526,6 @@ impl Window {
         let waker = ctx.clone();
 
         Watcher::new(move || waker.request_repaint(), &consoles)
-    }
-
-    /// **The heartbeat: waking up in time to say that a panel is old.**
-    ///
-    /// The watcher sees what changes; this sees what **stops** changing, and they are different
-    /// things — a producer that dies or hangs writes nothing, so it produces no file event at all.
-    /// Without this alarm clock the warning would never appear in a window at rest, which is
-    /// exactly when it is needed.
-    ///
-    /// **Only what is left until the first one falls due** is asked for: it is not a clock that
-    /// runs all the time, it is an alarm that is set when there is something to wait for and is not
-    /// set when there is not.
-    ///
-    /// **It is called twice per frame, and both are needed.** The panels are reread in the
-    /// interface pass, which runs *after* the logic half: arming the alarm only in the first, the
-    /// frame in which a panel is read for the first time would compute it with the state from
-    /// before reading it —that is, with no deadline to wait for— and the window would sleep for
-    /// ever. Measured: the delay published in that frame was `Duration::MAX`. And arming it only in
-    /// the second would leave out the rounds in which the window is covered and only the logic half
-    /// runs. Asking for too much costs nothing: the window keeps the shortest of all the deadlines
-    /// it is asked for.
-    ///
-    /// **And it looks only at the tab that is seen**, unlike the pumping. The alarm exists so that
-    /// the «this is old» label **appears on screen**, and a tab that is not painted has no screen:
-    /// waking the window for it would be spending a frame on a warning nobody is going to see.
-    /// Nothing is lost, because whether the panel looks stale is decided **when it is painted**, so
-    /// on going back to that tab the warning shows in that very frame.
-    fn set_the_alarm(&self, ctx: &egui::Context) {
-        let now = SystemTime::now();
-
-        // **The saving deadline wakes the window, and both halves have to ask for it.** The logic
-        // half starts by setting the deadline to the longest possible and is the only one that runs
-        // with the window covered: without the call over there, every round of a hidden window
-        // would erase this alarm and the layout would not be saved until someone moved the mouse.
-        //
-        // **And this changes how many frames a measurement run has**, so it goes declared in the
-        // annex: a window that wakes up twice a second while it is being dragged does not have the
-        // same number of frames as one that only responds to input.
-        if let Some(due) = self.save_due {
-            ctx.request_repaint_after(due.saturating_duration_since(Instant::now()));
-        }
-
-        if let Some(missing) = self
-            .active()
-            .panes()
-            .into_iter()
-            // **A folded panel wakes nobody**, for the same reason the panel of a tab that is not
-            // being looked at wakes nobody: the warning that its content is stale **is not
-            // painted**, so spending a frame on it is spending it on something nobody is going to
-            // see. Without this, folding a console whose producer goes quiet leaves the window
-            // waking up every minute for nothing.
-            .filter(|pane| !pane.folded)
-            .filter_map(|pane| pane.panel_state.how_long_until_warning(now))
-            .min()
-        {
-            ctx.request_repaint_after(missing);
-        }
     }
 
     /// Asks for the window size again while the window does not have it and attempts remain.

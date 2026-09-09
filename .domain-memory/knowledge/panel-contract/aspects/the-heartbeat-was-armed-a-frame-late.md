@@ -12,6 +12,7 @@ created_at: '2026-08-13T13:22:53.529Z'
 updated_at: '2026-08-13T13:22:53.529Z'
 last_verified: '2026-08-13T13:22:53.529Z'
 file_paths:
+  - crates/app/src/alarms.rs
   - crates/app/src/lib.rs
   - crates/app/src/panel.rs
 symbols:
@@ -44,4 +45,4 @@ feature_id: feat_panel-contract_8y2gc0
 
 ## Where it lives
 
-`Window::set_the_alarm` in `crates/app/src/lib.rs`, called from **both** halves of the eframe 0.36.1 loop (`logic` and the end of `ui`). The number comes from `PanelState::how_long_until_warning` in `crates/app/src/panel.rs`.
+`Window::set_the_alarm` in `crates/app/src/alarms.rs` — it left `lib.rs` in September 2026 with the delivery that made room for a blinking cursor, and the module it went to is named for the deadlines it arms so that the blink's *phase* does not follow it there — called from **both** halves of the eframe 0.36.1 loop (`logic` and the end of `ui`). The number comes from `PanelState::how_long_until_warning` in `crates/app/src/panel.rs`.
