@@ -1069,6 +1069,11 @@ const NOT_OURS: &[&str] = &[
     // The two tools `vendor_patch.rs` names when arguing for the check it chose over the other.
     "diff",
     "rustfmt",
+    // Kitty's setting for what a console paints when it is not the one being typed into, and the
+    // value it ships as its default. They are cited where this crate follows them instead of
+    // deciding the same thing again.
+    "cursor_shape_unfocused",
+    "hollow",
     // The two survivors this crate's closing path is written against: a program that puts itself in
     // a session of its own, and the one that is *named* for outliving the shell that launched it.
     "setsid",

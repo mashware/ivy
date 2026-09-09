@@ -370,6 +370,7 @@ impl eframe::App for Sweep {
                 &metrics,
                 origin,
                 &mut Default::default(),
+                true,
             );
 
             read += took;

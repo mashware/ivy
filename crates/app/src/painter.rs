@@ -221,6 +221,7 @@ pub fn paint(
     metrics: &CellMetrics,
     origin: Pos2,
     discoverer: &mut crate::fonts::Discoverer,
+    focused: bool,
 ) {
     let grid_size = view.size();
     // The default background is the same for the whole screen: asking for it once per cell would be
@@ -341,7 +342,7 @@ pub fn paint(
         }
     }
 
-    paint_cursor(painter, view, theme, metrics, origin, discoverer);
+    paint_cursor(painter, view, theme, metrics, origin, discoverer, focused);
 }
 
 /// The two colors of a cell, with the intensity already applied where it belongs.
@@ -539,6 +540,7 @@ fn paint_cursor(
     metrics: &CellMetrics,
     origin: Pos2,
     discoverer: &mut crate::fonts::Discoverer,
+    focused: bool,
 ) {
     // **With no cursor, no cursor is painted**, and since there is history that case really happens:
     // scrolling up far enough, the cursor stays in the active area, below what is being looked at. The
@@ -563,8 +565,16 @@ fn paint_cursor(
         slot.max.x += metrics.width;
     }
     let color = theme.color(TermColor::Cursor);
-    // No blinking, and not for lack of time: a cursor that blinks is a timer, and a timer is work at
-    // rest — exactly what this milestone measures and cannot afford to contaminate.
+    // Why this cursor does not blink is **D36**, along with what an unfocused console paints and the
+    // alternatives that were discarded.
+    if !focused {
+        // The outline is asked for **before** the shape is looked at, so a console that is not being
+        // typed into paints the same mark whatever its program asked for. Kitty defaults its
+        // `cursor_shape_unfocused` to `hollow` and WezTerm applies only the block outline to
+        // inactive panes: this follows them rather than deciding it again.
+        painter.rect_stroke(slot, 0.0, Stroke::new(1.0, color), StrokeKind::Inside);
+        return;
+    }
     match cursor.shape {
         CursorShape::Block => {
             painter.rect_filled(slot, 0.0, color);
@@ -616,9 +626,10 @@ fn paint_cursor(
 /// Paints a console whole: its grid, and over it whatever the **application** has to say.
 ///
 /// **It exists so that `paint` can stay what it is** — a pure function from a view and a corner —
-/// which is what the measurement bench and this module's own tests call. What made a second entry
-/// necessary rather than a seventh argument is `lib.rs`: it sits against **D28**'s recorded number,
-/// so the call site had to keep exactly the shape it had.
+/// which is what the measurement bench and this module's own tests call. When it was written, a
+/// second entry was cheaper than an argument on `paint` because `lib.rs` sat against **D28**'s
+/// recorded number and the call site had to keep exactly the shape it had; that constraint went with
+/// the delivery that moved [`paint_pane`] into this module, and `paint` does take the focus.
 pub(crate) fn paint_a_console(
     painter: &Painter,
     console: &crate::Pane,
@@ -626,6 +637,7 @@ pub(crate) fn paint_a_console(
     metrics: &CellMetrics,
     area: Rect,
     discoverer: &mut crate::fonts::Discoverer,
+    focused: bool,
 ) {
     paint(
         painter,
@@ -634,8 +646,136 @@ pub(crate) fn paint_a_console(
         metrics,
         area.left_top(),
         discoverer,
+        focused,
     );
     paint_the_question_over_it(painter, console, theme, metrics, area);
+}
+
+/// Paints a console clipped to its rectangle, and returns what queueing the painting cost.
+///
+/// **The clip is not cosmetic.** The painter deliberately does not clip the glyphs —so that a
+/// character wider than its cell is seen sticking out— and without clipping per console that
+/// glyph on the right-hand edge would appear inside the neighboring console, painted by a
+/// program that is not its own. It returns what the window needs to know about this pane after
+/// painting it. See [`crate::PaneOutcome`].
+pub(crate) fn paint_pane(
+    ui: &eframe::egui::Ui,
+    pane: &mut crate::Pane,
+    rect: eframe::egui::Rect,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    discoverer: &mut crate::fonts::Discoverer,
+    focused: bool,
+) -> crate::PaneOutcome {
+    // **The panel is timed apart from the console's queueing, with two clocks that are added
+    // together: one around reading and tiling, and another around painting it.** They are two
+    // and not one because the console's painting falls right in between and has a span of its
+    // own. For the frame's subtraction it would make no difference to add it all up —what
+    // matters there is that it be declared—, but a span called «queueing the painting» that
+    // also included reading a file off the disk is a number with the label changed, and in this
+    // project that has already invalidated a whole measurement.
+    //
+    // **Rereading goes before tiling**, because how much width the console has left depends on
+    // whether there is a panel or not: a console whose producer has just published for the
+    // first time narrows in this very frame, not in the next one.
+    let before_the_panel = std::time::Instant::now();
+    pane.refresh_its_panel();
+    // A single clock for tiling and for painting: if the panel were to age between the two
+    // questions, a strip would be reserved for a warning that never gets painted.
+    let now = std::time::SystemTime::now();
+    let mut panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
+
+    // **The panel's border is attended to here, before measuring the grid, and the tiling is
+    // redone in this very pass.** With the gesture attended to afterwards, the frame would
+    // paint the panel in the old place and —worse— would announce the old grid to its program,
+    // which is the one the pumping sends it on the next frame: a double readjustment, and a
+    // visible one in any full-screen program.
+    //
+    // **And the tree's tiling does not have to be redone.** This gesture tiles *inside* one
+    // pane, not between panes: the others' rectangles never find out. That is what tells it
+    // apart from dragging a divider of the tree or from dropping one console onto another,
+    // which do change it.
+    //
+    // The timed span encloses it for the same reason it encloses reading the file and sharing
+    // out the width: it is the panel's work, and what is not declared is taken by the frame's
+    // subtraction — which is the interface framework cost, the figure D3 has to decide on. **It
+    // is called without a panel too, and that is what makes unfolding possible**: folded there
+    // is no panel rectangle, but there is a grip flush against the edge to open it again by.
+    // **The width is compared before and after, and what the gesture returns is not believed.**
+    // The gesture returns «I have changed something», and folding and unfolding also change
+    // something — without touching the width. Since the number this datum feeds is published in
+    // the report under the «effects» label and the annex reads it as tilings and layouts,
+    // counting a fold in there would be publishing work that did not happen.
+    let width_before = pane.panel_width;
+    if pane.drag_its_panel_divider(ui, rect, panel_split.panel, metrics, now) {
+        panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
+    }
+    let width_changed = pane.panel_width != width_before;
+    let cost_of_reading = before_the_panel.elapsed();
+
+    pane.measured = metrics.cells_in(panel_split.console.size());
+
+    let before = std::time::Instant::now();
+    paint_a_console(
+        &ui.painter_at(panel_split.console),
+        pane,
+        theme,
+        metrics,
+        panel_split.console,
+        discoverer,
+        focused,
+    );
+    // **Rasterizing a color glyph runs INSIDE the painting, so it is subtracted from the
+    // painting.** It is the only expensive thing this project does in there: looking up and
+    // registering a face are done outside because they rebuild the atlas, but uploading a
+    // texture invalidates nothing. Without this subtraction, «queueing the painting» would also
+    // measure what decoding a PNG and scaling it down cost.
+    let color = discoverer.color_cost();
+    let queued = before.elapsed().saturating_sub(color.spent);
+
+    let before_painting_it = std::time::Instant::now();
+    if let (Some(panel_rect), Some(dir)) = (panel_split.panel, pane.panel.as_ref()) {
+        crate::panel::paint(
+            &ui.painter_at(panel_rect),
+            &mut pane.panel_state,
+            dir.id(),
+            theme,
+            metrics,
+            now,
+            discoverer,
+        );
+    }
+    let panel_cost = cost_of_reading + before_painting_it.elapsed();
+    // **The border is only reported if there is a grip behind it.** With the panel clipped
+    // below the grip the gesture registers no control at all —so as not to steal the point from
+    // the tree's divider—, and reporting the border anyway made the injected gesture press
+    // right on the edge of that divider: the batch spent its life dragging the consoles' tiling
+    // **under the label of the panel's gesture**. The script invalidated it for having no
+    // effects, but blaming the window.
+    let panel_divider = panel_split
+        .panel
+        .filter(|panel_rect| panel_rect.width() > crate::PANEL_GRIP)
+        .map(|panel_rect| panel_rect.left());
+
+    // The closing of the round goes here, in what paints one console, and not in the caller's walk
+    // over the panes, because **the queueing always has to be declared**, also when no output
+    // reached this console: it was painted just the same, and its cost has to come out of the
+    // window's «rest of the frame».
+    if let Some((waiting_since, collected_at, interpreted)) = pane.pending_measurement.take() {
+        pane.timings.record_round(crate::measure::Spans::of_a_round(
+            waiting_since,
+            collected_at,
+            interpreted,
+            queued,
+            panel_cost,
+        ));
+    }
+
+    crate::PaneOutcome {
+        panel_divider,
+        width_changed,
+        color,
+    }
 }
 
 /// What a notice says about how to answer it, **when the keyboard reaches that console**.
@@ -960,6 +1100,7 @@ mod tests {
                 cell,
                 Pos2::ZERO,
                 &mut discoverer,
+                true,
             );
         });
         let meshes = ctx.tessellate(output.shapes.clone(), 1.0);
@@ -1154,6 +1295,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 discoverer,
+                true,
             );
         });
         let (mut images, mut texts) = (0, 0);
@@ -1207,6 +1349,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut discoverer,
+                true,
             );
         });
         let (mut rectangles, mut texts) = (Vec::new(), 0);
@@ -1345,6 +1488,7 @@ mod tests {
                     &metrics(10.0, 20.0),
                     Pos2::ZERO,
                     &mut discoverer,
+                    true,
                 );
             })
             .drop_without_applying_deltas();
@@ -1568,6 +1712,7 @@ mod tests {
                 &metrics,
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
+                true,
             );
         });
         let mut drawing = None;
@@ -1644,6 +1789,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
+                true,
             );
         });
         let shapes = output.shapes.len();
@@ -1687,6 +1833,207 @@ mod tests {
         );
     }
 
+    /// A theme whose cursor is **not** the colour of its text.
+    ///
+    /// **Out of the box those two entries hold the same value** — `the_three_default_colors_are_the_project_ones`
+    /// asserts both are the project's grey — so a test that reads the cursor's colour off the default
+    /// theme cannot tell the two apart, and swapping them in the palette would leave it green. Every
+    /// assertion here about what colour the cursor came out in runs on this one instead.
+    fn theme_whose_cursor_is_its_own() -> Theme {
+        Theme::from_colors(&crate::settings::Colors {
+            cursor: Some(A_CURSOR_OF_ITS_OWN),
+            ..Default::default()
+        })
+    }
+
+    /// The colour the tests above put in the theme's cursor entry, **written out**.
+    ///
+    /// **Asking the theme for it instead would measure the code against itself.** The shape is found
+    /// by the colour the painter used, so with both sides of that comparison coming from
+    /// `Theme::color(TermColor::Cursor)`, pointing that entry at the foreground changes both at once
+    /// and cancels out — checked by mutation, the seven tests stayed green with the cursor's entry
+    /// serving the text's colour.
+    const A_CURSOR_OF_ITS_OWN: Color32 = Color32::from_rgb(0xFF, 0x00, 0xFF);
+
+    /// The rectangles the cursor put on the queue, as `(is it filled, its rectangle, how thick its
+    /// line is)`.
+    ///
+    /// **It keeps the shape and not a count**, unlike [`cursor_shapes`]: a count cannot tell a filled
+    /// block from an outlined one, which is the whole of what the focus decides.
+    ///
+    /// **And it keeps the stroke's width, which is not padding.** A stroke of zero is queued, carries
+    /// the right colour and covers the right rectangle — and is **invisible on screen**. Nothing else
+    /// in this crate asserts a stroke's width, so without this every test here passes over an
+    /// unfocused console that draws no cursor at all: disguise 3, a shape in the queue that nobody
+    /// can see.
+    fn cursor_rectangles(view: &View, focused: bool) -> Vec<(bool, Rect, f32)> {
+        let theme = theme_whose_cursor_is_its_own();
+        let ink = A_CURSOR_OF_ITS_OWN;
+        let ctx = Context::default();
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(eframe::egui::LayerId::new(
+                eframe::egui::Order::Foreground,
+                eframe::egui::Id::new("only the cursor"),
+            ));
+            paint_cursor(
+                &painter,
+                view,
+                &theme,
+                &metrics(10.0, 20.0),
+                Pos2::ZERO,
+                &mut crate::fonts::Discoverer::default(),
+                focused,
+            );
+        });
+        let mut found = Vec::new();
+        for shape in &output.shapes {
+            if let eframe::egui::Shape::Rect(rect) = &shape.shape {
+                if rect.fill == ink {
+                    found.push((true, rect.rect, rect.stroke.width));
+                } else if rect.stroke.color == ink {
+                    found.push((false, rect.rect, rect.stroke.width));
+                }
+            }
+        }
+        output.drop_without_applying_deltas();
+        found
+    }
+
+    /// A screen of one row whose program asked for `shape`, with the cursor over a letter.
+    fn a_screen_asking_for(shape: &str) -> Screen {
+        let mut screen = Screen::new(Size { rows: 2, cols: 8 });
+        screen.advance(b"ab");
+        screen.advance(shape.as_bytes());
+        screen
+    }
+
+    #[test]
+    fn the_console_without_the_keyboard_outlines_its_cursor_whatever_shape_it_asked_for() {
+        // **The shape is the program's while the console is being typed into, and stops being it
+        // when it is not** — that is what kitty's `hollow` default and WezTerm's inactive panes do,
+        // and it is why this is one branch and not five. The three requests are exercised, not one:
+        // with only the block, a version that outlined the block and left the beam a filled bar
+        // would pass.
+        // **And the focused half is asserted by its SIZE, not only by being filled.** «Filled» is
+        // satisfied by a block, so a version that painted every focused cursor as a full block would
+        // pass — and it would be a regression against what the program asked for, invisible to a
+        // test that only asks whether the rectangle has a fill. The cell here is 10 by 20: the block
+        // covers it, the underline is a tenth of its height along the bottom and the beam fifteen
+        // hundredths of its width down the side.
+        for (shape, request, filled_size) in [
+            ("block", "\x1b[2 q", (10.0, 20.0)),
+            ("underline", "\x1b[4 q", (10.0, 2.0)),
+            ("beam", "\x1b[6 q", (1.5, 20.0)),
+        ] {
+            let screen = a_screen_asking_for(request);
+
+            let focused = cursor_rectangles(&screen.view(), true);
+            let &[(is_filled, mark, _)] = focused.as_slice() else {
+                panic!("the {shape} cursor of a focused console queued {focused:?}");
+            };
+            assert!(
+                is_filled,
+                "the {shape} cursor of the console being typed into came out outlined"
+            );
+            assert_eq!(
+                (mark.width(), mark.height()),
+                filled_size,
+                "the console being typed into did not paint the {shape} its program asked for"
+            );
+
+            let unfocused = cursor_rectangles(&screen.view(), false);
+            let &[(is_filled, outline, thickness)] = unfocused.as_slice() else {
+                panic!("the {shape} cursor of an unfocused console queued {unfocused:?}");
+            };
+            assert!(
+                !is_filled,
+                "the {shape} cursor of a console without the keyboard came out filled, so two \
+                 consoles both look like the one being typed into"
+            );
+            // **The three of them are measured, not just the beam.** With the size asserted for one
+            // shape only, an outline traced around the underline's own thin bar satisfies «not
+            // filled» and is invisible at a tenth of a cell.
+            assert_eq!(
+                (outline.width(), outline.height()),
+                (10.0, 20.0),
+                "the outline over a {shape} is not the size of a cell, so what it outlines is the \
+                 shape and not the cell"
+            );
+            // **And a line of no thickness is queued, is the right colour, covers the right
+            // rectangle and cannot be seen.** Nothing else in this crate asserts a stroke's width,
+            // so without this line every assertion above passes over a console that draws no cursor
+            // at all.
+            assert!(
+                thickness >= 1.0,
+                "the outline over a {shape} is {thickness} thick, so it is queued and invisible"
+            );
+        }
+    }
+
+    #[test]
+    fn the_outline_of_an_unfocused_console_covers_both_columns_of_a_wide_character() {
+        // **Over a wide character the outline covers the two columns it occupies**, exactly as the
+        // filled block already does — half a letter inside the cursor and half outside reads as a
+        // drawing error. The cell-sized outline for each shape the program can ask for is asserted
+        // by the test above; what only this one exercises is the widening.
+        let mut wide = Screen::new(Size { rows: 2, cols: 8 });
+        wide.advance("日".as_bytes());
+        wide.advance(b"\x1b[H");
+        let over_a_wide_one = cursor_rectangles(&wide.view(), false);
+        let &[(_, across_both, _)] = over_a_wide_one.as_slice() else {
+            panic!("a wide character queued {over_a_wide_one:?} instead of one cursor");
+        };
+        assert_eq!(
+            (across_both.width(), across_both.height()),
+            (20.0, 20.0),
+            "the outline did not cover the two columns a wide character occupies and the whole of \
+             their height, so part of the letter is inside the cursor and part outside"
+        );
+    }
+
+    #[test]
+    fn a_hidden_cursor_stays_hidden_when_its_console_does_not_have_the_keyboard() {
+        // **Losing the keyboard must not make a cursor appear.** The outline branch goes after the
+        // guard for a shape of `Hidden` for exactly this; above it, a program that asked for no
+        // cursor gets one as soon as its console stops being the one being typed into.
+        let mut screen = Screen::new(Size { rows: 2, cols: 8 });
+        screen.advance(b"ab\x1b[?25l");
+        assert_eq!(
+            screen.view().cursor().map(|cursor| cursor.shape),
+            Some(CursorShape::Hidden),
+            "the test did not manage to get the program to hide its cursor"
+        );
+
+        assert!(
+            cursor_rectangles(&screen.view(), false).is_empty(),
+            "a console without the keyboard drew a cursor its program had hidden"
+        );
+        assert!(
+            cursor_rectangles(&screen.view(), true).is_empty(),
+            "a console with the keyboard drew a cursor its program had hidden"
+        );
+    }
+
+    #[test]
+    fn a_cursor_scrolled_out_of_the_view_is_not_drawn_by_a_console_without_the_keyboard_either() {
+        // The sibling of `with_the_history_scrolled_up_no_cursor_is_painted`, for the branch that
+        // did not exist when that one was written.
+        let mut screen = Screen::new(Size { rows: 4, cols: 20 });
+        for n in 0..40 {
+            screen.advance(format!("line {n}\r\n").as_bytes());
+        }
+        assert!(
+            !cursor_rectangles(&screen.view(), false).is_empty(),
+            "with the screen up to date no cursor was drawn, so the check below distinguishes nothing"
+        );
+
+        screen.scroll_by(term_core::Scroll::ToTop);
+        assert!(
+            cursor_rectangles(&screen.view(), false).is_empty(),
+            "a phantom cursor was outlined in the last row of a console nobody is typing into"
+        );
+    }
+
     /// In what order the painter enqueued its glyphs: `"text"` or `"image"`, one per shape.
     fn order_of(screen: &Screen) -> Vec<&'static str> {
         let ctx = Context::default();
@@ -1705,6 +2052,7 @@ mod tests {
                 &metrics(10.0, 20.0),
                 Pos2::ZERO,
                 &mut crate::fonts::Discoverer::default(),
+                true,
             );
         });
         let mut order = Vec::new();

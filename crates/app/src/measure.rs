@@ -134,7 +134,7 @@ pub struct Spans {
     /// did, split the width, **serve the panel's border** and **paint it**.
     ///
     /// **All six things, and saying it in full matters.** The number is made up of **two disjoint
-    /// spans** of `crate::Window::paint_pane`, summed: one before painting the console —checking the
+    /// spans** of `crate::painter::paint_pane`, summed: one before painting the console —checking the
     /// timestamp, reading whether it changed, splitting the width, serving the drag of its border and
     /// splitting again if the width changed— and another after —painting the panel—. What is left **in
     /// between**, which is enqueuing the console's paint, has its own field and does not enter here.

@@ -30,7 +30,7 @@ It is the same thing Kitty and Ghostty do.
 | `color.0` … `color.15` | the sixteen colours a program can ask for. 0 to 7 the normal ones, 8 to 15 the bright ones |
 | `background` | the console's background |
 | `foreground` | the colour it writes with when the program does not ask for another |
-| `cursor` | the cursor |
+| `cursor` | the cursor — both the filled one of the console being typed into and the outline every other console draws |
 | `divider` | the line that separates two consoles |
 | `focus` | what marks out the console that has the keyboard |
 | `panel` | the status panel's background |

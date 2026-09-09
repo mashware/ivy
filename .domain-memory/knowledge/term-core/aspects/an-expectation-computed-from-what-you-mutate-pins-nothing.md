@@ -81,9 +81,42 @@ number next to it was already being inverted for this same reason, written down 
 > according to what is UNDERNEATH, and that is another shape in the queue.** Where a color falls onto a
 > fill that the application itself chooses, the test has to look at the pair.
 
+### 4. Two palette entries hold the SAME value, so writing the literal pins neither
+
+**Disguise 1's own fix has a hole, and this is it.** «The concrete value has to be written in the test
+at least once» assumes the value identifies the entry. In this theme it does not:
+`TermColor::Cursor` and `TermColor::Foreground` are **both** the project's grey — asserted side by
+side, three lines apart, in `the_three_default_colors_are_the_project_ones` (`crates/app/src/theme.rs`).
+So a cursor test that writes `Color32::from_rgb(0xA7,0xA7,0xA7)` stays green when the two entries are
+swapped, and green when the painter reads the wrong one: it is disguise 2 of **D30** — a number where
+the defect and the fix agree — arriving through the palette instead of through the assertion.
+
+> **Before pinning a colour by its literal, check whether another entry of the palette holds the same
+> one.** Where one does, the test needs a theme built for it, whose entry under test differs from its
+> twin, and the mutation list has to include swapping the two entries — the only mutation that catches
+> it.
+
+**And building that theme is only half the fix, which is the half that is easy to stop at.** The
+delivery that told the focused console's cursor apart (#209, September 2026) built exactly such a
+theme — cursor magenta, text grey — and then read the colour back with
+`theme.color(TermColor::Cursor)`, **the same call the painter makes**, to find the shape in the queue.
+Both sides of the equality came from the accessor again. Measured: with
+`TermColor::Cursor => self.foreground`, **all seven of its new tests stayed green**; only an unrelated
+settings test fell. Written out as a `const` on the assertion's side, the same mutation falls seven of
+eight.
+
+> **The rule, sharper than «write the value once»: write it on the ASSERTION's side, not the
+> fixture's.** A fixture and an assertion that both call the same accessor are one side of an equality
+> wearing two names. The tell is a test that constructs its input through the same API it verifies its
+> output with — here `Theme::from_colors(…cursor: X)` and `theme.color(TermColor::Cursor)`, five lines
+> apart, both reading as «the cursor's colour».
+
 ## Where it lives
 
-All three were discovered while reviewing PR #99 and #100 of agent-terminal. The first was caught by a
+The first three were discovered while reviewing PR #99 and #100 of agent-terminal; the fourth in
+PR #212 (September 2026), by a test auditor that mutated the palette accessor — something the
+delivery's own mutation rounds never thought to touch, which is [[a-mutation-only-tests-what-its-author-imagined]]
+once more. The first was caught by a
 test auditor that mutated for real; the second, twice, by a test auditor and a coverage auditor; the
 third, by a code reviewer who **computed the contrast** instead of reading the color.
 
@@ -92,6 +125,9 @@ The fix for each is in `crates/app/src/lib.rs` (`mod tests`) and in `crates/app/
 `between_two_equal_claims_the_chip_shows_the_one_someone_holds` walks both orders and
 `with_three_consoles_the_chip_shows_the_claim_that_rules` the six orderings of three; and
 `el_simbolo_de_la_ficha_activa_se_pinta_sobre_el_fondo_y_no_sobre_el_realce` looks at what is underneath.
+The fourth's is in `crates/app/src/painter.rs` and `crates/app/src/lib.rs`: `A_CURSOR_OF_ITS_OWN`, a
+written-out constant used both to build the theme and to find the shape, with
+`theme_whose_cursor_is_its_own` / `window_whose_cursor_is_its_own` around it.
 
 Related: [[a-test-that-pins-the-helper-does-not-pin-the-path]] (nine times, the neighboring disguise),
 [[a-drag-test-needs-two-passes-at-least]] (the scenario that cannot occur) and

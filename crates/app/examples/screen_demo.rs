@@ -108,6 +108,7 @@ impl eframe::App for Demo {
             &metrics,
             origin,
             &mut Default::default(),
+            true,
         );
     }
 

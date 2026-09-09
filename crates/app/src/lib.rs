@@ -3231,130 +3231,6 @@ impl Window {
             pane.to_reread.raise();
         }
     }
-
-    /// Paints a console clipped to its rectangle, and returns what queueing the painting cost.
-    ///
-    /// **The clip is not cosmetic.** The painter deliberately does not clip the glyphs —so that a
-    /// character wider than its cell is seen sticking out— and without clipping per console that
-    /// glyph on the right-hand edge would appear inside the neighboring console, painted by a
-    /// program that is not its own. It returns what the window needs to know about this pane after
-    /// painting it. See [`PaneOutcome`].
-    fn paint_pane(
-        ui: &egui::Ui,
-        pane: &mut Pane,
-        rect: egui::Rect,
-        theme: &Theme,
-        metrics: &CellMetrics,
-        discoverer: &mut fonts::Discoverer,
-    ) -> PaneOutcome {
-        // **The panel is timed apart from the console's queueing, with two clocks that are added
-        // together: one around reading and tiling, and another around painting it.** They are two
-        // and not one because the console's painting falls right in between and has a span of its
-        // own. For the frame's subtraction it would make no difference to add it all up —what
-        // matters there is that it be declared—, but a span called «queueing the painting» that
-        // also included reading a file off the disk is a number with the label changed, and in this
-        // project that has already invalidated a whole measurement.
-        //
-        // **Rereading goes before tiling**, because how much width the console has left depends on
-        // whether there is a panel or not: a console whose producer has just published for the
-        // first time narrows in this very frame, not in the next one.
-        let before_the_panel = Instant::now();
-        pane.refresh_its_panel();
-        // A single clock for tiling and for painting: if the panel were to age between the two
-        // questions, a strip would be reserved for a warning that never gets painted.
-        let now = SystemTime::now();
-        let mut panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
-
-        // **The panel's border is attended to here, before measuring the grid, and the tiling is
-        // redone in this very pass.** With the gesture attended to afterwards, the frame would
-        // paint the panel in the old place and —worse— would announce the old grid to its program,
-        // which is the one the pumping sends it on the next frame: a double readjustment, and a
-        // visible one in any full-screen program.
-        //
-        // **And the tree's tiling does not have to be redone.** This gesture tiles *inside* one
-        // pane, not between panes: the others' rectangles never find out. That is what tells it
-        // apart from dragging a divider of the tree or from dropping one console onto another,
-        // which do change it.
-        //
-        // The timed span encloses it for the same reason it encloses reading the file and sharing
-        // out the width: it is the panel's work, and what is not declared is taken by the frame's
-        // subtraction — which is the interface framework cost, the figure D3 has to decide on. **It
-        // is called without a panel too, and that is what makes unfolding possible**: folded there
-        // is no panel rectangle, but there is a grip flush against the edge to open it again by.
-        // **The width is compared before and after, and what the gesture returns is not believed.**
-        // The gesture returns «I have changed something», and folding and unfolding also change
-        // something — without touching the width. Since the number this datum feeds is published in
-        // the report under the «effects» label and the annex reads it as tilings and layouts,
-        // counting a fold in there would be publishing work that did not happen.
-        let width_before = pane.panel_width;
-        if pane.drag_its_panel_divider(ui, rect, panel_split.panel, metrics, now) {
-            panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
-        }
-        let width_changed = pane.panel_width != width_before;
-        let cost_of_reading = before_the_panel.elapsed();
-
-        pane.measured = metrics.cells_in(panel_split.console.size());
-
-        let before = Instant::now();
-        painter::paint_a_console(
-            &ui.painter_at(panel_split.console),
-            pane,
-            theme,
-            metrics,
-            panel_split.console,
-            discoverer,
-        );
-        // **Rasterizing a color glyph runs INSIDE the painting, so it is subtracted from the
-        // painting.** It is the only expensive thing this project does in there: looking up and
-        // registering a face are done outside because they rebuild the atlas, but uploading a
-        // texture invalidates nothing. Without this subtraction, «queueing the painting» would also
-        // measure what decoding a PNG and scaling it down cost.
-        let color = discoverer.color_cost();
-        let queued = before.elapsed().saturating_sub(color.spent);
-
-        let before_painting_it = Instant::now();
-        if let (Some(panel_rect), Some(dir)) = (panel_split.panel, pane.panel.as_ref()) {
-            panel::paint(
-                &ui.painter_at(panel_rect),
-                &mut pane.panel_state,
-                dir.id(),
-                theme,
-                metrics,
-                now,
-                discoverer,
-            );
-        }
-        let panel_cost = cost_of_reading + before_painting_it.elapsed();
-        // **The border is only reported if there is a grip behind it.** With the panel clipped
-        // below the grip the gesture registers no control at all —so as not to steal the point from
-        // the tree's divider—, and reporting the border anyway made the injected gesture press
-        // right on the edge of that divider: the batch spent its life dragging the consoles' tiling
-        // **under the label of the panel's gesture**. The script invalidated it for having no
-        // effects, but blaming the window.
-        let panel_divider = panel_split
-            .panel
-            .filter(|panel_rect| panel_rect.width() > PANEL_GRIP)
-            .map(|panel_rect| panel_rect.left());
-
-        // The closing of the round goes here and not in the loop above because **the queueing
-        // always has to be declared**, also when no output reached this console: it was painted
-        // just the same, and its cost has to come out of the window's «rest of the frame».
-        if let Some((waiting_since, collected_at, interpreted)) = pane.pending_measurement.take() {
-            pane.timings.record_round(measure::Spans::of_a_round(
-                waiting_since,
-                collected_at,
-                interpreted,
-                queued,
-                panel_cost,
-            ));
-        }
-
-        PaneOutcome {
-            panel_divider,
-            width_changed,
-            color,
-        }
-    }
 }
 
 impl eframe::App for Window {
@@ -3652,13 +3528,29 @@ impl eframe::App for Window {
             Vec::new()
         };
         let mut with_effect = 0usize;
+        // **Two questions and not one, because a console only writes if the window is being written
+        // into.** egui's flag is the desktop's answer —`false` the moment somebody alt-tabs away—
+        // and the name is the window's own. Both are read once, before the walk borrows the panes.
+        // **The name and not the position**: the position is only right while the walk order holds,
+        // and the focus was made a name precisely so that reordering the tree cannot move it. See
+        // **D36**.
+        let the_window_has_the_keyboard = ui.ctx().input(|input| input.focused);
+        let with_the_focus = self.tabs[self.active].focus;
         for (pane, rect) in self.tabs[self.active]
             .panes_mut()
             .into_iter()
             .zip(rects.iter().copied())
         {
-            let pane_outcome =
-                Self::paint_pane(ui, pane, rect, &self.theme, &metrics, &mut self.discoverer);
+            let focused = the_window_has_the_keyboard && pane.name == with_the_focus;
+            let pane_outcome = painter::paint_pane(
+                ui,
+                pane,
+                rect,
+                &self.theme,
+                &metrics,
+                &mut self.discoverer,
+                focused,
+            );
             // **It is noted per pane and not once per frame**, because it belongs to the pane it
             // was subtracted from: two consoles that rasterize in the same frame each pay their
             // own.
@@ -3958,7 +3850,7 @@ mod tests {
             ));
             let metrics =
                 painter::CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer);
+            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer, true);
         });
         let painted = output.shapes.len();
         output.drop_without_applying_deltas();
@@ -3982,7 +3874,7 @@ mod tests {
             ));
             let metrics =
                 painter::CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer);
+            painter::paint_a_console(&painter, pane, theme, &metrics, rect, &mut discoverer, true);
         });
         let read = output
             .shapes
@@ -12270,13 +12162,14 @@ mod tests {
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            let outcome = Window::paint_pane(
+            let outcome = painter::paint_pane(
                 ui,
                 tabs[0].panes_mut()[0],
                 area_of(802.0),
                 &Theme::default(),
                 &metrics,
                 discoverer,
+                true,
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
                 color.record(
@@ -12765,13 +12658,14 @@ mod tests {
                 .zip(rects)
                 .enumerate()
             {
-                Window::paint_pane(
+                painter::paint_pane(
                     ui,
                     pane,
                     rect,
                     &Theme::default(),
                     &metrics,
                     &mut fonts::Discoverer::default(),
+                    true,
                 );
                 expected[which] = metrics.cells_in(rect.size());
             }
@@ -13020,13 +12914,14 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            Window::paint_pane(
+            painter::paint_pane(
                 ui,
                 pane,
                 area_of(800.0),
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
+                true,
             );
         })
         .drop_without_applying_deltas();
@@ -13365,13 +13260,14 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            Window::paint_pane(
+            painter::paint_pane(
                 ui,
                 &mut pane,
                 area_of(800.0),
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
+                true,
             );
         })
         .drop_without_applying_deltas();
@@ -13416,13 +13312,14 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            Window::paint_pane(
+            painter::paint_pane(
                 ui,
                 &mut pane,
                 whole,
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
+                true,
             );
             with_panel = pane.measured;
             without_discounting = metrics.cells_in(whole.size());
@@ -13455,13 +13352,14 @@ mod tests {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let metrics =
                 CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
-            Window::paint_pane(
+            painter::paint_pane(
                 ui,
                 &mut pane,
                 whole,
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
+                true,
             );
             cut_along = pane
                 .tile_with_its_panel(whole, metrics.width(), SystemTime::now())
@@ -16709,6 +16607,281 @@ mod tests {
         assert_ne!(
             tiling.parts[0], tiling.parts[1],
             "with this tiling the two consoles occupy the same rectangle and the test says nothing"
+        );
+    }
+
+    /// Which console filled its cursor and which outlined it, by the rectangle each one paints into.
+    ///
+    /// **The shapes are attributed by their clip and not by their order in the queue**: each console
+    /// is painted through a painter clipped to its own rectangle, so the clip is the only thing that
+    /// says whose a shape is. Reading them by position would pass with both cursors belonging to the
+    /// same console.
+    fn cursors_of_the_two_consoles(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        the_window_has_the_keyboard: bool,
+    ) -> Vec<bool> {
+        let ink = A_CURSOR_OF_ITS_OWN;
+        let input = egui::RawInput {
+            screen_rect: Some(area),
+            focused: the_window_has_the_keyboard,
+            ..Default::default()
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = ctx.run_ui(input, |ui| eframe::App::ui(window, ui, &mut frame));
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
+
+        let metrics =
+            painter::CellMetrics::measure(ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let tiling = tile(
+            area,
+            Orientation::Columns,
+            &weights_of(INITIAL_FRACTION),
+            metrics.width(),
+        );
+        let mut filled = vec![None; tiling.parts.len()];
+        for clipped in &shapes {
+            let egui::Shape::Rect(rect) = &clipped.shape else {
+                continue;
+            };
+            let it_is_the_cursor = if rect.fill == ink {
+                true
+            } else if rect.stroke.color == ink {
+                false
+            } else {
+                continue;
+            };
+            // The console it belongs to is the one whose rectangle contains the clip it was painted
+            // under. The focus highlight is painted with no clip of its own, and in another colour.
+            for (at, console) in tiling.parts.iter().enumerate() {
+                if console.contains_rect(clipped.clip_rect) {
+                    // **A second one is not overwritten in silence.** A console queues exactly one
+                    // shape in the cursor's colour; two would mean the mark is being painted twice,
+                    // and keeping the last would report the second as though it were the only one.
+                    assert!(
+                        filled[at].replace(it_is_the_cursor).is_none(),
+                        "console {at} queued more than one shape in the cursor's colour"
+                    );
+                }
+            }
+        }
+        filled
+            .into_iter()
+            .map(|found| found.expect("a console queued no cursor at all"))
+            .collect()
+    }
+
+    /// The colour these tests put in the theme's cursor entry, **written out**.
+    ///
+    /// **Asking the theme for it instead would measure the code against itself**: the shape is found
+    /// by the colour the painter used, so with both sides coming from `Theme::color`, pointing that
+    /// entry at the foreground changes both at once and cancels out. Checked by mutation.
+    const A_CURSOR_OF_ITS_OWN: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x00, 0xFF);
+
+    /// A window whose cursor colour is **not** the colour of its text.
+    ///
+    /// **The factory theme paints both with the same grey** — `the_three_default_colors_are_the_project_ones`
+    /// pins them side by side — so a test that looked for the cursor by the default colour would
+    /// find the letters too, and swapping the two entries of the palette would leave it green.
+    fn window_whose_cursor_is_its_own(left: &str, right: &str) -> Window {
+        let mut window = window_with(left, right);
+        window.theme = theme::Theme::from_colors(&settings::Colors {
+            cursor: Some(A_CURSOR_OF_ITS_OWN),
+            ..Default::default()
+        });
+        window
+    }
+
+    #[test]
+    fn only_the_console_with_the_focus_fills_its_cursor_and_it_is_not_always_the_left_one() {
+        // **Both orders, because with two elements position wins and not the rule.** With the focus
+        // only ever on the second console, a painter that outlined `rects[0]` for ever would pass —
+        // the same disguise the highlight's own test above records, and one this project has on
+        // file.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        for with_the_focus in [0, 1] {
+            let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+            focus_on(window.active_mut(), with_the_focus);
+            let ctx = egui::Context::default();
+
+            let filled = cursors_of_the_two_consoles(&mut window, &ctx, area, true);
+            assert_eq!(
+                filled,
+                vec![with_the_focus == 0, with_the_focus == 1],
+                "with the focus on console {with_the_focus} the filled cursor is not the one being \
+                 typed into: the window shows typing happening where the keys do not go"
+            );
+        }
+    }
+
+    #[test]
+    fn the_highlight_and_the_filled_cursor_land_on_the_same_console() {
+        // **Two independent lookups of the same fact, in the same frame.** The highlight asks
+        // `where_the_focus_is()` for a position and the cursor compares names inside the walk; both
+        // are right today and nothing said they had to agree. If they ever drift, the window draws
+        // its border around one console and the live cursor in another — the exact contradiction the
+        // border exists to prevent, told twice.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        for with_the_focus in [0, 1] {
+            let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+            focus_on(window.active_mut(), with_the_focus);
+            let ctx = egui::Context::default();
+            let outline = window.theme.focus();
+
+            let input = egui::RawInput {
+                screen_rect: Some(area),
+                ..Default::default()
+            };
+            let mut frame = eframe::Frame::_new_kittest();
+            let mut output = ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame));
+            let shapes = std::mem::take(&mut output.shapes);
+            output.drop_without_applying_deltas();
+
+            // **No tiling is rebuilt here, unlike the tests above.** What this one asks is whether
+            // the two marks fall on the same console, and the highlight's own rectangle answers it:
+            // the cursor's clip is inside it or it is not. Deriving the tiling as well would add a
+            // second way of being wrong without adding anything to check.
+            let highlighted = shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(shape) if shape.stroke.color == outline => Some(shape.rect),
+                    _ => None,
+                })
+                .expect("the focus highlight had to end up queued");
+            let filled = shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(shape) if shape.fill == A_CURSOR_OF_ITS_OWN => {
+                        Some(clipped.clip_rect)
+                    }
+                    _ => None,
+                })
+                .expect("no console filled its cursor");
+
+            assert!(
+                highlighted.contains_rect(filled),
+                "with the focus on console {with_the_focus} the highlight surrounds one console and \
+                 the filled cursor is in another"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_that_lost_the_desktops_focus_outlines_every_console() {
+        // **No console has the keyboard if the window does not have it.** Without this the terminal
+        // keeps claiming, from another workspace, that somebody is typing into it. `RawInput`
+        // defaults `focused` to `true`, so this is the only test that has to turn it off, and every
+        // other one keeps seeing a focused window.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 1);
+        let ctx = egui::Context::default();
+
+        assert_eq!(
+            cursors_of_the_two_consoles(&mut window, &ctx, area, false),
+            vec![false, false],
+            "with the window out of the desktop's focus a console still filled its cursor"
+        );
+        // And the other direction, so the assertion above is not satisfied by a painter that never
+        // fills anything.
+        assert_eq!(
+            cursors_of_the_two_consoles(&mut window, &ctx, area, true),
+            vec![false, true],
+            "coming back to the window did not return the filled cursor to the console with the focus"
+        );
+    }
+
+    #[test]
+    fn a_click_moves_the_filled_cursor_in_the_same_frame_that_moves_the_focus() {
+        // **The focus is read after the keyboard and after the mouse, and that ordering is what
+        // makes the cursor land in the same frame as the click.** Nothing failed if a later delivery
+        // hoisted that read above them: the cursor would follow one frame behind, which in a
+        // reactive window is until something else happens to ask for a repaint.
+        let area = area_of(800.0 + DIVIDER_THICKNESS);
+        let mut window = window_whose_cursor_is_its_own("sleep 30", "sleep 30");
+        focus_on(window.active_mut(), 0);
+        let ctx = egui::Context::default();
+        // A pass with no events first, for two reasons at once: the text engine does not exist until
+        // there has been one, and egui resolves an interaction against the regions of the previous
+        // pass — a click on a console nobody has registered yet reaches nothing.
+        assert_eq!(
+            cursors_of_the_two_consoles(&mut window, &ctx, area, true),
+            vec![true, false],
+            "the pass that sets the scene did not leave the filled cursor on the left-hand console"
+        );
+        let metrics =
+            painter::CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let tiling = tile(
+            area,
+            Orientation::Columns,
+            &weights_of(INITIAL_FRACTION),
+            metrics.width(),
+        );
+        let onto_the_right_one = tiling.parts[1].center();
+
+        let ink = A_CURSOR_OF_ITS_OWN;
+        // **A click is a press and a release**, and egui only calls it one once the button comes back
+        // up: the frame under test is the release's, which is the frame in which the focus moves.
+        let button = |pressed| egui::Event::PointerButton {
+            pos: onto_the_right_one,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events: vec![egui::Event::PointerMoved(onto_the_right_one), button(true)],
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut window, ui, &mut frame),
+        )
+        .drop_without_applying_deltas();
+
+        let input = egui::RawInput {
+            screen_rect: Some(area),
+            events: vec![button(false)],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| eframe::App::ui(&mut window, ui, &mut frame));
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
+
+        assert_eq!(
+            window.active().where_the_focus_is(),
+            Some(1),
+            "the click did not move the focus, so this test is not exercising what it claims"
+        );
+        // **Both consoles, not only the one that gained the focus.** Asserting that the right-hand
+        // one fills says nothing about the left-hand one still filling: a painter that filled every
+        // console would pass, and the scene-setting pass above is the only thing that would have
+        // caught it.
+        let mut filled = vec![None; tiling.parts.len()];
+        for clipped in &shapes {
+            let egui::Shape::Rect(rect) = &clipped.shape else {
+                continue;
+            };
+            let it_is_the_cursor = if rect.fill == ink {
+                true
+            } else if rect.stroke.color == ink {
+                false
+            } else {
+                continue;
+            };
+            for (at, console) in tiling.parts.iter().enumerate() {
+                if console.contains_rect(clipped.clip_rect) {
+                    filled[at] = Some(it_is_the_cursor);
+                }
+            }
+        }
+        assert_eq!(
+            filled,
+            vec![Some(false), Some(true)],
+            "the click did not move the fill to the console it gave the keyboard to, in that same \
+             frame and away from the one that had it"
         );
     }
 

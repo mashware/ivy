@@ -4478,6 +4478,15 @@ through was to take out a piece the delivery was already touching: reading the s
 somebody sets out to refactor fires almost never; this one fired on an ordinary delivery and cost it
 one function's move.
 
+**And it fired the same way a second time, which is what makes it a pattern rather than an anecdote.**
+The delivery that tells the focused console's cursor apart (**D36**) needed ten lines in `lib.rs`, and
+the piece it was already editing was painting a pane: 62 production lines, no `self`, gone to
+`painter.rs` — a module at 398 of its 600 — with **no visibility widened**, because privacy in Rust is
+per module and `painter` is a child of the crate root. Ten in and 62 out leaves `lib.rs` at **1 382**;
+`impl Window` is **427**, 62 out and nothing back in, because the ten lines are in the painting loop
+and that lives in `impl eframe::App for Window`. Both times the ceiling fired on somebody who was not
+refactoring, both times the answer was the same, and both times it cost one function's move.
+
 ### The third piece, and the two things this table had wrong about it
 
 **`lib.rs` went from 2 803 production lines to 2 111** — 692 out, the first number the order actually
@@ -5296,3 +5305,83 @@ the hottest path in the project.
 **What is not measured.** These characters change from a text shape to one or two rectangles per
 cell, and **no batch of `scripts/measure-frame.sh` puts a block element on screen**, so the bench
 cannot see the difference in either direction. That is a gap in the bench, not a number.
+
+## D36 — Only the console being typed into fills its cursor, and none of them does it when the window is not
+
+**Decided.** A console that does not have the keyboard paints its cursor as **the outline of a
+block**, whatever shape its program asked for; the one that does paints that shape, filled, exactly
+as before. And when **the window itself** has lost the desktop's focus, every console outlines,
+including the one the keyboard would go to. The question is asked in `painter::paint_cursor`, before
+the shape is looked at and after the guards that leave — no cursor in the view, a shape of `Hidden`,
+no cell where it stands — so a hidden cursor stays hidden and one
+scrolled out of the view is still not painted.
+
+**Why it exists.** Until this, the cursor was painted identically in every console, so with two open
+they both looked like the one being typed into. The only thing that said otherwise was a border of
+one pixel around the pane, and with four consoles that border is easy to lose. It is the same problem
+the border already solves, answered where the eye is already looking.
+
+**The unfocused mark ignores the program's shape, and that was settled outside rather than decided
+here.** Kitty ships `cursor_shape_unfocused` with `hollow` as its **default**, and WezTerm applies
+only the block outline to its inactive panes. Two independent implementations agree, and the reason
+is visible once written down: the outline of a beam is a one-pixel rectangle nobody can see, so «its
+own shape, outlined» reads as no cursor at all in two of the four shapes.
+
+**The window's own focus is the more frequent half.** Leaving for another application happens more
+often than moving between consoles, and it is the case those settings exist for. It is read from
+egui's own flag (`InputState::focused`, documented as *«false when the user alt-tabs away»*) instead
+of tracked here, so nothing new is kept between frames.
+
+**Why the cursor does not blink, which until this entry lived only in a comment.** A cursor that
+blinks is a timer, and a timer is **work at rest** — exactly what every published control batch of
+`scripts/measure-frame.sh` measures. Blinking is not refused, it is deferred with its price named:
+it needs a settings key of its own, off by default, a declared repaint path in the report, and a
+decision about what the batches do with it.
+[#210](https://github.com/mashware/agent-terminal/issues/210) holds that open. The old comment
+asserted this as a fact about the present; it now points here, which is where a decision belongs.
+
+**What was discarded, and why.**
+
+- **Outlining the shape the program asked for.** Above: two of the four shapes become invisible, and
+  both reference implementations do the opposite.
+- **Dimming the unfocused cursor instead of hollowing it.** It needs a derived colour, which means
+  deciding it for a palette the settings file can replace entirely — a dimmed cursor over a
+  dark-on-dark theme is a cursor nobody sees, and the outline works whatever the twenty-two colours
+  are.
+- **A fifth arm inside the shape `match`.** Every arm would ask the same question and `HollowBlock`
+  would ask it twice. One branch before the `match` is the same behaviour with one place to read.
+- **A `focused` field on `Pane`**, written once per frame the way the held paste's notice already
+  learns who has the keyboard. It would have been **correct** — both writers of the focus run before
+  that marking, which is itself the last thing before the painting — and it is **not cheaper**: the
+  field and its initializer are two production lines in `lib.rs`, under a ratchet with zero
+  tolerance, so it hits the same wall as the parameter for less. The parameter is computed in the
+  loop that paints, so no ordering can make it wrong.
+- **Reading the focus as a position** (`where_the_focus_is`) rather than as a name. The focus was
+  made a name precisely so that reordering the tree cannot move it; the loop has `pane.name` in
+  hand, so the position is a detour through an invariant it does not need.
+
+**What it cost in `lib.rs`, because D28's ratchet is part of this delivery's story.** The change
+needs ten production lines in the window's core and the ratchet has **zero tolerance**, so the piece
+this delivery was already editing came out first: painting a pane left for `painter.rs`, 62 lines,
+no `self`, and **no visibility widened** — privacy in Rust is per module and `painter` is a child of
+the crate root, which `paint_a_console` already relied on. `lib.rs` went 1 434 → 1 372 → **1 382**,
+and `impl Window` 489 → **427**. That also retired the constraint recorded in `paint_a_console`'s own
+docblock, which said a seventh argument on `paint` had been refused because the call site in
+`lib.rs` had to keep its shape.
+
+**What is not measured, and why no batch changes.** **Several batches do move the focus** — a press
+moves it, so `J`, `K`, `M`, `N` and `O`, which all inject one, move it too; the first version of this
+paragraph said no batch touched it, which came from grepping the script for the word instead of
+asking what a click does. What none of them changes is **how many consoles have it**: exactly one
+does, in every published run, before and after this change alike. And what the unfocused branch does
+is **strictly less work**: one stroked rectangle over one cell, in place of a filled rectangle plus
+the glyph underneath repainted on top. It is not a new painted path, so there is nothing new for the
+report to declare (**D13**), and no control batch stops comparing with the ones already published.
+
+> **The trap this delivery found, and it is not about the cursor.** `TermColor::Cursor` and
+> `TermColor::Foreground` are **the same value** in the factory theme. So the usual fix for a
+> painting test — write the concrete colour instead of calling what is being mutated — pins nothing
+> here: swap the two entries of the palette, or paint the cursor with the foreground, and a test
+> built on the default theme stays green. Every assertion about the cursor's colour runs on a theme
+> whose cursor differs from its text, and that mutation is on the list. Before pinning any colour by
+> its literal, check whether another entry of the palette holds the same one.

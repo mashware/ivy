@@ -98,7 +98,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        1_434,
+        1_382,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -109,15 +109,18 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          the gap by recording what the file actually is — a ratchet with slack is a ratchet that \
          ratchets late. **Then the order moved it for real**, in five deliveries out of 2 803: the \
          tiling and the tree 692, the mouse 430, publishing the report 96, the tab bar 100 and \
-         saving 51 into `session.rs`. That is 1 369, and **1 434 is what is left — against the \
-         3 119 this file came in at**",
+         saving 51 into `session.rs`. **And then this entry fired on an ordinary delivery for the \
+         second time**: the one that tells the focused console's cursor apart needed ten lines \
+         here, so painting a pane left for `painter.rs` — 62 lines, and the piece that delivery \
+         was already editing, which is exactly the way through D28 records. Sixty-two out and ten \
+         back in leaves **1 382 — against the 3 119 this file came in at**",
     ),
     (
         "src/lib.rs::impl Window",
-        489,
-        "25 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
-         tab bar, the report and saving have all left it, each to a module that owns that \
-         vocabulary; what is left is opening, painting and the shortcuts",
+        427,
+        "24 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
+         tab bar, the report, saving and painting a pane have all left it, each to a module that \
+         owns that vocabulary; what is left is opening, the frame's own walk and the shortcuts",
     ),
     (
         "src/lib.rs::impl Pane",
