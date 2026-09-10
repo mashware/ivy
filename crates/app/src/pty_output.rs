@@ -267,6 +267,18 @@ impl PtyOutput {
     }
 }
 
+/// Whether a console is over in the only sense the window may close itself over: its reading ended
+/// **well**, its bridge is gone and nothing it wrote is left unshown.
+///
+/// **What «finished» means, and what it used to mean, is written in **D40**.** The constraint that keeps the
+/// decision out here rather than on the pane is that a pseudoterminal whose *read* failed cannot be
+/// built from outside `term-core`, so the failing arms — a failure and a panicked reader — are
+/// reachable in a test only through a value. The pane's own question is pinned separately, with a
+/// bridge that has nothing behind it.
+pub fn is_finished(alive: bool, queue_left: bool, ending: Option<term_core::Ending>) -> bool {
+    !alive && !queue_left && ending == Some(term_core::Ending::EndedWell)
+}
+
 impl Drop for PtyOutput {
     fn drop(&mut self) {
         // The thread is not waited on: it may be inside a read of the channel that takes as long as
@@ -1105,6 +1117,105 @@ mod tests {
             pty_output.quiet.borrow_mut().look(failed(70)).is_some(),
             "a pickup with nothing recorded spent the sentence a later failure is owed"
         );
+    }
+
+    /// Every ending a console can report, plus «nothing recorded», so a test over one of them
+    /// cannot forget the others.
+    ///
+    /// **The `match` is what makes the promise in that first sentence true**: it lists the variants
+    /// one by one with no wildcard, so a new one added to the value stops this file compiling
+    /// instead of quietly leaving the array short.
+    fn every_ending() -> [Option<term_core::Ending>; 5] {
+        // An errno the standard library has no name for, which is the case worth carrying: it
+        // flattens into the uncategorised bucket and only the number survives. `EIO` would be the
+        // obvious choice and is the wrong one — the pseudoterminal library maps it to end of file
+        // before this arm is reached.
+        let failure = std::io::Error::from_raw_os_error(70);
+        let all = [
+            None,
+            Some(term_core::Ending::EndedWell),
+            Some(term_core::Ending::Failed {
+                kind: failure.kind(),
+                os_error: failure.raw_os_error(),
+            }),
+            Some(term_core::Ending::Panicked),
+            Some(term_core::Ending::NobodyListening),
+        ];
+
+        for ending in all.iter().flatten() {
+            match ending {
+                term_core::Ending::EndedWell
+                | term_core::Ending::Failed { .. }
+                | term_core::Ending::Panicked
+                | term_core::Ending::NobodyListening => {}
+            }
+        }
+
+        all
+    }
+
+    #[test]
+    fn a_console_that_ended_well_with_nothing_left_to_show_is_finished() {
+        assert!(is_finished(
+            false,
+            false,
+            Some(term_core::Ending::EndedWell)
+        ));
+    }
+
+    #[test]
+    fn no_other_ending_counts_as_finished_however_drained_the_console_is() {
+        // The whole of what this decision changes: a read that failed and a reader that died close
+        // the bridge exactly as an ordinary exit does, and used to be indistinguishable from one.
+        for ending in every_ending() {
+            if ending == Some(term_core::Ending::EndedWell) {
+                continue;
+            }
+
+            assert!(
+                !is_finished(false, false, ending),
+                "{ending:?} was taken for a console that finished"
+            );
+        }
+    }
+
+    #[test]
+    fn a_console_still_reading_is_not_finished_whatever_it_has_recorded() {
+        // The guard against the cheapest wrong reading of the above: that the ending alone decides.
+        // A live console has an ending recorded on no frame, but a value that arrives while the
+        // bridge is alive must not close a window either.
+        for ending in every_ending() {
+            assert!(
+                !is_finished(true, false, ending),
+                "a live console reporting {ending:?} was taken for finished"
+            );
+        }
+    }
+
+    #[test]
+    fn no_ending_at_all_is_finished_while_a_queue_is_left() {
+        // **The cross the other three never make**, and a review found what survives without it: a
+        // decision reading `!alive && (!queue_left ^ (ending != EndedWell))` passes all of them and
+        // declares a console **broken with output pending** finished — the window closing over
+        // exactly the bytes that explained the failure, which is the case D40 exists for.
+        for ending in every_ending() {
+            assert!(
+                !is_finished(false, true, ending),
+                "a console reporting {ending:?} with a queue left was taken for finished"
+            );
+        }
+    }
+
+    #[test]
+    fn a_console_that_ended_well_with_a_queue_left_is_not_finished_yet() {
+        // Older than this decision and it stays: dying does not erase what the program wrote before
+        // doing so, and closing with a queue pending would eat the ending, which is the part
+        // somebody was looking at.
+        assert!(!is_finished(
+            false,
+            true,
+            Some(term_core::Ending::EndedWell)
+        ));
     }
 }
 

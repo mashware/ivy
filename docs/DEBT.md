@@ -103,4 +103,12 @@ Format: `- <date> · <ticket> · <what> — <why it matters>`.
   threads are spawned with `thread::spawn` and no `Builder::name`, so nothing ties the panic to a
   console, and with several panes open the line says which file failed but not whose. Naming those
   threads belongs to the crate that spawns them.
-
+- 2026-09-10 · 192 · **A gap that was recorded here and then closed, kept because the reasoning was
+  the interesting part** — «reverting the pane's question leaves the whole suite green» was true, and
+  the reason given for not fixing it was that the state needs a reading that failed, which cannot be
+  built from outside `term-core`. **Wrong**: the question is «did it end well», so any other ending
+  serves, and a bridge built over an empty channel leaves the reading with no listener while the
+  program is alive. Two reviewers refuted it independently and the test exists
+  (`a_console_whose_reading_ended_badly_does_not_close_the_window_on_its_own`). The transferable half:
+  **«this state is unreachable» is a claim about the whole state space, and it was made from one
+  corner of it.**

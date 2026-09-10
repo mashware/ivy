@@ -1935,13 +1935,18 @@ impl Pane {
         requests
     }
 
-    /// Whether the program finished and nothing of its own is left to show.
+    /// Whether the program finished **well** and nothing of its own is left to show.
     ///
     /// **It waits for the queue to be empty**: dying does not erase what the program wrote before
     /// doing so, and giving the pane up for finished with a queue pending would eat precisely the
     /// end, which is the part that was being looked at.
+    ///
+    /// **What «finished» means is a decision and it lives outside this file**, in the module that
+    /// owns the signal it rests on: see [`pty_output::is_finished`]. **The ending is asked of the
+    /// pseudoterminal** and not of anything the bridge keeps, so it does not depend on the pump
+    /// having run this frame — which the queue, the other half of the question, does by definition.
     fn is_finished(&self, queue_left: bool) -> bool {
-        !self.pty_output.is_alive() && !queue_left
+        pty_output::is_finished(self.pty_output.is_alive(), queue_left, self.pty.ending())
     }
 }
 
@@ -6991,6 +6996,45 @@ mod tests {
         assert!(
             window.active().panes()[0].keystrokes.is_empty(),
             "the key ended up in the console without the focus as well"
+        );
+    }
+
+    #[test]
+    fn a_console_whose_reading_ended_badly_does_not_close_the_window_on_its_own() {
+        // **The pane's own predicate, and the mutation it exists against**: reverting it to «the
+        // bridge closed and no queue is left» leaves every other test in this crate green, because
+        // no other one puts a console in a state where the two answers differ.
+        //
+        // A pseudoterminal whose *read* failed cannot be built from outside `term-core` — on Linux
+        // the one errno a broken pseudoterminal gives is mapped to end of file before the failing
+        // arm — but it does not have to be a failure. **A bridge with nothing on the other end is
+        // enough**: the reading finds its listener gone with the program alive and records that,
+        // which is an ending that is not «ended well» and reaches this predicate exactly as a
+        // failure would.
+        let mut pane = pane_with("yes", 0);
+        let (_orphan, nowhere) = std::sync::mpsc::channel();
+        pane.pty_output = PtyOutput::new(nowhere, || {});
+        drop(_orphan);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pane.pty.ending().is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "the reading never noticed its listener was gone"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let queue_left = pane.pump();
+
+        assert_eq!(
+            pane.pty.ending(),
+            Some(term_core::Ending::NobodyListening),
+            "the console did not end the way this test needs it to"
+        );
+        assert!(
+            !pane.is_finished(queue_left),
+            "a console whose reading did not end well was taken for finished, so a window of one \
+             pane would close itself over the output that explains it"
         );
     }
 

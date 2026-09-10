@@ -5684,3 +5684,59 @@ which is **#198**.
   is probably that such a console should not accept a held paste at all — refusing at the moment of
   pasting, where there is still something to say — and that belongs to whoever owns the paste, not to
   the painter.
+
+## D40 — «Finished» means the reading ended well, so the window stops closing itself over a failure
+
+**A console that broke used to count as one that had finished.** What tells the window a console is
+over is its bridge closing, and a read that failed, a reader that died and a program that exited all
+close it the same way — so a window whose only console broke **closed itself**, taking with it the
+output that would have explained what happened. **D38** made the reason a value; this is the first
+thing that reads it.
+
+### The decision
+
+- **A pane is finished when its reading ended well, its bridge is gone and nothing it wrote is left
+  unshown.** The three conditions together, in `pty_output::is_finished`.
+- **Nothing recorded is not «finished» either.** It is what a console still reading answers — see
+  **D38** for the two things that answer belongs to — and the honest reading of it is «this console
+  is not over». Erring towards a window that stays open is erring towards output somebody can still
+  read. (The reader abandoned at the closing deadline never reaches this question: by then the pane
+  and its pseudoterminal are gone.)
+- **It is asked of the pseudoterminal, not of anything the frame keeps.** So what the window does
+  with a console that ended does not depend on whether the pump happened to run this frame.
+- **The decision lives outside `crates/app/src/lib.rs`, and the reason is what a test can reach.**
+  A pseudoterminal whose *read* failed cannot be built from outside `term-core`, so the two failing
+  arms — a failure and a panicked reader — are reachable only through a value, which is what makes
+  the decision exhaustively testable as a function and not as a method. The pane's own question is a
+  different test and needs no failure: **a bridge with nothing behind it** leaves the reading with no
+  listener, which is an ending that is not «ended well» and reaches the predicate exactly as a
+  failure would. Both tests exist; a review found the second after this entry claimed no test could.
+- **What the window does when a console ends badly is nothing, for now**: it stays open with the last
+  output on screen and copyable. The sentence that says why is the delivery that follows this one.
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **Leaving `is_finished` alone** and letting the sentence over the console be the whole answer | The sentence would be painted over a console the window is about to close itself over. A window that vanishes cannot say anything, and this is the half that can be had on its own |
+| **A latch beside `some_closed_by_hand`** — «somebody's console broke, never auto-close again» | Three lines in the file whose ratchet (**D28**) forbids growth, for a bit that is already derivable from the endings the panes report. And it would outlive the pane that set it, so closing the broken console by hand would not give the behaviour back |
+| **Asking the bridge's own record of the ending** instead of the pseudoterminal | The bridge learns the reason on the frame the pump runs, and closing must not depend on that. Two readers of one fact, one of them a frame behind |
+| **Treating «nothing recorded» as finished**, which is what the code did before | It is the answer of a console that is still reading. Reading it as «over» is the inference **D6** forbids, and it is the exact defect this entry closes |
+
+### What it leaves open
+
+- **This entry said no test could catch the pane forgetting to ask, and that was wrong.** It is
+  worth keeping because the reasoning looked sound: the state the question distinguishes needs a
+  reading that failed, and that cannot be built from outside `term-core`. What it missed is that
+  **the distinction does not need a failure** — any ending that is not «ended well» will do, and a
+  bridge constructed over an empty channel produces one with the program still alive. Reverting the
+  pane's body to «the bridge closed and no queue is left» now fails
+  `a_console_whose_reading_ended_badly_does_not_close_the_window_on_its_own`. Two reviewers refuted
+  the claim independently; the mutation was re-run before and after.
+- **And one cross of the decision's own three inputs was covered by nothing**, found the same way: a
+  reading of `!alive && (!queue_left ^ (ending != EndedWell))` passed all four of its tests and
+  declared a console **broken with a queue pending** finished — the window closing over the exact
+  bytes that explained the failure. Its test walks every ending with a queue left.
+- **A console whose program left a survivor still never ends**, so it is never finished and the
+  window never closes over it. Unchanged by this, mechanism in **D32**, and the obvious fix is worse
+  than the silence: `Child::try_wait` answers «the child is gone», not «this console is over».
