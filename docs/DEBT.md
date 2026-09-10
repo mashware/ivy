@@ -82,3 +82,25 @@ Format: `- <date> · <ticket> · <what> — <why it matters>`.
   because on Windows the pipe's write end is owned by the pseudoconsole and shared with the master
   through one `Arc`, so dropping the slave closes nothing and no end of file arrives while the
   console lives at all.
+- 2026-09-10 · 192 · **Which stream a developer line goes to, and how many times it comes out, is
+  held by no test** — the decision is testable and tested (the sentence is a returned value), but
+  from inside the process nothing can observe standard error, so replacing `say` with a `println!`
+  that prints twice leaves the suite green. Measured. What would close it is a child process that
+  runs the path and a parent that reads its streams — `crates/app/examples/leak.rs` is the precedent
+  — and it cannot be written yet for the failing case, because a pseudoterminal whose reading failed
+  cannot be built from outside `term-core`.
+- 2026-09-10 · 192 · **The input half of what the frame hands the pump is read by no test, and the
+  line it feeds has none at all** — `Silences::of` reads the backlog and the ending off one
+  pseudoterminal; hardcoding the **ending** to `None` fails a test, hardcoding the **backlog** to
+  `None` does not. A console nobody typed into owes nothing, so both sides answer `None` and the
+  assertion agrees with the defect — D30's second disguise, caught by mutating rather than by
+  reading. And the sentence that half feeds, `DeafConsole`'s (**D29**), has no test in the workspace
+  at all: its two literal strings are asserted nowhere. Binding either needs a program that stops
+  reading with enough bytes owed to it.
+- 2026-09-10 · 192 · **The runtime's panic line names no console** — the decision not to say
+  anything of our own about a reader that died rests on the default hook already printing the panic
+  with its file and its line. It does, and it prints `thread '<unnamed>' panicked at …`: the reading
+  threads are spawned with `thread::spawn` and no `Builder::name`, so nothing ties the panic to a
+  console, and with several panes open the line says which file failed but not whose. Naming those
+  threads belongs to the crate that spawns them.
+

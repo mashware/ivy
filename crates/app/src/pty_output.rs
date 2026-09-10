@@ -68,6 +68,12 @@ pub struct PtyOutput {
     /// asks on every frame, and the alternative was one more line inside the window's core — which
     /// **D28**'s ratchet does not admit. See [`DeafConsole`].
     deaf: std::cell::RefCell<DeafConsole>,
+    /// Whether it has already been said that this console stopped receiving its program's output.
+    ///
+    /// It lives here for the same reason `deaf` does. Two cells rather than one holding both marks:
+    /// each side is a decision of its own with its own reasons for staying quiet, and one cell would
+    /// have made them one type. See [`QuietConsole`].
+    quiet: std::cell::RefCell<QuietConsole>,
     /// A double-ended queue and not a vector: it is appended at the end and taken from the
     /// beginning, and taking from the beginning of a vector copies everything left behind it. With
     /// a dump in progress that would be megabytes copied on each frame, and that cost would end up
@@ -175,6 +181,7 @@ impl PtyOutput {
 
         Self {
             deaf: std::cell::RefCell::default(),
+            quiet: std::cell::RefCell::default(),
             queue,
             room,
             stop,
@@ -196,17 +203,23 @@ impl PtyOutput {
     ///
     /// It receives the destination instead of returning a new one so that the frame can always
     /// reuse the same one and not allocate memory once per frame.
-    pub fn pick_up(
-        &self,
-        destination: &mut Vec<u8>,
-        max: usize,
-        input: Option<term_core::Backlog>,
-    ) -> Pickup {
+    pub fn pick_up(&self, destination: &mut Vec<u8>, max: usize, silences: Silences) -> Pickup {
         // **What the program is NOT taking is looked at here**, where the frame already asks this
         // type what it has. It says it once and never fixes anything: there is nothing to fix from
         // here, the bytes are owed to a program that is not asking for them.
-        if let Some(sentence) = self.deaf.borrow_mut().look(input) {
-            eprintln!("{sentence}");
+        //
+        // **Neither line may take the window down, and `eprintln!` would.** It panics when the
+        // write fails, so `agent-terminal | head` — a closed pipe on standard error — killed the
+        // window at the exact moment a console had something to say. The failure predates this
+        // delivery by one statement and is fixed in both, because leaving one of two adjacent lines
+        // able to panic is worse than the shape it protects.
+        if let Some(sentence) = self.deaf.borrow_mut().look(silences.deaf) {
+            say(&sentence);
+        }
+        // **And how the reading ended is looked at in the same place, for the same reason**: the
+        // alternative was the window's core, whose ratchet (**D28**) does not admit the lines.
+        if let Some(sentence) = self.quiet.borrow_mut().look(silences.quiet) {
+            say(&sentence);
         }
         let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
 
@@ -265,6 +278,120 @@ impl Drop for PtyOutput {
     }
 }
 
+/// The two silences a console can fall into, as the frame finds them: what the program has not
+/// taken, and how the reading ended.
+///
+/// **It is a value and not the pseudoterminal itself, because twenty of this module's tests move a
+/// pickup without one.** Handing `&Pty` over would be simpler and impossible to cross halves of,
+/// and it would demand a real pseudoterminal in every one of those tests — which is the same reason
+/// the reading loop left its thread in the first place.
+///
+/// **And they travel together rather than as two arguments because of the ratchet.** Measured: two
+/// arguments put `crates/app/src/lib.rs` three production lines over the number **D28**'s guard
+/// records, because the formatter breaks a call whose arguments pass sixty characters into one line
+/// per argument. The two accessors behind them stay apart on the pseudoterminal, which is **D38**'s
+/// decision and not this type's business: one of them changes every frame and the other once per
+/// console.
+///
+/// **The fields are private and `of` is the only way in from outside this module**, so no caller can
+/// pair one console's backlog with another's ending. `Default` is «no silence at all», which is what
+/// a test that is not about either of them wants.
+#[derive(Default)]
+pub struct Silences {
+    /// What the program is not taking of what was typed into it. Read by [`DeafConsole`].
+    deaf: Option<term_core::Backlog>,
+    /// How the reading of its output ended. Read by [`QuietConsole`].
+    quiet: Option<term_core::Ending>,
+}
+
+impl Silences {
+    /// Reads both off one pseudoterminal, in one breath.
+    pub fn of(pty: &term_core::Pty) -> Self {
+        Self {
+            deaf: pty.backlog(),
+            quiet: pty.ending(),
+        }
+    }
+}
+
+/// Says one of this crate's lines on the developer channel, and **never takes the window down for
+/// it**.
+///
+/// `eprintln!` panics when the write fails — a closed pipe on standard error, which is all
+/// `agent-terminal | head` takes — and a window that dies because it had something to say is worse
+/// than the silence the sentence was written against. What cannot be delivered is dropped: there is
+/// no third channel to complain on.
+fn say(sentence: &str) {
+    use std::io::Write;
+
+    let _ = writeln!(std::io::stderr().lock(), "{sentence}");
+}
+
+/// Decides whether a console that stopped receiving deserves a line on the developer channel, and
+/// what that line says.
+///
+/// **It goes before this module's tests and not beside [`DeafConsole`]**, which is where the shape
+/// it copies lives. **D28**'s counter stops at the first `mod tests` line, so a type declared after
+/// it is not counted against the module's ceiling at all — and being counted is the point of a
+/// ratchet. `DeafConsole` sitting on the other side of that line is a defect this type does not
+/// inherit.
+///
+/// **It says what happened; it does not act on it.** Whether the window closes itself over a
+/// console that ended badly, and what the person in front of the window is told, are two further
+/// readers of the same value — neither of them here, and neither of them yet.
+///
+/// **Once, and only once per console** — the same rule [`DeafConsole`] follows, and for the same
+/// reason: this runs on every frame, and an ending is a fact that does not change afterwards.
+#[derive(Default)]
+struct QuietConsole {
+    said: bool,
+}
+
+impl QuietConsole {
+    /// Looks at how the reading ended, and returns the sentence to say the first time one is owed.
+    ///
+    /// **It returns the sentence instead of printing it**, like the rest of this crate's decisions:
+    /// printing cannot be observed from inside the process, so what a test can hold on to is what
+    /// was decided.
+    ///
+    /// **Three of the four endings are silent on this channel, each for its own reason.**
+    ///
+    /// - **An ordinary ending is not a silence.** A program that exits and a console somebody closes
+    ///   both take that arm, and neither is worth a word.
+    /// - **A panicked reader is already printed by the runtime's own hook**, with its file and its
+    ///   line, so a sentence here would duplicate what the process has said. What that hook does
+    ///   **not** say is which console it belonged to, and naming the reading thread is what would
+    ///   fix that — in the crate that spawns it, not here.
+    /// - **A vanished listener has no path to this line in this application**, and the reason is
+    ///   worth writing because the crate below says out loud that it cannot enforce it: that arm is
+    ///   taken only when the stop flag is down, and an ordinary close raises it first because a pane
+    ///   declares its pseudoterminal **before** the bridge that holds the receiver. Reverse those
+    ///   two fields and every ordinary close is recorded as nobody listening. **D38**, and the guard
+    ///   is `the_pseudoterminal_is_declared_before_the_bridge_that_holds_its_receiver`.
+    fn look(&mut self, ending: Option<term_core::Ending>) -> Option<String> {
+        let term_core::Ending::Failed { kind, os_error } = ending? else {
+            return None;
+        };
+        if self.said {
+            return None;
+        }
+        self.said = true;
+        // **The number travels with the kind because the kind alone can say nothing.** What a
+        // driver answers that the standard library has no name for flattens into one bucket whose
+        // whole printed form is a single word, while the operating system's number survives it.
+        // Measured, and recorded in **D38**.
+        Some(match os_error {
+            Some(number) => format!(
+                "agent-terminal: this console stopped receiving: read failed ({kind:?}, os error \
+                 {number})"
+            ),
+            None => {
+                format!("agent-terminal: this console stopped receiving: read failed ({kind:?})")
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,7 +420,7 @@ mod tests {
 
         let mut received = Vec::new();
         let arrived = wait_for(|| {
-            pty_output.pick_up(&mut received, usize::MAX, None);
+            pty_output.pick_up(&mut received, usize::MAX, Silences::default());
             received.windows(4).any(|v| v == b"hola")
         });
 
@@ -383,7 +510,7 @@ mod tests {
 
         let mut received = Vec::new();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut received, usize::MAX, None);
+            pty_output.pick_up(&mut received, usize::MAX, Silences::default());
             !received.is_empty()
         }));
         assert!(
@@ -404,13 +531,13 @@ mod tests {
         assert!(wait_for(|| !pty_output.is_alive()));
 
         let mut first = Vec::new();
-        pty_output.pick_up(&mut first, usize::MAX, None);
+        pty_output.pick_up(&mut first, usize::MAX, Silences::default());
         assert!(!first.is_empty(), "nothing arrived to pick up");
 
         // What is already picked up is not delivered again: if it repeated, the screen would show
         // the same text twice without the program having written it twice.
         let mut second = Vec::new();
-        pty_output.pick_up(&mut second, usize::MAX, None);
+        pty_output.pick_up(&mut second, usize::MAX, Silences::default());
         assert!(second.is_empty(), "the queue returned the same thing twice");
     }
 
@@ -429,14 +556,14 @@ mod tests {
         assert!(wait_for(|| !pty_output.is_alive()));
 
         let mut first = Vec::new();
-        let pickup = pty_output.pick_up(&mut first, 4, None);
+        let pickup = pty_output.pick_up(&mut first, 4, Silences::default());
         assert_eq!(first, b"0123", "the maximum was not respected");
         assert!(pickup.left_a_queue, "bytes were left and it said no");
 
         // And what was left over is still there, in its order, without having been lost or
         // repeated: it is what makes a dump be seen whole even if it takes several frames.
         let mut rest = Vec::new();
-        let pickup = pty_output.pick_up(&mut rest, usize::MAX, None);
+        let pickup = pty_output.pick_up(&mut rest, usize::MAX, Silences::default());
         assert_eq!(
             rest, b"456789",
             "what was left over did not come out whole nor in order"
@@ -507,7 +634,7 @@ mod tests {
         let (_sender, pty_output) = pty_output_with_queue(queue_split_in_two(b"0123456789", 6));
 
         let mut destination = Vec::new();
-        let pickup = pty_output.pick_up(&mut destination, usize::MAX, None);
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX, Silences::default());
 
         assert_eq!(
             destination, b"0123456789",
@@ -525,14 +652,20 @@ mod tests {
 
         let mut destination = Vec::new();
         assert!(
-            pty_output.pick_up(&mut destination, 4, None).left_a_queue,
+            pty_output
+                .pick_up(&mut destination, 4, Silences::default())
+                .left_a_queue,
             "six bytes were left"
         );
         assert_eq!(destination, b"0123", "the maximum was not respected");
 
         // And what was left is still astride the wrap, whole and in its order.
         let mut rest = Vec::new();
-        assert!(!pty_output.pick_up(&mut rest, usize::MAX, None).left_a_queue);
+        assert!(
+            !pty_output
+                .pick_up(&mut rest, usize::MAX, Silences::default())
+                .left_a_queue
+        );
         assert_eq!(rest, b"456789");
     }
 
@@ -542,7 +675,9 @@ mod tests {
 
         let mut destination = Vec::new();
         assert!(
-            pty_output.pick_up(&mut destination, 8, None).left_a_queue,
+            pty_output
+                .pick_up(&mut destination, 8, Silences::default())
+                .left_a_queue,
             "two bytes were left"
         );
 
@@ -551,7 +686,11 @@ mod tests {
         assert_eq!(destination, b"01234567");
 
         let mut rest = Vec::new();
-        assert!(!pty_output.pick_up(&mut rest, usize::MAX, None).left_a_queue);
+        assert!(
+            !pty_output
+                .pick_up(&mut rest, usize::MAX, Silences::default())
+                .left_a_queue
+        );
         assert_eq!(rest, b"89");
     }
 
@@ -568,7 +707,7 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(50));
         let mut destination = Vec::new();
-        let pickup = pty_output.pick_up(&mut destination, usize::MAX, None);
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX, Silences::default());
 
         let waiting_since = pickup
             .waiting_since
@@ -589,7 +728,7 @@ mod tests {
         let pty_output = PtyOutput::new(output, || {});
 
         let mut destination = Vec::new();
-        let pickup = pty_output.pick_up(&mut destination, usize::MAX, None);
+        let pickup = pty_output.pick_up(&mut destination, usize::MAX, Silences::default());
 
         assert!(destination.is_empty());
         assert!(pickup.waiting_since.is_none());
@@ -609,7 +748,7 @@ mod tests {
 
         let mut destination = Vec::new();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut destination, usize::MAX, None);
+            pty_output.pick_up(&mut destination, usize::MAX, Silences::default());
             destination.len() == 200
         }));
 
@@ -634,7 +773,7 @@ mod tests {
 
         let mut destination = b"antes".to_vec();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut destination, usize::MAX, None);
+            pty_output.pick_up(&mut destination, usize::MAX, Silences::default());
             destination.len() > b"antes".len()
         }));
         assert!(
@@ -702,7 +841,7 @@ mod tests {
         drop(pty);
         let mut rest = Vec::new();
         assert!(wait_for(|| {
-            pty_output.pick_up(&mut rest, usize::MAX, None);
+            pty_output.pick_up(&mut rest, usize::MAX, Silences::default());
             !pty_output.is_alive()
         }));
     }
@@ -752,6 +891,219 @@ mod tests {
             wait_for(|| Arc::strong_count(&witness) == 1),
             "the thread is still alive after destroying the bridge: it stayed waiting for a room \
              that no one is going to make for it any more"
+        );
+    }
+
+    /// A pseudoterminal is not needed for any of what follows: the sentence is a decision over a
+    /// value, and the value is the whole of what the reading thread reports.
+    fn failed(errno: i32) -> Option<term_core::Ending> {
+        let failure = std::io::Error::from_raw_os_error(errno);
+
+        Some(term_core::Ending::Failed {
+            kind: failure.kind(),
+            os_error: failure.raw_os_error(),
+        })
+    }
+
+    /// A failure with no number, which the value's shape allows and no known source produces.
+    fn failed_namelessly() -> Option<term_core::Ending> {
+        Some(term_core::Ending::Failed {
+            kind: std::io::ErrorKind::InvalidData,
+            os_error: None,
+        })
+    }
+
+    #[test]
+    fn a_failed_read_is_said_with_the_kind_and_the_number_the_system_gave() {
+        let mut quiet = QuietConsole::default();
+
+        // **Errno 70, and the number is the point.** It is what a device or a driver answers that
+        // the standard library has no name for, so the kind flattens to a word user code cannot
+        // even name and only the number says what happened. `EIO` would be the obvious choice and
+        // is the wrong one: the pseudoterminal library maps it to end of file before this arm.
+        assert_eq!(
+            quiet.look(failed(70)).as_deref(),
+            Some(
+                "agent-terminal: this console stopped receiving: read failed (Uncategorized, os \
+                 error 70)"
+            )
+        );
+    }
+
+    #[test]
+    fn a_failure_the_system_gave_no_number_for_is_still_said() {
+        // The number is an `Option` in the value this reads, so the sentence has to hold together
+        // without one. Nothing under the pseudoterminal is known to produce this, which is why the
+        // arm exists as a shape and not as a scenario.
+        let mut quiet = QuietConsole::default();
+
+        assert_eq!(
+            quiet.look(failed_namelessly()).as_deref(),
+            Some("agent-terminal: this console stopped receiving: read failed (InvalidData)")
+        );
+    }
+
+    #[test]
+    fn a_failed_read_is_said_once_and_the_frames_after_it_say_nothing() {
+        let mut quiet = QuietConsole::default();
+        let ending = failed(70);
+
+        assert!(quiet.look(ending).is_some());
+
+        assert_eq!(quiet.look(ending), None, "it was said twice");
+    }
+
+    #[test]
+    fn the_three_endings_that_are_not_a_failure_say_nothing_on_this_channel() {
+        // One assertion per reason, and each for its own: nothing recorded is a console still
+        // reading; an ordinary ending is not a silence; the runtime's own hook has already printed
+        // a panic with its file and its line; and a vanished listener is only reachable while the
+        // pane is being destroyed, with no console left for a line to be about.
+        for ending in [
+            None,
+            Some(term_core::Ending::EndedWell),
+            Some(term_core::Ending::Panicked),
+            Some(term_core::Ending::NobodyListening),
+        ] {
+            let mut quiet = QuietConsole::default();
+
+            assert_eq!(quiet.look(ending), None, "{ending:?} was said");
+        }
+    }
+
+    #[test]
+    fn a_silent_ending_does_not_spend_the_sentence_a_later_failure_is_owed() {
+        // The guard against the cheapest way of passing the test above: marking it said whatever
+        // arrives. A console reads `EndedWell` on no frame before it fails —the value is written
+        // once— but a reading that hands over any of the silent ones must leave the sentence unspent.
+        let mut quiet = QuietConsole::default();
+
+        assert_eq!(quiet.look(Some(term_core::Ending::EndedWell)), None);
+
+        assert!(
+            quiet.look(failed(70)).is_some(),
+            "an ordinary ending spent the sentence the failure was owed"
+        );
+    }
+
+    #[test]
+    fn the_pickup_the_frame_already_makes_is_what_spends_it() {
+        let (sender, output) = channel();
+        drop(sender);
+        let pty_output = PtyOutput::new(output, || {});
+        let mut destination = Vec::new();
+        let ending = failed(70);
+
+        // Two frames, because that is what the promise is about: a console that failed is still
+        // failed on the next pass, and the second pickup must not say it again.
+        for _ in 0..2 {
+            pty_output.pick_up(
+                &mut destination,
+                usize::MAX,
+                Silences {
+                    deaf: None,
+                    quiet: ending,
+                },
+            );
+        }
+
+        // If the pump did not look, the sentence would still be owed. This is the whole binding
+        // between the decision and the pass that runs once per frame per console.
+        assert_eq!(
+            pty_output.quiet.borrow_mut().look(ending),
+            None,
+            "the pickup did not look at how the reading ended"
+        );
+    }
+
+    #[test]
+    fn what_the_frame_hands_over_is_read_off_the_pseudoterminal_and_not_invented() {
+        // The seam between the two halves. Without this, replacing either field of `Silences::of`
+        // with `None` leaves every other test in this module green while no console ever gets a
+        // line: the rest of them build the value by hand.
+        let (pty, output) = Pty::spawn("sh", &["-c", "exit 0"], Size { rows: 24, cols: 80 })
+            .expect("no pseudoterminal");
+        let pty_output = PtyOutput::new(output, || {});
+        assert!(
+            wait_for(|| !pty_output.is_alive()),
+            "the console did not end"
+        );
+
+        let silences = Silences::of(&pty);
+
+        assert_eq!(
+            silences.quiet,
+            pty.ending(),
+            "the ending handed to the pump is not the one the pseudoterminal recorded"
+        );
+        assert_eq!(
+            silences.quiet,
+            Some(term_core::Ending::EndedWell),
+            "a program that exited was not recorded as an ordinary ending"
+        );
+        // **The other half is deliberately not asserted here.** A console nobody typed into owes
+        // nothing, so `backlog()` answers `None` and an assertion against it would be satisfied by
+        // hardcoding `None` in the seam — measured, the mutation survives. Binding it needs a
+        // program that stops reading and enough bytes owed to it, which is the input side's own
+        // scenario and has no test in this crate at all. In the debt log.
+    }
+
+    #[test]
+    fn a_bridge_whose_thread_lets_go_of_the_receiver_records_nobody_listening() {
+        // **The order that must not happen, made to happen on purpose.** The crate below says,
+        // where it matters, that it cannot enforce this: telling a close from a vanished listener
+        // rests on the stop flag going up before the receiving end disappears, and the receiving end
+        // belongs to whoever hosts the console. Here the pseudoterminal is kept alive and the
+        // bridge's thread is made to let go of it, which is the reversal — and the reading reports
+        // it as what it is instead of as a program that finished.
+        //
+        // **The queue has to be at its ceiling for the thread to exit at all**: dropping the bridge
+        // raises a flag the thread only consults while waiting for room. That is the one exit that
+        // takes the receiver with it, and it is why this arm exists at all — a review found the
+        // exit after a first reading had ruled it out.
+        let (pty, output) = Pty::spawn("cat", &["/dev/zero"], Size { rows: 24, cols: 80 })
+            .expect("could not open the pseudoterminal");
+        let pty_output = PtyOutput::new(output, || {});
+        assert!(
+            wait_for(|| {
+                pty_output
+                    .queue
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .bytes
+                    .len()
+                    >= QUEUE_CEILING
+            }),
+            "the queue did not reach the ceiling: the thread is not where the test needs it"
+        );
+
+        drop(pty_output);
+
+        assert!(
+            wait_for(|| pty.ending().is_some()),
+            "the reading never ended after its listener went away"
+        );
+        assert_eq!(
+            pty.ending(),
+            Some(term_core::Ending::NobodyListening),
+            "a listener that vanished on its own was recorded as something else"
+        );
+    }
+
+    #[test]
+    fn a_pickup_over_a_console_that_is_still_reading_spends_nothing() {
+        let (sender, output) = channel();
+        drop(sender);
+        let pty_output = PtyOutput::new(output, || {});
+        let mut destination = Vec::new();
+
+        pty_output.pick_up(&mut destination, usize::MAX, Silences::default());
+
+        // The other half of the binding: a pickup that marks it said whatever the ending is would
+        // satisfy the test above and swallow the sentence of every console that fails afterwards.
+        assert!(
+            pty_output.quiet.borrow_mut().look(failed(70)).is_some(),
+            "a pickup with nothing recorded spent the sentence a later failure is owed"
         );
     }
 }

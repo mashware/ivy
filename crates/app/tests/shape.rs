@@ -368,3 +368,45 @@ fn no_entry_of_the_ratchet_is_stale() {
         );
     }
 }
+
+/// A pane declares its pseudoterminal **before** the bridge that holds its receiver, and Rust drops
+/// fields in declaration order.
+///
+/// **This is not tidiness and the crate below cannot enforce it.** `term-core` tells a console being
+/// closed from a listener that vanished on its own by whether the stop flag is up, and it raises that
+/// flag in `Pty::drop` — but the receiving end belongs to whoever hosts the console. A `Pane` that
+/// declared its bridge first would let the receiver go while the flag was still down and record
+/// **every ordinary close** as «nobody was listening», which is the sentence that mechanism exists
+/// to keep from being said falsely. The crate says so where it matters and asks whoever first reads
+/// the distinction to pin it; that reader is the developer line, and this is the pin.
+///
+/// **It is a property of the file's text because there is nothing left to ask at runtime.** Once both
+/// halves are dropped there is no cell anybody holds and no console to answer for either of them.
+/// The effect of the reversal *is* covered by a test —
+/// `a_bridge_whose_thread_lets_go_of_the_receiver_records_nobody_listening` — which is what makes
+/// this one a guard over the order rather than over the mechanism.
+#[test]
+fn the_pseudoterminal_is_declared_before_the_bridge_that_holds_its_receiver() {
+    let source = MODULES
+        .iter()
+        .find(|(name, _)| *name == "src/lib.rs")
+        .map(|(_, source)| *source)
+        .expect("`src/lib.rs` is not in the module list");
+    let fields = source
+        .split_once("struct Pane {")
+        .expect("`struct Pane` is not declared in `src/lib.rs` under that name")
+        .1;
+    let pty = fields
+        .find("\n    pty: Pty,")
+        .expect("`Pane` no longer declares a field `pty: Pty`");
+    let bridge = fields
+        .find("\n    pty_output: PtyOutput,")
+        .expect("`Pane` no longer declares a field `pty_output: PtyOutput`");
+
+    assert!(
+        pty < bridge,
+        "`Pane` declares its bridge before its pseudoterminal, so the bridge is dropped first and \
+         its receiver goes away while the stop flag is still down: every ordinary close would be \
+         recorded as «nobody was listening». Declare `pty` first"
+    );
+}

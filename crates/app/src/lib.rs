@@ -76,7 +76,7 @@ use injected::{InjectedDrags, gesture_at_startup};
 use measure::{RestOfFrame, Timings};
 use painter::CellMetrics;
 use panel_contract::PanelDir;
-use pty_output::PtyOutput;
+use pty_output::{PtyOutput, Silences};
 use std::time::{Duration, Instant, SystemTime};
 use term_core::{Cell, Half, Pty, Screen, Scroll, Size};
 use theme::Theme;
@@ -1283,9 +1283,9 @@ impl Pane {
     /// Returns whether the budget cut the pumping short and left a queue to swallow.
     fn pump(&mut self) -> bool {
         self.received.clear();
-        let pickup = self
-            .pty_output
-            .pick_up(&mut self.received, PUMP_BUDGET, self.pty.backlog());
+        let pickup =
+            self.pty_output
+                .pick_up(&mut self.received, PUMP_BUDGET, Silences::of(&self.pty));
         // **One clock and not two.** The stamp of when the bytes were collected is also the start of
         // interpreting them: between the two there was nothing, and a second `Instant::now()` only
         // added a reading of its own to the span it was meant to measure.

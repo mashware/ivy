@@ -23,7 +23,7 @@
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use app::pty_output::PtyOutput;
+use app::pty_output::{PtyOutput, Silences};
 use term_core::{Pty, Size};
 
 /// Copied from `app::PUMP_BUDGET`, which is private. If it changes there, here it stops measuring the
@@ -157,7 +157,7 @@ fn pump_through_bridge(output: Receiver<Vec<u8>>, resident_at_start: u64) -> Ver
 
     loop {
         received.clear();
-        bridge.pick_up(&mut received, BUDGET, None);
+        bridge.pick_up(&mut received, BUDGET, Silences::default());
         collected += received.len() as u64;
 
         let resident = resident_kib().unwrap_or(resident_at_start);
