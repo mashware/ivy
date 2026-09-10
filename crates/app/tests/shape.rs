@@ -53,6 +53,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/keyboard.rs", include_str!("../src/keyboard.rs")),
     ("src/painter.rs", include_str!("../src/painter.rs")),
     (
+        "src/painter/notices.rs",
+        include_str!("../src/painter/notices.rs"),
+    ),
+    (
         "src/painter/blocks.rs",
         include_str!("../src/painter/blocks.rs"),
     ),

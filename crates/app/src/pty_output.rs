@@ -259,6 +259,30 @@ impl PtyOutput {
         pickup
     }
 
+    /// Whether somebody has taken the sentence about this console going quiet off the glass.
+    ///
+    /// **It is asked on every frame by the painting and by the mouse**, which is why it answers a
+    /// copy rather than lending the cell out.
+    pub fn the_silence_was_dismissed(&self) -> bool {
+        self.quiet.borrow().dismissed
+    }
+
+    /// Takes that sentence off the glass, for good, for this console — **if there was one**.
+    ///
+    /// **It undoes nothing.** How the reading ended is what the pseudoterminal recorded and stays
+    /// readable; what this changes is only whether the application is still saying it. A console
+    /// whose reading ended does not start again, so there is nothing to say twice.
+    ///
+    /// **It asks for the ending rather than trusting its caller, and a review is why.** A latch that
+    /// takes anybody's word for it can be set on a console that is still reading, which silently
+    /// swallows the sentence its read would have earned later — reachable from nowhere today, and
+    /// nothing in the type said so.
+    pub fn dismiss_the_silence(&self, ending: Option<term_core::Ending>) {
+        if crate::painter::notices::went_quiet(ending) {
+            self.quiet.borrow_mut().dismissed = true;
+        }
+    }
+
     /// Whether the program inside is still alive.
     ///
     /// It stops being so the moment the thread finishes, which is when its output channel closes.
@@ -339,8 +363,8 @@ fn say(sentence: &str) {
     let _ = writeln!(std::io::stderr().lock(), "{sentence}");
 }
 
-/// Decides whether a console that stopped receiving deserves a line on the developer channel, and
-/// what that line says.
+/// Decides what is left to say about a console that stopped receiving: whether it has earned a line
+/// on the developer channel, and whether the sentence over it is still on the glass.
 ///
 /// **It goes before this module's tests and not beside [`DeafConsole`]**, which is where the shape
 /// it copies lives. **D28**'s counter stops at the first `mod tests` line, so a type declared after
@@ -357,6 +381,15 @@ fn say(sentence: &str) {
 #[derive(Default)]
 struct QuietConsole {
     said: bool,
+    /// Whether somebody has already taken the sentence over this console off the glass.
+    ///
+    /// **It lives beside `said` because a pane holds one of these** and the window's core, where a
+    /// field would otherwise go, may not grow by a line (**D28**). The two are not the same
+    /// predicate and a review was right to say so: `said` is spent by a **failed read** alone,
+    /// because the runtime already prints a panic and a vanished listener has no console left to
+    /// speak over, while this one governs **every** ending that is not an ordinary one — which is
+    /// what the glass says something about. Dismissing hides the sentence and undoes nothing.
+    dismissed: bool,
 }
 
 impl QuietConsole {

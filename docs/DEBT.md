@@ -112,3 +112,21 @@ Format: `- <date> · <ticket> · <what> — <why it matters>`.
   (`a_console_whose_reading_ended_badly_does_not_close_the_window_on_its_own`). The transferable half:
   **«this state is unreachable» is a claim about the whole state space, and it was made from one
   corner of it.**
+- 2026-09-11 · 192 · **A console that is quiet AND deaf is reported by a decision nothing wires up**
+  — the sentence over the glass withholds «what you type still reaches it» when the writer has given
+  up, and both sentences are pinned by tests. What is **not** pinned is the reading of `gave_up`
+  itself: a write failure cannot be produced from outside `term-core` any more than a failed read
+  can, so hardcoding that half to `false` leaves the suite green. Same shape, and same missing seam,
+  as the entry above about the input half of `Silences::of`.
+- 2026-09-11 · 192 · **Three tests of the notices' precedence no-op silently off Linux** — they open
+  with `if !hold_a_paste_on(&mut pane) { return; }`, and the boundary a held paste needs is
+  `const Some(4_095)` under `cfg(linux)` and `None` elsewhere. On macOS and Windows — **F2.7**, the
+  next milestone — those three report green while asserting nothing. The helper's own docblock says
+  the `false` return is not a pass; what is missing is a `#[cfg]` that makes the whole file's
+  paste-dependent tests *absent* rather than empty, which is a change over all of them.
+- 2026-09-11 · 192 · **The mouse pass hit-tests a notice against the previous frame's tiling** —
+  inherited from the held paste's notice, whose comment records it and accepts it with its reason
+  (the press is answered where the person aimed it, which is what they could see). With the second
+  notice it doubles: on the one frame a producer first publishes a panel, a press over the panel's
+  new columns can dismiss a sentence that was drawn under them.
+

@@ -3866,7 +3866,10 @@ mod tests {
     /// lines. A reviewer found it by counting the file with the guard's own rules; here they cost
     /// nothing, because this module is the one the walk stops at.
     fn both_ways_to_answer() -> [&'static str; 2] {
-        [painter::ANSWERED_BY_HAND, painter::ANSWERED_BY_CLICK]
+        [
+            painter::notices::ANSWERED_BY_HAND,
+            painter::notices::ANSWERED_BY_CLICK,
+        ]
     }
 
     /// How tall the whole sentence lays out over the console, at the width the box is measured with.
@@ -3954,7 +3957,7 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::the_question_box(ui.painter(), pane, theme, metrics, rect);
+            found = painter::notices::the_question_box(ui.painter(), pane, theme, metrics, rect);
         })
         .drop_without_applying_deltas();
         found.expect("that console has a question with a box worth pressing")
@@ -4190,7 +4193,7 @@ mod tests {
     /// The painting *was* being walked — `text_painted` goes through `painter::paint_a_console`,
     /// which paints the question — but every test that walked it read `Shape::Text` and nothing
     /// else, while the ones that reason about the box's size enter through
-    /// `painter::the_question_box`, which measures it and hands the rectangle back without drawing
+    /// `painter::notices::the_question_box`, which measures it and hands the rectangle back without drawing
     /// anything. So the border had no assertion of any kind on it, and it fails the way the cursor's
     /// outline did: `Stroke::new(0.0, …)` is queued, carries the right colour and covers the right
     /// rectangle, and cannot be seen. A console holding a paste would show the question floating
@@ -4307,7 +4310,8 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
+            found =
+                painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
         })
         .drop_without_applying_deltas();
 
@@ -4351,11 +4355,17 @@ mod tests {
             let mut found = None;
             let mut answer = 0.0;
             ctx.run_ui(egui::RawInput::default(), |ui| {
-                found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, narrow);
+                found = painter::notices::the_question_box(
+                    ui.painter(),
+                    &pane,
+                    &theme,
+                    &metrics,
+                    narrow,
+                );
                 answer = ui
                     .painter()
                     .layout(
-                        painter::ANSWERED_BY_HAND.to_owned(),
+                        painter::notices::ANSWERED_BY_HAND.to_owned(),
                         metrics.font(),
                         theme.foreground(),
                         (narrow.width() - 4.0 * metrics.width()).max(metrics.width()),
@@ -4425,7 +4435,13 @@ mod tests {
                 let mut found = None;
                 let mut answers = [0.0_f32; 2];
                 ctx.run_ui(egui::RawInput::default(), |ui| {
-                    found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, area);
+                    found = painter::notices::the_question_box(
+                        ui.painter(),
+                        &pane,
+                        &theme,
+                        &metrics,
+                        area,
+                    );
                     let wrap = (area.width() - 4.0 * margin).max(metrics.width());
                     for (at, how) in both_ways_to_answer().into_iter().enumerate() {
                         answers[at] = ui
@@ -4503,7 +4519,8 @@ mod tests {
                 egui::Order::Foreground,
                 egui::Id::new("the console"),
             ));
-            box_of_it = painter::the_question_box(&painter, &pane, &theme, &metrics, narrow);
+            box_of_it =
+                painter::notices::the_question_box(&painter, &pane, &theme, &metrics, narrow);
             painter::paint_a_console(
                 &painter,
                 &pane,
@@ -4593,7 +4610,7 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, hair);
+            found = painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, hair);
         })
         .drop_without_applying_deltas();
 
@@ -4631,7 +4648,13 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, three_rows);
+            found = painter::notices::the_question_box(
+                ui.painter(),
+                &pane,
+                &theme,
+                &metrics,
+                three_rows,
+            );
         })
         .drop_without_applying_deltas();
 
@@ -4668,7 +4691,8 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, roomy);
+            found =
+                painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, roomy);
         })
         .drop_without_applying_deltas();
         let box_of_it = found.expect("a console with room to spare has a box");
@@ -4756,6 +4780,662 @@ mod tests {
             narrow.bottom(),
             box_of_it.max.y - the_middle
         );
+    }
+
+    /// Makes that console's reading end in a way that is **not** an ordinary ending, and waits for
+    /// the reason to be recorded.
+    ///
+    /// **A read that failed cannot be built from outside `term-core`** — on Linux the one errno a
+    /// broken pseudoterminal gives is mapped to end of file before the failing arm — so the ending
+    /// used here is the other one that is not «ended well»: a bridge with nothing behind it leaves
+    /// the reading with no listener while the program inside is alive and writing, which is exactly
+    /// what the sentence on the glass claims.
+    fn make_it_go_quiet(pane: &mut Pane) {
+        let (orphan, nowhere) = std::sync::mpsc::channel();
+        pane.pty_output = PtyOutput::new(nowhere, || {});
+        drop(orphan);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pane.pty.ending().is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "the reading never noticed its listener was gone"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_ne!(
+            pane.pty.ending(),
+            Some(term_core::Ending::EndedWell),
+            "this console ended well, so there would be nothing to say about it"
+        );
+    }
+
+    /// Where that console's silence notice goes, asked of the same function the painter and the
+    /// mouse pass both call.
+    fn the_silence_box_on(
+        pane: &Pane,
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        rect: egui::Rect,
+    ) -> Option<egui::Rect> {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::notices::the_boxes(ui.painter(), pane, theme, metrics, rect).silence;
+        })
+        .drop_without_applying_deltas();
+        found
+    }
+
+    /// How much room this console's silence sentence needs, laid out the way the notice lays it out.
+    fn the_sentence_laid_out_over(
+        pane: &Pane,
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        area: egui::Rect,
+    ) -> egui::Vec2 {
+        let margin = metrics.width();
+        let ctx = egui::Context::default();
+        let mut size = egui::Vec2::ZERO;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            size = ui
+                .painter()
+                .layout(
+                    painter::notices::what_it_says(false),
+                    metrics.font(),
+                    theme.foreground(),
+                    (area.width() - 4.0 * margin).max(margin),
+                )
+                .size();
+        })
+        .drop_without_applying_deltas();
+        let _ = pane;
+        size
+    }
+
+    /// A console with room to spare, placed away from the window's origin so an assertion cannot
+    /// read the window's top for the console's.
+    fn a_roomy_console(metrics: &CellMetrics) -> egui::Rect {
+        egui::Rect::from_min_size(
+            egui::pos2(41.0, metrics.height() * 1.5),
+            egui::vec2(metrics.width() * 80.0, metrics.height() * 40.0),
+        )
+    }
+
+    #[test]
+    fn the_silence_is_stroked_filled_and_drawn_where_its_box_is() {
+        // **The box existing is not the notice being painted**, and the mutation says so: deleting
+        // the whole painting call from the console's pass left every other assertion about this
+        // notice green, because they all ask the function that measures it. What follows reads the
+        // shapes the frame actually queued.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("yes", 0);
+        make_it_go_quiet(&mut pane);
+        let area = a_roomy_console(&metrics);
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut discoverer = fonts::Discoverer::default();
+        let mut box_of_it = None;
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("the console"),
+            ));
+            box_of_it =
+                painter::notices::the_boxes(&painter, &pane, &theme, &metrics, area).silence;
+            painter::paint_a_console(
+                &painter,
+                &pane,
+                &theme,
+                &metrics,
+                area,
+                &mut discoverer,
+                painter::CursorInk::Filled,
+            );
+        });
+        let box_of_it = box_of_it.expect("that console has something to say");
+        let mut output = output;
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
+
+        let stroked = shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(shape) => {
+                shape.rect == box_of_it
+                    && shape.stroke.color == THE_FOCUS_COLOUR
+                    && shape.stroke.width == 1.0
+            }
+            _ => false,
+        });
+        assert!(
+            stroked,
+            "the notice's border was never queued at {box_of_it:?}"
+        );
+
+        // **Filled as well as stroked, and nothing else asserted the fill.** Without it the
+        // sentence is painted straight over the program's own text, unreadable: a border around
+        // transparency is not a box.
+        let filled = shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(shape) => {
+                shape.rect == box_of_it && shape.fill == THE_PANEL_BACKGROUND
+            }
+            _ => false,
+        });
+        assert!(filled, "the notice's box was stroked but never filled");
+
+        // The sentence is drawn, and clipped to the box rather than to the console: a clip that
+        // ends lower paints the words over the half the ceiling exists to keep clear, and one that
+        // covers nothing leaves the shape queued and invisible.
+        let text = shapes
+            .iter()
+            .find(|clipped| matches!(clipped.shape, egui::Shape::Text(_)))
+            .expect("the sentence is drawn");
+        assert!(
+            text.clip_rect.max.y <= box_of_it.max.y + 1.0
+                && text.clip_rect.contains_rect(egui::Rect::from_min_size(
+                    box_of_it.left_top() + egui::vec2(metrics.width(), metrics.width()),
+                    box_of_it.size() - egui::vec2(2.0, 2.0) * metrics.width(),
+                )),
+            "the sentence is clipped to {:?} against a box of {box_of_it:?}: what the clip does not \
+             cover is not painted at all, and what it covers past the box is painted over the \
+             console's bottom half with nothing behind it",
+            text.clip_rect
+        );
+    }
+
+    #[test]
+    fn a_click_on_the_silence_takes_it_off_the_glass_through_the_mouse_pass() {
+        // AC9 through the door a person's hand comes in by, and not through the accessor: what the
+        // press has to do is find the box in the same geometry the painter drew it with, in a pass
+        // whose first line skips every console with nothing to say.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("yes", "sleep 30");
+        make_it_go_quiet(window.active_mut().panes_mut()[0]);
+        let theme = window.theme;
+        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
+            .expect("the console that went quiet has nothing to say");
+
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(notice.center()),
+        );
+
+        assert!(
+            window.active().panes()[0]
+                .pty_output
+                .the_silence_was_dismissed(),
+            "a click on the sentence left it on the glass"
+        );
+        assert!(
+            the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0]).is_none(),
+            "the box is still there to swallow the next press, so the last output cannot be marked"
+        );
+    }
+
+    #[test]
+    fn the_press_that_dismisses_the_silence_is_not_also_given_to_the_program() {
+        // **A review found this surviving: the branch answered the notice and returned the queue
+        // with the press still in it.** The click dismissed the sentence *and* went on to the
+        // routing below, so on a console whose program asked for the mouse the same click was
+        // reported to it — the paste's notice has a test for exactly this and the silence had none.
+        //
+        // The console has to have asked for the mouse **before** it goes quiet, because the mode is
+        // parsed out of its output, and it has to keep writing afterwards, because the reading only
+        // finds out its listener is gone when it next delivers. Hence a program that arms the mode,
+        // says so, and then does not stop.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with(
+            "stty -echo -icanon && printf '\\033[?1000h\\033[?1002h\\033[?1006h' && echo ready \
+             && yes",
+            "sleep 30",
+        );
+        // **The mode itself is what is waited for, not a word on screen**: the program floods, so
+        // «ready» scrolls out of the grid within a frame or two of being written.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !window.active().panes()[0]
+            .screen
+            .mouse_reporting()
+            .wants_mouse()
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the program never asked for the mouse, so a press reaching it would look like a \
+                 press that did not"
+            );
+            window.active_mut().panes_mut()[0].pump();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        make_it_go_quiet(window.active_mut().panes_mut()[0]);
+        let theme = window.theme;
+        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
+            .expect("the console that went quiet has nothing to say");
+
+        deliver_to_the_mouse(
+            &mut window,
+            &ctx,
+            &rects,
+            &metrics,
+            click_at(notice.center()),
+        );
+
+        assert!(
+            window.active().panes()[0]
+                .pty_output
+                .the_silence_was_dismissed(),
+            "the click did not dismiss the sentence it was aimed at"
+        );
+        // **The press was taken out of the batch, and this is what says so.** If it were left in,
+        // the routing below would have run over a console that wants the mouse and over a cell of
+        // its grid, which is the one thing that sets this back to true.
+        assert!(
+            !window.the_press_went_to_the_program,
+            "the press that dismissed the sentence was handed to the program as well"
+        );
+    }
+
+    #[test]
+    fn a_click_beside_the_silence_is_not_answered_by_it() {
+        // The other half of the press: the box is what answers, so a press on the console's own
+        // bottom half has to reach the selection exactly as it does today.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("yes", "sleep 30");
+        make_it_go_quiet(window.active_mut().panes_mut()[0]);
+        let theme = window.theme;
+        let notice = the_silence_box_on(window.active().panes()[0], &theme, &metrics, rects[0])
+            .expect("the console that went quiet has nothing to say");
+        let below = egui::pos2(notice.center().x, rects[0].bottom() - metrics.height());
+        assert!(
+            !notice.contains(below),
+            "the point chosen is inside the box, so this test would pass without the box being \
+             consulted at all"
+        );
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(below));
+
+        assert!(
+            !window.active().panes()[0]
+                .pty_output
+                .the_silence_was_dismissed(),
+            "a press in the console's bottom half answered a notice that is not there"
+        );
+    }
+
+    #[test]
+    fn a_console_that_stopped_receiving_says_so_over_its_grid() {
+        // AC1. What it says is the whole of the promise: the output stopped, the program may still
+        // be running, and what is typed still reaches it.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("yes", 0);
+        make_it_go_quiet(&mut pane);
+        let area = a_roomy_console(&metrics);
+
+        let box_of_it = the_silence_box_on(&pane, &theme, &metrics, area)
+            .expect("a console that stopped receiving has nothing to say");
+
+        // **Where it goes, not just that it exists**: on a console with nothing else to say the box
+        // starts one margin in from the console's own top-left corner, which is the claim a roomy
+        // rectangle cannot fail — `contains_rect` on eighty by forty holds whatever the geometry
+        // does.
+        let margin = metrics.width();
+        assert!(
+            (box_of_it.left() - (area.left() + margin)).abs() <= 1.0
+                && (box_of_it.top() - (area.top() + margin)).abs() <= 1.0,
+            "the box is at {:?} over a console whose top-left corner is {:?}: it is not where the \
+             only notice on a console goes",
+            box_of_it.left_top(),
+            area.left_top()
+        );
+        assert!(
+            painter::notices::STOPPED_RECEIVING.contains("may still be running"),
+            "the sentence stopped saying the thing that makes it worth saying: {}",
+            painter::notices::STOPPED_RECEIVING
+        );
+        // **The clause about typing is only true where the console can still be typed into**, so it
+        // is a sentence of its own and this console — whose writer never gave up — gets it.
+        assert!(
+            the_sentence_over(&pane, &theme, &metrics, area)
+                .ends_with(painter::notices::AND_STILL_TAKES_WHAT_YOU_TYPE),
+            "a console that can still be typed into did not say so"
+        );
+    }
+
+    /// The sentence a console is actually showing, laid out the way the painter lays it out.
+    fn the_sentence_over(
+        pane: &Pane,
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        area: egui::Rect,
+    ) -> String {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut discoverer = fonts::Discoverer::default();
+        let mut said = String::new();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("the console"),
+            ));
+            painter::paint_a_console(
+                &painter,
+                pane,
+                theme,
+                metrics,
+                area,
+                &mut discoverer,
+                painter::CursorInk::Filled,
+            );
+        });
+        let shapes = std::mem::take(&mut output.shapes);
+        output.drop_without_applying_deltas();
+        for clipped in &shapes {
+            if let egui::Shape::Text(text) = &clipped.shape {
+                said = text.galley.text().to_owned();
+            }
+        }
+        said
+    }
+
+    #[test]
+    fn a_console_that_has_also_stopped_taking_what_you_type_does_not_promise_it_does() {
+        // **The clause is the promise the reading's ending cannot make.** The two directions are two
+        // threads with two endings: a console can be quiet and deaf at once, and the developer
+        // channel's own line then says «this console can no longer be typed into» — so the glass
+        // saying the opposite in the same window is the kind of falsehood this project treats as
+        // worse than silence. A review caught it being said unconditionally.
+        let deaf = painter::notices::what_it_says(true);
+        let heard = painter::notices::what_it_says(false);
+
+        assert!(
+            !deaf.contains("reaches it"),
+            "a console that can no longer be typed into still promises that what you type arrives: \
+             {deaf}"
+        );
+        assert!(
+            heard.ends_with(painter::notices::AND_STILL_TAKES_WHAT_YOU_TYPE),
+            "a console that can still be typed into stopped saying so: {heard}"
+        );
+        assert!(
+            deaf.starts_with(painter::notices::STOPPED_RECEIVING)
+                && heard.starts_with(painter::notices::STOPPED_RECEIVING),
+            "the half that is always true stopped being said"
+        );
+    }
+
+    #[test]
+    fn a_console_that_ended_well_says_nothing_over_its_grid() {
+        // AC4's other half: the arm every ordinary console takes must stay silent, and a notice is
+        // measured by there being no box at all.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("printf done", 0);
+        wait_for_it_to_die(&pane);
+        pane.pump();
+        assert_eq!(
+            pane.pty.ending(),
+            Some(term_core::Ending::EndedWell),
+            "the console did not end the ordinary way"
+        );
+
+        assert!(
+            the_silence_box_on(&pane, &theme, &metrics, a_roomy_console(&metrics)).is_none(),
+            "a console whose program simply exited was given a notice saying it stopped receiving"
+        );
+    }
+
+    #[test]
+    fn a_console_still_reading_says_nothing_over_its_grid() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let pane = pane_with("sleep 30", 0);
+
+        assert!(
+            the_silence_box_on(&pane, &theme, &metrics, a_roomy_console(&metrics)).is_none(),
+            "a console that is still reading was told it had stopped receiving"
+        );
+    }
+
+    #[test]
+    fn the_silence_stands_under_the_held_paste_and_gives_way_to_it() {
+        // The precedence, and the reason it is not alphabetical: the paste's notice is a question
+        // with bytes waiting on an answer, and this one is a statement about something already
+        // over.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("yes", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        make_it_go_quiet(&mut pane);
+        let area = a_roomy_console(&metrics);
+
+        let paste = the_notice_box(&pane, &theme, &metrics, area);
+        let silence = the_silence_box_on(&pane, &theme, &metrics, area)
+            .expect("a wide console has room for both notices");
+
+        assert!(
+            silence.top() >= paste.bottom(),
+            "the silence's box starts at {:?} and the paste's ends at {:?}: they overlap, so one of \
+             the two sentences is drawn over the other",
+            silence.top(),
+            paste.bottom()
+        );
+    }
+
+    #[test]
+    fn both_notices_together_stay_out_of_the_bottom_half_of_their_console() {
+        // AC6 over the pair, which is the case the ceiling was asked for: the bottom half is where a
+        // console's last output is, it is the first thing somebody marks, and marking begins with a
+        // bare press.
+        //
+        // **It walks the heights instead of picking one**, and that is not thoroughness for its own
+        // sake: on a console with room to spare the pair fits under the half whatever the bound
+        // says, so a single roomy shape asserts nothing about it. The walk has to see the bound
+        // both refuse and allow, and it asserts that it did — otherwise a broken ceiling passes on
+        // the shapes where it was never consulted.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("yes", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        make_it_go_quiet(&mut pane);
+        let mut refused = 0;
+        let mut allowed = 0;
+
+        for rows in 4..=40 {
+            let area = egui::Rect::from_min_size(
+                egui::pos2(41.0, metrics.height() * 1.5),
+                egui::vec2(metrics.width() * 40.0, metrics.height() * rows as f32),
+            );
+            let the_middle = area.top() + area.height() * 0.5;
+            match the_silence_box_on(&pane, &theme, &metrics, area) {
+                None => refused += 1,
+                Some(silence) => {
+                    allowed += 1;
+                    // **Whole, and asserted on the box that came back rather than on the clause
+                    // that used to say so.** A review measured that clause dead — the ceiling
+                    // refuses every box the console had to clip — so what is pinned here is the
+                    // promise and not whichever line enforces it.
+                    let sentence = the_sentence_laid_out_over(&pane, &theme, &metrics, area);
+                    assert!(
+                        silence.height() - 2.0 * metrics.width() >= sentence.y - 1.0,
+                        "over a console of {rows} rows the box is {silence:?} and its sentence lays \
+                         out {sentence:?}: it is shown cut, and there is no key in it to protect"
+                    );
+                    assert!(
+                        silence.bottom() <= the_middle + 1.0,
+                        "over a console of {rows} rows the silence's box ends at {:?}, past the \
+                         middle at {the_middle:?}: the bottom half a person marks and copies in is \
+                         not theirs any more",
+                        silence.bottom()
+                    );
+                    let paste = the_notice_box(&pane, &theme, &metrics, area);
+                    assert!(
+                        paste.bottom() <= the_middle + 1.0 && silence.top() >= paste.bottom(),
+                        "over a console of {rows} rows the two boxes are {:?} and {:?}: they \
+                         overlap, or one of them is past the middle at {the_middle:?}",
+                        paste,
+                        silence
+                    );
+                }
+            }
+        }
+
+        assert!(
+            refused > 0 && allowed > 0,
+            "the bound was consulted on none of the shapes walked: {refused} refused and {allowed} \
+             allowed, so this test would pass with the ceiling removed"
+        );
+    }
+
+    #[test]
+    fn a_console_with_room_for_only_one_notice_keeps_the_question_and_drops_the_silence() {
+        // AC7's precedence, and the shape is measured rather than picked: the console is as tall as
+        // the paste's own notice needs plus what the ceiling costs, so the second one cannot fit.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("yes", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        make_it_go_quiet(&mut pane);
+        let narrow = egui::Rect::from_min_size(
+            egui::pos2(41.0, metrics.height() * 1.5),
+            egui::vec2(metrics.width() * 20.0, metrics.height() * 40.0),
+        );
+
+        let paste = the_notice_box(&pane, &theme, &metrics, narrow);
+
+        assert!(
+            paste.bottom() > narrow.top() + narrow.height() * 0.5 - metrics.height(),
+            "the question's box ends at {:?}, well short of the ceiling, so there is room for the \
+             second notice and this shape says nothing about the precedence",
+            paste.bottom()
+        );
+        assert!(
+            the_silence_box_on(&pane, &theme, &metrics, narrow).is_none(),
+            "the silence was drawn where only the question fits, so one of the two is showing half \
+             a sentence"
+        );
+    }
+
+    #[test]
+    fn a_console_too_short_for_the_whole_sentence_says_nothing_at_all() {
+        // AC8 for this notice. Whole or not at all: there is no key to press here, so nothing in a
+        // clipped sentence is worth protecting, and a box that shows half a statement is worse than
+        // a console that says nothing.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("yes", 0);
+        make_it_go_quiet(&mut pane);
+        let three_rows = egui::Rect::from_min_size(
+            egui::pos2(41.0, metrics.height() * 1.5),
+            egui::vec2(metrics.width() * 20.0, metrics.height() * 3.0),
+        );
+
+        assert!(
+            the_silence_box_on(&pane, &theme, &metrics, three_rows).is_none(),
+            "a console of three rows was given a box for a sentence that does not fit in it"
+        );
+    }
+
+    #[test]
+    fn a_console_that_went_quiet_puts_no_sentence_of_ours_in_its_grid() {
+        // AC10. The grid is what the program wrote, and a sentence of the application's put there
+        // would survive in the scrollback as if the program had written it.
+        //
+        // **The console has to have something in its grid first, and a review measured why.** The
+        // way this test makes a console go quiet takes its bridge away, so nothing can ever be
+        // pumped afterwards: the first version of this asserted three absences over an **empty
+        // string**, which every mutation in the world passes. So the program's own output goes in
+        // before the console goes quiet, and the words looked for come from the sentence itself.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        // **It writes and keeps writing**, and both halves matter: the ending is recorded once, so a
+        // program that exits first records an ordinary ending and there would be nothing to say
+        // about it — and the reading only finds out its listener is gone when it next delivers.
+        let mut pane = pane_with("yes", 0);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pane.screen.to_text().trim().is_empty() {
+            assert!(
+                Instant::now() < deadline,
+                "the program never wrote anything"
+            );
+            pane.pump();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !pane.screen.to_text().trim().is_empty(),
+            "the program's own output never reached the grid, so this test would be asserting \
+             absences over an empty screen"
+        );
+        make_it_go_quiet(&mut pane);
+        let area = a_roomy_console(&metrics);
+        assert!(
+            the_silence_box_on(&pane, &theme, &metrics, area).is_some(),
+            "the console has nothing to say, so nothing could have leaked into its grid either"
+        );
+
+        // The sentence is drawn over the console — that is what this asks about — and the pump runs
+        // afterwards, which is the frame a leak would show up in.
+        let _ = the_sentence_over(&pane, &theme, &metrics, area);
+        pane.pump();
+
+        let on_screen = pane.screen.to_text();
+        for word in painter::notices::what_it_says(false)
+            .split_whitespace()
+            .take(6)
+        {
+            let word = word.trim_end_matches(['.', ',']);
+            assert!(
+                !on_screen.contains(word),
+                "«{word}» of the application's own sentence reached the grid, so it is in the \
+                 scrollback as if the program had written it. The screen holds: {on_screen:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dismissing_the_silence_takes_the_sentence_away_and_undoes_nothing() {
+        // AC9. What the dismissal is for: the box is what swallows a press, so taking it away is
+        // what gives the console's last output back to whoever wants to mark and copy it.
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("yes", 0);
+        make_it_go_quiet(&mut pane);
+        let area = a_roomy_console(&metrics);
+        let how_it_ended = pane.pty.ending();
+        assert!(the_silence_box_on(&pane, &theme, &metrics, area).is_some());
+
+        pane.pty_output.dismiss_the_silence(pane.pty.ending());
+
+        assert!(
+            the_silence_box_on(&pane, &theme, &metrics, area).is_none(),
+            "the sentence is still on the glass after being dismissed"
+        );
+        assert_eq!(
+            pane.pty.ending(),
+            how_it_ended,
+            "dismissing the sentence changed how the reading is recorded as having ended"
+        );
+        // **What is not asserted here, and why**: «the window still will not close itself over this
+        // console» cannot fail — closing asks for an ordinary ending and this console has none, so
+        // the answer is the same before and after whatever the dismissal does. A review measured
+        // it. The claim that can fail is the one above: the ending is untouched.
     }
 
     /// **A press on the panel's strip does not answer the question**, because the box is clamped to
@@ -5017,7 +5697,8 @@ mod tests {
             .drop_without_applying_deltas();
         let mut found = None;
         ctx.run_ui(egui::RawInput::default(), |ui| {
-            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
+            found =
+                painter::notices::the_question_box(ui.painter(), &pane, &theme, &metrics, sliver);
         })
         .drop_without_applying_deltas();
 

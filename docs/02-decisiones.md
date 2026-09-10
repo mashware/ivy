@@ -5677,6 +5677,23 @@ which is **#198**.
 | **A floor of «one line of text»** | Measured: it admits a box showing a third of the way out |
 | **A ceiling expressed as a number of rows** | It would have to be re-derived every time the font changes; a share of the console does not |
 
+### What the second notice added to it (**#192**'s last delivery)
+
+The room this ceiling was asked for is now taken, and what fills it is the sentence about a console
+that stopped receiving. Two things follow from the ceiling itself; what that sentence *says* and what
+a click does to it are **D41**'s.
+
+- **The question keeps the top and the statement gives way.** Both notices share this ceiling, so on
+  a console with room for only one the held paste is drawn and the silence is not. The order is not
+  alphabetical: a held paste is a **question**, with bytes waiting on an answer and a key to press,
+  and the other is a statement about something already over that nothing can undo.
+- **The statement is drawn whole or not at all**, which is the opposite of what this ceiling does to
+  the question, and the difference is exactly the thing above. A clipped question still shows its
+  answer on the first line, so the ceiling can win there; a clipped statement protects nothing.
+  **What enforces it is the ceiling and not a floor of its own**: a box the console cannot hold is
+  clipped to the console, whose bottom is past the half by definition — measured, and the separate
+  clause that used to say so was dead code.
+
 ### What D39 leaves open
 
 - **A console between three and about six rows holds a paste in silence.** Three rows is a shape the
@@ -5740,3 +5757,61 @@ thing that reads it.
 - **A console whose program left a survivor still never ends**, so it is never finished and the
   window never closes over it. Unchanged by this, mechanism in **D32**, and the obvious fix is worse
   than the silence: `Child::try_wait` answers «the child is gone», not «this console is over».
+
+## D41 — What a console that stopped receiving says, and what a click does to it
+
+**D38** made how a reading ended a value, **D40** stopped the window closing itself over an ending
+that was not ordinary, and **D39** left half a console free for something to be said there. This is
+what is said, and it is the only part of **#192** a person sees.
+
+### The decision
+
+- **One sentence on the glass, the cause on the developer channel.** *«This console stopped receiving
+  its program's output. The program may still be running.»* Asked and answered by the user, against
+  three sentences over the console: from the chair the two reasons are acted on identically, and the
+  difference between a read that failed and a reader that died is actionable in the channel that
+  carries the `ErrorKind` and the errno, not over the grid.
+- **It names no key.** There is nothing to press to answer it — a click only takes it away — and
+  naming a key nobody needs is the defect **#170** closed one notice earlier.
+- **It says «what you type still reaches it» only where that is true.** The clause is a second
+  sentence, added when the console can still be typed into and withheld when the writer has given up
+  — because then **D29**'s own line says «this console can no longer be typed into», and the glass
+  promising delivery in the same window where standard error denies it is the kind of falsehood this
+  project treats as worse than silence. The reading's ending says nothing about the input side: they
+  are two threads with two endings. **A review caught the promise being made unconditionally**, and
+  it had been published in the design's own contract.
+- **Any ending that is not an ordinary one earns it** — a read that failed, a reader that died, an
+  output nobody was left to take — which is the same partition **D40** closes the window by. Nothing
+  recorded is a console still reading and says nothing.
+- **A click dismisses it, for that console, for good, and undoes nothing.** How the reading ended
+  stays exactly as the pseudoterminal recorded it and the window still will not close itself over
+  that console; what goes is the sentence, not the fact.
+- **The sentence never enters the grid.** It is painted over the console, not written into it: the
+  grid is what the program wrote, and a sentence of the application's put there would survive in the
+  scrollback as if the program had said it.
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **Three sentences on the glass**, one per reason | From the chair the two reasons are acted on identically. The user answered this one, and the difference stays in the channel where it can be used |
+| **Saying it in the pane's status panel** | That document belongs to whoever does the work, and `attention` is theirs to declare: **D6**, **D17** and **D18** all forbid the application writing into it |
+| **A key to dismiss it** | It would have to be named in the sentence, on every pane, while the keys reach one of them — the defect #170 closed. A click is the gesture that already means «not this» here |
+| **Leaving it until the console is closed** | The box is what swallows a press, and the console's last output — the thing somebody wants to mark and copy — is underneath. A notice with no way out is the whole console becoming a button, which is **#198** |
+| **Re-arming it on focus, or on any other event** | A dismissal that comes back is a notice that cannot be got rid of. What it costs is written in «what it leaves open» |
+
+### What it leaves open
+
+- **Nothing says which console.** Neither the sentence over the grid — it is over the console it is
+  about, so it does not have to — nor the developer line, which goes to a standard error shared by
+  every pane and says «this console». With several panes open, the line says what failed and not
+  whose. It is the shape all twenty-eight of this crate's lines have, so it is one change over all of
+  them.
+- **Once dismissed there is no way back**, and the only other surface that would say it is the
+  developer line — which is written for a **failed read** alone. So for a reader that died or a
+  listener that vanished, a stray press near the console's top-left corner takes away the only sign
+  there was. Candidates, none of them free: re-arming on focus, or the tab's own card, which the
+  application does own.
+- **A console too short or too narrow for the whole sentence says nothing at all**, which is
+  **D39**'s accepted price and is worth naming twice: on such a console what a person sees is a
+  console that stopped and a window that stayed open.

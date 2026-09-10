@@ -751,7 +751,10 @@ impl Window {
         // loop allocates a vector of every pane once per pane, on every frame, and nothing declares
         // that cost — which the frame's subtraction would publish as the framework's.
         for (pane, rect) in self.active_mut().panes_mut().into_iter().zip(rects) {
-            if pane.held.is_none() {
+            // **Two comparisons and neither allocates**, which is the shape this loop already had
+            // for one notice: a console with nothing to say must not make the frame pay for the
+            // thing that is almost never there. The second is a read of a cell written once.
+            if pane.held.is_none() && !crate::painter::notices::still_says_it_went_quiet(pane) {
                 continue;
             }
             // **The console's rectangle, and this pass works it out without having refreshed the
@@ -766,12 +769,14 @@ impl Window {
             let console = pane
                 .tile_with_its_panel(*rect, metrics.width(), now)
                 .console;
-            let Some(box_of_it) =
-                crate::painter::the_question_box(painter, pane, &theme, metrics, console)
-            else {
-                continue;
-            };
-            if box_of_it.contains(bare.at) {
+            // **Both boxes in one pass**, because the second is measured against where the first
+            // ends and asking for them separately lays the question's text out twice per quiet pane
+            // — work this pass would not be declaring (**D13**).
+            let boxes = crate::painter::notices::the_boxes(painter, pane, &theme, metrics, console);
+            if boxes
+                .question
+                .is_some_and(|box_of_it| box_of_it.contains(bare.at))
+            {
                 pane.held = None;
                 let mut rest = queue;
                 rest.remove(which);
@@ -779,6 +784,20 @@ impl Window {
                 // field feeds decides, one frame later, what the drag beginning at this press means;
                 // leaving the previous press's answer there made it decide by a gesture that is
                 // over.
+                self.the_press_went_to_the_program = false;
+                return rest;
+            }
+            // **The second notice, and a press on it discards nothing.** It takes the sentence off
+            // the glass; how the reading ended is what the pseudoterminal recorded and stays
+            // readable, and the console's last output goes back to being markable, which is what
+            // somebody clicking there most likely wanted.
+            if boxes
+                .silence
+                .is_some_and(|box_of_it| box_of_it.contains(bare.at))
+            {
+                pane.pty_output.dismiss_the_silence(pane.pty.ending());
+                let mut rest = queue;
+                rest.remove(which);
                 self.the_press_went_to_the_program = false;
                 return rest;
             }
