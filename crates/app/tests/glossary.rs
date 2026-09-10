@@ -1221,6 +1221,12 @@ const NOT_OURS: &[&str] = &[
     // The standard library and the language.
     "fsync",
     "read",
+    // The system's own error number for «the other end of this pseudoterminal is gone», cited by the
+    // value that reports how a reading ended and by the test that pins why that value carries a
+    // number at all: the standard library has no name for this one and flattens it into a bucket
+    // whose whole printed form is the word «uncategorized». Same case as `OPOST` above — a constant
+    // of the operating system, which this tree will never define.
+    "EIO",
     // A method of `f32`. It is cited by the rounding that decides the grid, as the alternative that
     // was discarded — so it is named here precisely because the code does **not** call it, and its
     // siblings `floor` and `round` need no entry only because the code does.

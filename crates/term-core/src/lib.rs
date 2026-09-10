@@ -12,11 +12,11 @@
 
 use std::ffi::OsStr;
 use std::io::{Read, Write};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{
     Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError, channel, sync_channel,
 };
+use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -37,6 +37,60 @@ pub use view::{
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// How a console's reading ended.
+///
+/// **It exists because every ending used to look the same from outside.** What reaches whoever hosts
+/// this crate is the output channel closing, and a program that finished, a read that failed and a
+/// reader that died all close it identically — so the host could tell that a console was over and
+/// never why. This is that «why» for the endings a thread lives to report, and it is reported **by
+/// the thread that ended**, which is what keeps it a fact rather than a guess: nothing outside is
+/// asked to deduce a reason from a closed channel. **A reader that dies reports nothing**, so that
+/// third case is not one of the variants below.
+///
+/// **`EndedWell` is not «no error», it is «this is what an ending is supposed to look like».** A
+/// program that exits and a console somebody closes both take that arm, and neither is worth saying
+/// anything about. The name is kept over the shorter one-word alternative because this is the word
+/// the decision
+/// about what closing means is written in, and one vocabulary for both is worth more than one fewer
+/// syllable at the point of use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ending {
+    /// The program finished, or this console is being closed.
+    ///
+    /// **Both of them, deliberately.** No consumer acts on the difference, and the one place it
+    /// could be told apart —whether the stop flag was up— is already what decides between this arm
+    /// and [`Ending::NobodyListening`].
+    EndedWell,
+    /// The read failed.
+    ///
+    /// **`kind` alone is not enough, and that was measured rather than assumed.** The standard
+    /// library flattens most of what a pseudoterminal can answer into one bucket whose whole printed
+    /// form is the word «uncategorized», while the operating system's own number survives: errno 5,
+    /// 70 and 75 all come out as that bucket and all keep their number. So both travel — the kind
+    /// for anybody who wants to branch, the number for the sentence somebody writes.
+    ///
+    /// **And the obvious example is the wrong one, which a review had to point out.** `EIO` never
+    /// reaches this arm: the pseudoterminal library maps it to end of file, on both platforms. What
+    /// arrives here is whatever a device or a driver answers that `std` has no name for, and that is
+    /// what the number is for.
+    ///
+    /// **Format it, do not branch on it.** The kind comes from a standard-library enum that gains
+    /// variants between releases, so a `match` over it here is one that stops being exhaustive
+    /// without this crate changing.
+    Failed {
+        kind: std::io::ErrorKind,
+        os_error: Option<i32>,
+    },
+    /// The reading stopped because nothing was left to deliver to, and nobody had asked for that.
+    ///
+    /// **This is not a console being closed, and telling the two apart is the whole reason this
+    /// variant exists.** Closing raises the stop flag first, so it comes out as
+    /// [`Ending::EndedWell`]. Reaching this arm means the other end of the output channel went away
+    /// on its own — the program inside may well be alive and writing — which is exactly the silence
+    /// this vocabulary was built to report, and calling it a clean end was the lie it exists against.
+    NobodyListening,
+}
 
 /// Size of the pseudoterminal, in cells.
 ///
@@ -84,6 +138,18 @@ pub struct Pty {
     /// `Disconnected` at once. A channel is used and not the `JoinHandle` because `join` has no
     /// timed form, and waiting for that thread without a deadline is the whole of this defect.
     reader_ended: Receiver<()>,
+    /// How the reading ended, written once by the reader thread and readable from here afterwards.
+    ///
+    /// **A cell and not a channel, because the answer has to survive being asked more than once.**
+    /// Receiving consumes, so whoever asked second would find nothing — and this is meant to be
+    /// asked by a painting loop, which asks about the same console again and again. It is the shape
+    /// [`Pty::backlog`] already uses for the other direction: shared state a thread writes and the
+    /// host reads on demand.
+    ///
+    /// **The cell keeps the first write, not the best one.** That is the right way round here —
+    /// one writer, one call site — but it is worth knowing before adding a second: the more
+    /// specific reason would be the one silently dropped.
+    ending: Arc<OnceLock<Ending>>,
     /// What pulls the reader thread out of a wait for room in the channel when it has to close.
     ///
     /// Without this, destroying the `Pty` while the channel is full **hangs the close**: the thread
@@ -225,11 +291,26 @@ const READER_GIVE_UP: Duration = Duration::from_millis(100);
 /// kernel's buffer fills up in turn —very little fits: some 20 KiB measured on Linux— and the program
 /// inside **blocks on write**, which is the only brake a terminal truly has.
 ///
-/// Eight reads of 8 KiB are 64 KiB: enough that a normal burst does not hit the ceiling, and
+/// Eight reads of [`READ_SIZE`] are 64 KiB: enough that a normal burst does not hit the ceiling, and
 /// little enough that what is held back does not matter. The consumer can accumulate on its own all it
 /// wants, but if it does so without limit it nullifies this brake — the ceiling only brakes if whoever
 /// drains stops draining.
 const READS_IN_FLIGHT: usize = 8;
+
+/// How much one read takes at most.
+///
+/// **It has a name because the brake's arithmetic is written in terms of it and lives elsewhere.**
+/// [`READS_IN_FLIGHT`] reasons in KiB from the product of the two; when this was a bare literal
+/// inside the reading loop, halving it would have quietly halved that brake.
+///
+/// **Two guards, because one of them only looks like a guard.** A validation round found the buffer
+/// could be set to half this constant with the whole suite green, and tied a delivered chunk's
+/// length to the name — which catches that. But **a review then found both sides of that test move
+/// with the constant**: change this number and the test follows it, green, while the brake halves.
+/// So the product is asserted against a **literal** as well, and that is the guard that cannot
+/// follow a value. The channel's own bounded test reasons about the product in prose and asserts a
+/// figure a thousandfold larger — it sees neither move.
+const READ_SIZE: usize = 8192;
 
 /// How often delivery is retried when the channel is full.
 ///
@@ -314,7 +395,7 @@ impl Pty {
         // one of those lives there is no end of file either. See [`READER_GIVE_UP`].
         drop(pair.slave);
 
-        let mut reader = pair.master.try_clone_reader()?;
+        let reader = pair.master.try_clone_reader()?;
         let mut writer = pair.master.take_writer()?;
 
         // **A thread of its own for writing, and it is not symmetry for its own sake.** `write_all`
@@ -356,21 +437,12 @@ impl Pty {
         let (tx, output) = sync_channel(READS_IN_FLIGHT);
         let stop_for_thread = Arc::clone(&stop);
         let (ended, reader_ended) = channel::<()>();
+        let ending = Arc::new(OnceLock::new());
+        let ending_for_thread = Arc::clone(&ending);
         let reader = thread::spawn(move || {
             // Moved in and never used: what closing reads is this being dropped when the thread ends.
             let _ended = ended;
-            let mut buf = [0u8; 8192];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if deliver(&tx, buf[..n].to_vec(), &stop_for_thread).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
+            feed_and_record(reader, &tx, &stop_for_thread, &ending_for_thread);
         });
 
         Ok((
@@ -391,6 +463,7 @@ impl Pty {
                 writer: Some(writer),
                 reader: Some(reader),
                 reader_ended,
+                ending,
                 stop,
             },
             output,
@@ -465,12 +538,112 @@ impl Pty {
     pub fn backlog(&self) -> Option<Backlog> {
         self.input.backlog()
     }
+
+    /// How the reading ended, or nothing while nothing has been recorded.
+    ///
+    /// **`None` is «nobody wrote a reason», and that covers more than «still reading».** Two ways it
+    /// answers `None` about a console that is over, both found by reading and neither a defect of
+    /// this accessor:
+    ///
+    /// - **the reader thread died without saying anything.** Unwinding never reaches the line that
+    ///   records the reason, so the channel says «over» and this says nothing. Ending that requires
+    ///   catching the panic, which is a decision of its own.
+    /// - **the reader was abandoned at the closing deadline.** [`Pty::drop`] lets that thread go
+    ///   when a survivor holds the pseudoterminal open, and it may record a reason afterwards — into
+    ///   a cell nobody is left to read, because the console it belonged to is gone.
+    ///
+    /// So `Some` may be read as «this is what happened», and `None` must not be read as «it is
+    /// fine»: what it means is that nothing was recorded.
+    pub fn ending(&self) -> Option<Ending> {
+        self.ending.get().copied()
+    }
+}
+
+/// Reads until the reading ends and records **that** ending in the cell the host reads.
+///
+/// **The two halves are one function because nothing was binding them together.** A review found it
+/// by mutation: with the recording hard-coded to one value, discarding everything the loop worked
+/// out, all eighty tests stayed green — every failure was asserted on the loop directly and the only
+/// tests that read the cell expected the value the mutation happened to write. This is the project's
+/// own first test disguise, asserting where a value is recorded instead of the effect it has, and
+/// the seam that closes it is a function a test can call with a source that fails.
+///
+/// **The recording goes before this returns, and the caller's channel is let go after it, on
+/// purpose.** What tells the host a console is over is that channel being dropped, so recording
+/// first is what makes the reason readable by anybody who noticed.
+///
+/// **What a test can hold of that ordering, measured rather than claimed**: putting the recording
+/// after the channel is released leaves the suite green, because the gap is a few instructions and
+/// the observer only looks once a blocking receive has already returned. The same disorder with a
+/// wait in it turns that test red. So what is guarded is a gap somebody could open by putting work
+/// between the two — the way this gets broken in practice — and not the instruction order itself.
+fn feed_and_record(
+    reader: impl Read,
+    channel: &SyncSender<Vec<u8>>,
+    stop: &AtomicBool,
+    ending: &OnceLock<Ending>,
+) {
+    let how = feed(reader, channel, stop);
+    let _ = ending.set(how);
+}
+
+/// Reads the pseudoterminal into the channel until there is nothing more to read, and answers how
+/// that ended.
+///
+/// **Not called `pump`, and the collision is avoided on purpose.** In this workspace pumping means
+/// *draining* that channel with a budget per frame —the pane's own method, and the number D13's
+/// reports publish— and this is the end that fills it. One word for both directions is how a
+/// vocabulary starts lying.
+///
+/// **It takes the source instead of owning one, and that is not tidiness: it is the only way this
+/// loop can be tested.** What `Pty::spawn` hands it is a `Box<dyn Read + Send>` that
+/// `portable-pty` builds over the master's descriptor, and nothing a test does to it makes it fail,
+/// come back short, or ask to be retried — so for as long as the loop lived inside the thread,
+/// every path through it except «bytes arrived» was unreachable from the suite. With the source as
+/// a parameter a test hands it whatever it needs to prove.
+fn feed(mut reader: impl Read, channel: &SyncSender<Vec<u8>>, stop: &AtomicBool) -> Ending {
+    let mut buf = [0u8; READ_SIZE];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => return Ending::EndedWell,
+            Ok(n) => match deliver(channel, buf[..n].to_vec(), stop) {
+                Ok(()) => {}
+                // Somebody is closing this console: the flag went up before anything else happened,
+                // which is the order `Drop for Pty` guarantees.
+                Err(Undelivered::Closing) => return Ending::EndedWell,
+                // Nobody asked, and there is nobody left to deliver to. **The distinction this arm
+                // makes is the one a review had to point out**: the receiving end lives in another
+                // thread, and that thread dying is not this console ending — the program inside can
+                // be alive and writing into a pseudoterminal whose output now goes nowhere.
+                Err(Undelivered::NobodyListening) => return Ending::NobodyListening,
+            },
+            Err(e) => {
+                return Ending::Failed {
+                    kind: e.kind(),
+                    os_error: e.raw_os_error(),
+                };
+            }
+        }
+    }
+}
+
+/// Why a chunk did not get delivered.
+///
+/// **The two are not the same event, and answering one `Err` for both was a defect.** A review
+/// found it: with a single failure the caller could only guess, and it guessed «somebody is
+/// closing» — which turns a console whose reader is gone while its program still writes into «the
+/// program finished», the exact silence this vocabulary exists to report.
+enum Undelivered {
+    /// The stop flag is up: whoever owns this console is closing it.
+    Closing,
+    /// The other end of the channel is gone and nobody raised the flag.
+    NobodyListening,
 }
 
 /// Leaves a chunk in the channel, waiting for room, and gives up if it has to close.
 ///
-/// Returning `Err` means "there is no one to deliver to": the channel closed or is closing. The
-/// caller ends the read loop.
+/// The `Err` says **which** of the two reasons it was, because they mean opposite things to whoever
+/// reports what happened to this console. See [`Undelivered`].
 ///
 /// **The wait is the brake.** While it lasts, this thread does not read from the pseudoterminal, so
 /// the kernel's buffer fills up and the program inside blocks on write. Nothing is discarded: the
@@ -479,14 +652,25 @@ fn deliver(
     channel: &SyncSender<Vec<u8>>,
     chunk: Vec<u8>,
     stop: &AtomicBool,
-) -> std::result::Result<(), ()> {
+) -> std::result::Result<(), Undelivered> {
     let mut pending = chunk;
     loop {
         // It is checked before trying and not only after failing: if the close arrives right when
         // the channel has room, delivering one more chunk breaks nothing, but checking first makes
         // the exit from the loop not depend on the state of the channel.
+        //
+        // **And it is what tells a close apart from a reader that vanished**, which is why the order
+        // is load-bearing rather than merely tidy: [`Pty::drop`] raises this flag before it drops
+        // anything.
+        //
+        // **What this crate cannot enforce, said here rather than assumed**: the receiving end is
+        // owned by whoever hosts this console, so «the flag goes up before that end disappears» also
+        // depends on the host dropping the console before the thing holding the receiver. A host
+        // that reversed that order would have every ordinary close recorded as nobody listening,
+        // and nothing here could tell. Whoever first reads that distinction is where it has to be
+        // pinned by a test.
         if stop.load(Ordering::Relaxed) {
-            return Err(());
+            return Err(Undelivered::Closing);
         }
         match channel.try_send(pending) {
             Ok(()) => return Ok(()),
@@ -494,7 +678,7 @@ fn deliver(
                 pending = returned;
                 thread::sleep(RETRY);
             }
-            Err(TrySendError::Disconnected(_)) => return Err(()),
+            Err(TrySendError::Disconnected(_)) => return Err(Undelivered::NobodyListening),
         }
     }
 }
@@ -652,12 +836,327 @@ mod tests {
     // lives; replacing it with `_` drops it on the spot, and `Drop` kills the program before it has
     // time to write. The test would not always fail — it would fail sometimes, which is worse.
 
+    /// A source of bytes that answers exactly what a test needs, in the order it needs it.
+    ///
+    /// **This is what the extraction bought.** The reader `Pty::spawn` hands to [`feed`] is
+    /// `portable-pty`'s, over a real descriptor: no test can make it fail, and every path through
+    /// the loop except «bytes arrived» was out of reach of the suite. Running out of script is end
+    /// of file, so a test that wants a failure has to put it there.
+    ///
+    /// **It answers a short read when the chunk does not fit**, and that is not defensive tidying: a
+    /// real `Read` may hand back fewer bytes than it was offered, and clamping instead of panicking
+    /// is what puts that shape within reach of a test at all. A review found this copying the whole
+    /// chunk regardless of the buffer, which panics at 9 000 bytes against 8 192 — and a second
+    /// review found the clamp **discarding** the tail, which is a fake that lies about the shape it
+    /// claims to model. The tail is pushed back.
+    struct Scripted(std::collections::VecDeque<std::io::Result<Vec<u8>>>);
+
+    impl Scripted {
+        fn of(turns: Vec<std::io::Result<Vec<u8>>>) -> Self {
+            Self(turns.into())
+        }
+    }
+
+    impl Read for Scripted {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.0.pop_front() {
+                Some(Ok(bytes)) => {
+                    let fits = bytes.len().min(buf.len());
+                    buf[..fits].copy_from_slice(&bytes[..fits]);
+                    // **The tail goes back, which is what makes this a short read and not a lossy
+                    // one.** A review caught the first version discarding it: a real `Read` that
+                    // answers fewer bytes than it was offered keeps the rest for the next call, so a
+                    // test scripting more than a buffer's worth in one turn would have lost the
+                    // excess and failed on content with no hint why.
+                    if fits < bytes.len() {
+                        self.0.push_front(Ok(bytes[fits..].to_vec()));
+                    }
+                    Ok(fits)
+                }
+                Some(Err(e)) => Err(e),
+                None => Ok(0),
+            }
+        }
+    }
+
+    /// A turn no correct loop ever reaches, put after the one under test.
+    ///
+    /// **Without it, three of these tests asserted the value the defect produces.** A one-turn
+    /// script that ends the loop and a one-turn script the loop *ignores* finish the same way: the
+    /// next read runs out of script, answers end of file, and hands back the very
+    /// `Ending::EndedWell` the assertion was looking for. Putting an unmistakable failure behind the
+    /// turn under test is what turns «it returned this» into «it stopped there».
+    fn never_reached() -> std::io::Result<Vec<u8>> {
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    }
+
+    /// **The brake's own number, against a literal, because every other guard follows the constant.**
+    ///
+    /// The test that ties a delivered chunk to `READ_SIZE` catches the buffer being halved and
+    /// **not** the constant being halved: both of its sides move together, so it stays green while
+    /// the ceiling this terminal rests on goes from 64 KiB to 32. **D8** chose that figure with
+    /// measurements behind it and two docblocks reason in KiB from it, so it is the figure and not
+    /// the expression that has to be pinned. This is the only assertion in the crate a rename or a
+    /// new value cannot follow.
+    #[test]
+    fn the_brake_is_still_the_sixty_four_kibibytes_the_decision_chose() {
+        assert_eq!(
+            READ_SIZE * READS_IN_FLIGHT,
+            64 * 1024,
+            "the reader's ceiling is no longer 64 KiB: {} reads of {READ_SIZE} bytes. Whoever \
+             changed it owes D8 a new measurement, because the brake is what stops a program \
+             dumping without bound",
+            READS_IN_FLIGHT
+        );
+    }
+
+    #[test]
+    fn a_reading_that_runs_out_of_source_ended_well_and_delivered_what_it_had() {
+        let (tx, rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+
+        let how = feed(Scripted::of(vec![Ok(b"hola".to_vec())]), &tx, &stop);
+
+        assert_eq!(how, Ending::EndedWell);
+        drop(tx);
+        // **Exactly, not «contains».** A loop that ignored the read's length and delivered its whole
+        // buffer would satisfy a substring check with the four letters followed by 8 188 zero bytes,
+        // and the only test in this crate that catches that today goes through a real
+        // pseudoterminal.
+        assert_eq!(drain_until_closed(&rx), b"hola");
+    }
+
+    #[test]
+    fn a_read_that_fails_is_stamped_with_the_kind_it_failed_with() {
+        let (tx, rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        let source = Scripted::of(vec![
+            Ok(b"before".to_vec()),
+            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)),
+        ]);
+
+        let how = feed(source, &tx, &stop);
+
+        // **The kind is asserted, not merely «it failed».** A sentence about this names the kind, so
+        // a reading that loses it on the way is a reading that cannot be spoken about.
+        assert_eq!(
+            how,
+            Ending::Failed {
+                kind: std::io::ErrorKind::BrokenPipe,
+                os_error: None
+            }
+        );
+        // And what arrived before the failure is not thrown away with it.
+        drop(tx);
+        assert_eq!(drain_until_closed(&rx), b"before");
+    }
+
+    #[test]
+    fn a_failure_reports_its_own_kind_and_not_a_fixed_one() {
+        let (tx, _rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        let source = Scripted::of(vec![Err(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        ))]);
+
+        // A second kind, because one kind alone is satisfied by a constant: with `BrokenPipe`
+        // hard-coded the test above passes and this one does not.
+        assert_eq!(
+            feed(source, &tx, &stop),
+            Ending::Failed {
+                kind: std::io::ErrorKind::PermissionDenied,
+                os_error: None
+            }
+        );
+    }
+
+    #[test]
+    fn a_failure_carries_the_systems_own_number_where_the_kind_says_nothing() {
+        let (tx, _rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        // Errno 5 is a number the standard library has no name for: its kind comes out of the bucket
+        // whose entire printed form is the word «uncategorized», so a sentence built from the kind
+        // alone would say nothing at all. The number is what survives, and that is the whole
+        // argument for the second field.
+        //
+        // **It is a synthetic error on purpose, and it is NOT the real path** — a review had to
+        // correct the first version of this comment, which claimed it was. That errno is what a
+        // pseudoterminal answers when the other end is gone, and the library below maps exactly that
+        // one to end of file, so it reaches the ordinary arm and never this one. What reaches this
+        // one is whatever else a device answers with no name of its own; five is simply a number
+        // that reliably has none, which is what this test needs.
+        let source = Scripted::of(vec![Err(std::io::Error::from_raw_os_error(5))]);
+
+        let Ending::Failed { kind, os_error } = feed(source, &tx, &stop) else {
+            panic!("a read that failed did not come back as a failure");
+        };
+
+        assert_eq!(os_error, Some(5));
+        // And the kind really is the useless one, which is why the number is carried at all: if this
+        // ever stops being true, the argument for the second field has changed.
+        assert_eq!(format!("{kind:?}"), "Uncategorized");
+    }
+
+    #[test]
+    fn a_receiver_that_vanished_with_nobody_closing_is_not_a_clean_end() {
+        let (tx, rx) = sync_channel(READS_IN_FLIGHT);
+        // **Nobody raised the flag**, and that is the whole subject: the receiving end lives in
+        // another thread, and that thread dying is not this console ending. The program inside can
+        // still be alive and writing into an output that now goes nowhere — the silence this
+        // vocabulary exists to report, and the first version of this test asserted it was a clean
+        // end.
+        let stop = AtomicBool::new(false);
+        drop(rx);
+
+        let how = feed(
+            Scripted::of(vec![Ok(b"into the void".to_vec()), never_reached()]),
+            &tx,
+            &stop,
+        );
+
+        assert_eq!(how, Ending::NobodyListening);
+    }
+
+    #[test]
+    fn a_console_being_closed_mid_delivery_ended_well() {
+        let (tx, rx) = sync_channel(READS_IN_FLIGHT);
+        // The flag `Drop` raises, with the receiver still there — the ordinary close, where the flag
+        // goes up before anything is dropped. It must not be reported as a failure, and must not be
+        // confused with the test above, which is the same delivery failing for the opposite reason.
+        let stop = AtomicBool::new(true);
+
+        let how = feed(
+            Scripted::of(vec![Ok(b"one last chunk".to_vec()), never_reached()]),
+            &tx,
+            &stop,
+        );
+
+        drop(rx);
+        assert_eq!(how, Ending::EndedWell);
+    }
+
     #[test]
     fn the_channel_closes_when_the_program_finishes() {
         let (_pty, output) =
             Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("launch sh");
 
         drain_until_closed(&output);
+    }
+
+    #[test]
+    fn what_gets_recorded_is_what_the_reading_answered() {
+        let (tx, _rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        let cell = OnceLock::new();
+        let source = Scripted::of(vec![Err(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        ))]);
+
+        feed_and_record(source, &tx, &stop, &cell);
+
+        // **A failure, on purpose, and that is the whole point of this test.** Every other assertion
+        // about a failure in this module is made on the reading itself; nothing was checking that
+        // the value the host ends up reading is the one the reading produced. A review proved it by
+        // recording a fixed «ended well» and watching all eighty tests stay green.
+        assert_eq!(
+            cell.get(),
+            Some(&Ending::Failed {
+                kind: std::io::ErrorKind::PermissionDenied,
+                os_error: None
+            })
+        );
+    }
+
+    #[test]
+    fn a_source_with_nothing_at_all_to_give_ended_well() {
+        let (tx, _rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+
+        // **A program that writes nothing, without depending on a shell to write nothing.** The
+        // real-pseudoterminal test below happens to cover this today because this host's `sh` emits
+        // nothing at all on `exit 0` — but that is the host's behaviour, not this crate's, and the
+        // next milestone takes this code to two platforms where nobody has checked. A validation
+        // round found the binding was incidental; this makes it independent of what any shell does.
+        assert_eq!(feed(Scripted::of(vec![]), &tx, &stop), Ending::EndedWell);
+    }
+
+    #[test]
+    fn a_program_that_exited_is_readable_as_such_through_the_real_path() {
+        let (pty, output) =
+            Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("launch sh");
+
+        // **What this binds and what it does not, said here rather than left to the name.** It binds
+        // that after the host has seen the channel close — the only thing that tells it a console is
+        // over — the accessor answers, and answers the right thing, through a real pseudoterminal
+        // rather than a scripted source. It does **not** bind the stamp's ordering against the
+        // channel being let go: reordering those two lines leaves this green, because the gap is a
+        // few instructions and this observer only looks after a blocking receive has returned. An
+        // earlier name for this test claimed the ordering, which is why it was renamed.
+        drain_until_closed(&output);
+
+        assert_eq!(pty.ending(), Some(Ending::EndedWell));
+    }
+
+    #[test]
+    fn a_source_that_hands_back_less_than_it_was_offered_is_read_to_the_end() {
+        let (tx, rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        // A real `Read` may answer with fewer bytes than the buffer offers, and until this loop took
+        // its source as a parameter nothing could hand it one that does. Two short turns in a row,
+        // so «it stopped after the first» would be visible.
+        let source = Scripted::of(vec![Ok(b"one".to_vec()), Ok(b"two".to_vec())]);
+
+        let how = feed(source, &tx, &stop);
+
+        assert_eq!(how, Ending::EndedWell);
+        drop(tx);
+        assert_eq!(drain_until_closed(&rx), b"onetwo");
+    }
+
+    #[test]
+    fn one_read_hands_over_a_whole_buffer_and_the_next_one_carries_on() {
+        let (tx, rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        // A turn that fills the buffer and one behind it. The full one is the **only** length at
+        // which `buf[..n]` and the whole buffer are the same slice, and it is the one length that
+        // says how big that buffer is: every other test here hands over a handful of letters and
+        // would read the same at any size. The size is not a tuning knob — the brake **D8** chose
+        // is it times [`READS_IN_FLIGHT`] — and halving the buffer was measured to leave the whole
+        // series green, which is why this length is scripted rather than a convenient short one.
+        let source = Scripted::of(vec![Ok(vec![FILLER; READ_SIZE]), Ok(b"tail".to_vec())]);
+
+        let how = feed(source, &tx, &stop);
+
+        assert_eq!(how, Ending::EndedWell);
+        drop(tx);
+        let first = rx.recv_timeout(DEADLINE).expect("the first read");
+        // The length and the content are asserted apart on purpose: comparing eight thousand
+        // bytes against eight thousand bytes prints both of them when it fails, and a red test
+        // nobody can read is most of the way back to no test.
+        assert_eq!(
+            first.len(),
+            READ_SIZE,
+            "a full read did not come back whole"
+        );
+        assert!(
+            first.iter().all(|&byte| byte == FILLER),
+            "what came back is not what was handed over"
+        );
+        // And a read that filled the buffer is not the end of anything: the turn behind it is
+        // there so that stopping at a full read would be visible.
+        assert_eq!(drain_until_closed(&rx), b"tail");
+    }
+
+    #[test]
+    fn a_console_that_is_still_reading_has_no_ending_to_report() {
+        let (pty, output) = Pty::spawn("sh", &["-c", "printf ready; sleep 30"], Size::default())
+            .expect("launch sh");
+
+        wait_for_marker(&output, "ready");
+
+        // «Nothing to report» and «ended for no reason» are different answers, and this is the one
+        // that keeps the absence from meaning anything.
+        assert_eq!(pty.ending(), None);
     }
 
     #[test]
@@ -805,11 +1304,16 @@ mod tests {
         );
     }
 
-    /// The hang this test covers is demonstrated, not hypothetical: with the channel full, the
-    /// reader thread is not inside `read` but waiting for room in [`deliver`], and `Drop for Pty`
-    /// does `kill` → `wait` → `join`. Without the `stop` flag that the `Drop` raises before killing
-    /// the child, nothing pulls that thread out of its wait —neither the `kill` nor the end of file
-    /// reach it while it is blocked there— and the `join` never returns: closing the window hangs.
+    /// The hang this test was written against is demonstrated, not hypothetical: with the channel
+    /// full, the reader thread is not inside `read` but waiting for room in [`deliver`], and
+    /// `Drop for Pty` used to `join` it without a deadline — so with nothing pulling that thread
+    /// out of its wait, neither the `kill` nor the end of file reaching it there, the `join` never
+    /// returned and closing the window hung.
+    ///
+    /// **What it can still tell apart is narrower than that, and it is measured**: since closing
+    /// abandons the reader after [`READER_GIVE_UP`] (**D32**), the close comes back whether or not
+    /// the flag is ever consulted, and with the check deleted this test stays green. The flag's
+    /// effect on this path is what it *costs*, and that is asserted by the test below.
     ///
     /// The check runs on a separate thread and uses `recv_timeout` to wait for its finish notice,
     /// not a direct `join` of the test's thread: if the hang returns, this test has to fall red
@@ -844,6 +1348,59 @@ mod tests {
         // The drop already finished, so this join is immediate; it is here for hygiene, not because
         // it is needed for the test to be correct.
         let _ = drop_thread.join();
+        drop(output);
+    }
+
+    /// **The stop flag's only remaining witness on the delivery path.**
+    ///
+    /// `closing_an_ordinary_console_does_not_spend_the_abandon_deadline` measures a reader parked
+    /// inside `read`, and its own comment says the drain there is what keeps it *off* the delivery
+    /// path. This is that other path: with the channel full the reader waits for room in
+    /// [`deliver`], where the flag is the only thing that can reach it — not the `kill`, not the
+    /// end of file.
+    ///
+    /// **Measured, and it is the whole reason this exists**: with the flag never consulted, the
+    /// test above — the one written against that very hang — stays green, because the reader is
+    /// abandoned after [`READER_GIVE_UP`] and the close comes back either way. What the flag buys
+    /// is that the thread *ends*, and a thread that ended is not waited for. So the cost is the
+    /// only thing left that tells the two apart, and this asserts it.
+    ///
+    /// **The bound is [`READER_GIVE_UP`] and not a literal**, the same choice as the ordinary
+    /// console's: it moves on its own if the constant ever does. Nothing here claims a number is
+    /// fast — only that the reserve for a survivor is not spent when there is none.
+    #[test]
+    fn closing_with_the_channel_full_does_not_spend_the_abandon_deadline() {
+        use std::sync::mpsc;
+
+        let (pty, output) = Pty::spawn("cat", &["/dev/zero"], Size::default()).expect("launch cat");
+
+        // Same wait and same reason as the test above: the channel has to be really full when the
+        // close arrives, which is what parks the reader in the wait for room.
+        thread::sleep(Duration::from_millis(200));
+
+        let (done, answer) = mpsc::channel();
+        let closing = thread::spawn(move || {
+            let started = Instant::now();
+            drop(pty);
+            let _ = done.send(started.elapsed());
+        });
+
+        // Generous, because this is not the assertion: it only keeps the old hang from taking the
+        // suite with it instead of turning it red.
+        let took = answer
+            .recv_timeout(Duration::from_secs(2))
+            .expect("closing a console whose channel is full returned");
+
+        assert!(
+            took < READER_GIVE_UP,
+            "closing with the channel full took {took:?}, the {READER_GIVE_UP:?} this crate \
+             reserves for abandoning a reader: nothing pulled that thread out of its wait for room"
+        );
+
+        let _ = closing.join();
+        // **Released only here, and that is load-bearing.** A receiver dropped any earlier makes
+        // the delivery fail as disconnected, which ends the thread for a reason that is not the
+        // flag — the close would come back fast and this test would be measuring the disguise.
         drop(output);
     }
 

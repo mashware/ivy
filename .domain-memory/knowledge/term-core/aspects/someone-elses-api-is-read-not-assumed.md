@@ -3,7 +3,7 @@ id: asp_someone-elses-api-is-read-not-assumed_hnvyp8
 slug: someone-elses-api-is-read-not-assumed
 name: >-
   Someone else's API is read, not assumed: in this project assuming it has
-  already cost sixteen times
+  already cost nineteen times
 type: aspect
 status: active
 superseded_by: null
@@ -43,7 +43,7 @@ feature_id: feat_term-core_nx0g1r
 ## What it does
 
 **The pattern, with its count.** **Sixteen** times in this project a third-party library has done
-something other than what its name promised, and **all sixteen were settled by reading its source
+something other than what its name promised, and **all nineteen were settled by reading its source
 code**, never by reasoning about it. It is not bad luck: it is what happens when a terminal is built
 on top of a VT engine, a pseudoterminal and an immediate-mode UI framework, three layers whose
 abstractions were designed for something else.
@@ -111,6 +111,24 @@ abstractions were designed for something else.
     needed»— and it failed on the first run. The flag is still asked about because a program **can
     turn it off**, and `vim` does so as soon as it wants the mouse for itself.
 
+17. **`portable-pty`'s Windows reader is not `portable-pty`'s at all**, and a whole risk rested on
+    assuming its `EIO → Ok(0)` translation was Unix-only. On Windows `openpty` builds two anonymous
+    pipes and `try_clone_reader` hands back a **`filedescriptor::FileDescriptor`**, whose own
+    `io::Read` answers `Ok(0)` when the error is a broken pipe — the same arm, reached the same way.
+    And `win/mod.rs`, the file the risk pointed a reader at, has **no read path at all**. The risk
+    had already been written into a design, a decision record and a pull-request body before a
+    skeptic read the source.
+18. **On Windows the pipe's write end is owned by the pseudoconsole**, shared with the master through
+    one `Arc`, so `drop(pair.slave)` — the line whose whole purpose on Unix is to let the read reach
+    end of file when the child dies — **closes nothing there**, and no end of file can arrive while
+    the console lives. Found in the same read as case 17, and it is the opposite risk: not «an
+    ordinary exit may look like a failure» but «no ordinary exit is ever seen».
+19. **`std::io::ErrorKind` is a coarse bucket, not a description**, and the errors a pseudoterminal
+    produces fall in the one that says nothing: errno 5, 70 and 75 all come out as the variant whose
+    entire printed form is one word, which is **unnameable in user code**. `raw_os_error()` keeps the
+    number. A value declared as a contract carried only the kind, and a blinded auditor asked what
+    the sentence built from it would say.
+
 **Where the alarm goes off.** The expensive case is not the one that does not compile: it is the one
 where **the label of a number describes what one believes the call does**. Cases 4 and 5 are the
 same error with opposite signs — calling queueing «painting», and calling a residue «tessellating»—
@@ -146,7 +164,7 @@ a call does; one is about to write in a comment «this does X» about someone el
 going to use a **convenience constructor** of an API that also offers the explicit version; or one
 is about to **declare that something cannot be done**.
 
-**And who catches it when it slips through:** in five of the sixteen cases it was uncovered by a
+**And who catches it when it slips through:** in **eight of the nineteen** cases it was uncovered by a
 review that went and read the source instead of opining about the diff. It is the strongest argument
 in favor of asking whoever reviews to **verify against the library's code**, not against the
 author's reasoning.
@@ -160,4 +178,8 @@ channel). Cases 1 to 10 came out in F1.3; 11 to 14 in F1.4, when putting two con
 click and a draggable divider. The account of each one, with the source line that proves it, is in
 the review records of those milestones. Cases 15 and 16 came out in F2.6, when asking the engine
 what the program has asked for about the mouse: they live in `crates/term-core/src/screen.rs` and
-their decision is **D23**.
+their decision is **D23**. Cases 17 to 19 came out in F2.13's first pull request, when giving a
+console's ending a vocabulary: 17 and 18 in `portable-pty`'s Windows side and `filedescriptor`,
+found by a skeptic **refuting a risk this project had already published**, and 19 in the standard
+library, found by an auditor blinded to the design. Their decision is **D38**, whose «what it leaves
+open» carries the withdrawal of the risk cases 17 and 18 refuted.

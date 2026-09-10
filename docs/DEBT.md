@@ -57,3 +57,28 @@ Format: `- <date> · <ticket> · <what> — <why it matters>`.
   against that number instead of `IMPL_CEILING`'s 300. The second is about twenty lines today, so
   nothing is wrong now — what is wrong is that it could grow unnoticed, and that the ratchet's own
   number stops describing one block.
+- 2026-09-10 · 192 · **The shape guard stops counting at `mod tests`, so a type declared after it is
+  free** — `crates/app/tests/shape.rs`'s counter breaks at the first line reading `mod tests`, and
+  `DeafConsole` sits **after** that line in `pty_output.rs`: about fifty-six production lines the
+  600-line ceiling never sees, in a module the guard measures at 107 against a real 814. A previous
+  delivery already made a file four lines *worse* by wrapping test helpers in a module of another
+  name to get them counted. This delivery put its new code **before** that line on purpose — being
+  counted is the point of a ratchet — but the hole is still there for whoever does not know.
+- 2026-09-10 · 192 · **`Eq` on the public ending value is held by nothing, deliberately** — dropping
+  it from the derive leaves all eighty-five tests green, because nothing in the workspace behaves
+  differently with or without it. Not filled: a test would assert the declaration rather than an
+  effect, which is this project's first named disguise, and the derives **are** checked character for
+  character by the blinded contract verifier every review runs. Written down so the next reader does
+  not rediscover it as a gap and fill it with the wrong kind of test.
+- 2026-09-10 · 192 · **A console whose program left a survivor never ends, and the obvious fix is
+  worse than the silence** — when something the shell launched holds the slave end, the read never
+  reaches end of file: the console never counts as finished, the window never closes itself over it,
+  and nothing is said. **D32** documents the mechanism and declines to kill the survivor. What is
+  owed is the note, not a ticket, and a skeptic established why: `Child::try_wait` answers «the child
+  is gone», not «this console is over» — the survivor can still be writing, so a console declared
+  finished on it would keep painting **after** saying it had ended, and with `all_finished` on the
+  other end it would auto-close a window over somebody's development server. Its owner is whatever
+  milestone answers «what does closing mean»; **F2.7 meets the same fact as a platform default**,
+  because on Windows the pipe's write end is owned by the pseudoconsole and shared with the master
+  through one `Arc`, so dropping the slave closes nothing and no end of file arrives while the
+  console lives at all.

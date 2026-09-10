@@ -5506,3 +5506,94 @@ asks for left for `settings.rs`** — 19 lines, the piece this delivery was alre
 exactly the way through D28 records. `lib.rs` went 1 367 → **1 362** and `impl Window` 411 → **401**,
 both re-measured. The ratchet's verdict on this delivery is therefore that it **did not** pay for its
 own lines out of what was already free, and the record says so rather than rounding it off.
+
+---
+
+## D38 — How a console's reading ended is a value its own thread reports, and «nobody was listening» is not «the program finished»
+
+**Every ending used to look identical from outside.** What tells whoever hosts this crate that a
+console is over is the output channel closing — and a program that exited, a read that failed and a
+reader thread that died all close it the same way. So the host could know that a console was over and
+never why, which is the whole of what **#192** asks and the output-side twin of what **D29** already
+publishes for input.
+
+### The decision
+
+- **The reason is a value, and the thread that ended is what reports it.** `term_core::Ending`,
+  stamped into a cell shared with `Pty` and read through `Pty::ending()`. Nothing outside deduces a
+  reason from a closed channel, which is **D6** applied to this: only whoever did the work knows what
+  its ending meant.
+- **It is stamped before the thread lets go of the channel that announces its end**, so anybody who
+  has noticed a console is over can already ask why.
+- **`EndedWell` merges a program that exited with a console somebody closed**, deliberately: no
+  consumer acts on the difference, and the one signal that could tell them apart is already spent
+  telling both of them from the arm below.
+- **A failure carries the operating system's number as well as the kind.** The standard library
+  flattens most of what a pseudoterminal can answer into one bucket whose entire printed form is the
+  word «uncategorized», while the number survives. Measured by running, not read: errno 5, 70 and 75
+  all come out as that bucket and all keep their number. A sentence built from the kind alone would
+  have said nothing at all.
+
+  **And `EIO` is NOT the example, which this entry had wrong two bullets from where it says why.**
+  `EIO` never reaches the failing arm at all: the pseudoterminal library maps it to end of file, on
+  both platforms, which is the bullet below. The errnos that do arrive and do flatten are the other
+  ones — a device or driver answering something `std` has no name for — and they are the reason the
+  number travels. The field stands; the example given for it was refuted by the same delivery.
+- **«Nobody was listening» is its own ending, and it is the one this vocabulary exists for.** A
+  delivery that fails has two reasons and they mean opposite things: the stop flag being up is
+  somebody closing this console, while the far end of the channel disappearing on its own means the
+  program inside may be alive and writing into an output that goes nowhere. **Answering one failure
+  for both published that second case as «the program finished»** — the exact silence the ticket is
+  about, arriving through the mechanism built to report it. A review found it; it had shipped in no
+  release.
+- **A reader that dies reports nothing**, and there is no variant for it. That is stated in the type
+  rather than papered over: `None` from the accessor means «nothing was recorded», which also covers
+  a reader abandoned at the closing deadline (**D32**).
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **An enum payload on the output channel** (`Bytes` / `Ended(reason)`) | It changes the type every console, every test and three modules pass around, for a value that arrives once |
+| **A payload on the channel that already announces the thread's end**, whose own comment invites exactly that | Right shape for a reason only the destructor learns, wrong one for a reason the host asks about on every frame: receiving consumes, so the second asker finds nothing |
+| **One accessor answering both what the program has not taken and how the reading ended** | Two lifetimes behind one accessor: the backlog changes every frame, the ending once per console |
+| **Inferring a panicked reader** from «the channel closed and nothing was recorded» | That is the app deciding what somebody else's failure means, which **D6** forbids. Catching the panic so the thread reports its own death is a separate decision |
+| **`Ended`, and other shorter names for `EndedWell`** | The word is the one the decision about what closing means is written in, and one vocabulary for both is worth more than one syllable at the point of use |
+| **Naming the reading loop `pump`** | In this workspace pumping means *draining* that channel with a budget per frame — the pane's own method and the number D13's reports publish. This end fills it, and one word for both directions is how a vocabulary starts lying |
+
+### What it leaves open
+
+- **An interrupted read still ends the console**, and is now reported as a failure with its kind.
+  That is the behaviour this delivery inherited rather than introduced, and **#194** is where it
+  changes.
+- **On Windows no end of file can arrive while the console lives, and that is the opposite of the
+  risk this entry first recorded.** The first draft said the ordinary-exit arm rested on a Unix-only
+  translation and might narrate every normal exit on Windows. **It was refuted by reading the
+  dependency**: `portable-pty`'s Windows side builds two anonymous pipes and hands the reader a
+  `filedescriptor::FileDescriptor`, whose own `Read` maps a broken pipe to end of file exactly as
+  Unix maps `EIO` — so the arm is reached the same way on both. What the same read turned up instead
+  is real and belongs to **F2.7**: the pipe's write end is owned by the pseudoconsole and shared with
+  the master through one `Arc`, so dropping the slave closes nothing and the read never ends while
+  the `Pty` is alive, whether or not the program exited.
+- **Telling a close from a vanished listener DOES rest on the host's field order, and this entry
+  said the opposite for a while. The arc is worth more than the conclusion.** A review recorded the
+  dependency; a skeptic refuted it by reading that the bridge *moves* the receiver into its own
+  thread, which parks in a receive and cannot let go until the reader's sender closes; and a second
+  reviewer refuted the refutation by finding **the bridge's other exit**. It breaks out of its
+  pick-up loop when its own stop flag is up — the flag its destructor sets — and that path is
+  reachable **only while the queue is at its ceiling**, which is precisely the jam that also parks
+  the reader inside a delivery. A test in that module already demonstrates the receiver being
+  dropped with the console alive.
+
+  So: a pane declares its console **before** the bridge, and Rust drops fields in declaration order,
+  which is the only reason an ordinary close raises the flag first. **Reverse those two lines and
+  every ordinary close of a jammed pane is recorded as «nobody was listening»** — the terminal
+  telling somebody a console went silent on the pane they just closed. `term-core` cannot detect the
+  violation, so the dependency is stated where the delivery makes it and the test belongs in the
+  consumer, in whoever first reads the distinction. **The comment in `deliver` says exactly that and
+  is the one to trust**; this bullet is what was wrong twice.
+
+  The transferable half: a refutation is a claim too, and «the receiver cannot be dropped first»
+  needed the same exhaustive read of the exits that the original claim needed. One exit was missed,
+  and it is the one that matters, because the state it requires — a jammed queue — is the state a
+  pane closed mid-dump is in.
