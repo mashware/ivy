@@ -910,6 +910,19 @@ pub(crate) fn paint_pane(
     }
 }
 
+/// How much of a console a notice may take.
+///
+/// **A half, and the half is a product decision rather than a taste.** What it protects is the
+/// bottom of the grid: that is where a console's last output is, it is the first thing somebody
+/// wants to mark and copy, and marking begins with a bare press — the same press that answers a
+/// notice. Without a ceiling the box runs a console's whole height at the width two panes get, so
+/// **the entire console becomes a button that throws the paste away**, which is the defect this
+/// closes.
+///
+/// It is also what leaves room for a second thing to say about the same console, which is why that
+/// feature's own delivery is where this ceiling was asked for.
+const NOTICE_SHARE: f32 = 0.5;
+
 /// What a notice says about how to answer it, **when the keyboard reaches that console**.
 ///
 /// **A click discards and never sends**, and the asymmetry is deliberate: sending a line the program
@@ -953,9 +966,24 @@ pub(crate) const ANSWERED_BY_CLICK: &str =
 /// pane's box one line short — text painted outside its own border, and a hit target smaller than the
 /// drawing.
 ///
-/// `None` unless the box is at least one row tall and a few cells wide. A console three rows tall
-/// flattens it, a degenerate rectangle still answers `contains` for the points on its edge, and a box
-/// whose text is entirely clipped would take a press while showing nothing to press.
+/// **It takes at most half the console's height**, and the bottom half is what that buys: a dead
+/// console's last output is at the bottom of its grid, it is the first thing somebody wants to mark
+/// and copy, and marking starts with a bare press. Without the ceiling the box runs the console's
+/// whole height at the width two panes get — measured at 168 pt — so the entire console becomes a
+/// button that throws the paste away.
+///
+/// `None` unless **the whole answer fits inside the capped box**, and a few cells wide. Two things
+/// about that floor, and both were got wrong first:
+///
+/// - **It is measured against what the ceiling leaves**, not against the box the text asked for.
+///   The other way round, a three-row console gets a box of about 26 px over a text area of about
+///   10 — under one line — which is stroked, swallows the press and shows nothing. That is the
+///   defect this floor has always existed against, recreated by the ceiling.
+/// - **The answer, not «a line».** A review pointed out that one line's worth of room is not the
+///   promise: the line saying how to get out wraps to about three at this application's narrowest
+///   console, so «a line fits» let through boxes showing half an instruction. A console that cannot
+///   show the whole way out gets no box, which is a silence — recorded as such rather than traded
+///   for an unreadable rectangle.
 pub(crate) fn the_question_box(
     painter: &Painter,
     console: &crate::Pane,
@@ -979,6 +1007,18 @@ pub(crate) fn the_question_box(
                 .size()
         })
         .reduce(|one, other| one.max(other))?;
+    // How much room the way out needs on its own, which is what the floor asks for. Laid out at the
+    // same width, and the taller of the two for the same reason the box is: whichever is shown, it
+    // has to be whole.
+    let answer = [ANSWERED_BY_HAND, ANSWERED_BY_CLICK]
+        .into_iter()
+        .map(|how| {
+            painter
+                .layout(how.to_owned(), metrics.font(), theme.foreground(), wrap)
+                .size()
+                .y
+        })
+        .reduce(f32::max)?;
     // **Clamped to the console, and what the clamp does and does not do is worth being exact about.**
     // A pane can be three rows tall and twenty columns wide, and an unclamped box runs off it. The
     // clamp keeps the **box** inside the console so its border is not stroked where the console is
@@ -986,13 +1026,22 @@ pub(crate) fn the_question_box(
     // What protects the answer is not this line: it is that **the keys are the first thing in the
     // galley**, so the line that survives a clip is the one saying how to get out. A question whose
     // answer is off-screen is worse than no question.
+    // The box starts a margin below the console's top, so what the ceiling leaves it is half the
+    // height minus that offset — which is what makes «nothing is drawn in the bottom half» true of
+    // the box's own bottom edge and not merely of its origin.
+    let ceiling = area.height() * NOTICE_SHARE - margin;
+    let tall_enough = (taller.y + 2.0 * margin).min(ceiling);
     let box_of_it = Rect::from_min_size(
         area.left_top() + vec2(margin, margin),
-        taller + vec2(2.0 * margin, 2.0 * margin),
+        vec2(taller.x + 2.0 * margin, tall_enough),
     )
     .intersect(area);
+    // **The floor asks for the ANSWER, not a line, and not a box a line tall.** With the ceiling in
+    // place those stopped being the same question twice over: a box exactly one row high has a text
+    // area of one row minus two margins, which is nothing — and one row of room still cuts an
+    // instruction that wraps to three at a narrow console.
     let worth_pressing =
-        box_of_it.height() >= metrics.height() && box_of_it.width() >= 4.0 * margin;
+        box_of_it.height() - 2.0 * margin >= answer && box_of_it.width() >= 4.0 * margin;
     worth_pressing.then_some(box_of_it)
 }
 
@@ -1030,11 +1079,28 @@ fn paint_the_question_over_it(
         theme.foreground(),
         (area.width() - 4.0 * margin).max(metrics.width()),
     );
+    // **The escape clause moved with the ceiling, and it had to.** It used to be «the box already
+    // fills the console, so a clip is expected» — a condition the ceiling makes **unreachable**,
+    // since the box can no longer reach the console's height. Left as it was, every console too
+    // short for the sentence would trip this assert in a debug build. What is expected now is a clip
+    // when the box is **at its ceiling**, which is the same thought about the new bound.
+    // **What this catches changed twice, and the message says what it catches now.** It was written
+    // for text painted outside its own border; with the clip below that cannot happen any more, so
+    // what is left — and it is still worth having — is a box that is **not** at its ceiling and yet
+    // too small for its text, which means the box was measured with something other than the
+    // sentence it is about to draw.
+    //
+    // **Both clauses carry the same slack, and the second one had none.** The height is a difference
+    // of two sums, so it lands a few units of least precision under a bound re-derived from the
+    // console's own height — never at the window's top, where every test builds its rectangle, and
+    // in a good share of the geometries a split or a tab bar produces. A debug build would have
+    // panicked while painting a held paste, in exactly the case this clause exempts.
     debug_assert!(
         sentence.size().y <= box_of_it.height() - 2.0 * margin + 1.0
-            || box_of_it.height() >= area.height() - 2.0 * margin,
-        "the sentence being drawn is taller than the box measured for it, so it will be painted \
-         outside its own border: {:?} in {box_of_it:?}",
+            || box_of_it.height() + 1.0 >= area.height() * NOTICE_SHARE - margin,
+        "the box is {:?} and its sentence lays out {:?}, and the box is not at its ceiling either: \
+         it was measured against something other than what is being drawn",
+        box_of_it,
         sentence.size()
     );
     painter.rect_filled(box_of_it, margin, theme.panel_background());
@@ -1044,11 +1110,33 @@ fn paint_the_question_over_it(
         Stroke::new(1.0, theme.focus()),
         StrokeKind::Inside,
     );
-    painter.galley(
-        box_of_it.left_top() + vec2(margin, margin),
-        sentence,
-        theme.foreground(),
-    );
+    // **Clipped to its own box, and until a review said so it was not.** The ceiling shortens the
+    // box and nothing shortened the text: the only clip in play is the console's, set by whoever
+    // paints the pane, so every line past the ceiling was drawn **outside** the filled rectangle,
+    // unbacked, over the grid — in the half the ceiling exists to keep clear — and outside the
+    // rectangle a press is judged by, so a click on the visible words started a selection instead of
+    // answering. The reasoning that made the ceiling the right choice («a clip takes the tail, never
+    // the answer, because the keys are first in the galley») was true of a clip that did not exist.
+    //
+    // **Intersected with the clip already in force** rather than replacing it, and it is worth being
+    // exact about why, because a validation round proposed removing it as the identity — which it is,
+    // on every path that exists today.
+    //
+    // It is kept anyway, and not as insurance against a hypothetical: `with_clip_rect` **sets** the
+    // clip, so the bare box would draw this notice wherever the box happens to be, and the box's
+    // position comes from an `area` this function does not own. Removing the intersection makes
+    // correctness depend on every caller handing in an area inside its own clip — a contract nobody
+    // states and nothing checks. That is a present constraint, not a future one, which is what tells
+    // this apart from the clamp this delivery did remove: that one gave the same answer in its only
+    // scenario, and this one changes what is drawn in a scenario no caller announces it cannot
+    // create.
+    painter
+        .with_clip_rect(box_of_it.intersect(painter.clip_rect()))
+        .galley(
+            box_of_it.left_top() + vec2(margin, margin),
+            sentence,
+            theme.foreground(),
+        );
 }
 
 #[cfg(test)]

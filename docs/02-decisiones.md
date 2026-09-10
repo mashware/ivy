@@ -5617,3 +5617,59 @@ publishes for input.
   needed the same exhaustive read of the exits that the original claim needed. One exit was missed,
   and it is the one that matters, because the state it requires — a jammed queue — is the state a
   pane closed mid-dump is in.
+
+---
+
+## D39 — A notice takes at most half its console, and it may not be drawn at all rather than drawn unreadable
+
+**A held paste's notice grew to fit its text and was only clamped to the console.** At the width two
+panes get — a console of 168 pt, measured — that meant the box ran the console's **whole height**, so
+**any click anywhere in that console discarded the paste**. The entire console was a dismiss button,
+which is **#198**.
+
+### What this one decided
+
+- **Half the console, and the half is what it buys, not a taste.** A console's last output is at the
+  **bottom** of its grid; it is the first thing somebody wants to mark and copy; and marking begins
+  with a bare press — the same press that answers a notice. So the bottom half stays theirs. It is
+  also what leaves room for a second thing to say about one console, which is why the delivery that
+  needs that room is where this was asked for.
+- **The floor is measured against what the ceiling leaves, not against the box the text asked for.**
+  Those were the same question only while the box grew to fit its text. Under a ceiling they are not:
+  a three-row console gets a box of ≈26 px over a text area of ≈10 — under one line — which is
+  stroked, swallows the press and shows nothing. That is precisely the failure the floor has always
+  existed against, recreated by the ceiling.
+- **And the floor asks for the whole answer, not for a line.** At this application's narrowest
+  console the line saying how to get out wraps to about three, while a five-to-seven-row console has
+  room under the ceiling for one. «A line fits» let through a box showing a third of an instruction:
+  legible enough to look deliberate, useless for getting out.
+- **So a console too small gets no notice at all, and that silence is accepted with its eyes open.**
+  A held paste with nothing on screen saying so is the failure **D31** exists against, and it is
+  still the better of the two: an unreadable rectangle that eats the press is worse than nothing,
+  because it looks like a working control.
+- **The sentence is clipped to its own box**, and that is the half that was missing rather than a
+  detail. Without it the ceiling shortens the box and nothing shortens the text, so the lines past
+  the ceiling are drawn **outside** the rectangle, unbacked, over the grid's bottom half — and
+  outside the rectangle a press is judged by, so a click on the visible words starts a selection
+  instead of answering. **The argument that chose the ceiling over the whole sentence — «a clip takes
+  the tail, never the answer, because the keys are first in the galley» — was true of a clip that did
+  not exist**, and it was published in two docblocks and in the answer to the question that decided
+  it before a review read the painting.
+
+### What D39 discarded, and why
+
+| | |
+|---|---|
+| **Letting the box grow past the ceiling where the sentence needs it** | On a console of twenty cells and forty rows the sentence needs 400 px and half is 312, so the exception would be the common case at the width two panes get — which is #198 coming back |
+| **Shortening the sentence until it fits at twenty cells** | It changes what the notice *says* to solve a geometry problem, and what it says is the part somebody has to act on |
+| **Keeping a box on any console, unreadable or not** | A stroked rectangle that answers a press and shows nothing readable is a control that lies. The silence at least does not |
+| **A floor of «one line of text»** | Measured: it admits a box showing a third of the way out |
+| **A ceiling expressed as a number of rows** | It would have to be re-derived every time the font changes; a share of the console does not |
+
+### What D39 leaves open
+
+- **A console between three and about six rows holds a paste in silence.** Three rows is a shape the
+  split gesture deliberately allows, so this is reachable rather than theoretical. The honest answer
+  is probably that such a console should not accept a held paste at all — refusing at the moment of
+  pasting, where there is still something to say — and that belongs to whoever owns the paste, not to
+  the painter.

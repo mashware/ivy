@@ -3864,7 +3864,11 @@ mod tests {
         [painter::ANSWERED_BY_HAND, painter::ANSWERED_BY_CLICK]
     }
 
-    /// How tall that answer sentence lays out over the console, at the width the box is measured with.
+    /// How tall the whole sentence lays out over the console, at the width the box is measured with.
+    ///
+    /// **It is not the promise any more and it is still the measurement**, which is why deleting it
+    /// with the promise was premature: what a roomy console must show is a box the size of its
+    /// question, and the only way to say «the size of its question» is to lay the question out.
     fn the_sentence_laid_out(
         pane: &Pane,
         theme: &theme::Theme,
@@ -3896,6 +3900,40 @@ mod tests {
         })
         .drop_without_applying_deltas();
         size
+    }
+
+    /// How tall **only** the line that says how to get out lays out, at the width the box is measured
+    /// with.
+    ///
+    /// **It is the half of the sentence that may never be clipped**, and since the box gained a
+    /// ceiling that is a different question from whether the whole sentence fits: on a narrow
+    /// console it does not, and the promise kept instead is this one. It is the first thing in the
+    /// galley, so it is also the part a clip reaches last.
+    fn the_answer_laid_out(
+        theme: &theme::Theme,
+        metrics: &CellMetrics,
+        rect: egui::Rect,
+        how: &str,
+    ) -> f32 {
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut tall = 0.0;
+        let margin = metrics.width();
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            tall = ui
+                .painter()
+                .layout(
+                    how.to_owned(),
+                    metrics.font(),
+                    theme.foreground(),
+                    (rect.width() - 4.0 * margin).max(metrics.width()),
+                )
+                .size()
+                .y;
+        })
+        .drop_without_applying_deltas();
+        tall
     }
 
     /// Where that console's notice goes, asked of **the same function the painter and the mouse pass
@@ -4091,6 +4129,15 @@ mod tests {
     /// cells, where they wrap the same, and stayed green under the exact mutation it was written
     /// for. Twenty cells is also this application's floor for a console, so it is not a contrived
     /// width.
+    ///
+    /// **What this asserts changed when the box got a ceiling, and the product promise changed with
+    /// it.** It used to demand that the whole sentence fit; on a console of twenty cells and forty
+    /// rows, half the height is 312 px and the sentence lays out 400, so the two promises — «never
+    /// more than half a console» and «the sentence is whole» — cannot both hold, and the ceiling was
+    /// chosen. What is promised instead, and asserted here, is that **the answer** always fits: the
+    /// line saying how to get out is the first thing in the galley, so what a clip takes is the tail
+    /// that counts bytes. The equality of the two boxes across the focus moving is unchanged and is
+    /// still the reason this test exists.
     #[test]
     fn the_notice_box_does_not_shrink_when_the_keyboard_leaves() {
         let metrics = with_metrics(|metrics| metrics.clone());
@@ -4109,15 +4156,24 @@ mod tests {
             // **Asserted against BOTH sentences laid out, and not against the other box.** Comparing
             // the two boxes proves nothing: measuring them both with one sentence makes them equal
             // too, which is the mutation the comparison stayed green under.
+            // **Half, written out here rather than read from the painter's constant.** A test that
+            // asked the same constant the code asks would pass under a mutation of it; this one
+            // pins the promise a person was given.
+            assert!(
+                box_of_it.height() <= narrow.height() * 0.5,
+                "at {cells} cells the box is {:?} tall over a console of {:?}: it takes more than \
+                 half, so the bottom half a person marks and copies in is no longer theirs",
+                box_of_it.height(),
+                narrow.height()
+            );
             for how in both_ways_to_answer() {
-                let laid_out = the_sentence_laid_out(&pane, &theme, &metrics, narrow, how);
+                let answer = the_answer_laid_out(&theme, &metrics, narrow, how);
                 assert!(
-                    laid_out.y <= box_of_it.height(),
-                    "at {cells} cells the box is {:?} tall and «{how}» lays out {:?}: that sentence \
-                     would be painted outside its own border, and the box a click is judged by is \
-                     smaller than the drawing",
-                    box_of_it.height(),
-                    laid_out.y
+                    answer <= box_of_it.height() - 2.0 * metrics.width(),
+                    "at {cells} cells the box leaves {:?} for text and the line of «{how}» that says \
+                     how to get out lays out {answer:?}: the answer itself would be clipped, which \
+                     is worse than no question at all",
+                    box_of_it.height() - 2.0 * metrics.width()
                 );
             }
         }
@@ -4253,6 +4309,447 @@ mod tests {
         assert!(
             found.is_none(),
             "a console of one row offered a box to press: {found:?}"
+        );
+    }
+
+    /// **The shape where «a line fits» was not enough, which is the one a review named.**
+    ///
+    /// At this application's narrowest console the line saying how to get out wraps to about three,
+    /// while a console of five to seven rows has room under the ceiling for **one**. So a floor
+    /// asking for a line let a box through showing a third of an instruction — legible enough to
+    /// look deliberate and useless for getting out. The floor asks for the whole answer instead, and
+    /// this is the console that tells the two rules apart: under the old one it has a box, under this
+    /// one it has none.
+    ///
+    /// **The silence is the price and it is recorded, not hidden**: such a console holds a paste with
+    /// nothing on screen saying so. Choosing that over an unreadable rectangle was the user's call.
+    #[test]
+    fn a_console_with_room_for_a_line_but_not_the_answer_has_no_box() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+
+        // Walked rather than picked: the band is where the ceiling leaves at least one row and less
+        // than the answer needs, and a single height would be a number chosen to pass.
+        let mut seen_a_console_in_the_band = false;
+        for rows in [5.0, 6.0, 7.0] {
+            let narrow = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(metrics.width() * 20.0, metrics.height() * rows),
+            );
+            let mut found = None;
+            let mut answer = 0.0;
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, narrow);
+                answer = ui
+                    .painter()
+                    .layout(
+                        painter::ANSWERED_BY_HAND.to_owned(),
+                        metrics.font(),
+                        theme.foreground(),
+                        (narrow.width() - 4.0 * metrics.width()).max(metrics.width()),
+                    )
+                    .size()
+                    .y;
+            })
+            .drop_without_applying_deltas();
+
+            let room = narrow.height() * 0.5 - 3.0 * metrics.width();
+            if room >= metrics.height() && room < answer {
+                seen_a_console_in_the_band = true;
+                assert!(
+                    found.is_none(),
+                    "a console of {rows} rows leaves {room:?} for text and the way out needs \
+                     {answer:?}, and it still offered {found:?}: a third of an instruction reads as \
+                     deliberate and does not get anybody out"
+                );
+            }
+        }
+        assert!(
+            seen_a_console_in_the_band,
+            "no console in this walk had room for a line and not for the answer, so this test \
+             asserted nothing: the band moved and the heights have to be measured again"
+        );
+    }
+
+    /// **The way out that fits has to be the one that will be shown, and which one that is depends on
+    /// where the keyboard is** — so a floor measured against either sentence on its own promises
+    /// nothing.
+    ///
+    /// The two are the same length in characters and **wrap apart**: measured on this host, at 21
+    /// cells the unfocused console's line takes a row more than the focused one's, and at 19 cells it
+    /// is the other way round. So a floor that asked only about «Escape or a click…» would hand a
+    /// box to a console with room for that and not for «A click discards it…», and the console it
+    /// clips is the one nobody is looking at — the case the whole sentence exists for, since a paste
+    /// held in silence is the failure this feature was built against.
+    ///
+    /// **Asked of a walk and not of a shape**, with its own guard against asserting nothing: the
+    /// widths where the two wrap apart are a property of a font and a string, so a single pair of
+    /// numbers here would rot into a test that passes because it stopped discriminating.
+    #[test]
+    fn no_console_gets_a_box_that_clips_the_way_out_it_will_show() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        let margin = metrics.width();
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+
+        // A shape worth the walk is one where a box exists, the two lines wrap to different heights,
+        // and the room is tight enough that forgetting one of them would have changed the answer.
+        let mut saw_a_box_where_the_two_wrap_apart = false;
+        for cells in 16..=32 {
+            for rows in 8..=16 {
+                let area = egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(
+                        metrics.width() * cells as f32,
+                        metrics.height() * rows as f32,
+                    ),
+                );
+                let mut found = None;
+                let mut answers = [0.0_f32; 2];
+                ctx.run_ui(egui::RawInput::default(), |ui| {
+                    found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, area);
+                    let wrap = (area.width() - 4.0 * margin).max(metrics.width());
+                    for (at, how) in both_ways_to_answer().into_iter().enumerate() {
+                        answers[at] = ui
+                            .painter()
+                            .layout(how.to_owned(), metrics.font(), theme.foreground(), wrap)
+                            .size()
+                            .y;
+                    }
+                })
+                .drop_without_applying_deltas();
+
+                let Some(box_of_it) = found else {
+                    continue;
+                };
+                let room = box_of_it.height() - 2.0 * margin;
+                let taller = answers[0].max(answers[1]);
+                if answers[0] != answers[1] && room < taller + metrics.height() {
+                    saw_a_box_where_the_two_wrap_apart = true;
+                }
+                for (at, how) in both_ways_to_answer().into_iter().enumerate() {
+                    assert!(
+                        room + 1.0 >= answers[at],
+                        "a console of {cells} cells by {rows} rows got a box leaving {room:?} for \
+                         text, and «{how}» lays out {:?} there: the console that shows that line \
+                         has its own way out clipped, so the floor was measured against something \
+                         other than the room this box leaves for BOTH sentences — the other \
+                         sentence, or the box instead of its text area",
+                        answers[at]
+                    );
+                }
+            }
+        }
+        assert!(
+            saw_a_box_where_the_two_wrap_apart,
+            "no console in this walk got a box while the two ways out wrapped to different heights \
+             with the room tight, so this test asserted nothing about which of them the floor \
+             asks: the widths where they wrap apart have to be measured again"
+        );
+    }
+
+    /// **The sentence is clipped to its own box, and nothing said so until a review did.**
+    ///
+    /// The ceiling shortens the box; nothing shortens the text. The only clip in force is the
+    /// console's, so every line past the ceiling was queued **outside** the filled rectangle — over
+    /// the grid, with no fill behind it, in the half the ceiling exists to keep clear, and outside
+    /// the rectangle a press is judged by. The whole argument for choosing the ceiling over the
+    /// sentence rested on «a clip takes the tail, never the answer», and that clip did not exist.
+    ///
+    /// **This asserts the clip and not the drawing**, because the drawing is what looked right: the
+    /// galley is queued at the same position either way, and the only difference is the rectangle it
+    /// is clipped to. A test that read the text's position saw nothing wrong, which is why nothing
+    /// caught it.
+    #[test]
+    fn the_question_is_clipped_to_its_own_box() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        // The shape the ceiling bites on: narrow enough that the sentence wraps long, short enough
+        // that half of it is less than the sentence needs. The diff's own measurement.
+        let narrow = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(metrics.width() * 20.0, metrics.height() * 40.0),
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut discoverer = fonts::Discoverer::default();
+        let mut box_of_it = None;
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("the console"),
+            ));
+            box_of_it = painter::the_question_box(&painter, &pane, &theme, &metrics, narrow);
+            painter::paint_a_console(
+                &painter,
+                &pane,
+                &theme,
+                &metrics,
+                narrow,
+                &mut discoverer,
+                painter::CursorInk::Filled,
+            );
+        });
+        let box_of_it = box_of_it.expect("that console has a question");
+
+        let text = output
+            .shapes
+            .iter()
+            .find(|clipped| matches!(clipped.shape, egui::Shape::Text(_)))
+            .expect("the question is drawn");
+
+        assert!(
+            text.clip_rect.max.y <= box_of_it.max.y + 1.0,
+            "the sentence is clipped to {:?}, whose bottom is past the box's at {:?}: the lines the \
+             ceiling cut are being drawn over the console's bottom half with nothing behind them",
+            text.clip_rect,
+            box_of_it.max.y
+        );
+
+        // **And the clip has to COVER the way out, which is the other half of the same claim.** A
+        // bound on where the clip ends says nothing about where it begins: a rectangle moved
+        // sideways off the box, or cut down to the box's first row, ends no lower than the box does
+        // and hides the words anyway — the whole question in the first case, and in the second
+        // exactly the line saying how to get out, which is first in the galley and therefore the
+        // part every other assertion here assumes survives. Both leave the shape on the queue, so
+        // there is nothing missing to notice: **the sentence is queued, clipped to nowhere, and
+        // never drawn**.
+        //
+        // Measured against the **taller** of the two answers for the same reason the box is: which
+        // one is shown depends on where the keyboard is, and whichever it is has to be whole.
+        let answer = both_ways_to_answer()
+            .map(|how| the_answer_laid_out(&theme, &metrics, narrow, how))
+            .into_iter()
+            .fold(0.0_f32, f32::max);
+        let where_the_answer_goes = egui::Rect::from_min_size(
+            box_of_it.left_top() + egui::vec2(metrics.width(), metrics.width()),
+            egui::vec2(box_of_it.width() - 2.0 * metrics.width(), answer),
+        );
+        assert!(
+            text.clip_rect.contains_rect(where_the_answer_goes),
+            "the sentence is clipped to {:?} and the way out is drawn in {where_the_answer_goes:?} \
+             inside a box of {box_of_it:?}: what the clip does not cover is not painted at all, and \
+             a question whose answer is invisible is worse than no question",
+            text.clip_rect
+        );
+        output.drop_without_applying_deltas();
+    }
+
+    /// **A guard was written here, found to have no scenario, and removed — and this is the test that
+    /// keeps that true.**
+    ///
+    /// The ceiling's arithmetic goes negative on a console under one row, so it was clamped at zero.
+    /// Measured: with the clamp and without it, such a console answers **no box** either way — a
+    /// negative size makes a degenerate rectangle that the floor rejects for the same reason a flat
+    /// one is rejected. A mechanism whose only scenario gives the same answer without it is a
+    /// mechanism with no scenario, and this project removes those rather than keeping them for
+    /// comfort.
+    ///
+    /// So what is pinned is not the clamp: it is **the relationship that made it unnecessary**. The
+    /// day the floor stops rejecting a degenerate box, this goes red and the clamp's argument is
+    /// reopened instead of quietly becoming false — the same answer given to the reader loop's own
+    /// unreachable guard, and what the store's card on unreachable guards prescribes.
+    #[test]
+    fn a_console_under_one_row_has_no_box_either() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        // Under one row the ceiling's own arithmetic goes negative, which is the only scenario a
+        // guard there would have. This is the probe that says whether the guard changes the answer.
+        let hair = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(metrics.width() * 40.0, metrics.height() * 0.4),
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, hair);
+        })
+        .drop_without_applying_deltas();
+
+        assert!(found.is_none(), "a console under one row offered {found:?}");
+    }
+
+    /// **The console the ceiling makes dangerous, and it is not a sliver.** Three rows is a shape the
+    /// tiling allows and the old floor accepted: the box grew to fit its text, was clamped to the
+    /// console, and came out a whole row tall, so «at least one row» read as «there is something
+    /// readable in it».
+    ///
+    /// With a ceiling of half the height that stops being true and the floor has to be measured
+    /// against what the ceiling leaves. Measured on this host at the font in use: a three-row
+    /// console is 48 px, half of that minus the margin is 16, and the two margins take all of it —
+    /// **nothing left for a line of text**. Judged the old way it passes the floor, gets stroked,
+    /// swallows the press and shows nothing, which is exactly the defect the floor exists against.
+    ///
+    /// So this asserts the **absence** of a box on a console that a naive ceiling would have given
+    /// one, and it is the test that fails if the two are ever reordered.
+    #[test]
+    fn a_console_whose_ceiling_leaves_no_room_for_a_line_has_no_box() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        let three_rows = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(metrics.width() * 40.0, metrics.height() * 3.0),
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, three_rows);
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            found.is_none(),
+            "a three-row console offered a box of {found:?}: under the ceiling it has no room for a \
+             line of text, so anything stroked there takes a press and shows nothing"
+        );
+    }
+
+    /// **The ceiling is a ceiling and not a size**: a console with room to spare gets the box its
+    /// sentence needs, not half the console.
+    ///
+    /// Without this, capping to exactly half would pass every other assertion here — the box would
+    /// be inside the console, under the ceiling, and tall enough for a line — while drawing a
+    /// rectangle far larger than the question in it, over output somebody wants to read.
+    #[test]
+    fn a_tall_console_gets_the_box_its_question_needs_and_not_half_the_screen() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        // Wide enough that the sentence wraps to few lines, tall enough that half of it is far more
+        // than those lines need.
+        let roomy = egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(metrics.width() * 60.0, metrics.height() * 60.0),
+        );
+
+        let ctx = egui::Context::default();
+        ctx.run_ui(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
+        let mut found = None;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            found = painter::the_question_box(ui.painter(), &pane, &theme, &metrics, roomy);
+        })
+        .drop_without_applying_deltas();
+        let box_of_it = found.expect("a console with room to spare has a box");
+
+        // **Against the question's own height, not against the ceiling.** Comparing with half the
+        // console proves nothing, and a mutation showed it: the ceiling is half MINUS a margin, so a
+        // box pinned to the ceiling is always strictly under half and the comparison stayed green
+        // while every box came out exactly half a console tall.
+        let needed = both_ways_to_answer()
+            .map(|how| the_sentence_laid_out(&pane, &theme, &metrics, roomy, how).y)
+            .into_iter()
+            .fold(0.0_f32, f32::max);
+        assert!(
+            box_of_it.height() <= needed + 1.0,
+            "the box is {:?} tall and its question needs {needed:?} over a console of {:?}: the \
+             ceiling is being used as a size, so the question is drawn over output nobody asked it \
+             to cover",
+            box_of_it.height(),
+            roomy.height()
+        );
+    }
+
+    /// **A notice with more to say than it has room for ends exactly at the middle of its console —
+    /// neither past it nor short of it**, and it is one equality because the half is a bound on the
+    /// box's bottom EDGE rather than on its height.
+    ///
+    /// Those are different numbers: the box starts a margin below the console's top, so one measured
+    /// «half a console tall» ends a margin **inside** the half it was meant to leave alone. What the
+    /// ceiling buys is that bottom half — the last output, the first thing somebody marks, and
+    /// marking begins with a bare press — which is the sentence the code's own comment makes: «true
+    /// of the box's own bottom edge and not merely of its origin».
+    ///
+    /// **And the other side of the equality is the share itself.** Every other assertion here is «no
+    /// more than the console» or «no more than half», so the fraction could be lowered to about a
+    /// quarter with the suite green: the box would just show less of the question, quietly, and more
+    /// consoles would fall under the floor into the silence D39 accepts as its price. The three ways
+    /// the ceiling can be got wrong — the margin, the fraction, and the origin the box is measured
+    /// from — all move this one edge, so one equality catches all three.
+    ///
+    /// **The console is deliberately not at the window's origin**, where an assertion could read the
+    /// window's top instead of the console's. A pane under a tab bar, or the lower half of a split,
+    /// is the shape a person actually gets.
+    #[test]
+    fn a_capped_notice_ends_at_the_middle_of_its_console_and_not_past_it() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let theme = theme::Theme::default();
+        let mut pane = pane_with("sleep 30", 0);
+        if !hold_a_paste_on(&mut pane) {
+            return;
+        }
+        // Twenty cells is this application's floor for a console and the width two panes get, which
+        // is where the sentence wraps long enough to be capped at all.
+        let narrow = egui::Rect::from_min_size(
+            egui::pos2(41.0, metrics.height() * 1.5),
+            egui::vec2(metrics.width() * 20.0, metrics.height() * 40.0),
+        );
+        let box_of_it = the_notice_box(&pane, &theme, &metrics, narrow);
+
+        // **Its own guard against asserting nothing.** A box that never reaches the ceiling satisfies
+        // any bound on where it ends, so the shape has to be one whose question does not fit.
+        let needed = both_ways_to_answer()
+            .map(|how| the_sentence_laid_out(&pane, &theme, &metrics, narrow, how).y)
+            .into_iter()
+            .fold(0.0_f32, f32::max);
+        assert!(
+            needed + 2.0 * metrics.width() > narrow.height() * 0.5,
+            "the question needs {needed:?} over a console of {:?}, so it already fits under the \
+             ceiling and the box is not at it: this test says nothing about the bound and the shape \
+             has to be measured again",
+            narrow.height()
+        );
+
+        // **Half written out here rather than read from the painter's constant**, for the reason the
+        // neighbouring test gives: a test that asks the same constant the code asks passes under a
+        // mutation of it. The slack is the one this file uses for a bound re-derived from a sum.
+        let the_middle = narrow.top() + narrow.height() * 0.5;
+        assert!(
+            (box_of_it.max.y - the_middle).abs() <= 1.0,
+            "the box ends at {:?} over a console that runs {:?} to {:?}, whose middle is at \
+             {the_middle:?} — {:?} out. Past it, the bottom half a person marks and copies in is \
+             not theirs any more while the box is still under half a console TALL; short of it, the \
+             notice is showing less of its question than the half it was given",
+            box_of_it.max.y,
+            narrow.top(),
+            narrow.bottom(),
+            box_of_it.max.y - the_middle
         );
     }
 
@@ -4480,6 +4977,14 @@ mod tests {
 
     /// **A console too narrow for the notice has no box to press either**, and the width half of that
     /// floor was untested while the height half was.
+    ///
+    /// **The console had to grow very tall for that to stay true, and until it did this test was
+    /// passing for the height's reason.** At three cells every word breaks, so the line saying how
+    /// to get out lays out taller than most consoles are — and the floor that asks for the whole
+    /// answer refuses a console of forty rows before the width is ever consulted. Measured: with the
+    /// width floor **deleted altogether** the suite stayed green. So the height is now derived from
+    /// the answer's own measurement instead of picked, and the width is the only thing left to
+    /// refuse the box.
     #[test]
     fn a_console_too_narrow_for_the_notice_has_no_box_to_press() {
         let metrics = with_metrics(|metrics| metrics.clone());
@@ -4488,9 +4993,18 @@ mod tests {
         if !hold_a_paste_on(&mut pane) {
             return;
         }
+        // Only the width reaches the wrapping, so the answer can be measured before the console it
+        // will be shown on exists.
+        let three_cells = metrics.width() * 3.0;
+        let probe =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(three_cells, metrics.height()));
+        let answer = both_ways_to_answer()
+            .map(|how| the_answer_laid_out(&theme, &metrics, probe, how))
+            .into_iter()
+            .fold(0.0_f32, f32::max);
         let sliver = egui::Rect::from_min_size(
             egui::Pos2::ZERO,
-            egui::vec2(metrics.width() * 3.0, metrics.height() * 40.0),
+            egui::vec2(three_cells, 2.0 * (answer + 4.0 * metrics.height())),
         );
 
         let ctx = egui::Context::default();
@@ -4502,6 +5016,17 @@ mod tests {
         })
         .drop_without_applying_deltas();
 
+        // **The guard mirrors the ceiling's arithmetic on purpose**: it claims nothing about the
+        // geometry — the neighbouring band test is where that is asserted — it says that **height
+        // is not the reason** this console has no box, which is the whole point of the assertion
+        // under it.
+        assert!(
+            sliver.height() * 0.5 - 3.0 * metrics.width() > answer,
+            "the ceiling leaves {:?} on this console and the way out needs {answer:?}, so it is the \
+             HEIGHT refusing the box and the width floor is being credited for it: the console has \
+             to be built taller than the answer its own width wraps to",
+            sliver.height() * 0.5 - 3.0 * metrics.width()
+        );
         assert!(
             found.is_none(),
             "a console three cells wide offered a box to press: {found:?}"
