@@ -4978,11 +4978,31 @@ wait itself.
 - **The ~101 ms that was already being paid** is untouched: it is `portable-pty`'s fixed 50 ms poll per
   console, and it needs a different change — SIGHUP then an immediate SIGKILL, or moving the close off
   the interface pass. Confirmed with ten samples in the work's diagnosis.
-- **Nobody is told.** The window publishes a line when a console's program stops taking what is typed
-  (**D29**); abandoning a reader says nothing — no line, no counter — so a trade taken knowingly is
-  unauditable from outside. It is a product question first: what does the window tell somebody whose
-  console left a thread behind.
-- **Whether closing should signal the group at all**, per the table above.
+- ~~**Nobody is told.**~~ **Answered, and the answer is «nothing».** The question was what the window
+  tells somebody whose console left a thread behind, and it was carried by **#192**, whose own body
+  offered four candidate answers. The first was chosen: nothing, and the trade stays a comment in the
+  source. What decided it was not taste but reachability — the abandonment happens inside `Drop for
+  Pty`, while the pane is being destroyed, so there is **no console left to speak over**, no area to
+  paint on, and one frame later no tab. And there is no honest place to print from either: this crate
+  prints nothing anywhere, and the thing on the other side that does print only speaks while the
+  console lives. The three alternatives are discarded below. **D38** is where the vocabulary that
+  came out of that ticket lives, and it covers the two silences that *can* be shown; this one cannot.
+- ~~**Whether closing should signal the group at all.**~~ **Answered: no** (**#193**). The table above
+  already established it would be **insufficient** — a survivor that called `setsid` is in a group of
+  its own — so the deadline is needed whatever is decided about the signal. What was left was the
+  product half, and it is settled the same way: a group signal would additionally kill the background
+  jobs of whoever closed that pane, and a terminal that kills what you deliberately detached because
+  you closed the pane it started in is worse than one that takes 150 ms. **Closing a pane does not
+  kill what its console left running**, and that is now a decision rather than an omission.
+
+### What was discarded in answering those two
+
+| | |
+|---|---|
+| **A line in the frame's report**, the shape **D29** uses for the input side | It is where a developer looks and not where a person does — and the review that built D38 found that D29's own line goes to standard error, so the precedent is thinner than it reads. It would have made the trade auditable without making it visible, and the question asked was what the *window* says |
+| **Something in the pane's own status panel** | The panel belongs to **whoever does the work** (**D17**), and the application painting its own state there is precisely what **D6** forbids. It would also outlive nothing: the pane is going away |
+| **A counter handed in at `spawn`**, which a reviewer suggested | It makes the leak countable without deciding what anybody sees, which is the useful half of the idea and the reason it is recorded — but a counter nothing reads is a mechanism with no scenario, and the audit it would feed is **#159**'s, not this one's |
+| **Signalling the group anyway, and documenting the cost** | The cost is somebody else's `nohup`ed build being killed. A cost that lands on a person who did nothing wrong is not documented, it is refused |
 - **`F2.7` inherits one concrete thing rather than a worry.** Every mechanism here is Linux-specific —
   the kernel hangup, `EIO`, the `VEOF` echo, `setsid(1)` itself — and the regression test is written so
   that a host without `setsid(1)`, which is every macOS, **fails loudly instead of passing quietly**.
