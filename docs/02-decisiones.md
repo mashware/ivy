@@ -5583,9 +5583,20 @@ publishes for input.
 
 ### What it leaves open
 
-- **An interrupted read still ends the console**, and is now reported as a failure with its kind.
-  That is the behaviour this delivery inherited rather than introduced, and **#194** is where it
-  changes.
+- ~~**An interrupted read still ends the console.**~~ **Closed by #194, and the reason it is retried
+  is not the one first written down.** The obvious argument — «a signal interrupts the blocking
+  read» — was checked and refused: nothing in this process installs a handler. What justifies it is
+  `io::Read`'s own contract, which says a reader may answer this for no reason and that the call
+  should simply be made again; nothing under the pseudoterminal library retries it, and that library
+  absorbs only the one errno that means end of file. So the failure mode was not a silence, it was a
+  **false sentence** on the glass about a console whose program was still writing.
+
+  **And the retry consults the stop flag, which is the half that is not obvious.** A retry is a wait,
+  and the rule this crate has been bitten by twice is that a thread which waits is not looking at
+  what would wake it: without the flag inside it, a source answering «interrupted» back to back is a
+  loop at full speed that closing cannot reach, and `Drop` would abandon a **spinning** thread for
+  the life of the process. Its test makes the call on a thread of its own with a deadline, because a
+  test for that shape otherwise hangs the suite instead of failing it.
 - **On Windows no end of file can arrive while the console lives, and that is the opposite of the
   risk this entry first recorded.** The first draft said the ordinary-exit arm rested on a Unix-only
   translation and might narrate every normal exit on Windows. **It was refuted by reading the

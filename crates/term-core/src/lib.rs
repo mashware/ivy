@@ -617,6 +617,23 @@ fn feed(mut reader: impl Read, channel: &SyncSender<Vec<u8>>, stop: &AtomicBool)
                 // be alive and writing into a pseudoterminal whose output now goes nowhere.
                 Err(Undelivered::NobodyListening) => return Ending::NobodyListening,
             },
+            // **An interrupted read is not the end of anybody's output**, and until now it ended the
+            // console for good. `io::Read`'s own contract says a reader may answer this for no
+            // reason and that the call should simply be made again; nothing below retries it — the
+            // pseudoterminal library only absorbs the one errno that means end of file — so the
+            // reader thread died and the program inside kept writing into a console nobody was
+            // draining, until the kernel's buffer filled and it blocked.
+            //
+            // **The stop flag is consulted here and that is not decoration.** This is a wait, and
+            // the rule this crate has already been bitten by twice is that a thread which waits is
+            // not looking at what would wake it: without this, a source answering «interrupted»
+            // back to back is a loop at full speed that closing cannot reach, and `Drop` would
+            // abandon a **spinning** thread for the life of the process.
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                if stop.load(Ordering::Relaxed) {
+                    return Ending::EndedWell;
+                }
+            }
             Err(e) => {
                 return Ending::Failed {
                     kind: e.kind(),
@@ -924,6 +941,60 @@ mod tests {
         // and the only test in this crate that catches that today goes through a real
         // pseudoterminal.
         assert_eq!(drain_until_closed(&rx), b"hola");
+    }
+
+    #[test]
+    fn an_interrupted_read_is_retried_and_says_nothing() {
+        let (tx, rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        let source = Scripted::of(vec![
+            Ok(b"before".to_vec()),
+            Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
+            Ok(b"after".to_vec()),
+        ]);
+
+        let how = feed(source, &tx, &stop);
+
+        // **Both halves, because either alone is satisfied by the defect.** That it ended well says
+        // the interruption was not reported; that «after» arrived says the loop went back for it
+        // instead of stopping. Before this change the same script ended as a failure and «after»
+        // never came.
+        assert_eq!(how, Ending::EndedWell);
+        drop(tx);
+        assert_eq!(drain_until_closed(&rx), b"beforeafter");
+    }
+
+    #[test]
+    fn a_source_interrupted_without_pause_still_lets_closing_finish() {
+        // A source that answers «interrupted» for ever, which is the shape that turns a retry into a
+        // spin. The flag is already up, as `Drop` raises it before anything else.
+        struct Always;
+        impl Read for Always {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(std::io::ErrorKind::Interrupted))
+            }
+        }
+        let (tx, _rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(true);
+
+        // **The assertion is that this returns at all.** Without the flag inside the retry it never
+        // does, and the test hangs the suite instead of failing it — which is why the call is made on
+        // a thread of its own with a deadline, the same shape this crate uses for every test about a
+        // wait that might not end.
+        let (told, when_it_ends) = channel();
+        thread::spawn(move || {
+            let how = feed(Always, &tx, &stop);
+            let _ = told.send(how);
+        });
+
+        match when_it_ends.recv_timeout(Duration::from_secs(3)) {
+            Ok(how) => assert_eq!(how, Ending::EndedWell),
+            Err(_) => panic!(
+                "the reading never came back: a source that answers «interrupted» without pause is \
+                 a loop at full speed that closing cannot reach, and this console's thread would be \
+                 abandoned spinning for the life of the process"
+            ),
+        }
     }
 
     #[test]
