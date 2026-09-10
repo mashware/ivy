@@ -45,8 +45,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// reader that died all close it identically — so the host could tell that a console was over and
 /// never why. This is that «why» for the endings a thread lives to report, and it is reported **by
 /// the thread that ended**, which is what keeps it a fact rather than a guess: nothing outside is
-/// asked to deduce a reason from a closed channel. **A reader that dies reports nothing**, so that
-/// third case is not one of the variants below.
+/// asked to deduce a reason from a closed channel. **A reader that dies reports it too**, since the
+/// unwinding is caught where the reading is recorded — it used to leave no reason at all, which made
+/// the accessor's «nothing recorded» cover a console that was over.
 ///
 /// **`EndedWell` is not «no error», it is «this is what an ending is supposed to look like».** A
 /// program that exits and a console somebody closes both take that arm, and neither is worth saying
@@ -82,6 +83,17 @@ pub enum Ending {
         kind: std::io::ErrorKind,
         os_error: Option<i32>,
     },
+    /// The thread reading this console died on the way.
+    ///
+    /// **It says nothing about the program**, which may be perfectly alive and writing: what ended is
+    /// the reading. And catching it is what makes this a reason at all — an uncaught panic reaches
+    /// the host as a channel that closed with nothing recorded, which is indistinguishable from a
+    /// console still working.
+    ///
+    /// **The runtime already says what and where.** Its own hook prints the panic with its file and
+    /// line, so nothing here repeats that; this variant exists so the *window* stops reading a death
+    /// as a clean end.
+    Panicked,
     /// The reading stopped because nothing was left to deliver to, and nobody had asked for that.
     ///
     /// **This is not a console being closed, and telling the two apart is the whole reason this
@@ -541,19 +553,18 @@ impl Pty {
 
     /// How the reading ended, or nothing while nothing has been recorded.
     ///
-    /// **`None` is «nobody wrote a reason», and that covers more than «still reading».** Two ways it
-    /// answers `None` about a console that is over, both found by reading and neither a defect of
-    /// this accessor:
+    /// **`None` is «nobody wrote a reason», and it now covers one case rather than two.** A reader
+    /// that dies used to be the other one — the unwinding never reached the line that records the
+    /// reason, so the channel said «over» and this said nothing — and that is caught where the
+    /// reading is recorded, so such a thread reports [`Ending::Panicked`] like any other ending.
     ///
-    /// - **the reader thread died without saying anything.** Unwinding never reaches the line that
-    ///   records the reason, so the channel says «over» and this says nothing. Ending that requires
-    ///   catching the panic, which is a decision of its own.
-    /// - **the reader was abandoned at the closing deadline.** [`Pty::drop`] lets that thread go
-    ///   when a survivor holds the pseudoterminal open, and it may record a reason afterwards — into
-    ///   a cell nobody is left to read, because the console it belonged to is gone.
+    /// What remains is **the reader abandoned at the closing deadline**: [`Pty::drop`] lets that
+    /// thread go when a survivor holds the pseudoterminal open, and it may record a reason
+    /// afterwards — into a cell nobody is left to read, because the console it belonged to is gone.
     ///
     /// So `Some` may be read as «this is what happened», and `None` must not be read as «it is
-    /// fine»: what it means is that nothing was recorded.
+    /// fine»: what it means is that nothing was recorded, which for a console that is over now means
+    /// one specific thing and not two.
     pub fn ending(&self) -> Option<Ending> {
         self.ending.get().copied()
     }
@@ -583,7 +594,16 @@ fn feed_and_record(
     stop: &AtomicBool,
     ending: &OnceLock<Ending>,
 ) {
-    let how = feed(reader, channel, stop);
+    // **`AssertUnwindSafe` is required and is not a formality.** The reader is a
+    // `Box<dyn Read + Send>`, and a boxed trait object carries no unwind-safety bound, so this does
+    // not compile without the assertion — while the flag and the channel are unwind-safe on their
+    // own. What is claimed is that a channel and a reader which a panic may have left half-used are
+    // still sound to observe afterwards: the standard library's channels do not poison, and the
+    // reader is dropped immediately below. Whoever widens this closure inherits that claim, which is
+    // why it is written here and not at the call site.
+    let how =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| feed(reader, channel, stop)))
+            .unwrap_or(Ending::Panicked);
     let _ = ending.set(how);
 }
 
@@ -756,8 +776,11 @@ impl Drop for Pty {
         if let Some(reader) = self.reader.take() {
             match self.reader_ended.recv_timeout(READER_GIVE_UP) {
                 // The thread is gone and its half of the channel went with it. Gone, not necessarily
-                // gone well: a reader that panicked looks exactly like this, and the `join` here
-                // discards that too.
+                // gone well — but a reader that panicked no longer looks like this: the unwinding is
+                // caught where the reading is recorded, so such a thread ends normally and its
+                // reason is readable. What the `join` here still discards is a panic from anywhere
+                // in that closure **outside** the reading itself, which is why it stays a `let _`
+                // rather than becoming a claim.
                 Err(RecvTimeoutError::Disconnected) => {
                     let _ = reader.join();
                 }
@@ -1112,6 +1135,50 @@ mod tests {
             Pty::spawn("sh", &["-c", "exit 0"], Size::default()).expect("launch sh");
 
         drain_until_closed(&output);
+    }
+
+    /// A source that dies rather than answering.
+    ///
+    /// **Until the unwinding was caught it took the recording with it**, so the host was left with a
+    /// closed channel and no reason — which is the same answer a console that is still working
+    /// gives.
+    struct Dies;
+
+    impl Read for Dies {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            panic!("the thread reading this console died");
+        }
+    }
+
+    /// Runs a reading that dies, with the runtime's own panic hook silenced for the duration.
+    ///
+    /// **Silenced so a passing suite does not read like a failing one**, and put back straight
+    /// after: the hook is process-wide, and leaving it off would hide the next real panic in this
+    /// binary.
+    fn what_a_dying_reader_records() -> Option<Ending> {
+        let (tx, _rx) = sync_channel(READS_IN_FLIGHT);
+        let stop = AtomicBool::new(false);
+        let cell = OnceLock::new();
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        feed_and_record(Dies, &tx, &stop, &cell);
+        std::panic::set_hook(hook);
+        cell.get().copied()
+    }
+
+    #[test]
+    fn a_reader_that_dies_on_the_way_reports_it_instead_of_leaving_nothing() {
+        // **Asserted on the cell and not on the call**, because the point is not that the panic was
+        // swallowed: it is that what the host reads about this console says the reading died.
+        assert_eq!(what_a_dying_reader_records(), Some(Ending::Panicked));
+    }
+
+    #[test]
+    fn a_console_whose_reader_died_is_not_reported_as_having_ended_well() {
+        // The half that matters to whoever paints, and it is a separate question: catching a panic
+        // and recording it as an ordinary end would satisfy the test above's shape while
+        // reintroducing the whole defect.
+        assert_ne!(what_a_dying_reader_records(), Some(Ending::EndedWell));
     }
 
     #[test]
