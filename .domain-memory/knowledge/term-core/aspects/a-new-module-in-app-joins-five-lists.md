@@ -5,11 +5,11 @@ name: >-
   Adding a module to `crates/app` means adding it to FIVE lists, and four of
   them fail silently
 type: aspect
-status: active
-superseded_by: null
+status: superseded
+superseded_by: asp_the-sixth-list-lives-in-production-code_nerc71
 confidence: 80
 created_at: '2026-09-09T21:53:59.611Z'
-updated_at: '2026-09-09T21:53:59.611Z'
+updated_at: '2026-09-11T20:23:21.337Z'
 last_verified: '2026-09-09T21:53:59.611Z'
 file_paths:
   - crates/app/tests/shape.rs
