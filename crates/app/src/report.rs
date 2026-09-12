@@ -87,6 +87,7 @@ impl Window {
                     frames: self.blink.frames_painted(),
                     ceiling: self.blink.ceiling,
                 },
+                buttons: self.buttons,
             },
         )?;
 

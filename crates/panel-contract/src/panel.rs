@@ -39,6 +39,30 @@ pub const MAX_BYTES: u64 = 256 * 1024;
 /// and without a ceiling whoever paints would repeat as many spaces as a file from outside says.
 pub const MAX_INDENT: u64 = 64;
 
+/// How many buttons a producer may declare.
+///
+/// **Chosen against the panel, not against the file.** [`MAX_BYTES`] is 256 KiB and
+/// `{"label":"a","send":"b"}` is 24 bytes, so a **legal** document declares about ten thousand
+/// buttons — each one a frame and two pieces of text to lay out, which is the same tessellation cost
+/// [`MAX_SEND`] is bounded against. At the panel's default width a button takes its label's row plus
+/// one or two wrapped command rows, so eight of them take roughly half the rows a panel has on a
+/// normal window: the most that can be declared while the body is still worth reading.
+///
+/// **Surplus entries are truncated, not rejected.** A document with nine buttons shows eight rather
+/// than losing its panel, which is the same tolerance every other field of this contract gets.
+pub const MAX_ACTIONS: usize = 8;
+
+/// How long a button's command may be, in characters.
+///
+/// **A cost bound, and it is worth saying that plainly** — the first telling of this called it «the
+/// painting ceiling restated», which is not checkable: what the painter bounds is *one row*, and a
+/// 512-character command wraps over fifteen of them. What guarantees the command is *readable* is
+/// that a button whose rows do not all fit is not pressable; what this number does is stop a legal
+/// document from making the window lay out and wrap a quarter of a megabyte.
+///
+/// **Counted in characters and not bytes**, to match the unit the painter cuts on.
+pub const MAX_SEND: usize = 512;
+
 /// How much silence is legitimate before warning, when the producer does not say.
 pub const STALE_AFTER: Duration = Duration::from_secs(30 * 60);
 
@@ -75,6 +99,15 @@ pub struct Panel {
     /// a signal. Deducing it from there would be fragile in the silliest way — a "I waited for approval
     /// on Tuesday" would mark the tab forever.
     pub attention: Option<Attention>,
+    /// The buttons the producer offers, **at the top level and not hanging off a line**.
+    ///
+    /// The reason is where they are painted. A line's place in the panel is decided by wrapping and
+    /// by how much fits, and what does not fit is dropped from the bottom: a button hanging off a
+    /// line would disappear in a short panel, or — worse — be drawn with its label visible and its
+    /// command scrolled away, which is the one state the rule about seeing a command before it runs
+    /// forbids. At the top level they join the block the application owns and the producer cannot
+    /// suppress, which is the frontier [`Panel::attention`] already drew.
+    pub actions: Vec<Action>,
     /// The body.
     pub lines: Vec<Line>,
     /// When the file was written, **which is where the age comes from**.
@@ -85,6 +118,116 @@ pub struct Panel {
     /// —which is when it is most needed— and this crate does not need to interpret dates nor drag along
     /// a calendar.
     pub written_at: Option<SystemTime>,
+}
+
+/// A button the producer declares, **and the only shape in this contract that reaches a shell**.
+///
+/// Its two fields are private and its only constructor checks them, which is the whole of the
+/// mechanism: there is then no path from JSON to a pseudoterminal that skips the gate, and a reviewer
+/// checks that by reading one function instead of every call site. It is the same reasoning the
+/// application's own paste filter states for staying private — *«an ungated door sitting beside the
+/// gated one, equally reachable and better named, is one autocomplete away from being used»*.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Action {
+    label: String,
+    send: String,
+}
+
+impl Action {
+    /// The button, **or nothing if what it would send is not exactly what it would show**.
+    ///
+    /// Both strings must be made entirely of scalars that are painted as themselves: see
+    /// [`is_shown_as_itself`]. `send` must also be at most [`MAX_SEND`] characters.
+    ///
+    /// **It rejects and never repairs, and that is the load-bearing decision.** The application
+    /// paints the literal command under its label and one click sends it, so that painted text *is*
+    /// the confirmation the security table demands. A filter that removed characters on the way out
+    /// would mean the bytes that ran are not the bytes that were read. Rejecting here makes «painted
+    /// and sent are the same string» true by construction rather than by care.
+    ///
+    /// A rejected button makes **that action** vanish, not the panel — the same tolerance per field
+    /// the rest of this contract has.
+    pub fn new(label: &str, send: &str) -> Option<Self> {
+        // **An empty command is not a command.** The application appends the terminator, so a button
+        // declaring nothing is one that presses a bare Enter into whatever the person had half
+        // typed — which is the opposite of «the command is visible before it runs», with nothing
+        // visible at all. An empty label is refused for the same reason: a button nobody can read.
+        // **Blank is not empty, and both are refused.** The application appends the terminator, so a
+        // button declaring nothing — or nothing but spaces — is one that presses a bare Enter into
+        // whatever the person had half typed, with a command row that is on screen and says nothing.
+        // «The command is visible before it runs» is not satisfied by a visible blank.
+        if send.trim().is_empty() || label.trim().is_empty() || send.chars().count() > MAX_SEND {
+            return None;
+        }
+        if !label.chars().all(is_shown_as_itself) || !send.chars().all(is_shown_as_itself) {
+            return None;
+        }
+        Some(Self {
+            label: label.to_owned(),
+            send: send.to_owned(),
+        })
+    }
+
+    /// What is painted on the button.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// What is painted under the label **and** written to the program, character for character.
+    ///
+    /// The terminator is not part of it: this text cannot carry a line break, so whether a button
+    /// executes is a property of the application and not a character a producer can get wrong.
+    pub fn send(&self) -> &str {
+        &self.send
+    }
+}
+
+/// Whether that scalar is painted as itself, which is what a button's text has to be made of.
+///
+/// **Two families are out, and the first is the one that has already been measured in this
+/// repository.**
+///
+/// *Controls* ([`char::is_control`], which is Unicode's `Cc` — the C0 range, `DEL`, and `U+0080` to
+/// `U+009F`) are handled by the kernel's line discipline **before the program sees them**: `0x03`
+/// interrupts the foreground process, `0x1a` suspends the shell and leaves the pane looking dead,
+/// `0x1c` dumps core and `0x04` closes the input. Wrapping the text protects from none of it. **A
+/// line break and a tab are rejected with the rest**, unlike in a paste: a paste is a document a
+/// person copied and its lines are the point, while a button is one command — a line break in it is a
+/// button that runs two commands while painting one, and a tab in a line editor is the completion
+/// key, so the same button would do something different depending on what is on disk.
+///
+/// *Zero-width and direction-changing scalars* are painted as nothing, or paint the rest backwards,
+/// so the text a person reads is not the text that runs. **This is a list and lists are how these
+/// checks rot**, so two things about it: it is a closed set of **scalars**, tested one by one below,
+/// with none of the rescanning hazard that sinks a search for forbidden *sequences*; and it is
+/// Unicode's `Cf` category as it stands, which grows. What would replace it is a general-category
+/// table, and this crate carries two dependencies with a written reason each — see its manifest.
+fn is_shown_as_itself(scalar: char) -> bool {
+    if scalar.is_control() {
+        return false;
+    }
+    !matches!(
+        scalar,
+        '\u{00ad}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061c}'
+            | '\u{06dd}'
+            | '\u{070f}'
+            | '\u{08e2}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{110bd}'
+            | '\u{110cd}'
+            | '\u{13430}'..='\u{1343f}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0000}'..='\u{e007f}'
+    )
 }
 
 /// A line of the panel.
@@ -368,9 +511,28 @@ fn parse(text: &str) -> Result<Panel, Problem> {
                 Duration::from_secs(minutes.saturating_mul(60))
             }),
         attention: string_ref(&raw, "attention").and_then(attention),
+        actions: raw
+            .get("actions")
+            .and_then(serde_json::Value::as_array)
+            .map(|declared| {
+                declared
+                    .iter()
+                    .filter_map(action)
+                    .take(MAX_ACTIONS)
+                    .collect()
+            })
+            .unwrap_or_default(),
         lines: lines.iter().filter_map(line).collect(),
         written_at: None,
     })
+}
+
+/// Turns an element of the list into a button, or **discards it**.
+///
+/// **A loose string is not an action**, unlike a line: a line has an obvious reading as bare text,
+/// and there is no way to split one string into a label and a command without inventing one.
+fn action(raw: &serde_json::Value) -> Option<Action> {
+    Action::new(string_ref(raw, "label")?, string_ref(raw, "send")?)
 }
 
 /// Turns an element of the list into a line, or **discards it**.
@@ -1160,6 +1322,7 @@ mod tests {
             header: true,
             stale_after: STALE_AFTER,
             attention: None,
+            actions: Vec::new(),
             lines: Vec::new(),
             written_at: None,
         }
@@ -1243,5 +1406,274 @@ mod tests {
         let produced = work();
 
         (produced, counting::PEAK.get().saturating_sub(baseline))
+    }
+}
+
+/// What a button may carry, and what happens to one that carries something else.
+///
+/// **The subject is the gate, and the gate is [`Action::new`]** — the parser's only way in. So these
+/// go through a whole document rather than through the constructor: an assertion on the constructor
+/// alone would stay green if the parser ever stopped calling it.
+#[cfg(test)]
+mod buttons {
+    use super::*;
+
+    fn actions_of(declared: &str) -> Vec<Action> {
+        let document = format!(r#"{{"actions": {declared}, "lines": ["x"]}}"#);
+        parse(&document)
+            .expect("the document carries lines")
+            .actions
+    }
+
+    /// A button carrying one scalar, named so a failure says which one.
+    ///
+    /// **The scalar goes in ESCAPED, and that is not a convenience of the test.** A raw control
+    /// character is not legal inside a JSON string, so the document a real producer writes carries
+    /// `\u0003` and it is `serde_json` that turns it back into the character before this crate ever
+    /// sees it. Writing the raw byte here would make the document invalid and the test would pass on
+    /// the wrong failure — which is what the first version of these did.
+    fn with(poison: char) -> Vec<Action> {
+        let escaped = format!("\\u{:04x}", poison as u32);
+        let declared = format!(r#"[{{"label": "Hidden", "send": "ls{escaped}x"}}]"#);
+        actions_of(&declared)
+    }
+
+    #[test]
+    fn a_button_carries_what_it_shows_and_what_it_sends() {
+        let actions = actions_of(r#"[{"label": "Run tests", "send": "npm test"}]"#);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].label(), "Run tests");
+        assert_eq!(actions[0].send(), "npm test");
+    }
+
+    /// **The whole point of the type, asserted on the effect**: what a producer writes has to survive
+    /// the read unchanged, because the application paints that string and sends that string.
+    #[test]
+    fn what_survives_the_read_is_what_the_producer_wrote() {
+        let actions = actions_of(r#"[{"label": "Deploy", "send": "make deploy ENV=staging"}]"#);
+
+        assert_eq!(actions[0].send(), "make deploy ENV=staging");
+    }
+
+    /// A line break is the character that makes a shell execute, so a button carrying one would run
+    /// two commands while painting one.
+    #[test]
+    fn a_command_carrying_a_line_break_is_dropped() {
+        assert!(with('\n').is_empty());
+        assert!(with('\r').is_empty());
+    }
+
+    /// In a line editor the tab is the completion key, so the same button would do something
+    /// different depending on what is on disk.
+    #[test]
+    fn a_command_carrying_a_tab_is_dropped() {
+        assert!(with('\t').is_empty());
+    }
+
+    /// The four the kernel's line discipline acts on before any program sees them. Each one is named
+    /// rather than looped over, so a failure says which.
+    #[test]
+    fn a_command_carrying_a_control_the_kernel_acts_on_is_dropped() {
+        assert!(with('\u{03}').is_empty(), "interrupt survived");
+        assert!(with('\u{1a}').is_empty(), "suspend survived");
+        assert!(with('\u{1c}').is_empty(), "dump survived");
+        assert!(with('\u{04}').is_empty(), "end of input survived");
+    }
+
+    /// `char::is_control` covers `U+0080`–`U+009F` too, and a terminal that parses eight-bit controls
+    /// reads `U+009B` as a control sequence introducer.
+    #[test]
+    fn a_command_carrying_an_eight_bit_control_is_dropped() {
+        assert!(with('\u{9b}').is_empty());
+    }
+
+    /// Painted as nothing and sent all the same: bytes the eye never saw reaching the shell.
+    #[test]
+    fn a_command_carrying_a_zero_width_scalar_is_dropped() {
+        for invisible in ['\u{200b}', '\u{feff}', '\u{ad}', '\u{2060}'] {
+            assert!(
+                with(invisible).is_empty(),
+                "{invisible:?} survived the read"
+            );
+        }
+    }
+
+    /// The text a person reads would not be the text that runs.
+    #[test]
+    fn a_command_carrying_a_direction_override_is_dropped() {
+        for reversing in ['\u{202e}', '\u{2066}'] {
+            assert!(
+                with(reversing).is_empty(),
+                "{reversing:?} survived the read"
+            );
+        }
+    }
+
+    /// The label is painted, so the same rule applies to it — and a line break there would reflow the
+    /// strip under a button whose place was worked out for one row.
+    #[test]
+    fn a_label_carrying_a_line_break_drops_the_button_too() {
+        let declared = "[{\"label\": \"Two\\nrows\", \"send\": \"ls\"}]";
+
+        assert!(actions_of(declared).is_empty());
+    }
+
+    #[test]
+    fn a_command_longer_than_the_ceiling_is_dropped() {
+        let inside = "a".repeat(MAX_SEND);
+        let over = "a".repeat(MAX_SEND + 1);
+
+        assert_eq!(
+            actions_of(&format!(r#"[{{"label": "x", "send": "{inside}"}}]"#)).len(),
+            1
+        );
+        assert!(actions_of(&format!(r#"[{{"label": "x", "send": "{over}"}}]"#)).is_empty());
+    }
+
+    /// **Counted in characters, not bytes**, which is the unit the painter cuts on. Its own test
+    /// because the two differ only on text that is not ASCII, and that is exactly where a byte count
+    /// would refuse a command that fits.
+    #[test]
+    fn the_ceiling_counts_characters_and_not_bytes() {
+        let japanese = "日".repeat(MAX_SEND);
+
+        assert!(
+            japanese.len() > MAX_SEND,
+            "the case needs more bytes than characters"
+        );
+        assert_eq!(
+            actions_of(&format!(r#"[{{"label": "x", "send": "{japanese}"}}]"#)).len(),
+            1
+        );
+    }
+
+    /// **Truncated and not rejected**: a document with one button too many shows the ones that fit
+    /// rather than losing its panel.
+    #[test]
+    fn more_buttons_than_fit_are_truncated_and_the_panel_survives() {
+        let declared: Vec<String> = (0..MAX_ACTIONS + 3)
+            .map(|nth| format!(r#"{{"label": "b{nth}", "send": "echo {nth}"}}"#))
+            .collect();
+        let actions = actions_of(&format!("[{}]", declared.join(",")));
+
+        assert_eq!(actions.len(), MAX_ACTIONS);
+        assert_eq!(actions[0].label(), "b0");
+    }
+
+    /// One bad button takes neither the good ones nor the body with it: the same tolerance per field
+    /// the rest of this contract has.
+    #[test]
+    fn a_dropped_button_leaves_the_others_and_the_body_standing() {
+        let declared = r#"[{"label": "Good", "send": "ls"},
+                {"label": "Bad", "send": "ls\u0003x"},
+                {"label": "Also good", "send": "pwd"}]"#;
+        let document = format!(r#"{{"actions": {declared}, "lines": ["the body survives"]}}"#);
+        let panel = parse(&document).expect("the document carries lines");
+
+        assert_eq!(panel.actions.len(), 2);
+        assert_eq!(panel.actions[1].label(), "Also good");
+        assert_eq!(panel.lines[0].text, "the body survives");
+    }
+
+    /// An element that cannot be read as a button is dropped, and a loose string is one of them:
+    /// there is no way to split it into a label and a command without inventing one.
+    #[test]
+    fn an_element_that_is_not_a_button_is_dropped() {
+        assert!(actions_of(r#"["just a string"]"#).is_empty());
+        assert!(actions_of(r#"[{"label": "no command"}]"#).is_empty());
+        assert!(actions_of(r#"[{"send": "no label"}]"#).is_empty());
+        assert!(actions_of("[7, null]").is_empty());
+    }
+
+    /// **`lines` stays the only required field.** A strip of buttons with no summary is not a panel,
+    /// and loosening that would turn this contract's single validity rule into two.
+    #[test]
+    fn a_document_with_buttons_and_no_body_is_still_invalid() {
+        let document = r#"{"actions": [{"label": "Run", "send": "ls"}]}"#;
+
+        assert!(matches!(parse(document), Err(Problem::Invalid(_))));
+    }
+
+    #[test]
+    fn a_document_that_declares_no_buttons_has_none() {
+        assert!(
+            parse(r#"{"lines": ["x"]}"#)
+                .expect("valid")
+                .actions
+                .is_empty()
+        );
+    }
+}
+
+/// The scalars the list of invisibles names, one test per branch.
+///
+/// **Six of its twenty-six branches were covered and twenty were not**, which a mutation found by
+/// deleting four of them and watching the suite stay green. A list nothing names is a list somebody
+/// trims by accident — the same shape as a guard list with no floor, one level down.
+#[cfg(test)]
+mod every_invisible {
+    use super::*;
+
+    /// One scalar out of every branch of the predicate, in the order they are written there.
+    const ONE_PER_BRANCH: [char; 20] = [
+        '\u{00ad}',
+        '\u{0600}',
+        '\u{0605}',
+        '\u{061c}',
+        '\u{06dd}',
+        '\u{070f}',
+        '\u{08e2}',
+        '\u{180e}',
+        '\u{200b}',
+        '\u{200f}',
+        '\u{202a}',
+        '\u{202e}',
+        '\u{2060}',
+        '\u{2064}',
+        '\u{2066}',
+        '\u{206f}',
+        '\u{feff}',
+        '\u{fff9}',
+        '\u{fffb}',
+        '\u{110bd}',
+    ];
+
+    /// The four that live past the basic planes, where a byte-counting walk is likeliest to slip.
+    const BEYOND_THE_BASIC_PLANE: [char; 4] = ['\u{110cd}', '\u{13430}', '\u{1bca0}', '\u{1d173}'];
+
+    #[test]
+    fn every_branch_of_the_list_refuses_its_scalar() {
+        for invisible in ONE_PER_BRANCH.into_iter().chain(BEYOND_THE_BASIC_PLANE) {
+            assert!(
+                Action::new("x", &format!("ls{invisible}x")).is_none(),
+                "{invisible:?} (U+{:04X}) is in the list and was accepted",
+                invisible as u32
+            );
+        }
+    }
+
+    /// **The other direction, and it is the one that keeps the list from swallowing the alphabet.**
+    /// A predicate that refused everything would pass the test above and every button would vanish.
+    #[test]
+    fn ordinary_text_is_not_refused() {
+        for ordinary in [
+            "ls -la",
+            "cargo test",
+            "grep 日本語 notes.txt",
+            "echo «ok»",
+            "cd ~/x",
+        ] {
+            assert!(
+                Action::new("x", ordinary).is_some(),
+                "{ordinary:?} was refused and it is ordinary text"
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_of_only_spaces_is_refused() {
+        assert!(Action::new("x", "   ").is_none());
+        assert!(Action::new("   ", "ls").is_none());
     }
 }

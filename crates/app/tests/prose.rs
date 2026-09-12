@@ -57,6 +57,10 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/alarms.rs", include_str!("../src/alarms.rs")),
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
+    (
+        "src/panel/buttons.rs",
+        include_str!("../src/panel/buttons.rs"),
+    ),
     ("src/measure.rs", include_str!("../src/measure.rs")),
     (
         "src/measure/header.rs",
@@ -79,6 +83,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/watcher.rs", include_str!("../src/watcher.rs")),
     ("src/theme.rs", include_str!("../src/theme.rs")),
     ("src/mouse.rs", include_str!("../src/mouse.rs")),
+    ("src/opening.rs", include_str!("../src/opening.rs")),
     ("src/pointer.rs", include_str!("../src/pointer.rs")),
     ("src/report.rs", include_str!("../src/report.rs")),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
@@ -590,8 +595,8 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
 #[test]
 fn the_walk_still_reads_the_comments_of_every_file() {
     assert!(
-        SOURCES.len() >= 27,
-        "the list of translated files has {} entries and this delivery left twenty-seven, which is \
+        SOURCES.len() >= 29,
+        "the list of translated files has {} entries and this delivery left twenty-nine, which is \
          every file of the crate: it only ever grows, so this is somebody emptying it and every \
          check downstream going quiet",
         SOURCES.len()

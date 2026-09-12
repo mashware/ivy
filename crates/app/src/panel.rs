@@ -6,14 +6,24 @@
 //! D6, and it is the reason the panel works for an agent, a deployment or a script without knowing
 //! anything about any of them.
 //!
-//! What this module **does not do yet**, and arrives with the milestone: aligning the reference column by
-//! blocks, wrapping to the width with its continuation indent, and painting each mark's symbol. Until
-//! then each line is a row and what does not fit is clipped.
+//! **And since the milestone that gives the panel buttons, one thing here is not translation**: what
+//! a producer declares under `actions` is painted with its command underneath, and a press on it
+//! writes that command into the pane's program. The vocabulary is still the producer's — the
+//! application reads no meaning out of the text — but where the bytes go is a fact about its own
+//! panes, so it is the application's to decide. **D42**.
+//!
+//! That is the one place in this module where being wrong costs more than a badly drawn panel, and
+//! it is why two properties here are held by mechanism rather than by care: what is painted under a
+//! label is what gets sent, character for character; and a press only reaches a button this pass
+//! drew **whole**, on a panel it did not have to lay out again.
 
 use std::time::{Duration, SystemTime};
 
+mod buttons;
+use buttons::buttons_drawn;
+
 use eframe::egui::{Align2, Color32, Painter, Pos2, Rect};
-use panel_contract::{Attention, Line, Mark, Panel, Problem, Style};
+use panel_contract::{Action, Attention, Line, Mark, Panel, Problem, Style};
 
 use crate::painter::CellMetrics;
 use crate::theme::Theme;
@@ -191,6 +201,45 @@ pub struct PanelState {
     /// Why the last read failed, if it failed. It is what tells apart «there is no producer here» from
     /// «there is one and it is broken», which look the same and are not the same thing.
     problem: Option<Problem>,
+    /// What the last painting **actually drew**, or nothing when it did not paint.
+    ///
+    /// **One value and not two fields, because a press consults both and they must not be able to
+    /// disagree.** The first version kept the rectangles and «was the layout reused» apart, and the
+    /// pair went stale together the moment the panel was **folded**: the window then skips painting
+    /// it altogether, neither field was touched, and a click on the console — where a button used to
+    /// be — ran its command with nothing on screen. Written once at the end of a painting, and taken
+    /// away by [`PanelState::nothing_was_drawn`] wherever the decision not to paint is made.
+    ///
+    /// **Recorded by the painting rather than derived again by whoever routes a press**, and that is
+    /// a decision rather than an optimisation. The layout is a cache whose key is the width and the
+    /// warning, and re-reading the file throws it away — so a second walk in the pointer pass
+    /// silently yields the *new* layout, with nothing left to compare a press against.
+    drawn: Option<Drawn>,
+}
+
+/// What one painting of a panel left behind for a press to land on.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Drawn {
+    /// Whether that painting reused the layout it already had.
+    ///
+    /// **A press is only accepted on a settled panel**, and this is what makes «the command you read
+    /// is the command that runs» true across frames. The panel is the one surface in this window
+    /// that repaints from an outside writer with no user action, so between the frame a person read
+    /// and the frame their click lands in, a producer can have replaced every button. It costs
+    /// nothing to refuse that click: the panel is redrawn, the person reads it again, they press
+    /// again.
+    settled: bool,
+    buttons: Vec<PaintedButton>,
+}
+
+/// A button as it was drawn: which action it is, and the rectangle it occupied.
+///
+/// The rectangle is the union of the button's rows — its label and the wrapped command under it — so
+/// a press anywhere on the command reaches the same button as a press on the label.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PaintedButton {
+    action: usize,
+    area: Rect,
 }
 
 /// A layout and the two things it depends on: if either changes, it has to be redone.
@@ -241,6 +290,45 @@ impl PanelState {
     #[cfg(test)]
     pub(crate) fn last_understood(&self) -> Option<&Panel> {
         self.last_good.as_ref()
+    }
+
+    /// The button that press reaches, if it reaches one.
+    ///
+    /// Three conditions, and each one is a decision rather than caution:
+    ///
+    /// - **the last pass painted this panel at all** — folded, or in a strip too short for one row,
+    ///   it is not painted, and then there is nothing on screen for a press to have been aimed at;
+    /// - **that painting reused the layout it already had**, so what is on screen now is what was on
+    ///   screen when the person decided to press;
+    /// - **the point is inside a button that painting recorded**, which excludes every button whose
+    ///   rows did not all fit.
+    pub fn button_at(&self, point: Pos2) -> Option<&Action> {
+        let drawn = self.drawn.as_ref().filter(|drawn| drawn.settled)?;
+        let pressed = drawn
+            .buttons
+            .iter()
+            .find(|drawn| drawn.area.contains(point))?;
+        self.last_good.as_ref()?.actions.get(pressed.action)
+    }
+
+    /// The buttons the last painting drew, in the order it drew them.
+    ///
+    /// **For the measurement and for the bench's injector**, which needs where to press and cannot
+    /// derive it: a button's place comes out of wrapping and of how many there are, so a second
+    /// derivation would be free to disagree with the one on screen.
+    pub fn buttons_drawn(&self) -> impl Iterator<Item = Rect> + '_ {
+        self.drawn
+            .iter()
+            .flat_map(|drawn| drawn.buttons.iter().map(|button| button.area))
+    }
+
+    /// Says that nothing was painted, so nothing is reachable.
+    ///
+    /// **Called wherever the window decides not to paint a panel** — a folded one, or a pane with no
+    /// directory. Without it the previous frame's rectangles survive and a press lands on a button
+    /// that is no longer on screen, which is the one thing this whole mechanism exists to prevent.
+    pub fn nothing_was_drawn(&mut self) {
+        self.drawn = None;
     }
 
     /// Whether this console has something to show, be it the producer's or the application's own.
@@ -345,7 +433,7 @@ impl PanelState {
         theme: &Theme,
         warning: Option<String>,
         attention: Option<AttentionState>,
-    ) -> Option<&[Row]> {
+    ) -> Option<(&[Row], bool)> {
         if self.last_good.is_none() && warning.is_none() {
             return None;
         }
@@ -370,7 +458,9 @@ impl PanelState {
                 warning,
             });
         }
-        self.layout.as_ref().map(|done| done.rows.as_slice())
+        self.layout
+            .as_ref()
+            .map(|done| (done.rows.as_slice(), still_valid))
     }
 }
 
@@ -503,6 +593,24 @@ pub(crate) fn attention_symbol(class: Attention) -> char {
     }
 }
 
+/// The symbol a button's label is painted with.
+///
+/// **It is a tenth sign and none of the other nine is reused** — the six a line can carry and the
+/// three a claim can — for the reason those three already give: the same sign in two places invites reading that one was deduced from the other, and
+/// here the two readings are «this line says something» and «pressing this runs a command». They are
+/// not the same kind of thing and they must not look alike.
+///
+/// **Two constraints, and the second was found by the bench rather than reasoned.** Like the others
+/// it is measured against the width of an `M`, because a sign the monospaced font draws wider than a
+/// cell knocks the whole column out of square. And it has to be a character **the built-in fonts
+/// already cover**: `»` was the first choice and it is not, so every frame that painted a button
+/// sent the window off to search the machine for a face — which invalidated the measurement batch on
+/// the rule that only the Japanese one may do that. A symbol nobody can see costs one glyph; a symbol
+/// that triggers discovery costs the comparability of every published series.
+fn action_symbol() -> char {
+    '>'
+}
+
 /// What the claim's row says, in words.
 ///
 /// **The symbol does not travel alone**: in the panel there is room, and a loose sign forces recalling a
@@ -527,12 +635,69 @@ fn attention_text(class: Attention) -> &'static str {
 /// its wrapping carries the same `max`.
 const MINIMUM_SLOT: usize = 8;
 
-/// A row already laid out: which column it starts in, what it says and what color.
+/// Wraps a text **without losing or inventing a single character**, unlike [`wrap`].
+///
+/// **The ordinary wrapping collapses whitespace, and for a button that is a defect rather than a
+/// nicety.** It splits on whitespace and rejoins with one space, so `echo  a` is painted `echo a`
+/// while `echo  a` is what gets sent — and for a button the painted text **is** the confirmation.
+/// Two spaces mean nothing to a shell outside quotes and everything inside them, and either way a
+/// painting that is not the sending has already broken the promise.
+///
+/// It is not [`sanitize`]d either: the contract already refuses every scalar that is not painted as
+/// itself, so there is nothing left here to flatten — and flattening is precisely what would make
+/// the two differ.
+///
+/// Cut **by characters and never by words**, which is right for one command and would be wrong for a
+/// summary: a long path has nowhere to break and the panel is narrow.
+fn wrap_verbatim(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: usize) {
+    // Kept as its own name rather than a flag on `wrap`: the two differ in a property that decides
+    // whether a button is honest, and a boolean at the call site is exactly where that stops being
+    // readable.
+    let slot = width.saturating_sub(indent).max(MINIMUM_SLOT);
+    let mut rest = text;
+    loop {
+        let cut = rest
+            .char_indices()
+            .nth(slot)
+            .map_or(rest.len(), |(at, _)| at);
+        let (row, after) = rest.split_at(cut);
+        rows.push(Row {
+            column: indent,
+            text: row.to_owned(),
+            color,
+            role: RowRole::Text,
+        });
+        if after.is_empty() {
+            return;
+        }
+        rest = after;
+    }
+}
+
+/// A row already laid out: which column it starts in, what it says, what color, and what it is for.
 #[derive(Debug, Clone, PartialEq)]
 struct Row {
     column: usize,
     text: String,
     color: Color32,
+    /// What this row is **for**, which is what lets the painting know which rectangle belongs to
+    /// which button without laying the panel out a second time.
+    role: RowRole,
+}
+
+/// What a laid-out row is for.
+///
+/// **A button occupies more than one row** — its label, and the command it sends wrapped underneath —
+/// and a press has to reach the whole of it. So the rows carry which button they belong to, rather
+/// than the painting trying to work it out from their text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+enum RowRole {
+    #[default]
+    Text,
+    /// The row carrying a button's label, with the index of the action it belongs to.
+    ButtonLabel(usize),
+    /// A row carrying part of the command that button sends.
+    ButtonBody(usize),
 }
 
 /// Turns a panel into the rows that are going to be painted, at the given width in cells.
@@ -597,6 +762,49 @@ fn lay_out(
         );
     }
 
+    // **The buttons go above the body and below the warning, inside the block the application owns.**
+    // Below is where the clip eats what does not fit, and a button whose command row got eaten would be
+    // a label you can press over a command you cannot read — the one state the rule about seeing a
+    // command before it runs forbids.
+    // **A panel too narrow to show a command at all declares no buttons.** The wrapping has a floor
+    // on its slot — without one it would put zero characters per row and hang — so below that floor
+    // it lays the text out wider than the strip and the painting clips what does not fit: the person
+    // would see a fragment and the press would send the whole string. Leaving these rows untagged is
+    // the same mechanism as a button the clip cut in half: unreachable rather than refused.
+    let shows_a_command = width.saturating_sub(MARGIN as usize) >= MINIMUM_SLOT;
+    for (nth, action) in panel
+        .iter()
+        .flat_map(|panel| panel.actions.iter())
+        .filter(|_| shows_a_command)
+        .enumerate()
+    {
+        let first = rows.len();
+        wrap(
+            &mut rows,
+            0,
+            &sanitize(&format!("{} {}", action_symbol(), action.label())),
+            theme.panel_color(None, None),
+            width,
+        );
+        let body = rows.len();
+        // **The command is painted in the ordinary ink and not in the dimmed one.** `clip`'s «… N more»
+        // uses the dim colour to say «this is elided», and the one sentence on this panel that a person
+        // has to read before pressing anything must not be styled as de-emphasis.
+        wrap_verbatim(
+            &mut rows,
+            MARGIN as usize,
+            action.send(),
+            theme.panel_color(None, None),
+            width,
+        );
+        for row in &mut rows[first..body] {
+            row.role = RowRole::ButtonLabel(nth);
+        }
+        for row in &mut rows[body..] {
+            row.role = RowRole::ButtonBody(nth);
+        }
+    }
+
     // The blank row is written by the layout, not by the painting: separated from the body, what the
     // application puts reads as what it is and not as the producer's first line.
     if !rows.is_empty() {
@@ -604,6 +812,7 @@ fn lay_out(
             column: 0,
             text: String::new(),
             color: Color32::TRANSPARENT,
+            role: RowRole::Text,
         });
     }
 
@@ -665,6 +874,7 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
             column: 0,
             text: String::new(),
             color,
+            role: RowRole::Text,
         }];
     }
 
@@ -718,6 +928,7 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
             column: 0,
             text: head,
             color,
+            role: RowRole::Text,
         }),
     }
     rows
@@ -737,6 +948,7 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
             column: indent,
             text: String::new(),
             color,
+            role: RowRole::Text,
         });
         return;
     }
@@ -771,6 +983,7 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
             column,
             text: line,
             color,
+            role: RowRole::Text,
         });
     }
 }
@@ -795,7 +1008,7 @@ pub fn paint(
     metrics: &CellMetrics,
     now: SystemTime,
     discoverer: &mut crate::fonts::Discoverer,
-) {
+) -> std::time::Duration {
     let rect = painter.clip_rect();
     painter.rect_filled(rect, 0.0, theme.panel_background());
 
@@ -805,8 +1018,12 @@ pub fn paint(
     let width = ((rect.width() / metrics.width()) as usize).saturating_sub(2 * MARGIN as usize);
     let warning = state.warning(now);
     let attention = state.attention_with(warning.is_none());
-    let Some(rows) = state.lay_out_if_needed(id, width, theme, warning, attention) else {
-        return;
+    // **Taken away first and put back only at the end.** Every way out of this function below is a
+    // frame in which nothing was drawn, and a press must not land on what the previous one left.
+    state.nothing_was_drawn();
+    let Some((rows, settled)) = state.lay_out_if_needed(id, width, theme, warning, attention)
+    else {
+        return std::time::Duration::ZERO;
     };
 
     // **Without a whole row nothing is painted, not even the warning.** With a floor of one, a panel of
@@ -814,11 +1031,21 @@ pub fn paint(
     // where no content fits.
     let fit = (rect.height() / metrics.height()) as usize;
     if fit == 0 {
-        return;
+        return std::time::Duration::ZERO;
     }
     let (visible, leftover) = clip(rows, fit);
+    let whole = rows.len() - leftover;
+    // **Timed apart from the painting it sits inside, because it is not painting.** Laying out and
+    // drawing a button's rows is what this span already means — rows are rows. Walking them
+    // afterwards to work out what a press may reach is a **new kind of work**, and a frame's cost is
+    // split by subtraction: a path that is not declared is published as the interface framework's,
+    // which is the figure **D3** judges egui by.
+    let walking = std::time::Instant::now();
+    let mut drawn = buttons_drawn(rows, whole, rect, metrics);
+    let walked = walking.elapsed();
 
     let text_left = rect.left() + MARGIN * metrics.width();
+    let mut overflowed: std::collections::BTreeSet<RowRole> = std::collections::BTreeSet::new();
     for (n, row) in visible.iter().enumerate() {
         let x = text_left + row.column as f32 * metrics.width();
         let y = rect.top() + n as f32 * metrics.height();
@@ -829,13 +1056,23 @@ pub fn paint(
         // any language—, and without noting it a summary in Japanese stayed as boxes forever because
         // nothing triggered the search.
         discoverer.note_text(&row.text);
-        painter.text(
+        let inked = painter.text(
             Pos2::new(x, y),
             Align2::LEFT_TOP,
             &row.text,
             metrics.font(),
             row.color,
         );
+        // **What a row really measures is asked of whoever drew it**, and that closes the last way a
+        // press could send a command nobody could read. This module lays text out counting
+        // characters, and a character is not a column: twenty-nine kanji are fifty-eight columns, so
+        // a command in Japanese is drawn past the strip's edge and the painter clips what sticks
+        // out — the person sees a fragment and the press would send the whole string. There is no
+        // table here that knows a glyph's width and there does not need to be: the text engine just
+        // drew it and returns where it ended.
+        if inked.right() > rect.right() {
+            overflowed.insert(row.role);
+        }
     }
 
     if leftover > 0 {
@@ -848,6 +1085,21 @@ pub fn paint(
             theme.panel_color(Some(Mark::Pending), None),
         );
     }
+
+    // **Recorded last, once nothing else borrows the layout.** What a press may reach is what this
+    // pass actually drew, so it is written after the drawing rather than alongside it.
+    // **A button whose ink left the strip is taken off the list**, for the same reason one the clip
+    // cut in half never went on it: unreachable rather than refused, with no branch anywhere that
+    // has to remember.
+    drawn.retain(|button| {
+        !overflowed.contains(&RowRole::ButtonLabel(button.action))
+            && !overflowed.contains(&RowRole::ButtonBody(button.action))
+    });
+    state.drawn = Some(Drawn {
+        settled,
+        buttons: drawn,
+    });
+    walked
 }
 
 /// How many rows are painted and how many are left out.
@@ -876,7 +1128,7 @@ mod tests {
         state.last_understood().expect("there is a panel").clone()
     }
 
-    fn publish(dir: &PanelDir, content: &str) {
+    pub(super) fn publish(dir: &PanelDir, content: &str) {
         std::fs::write(dir.path().join(PANEL_FILE), content).expect("publish the panel");
     }
 
@@ -884,7 +1136,7 @@ mod tests {
     ///
     /// By hand and not leaving it to the clock: two writes in a row fall within the same tick on some file
     /// systems, and then the test would pass or fail depending on the machine.
-    fn age_the_file(dir: &PanelDir, seconds: u64) {
+    pub(super) fn age_the_file(dir: &PanelDir, seconds: u64) {
         let path = dir.path().join(PANEL_FILE);
         std::fs::File::open(&path)
             .expect("open")
@@ -1004,7 +1256,7 @@ mod tests {
     ///
     /// Separated from [`what_gets_queued`] because the confession depends on **when** you look: the same
     /// panel is painted differently if its deadline has passed.
-    fn paint_the_state(
+    pub(super) fn paint_the_state(
         state: &mut PanelState,
         place: Rect,
         now: SystemTime,
@@ -1944,16 +2196,19 @@ mod tests {
         let first = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("there is a panel")
+            .0
             .to_vec();
         let repeated = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("there is a panel")
+            .0
             .to_vec();
         assert_eq!(first, repeated, "the same width gives the same layout");
 
         let narrow = state
             .lay_out_if_needed("a1b2", 12, &theme, None, None)
             .expect("there is a panel")
+            .0
             .to_vec();
         assert_ne!(
             first, narrow,
@@ -1979,7 +2234,7 @@ mod tests {
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("there is a panel");
         assert!(
-            rows.iter().any(|row| row.text.contains("the new")),
+            rows.0.iter().any(|row| row.text.contains("the new")),
             "the layout kept the old: {rows:?}"
         );
     }
@@ -2213,10 +2468,12 @@ mod tests {
         let first = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("there is a panel")
+            .0
             .as_ptr();
         let second = state
             .lay_out_if_needed("a1b2", 40, &theme, None, None)
             .expect("there is a panel")
+            .0
             .as_ptr();
 
         assert_eq!(
@@ -2465,10 +2722,10 @@ mod tests {
                 .lay_out_if_needed("probe", width, &theme, None, None)
                 .expect("there is a panel to lay out");
             assert!(
-                !rows.is_empty(),
+                !rows.0.is_empty(),
                 "with a panel of {width} cells no row was laid out"
             );
-            clip(rows, 1);
+            clip(rows.0, 1);
         }
     }
 
@@ -3022,5 +3279,276 @@ mod tests {
                  «{published}»: the producer that reads the contract expects one text and sees another"
             );
         }
+    }
+}
+
+/// What a button is on screen, and what a press on it reaches.
+///
+/// Named for the gesture rather than for the thing, because the thing already names the module the
+/// hit list lives in.
+///
+/// **These go through a real published document and a real painting**, never through a hand-pinned
+/// layout: a panel nobody published takes up no columns at all, so a test that invents the strip
+/// exercises something the window never does.
+#[cfg(test)]
+mod pressing {
+    use super::tests::{age_the_file, paint_the_state, publish};
+    use super::*;
+    use panel_contract::PanelDir;
+
+    const RUN: &str = r#"{"actions": [{"label": "Run tests", "send": "npm test"}],
+                          "lines": ["the body"]}"#;
+
+    /// A state with that document published, painted once at the given size.
+    fn painted(document: &str, place: Rect) -> PanelState {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        assert!(
+            state.is_visible(SystemTime::now()),
+            "the document was not understood, so there is no strip and this test would be vacuous"
+        );
+        // **Twice, and that is the subject rather than setup.** The first pass builds the layout, so
+        // the panel is not settled and a press would be refused; the second reuses it, which is the
+        // ordinary state of a panel nobody is writing to.
+        paint_the_state(&mut state, place, SystemTime::now());
+        paint_the_state(&mut state, place, SystemTime::now());
+        state
+    }
+
+    fn a_wide_strip() -> Rect {
+        Rect::from_min_size(Pos2::new(100.0, 50.0), eframe::egui::vec2(400.0, 600.0))
+    }
+
+    /// Somewhere inside the first button that was drawn.
+    fn on_the_first_button(state: &PanelState) -> Pos2 {
+        state
+            .buttons_drawn()
+            .next()
+            .expect("a button was drawn")
+            .center()
+    }
+
+    #[test]
+    fn a_button_that_was_drawn_is_reached_by_a_press_on_it() {
+        let state = painted(RUN, a_wide_strip());
+
+        let reached = state
+            .button_at(on_the_first_button(&state))
+            .expect("the press reaches the button that was drawn");
+
+        assert_eq!(reached.send(), "npm test");
+    }
+
+    #[test]
+    fn a_press_beside_the_button_reaches_nothing() {
+        let strip = a_wide_strip();
+        let state = painted(RUN, strip);
+        let below = Pos2::new(strip.center().x, strip.bottom() - 1.0);
+
+        assert!(
+            state.button_at(below).is_none(),
+            "a press at the bottom of the strip, where the body is, reached a button"
+        );
+    }
+
+    /// **The criterion the whole design rests on.** The rows the painting produced, reassembled, have
+    /// to be the string that would be written to the program — because that painted text *is* the
+    /// confirmation, and a filter or a wrapping that changed it would mean the bytes that ran are not
+    /// the bytes that were read.
+    ///
+    /// **It asserts against the laid-out rows and not against the parsed string**, which would be the
+    /// same value compared with itself and would pass however the painting mangled it.
+    #[test]
+    fn what_is_painted_under_the_label_is_what_would_be_sent() {
+        for command in [
+            "npm test",
+            // Runs of spaces: the ordinary wrapping collapses them, which is what this rule found.
+            "echo  two  spaces",
+            // Longer than the strip, so it wraps and the rows have to rejoin exactly.
+            "cargo test --workspace --all-targets --no-fail-fast -- --nocapture --test-threads=1",
+            // Not ASCII, so a cut by bytes would split a scalar and a cut by words would move it.
+            "grep 日本語 ~/documentos/notas.txt",
+            // Quoted whitespace, where the difference is not cosmetic at all.
+            r#"echo "a  b""#,
+        ] {
+            let document = format!(
+                r#"{{"actions": [{{"label": "x", "send": "{}"}}], "lines": ["b"]}}"#,
+                command.replace('"', "\\\"")
+            );
+            let mut state = PanelState::default();
+            let dir = PanelDir::create().expect("create the directory");
+            publish(&dir, &document);
+            state.refresh(dir.path());
+            let rows = state
+                .lay_out_if_needed("a1b2", 30, &Theme::default(), None, None)
+                .expect("there is a panel")
+                .0
+                .to_vec();
+
+            let reassembled: String = rows
+                .iter()
+                .filter(|row| matches!(row.role, RowRole::ButtonBody(0)))
+                .map(|row| row.text.as_str())
+                .collect();
+
+            assert_eq!(
+                reassembled, command,
+                "what the panel drew is not what the program would receive"
+            );
+        }
+    }
+
+    /// **A button whose rows did not all fit is not in the frame's reach**, and this pins the
+    /// mechanism rather than a number.
+    ///
+    /// **The first version of it passed for the wrong reason and that is worth recording.** It
+    /// invented a cell height of 15 points where the real one is about 16, so the strip fitted two
+    /// rows instead of three and **not one row of the button ever reached the screen** — the button
+    /// was absent because nothing of it was drawn, which is not the case this test is named after.
+    /// The defect and the fix gave the same result, which is the disguise **D30** lists second.
+    ///
+    /// So the height comes from the metrics the window uses, and the assertion is in two halves: the
+    /// label **is** on screen, and the button is **not** reachable. Only the two together say that a
+    /// half-drawn button was refused.
+    #[test]
+    fn a_button_that_did_not_fit_whole_cannot_be_pressed() {
+        let whole = painted(RUN, a_wide_strip());
+        assert_eq!(
+            whole.buttons_drawn().count(),
+            1,
+            "the case needs the button drawn whole"
+        );
+
+        // Three rows of the **real** cell: the identity row, the label, and one more that `clip`
+        // spends on «… N more». The command's row is what does not fit.
+        // The metrics the window itself uses, asked of a real context: a height invented here is how
+        // the first version of this test passed for the wrong reason.
+        let ctx = eframe::egui::Context::default();
+        let mut cell = 0.0;
+        let output = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            cell = CellMetrics::measure(
+                ui.ctx(),
+                eframe::egui::FontId::monospace(crate::DEFAULT_FONT_SIZE),
+            )
+            .height();
+        });
+        output.drop_without_applying_deltas();
+
+        let short = Rect::from_min_size(
+            Pos2::new(100.0, 50.0),
+            eframe::egui::vec2(400.0, cell * 3.0),
+        );
+        let clipped = painted(RUN, short);
+        let rows = clipped
+            .layout
+            .as_ref()
+            .expect("there is a layout")
+            .rows
+            .clone();
+        let label = rows
+            .iter()
+            .position(|row| matches!(row.role, RowRole::ButtonLabel(_)))
+            .expect("the button has a label row");
+        assert!(
+            label < 2,
+            "the case needs the label on screen and its command off it; the label is at row {label} \
+             and only 2 rows survive the clip"
+        );
+
+        assert_eq!(
+            clipped.buttons_drawn().count(),
+            0,
+            "a button the clip cut in half is still reachable by a press"
+        );
+    }
+
+    /// **A press is refused on a panel that was rebuilt this frame.** The panel is the one surface in
+    /// this window that repaints because somebody else wrote, so between the frame a person read and
+    /// the frame their click lands in, a producer can have replaced every button.
+    #[test]
+    fn a_press_is_refused_while_the_panel_is_not_settled() {
+        let strip = a_wide_strip();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, RUN);
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        paint_the_state(&mut state, strip, SystemTime::now());
+        paint_the_state(&mut state, strip, SystemTime::now());
+        let over_a_button = on_the_first_button(&state);
+        assert!(
+            state.button_at(over_a_button).is_some(),
+            "the case needs a press that would otherwise land"
+        );
+
+        // The producer publishes something else and the window paints it: that pass rebuilds the
+        // layout, so it is not settled.
+        age_the_file(&dir, 1);
+        publish(
+            &dir,
+            r#"{"actions": [{"label": "Deploy", "send": "make deploy"}], "lines": ["b"]}"#,
+        );
+        state.refresh(dir.path());
+        paint_the_state(&mut state, strip, SystemTime::now());
+
+        assert!(
+            state.button_at(over_a_button).is_none(),
+            "a press landed on the frame the panel was rewritten in, which is the one frame where \
+             what is under the pointer is not what the person read"
+        );
+
+        // And on the next frame, with nothing having changed, it is pressable again.
+        paint_the_state(&mut state, strip, SystemTime::now());
+        assert!(
+            state.button_at(on_the_first_button(&state)).is_some(),
+            "the panel never became pressable again"
+        );
+    }
+
+    /// **A command drawn past the strip's edge is not pressable**, and this is the last way a press
+    /// could have sent something nobody could read.
+    ///
+    /// This module lays text out counting **characters**, and a character is not a column: a kanji
+    /// is two. So a command in Japanese that fits by the character count is drawn beyond the strip
+    /// and the painter clips what sticks out — the person reads a fragment, and pressing would send
+    /// the whole string.
+    ///
+    /// **The width is asked of whoever drew the text**, which is the only authority there is: this
+    /// crate carries no table of glyph widths and does not need one.
+    #[test]
+    fn a_command_drawn_past_the_strip_is_not_pressable() {
+        // Narrow enough that the character count fits and the columns do not: the strip takes about
+        // thirty cells and every one of these is two wide.
+        let wide = "日".repeat(40);
+        let document =
+            format!(r#"{{"actions": [{{"label": "Wide", "send": "{wide}"}}], "lines": ["b"]}}"#);
+        let strip = Rect::from_min_size(Pos2::new(100.0, 50.0), eframe::egui::vec2(260.0, 600.0));
+
+        let narrow = painted(&document, strip);
+
+        assert!(
+            narrow.buttons_drawn().count() == 0,
+            "a command drawn outside the strip is still reachable by a press"
+        );
+        // And the case is not vacuous: the same document in a strip wide enough **is** pressable.
+        let roomy = painted(
+            &document,
+            Rect::from_min_size(Pos2::new(100.0, 50.0), eframe::egui::vec2(1400.0, 600.0)),
+        );
+        assert_eq!(
+            roomy.buttons_drawn().count(),
+            1,
+            "the case needs the same command to be pressable once there is room, or it proves nothing"
+        );
+    }
+
+    /// A producer that declares no buttons costs nothing and reaches nothing.
+    #[test]
+    fn a_panel_with_no_buttons_has_nothing_to_press() {
+        let state = painted(r#"{"lines": ["just a summary"]}"#, a_wide_strip());
+
+        assert_eq!(state.buttons_drawn().count(), 0);
+        assert!(state.button_at(a_wide_strip().center()).is_none());
     }
 }

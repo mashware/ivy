@@ -58,11 +58,13 @@ const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core"];
 /// is the stronger claim, and this one cannot add up to it.
 const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/mouse.rs",
+    "app/src/opening.rs",
     "app/src/keyboard.rs",
     "app/src/painter.rs",
     "app/src/painter/notices.rs",
     "app/src/fonts.rs",
     "app/src/panel.rs",
+    "app/src/panel/buttons.rs",
     "app/src/theme.rs",
     "app/src/watcher.rs",
     "app/src/pty_output.rs",
@@ -137,6 +139,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/measure.rs", "app"),
     ("app/src/measure/header.rs", "app"),
     ("app/src/panel.rs", "app"),
+    ("app/src/panel/buttons.rs", "app"),
     ("app/src/painter.rs", "app"),
     ("app/src/painter/notices.rs", "app"),
     ("app/src/pointer.rs", "app"),
@@ -144,6 +147,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/tab_bar.rs", "app"),
     ("app/src/pty_output.rs", "app"),
     ("app/src/mouse.rs", "app"),
+    ("app/src/opening.rs", "app"),
     ("app/src/session.rs", "app"),
     ("app/src/keyboard.rs", "app"),
     ("app/src/theme.rs", "app"),
@@ -589,8 +593,8 @@ fn guarded_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
     // here gets in nobody's way: it is there to notice one of them being emptied.
     assert!(
         FINISHED_CRATES.len() >= 3
-            && GLOSSARY_CLEAN_FILES.len() >= 25
-            && CITATIONS_CHECKED.len() >= 31,
+            && GLOSSARY_CLEAN_FILES.len() >= 27
+            && CITATIONS_CHECKED.len() >= 33,
         "the three lists this guard reads have {} crates, {} files and {} citation entries: they \
          only ever grow, so this is one of them being emptied and every check downstream going \
          quiet",
@@ -1063,6 +1067,14 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 /// it closed is what makes the guard below safe to break the build with — and the failure message
 /// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
 const NOT_OURS: &[&str] = &[
+    // **Unicode's own names for what a button's text may not carry.** `Cc` is the category of the
+    // control characters the kernel's line discipline acts on, `Cf` the format ones that are painted
+    // as nothing or paint the rest backwards, and `DEL` the one control that is not in the C0 range.
+    // They are cited where the contract explains why a button carrying one is dropped rather than
+    // repaired.
+    "Cc",
+    "Cf",
+    "DEL",
     // Other programs, and what the operating system gives them.
     "bash",
     // The one that writes for ever in two-byte lines, which is why the leak bench uses it.

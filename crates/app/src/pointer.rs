@@ -751,6 +751,42 @@ impl Window {
         // loop allocates a vector of every pane once per pane, on every frame, and nothing declares
         // that cost — which the frame's subtraction would publish as the framework's.
         for (pane, rect) in self.active_mut().panes_mut().into_iter().zip(rects) {
+            // **The panel's buttons are answered first, and they cost no geometry at all.** What the
+            // painting recorded is where each button really ended up, in the window's own
+            // coordinates, so this asks a question about a point instead of measuring a rectangle —
+            // and it asks it of the panel that drew, which is what makes a press on pane A's strip
+            // write into pane A's program wherever the keyboard happens to be.
+            if let Some(action) = pane.panel_state.button_at(bare.at) {
+                let bytes = crate::keyboard::what_a_button_sends(action.send());
+                match pane.pty.write(&bytes) {
+                    // **Counted only when the bytes went**, and the report's line says «pressed»
+                    // meaning «reached a program». Counting a failed write would publish a number
+                    // that is false in the direction that matters: a run where every write failed
+                    // would validate and claim presses that reached nothing.
+                    Ok(()) => {
+                        self.buttons.pressed += 1;
+                        // **For the bench, a press that landed IS this gesture's effect.** The
+                        // generic counter means «the tree accepted a drop» or «a width changed», and
+                        // a button press does neither — so without this the batch injects hundreds
+                        // of gestures, every one of them arriving, and the script invalidates the
+                        // run for having changed nothing.
+                        if let Some(injected_drags) = self.injected_drags.as_mut() {
+                            injected_drags.with_effect += 1;
+                        }
+                    }
+                    // Reported and not recorded, like the three call sites this one joins: a send
+                    // that failed is not a fast outbound trip and would skew the series that judges
+                    // one.
+                    Err(failure) => {
+                        eprintln!("the button could not write to the program: {failure}");
+                    }
+                }
+                let mut rest = queue;
+                rest.remove(which);
+                self.the_press_went_to_the_program = false;
+                return rest;
+            }
+
             // **Two comparisons and neither allocates**, which is the shape this loop already had
             // for one notice: a console with nothing to say must not make the frame pay for the
             // thing that is almost never there. The second is a read of a cell written once.

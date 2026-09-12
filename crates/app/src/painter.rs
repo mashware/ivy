@@ -870,8 +870,16 @@ pub(crate) fn paint_pane(
     let queued = before.elapsed().saturating_sub(color.spent);
 
     let before_painting_it = std::time::Instant::now();
+    let mut buttons = std::time::Duration::ZERO;
+    // **A pane whose panel is not painted says so, and it is not an afterthought.** The panel is
+    // folded away, or the pane has no directory: either way nothing of it is on screen, and without
+    // this the previous frame's buttons stay reachable — a click on the console, where one used to
+    // be, would run its command with nothing to read.
+    if panel_split.panel.is_none() || pane.panel.is_none() {
+        pane.panel_state.nothing_was_drawn();
+    }
     if let (Some(panel_rect), Some(dir)) = (panel_split.panel, pane.panel.as_ref()) {
-        crate::panel::paint(
+        buttons = crate::panel::paint(
             &ui.painter_at(panel_rect),
             &mut pane.panel_state,
             dir.id(),
@@ -881,7 +889,11 @@ pub(crate) fn paint_pane(
             discoverer,
         );
     }
-    let panel_cost = cost_of_reading + before_painting_it.elapsed();
+    // **Subtracted OUT of the panel's span and not folded into it**, the same shape the colour
+    // glyphs above already have. That span means six named things and its docblock enumerates them
+    // so that nothing creeps in; letting a seventh in would be a published series quietly changing
+    // meaning, which this file records having paid for twice.
+    let panel_cost = cost_of_reading + before_painting_it.elapsed().saturating_sub(buttons);
     // **The border is only reported if there is a grip behind it.** With the panel clipped
     // below the grip the gesture registers no control at all —so as not to steal the point from
     // the tree's divider—, and reporting the border anyway made the injected gesture press
@@ -898,18 +910,23 @@ pub(crate) fn paint_pane(
     // reached this console: it was painted just the same, and its cost has to come out of the
     // window's «rest of the frame».
     if let Some((waiting_since, collected_at, interpreted)) = pane.pending_measurement.take() {
-        pane.timings.record_round(crate::measure::Spans::of_a_round(
-            waiting_since,
-            collected_at,
-            interpreted,
-            queued,
-            panel_cost,
-        ));
+        pane.timings.record_round(
+            crate::measure::Spans::of_a_round(
+                waiting_since,
+                collected_at,
+                interpreted,
+                queued,
+                panel_cost,
+            )
+            .and_its_buttons(buttons),
+        );
     }
 
     crate::PaneOutcome {
         panel_divider,
         width_changed,
+        buttons_painted: pane.panel_state.buttons_drawn().count(),
+        first_button: pane.panel_state.buttons_drawn().next(),
         color,
         blinking,
     }

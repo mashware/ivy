@@ -150,7 +150,8 @@ pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
 ///
 /// **It is not `pub`, and that is the point.** Composing a paste without going through the gate is
 /// exactly the bug: an ungated door sitting beside the gated one, equally reachable and better
-/// named, is one autocomplete away from being used. [`paste_or_hold`] is the only way out.
+/// named, is one autocomplete away from being used. [`paste_or_hold`] and [`what_a_button_sends`]
+/// are the only two ways out, and a guard in `tests/shape.rs` counts them.
 fn paste(text: &str, bracketed: bool) -> Vec<u8> {
     const OPENS: &[u8] = b"\x1b[200~";
     const CLOSES: &[u8] = b"\x1b[201~";
@@ -197,6 +198,28 @@ fn paste(text: &str, bracketed: bool) -> Vec<u8> {
         body.extend_from_slice(CLOSES);
     }
     body
+}
+
+/// What a button on the panel writes to its own console's program.
+///
+/// **The same gate as a paste, under a second name, and the private one stays private.** A `send` is
+/// text another process wrote, so it carries exactly the danger that function's docblock enumerates;
+/// where it came from is the only difference, and that is not a reason for a second filter.
+///
+/// **The markers are off, and it is the load-bearing argument rather than a default.** Two reasons,
+/// both out of that same docblock. A shell that understands them *leaves the text written instead of
+/// executing it*, and a button declaring `npm test` exists to run it. And without them a line break
+/// comes out as a **carriage return**, which is what the Enter key sends — which is what makes the
+/// terminator below mean «and then press Enter» rather than «and then insert a control character».
+///
+/// **The terminator is appended here and is never carried by the text.** The contract refuses a
+/// `send` holding a line break, so whether a button executes is a property of this application and
+/// not a character a producer can get wrong: one meaning, nothing to misdeclare, and a button that
+/// only writes can be added later without breaking a single producer.
+pub(crate) fn what_a_button_sends(send: &str) -> Vec<u8> {
+    let mut bytes = paste(send, false);
+    bytes.push(b'\r');
+    bytes
 }
 
 /// How long a line may be before the line discipline stops keeping it, or **nothing** on a platform
@@ -2959,5 +2982,49 @@ mod keymap_tests {
                 keymap.action_for(chord)
             );
         }
+    }
+}
+
+/// **Why this application never has to warn that a button's command would arrive truncated.**
+///
+/// The line discipline closes an over-long line at its buffer's limit instead of refusing it, so the
+/// program receives something syntactically complete, different, and runs it — no error, no mark, and
+/// the screen showing the line that did not run. It is measured in this repository, and a button is
+/// the easiest way there is to produce such a line, because no human has to type it.
+///
+/// The design of this milestone carried a mechanism for it: a button painted inert, with its reason
+/// in the application's own row. **It was written and then removed, because the numbers make the case
+/// impossible** — and this test is what that removal is worth. A comment saying «it cannot happen» is
+/// a claim nobody runs; this fails the day it stops being true.
+///
+/// Raising [`panel_contract::MAX_SEND`] far enough, or landing on a platform whose line discipline
+/// keeps less, brings the case back — and brings the mechanism back with it. That is the message.
+#[cfg(test)]
+mod a_command_always_fits {
+    /// The worst case a scalar can cost once encoded, plus the terminator the application appends.
+    ///
+    /// **Bytes and not characters**, because bytes are what the kernel counts: calling them
+    /// characters would understate the worst case by a factor of four on anything that is not ASCII.
+    fn the_longest_a_command_can_compose() -> usize {
+        panel_contract::MAX_SEND * 4 + 1
+    }
+
+    #[test]
+    fn no_command_this_contract_accepts_can_be_truncated_by_the_line_discipline() {
+        let Some(ceiling) = crate::keyboard::the_longest_line_a_reader_keeps() else {
+            // A platform that answers nothing refuses nothing, and there is no case to have an
+            // opinion about. Its own docblock says why Windows has no such question and why nobody
+            // has measured macOS.
+            return;
+        };
+
+        assert!(
+            the_longest_a_command_can_compose() <= ceiling,
+            "a command this contract accepts can now be composed into {} bytes against a ceiling of \
+             {ceiling}, so the line discipline would close it and the program would run a different \
+             command with nothing said. The mechanism this test replaced — a button painted inert, \
+             with its reason in the application's own row — has to come back",
+            the_longest_a_command_can_compose()
+        );
     }
 }

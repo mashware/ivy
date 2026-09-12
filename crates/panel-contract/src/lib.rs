@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 mod panel;
 
 pub use panel::{
-    Attention, Line, MAX_BYTES, MAX_INDENT, Mark, Panel, Problem, STALE_AFTER, Style, read,
-    read_if_newer,
+    Action, Attention, Line, MAX_ACTIONS, MAX_BYTES, MAX_INDENT, MAX_SEND, Mark, Panel, Problem,
+    STALE_AFTER, Style, read, read_if_newer,
 };
 
 /// The only file the contract puts inside the directory. It is written by whoever does the work,

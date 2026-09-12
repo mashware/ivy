@@ -311,7 +311,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P or Q}
+BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q or R}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -352,7 +352,8 @@ case "$BATCH" in
     O)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=mouse ;;           # two, and the SAME walk, but the left program asked for the mouse
     P)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CJK=1 ;;       # two, and both dumping in JAPANESE: the only one that discovers fonts
     Q)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; EMOJI=1 ;;     # two, and both dumping EMOJI: the only one that rasterises colour glyphs
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P or Q" >&2; exit 2 ;;
+    R)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=button; ACTIONS=1 ;;   # two, and pressing a button on a panel: its control is C
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q or R" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -510,8 +511,34 @@ publish() {  # publish <directory> <n> <which of the consoles>
     # console so that different classes live together in one tab, which is what forces the tab to
     # compare: the one on an odd turn waits, the even one is taken as finished.
     if [ $(( $3 % 2 )) = 0 ]; then attention=done; else attention=wait; fi
+    # **Only batch R declares buttons**, for the same reason only P dumps Japanese and only Q dumps
+    # emoji: they are the one path that lays out a button's rows, walks them to work out what a press
+    # may reach, and composes what one sends. Any other batch painting one would be mixing foreign
+    # work into the spans, and the report's `buttons:` line is read in both directions to say so.
+    #
+    # **Eight of them, which is the ceiling the contract accepts**, so what the batch measures is the
+    # worst case a producer can declare rather than a convenient one.
+    # **Empty means the field is not written at all**, not an empty list: the composed document puts
+    # this straight in front of `"lines"`, so a value with no trailing comma would leave every other
+    # batch publishing a panel that is not JSON — which is how the first version of this was found.
+    actions=''
+    # **Read as $ACTIONS and not as $MEASURE_ACTIONS**: this seeding runs in the batch's own shell,
+    # where the batch table set it, while the MEASURE_ prefixed ones are what the window and its
+    # consoles see. Reading the child's name here left the document with no buttons and the batch
+    # invalidated itself, which is the guard doing its job on its author.
+    if [ "${ACTIONS:-}" = 1 ]; then
+        actions='"actions":[
+  {"label":"Run the tests","send":"echo batch"},
+  {"label":"Continue","send":"echo continue"},
+  {"label":"Open the request","send":"echo request"},
+  {"label":"Publish the report","send":"echo report"},
+  {"label":"Take the layout back","send":"echo layout"},
+  {"label":"Narrow the panel","send":"echo panel"},
+  {"label":"Close the console","send":"echo console"},
+  {"label":"Say what it cost","send":"echo cost"}],'
+    fi
     cat > "$tmp" <<JSON
-{"v":1,"stale_after_minutes":600,"attention":"$attention","lines":[
+{"v":1,"stale_after_minutes":600,"attention":"$attention",$actions"lines":[
   {"text":"Batch $BATCH · publication $2","style":"title"},
   "",
   {"ref":"load","text":"$MIB MiB per console, TUI-style dump","mark":"current"},
@@ -571,7 +598,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -587,7 +614,7 @@ STATUS=0
 export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$BATCH" \
     MEASURE_RUNS="$RUNS" MEASURE_TRIES="$DUMPING" \
     MEASURE_SIZE="$WINDOW_SIZE" MEASURE_DRAGS="$DRAGS" MEASURE_GESTURE="$GESTURE" MEASURE_CJK="${CJK:-}" \
-    MEASURE_EMOJI="${EMOJI:-}" \
+    MEASURE_EMOJI="${EMOJI:-}" MEASURE_ACTIONS="${ACTIONS:-}" \
     XDG_CONFIG_HOME="$CONFIG" \
     SHELL="$ROOT/scripts/measure-frame.sh"
 # **The two that ask for a layout are not exported when the batch restores, and that is what batch L
@@ -696,6 +723,41 @@ if [ "${EMOJI:-}" != 1 ] && [ "$RASTERIZED" != 0 ]; then
     invalidate "this batch does not dump emoji and yet it rasterised $RASTERIZED colour glyphs: \
 something other than the load is triggering it, so its spans mix in work that does not belong to what \
 it claims to measure"
+fi
+
+# **The panel's buttons, read in both directions like the emoji above and for the same reason.**
+# Batch R is the only one that declares any, so it is the only one that lays out a button's rows,
+# walks them to work out what a press may reach, and composes what one sends.
+#
+# **Two numbers and not one.** Painted with none pressed says the injector never hit a rectangle — a
+# narrow window, a seeding that did not arrive, a derivation that produced nothing — and the batch
+# would publish «pressing a button costs nothing», which is the deceit the witness already prevents
+# with the panels. Pressed with none painted cannot happen and says the walk stopped matching.
+#
+# And the other way round: a batch that declares no buttons and paints one is being seeded by
+# something other than its own load, so its spans carry work that does not belong to what it claims
+# to measure.
+# **The line is taken once and its two numbers are read off it**, rather than with two greps over the
+# report. A pattern that reads the report has to carry an anchor, or the guard that ties every one of
+# them to a test cannot see it — and two unanchored `[0-9]+` over the whole file would in any case be
+# free to pick up somebody else's number.
+BUTTONS_LINE=$(grep -E "^buttons:" "$REPORT" | head -1)
+DRAWN=$(printf '%s' "$BUTTONS_LINE" | grep -oE "[0-9]+ drawn" | grep -oE "^[0-9]+")
+PRESSED=$(printf '%s' "$BUTTONS_LINE" | grep -oE "[0-9]+ pressed" | grep -oE "^[0-9]+")
+DRAWN=${DRAWN:-0}
+PRESSED=${PRESSED:-0}
+if [ "${ACTIONS:-}" = 1 ] && [ "$DRAWN" = 0 ]; then
+    invalidate "this batch declares buttons to measure what painting and pressing one costs and it \
+drew none: the seeding never reached the panel, or the strip was too short for a whole button, and \
+either way the buttons section would be published empty and would read as costing nothing"
+fi
+if [ "${ACTIONS:-}" = 1 ] && [ "$PRESSED" = 0 ]; then
+    invalidate "this batch drew $DRAWN button(s) and pressed none: the injector never landed on one, \
+so what is published under «pressing a button» is the cost of a press that reached nothing"
+fi
+if [ "${ACTIONS:-}" != 1 ] && [ "$DRAWN" != 0 ]; then
+    invalidate "this batch declares no buttons and yet it drew $DRAWN: something other than its own \
+load is seeding them, so its spans mix in work that does not belong to what it claims to measure"
 fi
 
 # The application publishes the report on the way out, so if it finished badly the report is half
@@ -922,13 +984,14 @@ fi
 # the guard watches is that that path gets walked.
 #
 # **It is only demanded where the batch moves the layout.** In a still batch there is nothing to
-# save, and **neither in the one that marks text nor in the one that sends the mouse to the
-# program**: neither of them touches the tree or the share-out, so their runs do not attempt to save
+# save, and neither in the one that marks text, the one that sends the mouse to the program, **nor
+# the one that presses a button on the panel**: none of them touches the tree or the share-out, so
+# their runs do not attempt to save
 # even once and demanding it would invalidate them while being right for the wrong reason. That the
 # list of exempt gestures grows is not an oversight: it is that «injects gestures» and «moves the
 # layout» stopped being the same thing the moment there was a gesture that does not move it, and
 # since then every new gesture that does not move it comes in here.
-if [ "$DRAGS" != 0 ] && [ "$GESTURE" != mark ] && [ "$GESTURE" != mouse ]; then
+if [ "$DRAGS" != 0 ] && [ "$GESTURE" != mark ] && [ "$GESTURE" != mouse ] && [ "$GESTURE" != button ]; then
     ATTEMPTS=$(sed -n 's/^writing the layout to disk *([0-9]* writes of \([0-9]*\) attempts)$/\1/p' "$REPORT" | head -1)
     if [ -z "$ATTEMPTS" ]; then
         invalidate "drags were asked for and the report declares no attempt at saving the layout"

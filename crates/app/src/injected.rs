@@ -88,6 +88,16 @@ pub(crate) struct InjectedDrags {
     pub(crate) reported: usize,
     /// Which gesture is injected. See [`InjectedGesture`].
     pub(crate) which: InjectedGesture,
+    /// Where the previous pass drew the first button of **whichever pane painted last**, if it drew
+    /// one.
+    ///
+    /// **It comes from the painting and not from geometry of its own**, for the reason the whole
+    /// mechanism has: a button's place is decided by wrapping, by how many buttons there are and by
+    /// what fits, so computing it here would be a second derivation that can disagree with the one
+    /// on screen — and the batch would then press somewhere no button is and publish «pressing a
+    /// button costs nothing». It is the previous frame's, exactly like the panel's border, because
+    /// this hook runs before the interface pass.
+    pub(crate) a_button_at: Option<egui::Pos2>,
     /// What a cell of the font measures, for the panel gesture: its travel is counted in cells.
     ///
     /// **And it arrives empty on purpose, because at startup it cannot be known.** egui **has no
@@ -124,6 +134,7 @@ impl InjectedDrags {
     /// How many the batch asked for and of what kind, and nothing if it asked for none.
     pub(crate) fn new(how_many: usize, which: InjectedGesture) -> Option<Self> {
         (how_many > 0).then_some(Self {
+            a_button_at: None,
             asked_for: how_many,
             step: 0,
             completed: 0,
@@ -185,7 +196,44 @@ impl InjectedDrags {
             InjectedGesture::Select | InjectedGesture::MouseToProgram => {
                 self.select_a_stretch(painted, frame_nr)
             }
+            InjectedGesture::PressAButton => self.press_a_button(frame_nr),
         }
+    }
+
+    /// A bare press on a button, and its release on the next frame.
+    ///
+    /// **Two frames and not one**, so the press and the release do not arrive in the same batch: a
+    /// window that saw both at once would still route the press, but the batch would then be
+    /// measuring a shape no hand produces.
+    ///
+    /// **Nothing is emitted until the painting has recorded a button**, and the empty list is
+    /// returned **without advancing the gesture** — so a run where nothing was seeded declares
+    /// **zero gestures** and the script invalidates it, instead of publishing thousands of frames
+    /// with nothing inside under this label. It is the same discipline as the panel's border.
+    fn press_a_button(&mut self, frame_nr: u64) -> Vec<egui::Event> {
+        let Some(at) = self.a_button_at else {
+            return Vec::new();
+        };
+        self.last_frame = Some(frame_nr);
+        let step = self.step;
+        self.step += 1;
+
+        // The approach on its own frame, for the reason the header gives about every other gesture:
+        // a pointer that arrives and presses in the same batch is not what a hand does.
+        if step == 0 {
+            return vec![egui::Event::PointerMoved(at)];
+        }
+        let pressed = step == 1;
+        if !pressed {
+            self.step = 0;
+            self.completed += 1;
+        }
+        vec![egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }]
     }
 
     /// The gesture of marking text: grab inside the console and drag without stopping.
@@ -581,6 +629,11 @@ pub(crate) enum InjectedGesture {
     MoveDivider,
     /// Mark text inside a console: the left button on its own, which is what **D20** decides.
     Select,
+    /// **A bare press on a button of the first pane's panel.** The only injected gesture that does
+    /// not travel: what it costs is the walk that decides which button a point reaches and the
+    /// composing of what that button sends, and a travel would add a selection's cost under this
+    /// label.
+    PressAButton,
     /// **The same travel as marking, over a console whose program asked for the mouse.** What
     /// changes is not the gesture but where it goes: instead of extending a selection, a report
     /// goes out for every cell it crosses. That is why it reuses the injector of [`Self::Select`]
@@ -604,6 +657,7 @@ impl InjectedGesture {
             Self::MoveDivider => "moving the tree divider",
             Self::Select => "marking text",
             Self::MouseToProgram => "handing the mouse to the program",
+            Self::PressAButton => "pressing a button on the panel",
         }
     }
 }
@@ -621,6 +675,7 @@ pub(crate) fn gesture_of(value: Option<&str>) -> InjectedGesture {
         Some("divider") => InjectedGesture::MoveDivider,
         Some("mark") => InjectedGesture::Select,
         Some("mouse") => InjectedGesture::MouseToProgram,
+        Some("button") => InjectedGesture::PressAButton,
         _ => InjectedGesture::MovePane,
     }
 }

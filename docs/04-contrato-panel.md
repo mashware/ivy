@@ -29,6 +29,10 @@ transports feed it.
   "attention": "wait",
   "header": true,
   "stale_after_minutes": 30,
+  "actions": [
+    {"label": "Run the tests", "send": "cargo test --workspace"},
+    {"label": "Continue", "send": "yes"}
+  ],
   "lines": [
     "a loose line",
     {"text": "the two batch-read sources", "mark": "done", "ref": "#1",
@@ -51,6 +55,7 @@ transports feed it.
 | `attention` | no | **Whether this pane claims something, and of what kind.** `wait` `block` `done`. Absent = it claims nothing. See below |
 | `header` | no (`true` by default) | Whether the app adds its identity line at the top: the pane's identifier and its `phase` |
 | `stale_after_minutes` | no (30 by default) | How much silence is legitimate before warning |
+| `actions` | no | **The buttons this pane offers.** Each one is painted with its command underneath, and one click sends it to the program in that pane. See below |
 | `lines` | **yes** | The body |
 
 ### `attention`
@@ -82,6 +87,60 @@ in [02-decisiones.md](02-decisiones.md) → D18.
 - **It does not say what the program is doing.** For «working» or «idle» there is no field and there
   is not going to be one: that is either deduced by the app or declared by a harness that does not
   know the question ([02-decisiones.md](02-decisiones.md) → D6).
+
+### `actions`
+
+**The second field the application acts on**, after `attention`, and the only shape in this contract
+that reaches a shell. Each entry is an object with two strings:
+
+```json
+{"label": "Run the tests", "send": "cargo test --workspace"}
+```
+
+- **`label`** is what the button is called.
+- **`send`** is what the program receives. It is painted **under the label, literally**, and one
+  click sends it — so what is on screen is what runs, character for character.
+
+**The application appends the terminator itself.** A `send` cannot carry a line break (see below), so
+a button always executes: there is no way to declare one that only writes the text without running
+it, and no flag to get wrong. If that second kind is ever wanted it comes in as a new field, which
+breaks no producer.
+
+#### What is refused, and it is refused rather than repaired
+
+A `send` or a `label` carrying any of these makes **that button vanish** — the rest of the document,
+its other buttons included, is read as normal:
+
+| | |
+|---|---|
+| any control character (`U+0000`–`U+001F`, `U+007F`–`U+009F`) | the kernel's line discipline acts on them **before the program sees them**: one interrupts the foreground process, one suspends the shell and leaves the pane looking dead, one closes the input |
+| **a line break**, with the rest | a button is one command, not a document. One carrying a line break would run two commands while painting one |
+| **a tab**, with the rest | in a line editor the tab is the completion key, so the same button would do something different depending on what is on disk |
+| zero-width and direction-changing scalars (`U+200B`, `U+FEFF`, `U+00AD`, `U+202E`…) | they are painted as nothing, or paint the rest backwards, so the text a person reads is not the text that runs |
+
+**Refused and never cleaned, and that is the load-bearing decision**: the painted command *is* the
+confirmation this application requires before anything runs in a shell, so a filter that removed
+characters on the way out would mean the bytes that ran are not the bytes that were read.
+
+#### Ceilings
+
+| | |
+|---|---|
+| **8** buttons | more are **truncated**, not rejected: a document with nine shows eight rather than losing its panel |
+| **512** characters per `send` | a longer one makes that button vanish |
+
+#### What a producer has to know about a `send`
+
+- **It is painted on screen**, so a credential in one is in every screenshot of that window.
+- **It is written into the shell**, so it lands in `~/.bash_history` or `~/.zsh_history` — outside
+  anything this application controls, and surviving the pane. **It is no place for a credential**:
+  pass one through the environment or a file the command reads.
+- A button is **not pressable while it is not fully on screen.** In a short panel what does not fit
+  is dropped from the bottom, and a label over a command nobody can read is the one state the rule
+  about seeing a command before it runs forbids.
+- A press is **refused on the frame the document changed**. The panel repaints on its own the moment
+  somebody writes, so on that one frame what is under the pointer is not what the person read; the
+  panel is drawn again and the press works on the next one.
 
 ### `lines`
 
@@ -219,9 +278,15 @@ The prototype discovers the file by convention; the app does it by pane identity
 
 ## Pending
 
-- [ ] `actions` — declared buttons: `{"label": "Run tests", "send": "npm test\n"}` /
-      `{"label": "View PR", "open": "https://…"}`. See the risks in
-      [03-arquitectura.md](03-arquitectura.md) → Security
+- [x] **`actions` — declared buttons that write to their pane's program** — **done**: specified
+      above. The risks are in [03-arquitectura.md](03-arquitectura.md) → Security, and what replaced
+      the row that said the document's origin is checked is there too
+- [ ] **`open` — a button that opens an address** (`{"label": "View PR", "open": "https://…"}`).
+      Left out of the milestone that delivered `send`, and for the same reason `link` was left out of
+      the whole of F1.6: it is the only field that would **open** something coming from a document
+      that may be of outside origin, so painting it and sanitizing the address that goes with it
+      deserve a review of their own. A `send` reaches a shell this application already owns; an
+      `open` reaches the desktop's URL handler, which it does not
 - [ ] **How the source and the order of every delivery are expressed** (D17). Herdr solves it with a
       `--source` that is stable per integration, which grants authority and is released on leaving,
       and a strictly increasing `--seq` with which it discards whatever arrives late

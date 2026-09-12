@@ -17,7 +17,7 @@ context-dependent it says so instead of pretending.
 |---|---|---|
 | `división` (the thing) | **pane** | `docs/02-decisiones.md:3457`, `:3470`, `:3553`. **`split` is the GESTURE** (`Action::SplitRight`, `key.split-right`, `close-pane`) and D27 forbids reusing a word already spent. #12 called the thing a "split" in 41 places across 11 files. |
 | `reparto` | **tiling** | `:3494`, `:3504-3505`; and the types are `Tiling` and `PanelTiling`. **Never "split" and never "division"** — the second resurrects the very word D27 retired. #12 used both, 11 places. |
-| `tanda` | **batch** | `scripts/measure-frame.sh` ("EVERY BATCH IS RUN TWICE"). **And its letters `A`–`Q` are never translated** (`:3524`). |
+| `tanda` | **batch** | `scripts/measure-frame.sh` ("EVERY BATCH IS RUN TWICE"). **And its letters `A`–`R` are never translated** (`:3524`). |
 | `corrida` | **run** | Same source: "the two **runs** of the same **batch**". #12 rendered both as "run" in `session.rs`, producing *"every run of the run"*. |
 | `fuente` | **font** *or* **source** | **A false friend that inverted a claim in #12**: `la fuente de epaint` is its *source code*, not a typeface. Decide per sentence: a typeface is `font`, a library's code is `source`. |
 

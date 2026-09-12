@@ -3527,7 +3527,7 @@ Three types and one file wanted the same word:
   (**Not `fontdb`**, which the first version of this list cited: it is not in the tree — this project's
   font crate is `fontique`.)
 - **Proper names and labels:** `WezTerm`, `Ghostty`, `Kitty`, `tmux`, `vim`, `htop`, `Nerd Font`, `COLR`,
-  `D1`–`D27`, `F1.0`–`F2.12`, and **the batch letters `A`–`Q`**, which have no language.
+  `D1`–`D27`, `F1.0`–`F2.12`, and **the batch letters `A`–`R`**, which have no language.
 - **And the literals whose *length* is the test load.** The example that paints the check screen places a
   wide character **right on the column-80 boundary**, and its comment says that «without this row, the
   painter branch that handles that gap is looked at by nobody». **That file does not have a single
@@ -5815,3 +5815,128 @@ what is said, and it is the only part of **#192** a person sees.
 - **A console too short or too narrow for the whole sentence says nothing at all**, which is
   **D39**'s accepted price and is worth naming twice: on such a console what a person sees is a
   console that stopped and a window that stayed open.
+
+## D42 — A button is painted with its command underneath, and one click sends it
+
+**Status: taken.** Delivered in the second PR of the milestone that gives the panel buttons, F3.
+
+The panel has been a screen to look at since F1.6: whoever does the work publishes what is
+happening and the application paints it. This is the decision that turns it into a place to work
+in — a producer declares buttons and pressing one writes into its own pane's program.
+
+The rule this has to satisfy predates it by a year and is in
+[03-arquitectura.md](03-arquitectura.md) → Security: *a file that declares commands and a button
+that runs them is code execution in the user's shell, so the command must be visible before it
+runs.* Everything below is how that sentence is made true rather than asserted.
+
+### The decision, in four parts
+
+**1. The literal command is painted under its label, always, and one click sends it.**
+
+Not a confirmation on press, and not a button that arms on the first press and fires on the second.
+The command is on screen **before** the pointer arrives, which is what the rule asks; and Part I of
+the phase promises answering the agent **without typing**, which a chord would take back.
+
+**2. Painted and sent are the same text, character for character — so a dirty command is refused
+when the document is read, never cleaned.**
+
+This is the load-bearing half. That painted text *is* the confirmation, so a filter that removed
+characters on the way out would mean the bytes that ran are not the bytes that were read. Refusing
+at the read makes the property true by construction: the type holds two private strings and its only
+constructor checks them, so there is no path from a JSON file to a pseudoterminal that skips the
+gate, and a reviewer checks one function instead of every call site.
+
+What is refused is **every control character** — the kernel's line discipline acts on them before
+the program sees them, and that is measured in this repository rather than assumed — plus **a line
+break and a tab**, which a paste keeps and a button must not: a line break makes a button that runs
+two commands while painting one, and a tab in a line editor is the completion key, so the same
+button would do something different depending on what is on disk. And **the zero-width and
+direction-changing scalars**, which are painted as nothing or paint the rest backwards.
+
+**3. A press is refused unless the panel is settled, and a button that is not fully on screen is not
+pressable at all.**
+
+The panel is the one surface in this window that repaints because **somebody else wrote**, with no
+user action. So between the frame a person read and the frame their click lands in, a producer can
+have replaced every button — and it needs no attacker, a progress panel reordering its own buttons
+does it. A press is therefore only accepted on a frame whose painting reused the layout it already
+had. Refusing costs nothing: the panel is drawn again, it is read again, it is pressed again.
+
+And what does not fit is dropped from the bottom of a short panel, so a label can survive with its
+command scrolled away. Such a button is **absent from the frame's reach** rather than refused by a
+check — there is no branch anywhere that has to remember.
+
+**4. The application appends the terminator. A button always executes.**
+
+The text cannot carry a line break, so whether a button runs is a property of this application and
+not a character a producer can get wrong. One meaning, nothing to misdeclare, and the other kind —
+a button that only writes the text — can be added later as a new field without breaking a single
+producer.
+
+### What was discarded, and why
+
+| | |
+|---|---|
+| **A confirmation dialog on press** | The command is already on screen. A second gesture buys nothing the painting does not already give, and Part I promises answering without typing |
+| **A button that arms on the first press and fires on the second** | Two presses per button is the ergonomics of a dialog with none of its clarity, and the press that answers a painted question in this window is already a bare click |
+| **Reusing the held paste's question** (`Ctrl+Enter`) | It is keyboard-only, it holds one pending per console, and it drags [#170](https://github.com/mashware/agent-terminal/issues/170) with it — every pane painting a question only the focused one can answer |
+| **Cleaning the command instead of refusing it** | It makes the painted text a lie, which is the whole mitigation. And a remove-the-bad-characters pass is one refactor away from a search-and-delete, which this repository has already measured being slipped past |
+| **Keeping the paste's two exceptions** (tab, line breaks) | A paste is a document somebody copied and its lines are the point. A button is one command |
+| **A per-action flag choosing between running and only writing** | A second thing a producer can get wrong, for a case the roadmap's own three examples do not include |
+| **Painting a button inert when its command would arrive truncated** | Written, and then removed: a command is at most 512 characters — 2 049 bytes in the worst encoding — against a ceiling of 4 095 on the only platform that answers the question, so the branch could not be reached by any input. What replaced it is a test asserting that the worst a command can compose fits under the platform's ceiling, whose failure message says the mechanism has to come back. **A mechanism with no present scenario is what this project's own design rules forbid** |
+| **An origin check on the document** | There is nothing to test: `PANEL_DIR` is created by the application, `0700`, under the user's runtime directory with a name drawn at random, so whoever writes there is a process of the user's own uid. Deducing an origin would be **D6**. What is enforceable is the premise, and it is now written in the security table: the application never reads a panel document from a path it did not create |
+| **A hover highlight on a button** | A new painted path woken by a new event, to buy an affordance the symbol and the colour already give (**D13**) |
+| **A new theme colour for the command row** | The palette is twenty-two colours somebody writes by hand (**D26**), and a milestone that adds one for decoration is a milestone changing the manual |
+
+### Measured
+
+Batch **`R`** of `scripts/measure-frame.sh`: two consoles, both dumping, **eight buttons** — the
+ceiling the contract accepts — seeded on each panel, and a bare press on the first one over and
+over. **Its control is `C`**: same consoles, same load, and the only difference is the buttons.
+
+**Two runs of `R`, which `compare` says describe the same window and can be averaged**, against one
+of `C`:
+
+| | `R`, first run | `R`, second run | `R`, after the review | batch `C` (control) |
+|---|---|---|---|---|
+| the walk that decides what a press reaches, left pane | 1.015 µs mean, 1.853 µs p95 | 904 ns mean, 1.503 µs p95 | **1.137 µs mean, 1.884 µs p95** | 244 ns mean, 481 ns p95 |
+| the same, right pane | 623 ns mean, 1.182 µs p95 | 574 ns mean, 1.293 µs p95 | 575 ns mean, 1.283 µs p95 | 135 ns mean, 281 ns p95 |
+| buttons | 8 416 drawn whole, 173 pressed | 2 456 drawn, 51 pressed | 20 112 drawn, 415 pressed | 0 drawn, 0 pressed |
+
+**The third run is the one the delivery publishes**, and it is here beside the other two rather than
+replacing them: the review added a check of the ink's real width to every row drawn, so the number
+had to be taken again. It is inside the spread of the first two.
+
+**The two runs differ by about a tenth and the counts by a factor of three, and that is the injector
+rather than the work**: a gesture takes two frames and the run lasts as long as the load does, so how
+many presses fit is a property of the machine that minute. What is comparable is the per-frame span,
+and the two agree.
+
+**The control's figure is not zero, and that is honest rather than a defect**: the walk runs every
+frame over every visible row, finds that none of them is a button, and costs what it costs.
+
+**It is subtracted out of the panel's span and not folded into it.** That span means six named
+things and its docblock enumerates them so nothing creeps in; laying out and drawing a button's rows
+*is* painting, which it already covers, while deciding what a click can hit is not.
+
+**The report's line is read in both directions**, like the emoji and the fonts: a batch that declares
+buttons and draws none was never seeded, one that draws them and presses none never landed on a
+rectangle, and one that declares none and draws some is being seeded by something other than its own
+load.
+
+> **The batch invalidated itself four times before publishing, and every one was a real defect.** The
+> symbol first chosen for a button's label was not in the built-in fonts, so every frame that painted
+> one sent the window off to search the machine — which breaks the rule that only the Japanese batch
+> may do that, and would have cost the comparability of every published series. A symbol nobody can
+> see costs one glyph; one that triggers discovery costs the whole table.
+
+### What it leaves open
+
+- **A `send` lands in the shell's history** — `~/.bash_history`, `~/.zsh_history` — outside anything
+  this application controls and surviving the pane. It is written in the contract, because a producer
+  author will not guess it, and it is not fixable from here.
+- **A fully printable command is still a destructive one**, under a label that says something else.
+  That is the premise rather than a gap: the painted command is the defence, and there is no second
+  one.
+- **No batch measures opening or closing a pane**, by hand or over the channel that arrives in the
+  next PRs. It is in `docs/DEBT.md`, in the same class as «no batch draws a block element».

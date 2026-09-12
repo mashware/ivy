@@ -58,8 +58,8 @@ mod header;
 /// surface is exactly what `report.rs` and the window reach for. The module itself stays private, so
 /// `measure::header` outside this file is the function below and never the module.
 pub use header::{
-    Blinking, CONSOLE_NAME, ChoosingTheFont, Discovery, Drags, Rasterizing, ReadingSettings,
-    Reflow, Restoring, Saving, SessionHeader, SizeInPoints, TabBar, header, side,
+    Blinking, Buttons, CONSOLE_NAME, ChoosingTheFont, Discovery, Drags, Rasterizing,
+    ReadingSettings, Reflow, Restoring, Saving, SessionHeader, SizeInPoints, TabBar, header, side,
 };
 
 /// How many samples are kept of each number.
@@ -159,6 +159,15 @@ pub struct Spans {
     /// file from disk would be a number with the label swapped, and here that already cost a whole
     /// measurement: the cost that is not named well ends up attributed to whoever did not do it.
     panel: Duration,
+    /// What it cost to walk the panel's drawn rows and work out **what a press may reach**.
+    ///
+    /// **Its own field and subtracted out of `panel`, rather than folded into it.** That span means
+    /// six named things and its docblock enumerates them precisely so nothing creeps in; letting a
+    /// seventh in would be a published series quietly changing meaning, which this file records
+    /// having paid for twice. And it is a different **kind** of work: laying out and drawing a
+    /// button's rows is painting, which `panel` already covers, while deciding what a click can hit
+    /// is not.
+    buttons: Duration,
 }
 
 impl Spans {
@@ -179,7 +188,19 @@ impl Spans {
             interpreted,
             enqueued,
             panel,
+            buttons: Duration::ZERO,
         }
+    }
+
+    /// The same round, saying what walking the panel's buttons cost.
+    ///
+    /// **Chained rather than a seventh argument**, and the reason is this type's own docblock: named
+    /// fields exist here because three positional durations in a row let somebody swap two, compile
+    /// clean and publish a lying report. A seventh positional would be the same trap with one more
+    /// seat — and it would also edit eighteen call sites that have nothing to do with buttons, which
+    /// is the churn D28's order exists to avoid.
+    pub fn and_its_buttons(self, buttons: Duration) -> Self {
+        Self { buttons, ..self }
     }
 
     /// Merges the spans of **another pass of the same frame**.
@@ -198,7 +219,7 @@ impl Spans {
     /// The wait does not enter, and it is not an oversight: **it is not work**, it is how long the byte
     /// had been in the queue.
     fn declarable(&self) -> Duration {
-        self.interpreted + self.enqueued + self.panel
+        self.interpreted + self.enqueued + self.panel + self.buttons
     }
 
     fn and_also(self, other: Self) -> Self {
@@ -207,6 +228,7 @@ impl Spans {
             interpreted: self.interpreted + other.interpreted,
             enqueued: self.enqueued + other.enqueued,
             panel: self.panel + other.panel,
+            buttons: self.buttons + other.buttons,
         }
     }
 }
@@ -245,6 +267,11 @@ pub struct Timings {
     /// Checking the `panel.json` timestamp, reading and interpreting it when it has changed, splitting
     /// the width, **serving the drag of its border** and **painting it**.
     panel: Series,
+    /// Walking the panel's drawn rows to work out **what a press may reach**.
+    ///
+    /// Subtracted out of `panel` rather than folded into it: see [`Spans::buttons`], where the reason
+    /// is written once.
+    buttons: Series,
     round: Series,
     /// The previous frame's spans, waiting for `eframe` to publish what it cost.
     pending: Option<Spans>,
@@ -314,6 +341,7 @@ impl Timings {
             self.interpret.record(spans.interpreted);
             self.enqueue.record(spans.enqueued);
             self.panel.record(spans.panel);
+            self.buttons.record(spans.buttons);
             self.round.record(waited + cpu_cost);
         }
 
@@ -432,6 +460,7 @@ impl Timings {
             writeln!(a, "  interpreting:           {}", self.interpret)?;
             writeln!(a, "  enqueueing the paint:   {}", self.enqueue)?;
             writeln!(a, "  the status panel:       {}", self.panel)?;
+            writeln!(a, "  the panel's buttons:    {}", self.buttons)?;
             // **This span's mean mixes two populations and it has to be said.** Almost every frame
             // only checks the file timestamp and paints the already-laid-out text; the few in which
             // the producer has published cost, on top of that, reading, interpreting and redoing the
@@ -616,6 +645,7 @@ mod tests {
                 tab_bar: TabBar::default(),
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
+                buttons: Buttons::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -687,6 +717,7 @@ mod tests {
                 tab_bar: TabBar::default(),
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
+                buttons: Buttons::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -792,6 +823,7 @@ mod tests {
                 tab_bar,
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
+                buttons: Buttons::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -1736,6 +1768,7 @@ mod tests {
                         frames: 0,
                         ceiling: Some(false),
                     },
+                    buttons: Buttons::default(),
                 },
             )
             .expect("writing to memory does not fail");

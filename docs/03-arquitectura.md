@@ -84,8 +84,8 @@ every version of the agent. That is what channel 1 is for.
 
 | Risk | Mitigation |
 |---|---|
-| The panel's `actions` run commands in the shell | The command must be visible before it runs; `send` is plain text with no interpolation and no templates |
-| A `panel.json` of untrusted origin (cloned repo, container) | Treat the file as untrusted; never run anything from it without visible confirmation |
+| The panel's `actions` run commands in the shell | **The literal command is painted under its label and the click is the confirmation**, so what is on screen is what runs, character for character. `send` is plain text with no interpolation and no templates; every control character, line break, tab and zero-width scalar is **refused when the document is read, never cleaned** — cleaning would make the painted text stop being the sent text, which is the whole of this mitigation. A button that is not fully on screen is not pressable, and a press is refused on the frame the document changed |
+| A `panel.json` of untrusted origin (cloned repo, container) | **The document's origin is unknowable and the application does not pretend otherwise.** `PANEL_DIR` is created by the application, `0700`, under the user's runtime directory and with a name drawn at random, so whoever writes there is a process of the user's own uid — the same trust level as the shell in the pane. There is nothing to test, and deducing an origin would be **D6**. What is enforceable is the premise: **the application never reads a panel document from a path it did not create** — no flag, no setting and no convenience that points it at a file somebody names. That one-line feature would be the whole of the breach |
 | An agent writing into somebody else's pane | The MCP server scopes by `PANEL_ID`. **Through the file there is no scoping**: whoever can write in the directory is the producer (D17) |
 | Reading the buffer and sending it to a model | It exfiltrates whatever is on screen: tokens, keys, API responses. Choosing what gets sent must be explicit, never automatic |
 | Setting `ANTHROPIC_API_KEY` when launching a panel | Forbidden: it would change the user's billing (see D4) |

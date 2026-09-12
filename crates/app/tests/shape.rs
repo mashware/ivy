@@ -46,6 +46,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/alarms.rs", include_str!("../src/alarms.rs")),
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
+    (
+        "src/panel/buttons.rs",
+        include_str!("../src/panel/buttons.rs"),
+    ),
     ("src/measure.rs", include_str!("../src/measure.rs")),
     (
         "src/measure/header.rs",
@@ -68,6 +72,7 @@ const MODULES: &[(&str, &str)] = &[
     ("src/watcher.rs", include_str!("../src/watcher.rs")),
     ("src/theme.rs", include_str!("../src/theme.rs")),
     ("src/mouse.rs", include_str!("../src/mouse.rs")),
+    ("src/opening.rs", include_str!("../src/opening.rs")),
     ("src/pointer.rs", include_str!("../src/pointer.rs")),
     ("src/report.rs", include_str!("../src/report.rs")),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
@@ -104,11 +109,10 @@ const IMPL_CEILING: usize = 300;
 /// **A ratchet, not an exemption**: the guard fails when one of these grows. Lowering a number is
 /// the normal outcome of a delivery that takes a piece out, and this table is where that progress is
 /// recorded.
-const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
-    (
-        "src/lib.rs",
-        1_124,
-        "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
+const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
+    "src/lib.rs",
+    1_022,
+    "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
          first piece out and reading the settings file the second, which left for `settings.rs` \
@@ -141,17 +145,19 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          was written here it did not reconcile either. That second move is also what retired the \
          `impl Pane` entry that used to sit below: at 204 it no longer exceeds its ceiling, and an \
          entry that stops exceeding one is deleted rather than kept as a trophy — which is exactly \
-         what `no_entry_of_the_ratchet_is_stale` fails for.",
-    ),
-    (
-        "src/lib.rs::impl Window",
-        401,
-        "22 methods, and it came in at 47 holding a third of the whole file. Mouse routing, the \
-         tab bar, the report, saving, painting a pane, the deadlines the window sets itself and \
-         applying what the settings file asks for have all left it, each to a module that owns that \
-         vocabulary; what is left is opening, the frame's own walk and the shortcuts",
-    ),
-];
+         what `no_entry_of_the_ratchet_is_stale` fails for. **And then the milestone that gives the \
+         panel buttons paid it again**, because the previous delivery had left `impl Window` at its \
+         recorded number with no room at all and four lines were owed here: how a window comes into \
+         being — with the tabs it is asked for, or with the ones it left behind — went out to \
+         `opening.rs`, **117 production lines**, and `impl Window` lost 112 of them. That is also what \
+         retired the entry that used to sit below for that block: at **289** it no longer exceeds \
+         its ceiling. **Fifteen lines came straight back in the same delivery** — the fields the \
+         buttons' measurement needs on `Window` and on a pane's outcome, and the walk that hands the \
+         bench's injector the button the painting drew — so the file went 1 124 → 1 007 → **1 022**, \
+         which is what the guard measures. The two numbers are said rather than netted off: what the \
+         order is worth is only readable if a delivery's own cost is written beside the piece it \
+         took out.",
+)];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.
 ///
@@ -226,7 +232,7 @@ fn ceiling_for(name: &str) -> Option<usize> {
 fn no_module_is_over_its_ceiling() {
     // **A floor first, because this whole file passes by looking at nothing otherwise.** It is how
     // the guards of this suite die: somebody reshapes the walk, it finds no lines, every module
-    // looks tiny and nothing says so. Measured today: **twenty-three modules**, the thinnest being
+    // looks tiny and nothing says so. Measured today: **twenty-five modules**, the thinnest being
     // `src/main.rs` with three.
     //
     // **Splitting a module does not raise the total and that is the point** — it moves lines from
@@ -243,7 +249,7 @@ fn no_module_is_over_its_ceiling() {
         .map(|(_, src)| production_lines(src).len())
         .sum();
     assert!(
-        MODULES.len() >= 23 && total >= 6_000,
+        MODULES.len() >= 25 && total >= 6_000,
         "the walk found {total} production lines over {} modules: it stopped matching, and this \
          guard is measuring nothing",
         MODULES.len()
@@ -431,11 +437,16 @@ fn the_pseudoterminal_is_declared_before_the_bridge_that_holds_its_receiver() {
 /// removed the distance**: the walk that consumes a pass's keys now lives in `keyboard.rs` itself,
 /// and the two functions that assemble a mouse report live beside what sends one.
 ///
-/// So the protection stops being geography and becomes a number. **Two doors reach `paste`, not
-/// one** — composing a paste as it arrives, and composing a held one when it is finally answered
-/// against the mode that is current then — and that second one is the whole of **D31**. The mouse's
-/// two report forms have one door each. A call site beyond the count is the defect, whether or not
-/// it is wrong on the day it is written.
+/// So the protection stops being geography and becomes a number. **Three doors reach `paste`** —
+/// composing a paste as it arrives, composing a held one when it is finally answered against the
+/// mode that is current then (the whole of **D31**), and composing what a panel's button sends. The
+/// mouse's two report forms have one door each. A call site beyond the count is the defect, whether
+/// or not it is wrong on the day it is written.
+///
+/// **The third one is what this guard was written for, one delivery before it existed.** The
+/// milestone that gives the panel buttons needed a way to write text another process declared, the
+/// obvious move was a second filter beside the first, and this number is what turned that into a
+/// decision somebody had to make out loud instead of a function somebody added.
 ///
 /// # Two blind spots this guard had, both found by mutating it
 ///
@@ -454,8 +465,8 @@ fn a_gate_that_is_private_on_purpose_still_has_its_counted_callers() {
         (
             "src/keyboard.rs",
             "paste",
-            2,
-            "`paste_or_hold` and a held paste being answered",
+            3,
+            "`paste_or_hold`, a held paste being answered, and what a panel's button sends",
         ),
         ("src/mouse.rs", "extended_form", 1, "`encode`"),
         ("src/mouse.rs", "legacy_form", 1, "`encode`"),

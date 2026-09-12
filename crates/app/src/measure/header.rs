@@ -531,6 +531,25 @@ pub struct SessionHeader {
     pub reflow: Reflow,
     /// What a blinking cursor woke the window for.
     pub blink: Blinking,
+    /// What the panel's buttons drew and what was pressed.
+    pub buttons: Buttons,
+}
+
+/// What the panel's buttons did this run.
+///
+/// **Both numbers, and a run is invalidated by either of them being zero where it should not be.**
+/// Painted with nothing pressed says the injector never hit a rectangle — a narrow window, a
+/// derivation that produced none — and the batch would publish «pressing a button costs nothing».
+/// Pressed with nothing painted cannot happen and says the walk stopped matching. And either of them
+/// above zero in a batch that declares no buttons says something other than the load is declaring
+/// them, which mixes foreign work into the spans.
+#[derive(Default, Clone, Copy)]
+pub struct Buttons {
+    /// Buttons drawn **whole**, summed over the run's frames. A button the clip cut in half is not
+    /// counted, for the same reason it is not pressable.
+    pub painted: usize,
+    /// Presses that reached a button and wrote to a program.
+    pub pressed: usize,
 }
 
 /// What a blinking cursor cost this run, **and why it cost that**.
@@ -567,6 +586,7 @@ pub fn header(
         tab_bar,
         reflow,
         blink,
+        buttons,
     } = session;
     let profile = if cfg!(debug_assertions) {
         "debug — the number that counts is the one from --release"
@@ -752,6 +772,15 @@ pub fn header(
             // panes. It caught this line, which is what that guard is for.
             None => "the program decides, and it blinks unless it says otherwise",
         }
+    )?;
+    // **Always, and both numbers on one line.** A batch that declares buttons and reports zero
+    // painted seeded nothing; one that reports buttons painted and none pressed never hit a
+    // rectangle, and would publish «pressing a button costs nothing». The script reads the line in
+    // both directions, the way it already reads the drags, the fonts and the emoji.
+    writeln!(
+        a,
+        "buttons:      {} drawn whole, {} pressed",
+        buttons.painted, buttons.pressed
     )?;
     writeln!(a, "renderer:     glow")?;
     writeln!(a, "profile:      {profile}")?;

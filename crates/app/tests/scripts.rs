@@ -73,6 +73,10 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/alarms.rs", include_str!("../src/alarms.rs")),
     ("app/src/injected.rs", include_str!("../src/injected.rs")),
     ("app/src/panel.rs", include_str!("../src/panel.rs")),
+    (
+        "app/src/panel/buttons.rs",
+        include_str!("../src/panel/buttons.rs"),
+    ),
     ("app/src/measure.rs", include_str!("../src/measure.rs")),
     (
         "app/src/measure/header.rs",
@@ -98,6 +102,7 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/watcher.rs", include_str!("../src/watcher.rs")),
     ("app/src/theme.rs", include_str!("../src/theme.rs")),
     ("app/src/mouse.rs", include_str!("../src/mouse.rs")),
+    ("app/src/opening.rs", include_str!("../src/opening.rs")),
     ("app/src/pointer.rs", include_str!("../src/pointer.rs")),
     ("app/src/report.rs", include_str!("../src/report.rs")),
     ("app/src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
@@ -154,8 +159,8 @@ const MODULES: &[(&str, &str)] = &[
 #[test]
 fn the_list_still_names_every_module() {
     assert!(
-        MODULES.len() >= 32,
-        "`MODULES` names {} files and this delivery left thirty-two: a piece came out of a module \
+        MODULES.len() >= 34,
+        "`MODULES` names {} files and this delivery left thirty-four: a piece came out of a module \
          and its new home was not added, so whatever this guard reports, it is not reporting on \
          every script these crates run",
         MODULES.len()
