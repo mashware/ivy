@@ -2012,7 +2012,7 @@ mod tests {
         /// artifact to satisfy a test, which is the tail wagging the dog.
         const DRAWN_RULE: char = '\u{2500}';
 
-        const SOURCES: [(&str, &str); 9] = [
+        const SOURCES: [(&str, &str); 11] = [
             ("session.rs", include_str!("session.rs")),
             ("watcher.rs", include_str!("watcher.rs")),
             ("lib.rs", include_str!("lib.rs")),
@@ -2022,6 +2022,14 @@ mod tests {
             // 63 against a floor of 74. A module split silently narrows every list that names
             // files, which is why the guard counts and does not just judge.
             ("injected.rs", include_str!("injected.rs")),
+            // **And a third time, with the milestone that gives the panel buttons**: the keys' walk
+            // and what a pane does with the wheel left `lib.rs` for these two, taking three
+            // sentence-shaped literals with them. The corpus fell from 76 to 73 and the floor of 72
+            // swallowed it in silence — the exact failure this comment had already described twice
+            // and the list still did not defend against, because a list only defends the files it
+            // names.
+            ("keyboard.rs", include_str!("keyboard.rs")),
+            ("mouse.rs", include_str!("mouse.rs")),
             ("pointer.rs", include_str!("pointer.rs")),
             ("report.rs", include_str!("report.rs")),
             ("tab_bar.rs", include_str!("tab_bar.rs")),
@@ -2052,30 +2060,57 @@ mod tests {
             }
         }
         // Same floor and for the same reason as its siblings: without it a walk that stopped finding
-        // literals leaves this test passing by looking at nothing. The nine files hold **77** today
-        // — 27 in `session.rs`, 19 in `lib.rs`, 10, 6, 5, 5, 3, 1 and 1 — and the floor sits five
-        // below, tight enough that a broken walk cannot hide behind it and loose enough that
-        // deleting a message is not a failure.
+        // literals leaves this test passing by looking at nothing. The eleven files hold **79**
+        // today — 27 in `session.rs`, 15 in `lib.rs`, 10, 6, 5, 5, 4, 3, 2, 1 and 1 — and the floor
+        // sits five below, tight enough that a broken walk cannot hide behind it and loose enough
+        // that deleting a message is not a failure.
         //
         // **It was left at 74 when the corpus dropped from 78 to 76 and the claim above stopped
         // being true**: at two lines of slack, deleting a pair of messages *is* a failure. The floor
         // moves with the corpus or it stops meaning what it says.
         //
-        // **The cut at `mod tests` rests on there being nothing after it, and for two of the nine
-        // files walked here that is FALSE** — it read «there is not» until somebody checked. Six of
-        // this crate's modules declare no test module at all; of the ones that do, `keyboard.rs`
-        // keeps `Action`, `Chord` and `Keymap` below its own (about two hundred production lines) and
-        // `pty_output.rs` keeps `DeafConsole` there. Neither file is walked by this test, so nothing
-        // of theirs is lost here — but **`shape.rs` cannot see those lines either**, which is the
-        // same invisibility D28 records as costing one delivery fifty lines, and it is filed rather
-        // than fixed. Whenever a top-level item lands below a test module its sentences leave this
-        // walk in silence, which is why the floor is stated as a number and not as «some».
+        // **The cut at `mod tests` rests on there being nothing after it, and for one of the files
+        // walked here that is FALSE** — it read «there is not» until somebody checked. Six of this
+        // crate's modules declare no test module at all; of the ones that do, `pty_output.rs` keeps
+        // `DeafConsole` below its own and is not walked here, while **`keyboard.rs` now is**, and it
+        // keeps `Action`, `Chord` and `Keymap` below its own — about a hundred and sixty production
+        // lines this walk therefore does not read. **`shape.rs` cannot see those lines either**,
+        // which is the same invisibility D28 records as costing one delivery fifty lines, and it is
+        // filed rather than fixed; the one guard that could not live with it — the one counting the
+        // doors to the control-character gate — removes the test blocks by counting braces instead
+        // of truncating, and its own comment says why. Whenever a top-level item lands below a test
+        // module its sentences leave this walk in silence, which is why the floor is stated as a
+        // number and not as «some».
         assert!(
-            sentences.len() >= 72,
-            "only {} sentence-shaped literals were found before `mod tests` in the nine files: the \
+            sentences.len() >= 74,
+            "only {} sentence-shaped literals were found before `mod tests` in the eleven files: the \
              walk stopped working",
             sentences.len()
         );
+        // **Two floors and not one**, the lesson `COMMENT_LINES_AT_LEAST` in `tests/prose.rs`
+        // already paid for and this walk had only half of. A total floor answers «the walk still
+        // works»; it cannot answer «this file is still being read», because the slack above it is
+        // wider than any one file. Measured as this delivery leaves the tree: the eleven files
+        // carry 27, 15, 10, 6, 5, 5, 4, 3, 2, 1 and 1, so **four of them sit inside the total
+        // floor's five lines of slack** — `mouse.rs` with two and `pointer.rs` and `tab_bar.rs`
+        // with one each are defended by nothing else at all.
+        //
+        // **That is the failure this list has now met three times, and the total floor swallowed it
+        // every time**: a split moves a file's messages into a module nobody adds here, the corpus
+        // drops by less than the slack, and the guard stays green over sentences no oracle reads
+        // any more. Checked by doing exactly that — dropping `mouse.rs` from the list above leaves
+        // the floor of 74 green at 77.
+        //
+        // One and not more: `pointer.rs` and `tab_bar.rs` carry a single sentence each, so any
+        // higher number would be a table rather than a floor — the same reason its sibling gives.
+        for (name, _) in SOURCES {
+            assert!(
+                sentences.iter().any(|(from, _)| from == &name),
+                "{name} yielded no sentence-shaped literal: either its messages left for a module \
+                 that was never added to the list above, or the walk stopped matching for this \
+                 file alone — which no total would notice"
+            );
+        }
 
         let said: Vec<String> = problems
             .iter()

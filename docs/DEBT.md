@@ -12,6 +12,25 @@ Format: `- <date> · <ticket> · <what> — <why it matters>`.
 
 ## Open
 
+- 2026-09-11 · 226 · **No batch measures opening or closing a pane**, by hand or over the control
+  channel, so what those paths cost is published as the interface framework's cost — the figure D3
+  judges egui by. Same class as «no batch draws a block element»; neither is a hole that milestone
+  opened, and the control channel's own batches (`R`, `S`) do not close it either.
+- 2026-09-11 · 226 · **The script scanner reads only a plain one-line literal**, so a command
+  written across two lines is judged by nothing. One such command sat in `lib.rs` and left
+  `no_line_naming_a_mode_command_escapes_the_scanner` **red on `main`** until PR #227 joined it;
+  confirmed by running that guard against `de48db3` in a checkout of its own. The command is
+  repaired, the blind spot is not, and this milestone's own measurement batches will write commands
+  of that shape.
+- 2026-09-11 · 226 · **`production_lines` stops at the first `mod tests`**, so production code
+  *below* a test module is invisible to the module ceiling, the `impl` ceiling and the ratchet —
+  about 160 lines of `keyboard.rs` (`Action`, `Chord`, `Keymap` and four `impl` blocks) and
+  `pty_output.rs`'s `DeafConsole`. `settings.rs`'s prose already called this «filed rather than
+  fixed»; what PR #227 added is the measurement — a guard counting the doors to a deliberately
+  private gate was mutated with a caller past that cut and **stayed green**. That one guard now
+  removes test blocks by counting braces; the ceilings still truncate, because changing them moves
+  every recorded ratchet number at once.
+
 - 2026-09-09 · 210 · **`FLOW.md`'s validate note names scripts that no longer exist** — it says
   `scripts/medir-fotograma.sh`, `comparar` and `.INVALIDA`; since F2.12 renamed the repository to
   English the real names are `scripts/measure-frame.sh`, `compare` and `.INVALID`. Every

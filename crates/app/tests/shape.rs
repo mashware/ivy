@@ -47,6 +47,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     ("src/measure.rs", include_str!("../src/measure.rs")),
+    (
+        "src/measure/header.rs",
+        include_str!("../src/measure/header.rs"),
+    ),
     ("src/session.rs", include_str!("../src/session.rs")),
     ("src/fonts.rs", include_str!("../src/fonts.rs")),
     ("src/settings.rs", include_str!("../src/settings.rs")),
@@ -103,7 +107,7 @@ const IMPL_CEILING: usize = 300;
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
     (
         "src/lib.rs",
-        1_362,
+        1_124,
         "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -127,8 +131,17 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          not nine, so a second piece went out in the same delivery. Putting the settings the file \
          asks for onto the window left for `settings.rs`, 19 lines, the piece that delivery was \
          already editing. Nineteen out and fourteen in against 1 367 leaves **1 362**, which is what \
-         the guard measures. (The first telling said fifteen in and did not reconcile; a comment \
-         audit did the subtraction.)",
+         the guard measured until the phase that gives the panel buttons. (The first telling said \
+         fifteen in and did not reconcile; a comment audit did the subtraction.) **Then two pieces \
+         went out ahead of the deliveries that need the room, and nothing came in with them**: what \
+         a pane does with the keys of one pass left for `keyboard.rs` and what it does with the \
+         wheel and a mouse gesture for `mouse.rs`, **238 production lines against the 1 362 above**, \
+         leaving 1 124. The subtraction is stated between the two numbers this guard checks and not \
+         broken down per piece: a per-piece tally is arithmetic nothing runs, and the last time one \
+         was written here it did not reconcile either. That second move is also what retired the \
+         `impl Pane` entry that used to sit below: at 204 it no longer exceeds its ceiling, and an \
+         entry that stops exceeding one is deleted rather than kept as a trophy — which is exactly \
+         what `no_entry_of_the_ratchet_is_stale` fails for.",
     ),
     (
         "src/lib.rs::impl Window",
@@ -137,12 +150,6 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[
          tab bar, the report, saving, painting a pane, the deadlines the window sets itself and \
          applying what the settings file asks for have all left it, each to a module that owns that \
          vocabulary; what is left is opening, the frame's own walk and the shortcuts",
-    ),
-    (
-        "src/lib.rs::impl Pane",
-        442,
-        "the console. What has already been peeled off it lives in pty_output.rs, keyboard.rs and \
-         mouse.rs; what is left is the pumping and the grid",
     ),
 ];
 
@@ -219,7 +226,7 @@ fn ceiling_for(name: &str) -> Option<usize> {
 fn no_module_is_over_its_ceiling() {
     // **A floor first, because this whole file passes by looking at nothing otherwise.** It is how
     // the guards of this suite die: somebody reshapes the walk, it finds no lines, every module
-    // looks tiny and nothing says so. Measured today: **twenty-one modules**, the thinnest being
+    // looks tiny and nothing says so. Measured today: **twenty-three modules**, the thinnest being
     // `src/main.rs` with three.
     //
     // **Splitting a module does not raise the total and that is the point** — it moves lines from
@@ -236,7 +243,7 @@ fn no_module_is_over_its_ceiling() {
         .map(|(_, src)| production_lines(src).len())
         .sum();
     assert!(
-        MODULES.len() >= 21 && total >= 6_000,
+        MODULES.len() >= 23 && total >= 6_000,
         "the walk found {total} production lines over {} modules: it stopped matching, and this \
          guard is measuring nothing",
         MODULES.len()
@@ -413,4 +420,121 @@ fn the_pseudoterminal_is_declared_before_the_bridge_that_holds_its_receiver() {
          its receiver goes away while the stop flag is still down: every ordinary close would be \
          recorded as «nobody was listening». Declare `pty` first"
     );
+}
+
+/// **A gate that is private on purpose keeps a counted set of callers, and this counts them.**
+///
+/// `keyboard::paste` strips the control characters out of anything that did not come from a key, and
+/// its own docblock says why it is not `pub`: *«an ungated door sitting beside the gated one, equally
+/// reachable and better named, is one autocomplete away from being used»*. That argument rested on
+/// distance — the code that could have bypassed it lived in `lib.rs`, a module away. **D28's order
+/// removed the distance**: the walk that consumes a pass's keys now lives in `keyboard.rs` itself,
+/// and the two functions that assemble a mouse report live beside what sends one.
+///
+/// So the protection stops being geography and becomes a number. **Two doors reach `paste`, not
+/// one** — composing a paste as it arrives, and composing a held one when it is finally answered
+/// against the mode that is current then — and that second one is the whole of **D31**. The mouse's
+/// two report forms have one door each. A call site beyond the count is the defect, whether or not
+/// it is wrong on the day it is written.
+///
+/// # Two blind spots this guard had, both found by mutating it
+///
+/// **It read [`production_lines`], which stops at the first `mod tests`** — and `keyboard.rs` keeps
+/// about 160 lines of production code *below* its own test module. A third caller appended there
+/// left this guard green. So it reads [`outside_the_test_modules`] instead, which removes each test
+/// block by counting braces rather than truncating at the first one: a call in a unit test is still
+/// not a caller, and a call after one still is.
+///
+/// **And it looked its module up by exact name**, so a child module calling `super::paste` was never
+/// read — the shape this very delivery created with `measure/header.rs`. It now folds in every entry
+/// of [`MODULES`] that lives under the gate's own module.
+#[test]
+fn a_gate_that_is_private_on_purpose_still_has_its_counted_callers() {
+    for (module, gate, doors, through) in [
+        (
+            "src/keyboard.rs",
+            "paste",
+            2,
+            "`paste_or_hold` and a held paste being answered",
+        ),
+        ("src/mouse.rs", "extended_form", 1, "`encode`"),
+        ("src/mouse.rs", "legacy_form", 1, "`encode`"),
+    ] {
+        let family = module.trim_end_matches(".rs");
+        let sources: Vec<&str> = MODULES
+            .iter()
+            .filter(|(name, _)| *name == module || name.starts_with(&format!("{family}/")))
+            .map(|(_, source)| *source)
+            .collect();
+        assert!(
+            !sources.is_empty(),
+            "`{module}` is not in the module list, so this guard reads nothing"
+        );
+
+        let callers: usize = sources
+            .iter()
+            .flat_map(|source| outside_the_test_modules(source))
+            .filter(|line| !line.trim_start().starts_with("fn "))
+            .map(|line| calls_of(line, gate))
+            .sum();
+
+        assert_eq!(
+            callers, doors,
+            "`{module}` and the modules under it call `{gate}` {callers} times and the doors to it \
+             are {through}: a call site beyond those is a way past the gate, which is the thing \
+             that docblock says it is private to prevent"
+        );
+    }
+}
+
+/// The lines of a module with its **test blocks removed**, rather than everything after the first
+/// one.
+///
+/// [`production_lines`] truncates at `mod tests`, which is right for a line count — what follows is
+/// mostly tests, and counting them would make that ceiling measure a convention of the language.
+/// It is wrong for a guard that asks *whether a call exists*: `keyboard.rs` keeps four `impl` blocks
+/// and about 160 lines of production code below its test module, and a truncating walk cannot see a
+/// single one of them. **Measured by mutation**: a third caller of the gate, appended past that cut,
+/// left the guard green.
+///
+/// Blocks are removed by counting braces from the `mod tests` line, so production code that follows
+/// one is read. Nested braces inside the block are what the count is for; a brace inside a string
+/// literal would fool it, and no test module in this crate opens with one.
+fn outside_the_test_modules(source: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut lines = source.lines();
+    while let Some(line) = lines.next() {
+        let code = line.trim_start();
+        if !(code.starts_with("mod tests") || code.starts_with("pub mod tests")) {
+            out.push(line);
+            continue;
+        }
+        let mut depth = line.matches('{').count() - line.matches('}').count();
+        for inner in lines.by_ref() {
+            depth += inner.matches('{').count();
+            depth -= inner.matches('}').count().min(depth);
+            if depth == 0 {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// How many times a line calls that function **by its whole name**.
+///
+/// The whole-name part is the guard's own bug, found by running it: `paste` as a substring also
+/// matches `bracketed_paste()`, which reads a mode off the screen and goes nowhere near the gate.
+fn calls_of(line: &str, name: &str) -> usize {
+    let wanted = format!("{name}(");
+    let mut found = 0;
+    let mut rest = line;
+    while let Some(at) = rest.find(&wanted) {
+        let before = rest[..at].chars().next_back();
+        if !before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            found += 1;
+        }
+        rest = &rest[at + wanted.len()..];
+    }
+    found
 }

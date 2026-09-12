@@ -58,6 +58,10 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     ("src/measure.rs", include_str!("../src/measure.rs")),
+    (
+        "src/measure/header.rs",
+        include_str!("../src/measure/header.rs"),
+    ),
     ("src/session.rs", include_str!("../src/session.rs")),
     ("src/fonts.rs", include_str!("../src/fonts.rs")),
     ("src/settings.rs", include_str!("../src/settings.rs")),
@@ -94,7 +98,7 @@ const SOURCES: &[(&str, &str)] = &[
 ///
 /// **Without a floor this test passes by being empty**, which is how the guards of this suite die:
 /// somebody reshapes the comment detection, the walk finds nothing, every file looks clean and
-/// nothing says otherwise. Measured as this delivery leaves the tree: **13 844** comment lines, the
+/// nothing says otherwise. Measured as this delivery leaves the tree: **15 692** comment lines, the
 /// thinnest file being `src/main.rs` with **one** — it is four lines of `fn main`, and a floor that
 /// demanded more of it would have to be a table instead of a number.
 ///
@@ -102,8 +106,8 @@ const SOURCES: &[(&str, &str)] = &[
 /// `src/lib.rs` is what makes it matter: `src/main.rs`, `examples/leak.rs` and
 /// `examples/screen_demo.rs` together carry 94 lines, so losing all three sits inside the total
 /// floor's slack — reported by nothing but the per-file one. That is the case the second floor is
-/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 5 809 of the
-/// 13 844, so losing it drops the corpus to 8 035 and the total fires loudly. The two floors answer
+/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 6 112 of the
+/// 15 692, so losing it drops the corpus to 9 580 and the total fires loudly. The two floors answer
 /// different halves, which is why there are two.
 ///
 /// **The floor is a number over the corpus, so a split has to raise it.** The tiling and the tree
@@ -112,23 +116,32 @@ const SOURCES: &[(&str, &str)] = &[
 /// the guard's sight. **A list of files is the one thing a module split silently narrows**, and a
 /// floor left where it was is what turns that into silence.
 ///
-/// **13 300 and not a rounder number, and the slack was measured rather than chosen.** With the
-/// corpus at 13 844 the slack is 544, so every file carrying more than that is defended by the total
-/// alone; the **seventeen** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
-/// `examples/leak.rs` (59), `src/mouse.rs` (94), `src/report.rs` (134), `examples/sweep.rs` (134),
-/// `examples/fonts.rs` (168), `src/tab_bar.rs` (171), `src/theme.rs` (202), `src/watcher.rs` (203),
-/// `src/tiling.rs` (272), `src/pty_output.rs` (282), `src/injected.rs` (289), `src/painter.rs` (355),
-/// `src/tree.rs` (451), `src/pointer.rs` (458) and `src/settings.rs` (530) — and that is what the per-file floor is for and
-/// why it is stated here rather than left to be discovered. A floor loose enough to let a mid-sized
-/// file be gutted was checked by doing exactly that, on the number this replaced.
+/// **And it went unpaid for a second time, which is why the number moved so far in one delivery.**
+/// The floor sat at 13 300 against a corpus that had reached 15 692 — two thousand of slack, in a
+/// guard whose whole argument is that the slack is what it defends. The delivery that took the
+/// keys' walk and the wheel out of `src/lib.rs` is the one that measured it again, and the lesson is
+/// the file's own: a floor is re-measured by the delivery that touches the list, not by the one that
+/// happens to read the comment.
+///
+/// **15 150 and not a rounder number, and the slack was measured rather than chosen.** With the
+/// corpus at 15 692 the slack is 542, so every file carrying more than that is defended by the total
+/// alone; the **nineteen** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
+/// `examples/leak.rs` (59), `src/painter/blocks.rs` (87), `examples/sweep.rs` (134),
+/// `src/alarms.rs` (136), `src/report.rs` (136), `src/mouse.rs` (165), `examples/fonts.rs` (168),
+/// `src/tab_bar.rs` (171), `src/theme.rs` (202), `src/watcher.rs` (203),
+/// `src/painter/notices.rs` (222), `src/tiling.rs` (272), `src/injected.rs` (291),
+/// `src/measure/header.rs` (401), `src/tree.rs` (451), `src/pty_output.rs` (456) and
+/// `src/pointer.rs` (536) — and that is what the per-file floor is for and why it is stated here
+/// rather than left to be discovered. A floor loose enough to let a mid-sized file be gutted was
+/// checked by doing exactly that, on the number this replaced.
 ///
 /// **This list moves whenever anybody writes a comment, and that is the flaw rather than the
 /// maintenance.** The slack is the corpus minus the floor, so every line of prose added anywhere
-/// raises it and can pull another file under — the delivery that wrote this note added sixty-eight
-/// lines to `src/tab_bar.rs` and brought `src/tree.rs` and `src/pointer.rs` back in. Re-enumerated
-/// here because the alternative is a list that lies; the real answer is a per-file floor stated as a
-/// table, which is [issue #183](https://github.com/mashware/agent-terminal/issues/183).
-const COMMENT_LINES_AT_LEAST: usize = 13_300;
+/// raises it and can pull another file under. Re-enumerated here because the alternative is a list
+/// that lies; the real answer is a per-file floor stated as a table, which is
+/// [issue #183](https://github.com/mashware/agent-terminal/issues/183) — and the two-thousand-line
+/// drift above is the strongest argument yet for closing it.
+const COMMENT_LINES_AT_LEAST: usize = 15_150;
 const COMMENT_LINES_PER_FILE_AT_LEAST: usize = 1;
 
 /// How many **different** listed words a line needs before it is called Spanish.
@@ -206,7 +219,7 @@ const ISLANDS: &[(&str, &str)] = &[
 ///
 /// The list is closed, and the threshold above is what covers its remaining softness: a handful of
 /// entries — «con», «la», «es» — do exist in some corner of English, and one of them alone is never
-/// a verdict. Measured over all 13 844 comment lines of the twenty-three files: **zero** English lines
+/// a verdict. Measured over all 15 692 comment lines of the twenty-three files: **zero** English lines
 /// reach three markers.
 const SPANISH_WORDS: &[&str] = &[
     // ── The function words, from the sibling list in src/settings.rs ──
@@ -577,8 +590,8 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
 #[test]
 fn the_walk_still_reads_the_comments_of_every_file() {
     assert!(
-        SOURCES.len() >= 25,
-        "the list of translated files has {} entries and this delivery left twenty-five, which is \
+        SOURCES.len() >= 27,
+        "the list of translated files has {} entries and this delivery left twenty-seven, which is \
          every file of the crate: it only ever grows, so this is somebody emptying it and every \
          check downstream going quiet",
         SOURCES.len()
@@ -601,7 +614,7 @@ fn the_walk_still_reads_the_comments_of_every_file() {
     }
     assert!(
         total >= COMMENT_LINES_AT_LEAST,
-        "the walk found {total} comment lines and there are 13 844: the detection stopped matching \
+        "the walk found {total} comment lines and there are 15 692: the detection stopped matching \
          and this guard is judging almost nothing"
     );
 }

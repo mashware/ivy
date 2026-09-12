@@ -4,8 +4,10 @@
 //! It came out of `lib.rs` with **D28**, which is the entry that gave this crate a ceiling per
 //! module. It is the first piece to leave because it is the easiest to argue: it is instrumentation
 //! for the bench, it reaches into the window through one method, and nothing but the bench asks for
-//! it. **Not into `measure.rs`, which is the module whose name matches it**: that module is at 540
-//! production lines of its 600, so the ceiling ruled out the obvious home before the move was made.
+//! it. **Not into `measure.rs`, which is the module whose name matches it**: at the time that module
+//! had no room under its ceiling, so the obvious home was ruled out before the move was made. **The
+//! number this line used to state is deliberately gone** — `measure.rs` has since been split and the
+//! figure was stale twice over, which is what a comment asserting a count always becomes.
 //!
 //! What it does not own is the *measuring*: the spans and the guards that read them stay in
 //! `measure.rs`, and **publishing the report left for [`crate::report`]** with the delivery that took

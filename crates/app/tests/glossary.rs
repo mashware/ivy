@@ -75,6 +75,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/alarms.rs",
     "app/src/injected.rs",
     "app/src/measure.rs",
+    "app/src/measure/header.rs",
     "app/src/session.rs",
     "app/src/settings.rs",
     "app/examples/sweep.rs",
@@ -134,6 +135,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/painter/blocks.rs", "app"),
     ("app/src/fonts.rs", "app"),
     ("app/src/measure.rs", "app"),
+    ("app/src/measure/header.rs", "app"),
     ("app/src/panel.rs", "app"),
     ("app/src/painter.rs", "app"),
     ("app/src/painter/notices.rs", "app"),
@@ -587,8 +589,8 @@ fn guarded_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
     // here gets in nobody's way: it is there to notice one of them being emptied.
     assert!(
         FINISHED_CRATES.len() >= 3
-            && GLOSSARY_CLEAN_FILES.len() >= 23
-            && CITATIONS_CHECKED.len() >= 29,
+            && GLOSSARY_CLEAN_FILES.len() >= 25
+            && CITATIONS_CHECKED.len() >= 31,
         "the three lists this guard reads have {} crates, {} files and {} citation entries: they \
          only ever grow, so this is one of them being emptied and every check downstream going \
          quiet",

@@ -1,7 +1,11 @@
-//! Which bytes each mouse gesture sends to the program.
+//! What a pane does with the wheel and with a mouse gesture, and which bytes each one sends.
 //!
-//! It is a pure function from a gesture to the bytes a terminal would send, sibling of [`keyboard`]. It
-//! writes nowhere: whoever sends them is the loop, and where it sends them through is the bridge.
+//! **Two halves, and the seam between them is the point.** [`encode`] and everything under it is a
+//! pure function from a gesture to the bytes a terminal would send, sibling of [`keyboard`]: it
+//! writes nowhere. The `impl Pane` block at the end is the other half — who keeps the gesture, what
+//! the scrollback does with it and what finally reaches the program — and that one **does** write.
+//! It came out of the window's core under **D28**, which gives a module a ceiling and records what
+//! that file is at so the number can only go down.
 //!
 //! **This encoding does not come from the library.** The VT engine knows how to say whether the program
 //! wants the mouse —those are its flags—, but assembling the report was the Alacritty binary's job, not
@@ -16,7 +20,10 @@
 //!
 //! [`keyboard`]: crate::keyboard
 
+use crate::{Cell, Scroll, WheelInput, WheelOutcome, WheelOwner};
+use eframe::egui;
 use eframe::egui::{Modifiers, PointerButton};
+use std::time::{Duration, Instant};
 use term_core::MouseReporting;
 
 /// The highest column or row that the old encoding can report.
@@ -170,6 +177,180 @@ fn legacy_form(report: MouseReport, button: u8, at: CellPos) -> Option<Vec<u8>> 
         32 + at.column as u8,
         32 + at.row as u8,
     ])
+}
+
+/// What a pane does with the wheel and with a mouse gesture, before the bytes above are composed.
+///
+/// **The same vocabulary as the rest of this module**: who keeps the gesture, what the scrollback
+/// does with it and what finally reaches the program. It came out of the window's core under
+/// **D28**, which records what that file is at so the number can only go down.
+impl crate::Pane {
+    /// Moves the scrollback by what the wheel has asked for, **keeping what does not add up to a
+    /// line**.
+    ///
+    /// **The remainder accumulates from one frame to the next, and that is where the defect was.**
+    /// A touchpad sends points: every brush is worth a fraction of a line, and truncating without
+    /// keeping the remainder left the scrollback **still forever** with two fingers dragging
+    /// slowly. With a notched wheel it showed less —every notch is a whole line— but it lost the
+    /// fraction all the same, always against the movement.
+    ///
+    /// **It truncates towards zero and the remainder keeps its sign**, so changing direction
+    /// halfway does not drag debt from the previous direction: the fraction that was left is spent
+    /// against the new movement, which is what the hand does.
+    pub(crate) fn handle_wheel(
+        &mut self,
+        requested: WheelInput,
+        chord: egui::Modifiers,
+        at: Cell,
+    ) -> Option<WheelOutcome> {
+        self.pending_wheel.lines += requested.lines;
+        self.pending_wheel.pages += requested.pages;
+
+        let lines = self.pending_wheel.lines.trunc();
+        let pages = self.pending_wheel.pages.trunc();
+        self.pending_wheel.lines -= lines;
+        self.pending_wheel.pages -= pages;
+
+        match self.who_takes_the_wheel(chord) {
+            WheelOwner::Scrollback => {
+                // **Only what moves something.** A `Lines(0)` is not harmless for free: it is an
+                // order to the engine that does nothing, and publishing it would make whoever reads
+                // the code believe the frame scrolled.
+                if lines != 0.0 {
+                    self.screen.scroll_by(Scroll::Lines(lines as i32));
+                }
+                if pages != 0.0 {
+                    self.screen.scroll_by(Scroll::Pages(pages as i32));
+                }
+                None
+            }
+            owner => {
+                // **Pages are turned into lines before going out, and are not sent separately.** A
+                // program does not understand «a page»: what it expects is as many turns as lines,
+                // and the page is measured by the grid it has in front of it. Without this
+                // arithmetic, a touchpad that sends pages would leave `less` still.
+                let rows = f32::from(self.screen.size().rows);
+                let how_many = (lines + pages * rows) as i32;
+                (how_many != 0)
+                    .then(|| self.send_wheel(owner, how_many, at))
+                    .flatten()
+            }
+        }
+    }
+
+    /// Who gets the turn, in the order **D23** sets.
+    ///
+    /// **«Shift» first and always.** It is the way out that guarantees going up the scrollback can
+    /// be done in any console, whatever the program inside is watching; without it, inside a pager
+    /// there would be no way to see what went off the top **of the console**, which is a different
+    /// thing from what the pager shows.
+    fn who_takes_the_wheel(&self, chord: egui::Modifiers) -> WheelOwner {
+        if chord.shift {
+            WheelOwner::Scrollback
+        } else if self.screen.mouse_reporting().wants_mouse() {
+            WheelOwner::Program
+        } else if self.screen.wheel_acts_as_arrows() {
+            WheelOwner::ArrowKeys
+        } else {
+            WheelOwner::Scrollback
+        }
+    }
+
+    /// Sends the program as many turns as lines, and returns what it cost to reach the
+    /// pseudoterminal.
+    ///
+    /// **One send and not one per line.** The bytes are put together and go out at once: the
+    /// pseudoterminal is one system call per write, and with a touchpad a single gesture brings
+    /// dozens of lines.
+    fn send_wheel(&mut self, owner: WheelOwner, how_many: i32, at: Cell) -> Option<WheelOutcome> {
+        let started = Instant::now();
+        let to_the_top = how_many > 0;
+        let mut bytes = Vec::new();
+        for _ in 0..how_many.unsigned_abs() {
+            match owner {
+                WheelOwner::ArrowKeys => {
+                    // **The same table as the keys, and it inherits its declared cut**: application
+                    // mode —the one where the arrows change shape— is left out of the milestone,
+                    // and that is written in the keyboard module. Writing it here in another way
+                    // would leave two tables contradicting each other.
+                    bytes.extend_from_slice(if to_the_top { b"\x1b[A" } else { b"\x1b[B" });
+                }
+                _ => {
+                    let gesture = if to_the_top {
+                        MouseReport::WheelUp
+                    } else {
+                        MouseReport::WheelDown
+                    };
+                    // **The turn is reported on the cell under the pointer, not on the corner.** A
+                    // program with two scrolling areas —`tmux` with two panes, `vim` with two
+                    // windows— decides **which** one moves by the cell the report brings: with 1;1
+                    // fixed, the wheel always moved the top-left one, wherever the pointer was
+                    // looking.
+                    if let Some(report) = encode(
+                        gesture,
+                        CellPos::from_zero(at.row, at.col),
+                        self.screen.mouse_reporting(),
+                        egui::Modifiers::NONE,
+                    ) {
+                        bytes.extend_from_slice(&report);
+                    }
+                }
+            }
+        }
+        if bytes.is_empty() {
+            return None;
+        }
+        if let Err(failure) = self.pty.write(&bytes) {
+            eprintln!("the wheel turn could not be sent to the program: {failure}");
+            // **A send that failed is not a fast outbound trip**, just as on the keyboard's path
+            // and on the click's: recording it would measure the failure and publish it as the
+            // gesture's normal cost.
+            return None;
+        }
+        Some(WheelOutcome {
+            cost: started.elapsed(),
+            // **Arrow keys are not a mouse report, and counting them as one invalidated good
+            // batches.** What goes out along that path are the same keys the keyboard sends;
+            // publishing them under «N mouse reports» put foreign samples into that series and
+            // tripped the guard that demands zero reports in every batch that is not the mouse one
+            // — with a `less` scrolling, a correct run was marked invalid.
+            was_a_report: owner == WheelOwner::Program,
+        })
+    }
+
+    /// Sends the program what the mouse has just done over this console.
+    ///
+    /// Returns what it cost to **hand the gesture over**, or nothing if there was nothing to send —
+    /// which is the normal case: the program only receives what it has asked for.
+    ///
+    /// **It used to be «to reach the pseudoterminal», and it is not any more.** Since the write is
+    /// handed to a thread of its own, this stopwatch stops at the queue: the byte reaches the
+    /// program afterwards, on a thread nobody times. D23 published this span as 5.1–5.3 µs per
+    /// gesture when it still included the write; what it covers now is a shorter stretch under the
+    /// same name.
+    pub(crate) fn send_mouse_to_the_program(
+        &mut self,
+        gesture: MouseReport,
+        cell: Cell,
+        chord: egui::Modifiers,
+    ) -> Option<Duration> {
+        let started = Instant::now();
+        let bytes = encode(
+            gesture,
+            CellPos::from_zero(cell.row, cell.col),
+            self.screen.mouse_reporting(),
+            chord,
+        )?;
+        if let Err(failure) = self.pty.write(&bytes) {
+            // A gesture lost in silence inside an editor reads as the window being hung, just like
+            // a lost key.
+            eprintln!("the mouse could not be sent to the program: {failure}");
+            // A send that failed is not a fast outbound trip: it is not recorded, or the number
+            // would measure the failure.
+            return None;
+        }
+        Some(started.elapsed())
+    }
 }
 
 #[cfg(test)]

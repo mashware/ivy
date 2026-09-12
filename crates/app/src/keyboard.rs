@@ -1,7 +1,12 @@
-//! Which bytes each key sends to the program.
+//! What a pane does with the keys of one pass, and which bytes each key sends.
 //!
-//! It is a pure function from a window event to the bytes a terminal would send. It writes
-//! nowhere: the one that sends them is the loop, and where it sends them through is the bridge.
+//! **Two halves, and the seam between them is the point.** [`bytes`] and everything under it is a
+//! pure function from a window event to the bytes a terminal would send: it writes nowhere. The
+//! `impl Pane` block at the end is the other half — the walk that consumes one pass's events,
+//! decides which chords the window keeps and which reach the program, and answers a held paste —
+//! and that one **does** write: to the pseudoterminal, to the scrollback and to the clipboard. It
+//! came out of the window's core under **D28**, which gives a module a ceiling and records what that
+//! file is at so the number can only go down.
 //!
 //! **Where this milestone stops, and why.** Alt, the function keys and the numeric
 //! keypad are left out. None of them is needed to type commands in a shell or to move around an editor,
@@ -11,8 +16,11 @@
 //! tables blind. What is left out returns silence, never an approximate byte: a wrong
 //! byte is understood by the program inside as a different key, and that is worse than receiving nothing.
 
+use crate::{KEYSTROKE_SLACK, Orientation, Scroll, WindowRequest};
+use eframe::egui;
 use eframe::egui::{Context, Event, Key, Modifiers};
 use std::borrow::Cow;
+use std::time::Instant;
 
 /// Whether somebody typed in this frame's input.
 ///
@@ -329,7 +337,7 @@ impl HeldPaste {
         };
         format!(
             "this paste has a line of {} bytes, and a program that reads lines the plain way keeps \
-             only about {} of them — the rest would be dropped with nothing said, and what is left \
+             only about {} of them - the rest would be dropped with nothing said, and what is left \
              can be a different command from the one you can read.{also}",
             self.longest, self.ceiling
         )
@@ -613,6 +621,352 @@ fn with_ctrl(key: Key) -> Option<u8> {
         _ => return None,
     };
     Some(control_byte)
+}
+
+/// What a pane does with the keys of one pass.
+///
+/// **It lives here and not in the window's core because the vocabulary is this module's**: the
+/// chords, the held paste and the bytes each key sends are all decided by the functions above, and
+/// the walk that consumes them was the single largest method of `impl Pane`. It came out under
+/// **D28**, which records what the window's core is at so the number can only go down.
+impl crate::Pane {
+    /// Sends the program what has been typed in this pass, and measures how long it takes.
+    ///
+    /// The stopwatch starts **when the frame begins**, not when the key is pressed: the event was
+    /// already waiting when the frame began and it does not carry a stamp of its own, so that
+    /// stretch cannot be seen from here. The number carries that border written into it.
+    ///
+    /// **Returns the orders the chords ask of the window**, in the order in which they arrived.
+    ///
+    /// **They are a list and not a single one, and that is not generality to spare.** egui delivers
+    /// in a single batch everything that arrived while the window slept —this milestone's case: two
+    /// silent agents—, and more than one chord can come in there. With a single one it would be
+    /// necessary to pick which survives, and no choice is good: keeping the last one loses a close,
+    /// adding them up only works between switches, and a switch asked for *before* creating or
+    /// closing refers to a list of tabs that no longer exists. Applying them in order there is
+    /// nothing to pick. An empty vector allocates no memory, so the normal case —no chord— costs
+    /// nothing. The cut for those chords lives in here, in the same walk that already consumes the
+    /// paste and **before** translating to bytes, and not in a walk of [`crate::Window`]'s own: the chord
+    /// is rebuilt event by event, so two walks over the same queue would be **two rebuilds that can
+    /// disagree**, and the event has to be consumed in one of the two — sharing it out leaves the
+    /// question of which one wins.
+    ///
+    /// `open_tabs` is how many there are at the start of the batch. It is received instead of being
+    /// deduced because a pane does not know —nor does it have to— how many there are: what is
+    /// decided here is whether the chord is consumed or let through to the program, and that can
+    /// only be decided **inside** this walk. Filtering it afterwards, in the window, would arrive
+    /// late: the key would already have been swallowed. Inside, the count is kept up to date event
+    /// by event, because the batch itself creates and closes tabs.
+    pub(crate) fn send_keys(
+        &mut self,
+        ctx: &egui::Context,
+        frame_started: Instant,
+        modifiers: &mut egui::Modifiers,
+        open_tabs: usize,
+        keymap: &Keymap,
+        copy_enabled: bool,
+    ) -> Vec<WindowRequest> {
+        // It is asked once and not per event because **the mode cannot change halfway through a
+        // pass**: it is set by the program inside with what it writes, and what it writes is
+        // interpreted in the other half of the frame. (Asking it inside the closure would compile
+        // as well —the two fields are disjoint borrows—, so this is a choice, not a wall.)
+        let bracketed = self.screen.bracketed_paste();
+        // **With a paste held, its answer is read before anything else.** The bytes are not written
+        // and the question owns `Enter` and `Escape` until it is answered; everything else still
+        // reaches the program, because a held paste is not a frozen console. It is composed against
+        // the mode read just above, which is the mode **now** and not the one the question was asked
+        // in — see `HeldPaste`, where that difference is the difference between a paste and an
+        // execution.
+        let released = start_the_keys(ctx, &mut self.held, &mut self.keystrokes, bracketed);
+        let mut pasted = false;
+        let mut requests = Vec::new();
+        let mut scrolls: Vec<Scroll> = Vec::new();
+        let mut to_the_clipboard: Option<String> = None;
+
+        // The events that go to the program **are consumed**, not read and left. One frame can run
+        // more than one pass over the same input —egui does it when something asks to be
+        // recomposed—, and then the same key would be written twice to the pseudoterminal. The ones
+        // that are not translated stay where they were, for whoever wants them afterwards.
+        ctx.input_mut(|state| {
+            // **The modifiers are rebuilt here, event by event, and are not read from
+            // `state.modifiers`.** That field is a single one per pass: egui walks the batch and
+            // keeps the last change notice, so it describes how the keys stood **at the end**, not
+            // when the paste arrived. With the chord released before the frame is picked up it
+            // would be worth «none» and the control byte would be sent; pressing Shift after
+            // pasting, the other way round. Rebuilding them in order is what egui itself does
+            // inside, and it is exact.
+            let mut chord = *modifiers;
+            let mut paste_seen = false;
+            let mut asked = Vec::new();
+            let mut tabs_open = open_tabs;
+            let mut scrolled = Vec::new();
+            let mut to_copy = None;
+            // **A chord without Ctrl arrives TWICE, and consuming only one leaves it acting and
+            // writing.** egui emits the key's text alongside the key whenever it is printable and
+            // there is no command, so a `key.split-right = shift+e` split the console **and on top
+            // of that** wrote it an `E` to the program. The factory chords escaped by chance —the
+            // ones without Ctrl fall on keys that write nothing—, but the file accepts `shift+e`
+            // and the document publishes it as valid.
+            let mut swallow_the_text = false;
+
+            state.events.retain(|event| {
+                // It goes first because the text arrives **behind** its key: when it is looked at,
+                // it is already known whether the key in front of it was consumed as a shortcut.
+                if matches!(event, egui::Event::Text(_)) && swallow_the_text {
+                    swallow_the_text = false;
+                    return false;
+                }
+                // Any other event in between breaks the pair: the text that is swallowed is the one
+                // of the gesture that has just acted, not the first one to come through here
+                // afterwards.
+                swallow_the_text = false;
+
+                if let egui::Event::ModifiersChanged(new_modifiers) = event {
+                    chord = *new_modifiers;
+                    // It stays in the queue: it is not ours, and whoever looks at it afterwards
+                    // needs it.
+                    return true;
+                }
+
+                // **Losing the focus erases the chord, and this is not caution: it is the same
+                // safeguard egui has in its own loop**, with its reason written there — on leaving,
+                // the window does not get the notice that the keys were released. Without this,
+                // whoever holds Ctrl+Shift, goes away with a desktop shortcut and releases outside,
+                // comes back with Shift stuck for ever: the next Ctrl+V would paste instead of
+                // sending its byte, which is the confusion this work exists to prevent, and in the
+                // direction that also dumps the clipboard into the program.
+                if matches!(event, egui::Event::WindowFocused(false)) {
+                    chord = egui::Modifiers::NONE;
+                    return true;
+                }
+
+                // **Copying comes in through the same door as pasting, and for the same reason.**
+                // The desktop keeps `Ctrl+Shift+C` **before** it is a key and emits a copy event
+                // without saying whether there was Shift — its check is «command and the letter C»,
+                // and it does not look at it. So a terminal's copy chord **never arrives as a
+                // key**, and until now it ended up translated to `\x03`: asking to copy
+                // **interrupted the program**.
+                //
+                // The project itself left it written in `bytes` —«whoever brings the
+                // clipboard will have to decide it earlier, in the loop, where the state of the
+                // modifiers is available»— and nobody did it until a review checked it by running
+                // it.
+                //
+                // **With Shift it copies; without it, `Ctrl+C` goes on interrupting**, which is
+                // what it has to do. And **switched off the event is not touched**: it falls
+                // through to the table and leaves as `\x03`, which is just what `vim` or `tmux`
+                // expect when somebody hands them back the chord.
+                if matches!(event, egui::Event::Copy) && chord.shift && copy_enabled {
+                    // The event is swallowed **whether or not there is anything marked**: giving it
+                    // back would let it fall into the table, and asking to copy with nothing marked
+                    // would interrupt the program.
+                    to_copy = self.screen.selected_text();
+                    return false;
+                }
+
+                // **The desktop sends the same event for Ctrl+V and for Ctrl+Shift+V**, without
+                // saying which it was, and it swallows the key. This is the only door where they
+                // can be separated, and separating them is what makes Ctrl+V go on reaching the
+                // program inside: for vim it is the visual block, and for a shell «the next thing,
+                // literally».
+                // **And it is not written if one of its lines does not fit.** The line discipline
+                // closes an over-long line instead of refusing it, so the program receives
+                // something syntactically complete and runs it — a different command from the one
+                // on screen, with nothing said. Measured. The bytes are held and the question is
+                // put; nothing reaches the program until it is answered.
+                if let egui::Event::Paste(text) = event
+                    && chord.shift
+                {
+                    paste_or_hold(text, bracketed, &mut self.keystrokes, &mut self.held);
+                    paste_seen = true;
+                    return false;
+                }
+
+                // **A single query to the table decides whether the chord is the application's**,
+                // and that is what this block introduces. Before there were two parallel lists —one
+                // said whether the chord was ours and the other what it did— and letting them fall
+                // out of step already left an arrow «in the queue never reaching the program». With
+                // twelve configurable chords, the risk is multiplied by twelve.
+                //
+                // **What is NOT unified is each action's condition.** That creating is no good
+                // repeated, or that switching tabs is only ours with more than one open, still
+                // hangs off the action that needs it: they are real and they have to survive the
+                // chord changing.
+                if let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    repeat,
+                    ..
+                } = event
+                    && let Some(action) = keymap.action_for(Chord {
+                        ctrl: chord.ctrl,
+                        shift: chord.shift,
+                        alt: chord.alt,
+                        key: *key,
+                    })
+                {
+                    // **That the chord is in the table does not make it ours yet**, and here is the
+                    // only condition that decides that: with a single tab the arrow is **not** the
+                    // application's. The guard is not cosmetic — without it the chord would swallow
+                    // the key to do nothing —go from one tab to itself— and would take it away from
+                    // the program.
+                    //
+                    // **And the event has to FALL through to the translation to bytes, not be given
+                    // back here.** Giving it back untranslated keeps it in egui's queue and the
+                    // program never sees it: it is the defect this block has had documented since
+                    // F2.1, and **the shortcuts refactor reintroduced it**. Its two tests caught it
+                    // on the first attempt.
+                    //
+                    // **The count is kept event by event and not once per frame**, because the
+                    // batch itself changes it: with one tab open and `[create, ←]` in the same
+                    // batch, looking at it at the start would leave the arrow outside the guard.
+                    let ours = match action {
+                        Action::PreviousTab | Action::NextTab => tabs_open > 1,
+                        _ => true,
+                    };
+                    if ours {
+                        match action {
+                            Action::PreviousTab => asked.push(WindowRequest::Go(-1)),
+                            Action::NextTab => asked.push(WindowRequest::Go(1)),
+                            // **Repetition is swallowed without doing anything, and the guard is
+                            // the reason the window is still alive.** egui marks repetitions with
+                            // `repeat` but goes on setting `pressed`, so one second with the
+                            // closing chord held down is some thirty close orders in one batch:
+                            // every tab closed, all their programs dead and the window with them.
+                            // **And it is consumed all the same**: giving it back would send its
+                            // control byte to the program for every repetition.
+                            Action::NewTab if !repeat => {
+                                tabs_open += 1;
+                                asked.push(WindowRequest::NewTab);
+                            }
+                            // Closing the last one removes nothing from the list: it asks to close
+                            // the window. That is why the count does not go below one.
+                            Action::CloseTab if !repeat => {
+                                tabs_open = (tabs_open - 1).max(1);
+                                asked.push(WindowRequest::CloseTab);
+                            }
+                            // **Splitting carries the same guard and for the same reason**: each
+                            // one launches a program, so one second held down would be thirty
+                            // shells and thirty directories.
+                            Action::SplitRight if !repeat => {
+                                asked.push(WindowRequest::Split(Orientation::Columns));
+                            }
+                            Action::SplitDown if !repeat => {
+                                asked.push(WindowRequest::Split(Orientation::Rows));
+                            }
+                            // **Here the guard is the most necessary of the four**: one second held
+                            // down would close one console after another, then the tab, and then
+                            // the window with everything left to read.
+                            //
+                            // **The tab count does not go down here**, even though closing the only
+                            // console of a tab closes the tab: from the keyboard it is not known
+                            // how many consoles the focused one has, and always lowering it would
+                            // stop the arrow being consumed with two tabs open, which is the normal
+                            // case.
+                            Action::ClosePane if !repeat => {
+                                asked.push(WindowRequest::ClosePane);
+                            }
+                            // **Looking at the scrollback is the terminal's business, not the
+                            // program's**, so these four are consumed here and not translated to
+                            // bytes. **And repetition counts**: holding down to go up is the normal
+                            // gesture, the other way round from creating or closing.
+                            Action::ScrollPageUp => {
+                                scrolled.push(Scroll::Pages(1));
+                            }
+                            Action::ScrollPageDown => {
+                                scrolled.push(Scroll::Pages(-1));
+                            }
+                            Action::ScrollToTop => {
+                                scrolled.push(Scroll::ToTop);
+                            }
+                            Action::ScrollToBottom => scrolled.push(Scroll::ToBottom),
+                            // The repetition of creating, closing, splitting or copying falls here:
+                            // it is swallowed without doing anything, which is the point of the
+                            // guard.
+                            _ => {}
+                        }
+                        swallow_the_text = !chord.ctrl && !chord.command && !chord.alt;
+                        return false;
+                    }
+                }
+
+                match bytes(event) {
+                    Some(bytes) => {
+                        self.keystrokes.extend_from_slice(&bytes);
+                        false
+                    }
+                    None => true,
+                }
+            });
+
+            *modifiers = chord;
+            pasted = paste_seen || released;
+            requests = asked;
+            scrolls = scrolled;
+            to_the_clipboard = to_copy;
+        });
+
+        // **They are applied outside the input's closure**, not inside: in there the screen's
+        // borrow lives alongside the events' one, and this module already pays enough to keep those
+        // two borrows apart.
+        for how_much in scrolls {
+            self.screen.scroll_by(how_much);
+        }
+
+        // **And the clipboard, also outside**, but for another reason: writing to it is asking
+        // something of the context, and inside the closure the context has its input borrowed.
+        if let Some(text) = to_the_clipboard {
+            ctx.copy_text(text);
+        }
+
+        // An order goes out even if nothing has been typed for the program, which is the normal
+        // case: the tab-switching chord sends no byte at all.
+        if self.keystrokes.is_empty() {
+            return requests;
+        }
+
+        // **Typing brings the view back to where the program writes**, and it is what any terminal
+        // does. Without this, whoever stops to read something from the scrollback and then types
+        // **does not see what they are typing**: the program answers below, off the screen, and the
+        // window looks hung. It goes here and not in every key because the condition is exactly
+        // this one — that something has gone out towards the program.
+        self.screen.scroll_by(Scroll::ToBottom);
+        if let Err(failure) = self.pty.write(&self.keystrokes) {
+            // What has just been typed has not arrived. A key lost in silence is one of the
+            // failures that take longest to understand from the other side of the screen.
+            eprintln!("the keystrokes could not be sent to the program: {failure}");
+            // A send that failed is not a fast outbound trip: it is not recorded, or the number
+            // would measure the failure.
+            return requests;
+        }
+
+        // **What this number measures changed the day the write stopped blocking, and saying so is
+        // not optional.** It used to be *from a key in the frame to the byte written into the
+        // program* — D3 published it as 36 µs at rest and 3.42 ms with the two consoles dumping, and
+        // that second figure existed **because** the write waited for the program. Now the write
+        // hands the bytes to a queue and returns, so this stopwatch stops at *the key being handed
+        // over*. The byte reaches the program later, on a thread nobody times. It is a **shorter
+        // span under the same name**, and this file already documents having paid once for exactly
+        // that.
+        //
+        // **A paste still stays out of the series**, for what is left of the old reason: a
+        // one-megabyte clipboard is one allocation and one send, which is not what a keystroke costs,
+        // and mixing them moves the percentile that judges the framework.
+        if !pasted {
+            self.timings.record_outbound(frame_started.elapsed());
+        }
+
+        // **The memory of a big paste does not stay for ever.** This vector is reused between
+        // frames and emptying it does not give back its capacity: without this, pasting fifty
+        // megabytes leaves them reserved for as long as the process lives, and per pane. It is the
+        // symmetry the sibling vector —what is picked up from the program— already had with its
+        // budget.
+        if self.keystrokes.capacity() > KEYSTROKE_SLACK {
+            self.keystrokes.shrink_to(KEYSTROKE_SLACK);
+        }
+
+        requests
+    }
 }
 
 #[cfg(test)]

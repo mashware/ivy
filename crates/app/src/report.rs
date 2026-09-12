@@ -21,10 +21,12 @@
 //! **Not into `measure.rs`, which is the module whose name matches it**, and the first telling of
 //! this put the weak reason first. The strong one is that `measure.rs` **holds no `impl Window` at
 //! all** — types and free functions, nothing that reaches into a window — so the seam was already
-//! there and this only lands on the near side of it. The arithmetic agrees rather than decides:
-//! `measure.rs` is at 583 production lines of its 600 and these are 54, so the ceiling would have
-//! refused the move anyway. Consulting it before choosing a home is what **D28** asks for; leading
-//! with it made a boundary look like a coincidence of size.
+//! there and this only lands on the near side of it. The arithmetic agreed rather than decided: at
+//! the time `measure.rs` had no room for these 54 lines, so the ceiling would have refused the move
+//! anyway. **The number it used to state here is deliberately gone**: `measure.rs` has since been
+//! split and the figure was wrong twice over, which is what a comment asserting a count always
+//! becomes. Consulting the ceiling before choosing a home is what **D28** asks for; leading with it
+//! made a boundary look like a coincidence of size.
 //!
 //! It came out of `lib.rs` under **D28**.
 
