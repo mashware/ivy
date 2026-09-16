@@ -2,7 +2,7 @@
 
 use alacritty_terminal::Term;
 use alacritty_terminal::event::VoidListener;
-use alacritty_terminal::grid::{Dimensions, Scroll as GridScroll};
+use alacritty_terminal::grid::{Dimensions, Grid, Scroll as GridScroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::Config;
@@ -490,24 +490,7 @@ impl Screen {
         let mut lines: Vec<String> = Vec::with_capacity(grid.screen_lines());
 
         for row in 0..grid.screen_lines() {
-            let row = &grid[Line(row as i32)];
-            let mut line = String::with_capacity(grid.columns());
-            for col in 0..grid.columns() {
-                let cell = &row[Column(col)];
-                // A wide character takes up two cells but is a single character: the second is a
-                // companion with no content and would duplicate the glyph if it were copied.
-                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                    continue;
-                }
-                line.push(cell.c);
-                // **And what goes attached behind it, which the program also wrote.** Without this, `☁️`
-                // comes out as `☁` —the emoji selector takes up no column but IS text—, and returning
-                // that is returning a **different** character from the one that was written. It is the same rule that
-                // **D22** sets for copying: what comes out of here is what the program put, not one
-                // character more nor one less.
-                line.extend(cell.zerowidth().into_iter().flatten());
-            }
-            lines.push(line.trim_end().to_string());
+            lines.push(a_text_line(grid, row as i32));
         }
 
         while lines.last().is_some_and(String::is_empty) {
@@ -516,6 +499,59 @@ impl Screen {
 
         lines.join("\n")
     }
+
+    /// Dumps **everything the console still holds, the history included**, oldest line first.
+    ///
+    /// **The scrollback is where the answer to «what did it say before» lives**, and until now it was
+    /// reachable only by eye: [`to_text`](Screen::to_text) returns the active area, which is what the
+    /// program wrote, and an agent that reads a console it opened needs what can still be read. The
+    /// history is the engine's, up to the ceiling **D21** chose, and it comes out with the same rules
+    /// [`to_text`](Screen::to_text) uses — a wide character once, its zero-width scalars kept,
+    /// trailing spaces trimmed.
+    ///
+    /// **The blank rows of a console that has not scrolled are dropped**, at both ends and for the
+    /// same reason `to_text` drops the trailing ones: dragging invisible lines along turns any
+    /// comparison into a count of them.
+    pub fn scrollback_text(&self) -> String {
+        let grid = self.term.grid();
+        let history = grid.history_size() as i32;
+        let mut lines: Vec<String> = Vec::with_capacity(history as usize + grid.screen_lines());
+
+        for row in -history..grid.screen_lines() as i32 {
+            lines.push(a_text_line(grid, row));
+        }
+
+        let first = lines
+            .iter()
+            .position(|line| !line.is_empty())
+            .unwrap_or(lines.len());
+        lines.drain(..first);
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+
+        lines.join("\n")
+    }
+}
+
+/// One row of the grid as text, with the two rules the two dumps share.
+///
+/// **A wide character is emitted once** —its companion cell carries the flag and no content, and
+/// copying it would duplicate the glyph— and **the zero-width scalars attached behind a cell are
+/// kept**, because the program wrote them: without that, `☁️` comes out as `☁`, which is a different
+/// character from the one on screen. It is the rule **D22** sets for copying.
+fn a_text_line(grid: &Grid<alacritty_terminal::term::cell::Cell>, row: i32) -> String {
+    let row = &grid[Line(row)];
+    let mut line = String::with_capacity(grid.columns());
+    for col in 0..grid.columns() {
+        let cell = &row[Column(col)];
+        if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+            continue;
+        }
+        line.push(cell.c);
+        line.extend(cell.zerowidth().into_iter().flatten());
+    }
+    line.trim_end().to_string()
 }
 
 #[cfg(test)]
@@ -1329,6 +1365,38 @@ mod tests {
         assert!(
             screen.view().cursor().is_some(),
             "and the cursor is visible again"
+        );
+    }
+
+    /// **The scrollback dump keeps what the active-area dump drops.** The lines that scrolled off the
+    /// top are exactly what an agent reading a console it opened needs, and `to_text` deliberately
+    /// does not return them — that difference is the whole reason the two dumps exist apart.
+    #[test]
+    fn the_scrollback_dump_keeps_the_lines_that_scrolled_off_the_top() {
+        let mut screen = Screen::new(Size { rows: 3, cols: 20 });
+        for n in 0..8 {
+            screen.advance(format!("linea {n}\r\n").as_bytes());
+        }
+
+        let active = screen.to_text();
+        let everything = screen.scrollback_text();
+
+        assert!(
+            !active.contains("linea 0"),
+            "the premise failed: nothing scrolled off"
+        );
+        assert!(active.contains("linea 7"), "the last line is not on screen");
+        assert!(
+            everything.contains("linea 0"),
+            "the scrollback lost what scrolled off the top"
+        );
+        assert!(
+            everything.contains("linea 7"),
+            "the scrollback lost the active area"
+        );
+        assert!(
+            everything.starts_with("linea 0"),
+            "the scrollback does not begin at the oldest line: {everything:?}"
         );
     }
 

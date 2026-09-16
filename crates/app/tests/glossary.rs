@@ -1076,12 +1076,18 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 /// it closed is what makes the guard below safe to break the build with — and the failure message
 /// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
 const NOT_OURS: &[&str] = &[
-    // **The three tools the control channel's wire format has and this build does not serve.** They
-    // are names on a wire, not identifiers of this tree, and they are cited where the server explains
-    // why it advertises one tool and refuses the rest by name.
+    // **The three verbs of the control channel's wire format.** They are names on a wire and not
+    // identifiers of the app crate: the channel's crate is what declares them, and the app cites
+    // them where it explains what it does with each one.
     "split_open",
     "split_read",
     "split_close",
+    // **The kernel's own names for what a command line may cost.** `execve` is where a request's
+    // `program` and `args` end up, and `E2BIG` is what it answers when the argument list is past what
+    // the system takes — cited where the wire bounds them, and `ARG_MAX` where that bound is sized.
+    "execve",
+    "E2BIG",
+    "ARG_MAX",
     // The batch letter the publisher example is written for. A measurement batch is named in
     // `measure-frame.sh`, never in Rust.
     "S",

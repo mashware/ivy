@@ -295,8 +295,45 @@ per-field tolerance: everything above this line is unchanged and this section ad
 ```
 → {"tool":"panel_set","source":"flow","document":{ ...the panel document... }}
 ← {"ok":true}
+→ {"tool":"split_open","side":"right","program":"cargo","args":["test"]}
+← {"ok":true,"pane":"<opaque handle>"}
+→ {"tool":"split_read","pane":"<opaque handle>","scrollback":false}
+← {"ok":true,"text":"..."}
+→ {"tool":"split_close","pane":"<opaque handle>"}
+← {"ok":true}
 ← {"ok":false,"error":"..."}
 ```
+
+### The three `split_*` verbs
+
+They let the connection **open a console beside its own, read it and close it**, and they are the
+only verbs that name another pane:
+
+- **`split_open` opens beside the pane that asked** — `side` is `left`, `right`, `top` or `bottom` —
+  and the answer carries an **opaque handle**: sixteen random bytes the window scopes to this
+  connection on this pane. **The person's keyboard does not move**: whoever asked was an agent, and
+  splitting from the chord does move it because that gesture is a person's. Where the console cannot
+  give both children their minimum, nothing is opened and the caller is told. Where the console is
+  born with no addressable identity, the handle is `null` — the console exists and the person can use
+  it, and this channel cannot name it.
+- **There is no `env` on `split_open`, and there cannot be one.** The caller contributes **no
+  variable at all**: the console's environment is the one a pane's launch always builds — the
+  terminal's own fixed set, plus `PANEL_ID` and `PANEL_DIR` and nothing beside them. A field named
+  `env` is not read, and an allow-list of forbidden names was discarded for that reason: the
+  invariant is that the caller adds nothing, not that somebody maintains a list of what it may not add.
+- **`split_read` returns what the console shows** — its visible screen, or the whole scrollback when
+  `scrollback` is `true`, which is not the default because the small read is the one an agent usually
+  wants. The answer's `text` is the console's own bytes: a wide character once, its zero-width scalars
+  kept.
+- **`split_close` closes a console this connection opened**, and refuses a handle it did not open, a
+  console that is its tab's only one, and one the person has taken over.
+- **A handle is dead the moment the person's input reaches that console** — a keystroke or a paste
+  (the keyboard's single door), a wheel turn, or a mouse report: the three places the application
+  writes what a person produced into a pseudoterminal. From then on `split_read` and `split_close`
+  answer **with the reason**, and the console's own row says it to the person. **A press on a panel's
+  button does not revoke it**: that is the application writing on the person's behalf, not the person
+  taking the console back. This is an **application** boundary and not a confidentiality one: the
+  program `split_open` launched keeps reading whatever the person types afterwards.
 
 `panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
 would rather call a tool than open a socket. It is a client of this transport and not the transport
@@ -304,10 +341,13 @@ itself.
 
 ### Rules of this transport
 
-- **The pane is the endpoint you opened.** There is **no pane identifier in any message** and there
-  is not going to be one: `PANEL_ID` is inherited by every descendant of a pane and readable by any
-  process of the same user, so it is a name and not a credential. What stops a producer reaching
-  somebody else's pane is that there is nothing to say.
+- **The pane is the endpoint you opened, and no message names a pane by its identifier.** `PANEL_ID`
+  is inherited by every descendant of a pane and readable by any process of the same user, so it is a
+  name and not a credential, and there is nothing in this transport for a producer to say it with.
+  `panel_set` names nothing at all, and the three `split_*` verbs name **only consoles the same
+  connection opened**, by an **opaque handle** the window handed back — never a pane id, never a
+  name anybody could guess. What stops a producer reaching somebody else's pane is that the words do
+  not exist.
 - **The first publication claims the pane under its `source`, and the claim lasts as long as the
   connection does.** While it is held, that pane's `panel.json` **is not read at all**, and a second
   source is refused with an error naming the one holding it. The panel says who is driving it on its

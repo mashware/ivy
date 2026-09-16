@@ -26,6 +26,18 @@ use serde_json::value::RawValue;
 /// escapes included, because that is what the line has to hold.
 const MAX_SOURCE: usize = 256;
 
+/// The most a `split_open`'s program name, and the whole of its argument list, may take **on the
+/// wire**.
+///
+/// **They are bounded because these bytes end up in `execve`.** The transport's own ceiling would
+/// allow a single argument of a quarter of a megabyte, which the kernel refuses with `E2BIG` — and
+/// the caller would read that as an unexplained launch failure rather than as a request it can fix.
+/// The bound is on the encoded form, like [`MAX_SOURCE`], and a value over it is malformed: the
+/// connection survives and the caller can retry shorter. The numbers are generous past any real
+/// command line and far below `ARG_MAX`.
+const MAX_PROGRAM: usize = 1024;
+const MAX_ARGS: usize = 16 * 1024;
+
 /// Room the request's own keys and the source name may take on top of the document.
 ///
 /// **It exists so the envelope does not count against the document's ceiling.** The ceiling that
@@ -46,6 +58,42 @@ const ENVELOPE: usize = 1024;
 /// stops an unfinished line from reserving without limit.
 pub const MAX_REQUEST: usize = panel_contract::MAX_BYTES as usize + ENVELOPE;
 
+/// Which edge of the caller's pane a new one is opened on.
+///
+/// **Declared here and not imported from the tiling module**, because this crate is the wire's and
+/// knows nothing visual (D3): the format names four strings and the app translates them into its own
+/// `Side` at the boundary, so a rename inside the tiling cannot silently rename the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Side {
+    /// The string the frozen format carries, or `None` for one this build does not know.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "left" => Some(Self::Left),
+            "right" => Some(Self::Right),
+            "top" => Some(Self::Top),
+            "bottom" => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+
+    /// The one string that names this side back to a caller.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+        }
+    }
+}
+
 /// A request, once it has been understood.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
@@ -57,11 +105,22 @@ pub enum Request {
     /// start disagreeing field by field. It is the producer's own bytes, kept as a [`RawValue`], so
     /// the parser's ceiling measures what arrived and not a compact re-serialisation of it.
     PanelSet { source: String, document: String },
-    /// A tool this build does not serve, carried by its name so the refusal can say which.
+    /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
     ///
-    /// **The three `split_*` verbs land here on purpose in this delivery**: their scoping arrives
-    /// with the pane handles, and a verb that answered something before it could be scoped would be
-    /// a promise taken back later.
+    /// **There is no environment here, and there cannot be one**: a pane's environment is exactly
+    /// what [`panel_contract`] injects at launch, so `env` is not a field of this request's envelope
+    /// and a value sent under that name reaches nothing. The program and its arguments are the whole
+    /// of what a caller may choose.
+    SplitOpen {
+        side: Side,
+        program: Option<String>,
+        args: Vec<String>,
+    },
+    /// Read a pane this connection opened, the visible screen unless the scrollback is asked for.
+    SplitRead { pane: String, scrollback: bool },
+    /// Close a pane this connection opened.
+    SplitClose { pane: String },
+    /// A tool this build does not serve, carried by its name so the refusal can say which.
     NotServed(String),
 }
 
@@ -181,6 +240,16 @@ struct Envelope<'a> {
     source: Option<&'a RawValue>,
     #[serde(default, borrow)]
     document: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    side: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    program: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    args: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    pane: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    scrollback: Option<&'a RawValue>,
 }
 
 /// Turns one line into a request.
@@ -208,11 +277,17 @@ fn interpret(line: &[u8]) -> Incoming {
 
     match envelope.tool.as_str() {
         "panel_set" => panel_set(&envelope),
+        "split_open" => split_open(&envelope),
+        "split_read" => split_read(&envelope),
+        "split_close" => split_close(&envelope),
         other => Incoming::Request(Request::NotServed(other.to_owned())),
     }
 }
 
-/// The one tool this build serves.
+/// The publication, understood at the wire.
+///
+/// **The three `split_*` verbs are parsed here too, even though the window answers them**: the shape
+/// is what lets a refusal name the verb, and it is what pins that `split_open` carries no `env`.
 fn panel_set(envelope: &Envelope<'_>) -> Incoming {
     let Some(source) = envelope.source else {
         return Incoming::Malformed("a publication names no \"source\"".to_owned());
@@ -243,10 +318,107 @@ fn panel_set(envelope: &Envelope<'_>) -> Incoming {
     })
 }
 
+/// `split_open`: the side is required, the program and its arguments are not, and **there is no
+/// `env`** — the envelope has no such field, so a value sent under that name is never read.
+fn split_open(envelope: &Envelope<'_>) -> Incoming {
+    let Some(side) = envelope.side else {
+        return Incoming::Malformed("a split_open names no \"side\"".to_owned());
+    };
+    let Ok(side) = serde_json::from_str::<String>(side.get()) else {
+        return Incoming::Malformed("a split_open's \"side\" is not text".to_owned());
+    };
+    let Some(side) = Side::parse(&side) else {
+        return Incoming::Malformed("a split_open names no side this build knows".to_owned());
+    };
+
+    let program = match envelope.program {
+        None => None,
+        Some(raw) => {
+            // Measured before it is decoded, like the source: it is the wire that has to fit.
+            if raw.get().len() > MAX_PROGRAM {
+                return Incoming::Malformed(format!(
+                    "a split_open's \"program\" is over {MAX_PROGRAM} bytes"
+                ));
+            }
+            match serde_json::from_str::<String>(raw.get()) {
+                Ok(program) => Some(program),
+                Err(_) => {
+                    return Incoming::Malformed(
+                        "a split_open's \"program\" is not text".to_owned(),
+                    );
+                }
+            }
+        }
+    };
+    let args = match envelope.args {
+        None => Vec::new(),
+        Some(raw) => {
+            if raw.get().len() > MAX_ARGS {
+                return Incoming::Malformed(format!(
+                    "a split_open's \"args\" is over {MAX_ARGS} bytes"
+                ));
+            }
+            match serde_json::from_str::<Vec<String>>(raw.get()) {
+                Ok(args) => args,
+                Err(_) => {
+                    return Incoming::Malformed(
+                        "a split_open's \"args\" is not a list of text".to_owned(),
+                    );
+                }
+            }
+        }
+    };
+
+    Incoming::Request(Request::SplitOpen {
+        side,
+        program,
+        args,
+    })
+}
+
+/// `split_read`: the handle is required, and `scrollback` defaults to the visible screen.
+fn split_read(envelope: &Envelope<'_>) -> Incoming {
+    let Some(pane) = envelope.pane else {
+        return Incoming::Malformed("a split_read names no \"pane\"".to_owned());
+    };
+    let Ok(pane) = serde_json::from_str::<String>(pane.get()) else {
+        return Incoming::Malformed("a split_read's \"pane\" is not text".to_owned());
+    };
+    let scrollback = match envelope.scrollback {
+        None => false,
+        Some(raw) => match serde_json::from_str::<bool>(raw.get()) {
+            Ok(scrollback) => scrollback,
+            Err(_) => {
+                return Incoming::Malformed(
+                    "a split_read's \"scrollback\" is not true or false".to_owned(),
+                );
+            }
+        },
+    };
+
+    Incoming::Request(Request::SplitRead { pane, scrollback })
+}
+
+/// `split_close`: the handle, and nothing else.
+fn split_close(envelope: &Envelope<'_>) -> Incoming {
+    let Some(pane) = envelope.pane else {
+        return Incoming::Malformed("a split_close names no \"pane\"".to_owned());
+    };
+    let Ok(pane) = serde_json::from_str::<String>(pane.get()) else {
+        return Incoming::Malformed("a split_close's \"pane\" is not text".to_owned());
+    };
+
+    Incoming::Request(Request::SplitClose { pane })
+}
+
 /// What goes back over the channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     Ok,
+    /// A pane was opened; the handle is `None` where the pane has no addressable identity.
+    Opened(Option<String>),
+    /// What a pane showed.
+    Text(String),
     Failed(String),
 }
 
@@ -254,13 +426,24 @@ impl Reply {
     /// The literal line, terminated.
     ///
     /// **Built by hand and not serialised from a type**, which is worth a sentence because it looks
-    /// like the wrong call: the shape is two fields wide, it is frozen by this delivery's contract,
-    /// and the one thing that could go wrong — an error text with a quote or a newline in it — is
-    /// what `serde_json`'s string escaping is asked for below. A `Serialize` derive would add a
-    /// dependency feature to buy the half that is already bought.
+    /// like the wrong call: the shape is three fields wide at most, it is frozen by this delivery's
+    /// contract, and the one thing that could go wrong — an error text, a handle or a read carrying
+    /// a quote or a newline — is what `serde_json`'s string escaping is asked for below. A
+    /// `Serialize` derive would add a dependency feature to buy the half that is already bought.
     pub fn line(&self) -> String {
         match self {
             Self::Ok => "{\"ok\":true}\n".to_owned(),
+            Self::Opened(pane) => match pane {
+                Some(handle) => {
+                    let escaped = serde_json::Value::String(handle.clone());
+                    format!("{{\"ok\":true,\"pane\":{escaped}}}\n")
+                }
+                None => "{\"ok\":true,\"pane\":null}\n".to_owned(),
+            },
+            Self::Text(text) => {
+                let escaped = serde_json::Value::String(text.clone());
+                format!("{{\"ok\":true,\"text\":{escaped}}}\n")
+            }
             Self::Failed(reason) => {
                 let escaped = serde_json::Value::String(reason.clone());
                 format!("{{\"ok\":false,\"error\":{escaped}}}\n")
@@ -355,34 +538,118 @@ mod tests {
         );
     }
 
-    /// The three verbs of the frozen format are refused **by name** rather than read as malformed,
-    /// which is what lets the refusal say what it is refusing.
+    /// **A tool nobody serves still comes back named**, which is what lets the refusal say what it is
+    /// refusing. The three verbs of the frozen format are no longer among them: they are understood
+    /// here and answered by the window.
     #[test]
-    fn the_verbs_this_build_does_not_serve_come_back_named() {
-        for tool in ["split_open", "split_read", "split_close"] {
-            let incoming = one(&format!("{{\"tool\":\"{tool}\"}}\n"));
-
-            assert!(
-                matches!(&incoming, Incoming::Request(Request::NotServed(named)) if named == tool),
-                "{tool} did not come back named: {incoming:?}"
-            );
-        }
-    }
-
-    /// **`split_open` is not served, with or without the `env` field the frozen format carries.**
-    /// The whole verb comes back named, so there is no field of it — `env` included — this build
-    /// could accept; and pinning that is what stops a later delivery from quietly serving the verb
-    /// with an environment the pane's identity was designed to exclude.
-    #[test]
-    fn a_split_open_carrying_an_env_field_is_still_not_served() {
-        let incoming = one(
-            "{\"tool\":\"split_open\",\"side\":\"right\",\"env\":{\"PANEL_ID\":\"elsewhere\"}}\n",
-        );
+    fn an_unknown_tool_comes_back_named() {
+        let incoming = one("{\"tool\":\"panel_dance\"}\n");
 
         assert!(
-            matches!(&incoming, Incoming::Request(Request::NotServed(named)) if named == "split_open"),
-            "a split_open with an env field was not refused by name: {incoming:?}"
+            matches!(&incoming, Incoming::Request(Request::NotServed(named)) if named == "panel_dance"),
+            "an unknown tool did not come back named: {incoming:?}"
         );
+    }
+
+    /// The three verbs of the frozen format are read as requests, each with its own fields, and
+    /// `scrollback` defaults to the visible screen.
+    #[test]
+    fn the_three_split_verbs_are_understood() {
+        let Incoming::Request(Request::SplitOpen {
+            side,
+            program,
+            args,
+        }) = one(
+            "{\"tool\":\"split_open\",\"side\":\"right\",\"program\":\"cargo\",\"args\":[\"test\"]}\n",
+        )
+        else {
+            panic!("split_open was not understood");
+        };
+        assert_eq!(side, Side::Right);
+        assert_eq!(program.as_deref(), Some("cargo"));
+        assert_eq!(args, ["test"]);
+
+        assert_eq!(
+            one("{\"tool\":\"split_read\",\"pane\":\"h\"}\n"),
+            Incoming::Request(Request::SplitRead {
+                pane: "h".to_owned(),
+                scrollback: false,
+            }),
+            "scrollback did not default to the visible screen"
+        );
+        assert_eq!(
+            one("{\"tool\":\"split_read\",\"pane\":\"h\",\"scrollback\":true}\n"),
+            Incoming::Request(Request::SplitRead {
+                pane: "h".to_owned(),
+                scrollback: true,
+            })
+        );
+        assert_eq!(
+            one("{\"tool\":\"split_close\",\"pane\":\"h\"}\n"),
+            Incoming::Request(Request::SplitClose {
+                pane: "h".to_owned(),
+            })
+        );
+    }
+
+    /// **`split_open` carries no `env`, and a value sent under that name reaches nothing.** The
+    /// envelope has no such field, so the request that arrives is the same one as without it — which
+    /// is what stops the verb from ever accepting an environment the pane's identity was designed to
+    /// exclude.
+    #[test]
+    fn a_split_open_carrying_an_env_field_does_not_carry_it_anywhere() {
+        let with = one(
+            "{\"tool\":\"split_open\",\"side\":\"right\",\"env\":{\"PANEL_ID\":\"elsewhere\"}}\n",
+        );
+        let without = one("{\"tool\":\"split_open\",\"side\":\"right\"}\n");
+
+        assert_eq!(with, without, "the env field changed the request");
+        assert!(
+            matches!(with, Incoming::Request(Request::SplitOpen { .. })),
+            "split_open was not understood: {with:?}"
+        );
+    }
+
+    /// A missing or unknown side, and an `args` that is not a list of text, are refused as malformed
+    /// rather than opening a pane the wrong way; the connection lives, as for every malformed line.
+    #[test]
+    fn a_split_open_with_a_field_it_cannot_read_is_malformed() {
+        assert!(matches!(
+            one("{\"tool\":\"split_open\"}\n"),
+            Incoming::Malformed(_)
+        ));
+        assert!(matches!(
+            one("{\"tool\":\"split_open\",\"side\":\"diagonal\"}\n"),
+            Incoming::Malformed(_)
+        ));
+        assert!(matches!(
+            one("{\"tool\":\"split_open\",\"side\":\"right\",\"args\":\"cargo test\"}\n"),
+            Incoming::Malformed(_)
+        ));
+    }
+
+    /// The two payload replies are one escaped line each, and a pane with no addressable identity
+    /// answers a JSON null for its handle rather than inventing one.
+    #[test]
+    fn a_handle_and_a_read_travel_as_escaped_payloads() {
+        let opened = Reply::Opened(Some("a\"b".to_owned())).line();
+        assert_eq!(opened.matches('\n').count(), 1, "not one line: {opened:?}");
+        let parsed: serde_json::Value =
+            serde_json::from_str(opened.trim_end()).expect("the reply is valid JSON");
+        assert_eq!(parsed["ok"], serde_json::Value::Bool(true));
+        assert_eq!(parsed["pane"], "a\"b");
+
+        assert_eq!(Reply::Opened(None).line(), "{\"ok\":true,\"pane\":null}\n");
+
+        let text = Reply::Text("line one\nline two".to_owned()).line();
+        assert_eq!(
+            text.matches('\n').count(),
+            1,
+            "a read produced two lines: {text:?}"
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_str(text.trim_end()).expect("the reply is valid JSON");
+        assert_eq!(parsed["text"], "line one\nline two");
     }
 
     #[test]
@@ -422,7 +689,7 @@ mod tests {
         let mut framing = Framing::default();
         framing.feed(
             b"{\"tool\":\"panel_set\",\"source\":\"a\",\"document\":{\"lines\":[]}}\n\
-              {\"tool\":\"split_open\"}\n",
+              {\"tool\":\"split_close\",\"pane\":\"h\"}\n",
         );
 
         assert!(matches!(
@@ -431,7 +698,7 @@ mod tests {
         ));
         assert!(matches!(
             framing.take(),
-            Some(Incoming::Request(Request::NotServed(_)))
+            Some(Incoming::Request(Request::SplitClose { .. }))
         ));
         assert_eq!(framing.take(), None);
     }

@@ -22,7 +22,7 @@ use interprocess::local_socket::{Listener, Stream, prelude::*};
 use panel_contract::Panel;
 
 use crate::endpoint;
-use crate::wire::{Framing, Incoming, Reply, Request, write_reply};
+use crate::wire::{Framing, Incoming, Reply, Request, Side, write_reply};
 
 /// How long a publication waits for the window to take it.
 ///
@@ -82,11 +82,25 @@ pub struct Delivery {
     pub answer: SyncSender<Answer>,
 }
 
-/// The two things a connection ever says.
+/// The things a connection ever says.
 #[derive(Debug)]
 pub enum What {
     /// Publish this, under this source.
     Publish { source: String, panel: Panel },
+    /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
+    ///
+    /// **The pane is the caller's, not a name's**: the connection's own endpoint decided it, which is
+    /// why no pane identifier travels beside this. `program` and `args` are the only thing the caller
+    /// chooses, and there is no environment — see [`crate::wire`].
+    Open {
+        side: Side,
+        program: Option<String>,
+        args: Vec<String>,
+    },
+    /// Read a pane this connection opened.
+    Read { pane: String, scrollback: bool },
+    /// Close a pane this connection opened.
+    Close { pane: String },
     /// The connection is over. Whatever it held is no longer held.
     ///
     /// **It carries no answer anybody waits for**: the thread that sends it is on its way out, and a
@@ -94,10 +108,15 @@ pub enum What {
     Closed,
 }
 
-/// What the window answers a publication with.
+/// What the window answers a request with.
 #[derive(Debug)]
 pub enum Answer {
+    /// A publication was applied.
     Taken,
+    /// A pane was opened; the handle is `None` where the pane has no addressable identity.
+    Opened(Option<String>),
+    /// What a pane showed.
+    Text(String),
     /// Refused, with the reason as the caller is to read it.
     Refused(String),
 }
@@ -436,6 +455,46 @@ fn answer(
                 Err(problem) => (Reply::Failed(problem.to_string()), false),
             }
         }
+        // **The three `split_*` verbs travel to the window and are scoped there**, which is the only
+        // party that can see two connections at once and that owns the tree a pane lives in.
+        Incoming::Request(Request::SplitOpen {
+            side,
+            program,
+            args,
+        }) => (
+            ask_the_window(
+                Wants::Opened,
+                What::Open {
+                    side,
+                    program,
+                    args,
+                },
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
+        Incoming::Request(Request::SplitRead { pane, scrollback }) => (
+            ask_the_window(
+                Wants::Read,
+                What::Read { pane, scrollback },
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
+        Incoming::Request(Request::SplitClose { pane }) => (
+            ask_the_window(
+                Wants::Taken,
+                What::Close { pane },
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
         Incoming::Request(Request::NotServed(tool)) => (
             Reply::Failed(format!("this build does not serve \"{tool}\"")),
             false,
@@ -445,10 +504,50 @@ fn answer(
     }
 }
 
-/// Hands a document to the window and waits for it to say what it did with it.
+/// Handles a document to the window and waits for it to say what it did with it.
 fn publish(
     panel: Panel,
     source: String,
+    connection: Connection,
+    to_the_window: &SyncSender<Delivery>,
+    wake: &Arc<dyn Fn() + Send + Sync>,
+) -> Reply {
+    ask_the_window(
+        Wants::Taken,
+        What::Publish { source, panel },
+        connection,
+        to_the_window,
+        wake,
+    )
+}
+
+/// Which reply shape the caller on the other side can read.
+///
+/// **It exists so a mismatched answer cannot be handed over as a success.** The window is one party
+/// answering four kinds of request, and a bug there — answering `Taken` to a read — would reach the
+/// caller as `{"ok":true}` carrying nothing if this were a plain mapping. With it, that answer is
+/// refused and says so (**D30**'s rule applied to a reply).
+#[derive(Debug, Clone, Copy)]
+enum Wants {
+    Taken,
+    Opened,
+    Read,
+}
+
+impl Wants {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Taken => "a publication or a close",
+            Self::Opened => "an open",
+            Self::Read => "a read",
+        }
+    }
+}
+
+/// Hands one request to the window and waits for it to say what it did with it.
+fn ask_the_window(
+    wants: Wants,
+    what: What,
     connection: Connection,
     to_the_window: &SyncSender<Delivery>,
     wake: &Arc<dyn Fn() + Send + Sync>,
@@ -460,7 +559,7 @@ fn publish(
     // the queue without limit.
     match to_the_window.try_send(Delivery {
         connection,
-        what: What::Publish { source, panel },
+        what,
         answer: answering,
     }) {
         Ok(()) => {}
@@ -474,8 +573,23 @@ fn publish(
     wake();
 
     match answer.recv_timeout(ANSWER_DEADLINE) {
-        Ok(Answer::Taken) => Reply::Ok,
         Ok(Answer::Refused(why)) => Reply::Failed(why),
+        Ok(Answer::Taken) if matches!(wants, Wants::Taken) => Reply::Ok,
+        Ok(Answer::Opened(handle)) if matches!(wants, Wants::Opened) => Reply::Opened(handle),
+        Ok(Answer::Text(text)) if matches!(wants, Wants::Read) => Reply::Text(text),
+        // **A mismatched answer is refused rather than reshaped**, and only its *name* travels: a
+        // window that answered `Text` to a close would otherwise echo the console's screen back over
+        // the wire inside an error line, which is the opposite of what a refusal is for.
+        Ok(other) => Reply::Failed(format!(
+            "the window answered {} to {}",
+            match other {
+                Answer::Taken => "a taken",
+                Answer::Opened(_) => "an open",
+                Answer::Text(_) => "a read",
+                Answer::Refused(_) => "a refusal",
+            },
+            wants.name()
+        )),
         // **The wording is what the window did, not what happened to the panel**, and the
         // difference is not pedantry: the window may still take this document afterwards, because
         // giving up here cannot reach into a pass that has already started. Saying «it was not
@@ -743,23 +857,114 @@ mod tests {
         );
     }
 
-    /// The verbs of the frozen format that this build does not serve are refused by name, and the
-    /// connection survives to be used for what it does serve.
+    /// The verbs of the frozen format that nobody serves are refused by name without reaching the
+    /// window, and the connection survives to be used for what it does serve.
     #[test]
-    fn a_verb_this_build_does_not_serve_is_refused_and_the_connection_lives_on() {
+    fn an_unknown_tool_is_refused_by_name_and_the_connection_lives_on() {
+        let pane = a_pane();
+        let mut client = pane.connect();
+
+        client
+            .write_all(b"{\"tool\":\"panel_dance\"}\n")
+            .expect("ask for something nobody serves");
+        let refusal = read_reply(&mut client);
+        assert!(refusal.contains("panel_dance"), "{refusal}");
+
+        client
+            .write_all(publication("flow", "{\"lines\":[]}").as_bytes())
+            .expect("publish afterwards");
+        assert!(matches!(pane.next_delivery().what, What::Publish { .. }));
+    }
+
+    /// **The three `split_*` verbs travel to the window and its answer comes back to the caller.**
+    /// The window here is the test: it takes each delivery, checks what it was asked, and answers —
+    /// which is what pins that these no longer take the refusal path of an unknown tool, and that
+    /// each verb's reply shape is the one the wire declared.
+    #[test]
+    fn the_split_verbs_travel_to_the_window_and_its_answer_returns() {
         let pane = a_pane();
         let mut client = pane.connect();
 
         client
             .write_all(b"{\"tool\":\"split_open\",\"side\":\"right\"}\n")
             .expect("ask for a split");
-        let refusal = read_reply(&mut client);
-        assert!(refusal.contains("split_open"), "{refusal}");
+        let delivery = pane.next_delivery();
+        let What::Open {
+            side,
+            program,
+            args,
+        } = delivery.what
+        else {
+            panic!("the window was not asked to open: {:?}", delivery.what);
+        };
+        assert_eq!(side, Side::Right);
+        assert_eq!(program, None, "a program nobody named was invented");
+        assert!(args.is_empty());
+        delivery
+            .answer
+            .send(Answer::Opened(Some("h-1".to_owned())))
+            .expect("answer the open");
+        assert_eq!(read_reply(&mut client), "{\"ok\":true,\"pane\":\"h-1\"}");
 
         client
-            .write_all(publication("flow", "{\"lines\":[]}").as_bytes())
-            .expect("publish afterwards");
-        assert!(matches!(pane.next_delivery().what, What::Publish { .. }));
+            .write_all(b"{\"tool\":\"split_read\",\"pane\":\"h-1\",\"scrollback\":true}\n")
+            .expect("read it");
+        let delivery = pane.next_delivery();
+        let What::Read {
+            pane: handle,
+            scrollback,
+        } = delivery.what
+        else {
+            panic!("the window was not asked to read: {:?}", delivery.what);
+        };
+        assert_eq!(handle, "h-1");
+        assert!(scrollback, "the scrollback flag did not travel");
+        delivery
+            .answer
+            .send(Answer::Text("hello".to_owned()))
+            .expect("answer the read");
+        assert_eq!(read_reply(&mut client), "{\"ok\":true,\"text\":\"hello\"}");
+
+        client
+            .write_all(b"{\"tool\":\"split_close\",\"pane\":\"h-1\"}\n")
+            .expect("close it");
+        let delivery = pane.next_delivery();
+        assert!(
+            matches!(delivery.what, What::Close { .. }),
+            "the window was not asked to close: {:?}",
+            delivery.what
+        );
+        delivery
+            .answer
+            .send(Answer::Taken)
+            .expect("answer the close");
+        assert_eq!(read_reply(&mut client), "{\"ok\":true}");
+    }
+
+    /// **A window that answers the wrong shape is refused rather than handed over as a success**, and
+    /// only the shape's name travels: a `Taken` reaching a read would otherwise come back as
+    /// `{"ok":true}` carrying no text — the silent failure this crate's reply path exists to avoid —
+    /// and a read reaching a close would echo a console's screen into an error line.
+    #[test]
+    fn a_mismatched_answer_is_refused_rather_than_reshaped() {
+        let pane = a_pane();
+        let mut client = pane.connect();
+
+        client
+            .write_all(b"{\"tool\":\"split_read\",\"pane\":\"h-1\"}\n")
+            .expect("read it");
+        let delivery = pane.next_delivery();
+        delivery.answer.send(Answer::Taken).expect("answer wrongly");
+        let refusal = read_reply(&mut client);
+
+        assert!(
+            refusal.contains("answered a taken"),
+            "a mismatched answer was not refused: {refusal}"
+        );
+        assert!(
+            !refusal.contains("ok\":true"),
+            "the mismatched answer was handed over as a success: {refusal}"
+        );
     }
 
     /// The window is told there is something to pick up. Without it a publication would sit in the

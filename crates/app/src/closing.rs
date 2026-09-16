@@ -181,4 +181,62 @@ impl Window {
         self.rearm_the_watcher(ctx);
         self.timed_separately += its_cost + before.elapsed();
     }
+
+    /// Closes a console by its name, for a connection that opened it, **and refuses the two cases
+    /// the chord cannot produce**.
+    ///
+    /// **It refuses rather than closing the tab**, unlike the chord's path: a person who presses
+    /// `+X` on the last console of a tab means to close the tab, and an agent that guesses the same
+    /// would take a whole tab of consoles away on a handle typo (**AC16**). And **the focus moves
+    /// only if the console that leaves was holding it**, so closing one the person is not typing in
+    /// does not steal their keyboard.
+    pub(crate) fn close_a_pane_called(
+        &mut self,
+        name: usize,
+        ctx: &egui::Context,
+    ) -> Result<(), String> {
+        let tab_index = self
+            .tabs
+            .iter()
+            .position(|tab| tab.panes().iter().any(|pane| pane.name == name))
+            .ok_or_else(|| "that console is gone".to_owned())?;
+        if matches!(self.tabs[tab_index].root, Node::Leaf(_)) {
+            return Err(
+                "that console is its tab's only one; closing it would close the tab".to_owned(),
+            );
+        }
+
+        let closed = self.tabs[tab_index].root.close(name);
+        let Some(Closing {
+            mut leaving,
+            focus: inherited,
+        }) = closed
+        else {
+            return Err("the console was not found when closing; nothing was closed".to_owned());
+        };
+
+        // The same two things the chord's close collects, and for the same reasons: what the console
+        // had measured of this frame, and the channel counters that would leave with it.
+        //
+        // **The elapsed time is not added here.** It is the drain that times this call and adds it to
+        // `timed_separately`, because it is the drain that runs inside the frame; adding it in both
+        // places would subtract the same microseconds twice from the number the framework is judged
+        // by (**D13**) — the opposite of the mistake declared in this file, and just as wrong.
+        let its_cost = leaving.take_what_this_frame_left();
+        if let Some(did) = leaving
+            .control
+            .as_ref()
+            .map(crate::control::PaneControl::did)
+        {
+            self.bank_control(did);
+        }
+        drop(leaving);
+        if self.tabs[tab_index].focus == name {
+            self.tabs[tab_index].focus = inherited;
+        }
+        self.some_closed_by_hand = true;
+        self.rearm_the_watcher(ctx);
+        self.timed_separately += its_cost;
+        Ok(())
+    }
 }

@@ -962,6 +962,11 @@ impl crate::Pane {
             // would measure the failure.
             return requests;
         }
+        // **A byte of the person's own input has reached this console, so it is theirs again.** It
+        // sits on the keyboard door, which is the one a keystroke *and* a paste both come through,
+        // and it is not on the button's door: a press on a panel's button is the application writing
+        // on the person's behalf, not the person taking the console over (**AC15**).
+        self.hand_it_back_to_the_person();
 
         // **What this number measures changed the day the write stopped blocking, and saying so is
         // not optional.** It used to be *from a key in the frame to the byte written into the

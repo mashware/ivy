@@ -6022,3 +6022,72 @@ instant.
 - **A caller that gives up waiting still gets its document applied.** Undoing a document already on
   screen is not something the window can do, so the reply is worded for what is true: the window did
   not answer in time, never that nothing was published.
+
+## D44 — An agent names the panes it opened with an opaque handle, and the person's first byte takes them back
+
+**Status: taken.** Delivered in the fourth PR of the milestone that gives the panel buttons, F3.
+
+**D43 answered who rules a pane's document while a connection holds it. This answers a different
+question: what may a connection name.** `split_open`, `split_read` and `split_close` act on consoles
+other than the one whose channel asked, which is the first time a message has to point at a pane —
+and pointing is exactly what the transport refused to allow.
+
+### The decision, in four parts
+
+**1. The handle is sixteen random bytes, and it is scoped to the connection that opened the pane.**
+
+Not a pane index, and not `PANEL_ID`. The environment is inherited by every descendant of a pane and
+readable out of `/proc/<pid>/environ` by any process of the same user, so it is a name and not a
+credential; a small integer would be reachable by a typo. What is checked when a handle is used is
+**the pair (the pane whose channel asked, the connection)**, so a second connection cannot use a
+handle it overheard, and a pane with no addressable identity answers `null` instead of inventing one.
+
+**2. The keyboard does not move.**
+
+Opening a console for an agent is not the person asking for one. The chord's split moves the focus
+because whoever presses it wants to write there; a request over the channel is a machine reading, and
+stealing the person's keyboard for it is the wrong direction. Everything else about the new console is
+ordinary: it takes its place in the tree like any other, and its program is launched with the pane's
+own identity — **no environment travels in the request**, and there is no field for one.
+
+**3. The person's own input ends the access, at the doors the user's input already has.**
+
+A keystroke or a paste (the keyboard's single door), a wheel turn, or a mouse report: the three
+places the application writes what a person produced into a pseudoterminal. From that byte on, the
+handle answers **with the reason** and not with a bare error, and the console's own row — the
+application's, which `header: false` cannot suppress — says the same sentence to the person. **A press
+on a panel's button does not revoke it**: that door is the application writing on the person's behalf,
+not the person taking the console over.
+
+**4. It is an application boundary, and it is written down as one.**
+
+`split_open` chooses the program, so the process it launched keeps reading whatever the person types
+into that console afterwards. What the agent loses is **the application handing it that buffer**, not
+the program's own read: the promise an agent author is given is *«the app stops handing you that
+buffer; the program you opened does not»*. Removing `program` was not the alternative — it would make
+`split_open` useless for the one case the roadmap names.
+
+### What was discarded, and why
+
+| Discarded | Why |
+|---|---|
+| `PANEL_ID`, or any pane identifier, as the handle | It is in the environment of every descendant and readable by any process of this user: a name, not a credential, and a field somebody would start trusting |
+| A small integer handle | Reachable by a typo, and it would name a pane that the connection did not open |
+| Moving the focus to the console that was opened | The person did not ask for it; splitting from the chord moves it because that gesture is theirs |
+| An `env` field on `split_open` | The console's environment is the pane's identity and nothing else; a caller contributing variables would be a second, unchecked way to shape a child process |
+| Revoking on any user act — a focus click, a selection, a scrollback wheel | None of them writes a byte into the program, and none of them is the person taking the console over. The wheel only revokes when it goes *to the program*, not when it scrolls the history |
+| Revoking on a panel button's press | That door is the application acting on the person's behalf — a remote control they were shown and pressed, not their hands on this console |
+| Killing the consoles a connection opened when it dies | They are visible consoles of the person's; an agent that crashes must not take a person's screen with it. The handles die with the thread, the consoles do not |
+| A cleanup pass over the panes a dead connection opened | Same reason, and a pass would be a mechanism with no scenario: nothing reads a handle after its connection is gone |
+| Refusing to close a console the person has taken over, in silence | The reason travels, and the row carries it: refusing in silence is indistinguishable from being broken |
+
+### What it leaves open
+
+- **The scrollback read is as large as the console's ceiling** — 3 500 lines per console (**D21**) —
+  and nothing bounds a loop of `split_read`s. It is not a control: an agent can loop, and what it
+  reads is a buffer it was already allowed to see.
+- **Revocation does not reach the program the agent opened** (part 4), and that is the decision rather
+  than a gap to close here.
+- **A pane that closes leaves its handles naming nothing**, and using one is refused as gone rather
+  than as somebody else's: the window forgets them when the console goes, and the sentence says the
+  console is gone.

@@ -10,7 +10,7 @@ use std::path::Path;
 use interprocess::local_socket::Stream;
 
 use crate::endpoint;
-use crate::wire::MAX_REQUEST;
+use crate::wire::{MAX_REQUEST, Side};
 
 /// A connection to one pane's channel.
 ///
@@ -84,6 +84,54 @@ impl Producer {
         self.read_reply()
     }
 
+    /// Opens a console beside this pane's own, and returns the handle the window gave it.
+    ///
+    /// **The handle is what the rest of the verbs are named by**, and it is opaque on purpose: it
+    /// belongs to this connection, and a second connection cannot use it even if it reads it.
+    pub fn open_a_pane(
+        &mut self,
+        side: Side,
+        program: Option<&str>,
+        args: &[String],
+    ) -> io::Result<Answered> {
+        // **Built as a value and not interpolated**, so a program name with a quote in it cannot
+        // break the request it travels in — the same hazard the reply's escaping answers.
+        let mut request = serde_json::json!({"tool": "split_open", "side": side.name()});
+        if let Some(program) = program {
+            request["program"] = serde_json::Value::String(program.to_owned());
+        }
+        if !args.is_empty() {
+            request["args"] = serde_json::json!(args);
+        }
+        self.ask(request)
+    }
+
+    /// Reads a console this connection opened: **the visible screen unless the scrollback is asked
+    /// for**, which is the contract's default.
+    pub fn read_a_pane(&mut self, pane: &str, scrollback: bool) -> io::Result<Answered> {
+        self.ask(serde_json::json!({
+            "tool": "split_read",
+            "pane": pane,
+            "scrollback": scrollback,
+        }))
+    }
+
+    /// Closes a console this connection opened.
+    pub fn close_a_pane(&mut self, pane: &str) -> io::Result<Answered> {
+        self.ask(serde_json::json!({"tool": "split_close", "pane": pane}))
+    }
+
+    /// Writes one request line and reads its answer, **the one place that talks to the socket**.
+    ///
+    /// `Value`'s `Display` is the compact form, so a request can never carry a newline and break the
+    /// framing the wire rests on.
+    fn ask(&mut self, request: serde_json::Value) -> io::Result<Answered> {
+        writeln!(self.stream, "{request}")?;
+        self.stream.flush()?;
+
+        self.read_reply()
+    }
+
     /// Reads one reply line, bounded the same way a request is.
     fn read_reply(&mut self) -> io::Result<Answered> {
         let mut line = Vec::new();
@@ -107,7 +155,16 @@ impl Producer {
         let raw: serde_json::Value = serde_json::from_slice(&line)
             .map_err(|failure| io::Error::other(failure.to_string()))?;
         match raw.get("ok").and_then(serde_json::Value::as_bool) {
-            Some(true) => Ok(Answered::Ok),
+            Some(true) => match raw.get("pane") {
+                // **Present and possibly null**: an open answers with the handle, or with a JSON null
+                // where the console has no addressable identity, and those are two different
+                // answers a caller can act on differently.
+                Some(pane) => Ok(Answered::Opened(pane.as_str().map(str::to_owned))),
+                None => match raw.get("text").and_then(serde_json::Value::as_str) {
+                    Some(text) => Ok(Answered::Text(text.to_owned())),
+                    None => Ok(Answered::Ok),
+                },
+            },
             _ => Ok(Answered::Failed(
                 raw.get("error")
                     .and_then(serde_json::Value::as_str)
@@ -121,7 +178,12 @@ impl Producer {
 /// What a pane answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answered {
+    /// It was applied, and the reply carried nothing else.
     Ok,
+    /// A console was opened; the handle is `None` where it has no addressable identity.
+    Opened(Option<String>),
+    /// What a console showed.
+    Text(String),
     Failed(String),
 }
 
@@ -216,6 +278,62 @@ mod tests {
         let panel = window.join().expect("the window thread finished");
         assert_eq!(panel.lines.len(), 2);
         assert_eq!(panel.phase.as_deref(), Some("build"));
+    }
+
+    /// **The three `split_*` verbs have a client half too, and their payloads survive the round trip.**
+    /// The window here answers by hand: what is asserted is that each request arrives as the right
+    /// `What`, and that a handle and a read come back to the caller that asked.
+    #[test]
+    fn the_split_verbs_travel_and_their_payloads_come_back() {
+        let (dir, _channel, inbox) = a_pane();
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
+        let window = std::thread::spawn(move || {
+            let open = inbox
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the open");
+            let What::Open {
+                side,
+                program,
+                args,
+            } = open.what
+            else {
+                panic!("the window was handed something else");
+            };
+            assert_eq!(side, Side::Right);
+            assert_eq!(program.as_deref(), Some("cargo"));
+            assert_eq!(args, ["test"]);
+            let _ = open.answer.send(Answer::Opened(Some("h-1".to_owned())));
+
+            let read = inbox
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the read");
+            let What::Read { pane, scrollback } = read.what else {
+                panic!("the window was handed something else");
+            };
+            assert_eq!(pane, "h-1");
+            assert!(scrollback);
+            let _ = read.answer.send(Answer::Text("line one".to_owned()));
+
+            let close = inbox
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the close");
+            assert!(matches!(close.what, What::Close { .. }));
+            let _ = close.answer.send(Answer::Taken);
+        });
+
+        assert_eq!(
+            producer
+                .open_a_pane(Side::Right, Some("cargo"), &["test".to_owned()])
+                .expect("open"),
+            Answered::Opened(Some("h-1".to_owned()))
+        );
+        assert_eq!(
+            producer.read_a_pane("h-1", true).expect("read"),
+            Answered::Text("line one".to_owned())
+        );
+        assert_eq!(producer.close_a_pane("h-1").expect("close"), Answered::Ok);
+
+        window.join().expect("the window thread finished");
     }
 
     /// A document that is not JSON is refused **to its author, here**, instead of travelling to the

@@ -307,6 +307,8 @@ impl crate::Pane {
             // gesture's normal cost.
             return None;
         }
+        // The person turned the wheel into the program, so the console is theirs again.
+        self.hand_it_back_to_the_person();
         Some(WheelOutcome {
             cost: started.elapsed(),
             // **Arrow keys are not a mouse report, and counting them as one invalidated good
@@ -349,6 +351,8 @@ impl crate::Pane {
             // would measure the failure.
             return None;
         }
+        // A mouse report is the person's input reaching the console, so the console is theirs again.
+        self.hand_it_back_to_the_person();
         Some(started.elapsed())
     }
 }

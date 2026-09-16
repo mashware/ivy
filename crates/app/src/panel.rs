@@ -239,6 +239,25 @@ pub struct PanelState {
     /// file changed. This records the file's own date at the last read, and it is updated for free on
     /// the successful arm; [`PanelState::refresh`] uses it while a connection holds the pane.
     file_seen: Option<SystemTime>,
+    /// Why an agent's access to this console ended, once the person took it over.
+    ///
+    /// **The pane's own flag is the truth and this is its copy for the painting**, which reads the
+    /// panel state and has no way to reach the pane. It is set once, with the first byte of the
+    /// person's input, and it never clears: what ended did not end back (**AC15**).
+    taken_over: Option<String>,
+}
+
+impl PanelState {
+    /// Records that the person took this console over, **with the sentence the row will show**.
+    ///
+    /// **The application's own row and not a producer's**, so `header: false` cannot hide it: an agent
+    /// that turned the identity row off would otherwise be able to hide from the person that a console
+    /// of theirs had quietly gone back to them.
+    pub(crate) fn the_person_took_it_over(&mut self, why: &str) {
+        if self.taken_over.is_none() {
+            self.taken_over = Some(why.to_owned());
+        }
+    }
 }
 
 /// Whether a refresh looked at the file at all.
@@ -455,52 +474,6 @@ impl PanelState {
         Some(AttentionState { class, backed })
     }
 
-    /// What the application has to say of its own about this panel, if it has something to say.
-    ///
-    /// **It is the app's line, not a producer's line**, and that is why it does not depend on `header`:
-    /// that flag decides whether the pane's identity is painted, not whether the application can be
-    /// honest. A producer that turned it off to hide that its panel is broken would be exactly the case
-    /// this comes to prevent.
-    fn warning(&self, now: SystemTime) -> Option<String> {
-        // **A held panel's two confessions are independent, and both have to be able to appear.** A
-        // held panel says nothing on its own — the identity row already carries who is driving it, and
-        // a standing warning over a panel that is working perfectly is noise — but it can have two
-        // things to say, and the first version returned the file refusal and made the other
-        // unreachable for the whole life of the hold: an agent that wedged with its socket open kept
-        // painting a claim as fresh, and D43 promises the panel goes stale where a person can read
-        // that it has. They are joined rather than one chosen, because they say different things.
-        if let Some(holder) = &self.holder {
-            let mut said: Vec<String> = Vec::new();
-            if holder.file_refused {
-                said.push(format!(
-                    "the file is not being read: \"{}\" is publishing here",
-                    holder.source
-                ));
-            }
-            if self.problem.is_none()
-                && let Some(panel) = &self.last_good
-                && panel.is_stale_at(now)
-            {
-                said.push(no_news(panel, now));
-            }
-            return (!said.is_empty()).then(|| said.join(" · "));
-        }
-
-        // **The file that does not exist yet is the exception, and it goes first for that.** The rest is
-        // ordered by what has to be said: first the read failures, which are the most recent thing known,
-        // and only if there is none is the clock looked at.
-        match (&self.problem, &self.last_good) {
-            (Some(problem), _) if is_a_missing_file(problem) => self
-                .last_good
-                .as_ref()
-                .map(|_| "the panel file is no longer there".to_owned()),
-            (Some(problem), Some(_)) => Some(format!("what is shown is not the latest: {problem}")),
-            (Some(problem), None) => Some(format!("no panel: {problem}")),
-            (None, Some(panel)) if panel.is_stale_at(now) => Some(no_news(panel, now)),
-            (None, _) => None,
-        }
-    }
-
     /// How long until **what this panel says about itself changes**, if it is going to change.
     ///
     /// **The window needs it to wake up in time.** A producer that dies or hangs writes nothing, so there
@@ -571,7 +544,7 @@ impl PanelState {
 
 /// Whether the problem is that the file is not there, which is the only one that is **not** shown on its
 /// own.
-fn is_a_missing_file(problem: &Problem) -> bool {
+pub(super) fn is_a_missing_file(problem: &Problem) -> bool {
     matches!(problem, Problem::Missing)
 }
 
@@ -580,7 +553,7 @@ fn is_a_missing_file(problem: &Problem) -> bool {
 /// **Without a how-much when the deadline is under a minute**: the contract allows a `stale_after_minutes`
 /// of zero, and «no news for 0 min» a second after publishing reads as an application failure, not as a
 /// confession.
-fn no_news(panel: &Panel, now: SystemTime) -> String {
+pub(super) fn no_news(panel: &Panel, now: SystemTime) -> String {
     match now.duration_since(panel.written_at.unwrap_or(now)) {
         Ok(silence) if silence.as_secs() >= 60 => {
             format!("no news for {}", in_words(silence))
@@ -1551,6 +1524,28 @@ mod tests {
                 .iter()
                 .any(|row| row.contains("no panel") && row.contains("not understood")),
             "it does not say why there is no panel: {painted:?}"
+        );
+    }
+
+    /// **AC15's second half, against the rows a person reads**: once the person types into a console
+    /// an agent opened, the application's own row says so — and `header: false` cannot hide it, which
+    /// is the whole reason it is the application's row and not the producer's.
+    #[test]
+    fn a_console_the_person_took_over_says_so_on_its_own_row() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, "{\"header\":false,\"lines\":[\"still publishing\"]}");
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        state
+            .the_person_took_it_over("the person typed into this console, so it went back to them");
+
+        let painted = texts(paint_the_state(&mut state, PLACE, SystemTime::now()));
+
+        // **Joined, because the sentence wraps**, and the sibling tests above make the same concession
+        // for the same reason: what is asserted is that the reason is painted, not that it fits a row.
+        assert!(
+            painted.join(" ").contains("went back to them"),
+            "the console's own row does not say the person took it back: {painted:?}"
         );
     }
 

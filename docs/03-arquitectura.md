@@ -48,24 +48,30 @@ An MCP server exposing tools to the agent running in the pane:
 | Tool | What it does | Served |
 |---|---|---|
 | `panel_set` | Publish its pane's state | Yes, since F3's third PR |
-| `split_open` | Open a new pane | Not yet — planned for F3's fourth PR |
-| `split_read` | Read a pane's output | Not yet — planned for F3's fourth PR |
-| `split_close` | Close it | Not yet — planned for F3's fourth PR |
+| `split_open` | Open a new pane | Yes, since F3's fourth PR |
+| `split_read` | Read a pane's output | Yes, since F3's fourth PR |
+| `split_close` | Close it | Yes, since F3's fourth PR |
 
-The three that are not served are **not advertised either**: the server lists `panel_set` and nothing
-else, and asking it for one of the others is refused by name. They are part of the same frozen wire
-format and arrive with the scoping that makes them safe to answer; advertising one before then would
-be a promise taken back later.
+All four are advertised because all four are answered. The three `split_*` acts on **the panes this
+connection opened**, named by an **opaque handle** the window hands back — sixteen random bytes,
+scoped to (the pane whose channel asked, the connection) — and **the person's first byte into one of
+them takes it back**: from then on the handle answers with the reason and never with the buffer.
+**The revocation is an application boundary and not a confidentiality one** (F10): the process
+`split_open` launched keeps reading what the person types after that, and the promise an agent author
+is given is «the app stops handing you that buffer; the program you opened does not».
 
 **The transport is a per-pane endpoint inside that pane's `0700` directory** — a Unix socket on
 POSIX; on Windows, a named pipe that is **not bound until its security descriptor can be asserted**,
 which is F2.7's. It carries newline-delimited JSON, and the MCP vocabulary is a binary that speaks it
 rather than the channel itself.
 
-**Security rule:** an agent reaches **its own pane** only. The rule is kept by a mechanism and not by
-a check: **the pane a call acts on is the endpoint the connection opened**, and no message carries a
-pane's identifier at all — so reaching somebody else's pane is not refused, it is unsayable. See the
-Security table below for why a check would have been worth nothing.
+**Security rule:** an agent reaches **its own pane**, and the consoles it opened itself, and no other.
+For `panel_set` the rule is kept by a mechanism and not by a check: **the pane a call acts on is the
+endpoint the connection opened**, and no message carries a pane's identifier at all. For the three
+`split_*` verbs there *is* something to say — a console other than the caller's — and what is said is
+an **opaque handle scoped to the connection that opened it** (D44), so reaching a console somebody
+else opened is not refused, it is unsayable. See the Security table below for why a check on
+`PANEL_ID` would have been worth nothing.
 
 ### 3. Input — PTY (app → agent)
 
@@ -98,7 +104,8 @@ every version of the agent. That is what channel 1 is for.
 |---|---|
 | The panel's `actions` run commands in the shell | **The literal command is painted under its label and the click is the confirmation**, so what is on screen is what runs, character for character. `send` is plain text with no interpolation and no templates; every control character, line break, tab and zero-width scalar is **refused when the document is read, never cleaned** — cleaning would make the painted text stop being the sent text, which is the whole of this mitigation. A button that is not fully on screen is not pressable, and a press is refused on the frame the document changed |
 | A `panel.json` of untrusted origin (cloned repo, container) | **The document's origin is unknowable and the application does not pretend otherwise.** `PANEL_DIR` is created by the application, `0700`, under the user's runtime directory and with a name drawn at random, so whoever writes there is a process of the user's own uid — the same trust level as the shell in the pane. There is nothing to test, and deducing an origin would be **D6**. What is enforceable is the premise: **the application never reads a panel document from a path it did not create** — no flag, no setting and no convenience that points it at a file somebody names. That one-line feature would be the whole of the breach |
-| An agent writing into somebody else's pane | **The pane is the endpoint the connection opened, and the wire format carries no pane identifier for anybody to check.** The earlier wording here said the server «scopes by `PANEL_ID`», and that was not a mitigation: `PANEL_ID` is put in the child's environment, so every descendant of a pane inherits it and any process of the same uid reads it out of `/proc/<pid>/environ` — it is a name, not a credential, and it is eight hex digits drawn for collision avoidance rather than unguessability. What does the work is the directory's `0700` and the fact that there is nothing in a message to trust. **Through the file there is no scoping either**: whoever can write in the directory is the producer (D17) |
+| An agent writing into somebody else's pane | **The pane is the endpoint the connection opened, and `panel_set` carries no pane identifier for anybody to check.** The earlier wording here said the server «scopes by `PANEL_ID`», and that was not a mitigation: `PANEL_ID` is put in the child's environment, so every descendant of a pane inherits it and any process of the same uid reads it out of `/proc/<pid>/environ` — it is a name, not a credential, and it is eight hex digits drawn for collision avoidance rather than unguessability. What does the work is the directory's `0700` and the fact that there is nothing in a message to trust. **Through the file there is no scoping either**: whoever can write in the directory is the producer (D17). The three `split_*` verbs do name a console, and what they name it with is an **opaque per-connection handle** — sixteen random bytes, checked against the pair (origin pane, connection) — so a console the connection did not open cannot be said. **D44** |
+| An agent reading a console the person then types into | **The handle is revoked by the person's own input, and the revocation is an application boundary rather than a confidentiality one** (F10). A keystroke or a paste, a wheel turn, and a mouse report end it (a panel button's press does not: that is the application acting on the person's behalf). From that byte on, `split_read` and `split_close` answer with the reason, and the console's own row says it. **The program the agent opened keeps reading what the person types afterwards** — the promise is «the app stops handing you that buffer», and it is written that way wherever it is promised |
 | Two producers publishing to one pane | **The first connection to publish holds the pane under a source it declares; while it does, the file is not read at all and a second source is refused by name.** The hold dies with the connection, so an agent that crashes does not freeze that panel for the life of the window. **D43** |
 | Reading the buffer and sending it to a model | It exfiltrates whatever is on screen: tokens, keys, API responses. Choosing what gets sent must be explicit, never automatic |
 | Setting `ANTHROPIC_API_KEY` when launching a panel | Forbidden: it would change the user's billing (see D4) |

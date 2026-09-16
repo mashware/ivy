@@ -70,6 +70,7 @@ pub mod watcher;
 // meaning the other one. Named, that same day is a duplicate definition and the build stops. It
 // also gives the reader the one thing the glob takes away — the list of what this file still needs
 // back. For the list of what left, the order is in **D28**, not here.
+use opening::WindowRequest;
 use pointer::{DragIntent, WheelInput, WheelOutcome};
 use tab_bar::set_the_tab_bar_aside;
 use tiling::{DIVIDER_THICKNESS, Orientation, Side, can_split};
@@ -387,38 +388,6 @@ struct Pump {
     some_left_a_queue: bool,
     /// They have all died and none has a queue: **only then** is the window closed.
     all_finished: bool,
-}
-
-/// What a keyboard chord asks of the window, when what it asks is not the console's.
-///
-/// **It comes out through [`Pane::send_keys`]'s return value and not through an output parameter**,
-/// because it is output only: that function's `&mut Modifiers` is a parameter because it **is also
-/// input** —the chord can start on one frame and be used on the next—, and a request drags nothing
-/// from the previous pass.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum WindowRequest {
-    /// Change tab, **as many as the number says**: negative backwards, positive forwards.
-    ///
-    /// **It carries a number and not a direction because clicking a card jumps wherever**: from the
-    /// first to the third is two. Each key press, on the other hand, is worth exactly one — they do
-    /// not compose with each other, they are applied in order, and why it is like that is in
-    /// [`Pane::send_keys`].
-    Go(isize),
-    /// Open a new tab, with its two consoles, and leave it in front.
-    NewTab,
-    /// Close the tab being looked at. If it is the only one, what is closed is the window.
-    CloseTab,
-    /// Split in two the pane that has the focus, cutting in that direction.
-    Split(Orientation),
-    /// Close the pane that has the focus, and let its siblings share out its place.
-    ///
-    /// **It carries the suffix, and so do its two sisters above.** Since both things can be closed,
-    /// a bare «close» next to a «close the pane» would be told apart only by what **one of the two
-    /// does not say**, and getting it wrong kills the programs of a whole tab instead of one. For
-    /// the same reason [`WindowRequest::NewTab`] says what it opens: if some day something that is
-    /// not a tab can be opened, the name that did not say so would become the ambiguous one of the
-    /// two.
-    ClosePane,
 }
 
 /// How many consoles each tab opens with, and in what shape.
@@ -885,6 +854,13 @@ struct Pane {
     /// one that says something and narrow the one that does not. An application-wide width would
     /// also have to yield to the minimum of the narrowest pane, or lie in all the others.
     panel_width: usize,
+    /// Why an agent's access to this console ended, once the person took it over.
+    ///
+    /// **It lives on the pane because that is what decides it**: any user input that reaches this
+    /// console —a keystroke, a paste, a mouse report— is a write into *its* pseudoterminal, and the
+    /// pane is what those write sites already hold. While it is `None` the handles that opened it
+    /// work; from the first byte on they are refused, with this sentence as the reason (**AC15**).
+    taken_over: Option<String>,
     /// Whether this console's panel is folded.
     ///
     /// **It goes apart from the width and not inside it, and that is the decision.** A «zero width»
@@ -922,7 +898,21 @@ impl Pane {
         // first second and the variable we tell it has to point at something that already exists.
         // If launching fails afterwards, the directory deletes itself: the value dies along the
         // error path.
-        Self::with_panel(ctx, program, panel_or_none(PanelDir::create()), name)
+        Self::with_panel(ctx, program, &[], panel_or_none(PanelDir::create()), name)
+    }
+
+    /// The same, with the arguments a connection asked the program to run with.
+    ///
+    /// **Only a connection chooses arguments**, so this is the door `split_open` comes in by and the
+    /// user's own launching keeps passing none. It exists rather than a parameter with a default
+    /// because `&[]` at thirty call sites says nothing and this one call says exactly what it is.
+    fn launching_with_args(
+        ctx: &egui::Context,
+        program: &str,
+        args: &[String],
+        name: usize,
+    ) -> term_core::Result<Self> {
+        Self::with_panel(ctx, program, args, panel_or_none(PanelDir::create()), name)
     }
 
     /// And the same with the directory already resolved, including the case where it could not be
@@ -934,16 +924,19 @@ impl Pane {
     fn with_panel(
         ctx: &egui::Context,
         program: &str,
+        args: &[String],
         panel: Option<PanelDir>,
         name: usize,
     ) -> term_core::Result<Self> {
         let identity = identity_of(panel.as_ref());
+        // The spawn takes borrowed strings, and the arguments a connection chose arrive owned.
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
 
         // If what the environment says no longer exists —a deleted profile, an uninstalled shell—,
         // it falls back to the fallback one instead of not opening. Being left with no window while
         // `/bin/sh` is at hand, and with an error nobody is going to understand, is the worse of
         // the two outcomes.
-        let (pty, output) = match Pty::spawn_with_env(program, &[], INITIAL_GRID, &identity) {
+        let (pty, output) = match Pty::spawn_with_env(program, &borrowed, INITIAL_GRID, &identity) {
             Ok(spawned) => spawned,
             Err(failure) => {
                 eprintln!(
@@ -988,6 +981,7 @@ impl Pane {
             pending_wheel: WheelInput::default(),
             panel_width: panel::DEFAULT_WIDTH,
             folded: false,
+            taken_over: None,
         })
     }
 
@@ -1679,6 +1673,13 @@ struct Window {
     /// The size that was asked for on starting, while it still has to be insisted on. See
     /// [`RequestedSize`].
     requested_size: Option<RequestedSize>,
+    /// The consoles the control channel opened, by the opaque handle each connection was given.
+    ///
+    /// **It belongs to the window and not to a pane**, because opening one splits a tree and only
+    /// the window has one; and **the handle is scoped by the connection that asked**
+    /// ([`control::OpenedByAgents`]), so a second agent holding every identifier in its environment
+    /// still cannot name a pane it did not open (**AC14**).
+    opened_by_agents: control::OpenedByAgents,
 }
 
 /// A window size asked for from outside, and how many times there is still to insist.
@@ -2058,45 +2059,6 @@ impl Window {
         requests
     }
 
-    /// Does what the chord asked for, and **asks for a frame**.
-    ///
-    /// The second is not a precaution: today the only ones that ask for a repaint are the pending
-    /// queue, the blind watcher's fallback and the panels' alarm clock. With two quiet tabs —two
-    /// agents waiting for an answer, which is when this is used— none of the three has anything to
-    /// ask for, so without this line the window would go to sleep **showing the previous tab** and
-    /// the chord would look as though it had not worked. `whole_window` and `metrics` are where the
-    /// geometry **splitting** needs comes from: how big the focused pane is has to be known in
-    /// order to be able to refuse when it does not fit. They are passed instead of stored because
-    /// the area belongs to the interface pass and this can run several times inside one —the same
-    /// batch of events can bring several chords—, and **the bar appears or disappears along the
-    /// way**: creating the second tab takes height away from the consoles at that very instant, so
-    /// the area is recomputed one request at a time and not once for all of them.
-    fn apply(
-        &mut self,
-        request: WindowRequest,
-        ctx: &egui::Context,
-        whole_window: egui::Rect,
-        metrics: &CellMetrics,
-    ) {
-        match request {
-            // The wrap-around comes from `rem_euclid`, which unlike the usual remainder **does not
-            // return negatives**: from the first one backwards you reach the last, with no separate
-            // branch for that case.
-            WindowRequest::Go(delta) => {
-                let tabs = self.tabs.len() as isize;
-                self.active = (self.active as isize + delta).rem_euclid(tabs) as usize;
-            }
-            WindowRequest::NewTab => self.create_a_tab(ctx),
-            WindowRequest::CloseTab => self.close_the_active_tab(ctx),
-            WindowRequest::Split(cut_along) => {
-                self.split_the_focused(cut_along, ctx, whole_window, metrics)
-            }
-            WindowRequest::ClosePane => self.close_the_focused(ctx),
-        }
-
-        ctx.request_repaint();
-    }
-
     /// Splits in two the pane that has the keyboard, and gives focus to the one that is born.
     ///
     /// **Focus passes to the new one because splitting is opening a console**, and whoever opens a
@@ -2458,6 +2420,12 @@ impl eframe::App for Window {
         for request in requests {
             self.apply(request, ui.ctx(), ui.max_rect(), &metrics);
         }
+
+        // **What the open connections asked of the tree, answered here** because this is where a
+        // split's geometry exists. It goes after the keys —so a chord and a request in the same
+        // frame cannot fight over the tree— and before the tab bar, whose height depends on how many
+        // tabs there are and which a close can change.
+        self.answer_the_windows_requests(ui.ctx(), ui.max_rect(), &metrics);
 
         let (tab_bar, area) = set_the_tab_bar_aside(ui.max_rect(), self.tabs.len(), &metrics);
 
@@ -5437,6 +5405,385 @@ mod tests {
         );
     }
 
+    /// Binds a control channel to the console called `name`, so a request can reach the window.
+    fn attach_a_channel(window: &mut Window, name: usize) {
+        let dir = PanelDir::create().expect("a panel directory");
+        let control = control::PaneControl::open(&dir, || {}).expect("bind the channel");
+        let pane = window
+            .all_panes_mut()
+            .find(|pane| pane.name == name)
+            .expect("that console exists");
+        pane.panel = Some(dir);
+        pane.control = Some(control);
+    }
+
+    /// Puts one request in the window's queue and runs the pass that answers it.
+    ///
+    /// **By hand and not over a socket**, because what these tests are about is what the window does
+    /// with a request: that a line on a socket becomes one, and that the answer goes back, is
+    /// covered beside the listener.
+    fn ask_the_window(
+        window: &mut Window,
+        ctx: &egui::Context,
+        origin: usize,
+        connection: u64,
+        what: panel_control::What,
+    ) -> panel_control::Answer {
+        // A window big enough for two consoles of this crate's minimum, which is the ordinary case.
+        let whole_window =
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 800.0));
+        ask_the_window_at(window, ctx, origin, connection, whole_window, what)
+    }
+
+    /// The same, with the window's rectangle said, **which is what the refusal of a split that does
+    /// not fit needs**: the geometry is the whole of that answer.
+    fn ask_the_window_at(
+        window: &mut Window,
+        ctx: &egui::Context,
+        origin: usize,
+        connection: u64,
+        whole_window: egui::Rect,
+        what: panel_control::What,
+    ) -> panel_control::Answer {
+        let (answering, answer) = std::sync::mpsc::sync_channel(1);
+        window
+            .all_panes_mut()
+            .find(|pane| pane.name == origin)
+            .and_then(|pane| pane.control.as_mut())
+            .expect("that console keeps its channel")
+            .push_for_the_tests(panel_control::Delivery {
+                connection,
+                what,
+                answer: answering,
+            });
+        with_metrics(|metrics| window.answer_the_windows_requests(ctx, whole_window, metrics));
+        answer
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the window answered")
+    }
+
+    /// **AC13**: a console that cannot give both children their minimum is told so, and **nothing is
+    /// spent** — not a console, and not even a name.
+    #[test]
+    fn a_split_that_does_not_fit_is_refused_and_spends_nothing() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let panes = window.all_panes().count();
+        let names = window.next_pane_name;
+
+        // A window far narrower than two consoles' minimum: the left console cannot be halved.
+        let narrow = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(20.0, 400.0));
+        let panel_control::Answer::Refused(why) = ask_the_window_at(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            narrow,
+            panel_control::What::Open {
+                side: panel_control::Side::Right,
+                program: Some("sleep 8".to_owned()),
+                args: Vec::new(),
+            },
+        ) else {
+            panic!("a console with no room to give both children was split anyway");
+        };
+
+        assert!(why.contains("minimum"), "not the reason: {why}");
+        assert_eq!(window.all_panes().count(), panes, "a console was opened");
+        assert_eq!(
+            window.next_pane_name, names,
+            "a name was spent on a split that did not happen"
+        );
+    }
+
+    /// **AC15's doors, and the assertion is on the write happening through the real door** — not on
+    /// a flag set by hand. Without this, deleting the call in `keyboard.rs` or in `mouse.rs` leaves
+    /// the suite green, which is the disguise this project has paid for more than a dozen times.
+    #[test]
+    fn the_persons_own_input_at_the_two_doors_hands_the_console_back() {
+        let ctx = egui::Context::default();
+
+        // **The keyboard's door, which a paste also comes through.**
+        let mut pane = pane_with("sleep 8", 0);
+        assert!(pane.taken_over.is_none());
+        enqueue(&ctx, vec![egui::Event::Paste("hello".to_owned())]);
+        let mut modifiers = egui::Modifiers::NONE;
+        pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            2,
+            &keyboard::Keymap::default(),
+            true,
+        );
+        assert!(
+            !pane.keystrokes.is_empty(),
+            "the premise failed: the paste produced no bytes"
+        );
+        assert!(
+            pane.taken_over.is_some(),
+            "the person's own keystrokes did not hand the console back"
+        );
+
+        // **And the mouse's door**: a report, which reaches the program only once it asked for the
+        // mouse — so the premise is asserted before the gesture.
+        let mut pane = pane_with("sleep 8", 0);
+        pane.screen.advance(b"\x1b[?1000h");
+        assert!(
+            pane.screen.mouse_reporting().wants_mouse(),
+            "the premise failed: the program never asked for the mouse"
+        );
+        let sent = pane.send_mouse_to_the_program(
+            mouse::MouseReport::Press(egui::PointerButton::Primary),
+            Cell {
+                row: 3,
+                col: 4,
+                half: Half::Left,
+            },
+            egui::Modifiers::NONE,
+        );
+        assert!(
+            sent.is_some(),
+            "the premise failed: the report went nowhere"
+        );
+        assert!(
+            pane.taken_over.is_some(),
+            "the person's mouse report did not hand the console back"
+        );
+    }
+
+    /// **AC12, AC14 and AC15**: an agent's `split_open` splits the console that asked, hands back an
+    /// opaque handle, and **does not move the person's keyboard**; a second connection cannot use
+    /// that handle; and the moment the person's input reaches the console, a read with the handle is
+    /// refused **with the reason** and not with a bare error.
+    #[test]
+    fn an_agent_opens_a_console_without_moving_the_focus_and_loses_it_when_somebody_types() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let newborn = window.next_pane_name;
+        assert_eq!(window.active().focus, 0, "the test starts on the left");
+
+        let panel_control::Answer::Opened(Some(handle)) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Open {
+                side: panel_control::Side::Right,
+                program: Some("sleep 8".to_owned()),
+                args: Vec::new(),
+            },
+        ) else {
+            panic!("the console was not opened with a handle");
+        };
+        assert_eq!(window.next_pane_name, newborn + 1, "nothing was opened");
+        assert_eq!(
+            window.active().focus,
+            0,
+            "opening a console for an agent moved the person's keyboard"
+        );
+
+        // **AC14: another connection cannot name it, even holding the handle.** The scope is the
+        // connection that opened it, so the second one is refused by name and not by luck.
+        let panel_control::Answer::Refused(why) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            8,
+            panel_control::What::Read {
+                pane: handle.clone(),
+                scrollback: false,
+            },
+        ) else {
+            panic!("another connection read a console it did not open");
+        };
+        assert!(
+            why.contains("another connection"),
+            "the refusal does not say the handle is somebody else's: {why}"
+        );
+
+        // **The two reads, and the flag is what chooses between them.** The console's history holds
+        // lines the visible screen no longer does, so swapping the two dumps cannot stay invisible:
+        // making the screen scroll is the premise, and it is asserted before the read.
+        {
+            let opened = window
+                .all_panes_mut()
+                .find(|pane| pane.name == newborn)
+                .expect("the console that was opened");
+            for n in 0..80 {
+                opened.screen.advance(format!("linea {n}\r\n").as_bytes());
+            }
+        }
+        let read = |window: &mut Window, scrollback: bool| match ask_the_window(
+            window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Read {
+                pane: handle.clone(),
+                scrollback,
+            },
+        ) {
+            panel_control::Answer::Text(text) => text,
+            other => panic!("the read was refused: {other:?}"),
+        };
+        let visible = read(&mut window, false);
+        let everything = read(&mut window, true);
+        assert!(
+            visible.contains("linea 79"),
+            "the visible read lost the screen: {visible:?}"
+        );
+        assert!(
+            !visible.contains("linea 0"),
+            "the visible read carried the history: {visible:?}"
+        );
+        assert!(
+            everything.contains("linea 0"),
+            "the scrollback read lost the history: {everything:?}"
+        );
+
+        // **The person types into it**, through the door the keyboard uses, and the handle dies.
+        window
+            .all_panes_mut()
+            .find(|pane| pane.name == newborn)
+            .expect("the console that was opened")
+            .hand_it_back_to_the_person();
+
+        let panel_control::Answer::Refused(why) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Read {
+                pane: handle,
+                scrollback: false,
+            },
+        ) else {
+            panic!("a handle the person had taken back was allowed to read");
+        };
+        assert!(
+            why.contains("went back"),
+            "the refusal is not the reason the console was taken: {why}"
+        );
+    }
+
+    /// **AC16, the half that is reachable**: a console the agent opened is closed by its handle, the
+    /// tree loses it, and the handle is forgotten with it. Without this, a build that refused *every*
+    /// close would pass the refusal tests and close nothing.
+    ///
+    /// The other half — a console that is its tab's only one is refused rather than closing the tab —
+    /// is unreachable from here and is defended anyway: the origin pane has to stay alive for the
+    /// handle to be usable at all, and opening a console always leaves at least two in that tab.
+    #[test]
+    fn a_console_the_agent_opened_is_closed_by_its_handle_and_the_handle_is_forgotten() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+
+        let panel_control::Answer::Opened(Some(handle)) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Open {
+                side: panel_control::Side::Bottom,
+                program: Some("sleep 8".to_owned()),
+                args: Vec::new(),
+            },
+        ) else {
+            panic!("the console was not opened with a handle");
+        };
+        let opened = window.all_panes().count();
+
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Close {
+                pane: handle.clone(),
+            },
+        );
+        assert!(
+            matches!(answer, panel_control::Answer::Taken),
+            "the close was refused: {answer:?}"
+        );
+        assert_eq!(
+            window.all_panes().count(),
+            opened - 1,
+            "the console was not closed"
+        );
+
+        // **And the handle went with it**: a console that is gone is not somebody else's either.
+        let answer = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Close { pane: handle },
+        );
+        assert!(
+            matches!(&answer, panel_control::Answer::Refused(why) if why.contains("that handle")),
+            "a forgotten handle was still usable: {answer:?}"
+        );
+    }
+
+    /// **AC16**: a handle nobody issued is refused, **and a handle that belongs to another connection
+    /// too** — the scope is the connection and not the name, which is the whole of what the handle is
+    /// for.
+    #[test]
+    fn a_close_is_refused_for_a_handle_this_connection_does_not_own() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let panes = window.all_panes().count();
+
+        let panel_control::Answer::Refused(_) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Close {
+                pane: "not-a-handle".to_owned(),
+            },
+        ) else {
+            panic!("a handle nobody issued was allowed to close a console");
+        };
+        assert_eq!(window.all_panes().count(), panes, "something was closed");
+
+        // One the agent did open, asked for from a console that did not open it.
+        let panel_control::Answer::Opened(Some(handle)) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Open {
+                side: panel_control::Side::Right,
+                program: Some("sleep 8".to_owned()),
+                args: Vec::new(),
+            },
+        ) else {
+            panic!("the console was not opened with a handle");
+        };
+        let newborn = window.next_pane_name - 1;
+        attach_a_channel(&mut window, newborn);
+        let panel_control::Answer::Refused(why) = ask_the_window(
+            &mut window,
+            &ctx,
+            newborn,
+            7,
+            panel_control::What::Close { pane: handle },
+        ) else {
+            panic!("a handle was used from a console that did not open it");
+        };
+        assert!(
+            why.contains("another connection"),
+            "the refusal does not say the handle is somebody else's: {why}"
+        );
+    }
+
     /// Builds a pane with a program inside, with no interface framework in the way.
     ///
     /// The two halves of the frame tested here —pumping and resizing— do not touch the desktop
@@ -5463,6 +5810,7 @@ mod tests {
             pending_wheel: WheelInput::default(),
             panel_width: panel::DEFAULT_WIDTH,
             folded: false,
+            taken_over: None,
             received: Vec::new(),
             keystrokes: Vec::new(),
             held: None,
@@ -5572,6 +5920,7 @@ mod tests {
             // A test window asks for no size, just like the real one when nobody exports the
             // variable: that way no test sends resize orders to the context.
             requested_size: None,
+            opened_by_agents: control::OpenedByAgents::default(),
         };
 
         // The same as in the real constructor: the window describes itself when it is born, or the
@@ -6106,7 +6455,7 @@ mod tests {
     /// screen.
     #[test]
     fn a_console_with_no_directory_starts_the_same_and_its_program_does_not_see_the_identity() {
-        let mut pane = Pane::with_panel(&egui::Context::default(), "env", None, 0)
+        let mut pane = Pane::with_panel(&egui::Context::default(), "env", &[], None, 0)
             .expect("a console with no panel has to open just the same");
         wait_for_it_to_die(&pane);
 
@@ -22852,6 +23201,14 @@ mod tests {
             got, "npm test\n",
             "the program did not receive the command the button painted; the file it writes to \
              holds {got:?}"
+        );
+        // **A press on a button does not hand the console back to the person** (**AC15**): that door
+        // is the application writing on their behalf — a remote control they were shown and pressed —
+        // and revoking on it would take a console away from the agent the moment somebody used the
+        // button beside it. The three doors that do revoke are the person's own keys, wheel and mouse.
+        assert!(
+            window.active().panes()[0].taken_over.is_none(),
+            "a press on a panel's button revoked the console"
         );
         let _ = std::fs::remove_file(&received);
         let _ = std::fs::remove_dir_all(&dir);

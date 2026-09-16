@@ -14,6 +14,13 @@ panel-contract = { path = "../panel-contract" }
 # (D3).
 panel-control = { path = "../panel-control" }
 
+# **So that a handle is not guessable, which is the whole of its job.** `PANEL_ID` is in every
+# descendant's environment and any sibling of this user reads it out of `/proc/<pid>/environ`, so a
+# name is not a credential and a small integer is reachable by a typo; a handle is sixteen random
+# bytes. It adds no package to the tree: `panel-contract` already draws randomness from it to name
+# each console's directory.
+getrandom = "0.3"
+
 # To find out that a producer has published without asking the disk sixty times a second.
 # Its source was read before choosing it, and two decisions come out of that reading which are not
 # negotiable: what is watched is each console's **directory** and not its file, and the notice only

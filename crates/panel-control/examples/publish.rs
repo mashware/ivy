@@ -46,6 +46,13 @@ fn main() {
             // **Said and not fatal.** A refusal is a real answer — another source holds the pane —
             // and the run's own report is what decides whether the batch is valid, not this process.
             Ok(Answered::Failed(why)) => eprintln!("publish: refused ({why})"),
+            // **The three `split_*` verbs are the other half of the channel and this example never
+            // asks for them.** A payload here would mean the pane answered the wrong request, which
+            // is worth a line and not a panic: this process's job is the load, and the batch's own
+            // report is what decides whether the run counts.
+            Ok(Answered::Opened(_) | Answered::Text(_)) => {
+                eprintln!("publish: the pane answered something else to a publication");
+            }
             Err(failure) => {
                 eprintln!("publish: the channel is gone ({failure})");
                 return;

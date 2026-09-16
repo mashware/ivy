@@ -10,6 +10,7 @@
 //! ahead of the delivery that needed the room** — the milestone that gives the panel buttons — which
 //! is the order that entry's own prose asks for.
 
+use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
@@ -213,6 +214,7 @@ impl Window {
                 how_much,
                 attempts: FRAMES_INSISTING_ON_SIZE,
             }),
+            opened_by_agents: control::OpenedByAgents::default(),
         };
 
         // **The window is described once when it is born, and with that the deadline does not arm
@@ -224,5 +226,82 @@ impl Window {
         window.last_seen = Some(window.describe());
 
         Ok(window)
+    }
+}
+
+/// What a keyboard chord asks of the window, when what it asks is not the console's.
+///
+/// **It comes out through [`Pane::send_keys`]'s return value and not through an output parameter**,
+/// because it is output only: that function's `&mut Modifiers` is a parameter because it **is also
+/// input** —the chord can start on one frame and be used on the next—, and a request drags nothing
+/// from the previous pass.
+///
+/// **It lives here and not in the crate's core** because applying one is what somebody asks a window
+/// to do, which is this module's subject. It came out under **D28** ahead of the delivery that gives
+/// an agent the same gestures over the channel, which is what pays the lines the core spends back.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum WindowRequest {
+    /// Change tab, **as many as the number says**: negative backwards, positive forwards.
+    ///
+    /// **It carries a number and not a direction because clicking a card jumps wherever**: from the
+    /// first to the third is two. Each key press, on the other hand, is worth exactly one — they do
+    /// not compose with each other, they are applied in order, and why it is like that is in
+    /// [`Pane::send_keys`].
+    Go(isize),
+    /// Open a new tab, with its two consoles, and leave it in front.
+    NewTab,
+    /// Close the tab being looked at. If it is the only one, what is closed is the window.
+    CloseTab,
+    /// Split in two the pane that has the focus, cutting in that direction.
+    Split(Orientation),
+    /// Close the pane that has the focus, and let its siblings share out its place.
+    ///
+    /// **It carries the suffix, and so do its two sisters above.** Since both things can be closed,
+    /// a bare «close» next to a «close the pane» would be told apart only by what **one of the two
+    /// does not say**, and getting it wrong kills the programs of a whole tab instead of one. For
+    /// the same reason [`WindowRequest::NewTab`] says what it opens: if some day something that is
+    /// not a tab can be opened, the name that did not say so would become the ambiguous one of the
+    /// two.
+    ClosePane,
+}
+
+impl Window {
+    /// Does what the chord asked for, and **asks for a frame**.
+    ///
+    /// The second is not a precaution: today the only ones that ask for a repaint are the pending
+    /// queue, the blind watcher's fallback and the panels' alarm clock. With two quiet tabs —two
+    /// agents waiting for an answer, which is when this is used— none of the three has anything to
+    /// ask for, so without this line the window would go to sleep **showing the previous tab** and
+    /// the chord would look as though it had not worked. `whole_window` and `metrics` are where the
+    /// geometry **splitting** needs comes from: how big the focused pane is has to be known in
+    /// order to be able to refuse when it does not fit. They are passed instead of stored because
+    /// the area belongs to the interface pass and this can run several times inside one —the same
+    /// batch of events can bring several chords—, and **the bar appears or disappears along the
+    /// way**: creating the second tab takes height away from the consoles at that very instant, so
+    /// the area is recomputed one request at a time and not once for all of them.
+    pub(crate) fn apply(
+        &mut self,
+        request: WindowRequest,
+        ctx: &egui::Context,
+        whole_window: egui::Rect,
+        metrics: &CellMetrics,
+    ) {
+        match request {
+            // The wrap-around comes from `rem_euclid`, which unlike the usual remainder **does not
+            // return negatives**: from the first one backwards you reach the last, with no separate
+            // branch for that case.
+            WindowRequest::Go(delta) => {
+                let tabs = self.tabs.len() as isize;
+                self.active = (self.active as isize + delta).rem_euclid(tabs) as usize;
+            }
+            WindowRequest::NewTab => self.create_a_tab(ctx),
+            WindowRequest::CloseTab => self.close_the_active_tab(ctx),
+            WindowRequest::Split(cut_along) => {
+                self.split_the_focused(cut_along, ctx, whole_window, metrics)
+            }
+            WindowRequest::ClosePane => self.close_the_focused(ctx),
+        }
+
+        ctx.request_repaint();
     }
 }

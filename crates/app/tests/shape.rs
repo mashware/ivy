@@ -118,7 +118,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    959,
+    945,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -177,7 +177,13 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          `applied`/`refused`/`released` out of the numbers the report folds — so everything that \
          happens when a tab or the focused console goes left for `closing.rs`, **71 production \
          lines**, against the **30** the counters' field, their init and the banking cost back here. \
-         Seventy-one out and thirty in against 1 000 leaves **959**.",
+         Seventy-one out and thirty in against 1 000 leaves **959**. **And the phase that gives an \
+         agent a pane of its own paid it with the piece its own subject names**: what a keyboard \
+         chord asks of the window, and the dispatch that does it, went out to `opening.rs`, **33 \
+         production lines**, against the **19** this delivery spends back here — the field a window \
+         keeps its handles in, the walk that answers what the connections left for the tree, the \
+         arguments a launch now takes, and the flag a console the person took over carries. \
+         Thirty-three out and nineteen in against 959 leaves **945**.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.

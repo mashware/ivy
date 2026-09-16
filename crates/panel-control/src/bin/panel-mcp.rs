@@ -8,9 +8,10 @@
 //! ticket's day, and a second workspace member costs entries in six guard lists this delivery
 //! already has to pay.
 //!
-//! **It exposes `panel_set` and nothing else.** The three `split_*` verbs are part of the same
-//! frozen wire format and arrive with the scoping that makes them safe to answer; a tool advertised
-//! here before then would be a promise taken back later.
+//! **It exposes the four verbs the channel serves**: `panel_set`, and the three `split_*` that let an
+//! agent open, read and close a console of its own. Each one is advertised because each one is
+//! answered; the scoping that makes them safe —the handle belongs to this connection, and the
+//! person's first keystroke takes the console back— lives on the window's side of the channel.
 //!
 //! **Which pane it drives is not a parameter and cannot be one.** The two variables the program
 //! inherited name its own pane's directory, the endpoint inside it is what the connection opens, and
@@ -18,7 +19,7 @@
 
 use std::io::{BufRead, Read, Write};
 
-use panel_control::{Answered, MAX_REQUEST, Producer};
+use panel_control::{Answered, MAX_REQUEST, Producer, Side};
 
 /// The version answered when the client does not ask for one.
 ///
@@ -198,33 +199,112 @@ fn initialized(message: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// The one tool, with the shape of what it takes.
+/// The four tools this build serves, with the shape of what each takes.
 fn tools() -> serde_json::Value {
     serde_json::json!({
-        "tools": [{
-            "name": "panel_set",
-            "description": "Publish this pane's status panel. The document is the panel document: \
-                            a required \"lines\" array, and optionally \"phase\", \"attention\" \
-                            (wait, block or done), \"actions\" and the rest of the contract. \
-                            Publishing claims this pane under the given source until this process \
-                            exits; while it is claimed, the pane's panel.json is not read and \
-                            another source is refused.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "source": {
-                        "type": "string",
-                        "description": "What to call whoever is publishing, shown on the panel.",
+        "tools": [
+            {
+                "name": "panel_set",
+                "description": "Publish this pane's status panel. The document is the panel document: \
+                                a required \"lines\" array, and optionally \"phase\", \"attention\" \
+                                (wait, block or done), \"actions\" and the rest of the contract. \
+                                Publishing claims this pane under the given source until this process \
+                                exits; while it is claimed, the pane's panel.json is not read and \
+                                another source is refused.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "What to call whoever is publishing, shown on the panel.",
+                        },
+                        "document": {
+                            "type": "object",
+                            "description": "The panel document.",
+                        },
                     },
-                    "document": {
-                        "type": "object",
-                        "description": "The panel document.",
-                    },
+                    "required": ["source", "document"],
                 },
-                "required": ["source", "document"],
             },
-        }],
+            {
+                "name": "split_open",
+                "description": "Open a console beside this pane and return a handle for it. The \
+                                handle belongs to this connection: no other connection can use it. The \
+                                keyboard stays where the person left it. A console with no \
+                                addressable identity answers a null handle.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "side": {
+                            "type": "string",
+                            "enum": ["left", "right", "top", "bottom"],
+                            "description": "Which edge of this pane the new console goes on.",
+                        },
+                        "program": {
+                            "type": "string",
+                            "description": "What to run in it; the user's shell, the same one this pane runs, if \
+                                            it is left out.",
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments for that program. There is no environment: \
+                                            the console gets this pane's identity and nothing else.",
+                        },
+                    },
+                    "required": ["side"],
+                },
+            },
+            {
+                "name": "split_read",
+                "description": "Read a console this process opened, by its handle. Returns what is on \
+                                its screen, or the whole history if the scrollback is asked for. \
+                                Refused with the reason once the person has typed into that console.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pane": {
+                            "type": "string",
+                            "description": "The handle split_open answered with.",
+                        },
+                        "scrollback": {
+                            "type": "boolean",
+                            "description": "Read the whole history instead of the visible screen. \
+                                            Defaults to false.",
+                        },
+                    },
+                    "required": ["pane"],
+                },
+            },
+            {
+                "name": "split_close",
+                "description": "Close a console this process opened, by its handle. Refused for a \
+                                handle this connection does not own, for a console that is its \
+                                tab's only one, and for one the person has typed into.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "pane": {
+                            "type": "string",
+                            "description": "The handle split_open answered with.",
+                        },
+                    },
+                    "required": ["pane"],
+                },
+            }
+        ],
     })
+}
+
+/// What one tool call asks for, **already read and validated**.
+///
+/// **It exists so the channel is opened after the arguments are understood**, and not before: a
+/// malformed call is a tool error the agent reads, and finding it out must not require a pane.
+enum Ask {
+    Publish(String, String),
+    Open(Side, Option<String>, Vec<String>),
+    Read(String, bool),
+    Close(String),
 }
 
 /// Runs a tool call.
@@ -238,16 +318,92 @@ fn called(
         .get("name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    if name != "panel_set" {
+    // **A tool this server never advertised is a protocol error**, and it is checked before the pane
+    // is even reached: a call for something nobody serves must not open the channel to find that out.
+    if !matches!(
+        name,
+        "panel_set" | "split_open" | "split_read" | "split_close"
+    ) {
         return failed(id, -32602, &format!("no tool \"{name}\""));
     }
 
-    let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
-    let Some(source) = arguments.get("source").and_then(serde_json::Value::as_str) else {
-        return succeeded(id, refusal("panel_set needs a \"source\""));
-    };
-    let Some(document) = arguments.get("document") else {
-        return succeeded(id, refusal("panel_set needs a \"document\""));
+    // **What the call asks for, read and validated before the pane is reached.** A malformed argument
+    // is a tool error the agent reads, and finding that out must not need a channel — which is also
+    // what lets the refusals of a missing or unknown field be asserted without a pane to reach.
+    let ask = match name {
+        "panel_set" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let Some(source) = arguments.get("source").and_then(serde_json::Value::as_str) else {
+                return succeeded(id, refusal("panel_set needs a \"source\""));
+            };
+            let Some(document) = arguments.get("document") else {
+                return succeeded(id, refusal("panel_set needs a \"document\""));
+            };
+            Ask::Publish(source.to_owned(), document.to_string())
+        }
+        "split_open" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let Some(side) = arguments.get("side").and_then(serde_json::Value::as_str) else {
+                return succeeded(id, refusal("split_open needs a \"side\""));
+            };
+            let Some(side) = Side::parse(side) else {
+                return succeeded(id, refusal("split_open names no side this build knows"));
+            };
+            let program = match arguments.get("program") {
+                None => None,
+                Some(serde_json::Value::String(text)) => Some(text.clone()),
+                // **A present value of the wrong type is refused by name**, never defaulted: an
+                // agent that sent a number here would otherwise have its program silently dropped.
+                Some(_) => {
+                    return succeeded(id, refusal("split_open's \"program\" is not text"));
+                }
+            };
+            let args = match arguments.get("args") {
+                None => Vec::new(),
+                Some(serde_json::Value::Array(items)) => {
+                    let mut args = Vec::with_capacity(items.len());
+                    for item in items {
+                        let Some(text) = item.as_str() else {
+                            return succeeded(
+                                id,
+                                refusal("split_open's \"args\" is not a list of text"),
+                            );
+                        };
+                        args.push(text.to_owned());
+                    }
+                    args
+                }
+                Some(_) => {
+                    return succeeded(id, refusal("split_open's \"args\" is not a list of text"));
+                }
+            };
+            Ask::Open(side, program, args)
+        }
+        "split_read" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let Some(handle) = arguments.get("pane").and_then(serde_json::Value::as_str) else {
+                return succeeded(id, refusal("split_read needs a \"pane\""));
+            };
+            let scrollback = match arguments.get("scrollback") {
+                None => false,
+                Some(serde_json::Value::Bool(flag)) => *flag,
+                Some(_) => {
+                    return succeeded(
+                        id,
+                        refusal("split_read's \"scrollback\" is not true or false"),
+                    );
+                }
+            };
+            Ask::Read(handle.to_owned(), scrollback)
+        }
+        // `split_close`, the only name left after the check above.
+        _ => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            let Some(handle) = arguments.get("pane").and_then(serde_json::Value::as_str) else {
+                return succeeded(id, refusal("split_close needs a \"pane\""));
+            };
+            Ask::Close(handle.to_owned())
+        }
     };
 
     // **A failure to reach the pane is a tool error and not a protocol one**, which is the
@@ -257,8 +413,32 @@ fn called(
         Ok(producer) => producer,
         Err(failure) => return succeeded(id, refusal(&failure)),
     };
-    match producer.publish(source, &document.to_string()) {
-        Ok(Answered::Ok) => succeeded(id, published()),
+
+    let it_was_a_close = matches!(ask, Ask::Close(_));
+    let answer = match ask {
+        Ask::Publish(source, document) => producer.publish(&source, &document),
+        Ask::Open(side, program, args) => producer.open_a_pane(side, program.as_deref(), &args),
+        Ask::Read(handle, scrollback) => producer.read_a_pane(&handle, scrollback),
+        Ask::Close(handle) => producer.close_a_pane(&handle),
+    };
+
+    match answer {
+        // **A close and a publication answer with the same empty `ok`**, so the sentence is chosen
+        // from what was asked and not from the shape of the reply: reporting «published» after a
+        // successful close would be a wrong number under a label that reads as a measurement.
+        Ok(Answered::Ok) => succeeded(
+            id,
+            text(if it_was_a_close {
+                "closed"
+            } else {
+                "published"
+            }),
+        ),
+        // **The handle is the whole answer to an open**, and a null one is not an error: the console
+        // exists and is usable, it is only this channel that cannot address it.
+        Ok(Answered::Opened(Some(handle))) => succeeded(id, text(&handle)),
+        Ok(Answered::Opened(None)) => succeeded(id, text("opened, with no addressable identity")),
+        Ok(Answered::Text(what)) => succeeded(id, text(&what)),
         Ok(Answered::Failed(why)) => succeeded(id, refusal(&why)),
         Err(failure) => {
             // The channel is gone; the next call opens a fresh one rather than reusing a dead
@@ -282,8 +462,9 @@ fn open(pane: &mut Option<Producer>) -> Result<&mut Producer, String> {
     Ok(pane.insert(producer))
 }
 
-fn published() -> serde_json::Value {
-    serde_json::json!({"content": [{"type": "text", "text": "published"}]})
+/// One line of text as a tool's result, which is what every verb that is not an error answers with.
+fn text(what: &str) -> serde_json::Value {
+    serde_json::json!({"content": [{"type": "text", "text": what}]})
 }
 
 fn refusal(why: &str) -> serde_json::Value {
@@ -440,11 +621,11 @@ mod tests {
         assert!(answered["result"]["capabilities"]["tools"].is_object());
     }
 
-    /// **This build advertises one tool**, and the assertion is on the whole list rather than on the
-    /// presence of the one: advertising `split_open` before its scoping exists is exactly the
-    /// mistake this pins.
+    /// **This build advertises the four verbs it serves**, and the assertion is on the whole list rather
+    /// than on the presence of one: a tool advertised before it is answered is a promise taken back
+    /// later, and an answered tool left unadvertised is one no client will ever call.
     #[test]
-    fn only_the_tool_this_build_serves_is_advertised() {
+    fn the_four_verbs_this_build_serves_are_advertised() {
         let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
 
         let tools = answered["result"]["tools"]
@@ -454,7 +635,10 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().expect("every tool is named"))
             .collect();
-        assert_eq!(names, ["panel_set"]);
+        assert_eq!(
+            names,
+            ["panel_set", "split_open", "split_read", "split_close"]
+        );
     }
 
     /// A call with nothing to publish is a **tool** error, not a protocol one: the agent reads it,
@@ -473,9 +657,37 @@ mod tests {
     #[test]
     fn a_tool_that_was_never_advertised_is_a_protocol_error() {
         let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\
-             \"params\":{\"name\":\"split_open\",\"arguments\":{}}}");
+             \"params\":{\"name\":\"split_dance\",\"arguments\":{}}}");
 
         assert_eq!(answered["error"]["code"], -32602);
+    }
+
+    /// **A `split_open` with no side is a tool error and not a broken session**, the same shape as a
+    /// publication with no document: the agent reads it and carries on.
+    #[test]
+    fn a_split_open_missing_its_side_comes_back_as_a_tool_error() {
+        let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\
+             \"params\":{\"name\":\"split_open\",\"arguments\":{}}}");
+
+        assert!(answered.get("error").is_none(), "{answered}");
+        assert_eq!(answered["result"]["isError"], true);
+    }
+
+    /// **Every verb is dispatched and not just advertised**: a side this build does not know is
+    /// refused by name, and it is refused before the pane is even reached — which is why the refusal
+    /// arrives with no channel open in this test.
+    #[test]
+    fn an_unknown_side_is_refused_by_name_without_reaching_the_pane() {
+        let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\
+             \"params\":{\"name\":\"split_open\",\"arguments\":{\"side\":\"diagonal\"}}}");
+
+        assert_eq!(answered["result"]["isError"], true);
+        assert!(
+            answered["result"]["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("no side")),
+            "{answered}"
+        );
     }
 
     #[test]
