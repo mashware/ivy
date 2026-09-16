@@ -988,21 +988,24 @@ impl Pane {
     /// Which cell of this console that point falls in, **clamped to what the console really takes
     /// up**.
     ///
-    /// **The clamping is not a convenience: it is what stops anything being selected over the
-    /// panel.** The rectangle that arrives here is the whole pane's —console, handle and panel—,
-    /// and the columns left over from the grid are precisely the ones the panel takes. Whoever
-    /// starts a drag there is not pointing at text.
+    /// **What arrives is the console's rectangle, not the pane's** ([`Pane::console_within`]): the
+    /// corner it counts from has to be the corner the grid was measured from, or the two disagree
+    /// the moment anything is taken off the pane — a panel from the side, a header from the top.
+    ///
+    /// **And the clamping is still not a convenience: it is what stops anything being selected over
+    /// the panel.** A cell divides the rectangle a whole number of times only by luck, so the
+    /// leftover strip on the right belongs to no column and a point there is not pointing at text.
     ///
     /// Returns **nothing when the point falls outside the console's grid**, which is what whoever
     /// starts a selection has to respect; whoever extends one clamps, because dragging beyond the
     /// border is the normal gesture of selecting to the end.
     fn cell_under(
         &self,
-        pane_area: egui::Rect,
+        console: egui::Rect,
         point: egui::Pos2,
         metrics: &CellMetrics,
     ) -> Option<Cell> {
-        let offset = point - pane_area.min;
+        let offset = point - console.min;
         let column = offset.x / metrics.width();
         let row = offset.y / metrics.height();
         (column >= 0.0
@@ -1034,11 +1037,11 @@ impl Pane {
     /// whole.
     fn cell_to_extend_to(
         &self,
-        pane_area: egui::Rect,
+        console: egui::Rect,
         point: egui::Pos2,
         metrics: &CellMetrics,
     ) -> Cell {
-        let offset = point - pane_area.min;
+        let offset = point - console.min;
         let last_column = f32::from(self.measured.cols.saturating_sub(1));
         let column = offset.x / metrics.width();
         let row = offset.y / metrics.height();
@@ -1061,13 +1064,8 @@ impl Pane {
     /// here what is done with the cell is **to tell the program about it**, and a column its grid
     /// does not have is an invented cell. It happens as soon as a drag ends outside the console
     /// where it began, which is the normal end of a gesture.
-    fn clamped_cell(
-        &self,
-        pane_area: egui::Rect,
-        point: egui::Pos2,
-        metrics: &CellMetrics,
-    ) -> Cell {
-        let released_at = self.cell_to_extend_to(pane_area, point, metrics);
+    fn clamped_cell(&self, console: egui::Rect, point: egui::Pos2, metrics: &CellMetrics) -> Cell {
+        let released_at = self.cell_to_extend_to(console, point, metrics);
         Cell {
             row: released_at.row.min(self.measured.rows.saturating_sub(1)),
             col: released_at.col.min(self.measured.cols.saturating_sub(1)),
@@ -4662,7 +4660,7 @@ mod tests {
             ],
         );
         let its_cell = window.active().panes()[0]
-            .cell_under(rects[0], elsewhere, &metrics)
+            .cell_under(console, elsewhere, &metrics)
             .expect("the press landed on a cell of the console");
         wait_for_the_pane_to_say(
             &mut window,
@@ -4957,10 +4955,10 @@ mod tests {
         let elsewhere =
             console.left_bottom() + egui::vec2(metrics.width() * 2.5, -metrics.height());
         let its_cell = window.active().panes()[0]
-            .cell_under(rects[0], on_the_notice, &metrics)
+            .cell_under(console, on_the_notice, &metrics)
             .expect("the notice sits over a cell of the console");
         let the_other_cell = window.active().panes()[0]
-            .cell_under(rects[0], elsewhere, &metrics)
+            .cell_under(console, elsewhere, &metrics)
             .expect("the control's point sits over a cell of the console");
         assert_ne!(
             (its_cell.row, its_cell.col),
@@ -8825,6 +8823,120 @@ mod tests {
         );
     }
 
+    /// **The rectangle a pointer is measured against is the one the grid was measured from.**
+    ///
+    /// The two writers of `measured` —the painting and the walk over what is not seen— both take
+    /// the console out of [`Pane::tile_with_its_panel`], and from this delivery on so does whoever
+    /// turns a position into a cell. Letting the two come from different places is what would slide
+    /// every selection and every mouse report by a row the first time something is taken off the top
+    /// of a pane.
+    ///
+    /// **The panel is published rather than the grid fixed by hand**, and that is the premise this
+    /// test asserts before it asserts anything else: with no panel the console *is* the whole pane,
+    /// the two rectangles are the same one, and the comparison below would hold however wrong the
+    /// code was.
+    ///
+    /// **What it does not cover, said here rather than implied**: it never reaches the pointer's own
+    /// path. It cannot — with the two rectangles sharing their corner, passing one or the other
+    /// resolves the same cell, so no test in this delivery can tell the call sites apart. What it
+    /// pins is that this rectangle is not computed a second way; that the helpers count from the
+    /// rectangle they are handed is its sibling below, and the call sites are pinned by the criteria
+    /// of the delivery that cuts the strip.
+    #[test]
+    fn the_pointer_counts_from_the_rectangle_the_grid_was_measured_from() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+        let mut window = window_with("sleep 30", "sleep 30");
+        let now = SystemTime::now();
+        let pane = &mut window.active_mut().panes_mut()[0];
+
+        let dir = std::env::temp_dir().join(format!(
+            "agent-terminal-console-within-{}-{}",
+            std::process::id(),
+            pane.name
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the test panel's directory");
+        std::fs::write(
+            dir.join("panel.json"),
+            br#"{"v":1,"lines":[{"text":"the test panel"}]}"#,
+        )
+        .expect("publish the test's panel");
+        pane.panel_state.refresh(&dir);
+
+        let for_the_grid = pane.tile_with_its_panel(rect, metrics.width(), now).console;
+        let for_the_pointer = pane.console_within(rect, metrics.width(), now);
+
+        assert!(
+            for_the_grid.width() < rect.width(),
+            "no panel is taking columns here, so this test cannot tell the two rectangles apart"
+        );
+        assert_eq!(
+            for_the_pointer, for_the_grid,
+            "the pointer would count from a rectangle the grid was not measured from"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A cell is counted from the rectangle the helper is handed, and from nothing else.**
+    ///
+    /// This is the half of the delivery that *can* be pinned: the same point over two rectangles
+    /// whose corners are one cell apart has to come out one row apart. A helper that counted from
+    /// somewhere of its own — the pane it belongs to, the window's origin — answers the same twice,
+    /// and the row it hands the program or the selection would be the one the console had **before**
+    /// anything was taken off its top.
+    ///
+    /// **The grid is fixed by hand here on purpose**, which the tests that go through the tiling
+    /// deliberately do not do: what is under test is the arithmetic of the three helpers, not how
+    /// much of a pane its panel takes, and going through a real tiling would make the test depend on
+    /// a width that has nothing to do with what it asserts.
+    #[test]
+    fn a_cell_is_counted_from_the_rectangle_the_helper_is_given() {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        let pane = &mut window.active_mut().panes_mut()[0];
+        pane.measured = term_core::Size { rows: 20, cols: 40 };
+
+        let at_the_top = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+        let a_row_lower = egui::Rect::from_min_size(
+            egui::pos2(0.0, metrics.height()),
+            egui::vec2(400.0, 300.0 - metrics.height()),
+        );
+        // Well inside both, so the two answers exist and neither is the result of a clamp.
+        let point = egui::pos2(metrics.width() * 2.5, metrics.height() * 5.5);
+
+        let from_the_top = pane
+            .cell_under(at_the_top, point, &metrics)
+            .expect("the point is inside the grid measured from the top");
+        let from_a_row_lower = pane
+            .cell_under(a_row_lower, point, &metrics)
+            .expect("the point is inside the grid measured a row lower");
+
+        assert_eq!(
+            from_the_top.col, from_a_row_lower.col,
+            "the two rectangles share their left edge, so the column cannot change"
+        );
+        assert_eq!(
+            from_the_top.row,
+            from_a_row_lower.row + 1,
+            "the helper is not counting from the rectangle it was given: a corner one row lower has \
+             to give a row one less"
+        );
+
+        // The same for the two that never reject, so the three of them are held to one rule.
+        assert_eq!(
+            pane.cell_to_extend_to(at_the_top, point, &metrics).row,
+            pane.cell_to_extend_to(a_row_lower, point, &metrics).row + 1,
+            "extending a selection counts from somewhere of its own"
+        );
+        assert_eq!(
+            pane.clamped_cell(at_the_top, point, &metrics).row,
+            pane.clamped_cell(a_row_lower, point, &metrics).row + 1,
+            "the cell reported to the program counts from somewhere of its own"
+        );
+    }
+
     #[test]
     fn the_background_one_is_measured_with_its_own_divider_and_not_the_visible_ones() {
         // The divider belongs to the layout, so each tab tiles its own area with its own. Measuring
@@ -10597,6 +10709,58 @@ mod tests {
                 "with {name} the console moved elsewhere"
             );
         }
+    }
+
+    /// **A console that does not start at the window's edge counts its columns from its own.**
+    ///
+    /// The three helpers that turn a position into a cell subtract the corner of the rectangle they
+    /// are handed, and [`a_cell_is_counted_from_the_rectangle_the_helper_is_given`] pins that for
+    /// the **row**: two rectangles one cell apart on the vertical. Nothing pinned the **column**,
+    /// and the hole was reachable — measured by mutation, counting the column from the window's
+    /// origin instead of from the rectangle left every test of this crate green while **the
+    /// right-hand console of a split marked nothing at all**: 402 points in, its every press
+    /// resolves to a column its grid does not have and a selection that never starts.
+    ///
+    /// **It goes through the pointer's own path and not through the helper**, because the effect is
+    /// the marking and not the arithmetic. The left-hand console is marked first as the control, so
+    /// a run where **neither** marks fails saying that the harness is what broke and not the corner
+    /// the columns are counted from.
+    #[test]
+    fn the_console_that_is_not_at_the_windows_edge_marks_from_its_own_left() {
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = two_panes_with_text(&rects, &metrics);
+
+        // The control, inside the same run: the same gesture over the console that **does** start
+        // at the window's corner, where counting from one rectangle or the other is the same thing.
+        drag_to_select(
+            &mut window,
+            &ctx,
+            &rects,
+            rects[0].min + egui::vec2(1.0, 1.0),
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+        );
+        assert_eq!(
+            selected_at(&window, 0).as_deref(),
+            Some("hola"),
+            "the control never marked, so this run measured the harness and not the corner"
+        );
+
+        // And now the same four letters of the console that starts 402 points into the window.
+        drag_to_select(
+            &mut window,
+            &ctx,
+            &rects,
+            rects[1].min + egui::vec2(1.0, 1.0),
+            rects[1].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+        );
+        assert_eq!(
+            selected_at(&window, 1).as_deref(),
+            Some("hola"),
+            "the console away from the window's edge counted its columns from somewhere that is not \
+             its own rectangle"
+        );
     }
 
     #[test]

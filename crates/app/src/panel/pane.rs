@@ -156,6 +156,28 @@ impl Pane {
             (!self.folded && self.panel_state.is_visible(now)).then_some(self.panel_width),
         )
     }
+
+    /// The rectangle its console really occupies inside the pane's, which is **the one a pointer is
+    /// measured against**.
+    ///
+    /// **It exists so that there is one answer to «where does the console start», and not two.** The
+    /// grid a program is told about comes out of this same split
+    /// ([`Pane::tile_with_its_panel`]), and whoever turns a pointer's position into a cell has to
+    /// start counting from the same corner: with the pane's rectangle the two agree only for as
+    /// long as nothing is taken off the top, and the first thing that is —a header over each
+    /// console— would slide every selection and every mouse report by a row without anything
+    /// failing.
+    ///
+    /// The clock is passed in for the reason the split gives: two clocks in one pass can disagree
+    /// about whether a panel is still there.
+    pub(crate) fn console_within(
+        &self,
+        rect: egui::Rect,
+        cell_width: f32,
+        now: SystemTime,
+    ) -> egui::Rect {
+        self.tile_with_its_panel(rect, cell_width, now).console
+    }
 }
 
 impl panel::PanelState {

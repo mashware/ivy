@@ -118,7 +118,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    945,
+    940,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -183,7 +183,13 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          production lines**, against the **19** this delivery spends back here — the field a window \
          keeps its handles in, the walk that answers what the connections left for the tree, the \
          arguments a launch now takes, and the flag a console the person took over carries. \
-         Thirty-three out and nineteen in against 959 leaves **945**.",
+         Thirty-three out and nineteen in against 959 leaves **945**. **And then five lines came \
+         back with nothing going out, which is the direction this table exists to allow**: the \
+         milestone that gives every pane a header made the three helpers that turn a pointer's \
+         position into a cell take the console's rectangle instead of the pane's, and the shorter \
+         name let rustfmt fold a six-line signature into one. Nothing was moved and nothing was \
+         deleted — the formatter decides what this number counts, and here it decided in the \
+         file's favour. Nine hundred and forty-five less five leaves **940**.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.

@@ -196,6 +196,14 @@ impl Window {
         let mut names = Vec::new();
         self.active().root.walk(&mut |pane| names.push(pane.name));
 
+        // **One reading for every console rectangle this pass resolves**, for the reason
+        // [`Pane::tile_with_its_panel`] gives: how much of a pane its console takes depends on
+        // whether its panel is still there, and two readings a few microseconds apart can answer
+        // that differently — which would resolve two gestures of the same frame against rectangles
+        // 36 columns apart. It does not claim to be the only clock in the pass: answering a
+        // standing question takes one of its own, and works from unrefreshed state on purpose.
+        let now = SystemTime::now();
+
         let mut target = None;
         let mut the_tree_changed = false;
 
@@ -242,7 +250,7 @@ impl Window {
         let frame_nr = ui.ctx().cumulative_frame_nr();
         if self.last_frame_with_buttons != Some(frame_nr) {
             self.last_frame_with_buttons = Some(frame_nr);
-            self.route_the_buttons(rects, &names, metrics, queue);
+            self.route_the_buttons(rects, &names, metrics, queue, now);
         }
         // **Where the button went down, which is where a selection starts.** egui keeps it while
         // the button is still pressed, so it is read on whatever frame is needed.
@@ -314,8 +322,23 @@ impl Window {
                 ));
             }
 
+            // **What is left of the gesture is measured against the console's rectangle**, which is
+            // the one the grid was measured from: see [`Pane::console_within`]. Moving the pane
+            // does not ask for it — what is being moved is the pane, rectangle and all.
+            //
+            // **It is an `Option` and not an early exit, and that is the whole point of the
+            // binding.** Leaving here when the console is gone would also skip the release's own
+            // reset at the foot of each branch, and the gesture would stay latched with the button
+            // already up — a path nobody can reach today, which is exactly the kind that gets
+            // written and then becomes reachable.
+            let console = self
+                .pane_called(name)
+                .map(|pane| pane.console_within(*rect, metrics.width(), now));
+
             if self.drag_in_progress == Some(DragIntent::Select) {
-                self.select_while_dragging(&response, name, *rect, metrics, press_origin);
+                if let Some(console) = console {
+                    self.select_while_dragging(&response, name, console, metrics, press_origin);
+                }
                 if response.drag_stopped() {
                     self.drag_in_progress = None;
                 }
@@ -330,8 +353,8 @@ impl Window {
                 // is a contradiction.
                 if response.drag_stopped() {
                     self.drag_in_progress = None;
-                } else {
-                    self.drag_for_the_program(&response, name, *rect, metrics);
+                } else if let Some(console) = console {
+                    self.drag_for_the_program(&response, name, console, metrics);
                 }
                 continue;
             }
@@ -388,7 +411,8 @@ impl Window {
             // the panel's strip, and there what the program expects to know is that the wheel
             // turned: losing it would leave the wheel dead in the console's right-hand columns.
             && let Some(to_the_program) = {
-                let cell = pane.cell_to_extend_to(rect, pointer, &metrics.clone());
+                let console = pane.console_within(rect, metrics.width(), now);
+                let cell = pane.cell_to_extend_to(console, pointer, &metrics.clone());
                 pane.handle_wheel(requested, chord, cell)
             }
         {
@@ -422,6 +446,7 @@ impl Window {
         names: &[usize],
         metrics: &CellMetrics,
         queue: Vec<ButtonPress>,
+        now: SystemTime,
     ) {
         for button in queue {
             // **A release goes to the console that kept ITS press, not to the one underneath the
@@ -439,7 +464,7 @@ impl Window {
                 .flatten();
             if let Some(which) = of_a_live_press {
                 let (name, _) = self.presses_for_the_program.remove(which);
-                self.release_for_the_program(name, button, rects, names, metrics);
+                self.release_for_the_program(name, button, rects, names, metrics, now);
                 continue;
             }
 
@@ -467,9 +492,10 @@ impl Window {
             // press there has no cell to report. Noting it down anyway, the drag that started over
             // the panel of a console whose program asks for the mouse sent that program a gesture
             // that **started outside it** as soon as the pointer came in.
-            let over_the_grid = self
-                .pane_called(name)
-                .and_then(|pane| pane.cell_under(*rect, button.at, metrics));
+            let over_the_grid = self.pane_called(name).and_then(|pane| {
+                let console = pane.console_within(*rect, metrics.width(), now);
+                pane.cell_under(console, button.at, metrics)
+            });
             let of_the_program = for_the_program && over_the_grid.is_some();
 
             if button.button == egui::PointerButton::Primary {
@@ -877,6 +903,7 @@ impl Window {
         rects: &[egui::Rect],
         names: &[usize],
         metrics: &CellMetrics,
+        now: SystemTime,
     ) {
         let Some(its_index) = names.iter().position(|&which| which == name) else {
             // The console of the press is gone —closed halfway through the gesture—: there is
@@ -886,10 +913,10 @@ impl Window {
         let Some(rect) = rects.get(its_index).copied() else {
             return;
         };
-        let Some(cell) = self
-            .pane_called(name)
-            .map(|pane| pane.clamped_cell(rect, button.at, metrics))
-        else {
+        let Some(cell) = self.pane_called(name).map(|pane| {
+            let console = pane.console_within(rect, metrics.width(), now);
+            pane.clamped_cell(console, button.at, metrics)
+        }) else {
             return;
         };
         self.last_cell_reported = None;
@@ -950,7 +977,7 @@ impl Window {
         &mut self,
         response: &egui::Response,
         name: usize,
-        pane_area: egui::Rect,
+        console: egui::Rect,
         metrics: &CellMetrics,
     ) {
         let Some(pointer) = response.interact_pointer_pos() else {
@@ -964,7 +991,7 @@ impl Window {
         // `xterm` clamps.
         let Some(cell) = self
             .pane_called(name)
-            .map(|pane| pane.clamped_cell(pane_area, pointer, metrics))
+            .map(|pane| pane.clamped_cell(console, pointer, metrics))
         else {
             return;
         };
@@ -990,7 +1017,7 @@ impl Window {
         &mut self,
         response: &egui::Response,
         name: usize,
-        pane_area: egui::Rect,
+        console: egui::Rect,
         metrics: &CellMetrics,
         press_origin: Option<egui::Pos2>,
     ) {
@@ -1022,7 +1049,7 @@ impl Window {
             // **previous** selection survived and its far end jumped to the pointer, so pressing on
             // the panel and dragging changed only what was selected and `Ctrl+Shift+C` copied a
             // text nobody had pointed at.
-            match pane.cell_under(pane_area, pointer, metrics) {
+            match pane.cell_under(console, pointer, metrics) {
                 Some(cell) => pane.screen.start_selection(cell),
                 None => self.drag_in_progress = None,
             }
@@ -1031,7 +1058,7 @@ impl Window {
 
         // Extending does **not** reject: dragging past the edge and carrying on selecting is the
         // usual gesture.
-        let cell = pane.cell_to_extend_to(pane_area, pointer, metrics);
+        let cell = pane.cell_to_extend_to(console, pointer, metrics);
         pane.screen.extend_selection(cell);
         let it_selected = pane.screen.has_selection();
 
