@@ -533,6 +533,29 @@ pub struct SessionHeader {
     pub blink: Blinking,
     /// What the panel's buttons drew and what was pressed.
     pub buttons: Buttons,
+    /// What the control channel did.
+    pub control: Control,
+}
+
+/// What the panel's control channel did this run.
+///
+/// **Three numbers, and a run is invalidated in both directions by the first of them.** A batch that
+/// declares a publisher and applied nothing never reached a pane — a socket that did not bind, a
+/// client that could not connect — and would publish «the channel costs nothing»; any batch that
+/// does **not** declare one and applied something has work in its spans that its load did not ask
+/// for, which is exactly what **D13** forbids.
+///
+/// **The other two are published rather than checked**, because neither has a value a batch can
+/// promise: a refusal needs a second source and a release needs a connection to end, and the batch
+/// that measures the ordinary path does neither.
+#[derive(Default, Clone, Copy)]
+pub struct Control {
+    /// Documents taken and put on a panel.
+    pub applied: usize,
+    /// Publications refused because another source was holding the pane.
+    pub refused: usize,
+    /// Connections that ended and gave their pane back.
+    pub released: usize,
 }
 
 /// What the panel's buttons did this run.
@@ -587,6 +610,7 @@ pub fn header(
         reflow,
         blink,
         buttons,
+        control,
     } = session;
     let profile = if cfg!(debug_assertions) {
         "debug — the number that counts is the one from --release"
@@ -781,6 +805,15 @@ pub fn header(
         a,
         "buttons:      {} drawn whole, {} pressed",
         buttons.painted, buttons.pressed
+    )?;
+    // **Always, and all three on one line.** The first is read in both directions by the script; the
+    // other two are published because a batch cannot promise them — a refusal needs a second source
+    // and a release needs a connection to end — and a number nobody can check is still worth reading
+    // when the one beside it is the one that decides.
+    writeln!(
+        a,
+        "control:      {} applied, {} refused, {} released",
+        control.applied, control.refused, control.released
     )?;
     writeln!(a, "renderer:     glow")?;
     writeln!(a, "profile:      {profile}")?;

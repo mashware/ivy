@@ -58,7 +58,7 @@ mod header;
 /// surface is exactly what `report.rs` and the window reach for. The module itself stays private, so
 /// `measure::header` outside this file is the function below and never the module.
 pub use header::{
-    Blinking, Buttons, CONSOLE_NAME, ChoosingTheFont, Discovery, Drags, Rasterizing,
+    Blinking, Buttons, CONSOLE_NAME, ChoosingTheFont, Control, Discovery, Drags, Rasterizing,
     ReadingSettings, Reflow, Restoring, Saving, SessionHeader, SizeInPoints, TabBar, header, side,
 };
 
@@ -168,6 +168,19 @@ pub struct Spans {
     /// button's rows is painting, which `panel` already covers, while deciding what a click can hit
     /// is not.
     buttons: Duration,
+    /// What it cost to apply what arrived over a pane's control channel.
+    ///
+    /// **Its own field, and it is kept out of `panel` by where the panel's clock starts — not by a
+    /// subtraction.** The two are timed inside the same call, and an earlier shape did subtract one
+    /// from the other: that made the correct number depend on every caller remembering to, and a
+    /// caller that forgot would publish a document applied over a socket as the cost of reading a
+    /// file that was never read, which **D13** rates worse than no number at all. There is now no
+    /// subtraction anywhere for anybody to forget.
+    ///
+    /// **An empty drain is declared rather than skipped.** The channel is asked once per pane per
+    /// pass whether or not anything came and the span covers the asking, so what the polling costs
+    /// is in the report instead of hiding inside the frame's rest.
+    control: Duration,
 }
 
 impl Spans {
@@ -189,6 +202,7 @@ impl Spans {
             enqueued,
             panel,
             buttons: Duration::ZERO,
+            control: Duration::ZERO,
         }
     }
 
@@ -201,6 +215,13 @@ impl Spans {
     /// is the churn D28's order exists to avoid.
     pub fn and_its_buttons(self, buttons: Duration) -> Self {
         Self { buttons, ..self }
+    }
+
+    /// The same round, saying what applying the control channel's deliveries cost.
+    ///
+    /// Chained rather than an eighth argument, for the reason [`Spans::and_its_buttons`] gives.
+    pub fn and_its_control(self, control: Duration) -> Self {
+        Self { control, ..self }
     }
 
     /// Merges the spans of **another pass of the same frame**.
@@ -219,7 +240,7 @@ impl Spans {
     /// The wait does not enter, and it is not an oversight: **it is not work**, it is how long the byte
     /// had been in the queue.
     fn declarable(&self) -> Duration {
-        self.interpreted + self.enqueued + self.panel + self.buttons
+        self.interpreted + self.enqueued + self.panel + self.buttons + self.control
     }
 
     fn and_also(self, other: Self) -> Self {
@@ -229,6 +250,7 @@ impl Spans {
             enqueued: self.enqueued + other.enqueued,
             panel: self.panel + other.panel,
             buttons: self.buttons + other.buttons,
+            control: self.control + other.control,
         }
     }
 }
@@ -272,6 +294,9 @@ pub struct Timings {
     /// Subtracted out of `panel` rather than folded into it: see [`Spans::buttons`], where the reason
     /// is written once.
     buttons: Series,
+    /// Kept out of `panel` by where the panel's clock starts rather than by a subtraction: see
+    /// [`Spans::control`].
+    control: Series,
     round: Series,
     /// The previous frame's spans, waiting for `eframe` to publish what it cost.
     pending: Option<Spans>,
@@ -342,6 +367,7 @@ impl Timings {
             self.enqueue.record(spans.enqueued);
             self.panel.record(spans.panel);
             self.buttons.record(spans.buttons);
+            self.control.record(spans.control);
             self.round.record(waited + cpu_cost);
         }
 
@@ -461,6 +487,7 @@ impl Timings {
             writeln!(a, "  enqueueing the paint:   {}", self.enqueue)?;
             writeln!(a, "  the status panel:       {}", self.panel)?;
             writeln!(a, "  the panel's buttons:    {}", self.buttons)?;
+            writeln!(a, "  the control channel:    {}", self.control)?;
             // **This span's mean mixes two populations and it has to be said.** Almost every frame
             // only checks the file timestamp and paints the already-laid-out text; the few in which
             // the producer has published cost, on top of that, reading, interpreting and redoing the
@@ -646,6 +673,7 @@ mod tests {
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
+                control: Control::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -718,6 +746,7 @@ mod tests {
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
+                control: Control::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -824,6 +853,7 @@ mod tests {
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
+                control: Control::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -1769,6 +1799,7 @@ mod tests {
                         ceiling: Some(false),
                     },
                     buttons: Buttons::default(),
+                    control: Control::default(),
                 },
             )
             .expect("writing to memory does not fail");

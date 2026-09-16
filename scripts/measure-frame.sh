@@ -162,6 +162,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 APP="$ROOT/target/release/app"
 LOAD="$ROOT/target/release/host-load"
+PUBLISHER="$ROOT/target/release/examples/publish"
 
 # **The reference size, in points.** Any of them will do as long as it is the same across every
 # batch compared with each other; this one was chosen for fitting comfortably on the screen where
@@ -311,7 +312,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q or R}
+BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R or S}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -353,7 +354,8 @@ case "$BATCH" in
     P)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CJK=1 ;;       # two, and both dumping in JAPANESE: the only one that discovers fonts
     Q)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; EMOJI=1 ;;     # two, and both dumping EMOJI: the only one that rasterises colour glyphs
     R)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=button; ACTIONS=1 ;;   # two, and pressing a button on a panel: its control is C
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q or R" >&2; exit 2 ;;
+    S)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1 ;;       # two, and both published over the CHANNEL instead of by file: its control is C
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R or S" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -372,12 +374,27 @@ rm -rf "$RUNS"
 mkdir -p "$RUNS"
 
 
-# **Both binaries, before anything else.** Without `host-load` the two consoles die on the spot and
-# the window closes: out comes a report with a header and no spans, which at a glance looks like a
-# valid run. And if the application cannot launch this script as a shell, it falls back to the
-# system's and the two consoles sit at a prompt: the window never closes and publishes nothing.
-for binary in "$APP" "$LOAD"; do
-    [ -x "$binary" ] || { echo "$binary is missing — build with: cargo build --release -p app -p host-load" >&2; exit 1; }
+# **Every binary the chosen batch needs, before anything else.** Without `host-load` the two consoles
+# die on the spot and the window closes: out comes a report with a header and no spans, which at a
+# glance looks like a valid run. And if the application cannot launch this script as a shell, it falls
+# back to the system's and the two consoles sit at a prompt: the window never closes and publishes
+# nothing.
+#
+# **The publisher is on this list and the build line names it**, because a missing example is not an
+# error anybody sees: backgrounding it succeeds, the job exits, and the batch burns a whole window
+# before invalidating over something else entirely.
+NEEDED="$APP $LOAD"
+BUILD_WITH="cargo build --release -p app -p host-load"
+if [ "${CONTROL:-}" = 1 ]; then
+    NEEDED="$NEEDED $PUBLISHER"
+    # **`--example` is target selection, not an addition to the packages named.** Spelled on one
+    # line as `-p app -p host-load --example publish -p panel-control`, cargo builds the example and
+    # none of the packages' default binaries: whoever runs the printed line on a clean tree gets the
+    # publisher and the next preflight fails on `$APP`. Two invocations, so both halves happen.
+    BUILD_WITH="$BUILD_WITH && cargo build --release -p panel-control --example publish"
+fi
+for binary in $NEEDED; do
+    [ -x "$binary" ] || { echo "$binary is missing — build with: $BUILD_WITH" >&2; exit 1; }
 done
 
 # **With a window open nothing is measured, and even less is anything deleted.** The panel
@@ -492,25 +509,19 @@ if [ "$RESTORES" = 1 ]; then
     seed_layout
 fi
 
-publish() {  # publish <directory> <n> <which of the consoles>
-    # **Where the temporary lands does NOT matter, and batch D exists for having checked it.** The
-    # suspicion was that a temporary inside the watched directory would wake the window on its own
-    # when closed, doubling the wake-ups per publication. It is false by construction:
-    # `watcher::raise_matching` only raises the flag when the notice carries the exact path
-    # `<dir>/panel.json`, so any other file in the directory is invisible. D confirms it by
-    # measuring, and it is kept so the hypothesis is not raised again.
-    if [ "$BATCH" = D ]; then
-        tmp="/run/user/$(id -u)/.measure-$(basename "$1").json"
-    else
-        tmp="$1/.measure.json"
-    fi
+# **The document every batch publishes, written once.** The file-seeded path fills the turn in
+# directly; the channel's publisher gets the literal `{n}` and substitutes the turn it is on (see
+# `crates/panel-control/examples/publish.rs`). One body because a channel batch with a document of
+# its own would be measuring a different panel from its control — `C` is `S`'s control — and nothing
+# but this one function keeps two copies from drifting.
+document_body() {  # document_body <which of the consoles> <turn>
     # **The attention goes into what is seeded now that the tab shows it.** Without it, the bar
     # would be painted with nobody asking for anything: it would walk the same — the walk does not
     # depend on there being attention — but it would paint not a single symbol, and the batch would
     # publish what the bar costs **without the half this milestone added**. It is shared out per
     # console so that different classes live together in one tab, which is what forces the tab to
     # compare: the one on an odd turn waits, the even one is taken as finished.
-    if [ $(( $3 % 2 )) = 0 ]; then attention=done; else attention=wait; fi
+    if [ $(( $1 % 2 )) = 0 ]; then attention=done; else attention=wait; fi
     # **Only batch R declares buttons**, for the same reason only P dumps Japanese and only Q dumps
     # emoji: they are the one path that lays out a button's rows, walks them to work out what a press
     # may reach, and composes what one sends. Any other batch painting one would be mixing foreign
@@ -537,7 +548,7 @@ publish() {  # publish <directory> <n> <which of the consoles>
   {"label":"Close the console","send":"echo console"},
   {"label":"Say what it cost","send":"echo cost"}],'
     fi
-    cat > "$tmp" <<JSON
+    cat <<JSON
 {"v":1,"stale_after_minutes":600,"attention":"$attention",$actions"lines":[
   {"text":"Batch $BATCH · publication $2","style":"title"},
   "",
@@ -548,7 +559,64 @@ publish() {  # publish <directory> <n> <which of the consoles>
   {"text":"six lines and a warning: the size of a real working panel","mark":"done"}
 ]}
 JSON
+}
+
+publish() {  # publish <directory> <n> <which of the consoles>
+    # **Where the temporary lands does NOT matter, and batch D exists for having checked it.** The
+    # suspicion was that a temporary inside the watched directory would wake the window on its own
+    # when closed, doubling the wake-ups per publication. It is false by construction:
+    # `watcher::raise_matching` only raises the flag when the notice carries the exact path
+    # `<dir>/panel.json`, so any other file in the directory is invisible. D confirms it by
+    # measuring, and it is kept so the hypothesis is not raised again.
+    if [ "$BATCH" = D ]; then
+        tmp="/run/user/$(id -u)/.measure-$(basename "$1").json"
+    else
+        tmp="$1/.measure.json"
+    fi
+    document_body "$3" "$2" > "$tmp"
     mv "$tmp" "$1/panel.json"   # in one go, as the contract requires
+}
+
+# **What batch S publishes is that same body**, with the turn left as the literal `{n}` for the
+# publisher to substitute per publication.
+document_of() {  # document_of <which of the consoles>
+    document_body "$1" '{n}'
+}
+
+# **One publisher per console, each holding its connection open for the whole run.** A connection per
+# publication would claim and release the pane every turn, which measures the holder's churn instead
+# of the path an agent really takes. The rate is the same one the file seeding uses — once a second —
+# so the two batches differ in the transport and in nothing else.
+# **The identifier is cut with parameter expansion and not with `sed`**, and that is not taste: a
+# guard in this repository extracts every pattern the script runs over the report and checks it still
+# matches something, and a `sed` here — over a directory name, not over the report — is picked up by
+# that extractor and fails it. Keeping the shell's own expansion leaves the guard reading only what
+# it is about.
+publish_over_the_channel() {  # publish_over_the_channel <directories>
+    which=0
+    publishers=""
+    for d in $1; do
+        which=$((which + 1))
+        "$PUBLISHER" \
+            "$d" "${d##*agent-terminal-}" "bench" \
+            3600 1000 "$(document_of "$which")" >&2 &
+        publishers="$publishers $!"
+    done
+
+    # **The witness is written once every publisher is confirmed to have survived its first second**,
+    # and not when they were backgrounded. Backgrounding a command that cannot run succeeds: the job
+    # exits immediately and the loop above never notices, so a run where nobody published anything
+    # would be published as one where somebody did — which is exactly the deceit this witness exists
+    # to prevent, and it is not hypothetical here: the preflight used not to build this example, so
+    # the ordinary first run of the batch went down this path.
+    sleep 1
+    for pid in $publishers; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "a publisher died before it published anything over the channel" >&2
+            return 1
+        fi
+    done
+    : > "$WITNESS"
 }
 
 # The directories are created by the application at startup, so they have to be waited for. They are
@@ -572,6 +640,26 @@ seed() {
     if [ "$count" -ne "$DIRECTORIES" ]; then
         echo "$count panel directories showed up and $DIRECTORIES were expected: nothing is seeded" >&2
         return 1
+    fi
+
+    # **Batch S never writes a file**, which is the whole of what it measures: the channel's path
+    # does not touch the disk, and a batch that seeded both would publish the sum of the two.
+    if [ "${CONTROL:-}" = 1 ]; then
+        # **The socket, not the directory.** `Pane::with_panel` creates the panel directory, execs
+        # the program and only then binds the endpoint, so a directory observed in between makes
+        # every publisher fail with ENOENT — and round 2's own liveness check turns that race into an
+        # invalidated run, with a surviving publisher left holding its pane for an hour. Waiting for
+        # `control.sock` is waiting for the thing the publisher actually needs.
+        waited=0
+        for d in $dirs; do
+            while [ ! -e "$d/control.sock" ]; do
+                waited=$((waited + 1))
+                [ "$waited" -gt 100 ] && { echo "the control endpoint in $d did not show up" >&2; return 1; }
+                sleep 0.1
+            done
+        done
+        publish_over_the_channel "$dirs"
+        return $?
     fi
 
     if [ "$mode" = quiet ]; then
@@ -598,7 +686,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -758,6 +846,29 @@ fi
 if [ "${ACTIONS:-}" != 1 ] && [ "$DRAWN" != 0 ]; then
     invalidate "this batch declares no buttons and yet it drew $DRAWN: something other than its own \
 load is seeding them, so its spans mix in work that does not belong to what it claims to measure"
+fi
+
+# **The control channel, read in both directions, exactly like the buttons above.** A batch that
+# declares a publisher and applied nothing never reached a pane — nothing bound, or the client could
+# not connect — and its control series would be published as «the channel costs nothing». And a batch
+# that declares none and applied something is being published to by somebody other than its own load,
+# so its spans carry work it does not claim.
+#
+# **Only the first number is read in both directions**, and the other two are published rather than
+# checked: a refusal needs a second source and a release needs a connection to end, and neither is
+# something the ordinary batch can promise. A guard that demanded them would fire on a correct run.
+CONTROL_LINE=$(grep -E "^control:" "$REPORT" | head -1)
+APPLIED=$(printf '%s' "$CONTROL_LINE" | grep -oE "[0-9]+ applied" | grep -oE "^[0-9]+")
+APPLIED=${APPLIED:-0}
+if [ "${CONTROL:-}" = 1 ] && [ "$APPLIED" = 0 ]; then
+    invalidate "this batch publishes over the control channel and the window applied nothing: \
+nothing bound its endpoint, or the publisher never reached it, and what is published under «the \
+control channel» is the cost of a drain that never had anything in it"
+fi
+if [ "${CONTROL:-}" != 1 ] && [ "$APPLIED" != 0 ]; then
+    invalidate "this batch declares no publisher over the control channel and yet the window applied \
+$APPLIED document(s): something other than its own load is publishing, so its spans mix in work that \
+does not belong to what it claims to measure"
 fi
 
 # The application publishes the report on the way out, so if it finished badly the report is half

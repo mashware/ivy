@@ -20,10 +20,14 @@
 use std::time::{Duration, SystemTime};
 
 mod buttons;
+mod driving;
+pub(crate) mod pane;
 use buttons::buttons_drawn;
+use driving::Holder;
+pub(crate) use driving::Released;
 
 use eframe::egui::{Align2, Color32, Painter, Pos2, Rect};
-use panel_contract::{Action, Attention, Line, Mark, Panel, Problem, Style};
+use panel_contract::{Action, Attention, Line, Mark, Panel, Problem, Style, is_shown_as_itself};
 
 use crate::painter::CellMetrics;
 use crate::theme::Theme;
@@ -215,6 +219,39 @@ pub struct PanelState {
     /// warning, and re-reading the file throws it away — so a second walk in the pointer pass
     /// silently yields the *new* layout, with nothing left to compare a press against.
     drawn: Option<Drawn>,
+    /// The connection driving this panel, when one is.
+    ///
+    /// **This is D17's answer to «who rules», and the whole of it.** The contract has two transports
+    /// and the file cannot identify its producer, so authority cannot be given to it: while a
+    /// connection holds a pane it is the only writer, the file is not read at all, and a second
+    /// source is refused by name. There is no sequence number anywhere and none is needed — one
+    /// connection's newline-framed requests cannot reorder themselves, and with the file unread
+    /// there is nobody else to order against.
+    ///
+    /// **It dies with the connection**, which is not a detail: without a release, an agent that
+    /// crashed would freeze this pane's panel for ever and its file would never be read again.
+    holder: Option<Holder>,
+    /// The date of the last file this panel actually looked at.
+    ///
+    /// **It is the baseline a hold compares against to tell a real file publication from a raised
+    /// flag.** The watcher raises its notice for the exact path, but a split, an open tab, a close or
+    /// the blind rescan raise it on every pane regardless — so the flag alone cannot say whether the
+    /// file changed. This records the file's own date at the last read, and it is updated for free on
+    /// the successful arm; [`PanelState::refresh`] uses it while a connection holds the pane.
+    file_seen: Option<SystemTime>,
+}
+
+/// Whether a refresh looked at the file at all.
+///
+/// **It exists so a caller can hand the notice back**, which is the whole of why it is a value and
+/// not a bare return: the watcher raises a flag once per publication, and a refusal that swallowed
+/// it would lose that publication for ever.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refreshed {
+    /// The file was consulted — read, unchanged, or found broken.
+    Read,
+    /// A connection holds this panel, so nothing was read.
+    Declined,
 }
 
 /// What one painting of a panel left behind for a press to land on.
@@ -258,13 +295,36 @@ impl PanelState {
     /// **It times nothing**: whoever measures is the window, with a single clock around reading and
     /// painting. Two clocks for a stretch that is published as one is the easiest way for the number to
     /// stop meaning what it says.
-    pub fn refresh(&mut self, dir: &std::path::Path) {
+    pub fn refresh(&mut self, dir: &std::path::Path) -> Refreshed {
+        // **The return is before the file is read, and that is the invariant rather than an
+        // optimisation.** While a connection holds this pane there is exactly one writer, and reading
+        // the file would put a second one back — settled, as it was before D17, by whichever of the
+        // two wrote last. What it does do is **look at the file's date**, because the look-again flag
+        // alone cannot say whether the file changed: a split, an open tab or the blind watcher raise
+        // it on every pane, and latching the confession from it made a held panel say «the file is not
+        // being read» for the rest of its life over a file nobody wrote.
+        // The layout is not thrown away here: what this changes is the warning, and the warning is
+        // in the cache's key — so a hundred writes to a file nobody reads redo the layout once.
+        //
+        // **Saying «declined» rather than just returning is what lets the caller keep the notice.**
+        // A refusal that looked like a read would throw that publication away for ever: the file's
+        // date never changes again on its own.
+        if let Some(holder) = &mut self.holder {
+            if driving::file_mtime(dir) != self.file_seen {
+                holder.file_refused = true;
+            }
+            return Refreshed::Declined;
+        }
+
         // The date it is compared against is that of the last good read, which is the one the contract
         // itself returns. Keeping it separately would be having two copies of the same datum.
         let seen = self.last_good.as_ref().and_then(|panel| panel.written_at);
 
         match panel_contract::read_if_newer(dir, seen) {
             Ok(Some(panel)) => {
+                // The file's own date, kept as the baseline a later hold compares against. The
+                // contract's parser already carries it on the panel, so this is not a second read.
+                self.file_seen = panel.written_at;
                 self.last_good = Some(panel);
                 self.problem = None;
                 self.layout = None;
@@ -276,8 +336,17 @@ impl PanelState {
             // mount that flickers— would accuse the producer forever, because its file is not going to
             // change its date again on its own.
             Ok(None) => self.problem = None,
-            Err(problem) => self.problem = Some(problem),
+            Err(problem) => {
+                // A file that is not there is the baseline «nothing», so a file that appears during a
+                // later hold reads as a change and is confessed. Any other failure leaves the last date
+                // it had, which is still the file's date.
+                if matches!(problem, Problem::Missing) {
+                    self.file_seen = None;
+                }
+                self.problem = Some(problem);
+            }
         }
+        Refreshed::Read
     }
 
     /// The last panel that was understood, if there is one.
@@ -354,7 +423,7 @@ impl PanelState {
     /// confessed then is that there is no panel, and a panel that could never be read said nothing to
     /// claim.
     pub fn attention(&self, now: SystemTime) -> Option<AttentionState> {
-        self.attention_with(self.warning(now).is_none())
+        self.attention_with(now, self.warning(now).is_none())
     }
 
     /// The same, for whoever already has the warning in hand.
@@ -362,7 +431,7 @@ impl PanelState {
     /// **It exists so the warning is computed once per pane and frame** and not twice: the painting path
     /// already needs it whole, and asking for it again here only to ask whether it is `None` costs a
     /// string format on every frame of a window that may be repainting at sixty.
-    fn attention_with(&self, nothing_to_confess: bool) -> Option<AttentionState> {
+    fn attention_with(&self, now: SystemTime, nothing_to_confess: bool) -> Option<AttentionState> {
         let class = self.last_good.as_ref()?.attention?;
         // **The finished needs no one behind it.** Whoever finished stops publishing *by definition*, so
         // the silence does not belie its «it finished and nobody looked»: it is its normal
@@ -371,7 +440,18 @@ impl PanelState {
         // What does belie it is **not being able to read its file**, and that is the only thing looked at
         // here: `problem` is the same thing that separates the two classes of warning in
         // [`PanelState::warning`], from which `nothing_to_confess` comes.
-        let backed = nothing_to_confess || (class == Attention::Done && self.problem.is_none());
+        // **A held panel is backed unless what it shows has gone stale.** An open connection is the
+        // most direct evidence of somebody standing behind the claim — and it is also exactly what a
+        // wedged process holds. Giving it backing unconditionally kept a claim whose own line read
+        // «no news for 12 min» painted bright, and painted its tab's card as waiting for somebody. The
+        // warning is what already says the freshness is gone; this arm has to agree with it.
+        let stale = self
+            .last_good
+            .as_ref()
+            .is_some_and(|panel| panel.is_stale_at(now));
+        let backed = nothing_to_confess
+            || (self.holder.is_some() && !stale)
+            || (class == Attention::Done && self.problem.is_none());
         Some(AttentionState { class, backed })
     }
 
@@ -382,6 +462,30 @@ impl PanelState {
     /// honest. A producer that turned it off to hide that its panel is broken would be exactly the case
     /// this comes to prevent.
     fn warning(&self, now: SystemTime) -> Option<String> {
+        // **A held panel's two confessions are independent, and both have to be able to appear.** A
+        // held panel says nothing on its own — the identity row already carries who is driving it, and
+        // a standing warning over a panel that is working perfectly is noise — but it can have two
+        // things to say, and the first version returned the file refusal and made the other
+        // unreachable for the whole life of the hold: an agent that wedged with its socket open kept
+        // painting a claim as fresh, and D43 promises the panel goes stale where a person can read
+        // that it has. They are joined rather than one chosen, because they say different things.
+        if let Some(holder) = &self.holder {
+            let mut said: Vec<String> = Vec::new();
+            if holder.file_refused {
+                said.push(format!(
+                    "the file is not being read: \"{}\" is publishing here",
+                    holder.source
+                ));
+            }
+            if self.problem.is_none()
+                && let Some(panel) = &self.last_good
+                && panel.is_stale_at(now)
+            {
+                said.push(no_news(panel, now));
+            }
+            return (!said.is_empty()).then(|| said.join(" · "));
+        }
+
         // **The file that does not exist yet is the exception, and it goes first for that.** The rest is
         // ordered by what has to be said: first the read failures, which are the most recent thing known,
         // and only if there is none is the clock looked at.
@@ -453,6 +557,7 @@ impl PanelState {
                     theme,
                     warning.as_deref(),
                     attention,
+                    self.holder.as_ref().map(|held| held.source.as_str()),
                 ),
                 width,
                 warning,
@@ -543,9 +648,15 @@ const MAX_CHARACTERS: usize = 512;
 /// It is replaced with a space instead of deleted, so that two words separated by a line break do not end
 /// up stuck together and read as one.
 fn sanitize(text: &str) -> String {
+    // **The same predicate the action parser uses, and for the same reason.** The control predicate
+    // alone missed the format characters that are painted as nothing (U+200B), the direction
+    // overrides that paint the rest backwards (U+202E), and the line separators: text arriving over
+    // the wire — a `source` name above all — could reorder or spoof the line a person reads while
+    // the bytes are the ones that were sent. One list, in the contract crate, so the two callers
+    // cannot drift.
     text.chars()
         .take(MAX_CHARACTERS)
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| if is_shown_as_itself(c) { c } else { ' ' })
         .collect()
 }
 
@@ -713,14 +824,21 @@ fn lay_out(
     theme: &Theme,
     warning: Option<&str>,
     attention: Option<AttentionState>,
+    held_by: Option<&str>,
 ) -> Vec<Row> {
     let mut rows = Vec::new();
 
     if panel.is_none_or(|panel| panel.header) {
         let phase = panel.and_then(|panel| panel.phase.as_deref());
-        let identity = match phase {
-            Some(phase) => format!("{id} · {phase}"),
-            None => id.to_owned(),
+        // **Who is driving goes on the identity row, beside the pane's own name and its phase.**
+        // That row answers «what is this pane», and with two transports the answer includes which
+        // one is in charge — a person looking at a panel that will not change from the file has to
+        // be able to see why without editing anything to find out.
+        let identity = match (phase, held_by) {
+            (Some(phase), Some(source)) => format!("{id} · {phase} · {source}"),
+            (Some(phase), None) => format!("{id} · {phase}"),
+            (None, Some(source)) => format!("{id} · {source}"),
+            (None, None) => id.to_owned(),
         };
         wrap(
             &mut rows,
@@ -1017,7 +1135,7 @@ pub fn paint(
     // stuck to the console beside it.
     let width = ((rect.width() / metrics.width()) as usize).saturating_sub(2 * MARGIN as usize);
     let warning = state.warning(now);
-    let attention = state.attention_with(warning.is_none());
+    let attention = state.attention_with(now, warning.is_none());
     // **Taken away first and put back only at the end.** Every way out of this function below is a
     // frame in which nothing was drawn, and a press must not land on what the previous one left.
     state.nothing_was_drawn();
@@ -1827,6 +1945,180 @@ mod tests {
         assert_eq!(texts, ["a1b2 · build", "  the body"]);
     }
 
+    /// A panel driven over the channel, painted.
+    fn what_a_held_panel_paints(
+        source: &str,
+        document: &str,
+        and_then: impl Fn(&mut PanelState),
+    ) -> Vec<String> {
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                source,
+                panel_contract::parse_document(document).expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("nobody was holding it");
+        and_then(&mut state);
+
+        texts_and_colors(paint_the_state(&mut state, PLACE, SystemTime::now()))
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    }
+
+    /// **Who is driving is on the identity row**, so a person can see it without editing anything to
+    /// find out. Asserted on the whole row rather than with a `contains`: the source has to sit
+    /// beside the pane's name and its phase, and a `contains` would pass with it painted anywhere.
+    #[test]
+    fn a_panel_somebody_is_driving_says_so_on_its_identity_row() {
+        let rows =
+            what_a_held_panel_paints("flow", r#"{"phase":"build","lines":["the body"]}"#, |_| {});
+
+        assert_eq!(rows[0], "a1b2 · build · flow");
+    }
+
+    /// **AC9's other half**: a file publication refused while the panel is held is confessed, and the
+    /// sentence names the source that is driving. Without it, somebody editing `panel.json` and
+    /// seeing nothing change cannot tell «held by another producer» from «this terminal is broken».
+    ///
+    /// **And it says nothing until the file has actually been refused.** A standing warning over a
+    /// panel that is working perfectly is noise, which is what the second half of this asserts.
+    #[test]
+    fn a_file_refused_while_the_panel_is_held_is_confessed_and_names_who_is_driving() {
+        let quiet = what_a_held_panel_paints("flow", r#"{"lines":["the agent"]}"#, |state| {
+            // **A refresh with no file written, which is what a rearm, a split or the blind watcher
+            // produces.** The first version passed `|_| {}`, so `refresh` was never called: it proved
+            // «does not confess without refreshing», never «does not confess without a refusal» — and
+            // the flag a rearm raises was exactly what latched the confession in the field.
+            let dir = PanelDir::create().expect("create the directory");
+            state.refresh(dir.path());
+        });
+        assert!(
+            !quiet.iter().any(|row| row.contains("not being read")),
+            "it confessed a refusal that never happened: {quiet:?}"
+        );
+
+        let refused = what_a_held_panel_paints("flow", r#"{"lines":["the agent"]}"#, |state| {
+            let dir = PanelDir::create().expect("create the directory");
+            // The file's line says something no sentence of the application's could contain: with
+            // «the file» in it, the last assertion below matched the warning's own wording and the
+            // test failed on its own prose instead of on the code.
+            publish(&dir, r#"{"lines":["published by hand"]}"#);
+            state.refresh(dir.path());
+        });
+
+        assert!(
+            refused
+                .iter()
+                .any(|row| row.contains("not being read") && row.contains("flow")),
+            "the refusal was not confessed with its source: {refused:?}"
+        );
+        assert!(
+            refused.iter().any(|row| row.contains("the agent")),
+            "the held panel stopped being painted: {refused:?}"
+        );
+        assert!(
+            !refused.iter().any(|row| row.contains("published by hand")),
+            "the file was painted over a held panel: {refused:?}"
+        );
+    }
+
+    /// **A held panel that has gone stale says so**, which is what D43 promised and the first
+    /// version's warning order made unreachable: the file refusal returned before the staleness arm,
+    /// so an agent that wedged with its socket open — and a person editing `panel.json` meanwhile —
+    /// lost both lines. Held and stale with no file touched says the one thing that is true.
+    #[test]
+    fn a_held_panel_that_has_gone_stale_says_so() {
+        let mut state = PanelState::default();
+        let arrived = SystemTime::now();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(
+                    r#"{"stale_after_minutes":1,"attention":"wait","lines":["the agent"]}"#,
+                )
+                .expect("the document is a panel"),
+                arrived,
+            )
+            .expect("nobody was holding it");
+
+        let rows = texts_and_colors(paint_the_state(
+            &mut state,
+            PLACE,
+            arrived + Duration::from_secs(120),
+        ))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect::<Vec<_>>();
+
+        assert!(
+            rows.iter().any(|row| row.contains("no news")),
+            "a held panel that went stale said nothing about it: {rows:?}"
+        );
+    }
+
+    /// **A wedged holder's claim is dimmed once what it says has gone stale.** An open socket is what
+    /// a process that stopped working also holds, so backing the claim from the connection alone
+    /// painted the tab as waiting for somebody who is not there. The warning says the freshness is
+    /// gone; the claim has to agree.
+    #[test]
+    fn a_held_claim_that_has_gone_stale_is_not_backed() {
+        let mut state = PanelState::default();
+        let arrived = SystemTime::now();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(
+                    r#"{"stale_after_minutes":1,"attention":"wait","lines":["the agent"]}"#,
+                )
+                .expect("the document is a panel"),
+                arrived,
+            )
+            .expect("nobody was holding it");
+
+        assert!(
+            state.attention(arrived).expect("it claims").backed,
+            "a fresh held claim was dimmed"
+        );
+        assert!(
+            !state
+                .attention(arrived + Duration::from_secs(120))
+                .expect("it still claims")
+                .backed,
+            "a wedged agent's claim was painted bright"
+        );
+    }
+
+    /// A claim on a held panel is **backed**, because an open connection is the most direct evidence
+    /// there is that somebody is still behind it — more direct than the file's date, which is what
+    /// the other arms fall back on. Without this, the refusal's own warning would dim the claim.
+    #[test]
+    fn a_claim_on_a_held_panel_is_not_dimmed_by_the_refusal_it_causes() {
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(r#"{"attention":"wait","lines":["ready"]}"#)
+                    .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("nobody was holding it");
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"lines":["the file"]}"#);
+        state.refresh(dir.path());
+
+        let claim = state
+            .attention(SystemTime::now())
+            .expect("the producer declared a claim");
+
+        assert!(claim.backed, "a claim somebody is holding up was dimmed");
+    }
+
     #[test]
     fn with_the_header_removed_the_identity_is_not_painted() {
         let rows = what_gets_painted(r#"{"header":false,"phase":"build","lines":["the body"]}"#);
@@ -2305,6 +2597,7 @@ mod tests {
             &Theme::default(),
             None,
             None,
+            None,
         );
 
         for row in &rows {
@@ -2330,6 +2623,7 @@ mod tests {
             "a1b2",
             width,
             &Theme::default(),
+            None,
             None,
             None,
         );
@@ -2362,6 +2656,7 @@ mod tests {
             &Theme::default(),
             None,
             None,
+            None,
         );
 
         assert_eq!(
@@ -2386,6 +2681,7 @@ mod tests {
             "a1b2",
             width,
             &Theme::default(),
+            None,
             None,
             None,
         );
@@ -2415,6 +2711,7 @@ mod tests {
             &Theme::default(),
             None,
             None,
+            None,
         );
 
         let flush = rows[0].text.find("flush").expect("it is there");
@@ -2438,6 +2735,7 @@ mod tests {
             "a1b2",
             16,
             &Theme::default(),
+            None,
             None,
             None,
         );
@@ -2528,6 +2826,7 @@ mod tests {
             "a1b2",
             36,
             &Theme::default(),
+            None,
             None,
             None,
         );
@@ -2685,6 +2984,22 @@ mod tests {
     fn normal_text_passes_through_intact() {
         let as_is = "F1.6: the panel · 35,392 tokens — 18 %";
         assert_eq!(sanitize(as_is), as_is);
+    }
+
+    /// **The predicate is the contract's now, not a second list.** The control predicate missed the
+    /// format characters painted as nothing (U+200B), the direction overrides that paint the rest
+    /// backwards (U+202E), and the line separators — so text arriving over the wire, a `source` name
+    /// above all, could reorder or spoof the row a person reads while the bytes are the ones that
+    /// were sent.
+    #[test]
+    fn the_scalars_that_are_not_shown_as_themselves_do_not_survive() {
+        for hidden in ['\u{200b}', '\u{202e}', '\u{0890}', '\u{2028}'] {
+            assert_eq!(
+                sanitize(&format!("a{hidden}b")),
+                "a b",
+                "{hidden:?} survived the sanitizing"
+            );
+        }
     }
 
     /// **What the gesture of narrowing the panel makes reachable.** Before its border could be dragged, a
@@ -2974,6 +3289,7 @@ mod tests {
                 class: Attention::Block,
                 backed: true,
             }),
+            None,
         );
 
         assert!(
@@ -3019,6 +3335,7 @@ mod tests {
                     class,
                     backed: true,
                 }),
+                None,
             );
 
             // **The claim's rows are the ones before the first blank**, and the blank is what the layout

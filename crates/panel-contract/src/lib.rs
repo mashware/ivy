@@ -25,7 +25,7 @@ mod panel;
 
 pub use panel::{
     Action, Attention, Line, MAX_ACTIONS, MAX_BYTES, MAX_INDENT, MAX_SEND, Mark, Panel, Problem,
-    STALE_AFTER, Style, read, read_if_newer,
+    STALE_AFTER, Style, is_shown_as_itself, parse_document, read, read_if_newer,
 };
 
 /// The only file the contract puts inside the directory. It is written by whoever does the work,
@@ -36,6 +36,21 @@ pub use panel::{
 /// file; without exporting it, the string would be written out by hand in every place and the
 /// contract would stop living in a single one.
 pub const PANEL_FILE: &str = "panel.json";
+
+/// The other thing the contract puts inside the directory: the endpoint a producer can speak to
+/// instead of writing the file.
+///
+/// **It is here, beside [`PANEL_FILE`], for the reason the crate's header gives**: *where* the state
+/// is published is part of the contract, so the two transports' names live in the same place. It is
+/// also what [`remove`] has to know about — see that function for what a second name in this
+/// directory costs if it is forgotten.
+///
+/// **This is the POSIX half of the endpoint's name, and only that.** A pipe lives in the machine's
+/// namespace rather than in a directory, so on Windows there is nothing here to join a path to and
+/// whoever binds builds the name from the pane's identifier instead; nothing on that platform reads
+/// this constant. Which of the two does the separating is the transport's business, and the
+/// `panel-control` crate is where it is decided.
+pub const CONTROL_SOCKET: &str = "control.sock";
 
 /// The names of the contract's two variables, in a single place.
 ///
@@ -124,9 +139,17 @@ impl Drop for PanelDir {
 ///
 /// It is separate from the destructor so it can be tested: a destructor returns nothing, and the
 /// decision of what is kept quiet and what is said is exactly what has to be assertable.
+///
+/// **Everything the contract puts here is deleted here, and that is why the list is two names
+/// rather than one.** The deletion stays non-recursive for the reason above, so anything of this
+/// crate's own left behind makes `remove_dir` fail and prints the notice on **every** console close.
 fn remove(path: &Path) -> Option<io::Error> {
     // That it is not there is the normal case: until someone publishes, the directory is empty.
     let _ = std::fs::remove_file(path.join(PANEL_FILE));
+    // The endpoint is only there on the platforms where it is a file at all, and only once
+    // something bound it: the same «normal case» as the line above, and for the same reason its
+    // failure is dropped.
+    let _ = std::fs::remove_file(path.join(CONTROL_SOCKET));
 
     match std::fs::remove_dir(path) {
         Ok(()) => None,
@@ -244,6 +267,27 @@ mod tests {
             let panel = PanelDir::create().expect("create the panel directory");
             std::fs::write(panel.path().join(PANEL_FILE), b"{\"lines\":[]}")
                 .expect("publish a panel");
+            panel.path().to_path_buf()
+        };
+
+        assert!(!path.exists(), "the directory remained: {}", path.display());
+    }
+
+    /// The endpoint is the contract's, exactly like the file, so closing a console takes it away and
+    /// nobody is told the directory remains.
+    ///
+    /// **Without this the notice comes out on every console close**, which is what a second name in
+    /// this directory costs: `remove_dir` is non-recursive on purpose, so one leftover of this
+    /// crate's own is enough. The socket is written here as a plain file because what is being
+    /// asserted is the deletion, not the binding — a bound socket is a directory entry all the same,
+    /// and building one would drag the transport into the contract crate.
+    #[test]
+    fn when_dropped_it_takes_the_control_endpoint_with_it() {
+        let path = {
+            let panel = PanelDir::create().expect("create the panel directory");
+            std::fs::write(panel.path().join(PANEL_FILE), b"{\"lines\":[]}")
+                .expect("publish a panel");
+            std::fs::write(panel.path().join(CONTROL_SOCKET), b"").expect("leave an endpoint");
             panel.path().to_path_buf()
         };
 

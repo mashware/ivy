@@ -88,6 +88,21 @@ impl Window {
                     ceiling: self.blink.ceiling,
                 },
                 buttons: self.buttons,
+                // **Summed here, at the end, out of each pane's own count, plus what the panes that
+                // already closed banked on the window.** The channel is drained from two places —
+                // the painting and the sweep over the consoles nobody looks at — and a counter each
+                // of those had to remember to bump is a counter one of them eventually forgets. The
+                // window's share is not optional: without it a pane or a tab closed during the run
+                // disappears from these three numbers, and the script can invalidate a correct run.
+                control: self
+                    .all_panes()
+                    .filter_map(|pane| pane.control.as_ref())
+                    .map(crate::control::PaneControl::did)
+                    .fold(self.control, |so_far, did| measure::Control {
+                        applied: so_far.applied + did.applied,
+                        refused: so_far.refused + did.refused,
+                        released: so_far.released + did.released,
+                    }),
             },
         )?;
 
@@ -240,13 +255,16 @@ impl Window {
             // declared together—, and for that very reason it is worth writing down: the safe way
             // to add a span to this round is to put it inside, never beside it.
             if let Some((_, collected_at, interpreted)) = pane.pending_measurement.take() {
-                pane.timings.record_round(measure::Spans::of_a_round(
-                    None,
-                    collected_at,
-                    interpreted,
-                    std::time::Duration::ZERO,
-                    std::mem::take(&mut pane.panel_reread_unpainted),
-                ));
+                pane.timings.record_round(
+                    measure::Spans::of_a_round(
+                        None,
+                        collected_at,
+                        interpreted,
+                        std::time::Duration::ZERO,
+                        std::mem::take(&mut pane.panel_reread_unpainted),
+                    )
+                    .and_its_control(std::mem::take(&mut pane.control_unpainted)),
+                );
             }
         }
     }

@@ -811,8 +811,13 @@ pub(crate) fn paint_pane(
     // **Rereading goes before tiling**, because how much width the console has left depends on
     // whether there is a panel or not: a console whose producer has just published for the
     // first time narrows in this very frame, not in the next one.
+    let refreshed = pane.refresh_its_panel();
+    // **The clock starts AFTER the refresh and what the refresh cost is added back below**, rather
+    // than spanning it and subtracting the channel's share out. The boundary of the «panel» span is
+    // unchanged — it is still the read plus the tiling plus the border — but the control channel is
+    // now never inside any clock this span is built from, so there is no subtraction for a later
+    // caller to forget. It was written the other way first, and mutating it proved nothing failed.
     let before_the_panel = std::time::Instant::now();
-    pane.refresh_its_panel();
     // A single clock for tiling and for painting: if the panel were to age between the two
     // questions, a strip would be reserved for a warning that never gets painted.
     let now = std::time::SystemTime::now();
@@ -844,7 +849,7 @@ pub(crate) fn paint_pane(
         panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
     }
     let width_changed = pane.panel_width != width_before;
-    let cost_of_reading = before_the_panel.elapsed();
+    let cost_of_reading = refreshed.reading + before_the_panel.elapsed();
 
     pane.measured = metrics.cells_in(panel_split.console.size());
 
@@ -918,7 +923,8 @@ pub(crate) fn paint_pane(
                 queued,
                 panel_cost,
             )
-            .and_its_buttons(buttons),
+            .and_its_buttons(buttons)
+            .and_its_control(refreshed.applying),
         );
     }
 

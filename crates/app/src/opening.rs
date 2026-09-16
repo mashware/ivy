@@ -169,6 +169,7 @@ impl Window {
             tab_bar_this_frame: std::time::Duration::ZERO,
             tab_bar_cost: measure::TabBar::default(),
             buttons: measure::Buttons::default(),
+            control: measure::Control::default(),
             reflow: measure::Reflow::default(),
             persistence: session::Persistence::at(None),
             restoring: None,

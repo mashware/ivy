@@ -44,12 +44,19 @@
 const MODULES: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("../src/lib.rs")),
     ("src/alarms.rs", include_str!("../src/alarms.rs")),
+    ("src/closing.rs", include_str!("../src/closing.rs")),
+    ("src/control.rs", include_str!("../src/control.rs")),
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     (
         "src/panel/buttons.rs",
         include_str!("../src/panel/buttons.rs"),
     ),
+    (
+        "src/panel/driving.rs",
+        include_str!("../src/panel/driving.rs"),
+    ),
+    ("src/panel/pane.rs", include_str!("../src/panel/pane.rs")),
     ("src/measure.rs", include_str!("../src/measure.rs")),
     (
         "src/measure/header.rs",
@@ -111,7 +118,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    1_022,
+    959,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -154,9 +161,23 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          its ceiling. **Fifteen lines came straight back in the same delivery** — the fields the \
          buttons' measurement needs on `Window` and on a pane's outcome, and the walk that hands the \
          bench's injector the button the painting drew — so the file went 1 124 → 1 007 → **1 022**, \
-         which is what the guard measures. The two numbers are said rather than netted off: what the \
-         order is worth is only readable if a delivery's own cost is written beside the piece it \
-         took out.",
+         which is what the guard measured until the delivery that gives the panel a channel of its \
+         own. **That one paid it the way D28 prescribes, and with the piece the delivery's own \
+         subject names**: how a pane gets its panel — its directory, the identity it hands its \
+         program, what arrives for it and how much width it takes — went out to `panel/pane.rs`, \
+         **46 production lines**, against the **24** the channel spends here: a `mod`, a `use`, the \
+         field a pane keeps its end of the channel in, the block that opens it, the one that applies \
+         what arrived, and the four that keep what the channel cost off the panel's stopwatch on \
+         the consoles nobody paints. Forty-six out and twenty-four in against 1 022 leaves \
+         **1 000**. The two \
+         numbers are said rather than netted off: what the order is worth is only readable if a \
+         delivery's own cost is written beside the piece it took out. **And the phase that gives the \
+         panel a channel of its own paid it again**: the aggregate of the channel's counters had to \
+         survive a pane that closes — a pane or a tab closed mid-run used to take its \
+         `applied`/`refused`/`released` out of the numbers the report folds — so everything that \
+         happens when a tab or the focused console goes left for `closing.rs`, **71 production \
+         lines**, against the **30** the counters' field, their init and the banking cost back here. \
+         Seventy-one out and thirty in against 1 000 leaves **959**.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.
@@ -249,7 +270,7 @@ fn no_module_is_over_its_ceiling() {
         .map(|(_, src)| production_lines(src).len())
         .sum();
     assert!(
-        MODULES.len() >= 25 && total >= 6_000,
+        MODULES.len() >= 29 && total >= 6_000,
         "the walk found {total} production lines over {} modules: it stopped matching, and this \
          guard is measuring nothing",
         MODULES.len()

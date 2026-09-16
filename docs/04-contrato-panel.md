@@ -222,6 +222,10 @@ of us.
 
 ## Transport 1 — the file
 
+**The default, and the one with no barrier to entry**: a shell script with `printf` publishes a
+panel. [Transport 2](#transport-2--the-channel) is for the producer that already has a process
+running inside the pane.
+
 | Who reads | Where it looks |
 |---|---|
 | The application | **`$PANEL_DIR/panel.json`**, the directory it gives each console when it launches it |
@@ -276,6 +280,79 @@ The prototype discovers the file by convention; the app does it by pane identity
 
 ---
 
+## Transport 2 — the channel
+
+**For the producer that already has a process inside the pane and would rather not own a file.** It
+publishes the **same document**, through the same parser, with the same ceiling and the same
+per-field tolerance: everything above this line is unchanged and this section adds nothing to it.
+
+| Who reads | Where it listens |
+|---|---|
+| The application | **`$PANEL_DIR/control.sock`** on POSIX; on Windows, a named pipe that is **not bound yet** — see below |
+
+**What travels is newline-delimited JSON, one request per line:**
+
+```
+→ {"tool":"panel_set","source":"flow","document":{ ...the panel document... }}
+← {"ok":true}
+← {"ok":false,"error":"..."}
+```
+
+`panel-mcp`, a binary that ships with the terminal, speaks this channel over MCP for an agent that
+would rather call a tool than open a socket. It is a client of this transport and not the transport
+itself.
+
+### Rules of this transport
+
+- **The pane is the endpoint you opened.** There is **no pane identifier in any message** and there
+  is not going to be one: `PANEL_ID` is inherited by every descendant of a pane and readable by any
+  process of the same user, so it is a name and not a credential. What stops a producer reaching
+  somebody else's pane is that there is nothing to say.
+- **The first publication claims the pane under its `source`, and the claim lasts as long as the
+  connection does.** While it is held, that pane's `panel.json` **is not read at all**, and a second
+  source is refused with an error naming the one holding it. The panel says who is driving it on its
+  identity row, and confesses a file publication it refused. **D43**.
+- **The hold ends when the connection closes** — including when the producer dies, which is the case
+  it exists for. What was last published stays on screen; the file takes over from its next
+  publication.
+- **There is no sequence number and there is not going to be one.** One endpoint per pane plus the
+  file unread means exactly one writer, and one connection's requests cannot reorder themselves.
+- **A document delivered carries no date, so the application stamps its arrival.** That is what keeps
+  a held panel able to go stale: an agent that hangs with its connection open must not show the same
+  summary for ever.
+- **The same 256 KiB ceiling, on the document and decided by the same parser as the file.** A
+  document over it comes back as the file's own `too big` error and the connection survives, because
+  the end of its line was seen. **A line that goes over the transport's bound — the document plus its
+  envelope — ends the connection rather than being skipped**: the read stopped in the middle of
+  somebody's request, so what comes next is its tail and there is no boundary left to resynchronise
+  on.
+- **A `source` is a name and takes at most 256 bytes.** A longer one comes back as a malformed
+  request and the connection survives. The bound is what keeps the envelope bounded, so a document of
+  exactly the ceiling is never pushed over the transport's bound by the name it carries.
+- **A pane serves eight connections at a time.** Not a defence — reaching the endpoint already
+  requires being this user — but a bound on what a client looping on `connect` can make the window
+  spend.
+
+### What this transport does not give
+
+- **It is not there on Windows yet.** A named pipe gets a default security descriptor that lets any
+  process on the machine open it, and nothing in the milestone that built this channel can compile or
+  run Windows code to prove otherwise; what cannot be proven is not bound. **F2.7** is where the pipe,
+  its descriptor and the assertion over both arrive together. Until then a Windows pane publishes by
+  file, which works exactly as it always did.
+- **It does not survive the producer.** That is the point, not a gap: a hold that outlived its holder
+  would freeze that panel for the life of the window.
+
+### What it does give that the file does not
+
+- **It knows who writes**, which is the whole of why the hold can exist at all.
+- **It answers.** A document that is not a panel comes back as an error to whoever sent it, instead
+  of being discovered by the person looking at the panel — which is the thing that made writing a new
+  producer expensive.
+- **It writes nothing to disk**, so a producer that has no business owning a file does not have to.
+
+---
+
 ## Pending
 
 - [x] **`actions` — declared buttons that write to their pane's program** — **done**: specified
@@ -287,11 +364,13 @@ The prototype discovers the file by convention; the app does it by pane identity
       that may be of outside origin, so painting it and sanitizing the address that goes with it
       deserve a review of their own. A `send` reaches a shell this application already owns; an
       `open` reaches the desktop's URL handler, which it does not
-- [ ] **How the source and the order of every delivery are expressed** (D17). Herdr solves it with a
-      `--source` that is stable per integration, which grants authority and is released on leaving,
-      and a strictly increasing `--seq` with which it discards whatever arrives late
-      ([07-panorama.md](07-panorama.md) → E8). Here there is neither one nor the other, and it will
-      be needed as soon as MCP delivers documents alongside the file
+- [x] **How the source and the order of every delivery are expressed** (D17) — **done, and the order
+      turned out to be free**: the source is the **holder's name**, claimed on the first publication
+      over the channel and released when the connection closes, and while it is held the file is not
+      read at all. Herdr pairs its `--source` with a strictly increasing `--seq` to discard what
+      arrives late ([07-panorama.md](07-panorama.md) → E8); **there is no `seq` here and there is not
+      going to be one**, because one endpoint per pane plus an unread file leaves exactly one writer
+      and a connection's requests cannot reorder themselves. **D43**
 - [ ] **The system notification on going to `wait`.** The `attention` field already says when a pane
       claims (D18) and the tab's indicator already accumulates it; what is left is deciding whether
       the user is interrupted on top of that, and that is left for when the field has producers: a

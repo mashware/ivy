@@ -34,6 +34,9 @@
 //! there would resend the last key pressed thousands of times per second during a dump.
 
 mod alarms;
+mod closing;
+pub(crate) mod control;
+use panel::pane::{identity_of, panel_or_none};
 pub mod fonts;
 mod injected;
 pub mod keyboard;
@@ -70,7 +73,7 @@ pub mod watcher;
 use pointer::{DragIntent, WheelInput, WheelOutcome};
 use tab_bar::set_the_tab_bar_aside;
 use tiling::{DIVIDER_THICKNESS, Orientation, Side, can_split};
-use tree::{Closing, Node, Tab};
+use tree::Tab;
 
 use eframe::egui;
 use injected::{InjectedDrags, gesture_at_startup};
@@ -795,6 +798,12 @@ struct Pane {
     /// It is read **while alive too** since F1.6: it is where this console's status panel comes
     /// from.
     panel: Option<PanelDir>,
+    /// This console's end of the control channel, when it has one.
+    ///
+    /// **Optional for the same reason the directory above is**: a pane whose endpoint could not be
+    /// bound is a complete pane that publishes by file, exactly as every pane did before this
+    /// milestone. It is dropped with the pane, which is what asks its threads to end.
+    control: Option<control::PaneControl>,
     /// What is known about this console's panel: its last good content and when it was read.
     panel_state: panel::PanelState,
     /// Whether this console's `panel.json` has to be read again. The watcher raises it and the
@@ -846,6 +855,10 @@ struct Pane {
     /// repeats (`epi_integration.rs:288-303`), so a repeated pass pumps again and leaves a round
     /// trip pending again. There is never a read waiting for a round trip that does not come.
     panel_reread_unpainted: std::time::Duration,
+    /// The same, for what applying the control channel's deliveries cost on a console nobody
+    /// painted. It travels beside the one above and for the same reason — see [`measure::Spans`],
+    /// where the two are separate fields.
+    control_unpainted: std::time::Duration,
     /// What it has cost to reflow this console's text in this frame, waiting for the window to pick
     /// it up.
     ///
@@ -879,41 +892,6 @@ struct Pane {
     /// value — when what the user expects is to get **theirs** back. With two fields, folding does
     /// not touch the width: it stops being asked for, and on unfolding it is still there.
     folded: bool,
-}
-
-/// A directory that could not be created **does not stop the console from opening**.
-///
-/// It is the same decision as the fallback to another shell when the user's cannot be launched, and
-/// with more reason: without a panel, a console is still a complete terminal. It is a function so
-/// that this can be asserted — from a test the creation cannot be made to fail for real without
-/// touching the whole process's environment.
-fn panel_or_none(created: std::io::Result<PanelDir>) -> Option<PanelDir> {
-    match created {
-        Ok(panel) => Some(panel),
-        Err(failure) => {
-            eprintln!(
-                "this console goes without a panel: its directory could not be created ({failure})"
-            );
-            None
-        }
-    }
-}
-
-/// What is done with the panel's two variables when launching a console's program.
-///
-/// **With no directory they are removed, and removing them is not the same as not setting them.**
-/// The program inherits this application's environment, so if the application runs inside a console
-/// of its own —which happens as soon as it is used for work— the child console would receive its
-/// mother's identity: its producer would publish in the mother's mailbox and two panes would share
-/// an identifier, which is exactly what the identity comes to prevent.
-///
-/// There are always two, with a directory or without one: it is what makes the half-identity case
-/// impossible.
-fn identity_of(panel: Option<&PanelDir>) -> [(&'static str, Option<&std::ffi::OsStr>); 2] {
-    match panel {
-        Some(panel) => panel.env().map(|(name, value)| (name, Some(value))),
-        None => panel_contract::ENV_NAMES.map(|name| (name, None)),
-    }
 }
 
 /// Who gets the turn of the wheel over a console.
@@ -981,11 +959,20 @@ impl Pane {
         let waker = ctx.clone();
         let pty_output = PtyOutput::new(output, move || waker.request_repaint());
 
+        // **The channel is opened after the program, and that order is not arbitrary.** A pane whose
+        // program could not be launched has no pane, so binding an endpoint for it would leave a
+        // socket in a directory that is about to delete itself.
+        let control = panel.as_ref().and_then(|dir| {
+            let waker = ctx.clone();
+            control::PaneControl::open(dir, move || waker.request_repaint())
+        });
+
         Ok(Self {
             name,
             pty,
             pty_output,
             panel,
+            control,
             panel_state: panel::PanelState::default(),
             to_reread: Flag::raised(),
             screen: Screen::new(INITIAL_GRID),
@@ -996,6 +983,7 @@ impl Pane {
             timings: Timings::default(),
             pending_measurement: None,
             panel_reread_unpainted: std::time::Duration::ZERO,
+            control_unpainted: std::time::Duration::ZERO,
             reflowed: std::time::Duration::ZERO,
             pending_wheel: WheelInput::default(),
             panel_width: panel::DEFAULT_WIDTH,
@@ -1168,48 +1156,7 @@ impl Pane {
         self.timings.take_pending()
             + without_recording
             + std::mem::take(&mut self.panel_reread_unpainted)
-    }
-
-    /// Reads this console's `panel.json` again **if somebody has given notice** that it changed.
-    ///
-    /// The flag is always picked up, whether there is a directory or not: leaving it raised because
-    /// this console has nowhere to read from would mean another frame's read picked it up, and then
-    /// the notice that was saved would belong to nobody.
-    ///
-    /// With no directory there is nothing to read: it is the case of the console that could not
-    /// create its own, which has to keep looking as it did before the panel existed.
-    fn refresh_its_panel(&mut self) {
-        if let (true, Some(dir)) = (self.to_reread.take(), self.panel.as_ref()) {
-            self.panel_state.refresh(dir.path());
-        }
-    }
-
-    /// Splits this pane's rectangle between its console and its panel.
-    ///
-    /// **The clock is passed in from outside and is the same one the painting uses**: whether a
-    /// panel is stale depends on the time, and whether there is anything to show depends on that.
-    /// Two different clocks in the same frame could set aside a strip where nothing is then
-    /// painted.
-    fn tile_with_its_panel(
-        &self,
-        rect: egui::Rect,
-        cell_width: f32,
-        now: SystemTime,
-    ) -> panel::PanelTiling {
-        // **The width comes from the pane itself, and that is what keeps the two callers in
-        // agreement.** One measures the grid of the consoles that are not painted and the other
-        // paints the one on show; if the width travelled as a parameter, each could bring its own
-        // and a background console would again be measured with a width that is not its own — the
-        // defect that already cost 36 columns.
-        //
-        // **Folded asks for no width, and that is why folding leaves the console the whole
-        // rectangle**: it is the same path a pane whose producer has published nothing goes down,
-        // so the two look alike without there being two ways of having no panel.
-        panel::set_aside(
-            rect,
-            cell_width,
-            (!self.folded && self.panel_state.is_visible(now)).then_some(self.panel_width),
-        )
+            + std::mem::take(&mut self.control_unpainted)
     }
 
     /// Attends the border between this console and its panel, and returns whether the width
@@ -1554,6 +1501,15 @@ struct Window {
     /// What the panel's buttons drew and what was pressed this run. **For the report, which has to
     /// declare a painted path it did not have before** (D13).
     buttons: measure::Buttons,
+    /// The channel counters of panes **that have already closed**, so a run that closes one does not
+    /// lose what it did.
+    ///
+    /// **It lives on the window for the same reason [`Self::buttons`] does.** `report` used to fold
+    /// the counters out of the live panes alone, so a pane or a tab closed during a run took its
+    /// `applied`/`refused`/`released` with it — and `measure-frame.sh` can then invalidate a run
+    /// that was correct, which is the exact **D13** failure the `Control` docblock itself invokes.
+    /// Live panes are still added on top when the report is built.
+    control: measure::Control,
     /// What it has cost to reflow the consoles' text when their width changed.
     ///
     /// **It lives in the window and not in each pane even though the work is the console's**,
@@ -1962,8 +1918,8 @@ impl Window {
             // that here would come back through the tree's door.
             let tiling = tab.root.place(area, metrics.width());
             for (pane, rect) in tab.panes_mut().into_iter().zip(tiling.parts) {
+                let refreshed = pane.refresh_its_panel();
                 let before_the_panel = Instant::now();
-                pane.refresh_its_panel();
                 let panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
                 // **The span's boundary is the same as in the painting**, which also closes its
                 // stopwatch after tiling: `tile_with_its_panel` asks whether the panel is visible,
@@ -1972,7 +1928,14 @@ impl Window {
                 // two consoles of one and the same report would measure the «panel» span with
                 // different boundaries depending on whether they are looked at or not.
                 if pane.panel.is_some() {
-                    pane.panel_reread_unpainted = before_the_panel.elapsed();
+                    // **The same shape as in the painting, and for the same reason**: the clock
+                    // starts after the refresh and what the refresh cost is added back, so the
+                    // control channel is never inside a clock the panel's span is built from. A
+                    // console of a background tab is drained just the same, and a span that meant
+                    // «reading a file» in one place and «reading a file plus applying a document»
+                    // in the other would be one number meaning two things.
+                    pane.panel_reread_unpainted = refreshed.reading + before_the_panel.elapsed();
+                    pane.control_unpainted = refreshed.applying;
                 }
 
                 pane.measured = metrics.cells_in(panel_split.console.size());
@@ -2312,141 +2275,6 @@ impl Window {
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         self.rearm_the_watcher(ctx);
-    }
-
-    /// Closes the tab that is being seen. If it is the only one, what is closed is the window.
-    ///
-    /// **Rearming the watcher is indispensable**: without it it is left following the directories
-    /// of the tab that is leaving, however many it had, sees what it was watching disappear and
-    /// declares itself blind. From then on the window would reread every panel on every frame, for
-    /// ever and in the degraded mode, with nothing on screen saying so. There is a test that falls
-    /// if it is removed.
-    ///
-    /// **It is rearmed after dropping the tab, and the design asked for the opposite.** Its reason
-    /// was that the old watcher should not get to see the deletion and declare itself blind;
-    /// checked by inverting it, **the observable result is the same**, because the new watcher
-    /// brings its own blindness flag and the old one is discarded whole along with its own. With no
-    /// difference to defend, it is done in the order that does not need to know which tab is
-    /// leaving.
-    fn close_the_active_tab(&mut self, ctx: &egui::Context) {
-        // **The last one is not removed from the list, and it is not a capricious exception:**
-        // asking for the close does not close on the spot —frames are still running, and the report
-        // is published on exit—, so an empty vector would leave `active` indexing out of range on
-        // every one of them.
-        if self.tabs.len() == 1 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-
-        let leaving = self.active;
-        self.some_closed_by_hand = true;
-
-        // **What its consoles had already declared of this frame is collected before dropping
-        // them.** They leave with their `Timings` inside, and in there there can be a round
-        // recorded for this very frame: bytes that really were interpreted an instant ago. If it
-        // leaves without being declared, the subtraction attributes it to the interface framework
-        // and «the rest» comes out inflated precisely on the frame in which a tab is closed. The
-        // cost of the closing itself —killing the programs and deleting their directories, which
-        // happens when the tab is dropped— goes into the same bag for the same reason.
-        //
-        // **And the three places where this frame's work lives are collected, not just the recorded
-        // one.** Looking only at what the measurement already had noted down declared **zero**
-        // precisely at the instant of the chord: the real order of the frame is closing the
-        // previous one —which empties what the measurement had pending—, pumping —which fills what
-        // was interpreted without recording it— and attending to the keyboard **before** the
-        // painting. So what the console had just interpreted, and what rereading its panel cost,
-        // left with it undeclared. See [`Pane::take_what_this_frame_left`], which is where closing
-        // a pane already solved it.
-        let before = Instant::now();
-        let its_cost: std::time::Duration = self.tabs[leaving]
-            .panes_mut()
-            .into_iter()
-            .map(Pane::take_what_this_frame_left)
-            .sum();
-
-        // Here its programs die and its directories disappear, however many it had, through the
-        // usual `Drop`s.
-        self.tabs.remove(leaving);
-
-        // **Rearming the watcher goes inside the stopwatch**, and before it was left outside by a
-        // line drawn in the wrong place: it rebuilds the watching over the panes of every tab that
-        // is left and makes them reread their `panel.json`, which is the expensive half of closing.
-        // No pane declares it, so without this it was published as interface framework cost.
-        self.rearm_the_watcher(ctx);
-        // On removing the last one in the list the index is left outside; in any other case, it is
-        // left pointing at the one that took its place, which is the one on the right.
-        self.active = leaving.min(self.tabs.len() - 1);
-        self.timed_separately += its_cost + before.elapsed();
-    }
-
-    /// Closes the console that has the keyboard, and its siblings share out its place.
-    ///
-    /// **Nothing has to be shared out by hand, and that is the reason the layout carries weights
-    /// and not fractions that add up to one**: removing one child from the list leaves the rest
-    /// with the weights they already had, and the tiling places them in proportion over the whole
-    /// area. With normalized fractions they would have to be renormalized on every close.
-    ///
-    /// **With a single console, closing it is closing the tab** —there is no layout left to
-    /// reabsorb its place—, and if it was also the only tab, the window. It is delegated to the
-    /// path that already exists instead of repeating its rule, which is not obvious: the last tab
-    /// is not removed from the list, because asking for the close does not close on the spot and an
-    /// empty vector would leave `active` indexing out of range.
-    ///
-    /// **What it costs is declared in full**, and they are three things no living pane is going to
-    /// declare: the tree walk, what the one that is leaving had measured of this frame, and killing
-    /// its program and deleting its directory. Without declaring them, the subtraction attributes
-    /// them to the interface framework — the figure D3 decides with.
-    fn close_the_focused(&mut self, ctx: &egui::Context) {
-        let before = Instant::now();
-        // **The tab having a single console is its root being a leaf**, and asking the type costs
-        // what looking at a tag costs. Counting the leaves would walk the whole tree and allocate a
-        // vector only to throw it away, and it would also say for a second time —and more weakly—
-        // an invariant the structure already guarantees: a branch is born with two children and
-        // collapses when it is left with one.
-        if matches!(self.active().root, Node::Leaf(_)) {
-            self.timed_separately += before.elapsed();
-            self.close_the_active_tab(ctx);
-            return;
-        }
-
-        let focus = self.active().focus;
-        let closed = self.active_mut().root.close(focus);
-        let Some(Closing {
-            mut leaving,
-            focus: inherited,
-        }) = closed
-        else {
-            // **It cannot happen**: the focus is the name of one of this tab's leaves, and with
-            // more than one console none of them is the root. It is said out loud instead of kept
-            // quiet because the chord has swallowed the key and closed nothing, and without this
-            // line no trace of why would be left.
-            eprintln!("the focused pane was not found when closing; nothing has been closed");
-            // **The stopwatch is closed after writing**, not before: writing to the error output
-            // costs whatever whoever reads at the other end of the pipe takes, and what is not
-            // declared is published as interface framework cost.
-            self.timed_separately += before.elapsed();
-            return;
-        };
-
-        // **What it had done in this frame is collected before dropping it.** See [`Closing`] and
-        // [`Pane::take_what_this_frame_left`].
-        let its_cost = leaving.take_what_this_frame_left();
-        // Here its program dies and its directory disappears, through the usual `Drop`s.
-        drop(leaving);
-        self.active_mut().focus = inherited;
-        // **Closing a console by hand counts the same as closing a tab by hand**, and without this
-        // line the same gesture protected the window or not depending on how many siblings the
-        // console had: with only one, the path above delegates to closing the tab, which does raise
-        // it. The real case is a console whose program has already finished —and whose last content
-        // is being read— beside another with a live agent: on closing the agent's nothing alive is
-        // left, and the usual rule would close the window taking what was being read with it.
-        // Nobody asked for that: closing one console was asked for.
-        self.some_closed_by_hand = true;
-        // Without rearming, the watcher is left looking at a directory that has just been deleted:
-        // it sees what it was watching disappear, declares itself blind, and from then on the
-        // window rereads every panel on every frame, for ever and with nothing saying so.
-        self.rearm_the_watcher(ctx);
-        self.timed_separately += its_cost + before.elapsed();
     }
 
     /// Arms the watcher again over the panes of every tab that is left.
@@ -3034,6 +2862,7 @@ mod tests {
     use crate::tab_bar::{TAB_BAR_MARGIN, tab_rect};
     use crate::tiling::{Divider, INITIAL_FRACTION, Weight, side_of, tile, weights_of};
     use crate::tree::Child;
+    use crate::tree::Node;
     use std::time::{Duration, Instant};
 
     /// Leaves exactly these events in the window's queue, in this order.
@@ -5543,6 +5372,71 @@ mod tests {
         }
     }
 
+    /// **The notice a refusal hands back is what stops a publication being lost**, and this is the
+    /// only place it can be asserted: the flag belongs to the pane, and a test over `PanelState`
+    /// alone can only watch the value the refusal returns — a proxy that stays green with the
+    /// hand-back deleted.
+    #[test]
+    fn a_file_published_while_the_channel_holds_the_panel_is_read_when_the_hold_ends() {
+        let dir = PanelDir::create().expect("create the panel directory");
+        let mut pane = pane_with("sleep 30", 0);
+        pane.control = control::PaneControl::open(&dir, || {});
+        let mut producer =
+            panel_control::Producer::of(dir.path(), dir.id()).expect("connect as a producer");
+
+        // **Parked on a channel and not on a sleep.** A fixed sleep is the second disguise D30
+        // names: on a slow machine the hold ends before the file is written, the file is then read
+        // directly, and the test passes with the notice hand-back deleted — which is exactly the
+        // branch it exists to cover. Here the connection cannot close until the test says so, so the
+        // file is always written while the hold stands.
+        let (go, parked) = std::sync::mpsc::sync_channel::<()>(0);
+        let held = std::thread::spawn(move || {
+            let answered = producer.publish("flow", "{\"lines\":[\"the agent\"]}");
+            let _ = parked.recv();
+            answered
+        });
+        pane.panel = Some(dir);
+        let until = Instant::now() + Duration::from_secs(5);
+        while pane.panel_state.held_by().is_none() && Instant::now() < until {
+            pane.refresh_its_panel();
+        }
+        assert!(pane.panel_state.held_by().is_some(), "nobody took the pane");
+
+        std::fs::write(
+            pane.panel
+                .as_ref()
+                .expect("the directory")
+                .path()
+                .join(panel_contract::PANEL_FILE),
+            b"{\"lines\":[\"written during the hold\"]}",
+        )
+        .expect("publish by file");
+        pane.to_reread.raise();
+        pane.refresh_its_panel();
+        assert!(
+            pane.panel_state.held_by().is_some(),
+            "the hold ended before the publication was refused, so nothing was refused"
+        );
+
+        drop(go);
+        let _ = held.join().expect("the producer finished");
+        let until = Instant::now() + Duration::from_secs(5);
+        while pane.panel_state.held_by().is_some() && Instant::now() < until {
+            pane.refresh_its_panel();
+        }
+        pane.refresh_its_panel();
+
+        assert_eq!(
+            pane.panel_state
+                .last_understood()
+                .expect("there is a panel")
+                .lines[0]
+                .text,
+            "written during the hold",
+            "the publication made during the hold was thrown away"
+        );
+    }
+
     /// Builds a pane with a program inside, with no interface framework in the way.
     ///
     /// The two halves of the frame tested here —pumping and resizing— do not touch the desktop
@@ -5557,12 +5451,14 @@ mod tests {
             pty,
             pty_output: PtyOutput::new(output, || {}),
             panel: None,
+            control: None,
             panel_state: panel::PanelState::default(),
             to_reread: Flag::raised(),
             screen: Screen::new(INITIAL_GRID),
             timings: Timings::default(),
             pending_measurement: None,
             panel_reread_unpainted: std::time::Duration::ZERO,
+            control_unpainted: std::time::Duration::ZERO,
             reflowed: std::time::Duration::ZERO,
             pending_wheel: WheelInput::default(),
             panel_width: panel::DEFAULT_WIDTH,
@@ -5622,6 +5518,7 @@ mod tests {
             discovery: measure::Discovery::default(),
             color: measure::Rasterizing::default(),
             buttons: measure::Buttons::default(),
+            control: measure::Control::default(),
             // These consoles have no directory, so there is nothing to watch; the watcher is armed
             // anyway —over an empty list— so that the tests' window does not declare itself blind
             // and turn on the fallback, which is a path with a test of its own.

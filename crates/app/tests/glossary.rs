@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 const DECISIONS: &str = include_str!("../../../docs/02-decisiones.md");
 
 /// The crates whose identifiers are **all English**, under `crates/`. One entry per delivery.
-const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core"];
+const FINISHED_CRATES: &[&str] = &["panel-contract", "host-load", "term-core", "panel-control"];
 
 /// Single **files** that carry **no name the glossary retired**, for a crate that is not finished yet.
 ///
@@ -75,6 +75,10 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/src/tiling.rs",
     "app/src/tree.rs",
     "app/src/alarms.rs",
+    "app/src/closing.rs",
+    "app/src/control.rs",
+    "app/src/panel/driving.rs",
+    "app/src/panel/pane.rs",
     "app/src/injected.rs",
     "app/src/measure.rs",
     "app/src/measure/header.rs",
@@ -131,6 +135,10 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
 const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/src/lib.rs", "app"),
     ("app/src/alarms.rs", "app"),
+    ("app/src/closing.rs", "app"),
+    ("app/src/control.rs", "app"),
+    ("app/src/panel/driving.rs", "app"),
+    ("app/src/panel/pane.rs", "app"),
     ("app/src/injected.rs", "app"),
     ("app/src/main.rs", "app"),
     ("app/src/settings.rs", "app"),
@@ -161,6 +169,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/prose.rs", "app"),
     ("app/tests/shape.rs", "app"),
     ("app/tests/scripts.rs", "app"),
+    ("app/tests/batches.rs", "app"),
     ("app/tests/vendor_patch.rs", "app"),
 ];
 
@@ -592,7 +601,7 @@ fn guarded_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
     // files» guard is never asked of a list with no entries. The two lists only ever grow, so a floor
     // here gets in nobody's way: it is there to notice one of them being emptied.
     assert!(
-        FINISHED_CRATES.len() >= 3
+        FINISHED_CRATES.len() >= 4
             && GLOSSARY_CLEAN_FILES.len() >= 27
             && CITATIONS_CHECKED.len() >= 33,
         "the three lists this guard reads have {} crates, {} files and {} citation entries: they \
@@ -1067,6 +1076,22 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 /// it closed is what makes the guard below safe to break the build with — and the failure message
 /// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
 const NOT_OURS: &[&str] = &[
+    // **The three tools the control channel's wire format has and this build does not serve.** They
+    // are names on a wire, not identifiers of this tree, and they are cited where the server explains
+    // why it advertises one tool and refuses the rest by name.
+    "split_open",
+    "split_read",
+    "split_close",
+    // The batch letter the publisher example is written for. A measurement batch is named in
+    // `measure-frame.sh`, never in Rust.
+    "S",
+    // Traits of the standard library and of `serde`, cited where this crate leans on what they
+    // produce rather than deciding it again.
+    "Display",
+    "Serialize",
+    // The operating system's answer when a process is out of descriptors, cited where the acceptor
+    // says why it does not treat every accept failure as fatal.
+    "EMFILE",
     // **Unicode's own names for what a button's text may not carry.** `Cc` is the category of the
     // control characters the kernel's line discipline acts on, `Cf` the format ones that are painted
     // as nothing or paint the rest backwards, and `DEL` the one control that is not in the C0 range.

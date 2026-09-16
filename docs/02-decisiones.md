@@ -1982,9 +1982,15 @@ transport** for a document that can also arrive by others. Three parts:
    gets versioned and what nobody may break. Where it lives and how it travels is separate.
 2. **The source of truth is the state the app holds per pane**, not the file. The file feeds that
    state; it is not it.
-3. **Every delivery brings a source and an order.** Who publishes (`fichero`, `mcp`, and whatever
-   comes) and an increasing number per source. Two producers on the same pane stop treading on each
-   other by chance.
+3. **Every delivery brings a source and an order.** Who publishes and how two of them are told
+   apart. Two producers on the same pane stop treading on each other by chance.
+
+> **Amended by [D43](#d43--a-connection-holds-a-pane-the-file-is-not-read-while-it-does-and-the-hold-dies-with-the-connection), which is what answered this point rather than
+> restating it.** The third part read «an increasing number per source» until the channel existed,
+> and when it did the number turned out to protect a reordering the transport cannot produce: one
+> endpoint per pane, and the file unread while a connection holds it, means there is exactly one
+> writer. The source stayed — as the **holder's name**, claimed on the first publication and released
+> when the connection closes — and the sequence number was cut, with the reason in D43.
 
 **Why, and the reason is not theoretical.** The plan already had **two writers** of the same place:
 the file producer and the agent through MCP's `panel_set` in Phase 3 (**D5**). With no source and no
@@ -5940,3 +5946,79 @@ load.
   one.
 - **No batch measures opening or closing a pane**, by hand or over the channel that arrives in the
   next PRs. It is in `docs/DEBT.md`, in the same class as «no batch draws a block element».
+
+## D43 — A connection holds a pane, the file is not read while it does, and the hold dies with the connection
+
+**Status: taken.** Delivered in the third PR of the milestone that gives the panel buttons, F3.
+
+**[D17](#d17--the-contract-is-the-document-not-the-file-the-source-of-truth-is-the-apps-state) said the panel's contract is
+the document and `panel.json` is one of its transports, and it left a question open with its name on
+it: with two writers of the same place, who rules?** Until this delivery the question was academic
+because there was one transport. It is not academic now: a producer can connect to its pane and
+publish without writing anything.
+
+The answer is not a rule about ordering. It is a rule about **authority**.
+
+### The decision, in three parts
+
+**1. A connection claims the pane on its first publication, under a source it declares.**
+
+The source is a name the producer chooses and the panel shows — `flow`, `ci`, whatever it calls
+itself — and it is what a refusal names, so a caller can tell somebody else's connection from its
+own. What is compared is **the connection and never the source**: two connections calling themselves
+the same thing are two producers, and letting the second one through because the name matched is
+exactly the collision this exists to stop.
+
+**2. While it holds the pane, its `panel.json` is not read at all.**
+
+Not read and compared — **not read**. The file cannot identify its producer, which is the property
+that made D17 necessary in the first place, so authority cannot be handed to it: with both being
+read, who wins is decided by the operating system's scheduling. What it skips is the read and the
+parse, and only those: the watcher stays armed on that pane and its notice is still raised — and it
+has to be, because that notice is what the pass that ends the hold goes back for.
+
+And because refusing in silence is indistinguishable from being broken, a file publication that is
+actually refused is **confessed** in the application's own row, naming the source that is driving the
+panel. Nothing is said until a file has really been refused: a standing warning over a panel that is
+working perfectly is noise.
+
+**3. The hold dies with the connection, and there is no sequence number anywhere.**
+
+A hold that outlived its holder would freeze that pane's panel for the life of the window, and the
+file would never be read again — which is what an agent that crashes does. So the release is sent by
+the connection's own thread on its way out, and it can be refused by nobody.
+
+**A sequence number was in an earlier shape of this design and was cut.** With one endpoint per pane,
+and the file unread while the pane is held, there is exactly **one writer**; a connection's
+newline-framed requests cannot reorder themselves. A `seq` would detect only a reordering the
+transport cannot produce — and without a release it would be worse than useless: a restarted agent
+beginning again at zero would be refused for ever.
+
+**What stays on screen when a hold ends is the last thing that was published.** The agent is gone and
+what it last said is still the truest thing anybody knows about that pane; blanking it would throw
+away information in order to be tidy. The file takes over from its next publication, not from that
+instant.
+
+### What was discarded, and why
+
+| Discarded | Why |
+|---|---|
+| Comparing dates between the two writers | The file does not know who writes it. Giving authority to the transport that cannot identify its producer is the defect D17 named |
+| A sequence number per source | It detects a reordering that one endpoint per pane makes impossible, and a restart at zero would be refused for ever |
+| A hold released by an explicit message | A crashed agent sends no goodbye, and that is precisely the case the release exists for |
+| Blanking the panel when a hold ends | Throwing away the last thing anybody knows about that pane in order to look tidy |
+| A window-wide endpoint with the pane named in the message | Then the server decides which pane a message is for from the message's contents, and the directory's permission stops being the access control |
+
+### What it leaves open
+
+- **A connection that holds a pane and never publishes again keeps it**, and the panel goes stale
+  where a person can read that it has. The date is stamped **on arrival** precisely so that happens:
+  a delivered document carries none of its own, and leaving it undated would make a held panel
+  immortal.
+- **On Windows nothing binds yet**, so a Windows pane publishes by file exactly as before. A named
+  pipe gets a default security descriptor that lets any process on the machine open it, and the
+  delivery that wrote this cannot compile or run a line of Windows code to prove otherwise. **F2.7**
+  is where the pipe, its descriptor and the assertion over both arrive together.
+- **A caller that gives up waiting still gets its document applied.** Undoing a document already on
+  screen is not something the window can do, so the reply is worded for what is true: the window did
+  not answer in time, never that nothing was published.

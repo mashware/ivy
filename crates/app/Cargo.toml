@@ -8,6 +8,12 @@ eframe.workspace = true
 term-core = { path = "../term-core" }
 panel-contract = { path = "../panel-contract" }
 
+# The second transport of the panel document: the endpoint a producer speaks to instead of writing
+# the file. It depends on nothing visual, exactly like the contract it carries, so the window takes it
+# the same way it takes the contract — as a crate that would survive the interface being rewritten
+# (D3).
+panel-control = { path = "../panel-control" }
+
 # To find out that a producer has published without asking the disk sixty times a second.
 # Its source was read before choosing it, and two decisions come out of that reading which are not
 # negotiable: what is watched is each console's **directory** and not its file, and the notice only

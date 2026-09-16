@@ -71,6 +71,15 @@ use std::collections::BTreeSet;
 const MODULES: &[(&str, &str)] = &[
     ("app/src/lib.rs", include_str!("../src/lib.rs")),
     ("app/src/alarms.rs", include_str!("../src/alarms.rs")),
+    ("app/src/control.rs", include_str!("../src/control.rs")),
+    (
+        "app/src/panel/driving.rs",
+        include_str!("../src/panel/driving.rs"),
+    ),
+    (
+        "app/src/panel/pane.rs",
+        include_str!("../src/panel/pane.rs"),
+    ),
     ("app/src/injected.rs", include_str!("../src/injected.rs")),
     ("app/src/panel.rs", include_str!("../src/panel.rs")),
     (

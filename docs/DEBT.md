@@ -149,3 +149,35 @@ Format: `- <date> · <ticket> · <what> — <why it matters>`.
   notice it doubles: on the one frame a producer first publishes a panel, a press over the panel's
   new columns can dismiss a sentence that was drawn under them.
 
+- 2026-09-14 · 226 · **No batch measures what the control channel's threads cost when nobody is
+  publishing.** Each pane has an acceptor thread parked in a blocking `accept` — zero wake-ups at
+  rest; the thread that serves a producer sleeps in a blocking read with a 200 ms receive timeout, so
+  an idle connection costs at most five wake-ups a second and a publication wakes it on the data
+  itself. It is off the frame, so no span of the report covers it — and «the window is at rest» is a
+  claim this project measures everywhere else. Every pane binds its endpoint in every batch, `C`
+  included, so the threads are already inside every published number — what no batch does is isolate
+  it: `S` has somebody publishing over it and `C` has the same threads running with nobody
+  publishing, which is a comparison nothing reads because the cost is off the frame in both.
+- 2026-09-14 · 226 · **The `control:` line's second and third numbers are published and checked by
+  nobody.** Only «applied» is read in both directions by the script, because a refusal needs a second
+  source and a release needs a connection to end, and no batch does either. A batch that drove two
+  sources would make all three assertable.
+
+- 2026-09-16 · 226 · **The painted-equals-sent criterion compares layout rows, not what the painter
+  hands the engine.** A mutation inside `paint` that crops or collapses the command as it draws it
+  leaves the criterion green, because the criterion reassembles the rows the layout produced. The
+  case that mattered — ink drawn outside the strip — is closed by asking the text engine where the
+  ink ended; the general form is not. Owner: whoever next changes how a panel row is drawn.
+- 2026-09-16 · 226 · **An `open`-style button is discarded in silence if a producer writes one.**
+  The contract has listed it beside `send` since F1.6, but `Action::new` builds a button out of
+  `label` and `send` only, so `{"open": …}` is dropped with the document still `Ok`. The review the
+  field needs — a URL reaching the desktop's handler, not a shell this application already owns — is
+  one review for `open` and `link`, already written verbatim in `docs/04-contrato-panel.md`'s Pending
+  list; a ticket for `open` alone would split that subject.
+- 2026-09-16 · 226 · **A button the contract rejects vanishes with nothing said, and the premise that
+  the warning row already carries it is false.** `parse` drops a control scalar, an empty label or
+  `send`, a command over 512 characters or the ninth action through
+  `filter_map(action).take(MAX_ACTIONS)`, keeping no reason; `PanelState::warning` is built only out
+  of `Problem` — read-level — plus staleness, so nothing carries a per-action drop from the parser to
+  the painting, and over the wire the producer is answered `ok`. Real, and nobody's next task: the
+  author holds both the JSON and the documented table, and self-diagnosis costs minutes.

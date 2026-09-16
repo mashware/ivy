@@ -1,0 +1,41 @@
+[package]
+name = "panel-control"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# The document this channel carries **is** the panel document, so its parser, its ceiling and the
+# endpoint's name all come from the contract rather than being written a second time here. A second
+# parser is how two transports of one contract start disagreeing field by field.
+panel-contract = { path = "../panel-contract" }
+
+# The wire format is newline-delimited JSON, and it is read from a socket somebody else fills: the
+# same reason the contract crate states for taking it.
+#
+# **`raw_value` is on so the document travels as the bytes the producer wrote.** Without it the
+# envelope was parsed into a value and the document re-serialised compact, so the ceiling was checked
+# against the compact form: a pretty-printed document over 256 KiB could compact under it and be
+# accepted over the channel while the same file was refused. `RawValue` keeps the producer's own text
+# and the parser measures what was sent.
+serde_json = { version = "1", features = ["raw_value"] }
+
+# **`serde`'s derive is what lets the request be read with a raw document field.** `serde_json`'s
+# `Map` only deserialises values, so the only way to keep the producer's own text for one field is a
+# struct with a `RawValue` member; the derive is that struct. `serde` is already in the tree under
+# `serde_json`, so this adds no compiled crate the workspace did not have.
+serde = { version = "1", features = ["derive"] }
+
+# **One dependency that already knows how to be a Unix socket on POSIX and a named pipe on Windows**,
+# behind one name-building API, in blocking mode. The three alternatives and why each was refused are
+# in the delivery's design; the short of it is that the hand-rolled half is raw `CreateNamedPipeW` on
+# a platform nobody in this project has run yet, `mio` is only here transitively through `notify` and
+# offers the one shape this design does not want, and `tokio` is a runtime for a server whose whole
+# concurrency is one blocking thread per pane.
+#
+# It is **not** in `Cargo.lock` or in this machine's registry cache before this delivery, so the first
+# build of this branch fetches it. Worth knowing before running the delivery offline.
+interprocess = "2.4"
+
+[[bin]]
+name = "panel-mcp"
+path = "src/bin/panel-mcp.rs"

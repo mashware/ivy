@@ -55,6 +55,12 @@ use std::collections::BTreeSet;
 const SOURCES: &[(&str, &str)] = &[
     ("src/lib.rs", include_str!("../src/lib.rs")),
     ("src/alarms.rs", include_str!("../src/alarms.rs")),
+    ("src/control.rs", include_str!("../src/control.rs")),
+    (
+        "src/panel/driving.rs",
+        include_str!("../src/panel/driving.rs"),
+    ),
+    ("src/panel/pane.rs", include_str!("../src/panel/pane.rs")),
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     (

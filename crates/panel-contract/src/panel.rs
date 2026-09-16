@@ -200,9 +200,15 @@ impl Action {
 /// so the text a person reads is not the text that runs. **This is a list and lists are how these
 /// checks rot**, so two things about it: it is a closed set of **scalars**, tested one by one below,
 /// with none of the rescanning hazard that sinks a search for forbidden *sequences*; and it is
-/// Unicode's `Cf` category as it stands, which grows. What would replace it is a general-category
-/// table, and this crate carries two dependencies with a written reason each — see its manifest.
-fn is_shown_as_itself(scalar: char) -> bool {
+/// Unicode's `Cf` category as it stands, which grows — **plus the two line and paragraph
+/// separators**, which are not `Cf` and paint as a line break all the same. What would replace the
+/// whole list is a general-category table, and this crate carries two dependencies with a written
+/// reason each — see its manifest.
+///
+/// **It is `pub` because two callers already need the same answer**, and a second list is how the
+/// two drift: the action parser asks it to decide whether a command or a label is dropped
+/// ([`Action`]), and the application asks it before painting text that arrived over the wire.
+pub fn is_shown_as_itself(scalar: char) -> bool {
     if scalar.is_control() {
         return false;
     }
@@ -213,10 +219,11 @@ fn is_shown_as_itself(scalar: char) -> bool {
             | '\u{061c}'
             | '\u{06dd}'
             | '\u{070f}'
+            | '\u{0890}'..='\u{0891}'
             | '\u{08e2}'
             | '\u{180e}'
             | '\u{200b}'..='\u{200f}'
-            | '\u{202a}'..='\u{202e}'
+            | '\u{2028}'..='\u{202e}'
             | '\u{2060}'..='\u{2064}'
             | '\u{2066}'..='\u{206f}'
             | '\u{feff}'
@@ -453,10 +460,12 @@ pub fn read(dir: &Path) -> Result<Panel, Problem> {
 
 /// Reads at most one byte more than the ceiling.
 ///
-/// **The ceiling is applied while reading, and only here.** Looking at the size before opening seems
-/// cheaper, but it would be a second path that no test can exercise —the first would always reject
-/// earlier— and on top of that it would leave out the race that matters: the producer overwrites the
-/// whole file, so between looking and reading it may have written a bigger one.
+/// **How much of the file is read is decided here**, so `read` never holds a file it will refuse.
+/// Looking at the size before opening seems cheaper, but it would be a second path that no test can
+/// exercise —the first would always reject earlier— and on top of that it would leave out the race
+/// that matters: the producer overwrites the whole file, so between looking and reading it may have
+/// written a bigger one. **The refusal itself is [`parse`]'s**, shared with the delivered transport;
+/// what this function bounds is the memory, not the verdict.
 ///
 /// The extra byte is what lets "it takes up exactly the ceiling" be told apart from "it goes over". And
 /// it is separate from the rest **so that how much is read can be asserted**: looking only at the
@@ -477,6 +486,21 @@ fn read_capped(file: std::fs::File, expected: u64) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Turns a **delivered** document into a panel, with no file anywhere.
+///
+/// **It is the same parser the file goes through, and that is the whole of why it exists.** The
+/// contract is the document, not the transport (**D17**): a second entry point with a parser of its
+/// own would let the two transports drift — a field tolerated on one side and rejected on the other,
+/// with nothing failing until a producer that worked over one stopped working over the other.
+///
+/// **What it does not do is stamp a date.** [`read`] takes [`Panel::written_at`] from the file's
+/// own, and a delivered document has no such thing: whoever applies it stamps the moment it arrived,
+/// which is what keeps a held panel able to go stale. Left here it would be a date this crate
+/// invented.
+pub fn parse_document(text: &str) -> Result<Panel, Problem> {
+    parse(text)
+}
+
 /// Turns the text into a panel, tolerating per field.
 ///
 /// **Tolerance is per field and not per document**, and that decides how it is read: a single field
@@ -487,7 +511,18 @@ fn read_capped(file: std::fs::File, expected: u64) -> std::io::Result<Vec<u8>> {
 ///
 /// There are only two ways for a file not to be valid: that it is not JSON, or that it carries no
 /// lines.
+///
+/// **The ceiling lives here and not only in [`read`], because the two transports share this parser
+/// (D17) and a ceiling on one of them is not a contract.** Putting it in `read` left
+/// [`parse_document`] with no size control at all, so the channel accepted a document the file
+/// refuses with [`Problem::TooBig`] — the drift the delivered transport exists to prevent. [`read`]
+/// keeps its own check because it has to decide *before* turning a capped byte buffer into text: a
+/// cap that cuts a multi-byte character would otherwise be reported as "not UTF-8" instead of "over
+/// the ceiling".
 fn parse(text: &str) -> Result<Panel, Problem> {
+    if text.len() as u64 > MAX_BYTES {
+        return Err(Problem::TooBig);
+    }
     let raw: serde_json::Value =
         serde_json::from_str(text).map_err(|failure| Problem::Invalid(failure.to_string()))?;
 
@@ -646,6 +681,48 @@ mod tests {
     fn panel_in(dir: &PanelDir, contents: &str) -> Result<Panel, Problem> {
         std::fs::write(dir.path().join(crate::PANEL_FILE), contents).expect("publish the panel");
         read(dir.path())
+    }
+
+    /// The two transports are one contract, and this is what holds them to it.
+    ///
+    /// **It asserts on the whole panel and not on a field of it**, because the drift this guards
+    /// against is per field by construction: the parse tolerates each one separately, so a second
+    /// entry point that diverged would diverge in whichever field nobody named here. The date is the
+    /// one thing that legitimately differs — the file has one and a delivered document does not — so
+    /// it is what the comparison sets aside, out loud.
+    #[test]
+    fn a_delivered_document_is_read_exactly_as_the_file_would_be() {
+        let dir = PanelDir::create().expect("create the directory");
+        let from_file = panel_in(&dir, ACTUAL).expect("read the panel");
+        let delivered = parse_document(ACTUAL).expect("parse the delivered document");
+
+        assert!(
+            from_file.written_at.is_some(),
+            "the file's read is what carries a date"
+        );
+        assert_eq!(delivered.written_at, None, "nothing delivered dates itself");
+        assert_eq!(
+            delivered,
+            Panel {
+                written_at: None,
+                ..from_file
+            }
+        );
+    }
+
+    /// What is invalid over one transport is invalid over the other, and for the same two reasons:
+    /// it is not JSON, or it carries no lines.
+    #[test]
+    fn a_delivered_document_is_refused_on_the_same_two_grounds() {
+        assert!(matches!(
+            parse_document("{\"lines\": 3}"),
+            Err(Problem::Invalid(_))
+        ));
+        assert!(matches!(
+            parse_document("not json"),
+            Err(Problem::Invalid(_))
+        ));
+        assert!(parse_document("{\"lines\": []}").is_ok());
     }
 
     #[test]
@@ -1272,6 +1349,25 @@ mod tests {
         assert!(matches!(failure, Problem::TooBig), "was {failure:?}");
     }
 
+    /// **The delivered document meets the same two boundaries as the file.** The channel used to
+    /// accept a document the file refuses because the only size check lived in [`read`]; with the
+    /// check in [`parse`] both transports of one contract decide the same way. Asserted on both
+    /// boundaries and not just on the refusal, because a ceiling that refused everything would pass
+    /// the second half alone.
+    #[test]
+    fn a_delivered_document_meets_the_ceiling_exactly_as_a_file_does() {
+        let overhead = r#"{"lines":["WIDTH"]}"#.len() - "WIDTH".len();
+        let exact_fit = "x".repeat(MAX_BYTES as usize - overhead);
+
+        let fits = parse_document(&format!(r#"{{"lines":["{exact_fit}"]}}"#))
+            .expect("it just fits over the channel too");
+        assert_eq!(fits.lines.len(), 1);
+
+        let failure =
+            parse_document(&format!(r#"{{"lines":["{exact_fit}x"]}}"#)).expect_err("one more, no");
+        assert!(matches!(failure, Problem::TooBig), "was {failure:?}");
+    }
+
     #[test]
     fn silence_exactly_equal_to_the_cap_is_not_stale_yet() {
         let panel = Panel {
@@ -1506,6 +1602,20 @@ mod buttons {
             assert!(
                 with(reversing).is_empty(),
                 "{reversing:?} survived the read"
+            );
+        }
+    }
+
+    /// **The list is a Unicode release behind and that is how it rots**: the Arabic pound and piastre
+    /// marks have been `Cf` since Unicode 14 and were missing, so a command carrying one was painted
+    /// as nothing and sent all the same. The line and paragraph separators are not `Cf` and paint as
+    /// a break, which is the same defect by another route.
+    #[test]
+    fn the_newest_format_characters_and_the_separators_are_not_shown_as_themselves() {
+        for hidden in ['\u{0890}', '\u{0891}', '\u{2028}', '\u{2029}'] {
+            assert!(
+                !is_shown_as_itself(hidden),
+                "{hidden:?} would be painted as nothing"
             );
         }
     }
