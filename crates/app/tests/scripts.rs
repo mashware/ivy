@@ -80,6 +80,7 @@ const MODULES: &[(&str, &str)] = &[
         "app/src/panel/pane.rs",
         include_str!("../src/panel/pane.rs"),
     ),
+    ("app/src/header.rs", include_str!("../src/header.rs")),
     ("app/src/injected.rs", include_str!("../src/injected.rs")),
     ("app/src/panel.rs", include_str!("../src/panel.rs")),
     (
@@ -168,8 +169,8 @@ const MODULES: &[(&str, &str)] = &[
 #[test]
 fn the_list_still_names_every_module() {
     assert!(
-        MODULES.len() >= 34,
-        "`MODULES` names {} files and this delivery left thirty-four: a piece came out of a module \
+        MODULES.len() >= 35,
+        "`MODULES` names {} files and this delivery left thirty-five: a piece came out of a module \
          and its new home was not added, so whatever this guard reports, it is not reporting on \
          every script these crates run",
         MODULES.len()

@@ -88,6 +88,17 @@ pub(crate) enum DragIntent {
     ToTheProgram,
 }
 
+/// Whether the press this gesture was born from landed on its pane's strip.
+///
+/// **A type and not a `bool`, and the reason is the call it appears in.** Beside it travels «the
+/// program asked for the mouse», also a yes-or-no: two adjacent booleans are swapped in a call
+/// without the compiler saying a word, and swapping these two turns a press on the strip of a
+/// console running `vim` into a mouse report — the console moves nowhere and the program receives a
+/// click it should never have seen. It is the same move [`crate::header::Headers`] makes one file
+/// away, and the one [`WheelInput`] made for its pair of numbers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct OnTheStrip(pub(crate) bool);
+
 impl DragIntent {
     /// What pressing with that chord over a console whose program wants —or does not want— the
     /// mouse means.
@@ -101,8 +112,24 @@ impl DragIntent {
     /// forces the selection** even if the program claims the mouse — without that exit, inside
     /// `vim` or `htop` there would be **no** way to get a line off the screen, and it is what every
     /// terminal does. Only then is it looked at whether the program asked for it.
-    fn from_chord(chord: egui::Modifiers, the_program_wants_it: bool) -> Self {
-        if chord.ctrl && chord.shift {
+    ///
+    /// **The strip is a second door into the same branch, not a fourth intent.** Everything that
+    /// hangs off `MovePane` — the identity the drag is held by, the half previewed before dropping,
+    /// the tree transformed by value, D20's latch — is earned once; a door of its own would have to
+    /// earn every one of them again. What the strip adds is that the gesture can be **discovered**:
+    /// `Ctrl+Shift` is a chord nobody is told about, and a band you can grab says by itself that a
+    /// console can be moved.
+    ///
+    /// **`on_the_strip` is where the button went down, never where the pointer is now.** egui gives
+    /// a drag as started on the frame the pointer has already moved, which by then may be anywhere;
+    /// reading the position there would move a pane whose strip was never pressed, and leave one
+    /// whose strip was pressed marking text instead.
+    fn from_the_press(
+        chord: egui::Modifiers,
+        on_the_strip: OnTheStrip,
+        the_program_wants_it: bool,
+    ) -> Self {
+        if (chord.ctrl && chord.shift) || on_the_strip.0 {
             Self::MovePane
         } else if the_program_wants_it && !chord.shift {
             Self::ToTheProgram
@@ -110,6 +137,25 @@ impl DragIntent {
             Self::Select
         }
     }
+}
+
+/// Whether a press at that point fell on that pane's strip.
+///
+/// **`None` is not `false` in disguise**: a pane with no strip — a measured run — is a pane no press
+/// can fall on the strip of, and a window that has not seen a press yet has no position to compare.
+/// Both answer no, and neither one invents a point. Where the strip ends is
+/// [`crate::panel::pane::PaneChrome::strip_holds`]' to say, not this one's.
+///
+/// **It is not a method of the window**, for the reason [`Window::collect_the_wheel`] gives one
+/// screen below: it reads nothing from it, and a receiver promises a dependency that does not exist.
+fn the_press_fell_on(
+    chrome: Option<&crate::panel::pane::PaneChrome>,
+    at: Option<egui::Pos2>,
+) -> OnTheStrip {
+    OnTheStrip(match (chrome, at) {
+        (Some(chrome), Some(at)) => chrome.strip_holds(at),
+        _ => false,
+    })
 }
 
 /// A button that was pressed or released on this frame, with where and with which chord.
@@ -203,6 +249,10 @@ impl Window {
         // 36 columns apart. It does not claim to be the only clock in the pass: answering a
         // standing question takes one of its own, and works from unrefreshed state on purpose.
         let now = SystemTime::now();
+        // **Read once, beside the clock and for the same reason.** Both say how a pane's rectangle
+        // is shared out, and a pass that resolved two gestures against two different answers would
+        // measure them against rectangles a row apart.
+        let headers = self.headers;
 
         let mut target = None;
         let mut the_tree_changed = false;
@@ -218,11 +268,16 @@ impl Window {
         let wheel = Self::collect_the_wheel(ui, metrics);
 
         // **Which chord it was pressed with, from the event itself and not from the state.** See
-        // [`DragIntent::from_chord`] and [`Self::chord_of_the_last_press`]. It is looked at before
+        // [`DragIntent::from_the_press`] and [`Self::chord_of_the_last_press`]. It is looked at before
         // the loop because the answer belongs to the window, not to each console: only one of them
         // receives the press.
-        self.chord_of_the_last_press =
-            Self::chord_of_the_press(ui).unwrap_or(self.chord_of_the_last_press);
+        if let Some((at, chord)) = Self::the_primary_press(ui) {
+            // **Both are written from one reading of one event, in one statement.** Kept as two
+            // separate reads, a frame could note the chord of this press beside the position of the
+            // previous one, and the gesture would be decided from a point nobody pressed.
+            self.chord_of_the_last_press = chord;
+            self.where_the_last_press_fell = Some(at);
+        }
 
         // **Presses and releases are routed here, before the loop**, and not inside with each
         // console's response: egui gives `clicked()` **on release**, so the program would find out
@@ -311,29 +366,33 @@ impl Window {
                 continue;
             }
 
-            // **The meaning of the gesture is fixed here, at the start, and is not looked at
-            // again.** See [`DragIntent`]. With no chord in the queue —which is what happens when
-            // egui takes the drag as started one frame after the press— the one for a bare button
-            // is taken, which is selecting.
-            if response.drag_started() {
-                self.drag_in_progress = Some(DragIntent::from_chord(
-                    self.chord_of_the_last_press,
-                    self.the_press_went_to_the_program,
-                ));
-            }
-
-            // **What is left of the gesture is measured against the console's rectangle**, which is
-            // the one the grid was measured from: see [`Pane::console_within`]. Moving the pane
-            // does not ask for it — what is being moved is the pane, rectangle and all.
+            // **How this pane's rectangle is shared out, resolved once for the whole gesture.**
+            // The strip decides what the gesture means, and what is left of it is measured against
+            // the console's rectangle — the one the grid was measured from, see
+            // [`Pane::chrome_within`]. Moving the pane asks for neither: what is being moved is the
+            // pane, rectangle and all.
             //
             // **It is an `Option` and not an early exit, and that is the whole point of the
             // binding.** Leaving here when the console is gone would also skip the release's own
             // reset at the foot of each branch, and the gesture would stay latched with the button
             // already up — a path nobody can reach today, which is exactly the kind that gets
             // written and then becomes reachable.
-            let console = self
+            let chrome = self
                 .pane_called(name)
-                .map(|pane| pane.console_within(*rect, metrics.width(), now));
+                .map(|pane| pane.chrome_within(*rect, metrics, now, headers));
+            let console = chrome.as_ref().map(|chrome| chrome.console());
+
+            // **The meaning of the gesture is fixed here, at the start, and is not looked at
+            // again.** See [`DragIntent`]. With no chord in the queue —which is what happens when
+            // egui takes the drag as started one frame after the press— the one for a bare button
+            // is taken, which is selecting.
+            if response.drag_started() {
+                self.drag_in_progress = Some(DragIntent::from_the_press(
+                    self.chord_of_the_last_press,
+                    the_press_fell_on(chrome.as_ref(), self.where_the_last_press_fell),
+                    self.the_press_went_to_the_program,
+                ));
+            }
 
             if self.drag_in_progress == Some(DragIntent::Select) {
                 if let Some(console) = console {
@@ -359,6 +418,21 @@ impl Window {
                 continue;
             }
 
+            // **Only a gesture that IS the move reaches the tree, and saying so is not a
+            // formality.** This branch used to run for anything that was not selecting and was not
+            // the program's — `MovePane` **and** «no intent at all». The second is reachable: a
+            // press that starts outside the console's grid cancels the selection by clearing the
+            // intent, and from the next frame on the gesture fell through to here and **moved the
+            // pane**. It was found by mutating the strip's door: taking the door out left the test
+            // for it green, because the press on the strip was cancelling a selection and then
+            // being moved by this branch — with the chord nobody held.
+            if self.drag_in_progress != Some(DragIntent::MovePane) {
+                if response.drag_stopped() {
+                    self.drag_in_progress = None;
+                }
+                continue;
+            }
+
             // With no pointer there is no destination: the mouse has left the window. The gesture
             // ends up with no effect and the tree is not touched, which is what is expected of
             // cancelling halfway.
@@ -374,7 +448,7 @@ impl Window {
                 // nothing happens — the warning only comes out on the error output, which nobody is
                 // watching. It is the **same rule** dropping applies, asked earlier so as not to
                 // promise what is not going to be kept.
-                can_split(rects[at], side.cut_along(), metrics).then_some((at, side))
+                can_split(rects[at], side.cut_along(), metrics, self.headers).then_some((at, side))
             });
 
             // **The button is required to have been RELEASED, and the drag ending is not enough.**
@@ -411,7 +485,7 @@ impl Window {
             // the panel's strip, and there what the program expects to know is that the wheel
             // turned: losing it would leave the wheel dead in the console's right-hand columns.
             && let Some(to_the_program) = {
-                let console = pane.console_within(rect, metrics.width(), now);
+                let console = pane.console_within(rect, metrics, now, headers);
                 let cell = pane.cell_to_extend_to(console, pointer, &metrics.clone());
                 pane.handle_wheel(requested, chord, cell)
             }
@@ -448,6 +522,7 @@ impl Window {
         queue: Vec<ButtonPress>,
         now: SystemTime,
     ) {
+        let headers = self.headers;
         for button in queue {
             // **A release goes to the console that kept ITS press, not to the one underneath the
             // pointer.** Releasing over another console, over the panel's strip or outside the
@@ -484,18 +559,40 @@ impl Window {
             // **The chord for moving the pane wins before anything else is looked at**: it belongs
             // to the window, and letting a program keep it would make it impossible to rearrange
             // consoles inside `vim`.
-            let for_the_program = DragIntent::from_chord(button.chord, self.wants_the_mouse(name))
-                == DragIntent::ToTheProgram;
+            // **The pane is shared out once for this press, and both questions below read that one
+            // answer.** Asking twice is not only two walks: composing a panel's warning is inside
+            // that call, so a press would lay out the same sentence twice — and, worse, «where does
+            // the strip end» would be answered in two places a later delivery can move apart.
+            let chrome = self
+                .pane_called(name)
+                .map(|pane| pane.chrome_within(*rect, metrics, now, headers));
+
+            // **The strip is asked about here too, and through the same function.** A press on it
+            // belongs to the window whatever the program below has claimed; with two functions
+            // answering «whose is this press», the two would drift apart on the first delivery that
+            // touched one of them.
+            let on_the_strip = OnTheStrip(
+                chrome
+                    .as_ref()
+                    .is_some_and(|chrome| chrome.strip_holds(button.at)),
+            );
+            let for_the_program =
+                DragIntent::from_the_press(button.chord, on_the_strip, self.wants_the_mouse(name))
+                    == DragIntent::ToTheProgram;
 
             // **The cell is resolved before anything is noted down, and that was a defect.** The
             // status panel's columns are inside the pane's rectangle but are not the console's: a
             // press there has no cell to report. Noting it down anyway, the drag that started over
             // the panel of a console whose program asks for the mouse sent that program a gesture
             // that **started outside it** as soon as the pointer came in.
-            let over_the_grid = self.pane_called(name).and_then(|pane| {
-                let console = pane.console_within(*rect, metrics.width(), now);
-                pane.cell_under(console, button.at, metrics)
-            });
+            let over_the_grid =
+                chrome
+                    .as_ref()
+                    .map(|chrome| chrome.console())
+                    .and_then(|console| {
+                        self.pane_called(name)
+                            .and_then(|pane| pane.cell_under(console, button.at, metrics))
+                    });
             let of_the_program = for_the_program && over_the_grid.is_some();
 
             if button.button == egui::PointerButton::Primary {
@@ -521,7 +618,7 @@ impl Window {
 
     /// The presses and releases in this frame's queue.
     ///
-    /// **It does not consume them**, just like [`Self::chord_of_the_press`]: the press is what egui
+    /// **It does not consume them**, just like [`Self::the_primary_press`]: the press is what egui
     /// needs in order to decide who is being dragged, and taking it away would leave the gesture
     /// never starting.
     fn collect_the_buttons(ui: &egui::Ui) -> Vec<ButtonPress> {
@@ -547,7 +644,8 @@ impl Window {
         })
     }
 
-    /// Which chord the primary button was pressed with on this frame, if it was pressed at all.
+    /// Where the primary button was pressed on this frame and with which chord, if it was pressed
+    /// at all.
     ///
     /// **From the event itself and not from the frame's state.** The state describes the **end of
     /// the batch of events**: if the press arrives in the same batch and afterwards the notice that
@@ -558,15 +656,15 @@ impl Window {
     /// **It does not consume the event**, unlike the wheel and the keyboard: the press is what egui
     /// needs in order to start the drag, and taking it away would leave the gesture never starting.
     /// Here it is only looked at.
-    fn chord_of_the_press(ui: &egui::Ui) -> Option<egui::Modifiers> {
+    fn the_primary_press(ui: &egui::Ui) -> Option<(egui::Pos2, egui::Modifiers)> {
         ui.ctx().input(|state| {
             state.events.iter().find_map(|event| match event {
                 egui::Event::PointerButton {
+                    pos,
                     button: egui::PointerButton::Primary,
                     pressed: true,
                     modifiers,
-                    ..
-                } => Some(*modifiers),
+                } => Some((*pos, *modifiers)),
                 _ => None,
             })
         })
@@ -743,7 +841,7 @@ impl Window {
     /// they happened at. The module documents that trap twice already.
     ///
     /// **Only a completely bare press answers**, which is stricter than the conditions
-    /// [`DragIntent::from_chord`] decides a drag by, and deliberately so: a press carrying anything
+    /// [`DragIntent::from_the_press`] decides a drag by, and deliberately so: a press carrying anything
     /// at all is somebody else's gesture and answering it would throw a held paste away in silence,
     /// which is the failure this feature exists to stop. The sharpest case is the chord that moves a
     /// console — it would move a pane *and* lose the paste — and the escape hatch that takes the
@@ -773,6 +871,10 @@ impl Window {
         let theme = self.theme;
         let painter = ui.painter();
         let now = SystemTime::now();
+        // Read before the walk borrows the panes, and for the reason the clock beside it is: the
+        // notices are drawn inside the console, so the box a press is measured against has to be
+        // cut the same way the painting cut it.
+        let headers = self.headers;
         // **One walk over the panes, paired with their rectangles.** Asking `pane_called` inside the
         // loop allocates a vector of every pane once per pane, on every frame, and nothing declares
         // that cost — which the frame's subtraction would publish as the framework's.
@@ -828,9 +930,7 @@ impl Window {
             // tried here and removed: it reads the same unrefreshed state, so it would have said
             // yes in the very case it was written for — a guard whose comment promised more than it
             // did.
-            let console = pane
-                .tile_with_its_panel(*rect, metrics.width(), now)
-                .console;
+            let console = pane.console_within(*rect, metrics, now, headers);
             // **Both boxes in one pass**, because the second is measured against where the first
             // ends and asking for them separately lays the question's text out twice per quiet pane
             // — work this pass would not be declaring (**D13**).
@@ -913,8 +1013,9 @@ impl Window {
         let Some(rect) = rects.get(its_index).copied() else {
             return;
         };
+        let headers = self.headers;
         let Some(cell) = self.pane_called(name).map(|pane| {
-            let console = pane.console_within(rect, metrics.width(), now);
+            let console = pane.console_within(rect, metrics, now, headers);
             pane.clamped_cell(console, button.at, metrics)
         }) else {
             return;
@@ -1095,7 +1196,7 @@ impl Window {
         // not redundant.** There it serves not to promise; here it serves to make the operation
         // safe whoever calls it — the gesture is the only caller today, but the guard does not
         // depend on it staying that way.
-        if !can_split(its_area, side.cut_along(), metrics) {
+        if !can_split(its_area, side.cut_along(), metrics, self.headers) {
             // It is said out loud for the same reason as when splitting: the gesture has finished
             // and nothing has happened, and without this line it reads as if the drag were broken.
             eprintln!(

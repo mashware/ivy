@@ -490,10 +490,17 @@ pub(crate) fn can_split(
     pane_area: egui::Rect,
     cut_along: Orientation,
     metrics: &CellMetrics,
+    headers: crate::header::Headers,
 ) -> bool {
     let minimum = match cut_along {
         Orientation::Columns => panel::MINIMUM_CONSOLE * metrics.width(),
-        Orientation::Rows => MINIMUM_ROWS * metrics.height(),
+        // **The strip counts towards the minimum, and it has to count here.** Each daughter gets one
+        // of its own, so a pane that fits two consoles of three rows no longer fits them once each
+        // owes a strip as well: without this the split is allowed and both consoles come out below
+        // the floor this function exists to keep.
+        Orientation::Rows => {
+            MINIMUM_ROWS * metrics.height() + crate::header::height(metrics, headers)
+        }
     };
 
     cut_along.length_of(pane_area) >= 2.0 * minimum + DIVIDER_THICKNESS

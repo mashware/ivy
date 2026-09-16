@@ -181,6 +181,13 @@ pub struct Spans {
     /// pass whether or not anything came and the span covers the asking, so what the polling costs
     /// is in the report instead of hiding inside the frame's rest.
     control: Duration,
+    /// What painting the strip over this console cost.
+    ///
+    /// **Zero in every published batch, and declared all the same.** The measurement gate switches
+    /// the strip off, so no run of `scripts/measure-frame.sh` as it stands today paints one — but a
+    /// path that is only declared once somebody measures it is a path that arrives undeclared, and
+    /// **D13** rates a cost attributed to whoever did not pay it as worse than no number at all.
+    header: Duration,
 }
 
 impl Spans {
@@ -203,6 +210,7 @@ impl Spans {
             panel,
             buttons: Duration::ZERO,
             control: Duration::ZERO,
+            header: Duration::ZERO,
         }
     }
 
@@ -224,6 +232,13 @@ impl Spans {
         Self { control, ..self }
     }
 
+    /// The same round, saying what painting the strip over its console cost.
+    ///
+    /// Chained rather than a ninth argument, for the reason [`Spans::and_its_buttons`] gives.
+    pub fn and_its_header(self, header: Duration) -> Self {
+        Self { header, ..self }
+    }
+
     /// Merges the spans of **another pass of the same frame**.
     ///
     /// egui may repeat the pass over the same input, and `eframe` calls the two halves of the
@@ -240,7 +255,7 @@ impl Spans {
     /// The wait does not enter, and it is not an oversight: **it is not work**, it is how long the byte
     /// had been in the queue.
     fn declarable(&self) -> Duration {
-        self.interpreted + self.enqueued + self.panel + self.buttons + self.control
+        self.interpreted + self.enqueued + self.panel + self.buttons + self.control + self.header
     }
 
     fn and_also(self, other: Self) -> Self {
@@ -251,6 +266,7 @@ impl Spans {
             panel: self.panel + other.panel,
             buttons: self.buttons + other.buttons,
             control: self.control + other.control,
+            header: self.header + other.header,
         }
     }
 }
@@ -297,6 +313,9 @@ pub struct Timings {
     /// Kept out of `panel` by where the panel's clock starts rather than by a subtraction: see
     /// [`Spans::control`].
     control: Series,
+    /// Painting the strip over this console. Zero in every published batch, and declared all the
+    /// same: see [`Spans::header`].
+    header: Series,
     round: Series,
     /// The previous frame's spans, waiting for `eframe` to publish what it cost.
     pending: Option<Spans>,
@@ -368,6 +387,7 @@ impl Timings {
             self.panel.record(spans.panel);
             self.buttons.record(spans.buttons);
             self.control.record(spans.control);
+            self.header.record(spans.header);
             self.round.record(waited + cpu_cost);
         }
 
@@ -488,6 +508,7 @@ impl Timings {
             writeln!(a, "  the status panel:       {}", self.panel)?;
             writeln!(a, "  the panel's buttons:    {}", self.buttons)?;
             writeln!(a, "  the control channel:    {}", self.control)?;
+            writeln!(a, "  the console's header:   {}", self.header)?;
             // **This span's mean mixes two populations and it has to be said.** Almost every frame
             // only checks the file timestamp and paints the already-laid-out text; the few in which
             // the producer has published cost, on top of that, reading, interpreting and redoing the

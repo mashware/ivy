@@ -2314,7 +2314,9 @@ us most.
   gesture.
 - **A header per pane, in the style of Tilix**, which would be the handle for dragging and would
   carry the close button. **A good idea, and that is why it is not discarded entirely: it becomes a
-  milestone of its own** (see the roadmap). Here it is discarded **as part of F2.6** because of its
+  milestone of its own** (see the roadmap). **That milestone landed, and it is D45**: the price
+  stated below is unchanged, and what answers it is that a measured run does not paint the strip —
+  so the published batches go on comparing with each other. Here it is discarded **as part of F2.6** because of its
   price: a header **takes height away from every console, always**, and this project already took
   that decision the other way round when it stopped painting the tab bar with a single tab —
   precisely so that the grid would be identical to the earlier one and the measurements could be
@@ -6091,3 +6093,73 @@ buffer; the program you opened does not»*. Removing `program` was not the alter
 - **A pane that closes leaves its handles naming nothing**, and using one is refused as gone rather
   than as somebody else's: the window forgets them when the console goes, and the sentence says the
   console is gone.
+
+---
+
+## D45 — Every console carries a strip you drag it by, and a measured run does not paint one
+
+**Decision.** A **strip over every console**, in every tab and with however many panes there are, a
+single console included. It is grabbed with the **primary button and no chord** to take the pane
+somewhere else, which is **D15**'s gesture reached through a second door: the chord of **D20** goes
+on working, unchanged. And **a measurement batch does not paint it**, vetoed by the same gate that
+already vetoes the settings file (**D26**) and forces the cursor's blink off (**D37**); a batch that
+wants one asks for it with a knob of its own.
+
+**Why a strip at all, when the chord already moves panes.** `Ctrl+Shift` is a chord you have to be
+told about: nothing on screen says a console can be moved. The strip is what says it. That is the
+whole of what it buys, and it is why it is the milestone's subject rather than a decoration.
+
+**Why it costs what D20 refused to pay, and what changed.** D20 discarded a header **as part of
+F2.6** for a stated price: a header takes height from every console, always, and with one **the
+published control batches stop comparing with anything** — the same reasoning that keeps the tab bar
+unpainted with a single tab. The arithmetic has not changed; what changed is who pays it. **The bench
+switches the strip off**, so the eighteen published batches keep the grid they were measured with,
+and what the strip costs **will be** measured in a batch of its own against its control — a batch
+that does not exist yet, which is what the closing paragraph of this decision says. D20 is amended
+here, not reopened: its reason stands and this is the answer to it.
+
+**The price of that answer, said rather than hidden.** With the gate on, every published batch
+describes a console **one row per pane taller** than the one a person sees. The numbers stay
+comparable with each other and stop being comparable with the product, and the new batch is the only
+place the difference is visible. Nothing forces a later milestone to re-baseline.
+
+**Why the knob is an opt-in outside the five measurement variables.** The script exports the window
+size on **every** batch, so the gate holds in every run: with the gate alone deciding, the batch that
+exists to measure the strip could never paint one. It is the shape the script's per-batch switches
+already have — the ones that turn on the Japanese dump, the emoji dump and the panel's buttons.
+
+**Why the strip is a second door into the same gesture and not a gesture of its own.** Everything
+that hangs off moving a pane — the identity the drag is held by, the half previewed before dropping,
+the tree transformed by value or not at all (**D15**), D20's latch — is earned once. A widget of its
+own would have to earn every one of them again, and two mechanisms that must agree about one gesture
+is how they stop agreeing.
+
+**What it drags along, and it is in the code with its tests.**
+
+- **The row is reserved wherever it is painted, and nowhere else.** One value decides both, resolved
+  once at startup beside the settings the same gate vetoes. There is no regime where a row is
+  reserved and not drawn, or drawn and not reserved.
+- **A pointer is measured against the console's rectangle, never the pane's.** Otherwise every
+  selection and every mouse report slides by a row and a press on the strip reaches the program as
+  row 0. The seam was moved first, in a delivery of its own that changed no behaviour.
+- **Splitting counts the strip.** Each daughter owes one, so a pane that fits two consoles of three
+  rows no longer fits them: it is refused instead of producing two consoles below the floor.
+- **The cut is bounded.** `Rect::split_top_bottom_at_y` builds an inverted rectangle when the cut
+  falls past the bottom (emath 0.36.1), which a window dragged shorter than a pane's strip reaches.
+- **What it costs the frame is declared on its own line** (**D13**): a path that is not declared is
+  published as the framework's cost, which is the figure **D3** judges egui by. It is zero in every
+  published batch, and declared all the same.
+
+**What was discarded, and why.**
+
+| Discarded | Why |
+|---|---|
+| Re-running the seventeen published series with the strip on | Days of machine time to restate what is already known, and the two halves would still not be comparable with anything published before |
+| Splitting the history into «pre-header» and «post-header» | Two series that cannot be compared, and every later reader having to know which one they are holding |
+| A setting to switch the strip off | The decision taken is «always»; the only regime that needs it off is the bench, and that is the gate. A key would also have to join the manual's table and its floor |
+| Showing it only where a pane has siblings | A console that is alone can still be dragged onto another tab's layout later, and a strip that comes and goes teaches nobody that the gesture exists |
+| Chrome overlaid by proximity, with no row of its own | **D20** already discarded it: it has to be discovered and leaves no room for the close button. Kept as the fallback if the measurement makes the row unaffordable |
+| A widget of its own for the strip | See above: it would have to re-earn the identity, the preview, the atomicity and the latch |
+
+**Measured.** The annex belongs to the batch that asks for a strip and to its control, and it is
+owed by the delivery that adds them. Until it is published, this decision claims no number.

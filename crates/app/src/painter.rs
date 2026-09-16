@@ -149,6 +149,26 @@ impl CellMetrics {
         }
     }
 
+    /// A metric with the two sizes written out, **for a test whose subject is arithmetic**.
+    ///
+    /// Measuring for real needs a context, and a module that only does rectangle arithmetic would
+    /// have to open a window to check a sum. This is the same helper `painter`'s own tests already
+    /// built by hand with the fields in front of them; it exists so that a sibling module can have
+    /// one too without the fields being opened — they stay private together for the reason the
+    /// struct gives.
+    ///
+    /// **One device pixel to the point**, so the snapping neither moves a corner nor a size and the
+    /// test's arithmetic reads as it is written.
+    #[cfg(test)]
+    pub(crate) fn of(width: f32, height: f32) -> Self {
+        Self {
+            width,
+            height,
+            font: FontId::monospace(14.0),
+            per_point: 1.0,
+        }
+    }
+
     /// How wide a cell is.
     ///
     /// It can be read, but not set: whoever measures a grid needs this number —to place two consoles
@@ -584,6 +604,37 @@ pub struct Blink {
     pub focused: bool,
 }
 
+/// The two things the frame resolves before it walks the panes, travelling together.
+///
+/// **It is an argument count and it is said so**, rather than dressed up as a concept: painting a
+/// console reached eight arguments with the strip's decision, and the lint that guards this crate
+/// stops at seven. Riding the two in one value is the same answer [`Blink::focused`] already gave
+/// one level down, for the same reason its docblock gives — an eighth argument is where a reader
+/// stops being able to tell which value is which.
+///
+/// **Neither of the two is purely the session's**: the strip's decision is, but the blink arrives
+/// **narrowed per console** with [`Blink::on`], because whether the cursor is lit depends on which
+/// console has the keyboard.
+#[derive(Clone, Copy)]
+pub(crate) struct HowToPaint {
+    /// Whether this console's cursor is lit, and for how much longer.
+    pub(crate) blink: Blink,
+    /// Whether a strip is painted over it. See [`crate::header::Headers`].
+    pub(crate) headers: crate::header::Headers,
+}
+
+impl HowToPaint {
+    /// The two of them, in the order the frame resolves them.
+    ///
+    /// **It exists to keep the call site one line long**, which is not a style preference here:
+    /// `lib.rs` is a ratchet that may only shrink (**D28**), and the literal form of this value
+    /// costs that file three lines for nothing. The tests build it as a literal, which is fine —
+    /// they are not counted.
+    pub(crate) fn of(blink: Blink, headers: crate::header::Headers) -> Self {
+        Self { blink, headers }
+    }
+}
+
 impl Blink {
     /// Whether the cursor is lit, and how long until it flips. `None` once the blink has stopped.
     ///
@@ -798,8 +849,9 @@ pub(crate) fn paint_pane(
     theme: &Theme,
     metrics: &CellMetrics,
     discoverer: &mut crate::fonts::Discoverer,
-    blink: Blink,
+    how: HowToPaint,
 ) -> crate::PaneOutcome {
+    let HowToPaint { blink, headers } = how;
     // **The panel is timed apart from the console's queueing, with two clocks that are added
     // together: one around reading and tiling, and another around painting it.** They are two
     // and not one because the console's painting falls right in between and has a span of its
@@ -821,7 +873,11 @@ pub(crate) fn paint_pane(
     // A single clock for tiling and for painting: if the panel were to age between the two
     // questions, a strip would be reserved for a warning that never gets painted.
     let now = std::time::SystemTime::now();
-    let mut panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
+    // **The strip is cut here and the panel is tiled over what is left**, so the console's
+    // rectangle comes out of one split and not out of two agreeing by accident. See
+    // [`crate::Pane::chrome_within`].
+    let chrome = pane.chrome_within(rect, metrics, now, headers);
+    let mut panel_split = chrome.split();
 
     // **The panel's border is attended to here, before measuring the grid, and the tiling is
     // redone in this very pass.** With the gesture attended to afterwards, the frame would
@@ -845,8 +901,8 @@ pub(crate) fn paint_pane(
     // the report under the «effects» label and the annex reads it as tilings and layouts,
     // counting a fold in there would be publishing work that did not happen.
     let width_before = pane.panel_width;
-    if pane.drag_its_panel_divider(ui, rect, panel_split.panel, metrics, now) {
-        panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
+    if pane.drag_its_panel_divider(ui, chrome.below(), panel_split.panel, metrics, now) {
+        panel_split = pane.tile_with_its_panel(chrome.below(), metrics.width(), now);
     }
     let width_changed = pane.panel_width != width_before;
     let cost_of_reading = refreshed.reading + before_the_panel.elapsed();
@@ -899,6 +955,15 @@ pub(crate) fn paint_pane(
     // so that nothing creeps in; letting a seventh in would be a published series quietly changing
     // meaning, which this file records having paid for twice.
     let panel_cost = cost_of_reading + before_painting_it.elapsed().saturating_sub(buttons);
+
+    // **The strip is painted last of the pane's own painting and timed on its own** (**D13**): the
+    // frame's cost is split by subtraction, so a band painted inside somebody else's span would be
+    // published as that span's, and one painted inside no span at all as the framework's. It goes
+    // after the console because that is the order the notices already follow — chrome the
+    // application owns goes over what the program wrote, never under it.
+    let header_cost = chrome.header().map_or(std::time::Duration::ZERO, |header| {
+        crate::header::paint(&ui.painter_at(header), header, theme, metrics)
+    });
     // **The border is only reported if there is a grip behind it.** With the panel clipped
     // below the grip the gesture registers no control at all —so as not to steal the point from
     // the tree's divider—, and reporting the border anyway made the injected gesture press
@@ -924,7 +989,8 @@ pub(crate) fn paint_pane(
                 panel_cost,
             )
             .and_its_buttons(buttons)
-            .and_its_control(refreshed.applying),
+            .and_its_control(refreshed.applying)
+            .and_its_header(header_cost),
         );
     }
 

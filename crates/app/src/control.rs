@@ -432,7 +432,7 @@ impl Window {
             .position(|pane| pane.name == origin)
             .ok_or_else(gone)?;
         let its_area = self.tabs[tab_index].root.place(area, metrics.width()).parts[at];
-        if !can_split(its_area, cut_along, metrics) {
+        if !can_split(its_area, cut_along, metrics, self.headers) {
             return Err(
                 "the console cannot give both children their minimum; make the window bigger"
                     .to_owned(),

@@ -87,6 +87,7 @@ const MARGIN: f32 = 1.0;
 /// It has a name, and is not a tuple, for the same reason [`crate::tiling::Tiling`] has one, which does the same
 /// between the two consoles: two divisions in the same frame that read differently would be two
 /// languages for a single idea.
+#[derive(Clone, Copy)]
 pub struct PanelTiling {
     /// What is left to the console, which is what its grid has to be measured against.
     pub console: Rect,

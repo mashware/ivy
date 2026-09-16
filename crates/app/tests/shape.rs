@@ -64,6 +64,7 @@ const MODULES: &[(&str, &str)] = &[
     ),
     ("src/session.rs", include_str!("../src/session.rs")),
     ("src/fonts.rs", include_str!("../src/fonts.rs")),
+    ("src/header.rs", include_str!("../src/header.rs")),
     ("src/settings.rs", include_str!("../src/settings.rs")),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs")),
     ("src/painter.rs", include_str!("../src/painter.rs")),
@@ -118,7 +119,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    940,
+    894,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -189,7 +190,19 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          position into a cell take the console's rectangle instead of the pane's, and the shorter \
          name let rustfmt fold a six-line signature into one. Nothing was moved and nothing was \
          deleted — the formatter decides what this number counts, and here it decided in the \
-         file's favour. Nine hundred and forty-five less five leaves **940**.",
+         file's favour. Nine hundred and forty-five less five leaves **940**. **And the delivery \
+         that actually cut the strip paid it the way D28 prescribes, with the piece its own subject \
+         names**: attending the border between a console and its panel went out to \
+         `panel/pane.rs`, **53 production lines**, which is the module that already answered how \
+         much of its rectangle a pane's panel takes — and going `pub(crate)` on the way widened \
+         nothing, because it lived in the crate's root module where every module could already \
+         reach it. Against that, the strip spends **seven** lines back here: the `mod`, the two \
+         fields a window keeps (whether it paints strips at all, and where the last press fell), \
+         their two seeds, the one that reads the knob at startup, the one that resolves it, and \
+         the one that reads it once per walk — **less the one the clippy ceiling gave back**, \
+         because grouping the blink and the strip into one value took the painting's call from \
+         eight arguments to seven and two lines to one. Fifty-three out and six net in against 940 \
+         leaves **894**.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.

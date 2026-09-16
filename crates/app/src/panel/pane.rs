@@ -13,8 +13,9 @@ use panel_contract::PanelDir;
 
 use eframe::egui;
 
-use crate::Pane;
-use crate::panel;
+use crate::painter::CellMetrics;
+use crate::tiling::{DIVIDER_THICKNESS, Orientation};
+use crate::{PANEL_GRIP, Pane, panel};
 
 /// What one refresh of a pane's panel cost, split by **which transport it was spent on**.
 ///
@@ -157,26 +158,346 @@ impl Pane {
         )
     }
 
+    /// How a pane's rectangle is shared out between its strip, its console and its panel.
+    ///
+    /// **One function makes both cuts, and that is the whole reason this exists.** The grid a
+    /// program is told about is measured from `console` ([`crate::painter::paint_pane`]) and every
+    /// pointer is counted from that same rectangle ([`Pane::console_within`]); with the two cuts
+    /// made in two places, a delivery that changes one of them slides every selection and every
+    /// mouse report by a row without anything failing.
+    ///
+    /// The clock is passed in for the reason [`Pane::tile_with_its_panel`] gives: two clocks in one
+    /// pass can disagree about whether a panel is still there.
+    pub(crate) fn chrome_within(
+        &self,
+        rect: egui::Rect,
+        metrics: &CellMetrics,
+        now: SystemTime,
+        headers: crate::header::Headers,
+    ) -> PaneChrome {
+        // **The strip is taken off first, and the order is the decision.** The panel is cut from
+        // the right and the strip from the top, so arithmetically the order changes nothing; what
+        // it changes is what the panel's own border is registered over. Cut the other way round,
+        // that border's grip would run the full height of the pane and would cover the right-hand
+        // end of the strip — and being registered later, it would win the tie: the one band that
+        // exists to be grabbed would not be grabbable at its own corner.
+        let (header, below) = crate::header::set_the_header_aside(rect, metrics, headers);
+
+        PaneChrome {
+            header,
+            below,
+            split: self.tile_with_its_panel(below, metrics.width(), now),
+        }
+    }
+
+    /// Attends the border between this console and its panel, and returns whether the width
+    /// changed.
+    ///
+    /// **It came out of `lib.rs` with the delivery that cut the strip** (**D28**: a delivery that
+    /// needs room in a file takes a piece out of it first), and it came **here** because this module
+    /// is the one that already answers how much of its rectangle a pane's panel takes. It became
+    /// `pub(crate)` on the way, which widens nothing: it lived in the crate's root module, where
+    /// every module of the crate could already reach it.
+    ///
+    /// **The identifier carries the pane's name, never its place.** egui holds a drag between
+    /// frames by that identifier, and this one lasts as long as the button is held down. The chords
+    /// for splitting, closing and switching tabs are applied **at the start of the same pass**,
+    /// long before the mouse is attended: with the position inside, grabbing this border and
+    /// pressing one of those chords without letting go would narrow another console's panel. The
+    /// reasoning that does allow the tree's dividers to be indexed by position —that their drag is
+    /// resolved within the same frame— does not hold here.
+    ///
+    /// **The handle is an invisible strip straddling the cut**, wider than the line a tree divider
+    /// paints but painting none. Neither the geometry nor the look changes: between the console and
+    /// its panel there is no line, and putting one in would deduct its thickness from the tiling
+    /// and would move every console's grid — the comparison with the earlier measurements would be
+    /// lost to gain an ornament.
+    ///
+    /// **And it is not mounted if the panel has no width.** There its border coincides with the
+    /// pane's edge, that is, with the divider that tiles consoles; as this control is registered
+    /// afterwards, it would win the tie and would leave dead the border that does move something —
+    /// in exchange for resizing a panel that is not on show.
+    ///
+    /// **The width is asked for in cells from the pointer's position, not by accumulating its
+    /// displacement.** An accumulator falls out of step with the mouse as soon as the floor or the
+    /// ceiling clips one frame: the pointer would go on descending and the panel would not, and on
+    /// coming back the whole of that stretch would have to be retraced before the border moved.
+    pub(crate) fn drag_its_panel_divider(
+        &mut self,
+        ui: &egui::Ui,
+        pane_area: egui::Rect,
+        panel: Option<egui::Rect>,
+        metrics: &CellMetrics,
+        now: SystemTime,
+    ) -> bool {
+        // **Folded there is no panel, and even so somewhere to grab has to be left**: if the border
+        // went away with it, the gesture that closed it could not be undone with the mouse. The
+        // handle stays stuck to the pane's right edge, **inwards**.
+        //
+        // **Inwards and not straddling, unlike the one of a border with a panel.** A pane's right
+        // edge is where the divider that tiles consoles begins, and this control is registered
+        // afterwards: straddling, it would win the tie and would leave dead the border that does
+        // move something. The price of putting it inwards is declared and is small: on a folded
+        // console, the band at the right edge grabs its panel and not the console, so there it
+        // cannot be picked up to be carried elsewhere.
+        let cut_along = match panel {
+            // **A panel narrower than the handle itself is not grabbable by its border**, and the
+            // threshold is the handle and not zero: with zero, a panel of two points left the band
+            // of eight **covering the divider** that tiles the consoles, and as this control is
+            // registered afterwards it won the tie — the console could not be widened again. The
+            // review found it, with the exact-zero test in the green.
+            Some(panel_rect) if panel_rect.width() <= PANEL_GRIP => return false,
+            Some(panel_rect) => panel_rect.left(),
+            // **Folded there is a handle, but only if there is a panel to unfold.** If the producer
+            // stopped publishing while it was folded there is nothing left to show, and setting
+            // aside a band of eight points there would take from the console its right edge —the
+            // place it is grabbed by to be carried elsewhere— in exchange for unfolding a panel
+            // that does not exist.
+            None if self.folded && self.panel_state.is_visible(now) => {
+                // **And one divider thickness is withdrawn from the edge**, so that the band does
+                // not reach the point where that divider begins. egui's rectangles contain both
+                // their ends and ties are won by the last one registered, which is this one:
+                // without the withdrawal, the exact point of the edge resized the panel instead of
+                // moving the console tiling. It is the same tie the narrow-panel guard avoids, and
+                // the price D10 declares is only over the console, not over the divider.
+                pane_area.right() - PANEL_GRIP - DIVIDER_THICKNESS
+            }
+            // With no panel and not folded there is nothing to show nor to adjust: it is a console
+            // whose producer has published nothing.
+            None => return false,
+        };
+
+        let grip = egui::Rect::from_min_max(
+            egui::pos2(cut_along - PANEL_GRIP, pane_area.top()),
+            egui::pos2(cut_along + PANEL_GRIP, pane_area.bottom()),
+        );
+
+        // `Sense::DRAG` and not `Sense::drag()`: the second adds `FOCUSABLE`, that is, the border
+        // would ask for egui's keyboard focus and would compete with the application's geographic
+        // routing.
+        //
+        // **And grabbing this border does not give its console the focus, unlike grabbing the
+        // console.** It is deliberate and goes with the other borders: moving the divider that
+        // tiles two consoles does not change where the keys go either. What gives the focus is
+        // grabbing **a console**, because that does say which one you want to work in; adjusting a
+        // panel's width does not say it.
+        let id = ui.id().with(("panel-border", self.name));
+        let response = ui
+            .interact(grip, id, egui::Sense::DRAG)
+            // While it is being dragged too, and above all in the frame where it is released: there
+            // the drag has already ended and the pointer may have been left outside the handle,
+            // where the cursor would flicker to an arrow right at the end of the maneuver.
+            .on_hover_and_drag_cursor(Orientation::Columns.cursor());
+
+        // **Only the primary button, and only if the pointer has moved.** The two conditions cover
+        // two different holes, and both are in egui 0.36.1's source:
+        //
+        // - `interaction.rs:162` matches `PointerEvent::Pressed { .. }` **without looking at which
+        //   button it was**, so the middle one —X11's paste— and the right one —the selection in
+        //   almost any terminal— arm the drag as well. It is the same guard the console drag
+        //   already has and documents.
+        // - A control that only senses drags is marked as dragged **on the press itself**, with no
+        //   movement (`interaction.rs:219-220`, with its comment). And that, over a pane where the
+        //   tiling is clipping the panel, is destructive: the handle is painted at the **clipped**
+        //   cut, so a bare click would read that cut as intent and would wipe out the width the
+        //   user had asked for when the window was wider. Demanding movement is what separates «I
+        //   have pressed here» from «I want this width».
+        if !response.dragged_by(egui::PointerButton::Primary) || response.drag_delta().x == 0.0 {
+            return false;
+        }
+
+        let Some(pointer) = response.interact_pointer_pos() else {
+            return false;
+        };
+
+        // **The ceiling is what the tiling can honor today, not what the pane measures.** During a
+        // gesture what the user asks for is what they see, and the tiling is not going to give them
+        // more than what is spare after the console's floor: saving more would be saving a width
+        // they never saw, and which would appear all at once on widening the window.
+        //
+        // **And the ceiling is applied only on writing, which is what makes shrinking the window
+        // not erase what was asked for.** With no gesture this is not gone through, so a panel of
+        // thirty-six cells saved in a wide window survives a narrow one: it is painted clipped and
+        // comes back whole on widening.
+        //
+        // The pane's number of cells comes from [`CellMetrics::cells_in`] so as not to repeat here
+        // a conversion that function already does with its floor and its ceiling. **But its cap is
+        // not the one that is needed and it is worth saying so:** it is a thousand columns, a grid
+        // limit, not «the rectangle corresponds to a real window». With the ten thousand points of
+        // reserve egui returns while the desktop has not said its size, this ceiling comes out at
+        // almost a thousand cells and **lets through** a width no real window is going to have.
+        // What really stops that from being saved is the guard below: a drag demands that the
+        // pointer has moved, and in those first two frames there is nobody dragging.
+        let fits = metrics.cells_in(pane_area.size()).cols as usize;
+        let ceiling = fits
+            .saturating_sub(panel::MINIMUM_CONSOLE as usize)
+            .max(panel::DRAG_FLOOR);
+
+        // **No guard against a non-finite value, and this time with the four paths enumerated.**
+        // The review warned that, since asking for less than the floor means **folding**, a zero is
+        // no longer raised by the floor: it would fold the panel. The warning is correct in its
+        // reasoning and the scenario **is not reachable**; the guard was put in, it was mutated,
+        // and **the mutation survived**. Enumerating where a non-finite value could come from:
+        //
+        // - **The pane's rectangle with no number.** The handle is built from its coordinates, so
+        //   it comes out with no number too, and egui **does not deliver the drag of a control like
+        //   that** — checked: the method leaves through the «nobody is dragging me» door and never
+        //   gets this far.
+        // - **The pointer's position with no number.** Impossible: `interact_pointer_pos` returns
+        //   `None` when the position holds a `NaN` (`response.rs:545-548`), and that has already
+        //   been returned from.
+        // - **A cell of zero width, with the pointer anywhere but the edge.** It gives infinity,
+        //   which on being converted to an integer saturates at the maximum and the ceiling brings
+        //   it down. It does not fold.
+        // - **A cell of zero width, with the pointer right on the right edge.** It gives `NaN`,
+        //   which falls to zero and folds — and **asking for zero from the right edge is exactly
+        //   asking for it to be folded**.
+        //
+        // All four give the correct result or do not happen, so the guard would be a mechanism with
+        // no scenario. Its sibling the border drag does need it, and that is why it has it: there
+        // the state is a fraction and a clip over a `NaN` returns it untouched. **What separates «I
+        // have pressed here» from «I want this width»: that the pointer has crossed at least half a
+        // cell from where the panel is cut right now.** And it has to be said why it is *this* and
+        // not what the review proposed, because both things were tried.
+        //
+        // **The hole was real.** The handle is drawn where the tiling **clips** the panel, which in
+        // a narrow pane is not the width the user asked for; reading the pointer's position as
+        // intent turns a press into «I want the clipped width» and wipes out for ever what had
+        // been asked for with the window wide. The first protection demanded that the width asked
+        // for *departed* from the painted one, and it **only moved the hole**: a half-cell tremble
+        // already makes them different, and the two tests watching it used zero and one point — the
+        // suite was green with the defect inside, which is the small-margin disguise the project's
+        // hard rule names.
+        //
+        // **And the fix the review proposed —anchoring to the saved width and adding the
+        // displacement to it— was implemented, was mutated and did NOT change a single outcome.**
+        // The reason can be followed with a pencil: when the tiling clips, what it paints **is**
+        // the ceiling (`fits - MINIMUM_CONSOLE`), so the direct reading gives `ceiling +
+        // displacement` and the anchor gives `saved + displacement`, and the `min(ceiling)` below
+        // leaves both at `ceiling`. And where there is no clipping, both coincide by construction.
+        // A mechanism that cannot change an outcome is a mechanism with no scenario, so out it
+        // goes.
+        //
+        // What really closes the hole is the guard here: without half a cell crossed the state is
+        // not touched, **be the tremble one point or four**.
+        let painted_cut = panel.map_or(pane_area.right(), |panel_rect| panel_rect.left());
+        if ((painted_cut - pointer.x) / metrics.width()).round() == 0.0 {
+            return false;
+        }
+        // The negative and what is not a number fall to zero on being converted to an integer,
+        // which is what makes pushing beyond the right edge ask for zero — that is, ask for a fold.
+        let requested = ((pane_area.right() - pointer.x) / metrics.width()).round() as usize;
+
+        // **Folding is dragging to the end, which is how the project's written decision defines it:
+        // asking for less than the floor.** And unfolding is the symmetric thing — pulling the
+        // handle inwards.
+        //
+        // **Neither one nor the other touches the saved width, and there lies the detail that makes
+        // unfolding give back what the user asked for.** Folding merely stops asking for it;
+        // unfolding asks again for **the same one**, so the panel reappears with its earlier width
+        // and not with the factory one. From that frame on the drag goes on ruling, which is what
+        // was decided: your width, and the mouse ruling from there.
+        //
+        // > **Declared blind spot:** egui can repeat the pass over the same input, and the second
+        // > one no longer sees the panel folded, so it writes the pointer's width instead of
+        // > keeping the saved one. The two are halves of what was decided —the earlier width, and
+        // > the mouse ruling— so no state of our own is invented to force one of the two. It is
+        // > left said because it is the class of difference between frames this project has already
+        // > paid for once without seeing it.
+        if requested < panel::DRAG_FLOOR {
+            let changed = !self.folded;
+            self.folded = true;
+            return changed;
+        }
+        if self.folded {
+            self.folded = false;
+            return true;
+        }
+
+        // `min` and not `clamp`: the floor was already applied by the folding branch, seven lines
+        // above. A `clamp` here would read as if this line defended it, and it defends nothing —
+        // and along the way the form that panics when the minimum exceeds the maximum disappears.
+        let new = requested.min(ceiling);
+        let changed = new != self.panel_width;
+        self.panel_width = new;
+        changed
+    }
+
     /// The rectangle its console really occupies inside the pane's, which is **the one a pointer is
     /// measured against**.
     ///
     /// **It exists so that there is one answer to «where does the console start», and not two.** The
-    /// grid a program is told about comes out of this same split
-    /// ([`Pane::tile_with_its_panel`]), and whoever turns a pointer's position into a cell has to
-    /// start counting from the same corner: with the pane's rectangle the two agree only for as
-    /// long as nothing is taken off the top, and the first thing that is —a header over each
-    /// console— would slide every selection and every mouse report by a row without anything
-    /// failing.
-    ///
-    /// The clock is passed in for the reason the split gives: two clocks in one pass can disagree
-    /// about whether a panel is still there.
+    /// grid a program is told about comes out of this same split ([`Pane::chrome_within`]), and
+    /// whoever turns a pointer's position into a cell has to start counting from the same corner:
+    /// with the pane's rectangle the two agree only for as long as nothing is taken off the top, and
+    /// the first thing that is —the strip over each console— slides every selection and every mouse
+    /// report by a row without anything failing.
     pub(crate) fn console_within(
         &self,
         rect: egui::Rect,
-        cell_width: f32,
+        metrics: &CellMetrics,
         now: SystemTime,
+        headers: crate::header::Headers,
     ) -> egui::Rect {
-        self.tile_with_its_panel(rect, cell_width, now).console
+        self.chrome_within(rect, metrics, now, headers).console()
+    }
+}
+
+/// What a pane's rectangle is shared out into.
+///
+/// **The panel's own division travels whole and is not flattened into this one.** Taking its two
+/// rectangles apart here forced the painting to put a [`panel::PanelTiling`] back together field by
+/// field in order to hand it on — a second place deciding what that type is, in the one delivery
+/// whose whole point is that there is a single place deciding where a console starts.
+///
+/// **The fields are private and read through their accessors**, which is [`CellMetrics`]' standard
+/// in this crate: with them open anybody can build a chrome whose strip and whose console overlap,
+/// and the one thing this type is for is that the two cuts agree. The only way to make one is
+/// [`Pane::chrome_within`].
+#[derive(Clone, Copy)]
+pub(crate) struct PaneChrome {
+    header: Option<egui::Rect>,
+    below: egui::Rect,
+    split: panel::PanelTiling,
+}
+
+impl PaneChrome {
+    /// The strip over the console, or nothing where none is painted — which is every measured run.
+    pub(crate) fn header(&self) -> Option<egui::Rect> {
+        self.header
+    }
+
+    /// What is left of the pane once the strip is off: the console and its panel together.
+    ///
+    /// **It is what the panel's border is registered over**, and what the panel's width is measured
+    /// against. Recomputing it at either of those call sites would be the second place that decides
+    /// where the strip ends.
+    pub(crate) fn below(&self) -> egui::Rect {
+        self.below
+    }
+
+    /// What is left to the console, **and what its grid and every pointer are measured against**.
+    pub(crate) fn console(&self) -> egui::Rect {
+        self.split.console
+    }
+
+    /// The panel's own division of what is below the strip, whole.
+    pub(crate) fn split(&self) -> panel::PanelTiling {
+        self.split
+    }
+
+    /// Whether a press at that point belongs to the strip.
+    ///
+    /// **Exclusive of the bottom edge, and that is the whole of this method.**
+    /// [`egui::Rect::contains`] is inclusive on both edges and the cut leaves the strip's bottom
+    /// **equal** to the console's top, so the one line the two share answered yes twice: a press
+    /// there both fell on the strip and resolved to row 0 of the console. What that costs is a
+    /// press that moves the pane where somebody meant to mark, and a program that asked for the
+    /// mouse never being told about a click on its own first row. It is the same tie the panel's
+    /// grip documents twice, decided here in the one place both callers read.
+    pub(crate) fn strip_holds(&self, at: egui::Pos2) -> bool {
+        self.header
+            .is_some_and(|strip| strip.contains(at) && at.y < strip.bottom())
     }
 }
 

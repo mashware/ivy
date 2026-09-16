@@ -38,6 +38,7 @@ mod closing;
 pub(crate) mod control;
 use panel::pane::{identity_of, panel_or_none};
 pub mod fonts;
+mod header;
 mod injected;
 pub mod keyboard;
 pub mod measure;
@@ -676,6 +677,12 @@ pub fn run() -> eframe::Result {
     // comparable. See [`SIZE_VARIABLE`].
     let requested = size_at_startup();
     let injected_drags = drags_at_startup();
+    // **Read here with the rest of the environment, and not inside the closure**, which is where
+    // every other gate of this function is read. It is **applied** to the window after it is built,
+    // like the theme and the injected gestures beside it — `Window::opening` is born painting strips
+    // and a measured session takes them away, so no test depends on what the session that launched
+    // it exported.
+    let wants_headers = std::env::var_os(header::HEADER_VARIABLE).is_some();
     if let Some(size) = requested {
         options.viewport = options.viewport.with_inner_size(size);
     }
@@ -700,6 +707,11 @@ pub fn run() -> eframe::Result {
             // constructors with thirty-three calls among tests, and none of them configures
             // anything.
             window.apply_the_settings(&settings);
+            // **The strip is switched off by the same gate that vetoes the settings file**, and a
+            // batch opts back into it with a knob of its own: a header takes a row from every
+            // console, so a measured run that painted one would publish a grid no published batch
+            // was measured with. See [`header::Headers::resolved`].
+            window.headers = header::Headers::resolved(entry, wants_headers);
             // **The font goes apart from the rest of the settings, and it is not tidiness.** The
             // others put a value on the window; this one talks to the text engine and **costs
             // between 17.3 and 23.2 ms** (**D24**) because resolving a name forces enumerating the
@@ -1151,233 +1163,6 @@ impl Pane {
             + std::mem::take(&mut self.control_unpainted)
     }
 
-    /// Attends the border between this console and its panel, and returns whether the width
-    /// changed.
-    ///
-    /// **The identifier carries the pane's name, never its place.** egui holds a drag between
-    /// frames by that identifier, and this one lasts as long as the button is held down. The chords
-    /// for splitting, closing and switching tabs are applied **at the start of the same pass**,
-    /// long before the mouse is attended: with the position inside, grabbing this border and
-    /// pressing one of those chords without letting go would narrow another console's panel. The
-    /// reasoning that does allow the tree's dividers to be indexed by position —that their drag is
-    /// resolved within the same frame— does not hold here.
-    ///
-    /// **The handle is an invisible strip straddling the cut**, wider than the line a tree divider
-    /// paints but painting none. Neither the geometry nor the look changes: between the console and
-    /// its panel there is no line, and putting one in would deduct its thickness from the tiling
-    /// and would move every console's grid — the comparison with the earlier measurements would be
-    /// lost to gain an ornament.
-    ///
-    /// **And it is not mounted if the panel has no width.** There its border coincides with the
-    /// pane's edge, that is, with the divider that tiles consoles; as this control is registered
-    /// afterwards, it would win the tie and would leave dead the border that does move something —
-    /// in exchange for resizing a panel that is not on show.
-    ///
-    /// **The width is asked for in cells from the pointer's position, not by accumulating its
-    /// displacement.** An accumulator falls out of step with the mouse as soon as the floor or the
-    /// ceiling clips one frame: the pointer would go on descending and the panel would not, and on
-    /// coming back the whole of that stretch would have to be retraced before the border moved.
-    fn drag_its_panel_divider(
-        &mut self,
-        ui: &egui::Ui,
-        pane_area: egui::Rect,
-        panel: Option<egui::Rect>,
-        metrics: &CellMetrics,
-        now: SystemTime,
-    ) -> bool {
-        // **Folded there is no panel, and even so somewhere to grab has to be left**: if the border
-        // went away with it, the gesture that closed it could not be undone with the mouse. The
-        // handle stays stuck to the pane's right edge, **inwards**.
-        //
-        // **Inwards and not straddling, unlike the one of a border with a panel.** A pane's right
-        // edge is where the divider that tiles consoles begins, and this control is registered
-        // afterwards: straddling, it would win the tie and would leave dead the border that does
-        // move something. The price of putting it inwards is declared and is small: on a folded
-        // console, the band at the right edge grabs its panel and not the console, so there it
-        // cannot be picked up to be carried elsewhere.
-        let cut_along = match panel {
-            // **A panel narrower than the handle itself is not grabbable by its border**, and the
-            // threshold is the handle and not zero: with zero, a panel of two points left the band
-            // of eight **covering the divider** that tiles the consoles, and as this control is
-            // registered afterwards it won the tie — the console could not be widened again. The
-            // review found it, with the exact-zero test in the green.
-            Some(panel_rect) if panel_rect.width() <= PANEL_GRIP => return false,
-            Some(panel_rect) => panel_rect.left(),
-            // **Folded there is a handle, but only if there is a panel to unfold.** If the producer
-            // stopped publishing while it was folded there is nothing left to show, and setting
-            // aside a band of eight points there would take from the console its right edge —the
-            // place it is grabbed by to be carried elsewhere— in exchange for unfolding a panel
-            // that does not exist.
-            None if self.folded && self.panel_state.is_visible(now) => {
-                // **And one divider thickness is withdrawn from the edge**, so that the band does
-                // not reach the point where that divider begins. egui's rectangles contain both
-                // their ends and ties are won by the last one registered, which is this one:
-                // without the withdrawal, the exact point of the edge resized the panel instead of
-                // moving the console tiling. It is the same tie the narrow-panel guard avoids, and
-                // the price D10 declares is only over the console, not over the divider.
-                pane_area.right() - PANEL_GRIP - DIVIDER_THICKNESS
-            }
-            // With no panel and not folded there is nothing to show nor to adjust: it is a console
-            // whose producer has published nothing.
-            None => return false,
-        };
-
-        let grip = egui::Rect::from_min_max(
-            egui::pos2(cut_along - PANEL_GRIP, pane_area.top()),
-            egui::pos2(cut_along + PANEL_GRIP, pane_area.bottom()),
-        );
-
-        // `Sense::DRAG` and not `Sense::drag()`: the second adds `FOCUSABLE`, that is, the border
-        // would ask for egui's keyboard focus and would compete with the application's geographic
-        // routing.
-        //
-        // **And grabbing this border does not give its console the focus, unlike grabbing the
-        // console.** It is deliberate and goes with the other borders: moving the divider that
-        // tiles two consoles does not change where the keys go either. What gives the focus is
-        // grabbing **a console**, because that does say which one you want to work in; adjusting a
-        // panel's width does not say it.
-        let id = ui.id().with(("panel-border", self.name));
-        let response = ui
-            .interact(grip, id, egui::Sense::DRAG)
-            // While it is being dragged too, and above all in the frame where it is released: there
-            // the drag has already ended and the pointer may have been left outside the handle,
-            // where the cursor would flicker to an arrow right at the end of the maneuver.
-            .on_hover_and_drag_cursor(Orientation::Columns.cursor());
-
-        // **Only the primary button, and only if the pointer has moved.** The two conditions cover
-        // two different holes, and both are in egui 0.36.1's source:
-        //
-        // - `interaction.rs:162` matches `PointerEvent::Pressed { .. }` **without looking at which
-        //   button it was**, so the middle one —X11's paste— and the right one —the selection in
-        //   almost any terminal— arm the drag as well. It is the same guard the console drag
-        //   already has and documents.
-        // - A control that only senses drags is marked as dragged **on the press itself**, with no
-        //   movement (`interaction.rs:219-220`, with its comment). And that, over a pane where the
-        //   tiling is clipping the panel, is destructive: the handle is painted at the **clipped**
-        //   cut, so a bare click would read that cut as intent and would wipe out the width the
-        //   user had asked for when the window was wider. Demanding movement is what separates «I
-        //   have pressed here» from «I want this width».
-        if !response.dragged_by(egui::PointerButton::Primary) || response.drag_delta().x == 0.0 {
-            return false;
-        }
-
-        let Some(pointer) = response.interact_pointer_pos() else {
-            return false;
-        };
-
-        // **The ceiling is what the tiling can honor today, not what the pane measures.** During a
-        // gesture what the user asks for is what they see, and the tiling is not going to give them
-        // more than what is spare after the console's floor: saving more would be saving a width
-        // they never saw, and which would appear all at once on widening the window.
-        //
-        // **And the ceiling is applied only on writing, which is what makes shrinking the window
-        // not erase what was asked for.** With no gesture this is not gone through, so a panel of
-        // thirty-six cells saved in a wide window survives a narrow one: it is painted clipped and
-        // comes back whole on widening.
-        //
-        // The pane's number of cells comes from [`CellMetrics::cells_in`] so as not to repeat here
-        // a conversion that function already does with its floor and its ceiling. **But its cap is
-        // not the one that is needed and it is worth saying so:** it is a thousand columns, a grid
-        // limit, not «the rectangle corresponds to a real window». With the ten thousand points of
-        // reserve egui returns while the desktop has not said its size, this ceiling comes out at
-        // almost a thousand cells and **lets through** a width no real window is going to have.
-        // What really stops that from being saved is the guard below: a drag demands that the
-        // pointer has moved, and in those first two frames there is nobody dragging.
-        let fits = metrics.cells_in(pane_area.size()).cols as usize;
-        let ceiling = fits
-            .saturating_sub(panel::MINIMUM_CONSOLE as usize)
-            .max(panel::DRAG_FLOOR);
-
-        // **No guard against a non-finite value, and this time with the four paths enumerated.**
-        // The review warned that, since asking for less than the floor means **folding**, a zero is
-        // no longer raised by the floor: it would fold the panel. The warning is correct in its
-        // reasoning and the scenario **is not reachable**; the guard was put in, it was mutated,
-        // and **the mutation survived**. Enumerating where a non-finite value could come from:
-        //
-        // - **The pane's rectangle with no number.** The handle is built from its coordinates, so
-        //   it comes out with no number too, and egui **does not deliver the drag of a control like
-        //   that** — checked: the method leaves through the «nobody is dragging me» door and never
-        //   gets this far.
-        // - **The pointer's position with no number.** Impossible: `interact_pointer_pos` returns
-        //   `None` when the position holds a `NaN` (`response.rs:545-548`), and that has already
-        //   been returned from.
-        // - **A cell of zero width, with the pointer anywhere but the edge.** It gives infinity,
-        //   which on being converted to an integer saturates at the maximum and the ceiling brings
-        //   it down. It does not fold.
-        // - **A cell of zero width, with the pointer right on the right edge.** It gives `NaN`,
-        //   which falls to zero and folds — and **asking for zero from the right edge is exactly
-        //   asking for it to be folded**.
-        //
-        // All four give the correct result or do not happen, so the guard would be a mechanism with
-        // no scenario. Its sibling the border drag does need it, and that is why it has it: there
-        // the state is a fraction and a clip over a `NaN` returns it untouched. **What separates «I
-        // have pressed here» from «I want this width»: that the pointer has crossed at least half a
-        // cell from where the panel is cut right now.** And it has to be said why it is *this* and
-        // not what the review proposed, because both things were tried.
-        //
-        // **The hole was real.** The handle is drawn where the tiling **clips** the panel, which in
-        // a narrow pane is not the width the user asked for; reading the pointer's position as
-        // intent turns a press into «I want the clipped width» and wipes out for ever what had
-        // been asked for with the window wide. The first protection demanded that the width asked
-        // for *departed* from the painted one, and it **only moved the hole**: a half-cell tremble
-        // already makes them different, and the two tests watching it used zero and one point — the
-        // suite was green with the defect inside, which is the small-margin disguise the project's
-        // hard rule names.
-        //
-        // **And the fix the review proposed —anchoring to the saved width and adding the
-        // displacement to it— was implemented, was mutated and did NOT change a single outcome.**
-        // The reason can be followed with a pencil: when the tiling clips, what it paints **is**
-        // the ceiling (`fits - MINIMUM_CONSOLE`), so the direct reading gives `ceiling +
-        // displacement` and the anchor gives `saved + displacement`, and the `min(ceiling)` below
-        // leaves both at `ceiling`. And where there is no clipping, both coincide by construction.
-        // A mechanism that cannot change an outcome is a mechanism with no scenario, so out it
-        // goes.
-        //
-        // What really closes the hole is the guard here: without half a cell crossed the state is
-        // not touched, **be the tremble one point or four**.
-        let painted_cut = panel.map_or(pane_area.right(), |panel_rect| panel_rect.left());
-        if ((painted_cut - pointer.x) / metrics.width()).round() == 0.0 {
-            return false;
-        }
-        // The negative and what is not a number fall to zero on being converted to an integer,
-        // which is what makes pushing beyond the right edge ask for zero — that is, ask for a fold.
-        let requested = ((pane_area.right() - pointer.x) / metrics.width()).round() as usize;
-
-        // **Folding is dragging to the end, which is how the project's written decision defines it:
-        // asking for less than the floor.** And unfolding is the symmetric thing — pulling the
-        // handle inwards.
-        //
-        // **Neither one nor the other touches the saved width, and there lies the detail that makes
-        // unfolding give back what the user asked for.** Folding merely stops asking for it;
-        // unfolding asks again for **the same one**, so the panel reappears with its earlier width
-        // and not with the factory one. From that frame on the drag goes on ruling, which is what
-        // was decided: your width, and the mouse ruling from there.
-        //
-        // > **Declared blind spot:** egui can repeat the pass over the same input, and the second
-        // > one no longer sees the panel folded, so it writes the pointer's width instead of
-        // > keeping the saved one. The two are halves of what was decided —the earlier width, and
-        // > the mouse ruling— so no state of our own is invented to force one of the two. It is
-        // > left said because it is the class of difference between frames this project has already
-        // > paid for once without seeing it.
-        if requested < panel::DRAG_FLOOR {
-            let changed = !self.folded;
-            self.folded = true;
-            return changed;
-        }
-        if self.folded {
-            self.folded = false;
-            return true;
-        }
-
-        // `min` and not `clamp`: the floor was already applied by the folding branch, seven lines
-        // above. A `clamp` here would read as if this line defended it, and it defends nothing —
-        // and along the way the form that panics when the minimum exceeds the maximum disappears.
-        let new = requested.min(ceiling);
-        let changed = new != self.panel_width;
-        self.panel_width = new;
-        changed
-    }
-
     /// Whether the program finished **well** and nothing of its own is left to show.
     ///
     /// **It waits for the queue to be empty**: dying does not erase what the program wrote before
@@ -1528,6 +1313,12 @@ struct Window {
     reading_settings: measure::ReadingSettings,
     /// What choosing the font cost, and whether one was asked for at all.
     chosen_font: measure::ChoosingTheFont,
+    /// Whether this session paints a strip over each console.
+    ///
+    /// **Resolved once, where the settings the same gate vetoes are resolved**, and carried from
+    /// there: the geometry, the painting and the pointer all read this one value, so there is no
+    /// regime where a row is reserved and not drawn. See [`header::Headers`].
+    headers: header::Headers,
     /// The previous frame's mirror. **The deadline is armed against it**, so the deadline is
     /// rearmed **when something changes** and not when something is unwritten: without this, a
     /// non-writable directory would leave the difference in place and **the window would never go
@@ -1576,6 +1367,15 @@ struct Window {
     /// between**: between the two frames there is nothing that invalidates it, and clearing it in
     /// the first one that brings no press would erase it right before it is used.
     chord_of_the_last_press: egui::Modifiers,
+    /// Where that same press fell.
+    ///
+    /// **Its own field beside the chord, and written in the same statement as it**: the two answer
+    /// «what did the user mean by this press», one from the keyboard and the other from the
+    /// geometry, and the strip needs the second — a drag that begins a frame later has no way back
+    /// to where the button went down. `None` until the first press: a window nobody has touched has
+    /// no point to compare, and a corner invented for it would put every gesture on the strip of
+    /// the top-left pane.
+    where_the_last_press_fell: Option<egui::Pos2>,
     /// The last frame in which presses and releases were shared out, and **nothing** until the
     /// first one.
     ///
@@ -1905,6 +1705,11 @@ impl Window {
         // that could contradict it.
         let now = SystemTime::now();
         let active = self.active;
+        // **The console of a tab nobody is looking at is measured the same way as a painted one.**
+        // Its strip is not drawn — nothing of that tab is — but the row is reserved all the same, or
+        // the program inside would be told a grid one row taller than the one it gets the moment its
+        // tab comes to the front.
+        let headers = self.headers;
 
         for (which, tab) in self.tabs.iter_mut().enumerate() {
             if which == active {
@@ -1919,7 +1724,7 @@ impl Window {
             for (pane, rect) in tab.panes_mut().into_iter().zip(tiling.parts) {
                 let refreshed = pane.refresh_its_panel();
                 let before_the_panel = Instant::now();
-                let panel_split = pane.tile_with_its_panel(rect, metrics.width(), now);
+                let panel_split = pane.chrome_within(rect, metrics, now, headers);
                 // **The span's boundary is the same as in the painting**, which also closes its
                 // stopwatch after tiling: `tile_with_its_panel` asks whether the panel is visible,
                 // and that question goes as far as composing the text of a warning when the
@@ -1937,7 +1742,7 @@ impl Window {
                     pane.control_unpainted = refreshed.applying;
                 }
 
-                pane.measured = metrics.cells_in(panel_split.console.size());
+                pane.measured = metrics.cells_in(panel_split.console().size());
             }
         }
     }
@@ -2095,7 +1900,7 @@ impl Window {
         let Some(its_area) = focused_area else {
             return;
         };
-        if !can_split(its_area, cut_along, metrics) {
+        if !can_split(its_area, cut_along, metrics, self.headers) {
             // **It is said out loud, because the chord has swallowed the key and nothing has
             // happened.** Without this line, in a narrow window the shortcut reads as broken: it
             // neither splits, nor reaches the program inside, nor leaves a trace of why. It is the
@@ -2576,6 +2381,9 @@ impl eframe::App for Window {
         // would put two consoles of the same frame in different halves of the same blink.
         let blink = self.blink.now();
         self.blink.new_frame();
+        // Read once before the walk, like the two questions above it: it is the session's decision
+        // and not a pane's, and every pane of the frame has to be tiled by the same one.
+        let headers = self.headers;
         for (pane, rect) in self.tabs[self.active]
             .panes_mut()
             .into_iter()
@@ -2589,7 +2397,7 @@ impl eframe::App for Window {
                 &self.theme,
                 &metrics,
                 &mut self.discoverer,
-                blink.on(focused),
+                painter::HowToPaint::of(blink.on(focused), headers),
             );
             // **What the painting really drew, not what the program asked for**: it is what the
             // repaint deadline is armed from. See [`alarms::BlinkState::painted`].
@@ -4570,9 +4378,12 @@ mod tests {
         }
         // The strip the panel occupies: inside the pane, outside the console. Asserted, so that a
         // pane whose panel stopped taking columns turns this test red instead of vacuous.
-        let console = window.active_mut().panes_mut()[0]
-            .tile_with_its_panel(rects[0], metrics.width(), SystemTime::now())
-            .console;
+        let console = window.active_mut().panes_mut()[0].console_within(
+            rects[0],
+            &metrics,
+            SystemTime::now(),
+            header::Headers::PAINTED,
+        );
         let on_the_panel = egui::pos2(
             (console.right() + rects[0].right()) / 2.0,
             rects[0].top() + metrics.height(),
@@ -4624,9 +4435,12 @@ mod tests {
             return;
         }
         let theme = window.theme;
-        let console = window.active_mut().panes_mut()[0]
-            .tile_with_its_panel(rects[0], metrics.width(), SystemTime::now())
-            .console;
+        let console = window.active_mut().panes_mut()[0].console_within(
+            rects[0],
+            &metrics,
+            SystemTime::now(),
+            header::Headers::PAINTED,
+        );
         let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, console);
         let on_the_notice = notice.center();
         let elsewhere =
@@ -4945,9 +4759,12 @@ mod tests {
         // The notice goes over the **console**, which is not the whole pane here: this one has a
         // panel published beside it.
         let theme = window.theme;
-        let console = window.active_mut().panes_mut()[0]
-            .tile_with_its_panel(rects[0], metrics.width(), SystemTime::now())
-            .console;
+        let console = window.active_mut().panes_mut()[0].console_within(
+            rects[0],
+            &metrics,
+            SystemTime::now(),
+            header::Headers::PAINTED,
+        );
         let notice = the_notice_box(window.active().panes()[0], &theme, &metrics, console);
         let on_the_notice = notice.center();
         // A cell of the console that is **not** the notice's, so the two reports would be told apart
@@ -5895,6 +5712,9 @@ mod tests {
             restoring: None,
             reading_settings: measure::ReadingSettings::default(),
             chosen_font: measure::ChoosingTheFont::default(),
+            // A window built for a test paints headers, which is what whoever opens the terminal
+            // gets; the batch that goes without says so by building it the other way.
+            headers: header::Headers::PAINTED,
             last_seen: None,
             last_written: None,
             save_due: None,
@@ -5905,6 +5725,7 @@ mod tests {
             injected_drags: None,
             spent_injecting: std::time::Duration::ZERO,
             chord_of_the_last_press: egui::Modifiers::NONE,
+            where_the_last_press_fell: None,
             the_press_went_to_the_program: false,
             presses_for_the_program: Vec::new(),
             last_cell_reported: None,
@@ -8836,12 +8657,11 @@ mod tests {
     /// the two rectangles are the same one, and the comparison below would hold however wrong the
     /// code was.
     ///
-    /// **What it does not cover, said here rather than implied**: it never reaches the pointer's own
-    /// path. It cannot — with the two rectangles sharing their corner, passing one or the other
-    /// resolves the same cell, so no test in this delivery can tell the call sites apart. What it
-    /// pins is that this rectangle is not computed a second way; that the helpers count from the
-    /// rectangle they are handed is its sibling below, and the call sites are pinned by the criteria
-    /// of the delivery that cuts the strip.
+    /// **Since the strip exists, the two subtractions are both visible here**: the panel takes
+    /// columns from the right and the strip takes a row from the top, and the rectangle the pointer
+    /// is measured against is the one that has paid both. Until the strip existed this could only
+    /// assert that the rectangle was not computed a second way — the two shared their corner, so
+    /// passing either resolved the same cell.
     #[test]
     fn the_pointer_counts_from_the_rectangle_the_grid_was_measured_from() {
         let metrics = with_metrics(|metrics| metrics.clone());
@@ -8864,16 +8684,32 @@ mod tests {
         .expect("publish the test's panel");
         pane.panel_state.refresh(&dir);
 
-        let for_the_grid = pane.tile_with_its_panel(rect, metrics.width(), now).console;
-        let for_the_pointer = pane.console_within(rect, metrics.width(), now);
+        let chrome = pane.chrome_within(rect, &metrics, now, header::Headers::PAINTED);
+        let for_the_pointer = pane.console_within(rect, &metrics, now, header::Headers::PAINTED);
 
         assert!(
-            for_the_grid.width() < rect.width(),
+            chrome.console().width() < rect.width(),
             "no panel is taking columns here, so this test cannot tell the two rectangles apart"
         );
         assert_eq!(
-            for_the_pointer, for_the_grid,
+            for_the_pointer,
+            chrome.console(),
             "the pointer would count from a rectangle the grid was not measured from"
+        );
+        // **The two subtractions, each written out.** The panel's is asserted above as the test's
+        // premise; the strip's is this one, and it is what tells a console's corner apart from its
+        // pane's — the difference every selection and every mouse report is counted from.
+        assert_eq!(
+            for_the_pointer.top(),
+            rect.top() + header::height(&metrics, header::Headers::PAINTED),
+            "the pointer counts from the pane's top edge, so every press lands a row above where it \
+             was made"
+        );
+        assert_eq!(
+            pane.console_within(rect, &metrics, now, header::Headers::NOT_PAINTED)
+                .top(),
+            rect.top(),
+            "a measured run loses a row it never painted"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -10508,7 +10344,10 @@ mod tests {
     fn two_panes_with_text(rects: &[egui::Rect], metrics: &CellMetrics) -> Window {
         let mut window = window_with("sleep 30", "sleep 30");
         for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(rects) {
-            pane.measured = metrics.cells_in(rect.size());
+            // **The grid announced is the console's, not the pane's.** The painting measures what is
+            // left after the strip, and a harness that announced one row more would put the text
+            // these tests mark a row away from where the real window puts it.
+            pane.measured = metrics.cells_in(console_of(*rect, metrics).size());
             pane.screen.resize(pane.measured);
             pane.screen.advance(b"hola mundo");
         }
@@ -10543,8 +10382,12 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
         );
 
         assert_eq!(
@@ -10596,6 +10439,316 @@ mod tests {
                 .iter()
                 .all(|pane| pane.screen.selected_text().is_none()),
             "the move gesture left text marked along the way"
+        );
+    }
+
+    #[test]
+    fn a_drag_that_starts_on_the_strip_moves_the_pane_with_no_chord_held() {
+        // **AC2, and it is the whole point of the milestone.** It is written as the twin of
+        // `the_left_button_inside_a_console_marks_text_and_does_not_move_it_elsewhere`: same
+        // window, same bare button, same destination, and **one** coordinate different — where the
+        // press lands. That is what makes the pair say that the strip is what decides, and not the
+        // chord, the button or the console.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = two_panes_with_text(&rects, &metrics);
+        let first_part = window.active().panes()[0].name;
+        let strip = header::set_the_header_aside(rects[0], &metrics, header::Headers::PAINTED)
+            .0
+            .expect("the pane carries a strip");
+
+        // **The bare button, with no chord at all**: `drag_to_select` is the gesture that marks
+        // text everywhere else in this file, and here it has to move the console instead.
+        drag_to_select(
+            &mut window,
+            &ctx,
+            &rects,
+            strip.center(),
+            rects[1].right_center() - egui::vec2(10.0, 0.0),
+        );
+
+        assert_eq!(
+            window.active().panes()[1].name,
+            first_part,
+            "the drag by the strip did not move the console: the strip is not a door into the \
+             gesture, and the only way to move a pane is still a chord nobody is told about"
+        );
+        assert!(
+            window
+                .active()
+                .panes()
+                .iter()
+                .all(|pane| pane.screen.selected_text().is_none()),
+            "the drag by the strip left text marked along the way: the gesture is being resolved as \
+             a selection as well"
+        );
+    }
+
+    #[test]
+    fn the_line_the_strip_and_the_console_share_belongs_to_the_console() {
+        // **One float of ambiguity, and both sides answered yes.** `egui::Rect::contains` is
+        // inclusive on both edges and the cut leaves the strip's bottom **equal** to the console's
+        // top, so a press exactly there fell on the strip *and* resolved to row 0 of the grid. What
+        // it cost is this: aiming at the first row of text moved the console somewhere else.
+        //
+        // It is written as the twin of the two tests above it — same window, same gesture — with the
+        // press one point higher, on the shared line itself.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = two_panes_with_text(&rects, &metrics);
+        let request = names_in_order(&window);
+        let on_the_line = inside_the_console(rects[0], &metrics, egui::vec2(1.0, 0.0));
+
+        // The premise, asserted rather than assumed: the point really is the boundary, so a test
+        // that stopped putting it there would say so instead of passing for pressing elsewhere.
+        assert_eq!(
+            on_the_line.y,
+            console_of(rects[0], &metrics).top(),
+            "the press is not on the line the two rectangles share, so this test measures nothing"
+        );
+        assert_eq!(
+            on_the_line.y,
+            header::set_the_header_aside(rects[0], &metrics, header::Headers::PAINTED)
+                .0
+                .expect("the pane carries a strip")
+                .bottom(),
+            "the strip does not end where the console begins, so there is no shared line to argue \
+             about"
+        );
+
+        drag_to_select(
+            &mut window,
+            &ctx,
+            &rects,
+            on_the_line,
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
+        );
+
+        assert_eq!(
+            selected_at(&window, 0).as_deref(),
+            Some("hola"),
+            "a press on the line the strip and the console share marked nothing: the strip took a \
+             gesture aimed at the first row of text"
+        );
+        assert_eq!(
+            names_in_order(&window),
+            request,
+            "the console moved elsewhere: the shared line is being resolved as the strip's"
+        );
+    }
+
+    #[test]
+    fn every_pane_carries_a_strip_over_its_console_with_one_and_with_four() {
+        // **AC1, asserted over what reaches the queue and not over the geometry.** The arithmetic
+        // has its own tests in `header`; what this one adds is that somebody paints it — a band
+        // reserved and never drawn is a row stolen from every console.
+        //
+        // **With one pane and with four**, because the product decision taken at the start of the
+        // milestone is that every console carries one, single console included. The one-pane case
+        // is the one that could quietly stop being true: it is the one the tab bar's own rule —
+        // no bar with a single tab — would suggest.
+        for how_many in [1usize, 4] {
+            let ctx = egui::Context::default();
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.tabs[0] = Tab::with_panes(
+                (0..how_many)
+                    .map(|which| pane_with("sleep 30", which))
+                    .collect(),
+                &OpeningLayout::DEFAULT,
+                0,
+            );
+            let area = area_of(1200.0);
+            let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+            let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+            let rects = window
+                .active()
+                .root
+                .place(area, metrics.width())
+                .parts
+                .clone();
+
+            assert_eq!(
+                rects.len(),
+                how_many,
+                "the window did not end up with the {how_many} panes this run is about"
+            );
+            for rect in rects {
+                let strip = header::set_the_header_aside(rect, &metrics, header::Headers::PAINTED)
+                    .0
+                    .expect("a pane of a painted session sets a strip aside");
+                assert!(
+                    shapes.iter().any(|clipped| matches!(
+                        &clipped.shape,
+                        egui::Shape::Rect(shape)
+                            if shape.rect == strip
+                                && shape.fill == window.theme.panel_background()
+                                && !clipped.clip_rect.is_negative()
+                    )),
+                    "with {how_many} pane(s), the pane at {rect:?} reserved a strip and nobody \
+                     painted one over it"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_measured_run_paints_no_strip_and_leaves_the_grid_it_always_had() {
+        // **AC7, and it is what keeps the eighteen published batches comparable.** The
+        // grid is asserted against `cells_in` of the **whole pane**, which is what every batch was
+        // measured with before this milestone: with a row reserved and not painted, or painted and
+        // not reserved, this number moves and nothing else says so.
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.headers = header::Headers::NOT_PAINTED;
+        let area = area_of(1200.0);
+
+        let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+
+        for (pane, rect) in window.active().panes().into_iter().zip(&rects) {
+            assert_eq!(
+                pane.measured,
+                metrics.cells_in(rect.size()),
+                "a measured run lost a row it never painted, so its grid stopped being the one \
+                 every published batch was measured with"
+            );
+        }
+        // **And nothing was painted in the strip's colour**, which is the other direction: a run
+        // that reserved nothing and painted anyway would leave a band over the first row of text.
+        assert!(
+            !shapes.iter().any(|clipped| matches!(
+                &clipped.shape,
+                egui::Shape::Rect(shape) if shape.fill == window.theme.panel_background()
+            )),
+            "a measured run painted a strip: the batch it is compared against did not have one"
+        );
+    }
+
+    #[test]
+    fn a_measured_run_has_no_strip_to_grab_and_the_same_press_still_marks_text() {
+        // **The other half of AC7, and nothing was driving it.** Under the gate the strip is not
+        // painted and no row is reserved — but whether the strip's *door into the gesture* closes
+        // with it was pinned by nobody: every test of that door runs with the strip painted. What
+        // it would cost is the batch that drags panes (`J`): its presses land where a strip would
+        // be, and with the door open under the gate they would move consoles where until this
+        // milestone they marked text.
+        //
+        // It is the inverse of `a_drag_that_starts_on_the_strip_moves_the_pane_with_no_chord_held`:
+        // same press, same destination, and the gate as the only difference.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.headers = header::Headers::NOT_PAINTED;
+        for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(&rects) {
+            // The grid of the **whole pane**, which is what a run with no strip measures.
+            pane.measured = metrics.cells_in(rect.size());
+            pane.screen.resize(pane.measured);
+            pane.screen.advance(b"hola mundo");
+        }
+        let request = names_in_order(&window);
+
+        let where_a_strip_would_be = rects[0].min + egui::vec2(1.0, 1.0);
+        // The premise, asserted rather than assumed: this is the very band the painted session
+        // moves a console by, so a test that stopped pressing there would say so instead of
+        // passing for marking somewhere no strip ever was.
+        assert!(
+            header::set_the_header_aside(rects[0], &metrics, header::Headers::PAINTED)
+                .0
+                .expect("a painted session sets a strip aside")
+                .contains(where_a_strip_would_be),
+            "the press does not land where a painted session puts its strip, so this test cannot \
+             tell the gate from the door"
+        );
+
+        drag_to_select(
+            &mut window,
+            &ctx,
+            &rects,
+            where_a_strip_would_be,
+            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+        );
+
+        assert_eq!(
+            selected_at(&window, 0).as_deref(),
+            Some("hola"),
+            "a measured run answered a press on its first row with the gesture that moves consoles"
+        );
+        assert_eq!(
+            names_in_order(&window),
+            request,
+            "a measured run moved a console: the strip's door is open where no strip is painted, \
+             and batch J's presses stopped meaning what they meant"
+        );
+    }
+
+    #[test]
+    fn a_drag_that_starts_on_the_panel_columns_does_not_move_the_console_elsewhere() {
+        // **The fall-through this delivery closed, and nothing was driving it either.** A press on
+        // the columns the panel keeps is not pointing at text, so the selection cancels the whole
+        // gesture by clearing its meaning — and a gesture with no meaning left used to reach the
+        // branch that reorders the tree. Pressing on one console's panel and dragging onto another
+        // **moved it**, with nobody holding the chord and nobody having touched a strip.
+        //
+        // Its twin `pressing_over_the_panel_neither_starts_nor_changes_any_selection` presses on
+        // the panel too and releases **inside the same console**, where there is no destination to
+        // move to: it pins what ends up marked and cannot see this.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = two_panes_with_text(&rects, &metrics);
+        let request = names_in_order(&window);
+
+        // The console is left with less grid than its pane has width: what is left over on the
+        // right is what the panel and its grip take up in the real window.
+        let whole = grid_of(rects[0], &metrics);
+        let half = Size {
+            rows: whole.rows,
+            cols: whole.cols / 2,
+        };
+        window.active_mut().panes_mut()[0].measured = half;
+
+        let over_the_panel = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * (f32::from(half.cols) + 2.0), 4.0),
+        );
+        // The premise: the press really falls outside the grid, which is what cancels the
+        // selection. Inside it, the gesture would stay a selection and this test would pass for
+        // never posing its case.
+        assert!(
+            window.active().panes()[0]
+                .cell_under(console_of(rects[0], &metrics), over_the_panel, &metrics)
+                .is_none(),
+            "the press landed on a cell of the grid, so no selection is cancelled and the branch \
+             this test is about is never reached"
+        );
+
+        drag_to_select(
+            &mut window,
+            &ctx,
+            &rects,
+            over_the_panel,
+            rects[1].right_center() - egui::vec2(10.0, 0.0),
+        );
+
+        assert_eq!(
+            names_in_order(&window),
+            request,
+            "dragging from the panel's columns onto the console next door moved it: a gesture that \
+             cancelled itself is still reaching the tree"
         );
     }
 
@@ -10687,8 +10840,12 @@ mod tests {
                 &mut window,
                 &ctx,
                 &rects,
-                rects[0].min + egui::vec2(1.0, 1.0),
-                rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+                inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+                inside_the_console(
+                    rects[0],
+                    &metrics,
+                    egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+                ),
                 chord,
             );
 
@@ -10738,8 +10895,12 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
         );
         assert_eq!(
             selected_at(&window, 0).as_deref(),
@@ -10752,8 +10913,12 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[1].min + egui::vec2(1.0, 1.0),
-            rects[1].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[1], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[1],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
         );
         assert_eq!(
             selected_at(&window, 1).as_deref(),
@@ -10788,21 +10953,32 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
         );
         let before = selected_at(&window, 0);
         assert_eq!(before.as_deref(), Some("hola"), "nothing ever got marked");
 
         // And now a drag that STARTS over the panel's columns.
-        let over_the_panel =
-            rects[0].min + egui::vec2(metrics.width() * (f32::from(half.cols) + 2.0), 4.0);
+        let over_the_panel = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * (f32::from(half.cols) + 2.0), 4.0),
+        );
         drag_to_select(
             &mut window,
             &ctx,
             &rects,
             over_the_panel,
-            rects[0].min + egui::vec2(metrics.width() * 8.5, metrics.height() * 0.5),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 8.5, metrics.height() * 0.5),
+            ),
         );
 
         assert_eq!(
@@ -10841,9 +11017,13 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
             // Well past the grid's right-hand edge.
-            rects[0].min + egui::vec2(metrics.width() * 40.0, metrics.height() * 0.5),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 40.0, metrics.height() * 0.5),
+            ),
         );
 
         assert_eq!(
@@ -10870,8 +11050,12 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
         );
 
         let injected_drags = window
@@ -10902,13 +11086,21 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
         );
         assert!(selected_at(&window, 0).is_some(), "nothing ever got marked");
 
         // A bare click: press and release in the same spot, without moving.
-        let at = rects[0].min + egui::vec2(metrics.width() * 6.5, metrics.height() * 0.5);
+        let at = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * 6.5, metrics.height() * 0.5),
+        );
         drag_to_select(&mut window, &ctx, &rects, at, at);
 
         assert_eq!(
@@ -11052,8 +11244,12 @@ mod tests {
             &ctx,
             &rects,
             egui::PointerButton::Primary,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
             egui::Modifiers::NONE,
             // And halfway through the gesture both keys of the move chord are pressed.
             MOVE_CHORD,
@@ -11100,7 +11296,7 @@ mod tests {
                 &ctx,
                 &rects,
                 button,
-                rects[0].min + egui::vec2(1.0, 1.0),
+                inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
                 rects[1].right_center() - egui::vec2(10.0, 0.0),
                 egui::Modifiers::NONE,
                 egui::Modifiers::NONE,
@@ -11117,6 +11313,37 @@ mod tests {
                 "dragging with {name} moved the consoles elsewhere"
             );
         }
+    }
+
+    /// What is left of a pane once its strip is off, **for a pane with no panel published**.
+    ///
+    /// Every test that presses inside a console or announces its grid needs this: since the strip
+    /// exists, a pane's rectangle and its console's are no longer the same one, and a point measured
+    /// from the pane's corner lands on the strip — where the gesture is not a selection at all but
+    /// the one that takes the console somewhere else.
+    fn console_of(rect: egui::Rect, metrics: &CellMetrics) -> egui::Rect {
+        header::set_the_header_aside(rect, metrics, header::Headers::PAINTED).1
+    }
+
+    /// A point inside that pane's console, given as an offset **from the console's own corner**.
+    ///
+    /// It exists so the offsets in these tests go on reading as what they are — «one point in», «two
+    /// cells across» — instead of carrying the strip's height added by hand at thirty call sites.
+    fn inside_the_console(
+        rect: egui::Rect,
+        metrics: &CellMetrics,
+        offset: egui::Vec2,
+    ) -> egui::Pos2 {
+        console_of(rect, metrics).min + offset
+    }
+
+    /// The grid a pane of that rectangle really ends up with.
+    ///
+    /// The cells of what is left **after the strip**, which is what the painting measures and what
+    /// the program inside is told. Measuring the pane's whole rectangle announces a row that is not
+    /// there.
+    fn grid_of(rect: egui::Rect, metrics: &CellMetrics) -> term_core::Size {
+        metrics.cells_in(console_of(rect, metrics).size())
     }
 
     /// Two consoles side by side **with room to spare** to receive another one on any side.
@@ -13216,10 +13443,13 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 discoverer,
-                painter::Blink {
-                    ceiling: Some(false),
-                    since_a_key: std::time::Duration::ZERO,
-                    focused: true,
+                painter::HowToPaint {
+                    blink: painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        focused: true,
+                    },
+                    headers: header::Headers::PAINTED,
                 },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
@@ -13728,13 +13958,16 @@ mod tests {
                     &Theme::default(),
                     &metrics,
                     &mut fonts::Discoverer::default(),
-                    painter::Blink {
-                        ceiling: Some(false),
-                        since_a_key: std::time::Duration::ZERO,
-                        focused: true,
+                    painter::HowToPaint {
+                        blink: painter::Blink {
+                            ceiling: Some(false),
+                            since_a_key: std::time::Duration::ZERO,
+                            focused: true,
+                        },
+                        headers: header::Headers::PAINTED,
                     },
                 );
-                expected[which] = metrics.cells_in(rect.size());
+                expected[which] = grid_of(rect, &metrics);
             }
         })
         .drop_without_applying_deltas();
@@ -13988,10 +14221,13 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                painter::Blink {
-                    ceiling: Some(false),
-                    since_a_key: std::time::Duration::ZERO,
-                    focused: true,
+                painter::HowToPaint {
+                    blink: painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        focused: true,
+                    },
+                    headers: header::Headers::PAINTED,
                 },
             );
         })
@@ -14344,10 +14580,13 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                painter::Blink {
-                    ceiling: Some(false),
-                    since_a_key: std::time::Duration::ZERO,
-                    focused: true,
+                painter::HowToPaint {
+                    blink: painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        focused: true,
+                    },
+                    headers: header::Headers::PAINTED,
                 },
             );
         })
@@ -14400,14 +14639,21 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                painter::Blink {
-                    ceiling: Some(false),
-                    since_a_key: std::time::Duration::ZERO,
-                    focused: true,
+                painter::HowToPaint {
+                    blink: painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        focused: true,
+                    },
+                    headers: header::Headers::PAINTED,
                 },
             );
             with_panel = pane.measured;
-            without_discounting = metrics.cells_in(whole.size());
+            // **The strip is off both sides of the comparison, not subtracted from one.** What this
+            // test is about is the panel's columns; measuring the whole pane on one side would make
+            // the strip's row show up as the difference and the assertion below would be about two
+            // things at once.
+            without_discounting = grid_of(whole, &metrics);
         })
         .drop_without_applying_deltas();
 
@@ -14444,10 +14690,13 @@ mod tests {
                 &Theme::default(),
                 &metrics,
                 &mut fonts::Discoverer::default(),
-                painter::Blink {
-                    ceiling: Some(false),
-                    since_a_key: std::time::Duration::ZERO,
-                    focused: true,
+                painter::HowToPaint {
+                    blink: painter::Blink {
+                        ceiling: Some(false),
+                        since_a_key: std::time::Duration::ZERO,
+                        focused: true,
+                    },
+                    headers: header::Headers::PAINTED,
                 },
             );
             cut_along = pane
@@ -15496,14 +15745,18 @@ mod tests {
         // green. And with the boundary written this way, the opposite mutation also falls —asking
         // for *more* than the limit—, which would forbid a split that fits exactly.
         with_metrics(|metrics| {
+            // **Measured with no strip, which is what this boundary has always been about.** What
+            // the strip adds to the floor is the next test's subject; mixing the two here would
+            // leave neither of them pinning its own number.
+            let bare = header::Headers::NOT_PAINTED;
             // Forty columns: the twenty that make a console usable, for each child.
             let exact = 40.0 * metrics.width() + DIVIDER_THICKNESS;
             assert!(
-                can_split(area_of(exact), Orientation::Columns, metrics),
+                can_split(area_of(exact), Orientation::Columns, metrics, bare),
                 "a pane where the two children and their divider fit exactly is not split"
             );
             assert!(
-                !can_split(area_of(exact - 1.0), Orientation::Columns, metrics),
+                !can_split(area_of(exact - 1.0), Orientation::Columns, metrics, bare),
                 "a pane where the two children and their divider do not fit by one point is split: \
                  the divider's thickness is not being counted"
             );
@@ -15514,12 +15767,105 @@ mod tests {
             };
             let exact = 6.0 * metrics.height() + DIVIDER_THICKNESS;
             assert!(
-                can_split(height_of(exact), Orientation::Rows, metrics),
+                can_split(height_of(exact), Orientation::Rows, metrics, bare),
                 "a pane where the two children and their divider fit exactly is not split below"
             );
             assert!(
-                !can_split(height_of(exact - 1.0), Orientation::Rows, metrics),
+                !can_split(height_of(exact - 1.0), Orientation::Rows, metrics, bare),
                 "a pane that falls one point short is split below"
+            );
+        });
+    }
+
+    #[test]
+    fn a_pane_that_fits_two_consoles_but_not_their_two_strips_is_not_split_below() {
+        // **The case this criterion exists for**: a pane with exactly the room for two consoles of
+        // three rows and their divider. Before the strip that split was legal and both daughters
+        // came out at the floor; now each of them owes a strip as well, so the same pane no longer
+        // fits them and refusing is the only answer that keeps the floor meaning anything.
+        //
+        // **The mutation this is written to catch**: taking `header::height` back out of
+        // `can_split`'s row minimum. With it out, the first assertion below passes — which is why
+        // the second one is here, measuring the same pane from the other side.
+        with_metrics(|metrics| {
+            let height_of = |height| {
+                egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, height))
+            };
+            let two_consoles = 6.0 * metrics.height() + DIVIDER_THICKNESS;
+            let two_strips = 2.0 * header::height(metrics, header::Headers::PAINTED);
+
+            assert!(
+                !can_split(
+                    height_of(two_consoles),
+                    Orientation::Rows,
+                    metrics,
+                    header::Headers::PAINTED
+                ),
+                "a pane with room for two consoles and none for their strips was split: both \
+                 daughters are born below the floor this function exists to keep"
+            );
+            assert!(
+                can_split(
+                    height_of(two_consoles + two_strips),
+                    Orientation::Rows,
+                    metrics,
+                    header::Headers::PAINTED
+                ),
+                "a pane with room for the two consoles AND their two strips is refused: the floor \
+                 is asking for more than a strip apiece"
+            );
+            // **And the difference between the two regimes is exactly two strips, written out
+            // rather than derived.** Without this the test would pass with a floor that grew by any
+            // amount at all — one strip, four, a constant somebody invented.
+            assert!(
+                can_split(
+                    height_of(two_consoles),
+                    Orientation::Rows,
+                    metrics,
+                    header::Headers::NOT_PAINTED
+                ),
+                "the same pane is refused with no strip painted, so what is being measured is not \
+                 the strip"
+            );
+            assert!(
+                !can_split(
+                    height_of(two_consoles + two_strips - 1.0),
+                    Orientation::Rows,
+                    metrics,
+                    header::Headers::PAINTED
+                ),
+                "one point short of the two strips is already enough, so the floor counts less than \
+                 a strip per daughter"
+            );
+            // **And the other axis does not move, which is half of what this criterion says.** A
+            // strip takes height; adding it to the column floor as well would refuse side-by-side
+            // splits that fit perfectly, and the row assertions above would go on passing. Checked
+            // by mutation: summing `header::height` into the `Columns` arm leaves them all green.
+            let exact = 40.0 * metrics.width() + DIVIDER_THICKNESS;
+            assert!(
+                can_split(
+                    area_of(exact),
+                    Orientation::Columns,
+                    metrics,
+                    header::Headers::PAINTED
+                ),
+                "a pane where two consoles fit side by side exactly is refused with strips painted: \
+                 the strip is being counted on the axis it does not take"
+            );
+            assert_eq!(
+                can_split(
+                    area_of(exact),
+                    Orientation::Columns,
+                    metrics,
+                    header::Headers::NOT_PAINTED
+                ),
+                can_split(
+                    area_of(exact),
+                    Orientation::Columns,
+                    metrics,
+                    header::Headers::PAINTED
+                ),
+                "the column floor answers differently with and without strips"
             );
         });
     }
@@ -15636,9 +15982,19 @@ mod tests {
         // the bar: it is chosen right between the two floors —enough for two children of three rows
         // without the bar and not enough with it— and half a bar is left over on each side, so it
         // is not a rounding margin.
-        let (width, height) = with_metrics(|metrics| (metrics.width(), metrics.height()));
+        let (width, height, strip) = with_metrics(|metrics| {
+            (
+                metrics.width(),
+                metrics.height(),
+                header::height(metrics, header::Headers::PAINTED),
+            )
+        });
         let tab_bar = height + 2.0 * TAB_BAR_MARGIN;
-        let exact = 6.0 * height + DIVIDER_THICKNESS + tab_bar / 2.0;
+        // **The two strips are in the height on purpose, and they are not what this test is
+        // about.** Each of the two children owes one, so a height that ignored them would sit below
+        // the floor in **both** windows and the test would pass by refusing to split for a reason
+        // that has nothing to do with the bar — the shape of a green that proves nothing.
+        let exact = 6.0 * height + 2.0 * strip + DIVIDER_THICKNESS + tab_bar / 2.0;
         let area =
             egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0 * width, exact));
 
@@ -17491,12 +17847,12 @@ mod tests {
 
             assert_eq!(
                 window.active().panes()[0].measured,
-                metrics.cells_in(tiling.parts[0].size()),
+                grid_of(tiling.parts[0], &metrics),
                 "with the window at {width} points, the left console did not measure its quarter"
             );
             assert_eq!(
                 window.active().panes()[1].measured,
-                metrics.cells_in(tiling.parts[1].size()),
+                grid_of(tiling.parts[1], &metrics),
                 "with the window at {width} points, the right console did not measure its three \
                  quarters"
             );
@@ -17550,7 +17906,7 @@ mod tests {
         );
         let rects = [tiling.parts[0], tiling.parts[1]];
         for (which, (pane, rect)) in window.active().panes().into_iter().zip(rects).enumerate() {
-            let expected = metrics.cells_in(rect.size());
+            let expected = grid_of(rect, &metrics);
             // That the expected size is **not** the startup one is what makes the assertion below
             // mean something: if they coincided, it would pass just the same with a resize that
             // never happened.
@@ -18452,12 +18808,12 @@ mod tests {
         );
         assert_eq!(
             window.active().panes()[0].measured,
-            metrics.cells_in(tiling.parts[0].size()),
+            grid_of(tiling.parts[0], &metrics),
             "the left console was measured with the tiling from before the drag"
         );
         assert_eq!(
             window.active().panes()[1].measured,
-            metrics.cells_in(tiling.parts[1].size()),
+            grid_of(tiling.parts[1], &metrics),
             "the right console was measured with the tiling from before the drag"
         );
     }
@@ -19035,6 +19391,79 @@ mod tests {
         assert!(
             window.active().panes()[0].folded,
             "the gesture never took effect, so the test does not pose the case"
+        );
+    }
+
+    #[test]
+    fn the_strip_is_grabbed_at_the_corner_the_folded_panels_handle_would_take() {
+        // **The one band that exists to be grabbed, at the one place two controls want.** The
+        // panel's handle is registered **after** the console, so it wins every tie; with a folded
+        // panel it is stuck inwards from the pane's right edge, which is exactly where the strip's
+        // right-hand end is. Cutting the strip after tiling the panel instead of before leaves that
+        // handle running the pane's whole height and swallowing that corner of the strip — the
+        // delivery calls it true «by construction» and nothing was driving it.
+        //
+        // **Folded and not merely published**, because that is the sharp case: with a panel on show
+        // the handle sits at its left edge, well inside the pane; folded there is no panel to cut
+        // at and it goes to the edge itself.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of_cells(200.0);
+        with_the_panel_in_place(&mut window, 0, r#"{"lines":["working"]}"#);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        drag_the_panel(&mut window, &ctx, area, 0, area.right() + 500.0);
+        assert!(
+            window.active().panes()[0].folded,
+            "the panel never folded, so the handle is not where this test presses"
+        );
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let strip = header::set_the_header_aside(rects[0], &metrics, window.headers)
+            .0
+            .expect("the pane carries a strip");
+        // The very abscissa the folded handle is built at, written the way the painting writes it:
+        // if production moved it, this test would press where there is no contest and would stop
+        // posing its case.
+        let contested = egui::pos2(
+            rects[0].right() - PANEL_GRIP - DIVIDER_THICKNESS,
+            strip.center().y,
+        );
+        let before = names_in_order(&window);
+        let onto = rects[1].right_center() - egui::vec2(10.0, 0.0);
+
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            pointer_at(contested.x, contested.y),
+        );
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            button(contested.x, contested.y, true),
+        );
+        one_frame_in(&mut window, &ctx, area, pointer_at(onto.x, onto.y));
+        one_frame_in(&mut window, &ctx, area, button(onto.x, onto.y, false));
+
+        let mut moved = before.clone();
+        moved.reverse();
+        assert_eq!(
+            names_in_order(&window),
+            moved,
+            "the strip's right-hand end did not move its console: the panel's handle is taking the \
+             press, and the band that says «grab me here» cannot be grabbed at its own corner"
+        );
+        assert!(
+            window.active().panes()[1].folded,
+            "the press unfolded the panel instead of moving the console"
         );
     }
 
@@ -21893,8 +22322,9 @@ mod tests {
                 "the test's panel never got to be seen, so its strip does not exist"
             );
 
-            let panel_split = pane.tile_with_its_panel(*rect, metrics.width(), SystemTime::now());
-            pane.measured = metrics.cells_in(panel_split.console.size());
+            let chrome =
+                pane.chrome_within(*rect, metrics, SystemTime::now(), header::Headers::PAINTED);
+            pane.measured = metrics.cells_in(chrome.console().size());
             pane.screen.resize(pane.measured);
         }
         let left_pane = &mut window.active_mut().panes_mut()[0];
@@ -22033,7 +22463,11 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5),
+            ),
             3.0,
             egui::Modifiers::NONE,
         );
@@ -22072,7 +22506,11 @@ mod tests {
             })
             .drop_without_applying_deltas();
         };
-        let over = rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5);
+        let over = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
+        );
         pass(
             &mut window,
             egui::RawInput {
@@ -22170,7 +22608,7 @@ mod tests {
         // pass by being empty.
         window.injected_drags = InjectedDrags::new(1, InjectedGesture::MouseToProgram);
         for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(&rects) {
-            pane.measured = metrics.cells_in(rect.size());
+            pane.measured = grid_of(*rect, &metrics);
             pane.screen.resize(pane.measured);
         }
         wait_for_the_pane_to_say(&mut window, 0, "ready");
@@ -22220,7 +22658,11 @@ mod tests {
             "a_click_reaches_the_program_that_asked_for_it_and_with_its_cell",
         );
 
-        let at = rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5);
+        let at = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5),
+        );
         drag_to_select(&mut window, &ctx, &rects, at, at);
 
         wait_for_the_pane_to_say(&mut window, 0, "^[[<0;4;3M");
@@ -22244,8 +22686,12 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
         );
 
         assert_eq!(
@@ -22271,7 +22717,11 @@ mod tests {
             "a_repeated_pass_does_not_send_the_click_twice_to_the_program",
         );
         let cell = |column: f32| {
-            rects[0].min + egui::vec2(metrics.width() * column, metrics.height() * 0.5)
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * column, metrics.height() * 0.5),
+            )
         };
 
         // **The same input, twice, within the SAME frame**: it is what egui does when something
@@ -22345,13 +22795,20 @@ mod tests {
             &ctx,
             &rects,
             on_the_panel,
-            rects[0].min + egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
+            ),
         );
 
         // The sentinel: a clean click INSIDE the console, which does have to arrive. With it on
         // screen, whatever the previous gesture had sent would have arrived too.
-        let inside_the_console =
-            rects[0].min + egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5);
+        let inside_the_console = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * 5.5, metrics.height() * 0.5),
+        );
         drag_to_select(
             &mut window,
             &ctx,
@@ -22408,7 +22865,11 @@ mod tests {
         let rects = two_wide_panes();
         let metrics = with_metrics(|metrics| metrics.clone());
         let mut window = a_pane_that_asks_for_the_mouse(&rects, &metrics, "non_primary_button");
-        let at = rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5);
+        let at = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
+        );
 
         let pass = |window: &mut Window, input: egui::RawInput| {
             ctx.run_ui(input, |ui| {
@@ -22456,8 +22917,16 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
-            rects[0].min + egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
+            ),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 2.5, metrics.height() * 0.5),
+            ),
             egui::Modifiers::CTRL,
         );
 
@@ -22481,7 +22950,11 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 0.5, metrics.height() * 0.5),
+            ),
             rects[1].center(),
         );
 
@@ -22537,7 +23010,11 @@ mod tests {
             a_pane_that_asks_for_the_mouse(&rects, &metrics, "one_gesture_three_reports");
         window.injected_drags = InjectedDrags::new(2, InjectedGesture::MouseToProgram);
         let cell = |column: f32| {
-            rects[0].min + egui::vec2(metrics.width() * column, metrics.height() * 0.5)
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * column, metrics.height() * 0.5),
+            )
         };
 
         let pass = |window: &mut Window, input: egui::RawInput| {
@@ -22637,7 +23114,11 @@ mod tests {
             "the_drag_does_not_repeat_the_report_of_the_cell_it_is_already_on",
         );
         let cell = |column: f32| {
-            rects[0].min + egui::vec2(metrics.width() * column, metrics.height() * 0.5)
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * column, metrics.height() * 0.5),
+            )
         };
 
         let pass = |window: &mut Window, input: egui::RawInput| {
@@ -22714,8 +23195,12 @@ mod tests {
             &mut window,
             &ctx,
             &rects,
-            rects[0].min + egui::vec2(1.0, 1.0),
-            rects[0].min + egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            inside_the_console(rects[0], &metrics, egui::vec2(1.0, 1.0)),
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 0.5),
+            ),
             egui::Modifiers::SHIFT,
         );
 
@@ -23328,10 +23813,18 @@ mod tests {
                 pane.panel_state.is_visible(SystemTime::now()),
                 "the test's panel never got to be seen, so its strip does not exist"
             );
-            let split = pane.tile_with_its_panel(rects[0], metrics.width(), SystemTime::now());
-            pane.measured = metrics.cells_in(split.console.size());
+            let split = pane.chrome_within(
+                rects[0],
+                &metrics,
+                SystemTime::now(),
+                header::Headers::PAINTED,
+            );
+            pane.measured = metrics.cells_in(split.console().size());
             pane.screen.resize(pane.measured);
-            split.panel.expect("the panel takes columns of its own")
+            split
+                .split()
+                .panel
+                .expect("the panel takes columns of its own")
         };
 
         // **Painted twice, and that is the subject rather than setup**: the first pass builds the

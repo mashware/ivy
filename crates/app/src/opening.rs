@@ -188,7 +188,13 @@ impl Window {
             // than thirty calls — two slots that do not say which is which.
             injected_drags: None,
             spent_injecting: std::time::Duration::ZERO,
+            // **Painted unless whoever opens the window says otherwise**, which is what
+            // [`crate::run`] does for a measurement batch: a constructor that decided it by reading
+            // the environment would make every test depend on what the session that launched it
+            // exported.
+            headers: crate::header::Headers::PAINTED,
             chord_of_the_last_press: egui::Modifiers::NONE,
+            where_the_last_press_fell: None,
             the_press_went_to_the_program: false,
             presses_for_the_program: Vec::new(),
             last_cell_reported: None,

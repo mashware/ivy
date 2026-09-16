@@ -74,6 +74,7 @@ const SOURCES: &[(&str, &str)] = &[
     ),
     ("src/session.rs", include_str!("../src/session.rs")),
     ("src/fonts.rs", include_str!("../src/fonts.rs")),
+    ("src/header.rs", include_str!("../src/header.rs")),
     ("src/settings.rs", include_str!("../src/settings.rs")),
     ("src/keyboard.rs", include_str!("../src/keyboard.rs")),
     ("src/painter.rs", include_str!("../src/painter.rs")),
