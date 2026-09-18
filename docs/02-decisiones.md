@@ -6161,8 +6161,32 @@ is how they stop agreeing.
 | Chrome overlaid by proximity, with no row of its own | **D20** already discarded it: it has to be discovered and leaves no room for the close button. Kept as the fallback if the measurement makes the row unaffordable |
 | A widget of its own for the strip | See above: it would have to re-earn the identity, the preview, the atomicity and the latch |
 
-**Measured.** The annex belongs to the batch that asks for a strip and to its control, and it is
-owed by the delivery that adds them. Until it is published, this decision claims no number.
+### Measured — what the strip costs (18 September 2026)
+
+**Two runs with the binary that merged**, on `main` after every code PR of this milestone had
+landed: `scripts/measure-frame.sh T` and `... C`, window of 1280×800 points, two panes dumping,
+neither run touching the other. `scripts/measure-frame.sh compare` says both pairs of runs describe
+the same window and can be averaged.
+
+| Run | Frames with a strip | Header total | Per frame | Grid, `T` | Grid, `C` |
+|---|---|---|---|---|---|
+| 1st | 436 | 228.712 µs | 524 ns | 48×40 | 49×40 |
+| 2nd | 378 | 388.846 µs | 1.028 µs | 48×40 | 49×40 |
+
+**Averaged over both runs: ~759 ns per frame** — (228.712 + 388.846) µs over 814 frames. Against the
+60 Hz slot that is under a thousandth of 1 %.
+
+**The range is wide on purpose, and it is said rather than rounded away.** The two runs differ by a
+factor of two, 524 ns against 1.028 µs, on the same machine and the same binary — the signature of a
+strip that is one flat rectangle plus a stroke, cheap enough that the frame's own noise dominates it.
+Publishing a single figure to three digits would be feigning precision D45 does not have.
+
+**`T` and `C` do not share a grid, and the asymmetry is declared rather than subtracted.** Every run
+of `T` measures 48 columns per pane; every run of `C` measures 49 — one narrower, with the same 40
+rows and the same window. Both directions of the guard hold across both runs: `T` never painted zero
+strips and `C` never painted one, so the report's two-way invalidation (**AC8**) is exercised by the
+very runs this annex cites. The column lost to `T` is not folded into the per-frame number above; it
+is a fact about the grid the reader compares, not about what the strip costs to paint.
 
 ## D46 — The strip carries the button that closes its console, and a console with no sibling carries none
 
@@ -6244,3 +6268,11 @@ the grab — the same tie the strip already decides on the line it shares with t
 | Closing through the chord's own door, «the focused one» | It makes the argument travel as a side effect on the keyboard, and on three consoles it moves the keyboard off the one being typed in |
 | Squeezing the button into a strip too narrow for it | The narrow strip becomes one big close button, and the handle disappears |
 | A guard so that the press which closes does not also arm the drag | **Asked for by the design and cut after measuring.** Its reason was that egui cannot consume a pointer button event. What is true is that egui does not decide a press is a drag **in the frame the press arrives in**, and by the next frame the console has been closed at the foot of that pass and nobody interacts with its widget again. Written, mutated away, and no test moved: a guard that fires in no frame that exists |
+
+**What it did to three published batches, said rather than left silent.** The scan for a pressed
+close button walks the panes on any frame carrying a bare primary press, inside the mouse's already
+declared span (**D13**, so nothing is mislabelled). Batches `K`, `M` and `N` — the three that inject
+gestures — gained that scan **after** they were measured and published: their figures are from
+before this decision, and the milestone does not republish them. Rejected: hours of machine time to
+restate what the scan does not change enough to matter, and it would turn D45's annex into a new
+measured series nobody asked for.
