@@ -5481,6 +5481,93 @@ mod tests {
         );
     }
 
+    /// **The row that says the person took the console over is only published where an agent had a
+    /// console to lose** (**AC15**). The sentence reports the end of an access, so on a console the
+    /// person opened themselves there is no access that ended — and publishing it anyway made the
+    /// panel **visible**, which is what takes [`panel::DEFAULT_WIDTH`] columns off the console the
+    /// first time anybody types into it.
+    ///
+    /// **Both sides are asserted in the same window and through the same door**, because a gate is
+    /// the one shape a single-sided test cannot cover: asserting only the agent's console passes
+    /// with the gate removed, and asserting only the person's passes with the row never published at
+    /// all. And the assertion is on the panel **being visible**, not on the field where the sentence
+    /// is recorded: what the person meets is the panel appearing.
+    #[test]
+    fn only_a_console_an_agent_opened_says_on_its_panel_that_it_went_back() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let newborn = window.next_pane_name;
+
+        let panel_control::Answer::Opened(Some(_)) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            7,
+            panel_control::What::Open {
+                side: panel_control::Side::Right,
+                program: Some("sleep 8".to_owned()),
+                args: Vec::new(),
+            },
+        ) else {
+            panic!("the console was not opened with a handle");
+        };
+
+        // **Nobody has published here**, so neither panel is showing anything before the typing: the
+        // premise of the whole test, and without it the person's console could be passing for a
+        // reason of its own.
+        let now = SystemTime::now();
+        let visible = |window: &Window, name: usize| {
+            window
+                .all_panes()
+                .find(|pane| pane.name == name)
+                .expect("the console")
+                .panel_state
+                .is_visible(now)
+        };
+        assert!(
+            !visible(&window, 0),
+            "the person's panel was already showing"
+        );
+        assert!(
+            !visible(&window, newborn),
+            "the agent's panel was already showing"
+        );
+
+        // **The person types into both, through the door a keystroke and a paste share**, and not by
+        // setting the flag by hand: what is being guarded is which console grows a panel from real
+        // input.
+        for name in [0, newborn] {
+            let pane = window
+                .all_panes_mut()
+                .find(|pane| pane.name == name)
+                .expect("the console");
+            enqueue(&ctx, vec![egui::Event::Paste("hello".to_owned())]);
+            let mut modifiers = egui::Modifiers::NONE;
+            pane.send_keys(
+                &ctx,
+                Instant::now(),
+                &mut modifiers,
+                2,
+                &keyboard::Keymap::default(),
+                true,
+            );
+            assert!(
+                pane.taken_over.is_some(),
+                "the premise failed: console {name} was not handed back"
+            );
+        }
+
+        assert!(
+            visible(&window, newborn),
+            "the console an agent opened does not say on its panel that it went back"
+        );
+        assert!(
+            !visible(&window, 0),
+            "typing into the person's own console grew it a panel nobody published"
+        );
+    }
+
     /// **AC16, the half that is reachable**: a console the agent opened is closed by its handle, the
     /// tree loses it, and the handle is forgotten with it. Without this, a build that refused *every*
     /// close would pass the refusal tests and close nothing.

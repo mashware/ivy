@@ -246,16 +246,33 @@ pub struct PanelState {
     /// panel state and has no way to reach the pane. It is set once, with the first byte of the
     /// person's input, and it never clears: what ended did not end back (**AC15**).
     taken_over: Option<String>,
+    /// Whether an agent opened this console over the control channel.
+    ///
+    /// **It is what decides whether the person taking the console over is published here at all**
+    /// (**AC15**). The sentence reports that an agent's access ended, so on a console no agent ever
+    /// opened there is nothing that ended — and publishing it anyway made this panel **visible** over
+    /// a console with no producer, which is what takes [`DEFAULT_WIDTH`] columns off it the first
+    /// time anybody types.
+    ///
+    /// **It lives with the row it gates and not on the pane**, so the two are read in one place:
+    /// whether there is a row to publish is a question about this panel, not about the console.
+    opened_by_an_agent: bool,
 }
 
 impl PanelState {
+    /// Records that an agent opened this console, **so its panel may carry the app's own row about
+    /// losing it**.
+    pub(crate) fn an_agent_opened_it(&mut self) {
+        self.opened_by_an_agent = true;
+    }
+
     /// Records that the person took this console over, **with the sentence the row will show**.
     ///
     /// **The application's own row and not a producer's**, so `header: false` cannot hide it: an agent
     /// that turned the identity row off would otherwise be able to hide from the person that a console
     /// of theirs had quietly gone back to them.
     pub(crate) fn the_person_took_it_over(&mut self, why: &str) {
-        if self.taken_over.is_none() {
+        if self.opened_by_an_agent && self.taken_over.is_none() {
             self.taken_over = Some(why.to_owned());
         }
     }
@@ -1531,12 +1548,18 @@ mod tests {
     /// **AC15's second half, against the rows a person reads**: once the person types into a console
     /// an agent opened, the application's own row says so — and `header: false` cannot hide it, which
     /// is the whole reason it is the application's row and not the producer's.
+    ///
+    /// **The console is made an agent's first, and that is the premise and not a formality**: on one
+    /// the person opened themselves there is no access that ended and no row, which is what
+    /// `only_a_console_an_agent_opened_says_on_its_panel_that_it_went_back` guards from the window's
+    /// own doors.
     #[test]
     fn a_console_the_person_took_over_says_so_on_its_own_row() {
         let dir = PanelDir::create().expect("create the directory");
         publish(&dir, "{\"header\":false,\"lines\":[\"still publishing\"]}");
         let mut state = PanelState::default();
         state.refresh(dir.path());
+        state.an_agent_opened_it();
         state
             .the_person_took_it_over("the person typed into this console, so it went back to them");
 

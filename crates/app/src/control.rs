@@ -296,9 +296,12 @@ impl Pane {
     pub(crate) fn hand_it_back_to_the_person(&mut self) {
         if self.taken_over.is_none() {
             self.taken_over = Some(HANDED_BACK.to_owned());
-            // **And the panel's own row says it too**, which is what the person reads: the flag alone
-            // would leave a console that quietly stopped being an agent's with nothing on screen
-            // saying so (**AC15**).
+            // **And the panel's own row says it too, on a console an agent opened**, which is what
+            // the person reads: the flag alone would leave a console that quietly stopped being an
+            // agent's with nothing on screen saying so (**AC15**). Whether there is such a row to
+            // publish is the panel's own question and it answers it — on every other console the row
+            // would announce the end of an access nobody ever had, and it would be the application
+            // making a panel appear where no producer published one (**D17**).
             self.panel_state.the_person_took_it_over(HANDED_BACK);
         }
     }
@@ -459,7 +462,7 @@ impl Window {
         // **The name is spent even if the program never starts**, as the chord's split also does:
         // what opens afterwards must not be called the same as what never got to exist.
         self.next_pane_name += 1;
-        let new = match opened {
+        let mut new = match opened {
             Ok(new) => new,
             Err(failure) => return Err(format!("the console could not be opened ({failure})")),
         };
@@ -467,6 +470,13 @@ impl Window {
         // says so with a null handle instead of inventing one: the console exists and the person can
         // use it, but this channel has no identity to hand back for it.
         let addressable = new.panel.is_some();
+        // **And its panel is told an agent opened this console, before it is grafted**: from here on
+        // it may carry the application's row saying the person took it back (**AC15**), which no
+        // console the person opened themselves has anything to say about. It follows `addressable`,
+        // because a console this channel cannot name is not one it can lose either.
+        if addressable {
+            new.panel_state.an_agent_opened_it();
+        }
 
         // A `Some` here is the target having been lost and the console handed back; nothing has been
         // split and it is said, because the console that was built dies on being dropped.
