@@ -9,8 +9,21 @@
 //! is the turn number, substituted into the literal `{n}`, so a run's publications are told apart on
 //! screen exactly as the file-seeded ones are.
 //!
+//! **And it reads the document back where the batch asks it to**, which is the other half of the same
+//! argument: the reading batch measures what answering a read costs, and nothing else in the bench
+//! ever asks for one.
+//!
+//! **The reading batch publishes AND reads every turn, and that is what makes its control honest.**
+//! The first shape had it publish once and then only read, which looks tighter and is not: a
+//! publication drops the panel's layout cache and changes the text, so the batch it is compared
+//! against pays a re-layout and a repaint every second that the reading batch would not — and the
+//! subtraction would come out as the cost of a read *minus* all of that, which can be zero or
+//! negative and would be published as «answering a read costs nothing». Publishing the same document
+//! on the same cadence and asking for it back makes the reading batch its control **plus one read**,
+//! which is the only shape whose difference is the thing being measured.
+//!
 //! ```text
-//! publish <directory> <identifier> <source> <how many> <every so many ms> <document>
+//! publish <directory> <identifier> <source> <how many> <every so many ms> <document> [publish|read]
 //! ```
 
 use std::time::Duration;
@@ -19,12 +32,29 @@ use panel_control::{Answered, Producer};
 
 fn main() {
     let asked: Vec<String> = std::env::args().skip(1).collect();
-    let [dir, id, source, how_many, every_ms, document] = &asked[..] else {
-        eprintln!(
-            "publish <directory> <identifier> <source> <how many> <every so many ms> <document>"
-        );
-        std::process::exit(2);
+    let ([dir, id, source, how_many, every_ms, document], verb) = match &asked[..] {
+        [dir, id, source, how_many, every_ms, document] => (
+            [dir, id, source, how_many, every_ms, document],
+            "publish".to_owned(),
+        ),
+        [dir, id, source, how_many, every_ms, document, verb] => (
+            [dir, id, source, how_many, every_ms, document],
+            verb.clone(),
+        ),
+        _ => {
+            eprintln!(
+                "publish <directory> <identifier> <source> <how many> <every so many ms> <document> [publish|read]"
+            );
+            std::process::exit(2);
+        }
     };
+    // **A verb nobody serves ends the process instead of falling back to publishing**, because a
+    // silent fallback is how a batch measures the load of the batch beside it under its own name.
+    if verb != "publish" && verb != "read" {
+        eprintln!("publish: the verb is \"publish\" or \"read\", not \"{verb}\"");
+        std::process::exit(2);
+    }
+    let reading = verb == "read";
     let how_many: usize = how_many.parse().expect("how many is a number");
     let every = Duration::from_millis(every_ms.parse().expect("the interval is a number"));
 
@@ -41,8 +71,21 @@ fn main() {
 
     for turn in 1..=how_many {
         let document = document.replace("{n}", &turn.to_string());
-        match pane.publish(source, &document) {
+        // **The publication happens in both batches**, so the one that reads is the other one plus a
+        // read rather than a different load wearing its name.
+        let published = pane.publish(source, &document);
+        let answered = if reading {
+            report("publish", published);
+            pane.read_the_document()
+        } else {
+            published
+        };
+        match answered {
             Ok(Answered::Ok) => {}
+            // What a read comes back with, **and only the batch that asked for one may see it**: a
+            // document answered to a publication is the pane answering the wrong verb, which is the
+            // case the arm below exists to report and not one to pass over in silence.
+            Ok(Answered::Document(_)) if reading => {}
             // **Said and not fatal.** A refusal is a real answer — another source holds the pane —
             // and the run's own report is what decides whether the batch is valid, not this process.
             Ok(Answered::Failed(why)) => eprintln!("publish: refused ({why})"),
@@ -50,7 +93,7 @@ fn main() {
             // asks for them.** A payload here would mean the pane answered the wrong request, which
             // is worth a line and not a panic: this process's job is the load, and the batch's own
             // report is what decides whether the run counts.
-            Ok(Answered::Opened(_) | Answered::Text(_)) => {
+            Ok(Answered::Opened(_) | Answered::Text(_) | Answered::Document(_)) => {
                 eprintln!("publish: the pane answered something else to a publication");
             }
             Err(failure) => {
@@ -59,5 +102,21 @@ fn main() {
             }
         }
         std::thread::sleep(every);
+    }
+}
+
+/// Says what an answer was, when nothing else is going to look at it.
+///
+/// **Its `Err` arm is the reason it exists.** The publication the reading batch makes every turn is
+/// not the one whose answer that batch inspects, and dropping it silently is how a run passes its own
+/// guard having never published over the channel at all: the file seeding writes `panel.json` too, so
+/// the reads succeed on a document that arrived the other way and the batch reports a channel it
+/// never used.
+fn report(verb: &str, answered: std::io::Result<Answered>) {
+    match answered {
+        Ok(Answered::Ok) => {}
+        Ok(Answered::Failed(why)) => eprintln!("{verb}: refused ({why})"),
+        Ok(_) => eprintln!("{verb}: the pane answered something else"),
+        Err(failure) => eprintln!("{verb}: the channel is gone ({failure})"),
     }
 }

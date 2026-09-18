@@ -116,6 +116,16 @@ impl Producer {
         }))
     }
 
+    /// Asks for the document this pane's panel is showing.
+    ///
+    /// **It takes no hold and needs none**: it is for the producer that has *not* claimed the pane —
+    /// one that restarted, one whose context was compacted away, a second tool taking the console
+    /// over — and it answers with a document that arrived by file just as readily as with one this
+    /// connection published.
+    pub fn read_the_document(&mut self) -> io::Result<Answered> {
+        self.ask(serde_json::json!({"tool": "panel_get"}))
+    }
+
     /// Closes a console this connection opened.
     pub fn close_a_pane(&mut self, pane: &str) -> io::Result<Answered> {
         self.ask(serde_json::json!({"tool": "split_close", "pane": pane}))
@@ -152,27 +162,63 @@ impl Producer {
             }
         }
 
-        let raw: serde_json::Value = serde_json::from_slice(&line)
+        // **The document is kept as the bytes that arrived, and every other field is not.** A
+        // `serde_json::Value` cannot do it: without `preserve_order` its map is sorted, so a document
+        // published as `{"updated_at":…,"phase":…,"lines":…}` came back
+        // `{"lines":…,"phase":…,"updated_at":…}` — the same panel, and not the same bytes. That
+        // defeats the one reason the reply carries the document unescaped, and it made this type's own
+        // promise —«as the JSON text it arrived as»— false. Borrowing it as a [`RawValue`] is the same
+        // answer the request side already gives for the same reason.
+        let raw: Reply<'_> = serde_json::from_slice(&line)
             .map_err(|failure| io::Error::other(failure.to_string()))?;
-        match raw.get("ok").and_then(serde_json::Value::as_bool) {
-            Some(true) => match raw.get("pane") {
+        // **The field travels, not its name.** Looking one up by a string would put a `_ => None` arm
+        // between a refusal and the caller: a typo would compile, every refusal would collapse into
+        // «it refused without saying why», and the reason would be thrown away — the same silent loss
+        // the branch below exists to remove.
+        let text_of = |held: Option<&serde_json::value::RawValue>| -> Option<String> {
+            held.and_then(|held| serde_json::from_str::<String>(held.get()).ok())
+        };
+        match raw.ok {
+            Some(true) => match raw.pane {
                 // **Present and possibly null**: an open answers with the handle, or with a JSON null
                 // where the console has no addressable identity, and those are two different
                 // answers a caller can act on differently.
-                Some(pane) => Ok(Answered::Opened(pane.as_str().map(str::to_owned))),
-                None => match raw.get("text").and_then(serde_json::Value::as_str) {
-                    Some(text) => Ok(Answered::Text(text.to_owned())),
-                    None => Ok(Answered::Ok),
+                Some(pane) => Ok(Answered::Opened(text_of(Some(pane)))),
+                // **Before the fallback and not after it.** Everything that is not `pane` and not
+                // `text` used to land on `Answered::Ok` — success carrying nothing — so a reply whose
+                // whole content is the document would have read as «it worked» with the document
+                // thrown away, and silently.
+                None => match raw.document {
+                    Some(document) => Ok(Answered::Document(document.get().to_owned())),
+                    None => match text_of(raw.text) {
+                        Some(text) => Ok(Answered::Text(text)),
+                        None => Ok(Answered::Ok),
+                    },
                 },
             },
-            _ => Ok(Answered::Failed(
-                raw.get("error")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("the pane refused it without saying why")
-                    .to_owned(),
-            )),
+            _ => Ok(Answered::Failed(text_of(raw.error).unwrap_or_else(|| {
+                "the pane refused it without saying why".to_owned()
+            }))),
         }
     }
+}
+
+/// One reply line, **with the document kept as the bytes it arrived as**.
+///
+/// Every field is borrowed raw for the reason the request's own envelope states: this crate does not
+/// re-serialise somebody else's JSON, because re-serialising is what silently reordered a document's
+/// keys on the way back to its producer.
+#[derive(serde::Deserialize)]
+struct Reply<'a> {
+    ok: Option<bool>,
+    #[serde(default, borrow)]
+    pane: Option<&'a serde_json::value::RawValue>,
+    #[serde(default, borrow)]
+    text: Option<&'a serde_json::value::RawValue>,
+    #[serde(default, borrow)]
+    document: Option<&'a serde_json::value::RawValue>,
+    #[serde(default, borrow)]
+    error: Option<&'a serde_json::value::RawValue>,
 }
 
 /// What a pane answered.
@@ -184,6 +230,10 @@ pub enum Answered {
     Opened(Option<String>),
     /// What a console showed.
     Text(String),
+    /// The document a console's panel is showing, **as the bytes it arrived as** — not a
+    /// re-serialisation of them, which sorts the keys and hands the producer a document it did not
+    /// publish.
+    Document(String),
     Failed(String),
 }
 
@@ -243,6 +293,33 @@ mod tests {
             answered,
             Answered::Failed("held by \"flow\", 2 line(s)".to_owned())
         );
+    }
+
+    /// **What comes back is the bytes the pane sent, not a re-serialisation of them.**
+    ///
+    /// The assertion is on the **order of the keys**, and that is the whole point: any reading that
+    /// goes through a `serde_json::Value` returns the same panel with its fields sorted, so a test
+    /// that parsed the answer and compared documents would pass on exactly the version this guards
+    /// against. Published as `updated_at`, `phase`, `lines`; sorted it would be `lines`, `phase`,
+    /// `updated_at`.
+    #[test]
+    fn a_document_comes_back_in_the_order_the_pane_sent_it() {
+        let (dir, _channel, inbox) = a_pane();
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
+        let sent = "{\"updated_at\":\"x\",\"phase\":\"build\",\"lines\":[\"one\"]}";
+
+        let window = std::thread::spawn(move || {
+            let delivery = inbox
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the window is handed the question");
+            assert!(matches!(delivery.what, What::Get));
+            let _ = delivery.answer.send(Answer::Document(sent.to_owned()));
+        });
+
+        let answered = producer.read_the_document().expect("read the document");
+
+        window.join().expect("the window thread finished");
+        assert_eq!(answered, Answered::Document(sent.to_owned()));
     }
 
     /// **A document written the way a person writes JSON — over several lines — must still arrive as

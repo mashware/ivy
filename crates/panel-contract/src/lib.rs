@@ -25,7 +25,7 @@ mod panel;
 
 pub use panel::{
     Action, Attention, Line, MAX_ACTIONS, MAX_BYTES, MAX_INDENT, MAX_SEND, Mark, Panel, Problem,
-    STALE_AFTER, Style, is_shown_as_itself, parse_document, read, read_if_newer,
+    STALE_AFTER, Style, is_shown_as_itself, parse_document, read, read_if_newer, serialize,
 };
 
 /// The only file the contract puts inside the directory. It is written by whoever does the work,

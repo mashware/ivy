@@ -137,6 +137,27 @@ impl PaneControl {
                     // when the caller is already gone, which changes nothing about what is on screen.
                     let _ = delivery.answer.send(answer);
                 }
+                // **Answered here and not in the window's queue**, for the same reason the
+                // publication above is: what it needs is this pane's panel, which is in hand, and not
+                // the tree of panes, which is not. It is also what keeps it out of the trap a request
+                // only the window can answer falls into — queued during a painting, after the frame's
+                // own drain has already run, and answered by no pass at all while the window is at
+                // rest.
+                What::Get => {
+                    let answer = match state.document() {
+                        Ok(document) => {
+                            self.did.read_back += 1;
+                            self.did.largest_serialized =
+                                self.did.largest_serialized.max(document.len());
+                            Answer::Document(document)
+                        }
+                        Err(why) => {
+                            self.did.read_refused += 1;
+                            Answer::Refused(why)
+                        }
+                    };
+                    let _ = delivery.answer.send(answer);
+                }
                 What::Closed => {
                     if state.release(delivery.connection) == Released::Given {
                         self.did.released += 1;
@@ -390,7 +411,7 @@ impl Window {
                     // there is nobody to answer and nothing to say.
                     continue;
                 }
-                What::Publish { .. } => {
+                What::Publish { .. } | What::Get => {
                     Answer::Refused("that request is not the window's".to_owned())
                 }
             };
@@ -598,6 +619,171 @@ mod tests {
             state: PanelState::default(),
             woken,
         }
+    }
+
+    /// A producer that asks one question and stays connected while it is answered.
+    ///
+    /// **The same shape as `Publishing` and for the same reason**: a thread that drops its producer
+    /// before the assertion runs releases the connection, and a read whose connection is gone is not
+    /// the read this suite is about.
+    struct Asking {
+        answered: Receiver<Answered>,
+        go: Option<SyncSender<()>>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Asking {
+        fn start(mut producer: Producer) -> Self {
+            let (answering, answered) = channel();
+            let (go, told) = sync_channel(0);
+            let thread = std::thread::spawn(move || {
+                let _ = answering.send(
+                    producer
+                        .read_the_document()
+                        .expect("the question reached the pane"),
+                );
+                let _ = told.recv();
+            });
+
+            Self {
+                answered,
+                go: Some(go),
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for Asking {
+        fn drop(&mut self) {
+            drop(self.go.take());
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// **The case the verb was asked for: a document nobody published over this channel.**
+    ///
+    /// A producer that restarted, or whose context was compacted away, reaches a pane whose panel
+    /// came from its `panel.json` — and it has no hold, because it never claimed anything. What comes
+    /// back is that document, read by the same parser and written back out by the same writer, so
+    /// what the producer receives parses into the panel that is on screen.
+    #[test]
+    fn a_document_that_arrived_by_file_is_read_back_by_a_producer_that_never_published() {
+        let mut driven = a_driven_pane();
+        std::fs::write(
+            driven.dir.path().join(panel_contract::PANEL_FILE),
+            r#"{"phase":"ci","lines":[{"text":"green","mark":"done","key":"tests"}]}"#,
+        )
+        .expect("publish by file");
+        assert!(matches!(
+            driven.state.refresh(driven.dir.path()),
+            crate::panel::Refreshed::Read
+        ));
+        assert!(
+            driven.state.held_by().is_none(),
+            "nothing claimed this pane"
+        );
+
+        let asking = Asking::start(driven.producer());
+        let Answered::Document(document) = answered(&mut driven, &asking) else {
+            panic!("a read answers with a document");
+        };
+        let read_back = panel_contract::parse_document(&document).expect("it parses as a panel");
+        assert_eq!(read_back.phase.as_deref(), Some("ci"));
+        assert_eq!(read_back.lines.len(), 1);
+        assert_eq!(read_back.lines[0].key.as_deref(), Some("tests"));
+        assert!(
+            driven.state.held_by().is_none(),
+            "reading the document claimed the pane, and it must not"
+        );
+    }
+
+    /// **And none of the application's own rows travel with it.**
+    ///
+    /// The identity row, the claim and the confessions are composed when the panel is laid out and are
+    /// not fields of the document at all, so what goes back is the producer's own text and nothing
+    /// else. Asserted on the lines that come back rather than on the absence of a field, because the
+    /// failure this guards against is a future delivery composing the rows earlier.
+    #[test]
+    fn what_is_read_back_carries_nothing_the_application_added() {
+        let mut driven = a_driven_pane();
+        let _publishing = driven.publishing(
+            "flow",
+            r#"{"phase":"build","attention":"wait","lines":["only this"]}"#,
+        );
+
+        let asking = Asking::start(driven.producer());
+        let Answered::Document(document) = answered(&mut driven, &asking) else {
+            panic!("a read answers with a document");
+        };
+        let read_back = panel_contract::parse_document(&document).expect("it parses as a panel");
+        assert_eq!(
+            read_back
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["only this"],
+            "a row the application composes reached the producer"
+        );
+    }
+
+    /// A pane nobody has published to says so, **instead of answering an empty document**.
+    #[test]
+    fn a_console_with_nothing_published_says_so_rather_than_answering_an_empty_document() {
+        let mut driven = a_driven_pane();
+
+        let asking = Asking::start(driven.producer());
+        let Answered::Failed(why) = answered(&mut driven, &asking) else {
+            panic!("a read of nothing is refused");
+        };
+        assert!(why.contains("nothing has been published"), "{why}");
+    }
+
+    /// The run's own numbers, **because a path in the frame that nothing counts is published as the
+    /// interface framework's cost** (D13).
+    #[test]
+    fn a_document_read_back_is_counted_with_the_size_it_was_paid_at() {
+        let mut driven = a_driven_pane();
+        let _publishing = driven.publishing("flow", r#"{"lines":["a line of some length here"]}"#);
+        assert_eq!(driven.control.did().read_back, 0);
+
+        let asking = Asking::start(driven.producer());
+        let Answered::Document(document) = answered(&mut driven, &asking) else {
+            panic!("a read answers with a document");
+        };
+
+        assert_eq!(driven.control.did().read_back, 1);
+        assert_eq!(
+            driven.control.did().largest_serialized,
+            document.len(),
+            "the size published is the size of what was written out"
+        );
+        assert_eq!(
+            driven.control.did().applied,
+            1,
+            "a read must not be counted as a document applied"
+        );
+    }
+
+    /// Runs the apply point until the question is answered, the way frames would.
+    ///
+    /// **A loop and not a sleep**, for the reason `frames_until` gives one screen up: the question is
+    /// answered on another thread, and a fixed wait is a test that passes on a fast machine.
+    fn answered(driven: &mut Driven, asking: &Asking) -> Answered {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            driven.control.apply(&mut driven.state, SystemTime::now());
+            match asking.answered.try_recv() {
+                Ok(answer) => return answer,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(gone) => panic!("the producer's thread is gone ({gone})"),
+            }
+        }
+        panic!("the pane never answered the question");
     }
 
     /// A producer publishing from a thread of its own **and staying connected afterwards**.

@@ -32,6 +32,7 @@ const DECLARED: &[(&str, &str)] = &[
     ("ACTIONS", "buttons"),
     ("CONTROL", "control"),
     ("HEADER", "header"),
+    ("READS", "documents"),
 ];
 
 /// Whether the script has a conditional on this test that ends up invalidating the run.

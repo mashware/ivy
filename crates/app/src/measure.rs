@@ -487,8 +487,6 @@ impl Timings {
             writeln!(a, "  interpreting:           {}", self.interpret)?;
             writeln!(a, "  enqueueing the paint:   {}", self.enqueue)?;
             writeln!(a, "  the status panel:       {}", self.panel)?;
-            writeln!(a, "  the panel's buttons:    {}", self.buttons)?;
-            writeln!(a, "  the control channel:    {}", self.control)?;
             // **This span's mean mixes two populations and it has to be said.** Almost every frame
             // only checks the file timestamp and paints the already-laid-out text; the few in which
             // the producer has published cost, on top of that, reading, interpreting and redoing the
@@ -498,7 +496,15 @@ impl Timings {
             // **And the span includes painting**, not only reading: the clock runs from before
             // checking the timestamp to after painting the last row. Saying it here is what keeps
             // whoever copies this number into a document from attributing it to someone else.
+            //
+            // **It goes directly under the span it explains, and that is a correction.** Two
+            // milestones inserted their own lines between the two, so this paragraph was printed
+            // under «the control channel» and read as its explanation — which was already wrong and
+            // became misleading the day that span started covering a document being written out.
             writeln!(a, "{PANEL_EXPLANATION}")?;
+            writeln!(a, "  the panel's buttons:    {}", self.buttons)?;
+            writeln!(a, "  the control channel:    {}", self.control)?;
+            writeln!(a, "{CONTROL_EXPLANATION}")?;
             writeln!(
                 a,
                 "  it includes the whole frame, the other consoles' painting too: a frame\n  \
@@ -509,6 +515,26 @@ impl Timings {
         Ok(())
     }
 }
+/// What the control channel's span covers, **and what it does not**.
+///
+/// It is written for the same reason as [`PANEL_EXPLANATION`] and it says a different thing: this
+/// span used to be a queue being drained, which is arithmetic, and since a producer can ask for its
+/// document back it also covers **writing that document out**. That makes it the first figure of this
+/// module whose cost follows the **size** of what somebody published rather than the number of
+/// requests that arrived — so the mean describes the frames that drained nothing, the 95th the frame
+/// that answered, and the report's own line about documents says how big the largest one was. Without
+/// that last number a reader carries a six-line panel's cost to the ceiling.
+///
+/// **And what is outside it is said here so nobody declares it twice**: escaping the document into
+/// the reply and writing it to the socket happen on the connection's own thread, which no frame
+/// times.
+const CONTROL_EXPLANATION: &str = "\
+    \x20   mixes the frames that drained nothing —almost all of them— with the ones that\n\
+    \x20   applied a document or wrote one back out: the mean describes the former and the\n\
+    \x20   95th the latter, and the «documents:» line says how big the largest document\n\
+    \x20   written out was\n\
+    \x20   escaping it into the reply and writing the socket are NOT in here: both happen\n\
+    \x20   on the connection's own thread, which no frame times";
 
 /// What the report says under the panel span's line.
 ///

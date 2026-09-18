@@ -156,6 +156,13 @@ it is not painted blank: an empty line where there was garbage would be inventin
 | `style` | `normal` `dim` `title` `accent` `ok` `warn` `error` — meant for lines without a `mark`, but **it can come alongside one**: then the mark sets the symbol and the style the color |
 | `link` | A URL. **It is read and not painted yet** — see Pending |
 | `indent` | Manual indentation, in cells (inherited by the continuation lines). **It is bounded to 64** when read, and **when painted also against the panel's width**: an indentation of 40 is not honored whole in a panel of 36, because it would leave the text outside |
+| `key` | The name **you** give this line, so it can be addressed later. **It is never painted**, it has no bound of its own — the document's ceiling holds it, as it holds every other string — and it is kept exactly as you wrote it, repeated keys included |
+
+**A line with no `key` is a line.** Nothing about publishing changes if you never write one, and
+nothing about how a panel is painted changes if you do — the field exists for what a channel can say
+about a document, not for what the document looks like. And **it is deliberately not `ref`**: that one
+is painted, clipped to the width of its column, and legitimately repeated —`#1` twice in one panel is
+ordinary— so an address built on it would change whenever the text did.
 
 **Write sentences, not measured columns.** The app wraps to the width, aligns by blocks (separated by
 empty lines) and clips to the height. Multiple spaces are collapsed: they are no good for aligning.
@@ -277,6 +284,11 @@ The prototype discovers the file by convention; the app does it by pane identity
 - **It does not tell the producer that their document is broken.** The error is seen in the user's
   panel, not by whoever publishes — and that is what makes writing a new producer expensive, which is
   exactly what this project needs to be cheap.
+- **It cannot be read back.** There is nothing to ask and nobody to answer: a file is written, not
+  spoken to. A producer that wants to know what is on its panel — one that restarted, one that lost
+  the document it published — needs the channel, whose `panel_get` exists for exactly that. This is
+  deliberate rather than pending: the whole worth of this transport is that its barrier to entry is
+  zero, and a question needs a connection that can answer.
 
 ---
 
@@ -295,6 +307,8 @@ per-field tolerance: everything above this line is unchanged and this section ad
 ```
 → {"tool":"panel_set","source":"flow","document":{ ...the panel document... }}
 ← {"ok":true}
+→ {"tool":"panel_get"}
+← {"ok":true,"document":{ ...the panel document... }}
 → {"tool":"split_open","side":"right","program":"cargo","args":["test"]}
 ← {"ok":true,"pane":"<opaque handle>"}
 → {"tool":"split_read","pane":"<opaque handle>","scrollback":false}
@@ -303,6 +317,36 @@ per-field tolerance: everything above this line is unchanged and this section ad
 ← {"ok":true}
 ← {"ok":false,"error":"..."}
 ```
+
+### `panel_get` — reading the document back
+
+**It hands back the document this pane's panel is showing, and it takes nothing.** No arguments, no
+source, no hold: the connection's own endpoint already decided which pane this is, and there is no
+word here for asking about another.
+
+It is for the producer that has **not** claimed the pane — one that restarted, one whose context was
+compacted away, a second tool taking the console over — so gating it on a hold would take away the
+only reason it exists. Three things follow, and they are the whole of it:
+
+- **It answers with a document that arrived by file just as readily as with one published here.** The
+  source of truth is what the application holds for that pane, not the file (**D17**), and that is
+  where this reads from.
+- **It carries nothing of the application's own.** The identity row, the claim indicator, the notices
+  about a stale panel or a refused file are painted beside your document and are not part of it. What
+  comes back is yours.
+- **Reading changes nothing.** It takes no hold, so it does not stop the file being read, it does not
+  refuse anybody else, and a panel driven by its `panel.json` goes on being driven by it.
+
+**What comes back is not byte-for-byte what you sent, and it is not meant to be.** The document is
+read tolerantly — an unknown field is dropped, an indentation past 64 is clipped, a word none of the
+vocabularies knows falls away — so what you get is the document **as the application understands it**.
+Two consequences to know before you rely on it: a field the application did not understand is not
+there, and a field you wrote at its default (`"header": true`) comes back absent, because once it is
+read there is no difference between *not said* and *said the default*. What **is** guaranteed is that
+publishing back what you received leaves the panel exactly as it is: read, edit, publish is stable.
+
+A pane where nothing has been published yet answers
+`{"ok":false,"error":"nothing has been published on this console yet"}`.
 
 ### The three `split_*` verbs
 

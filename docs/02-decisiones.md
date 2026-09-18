@@ -6276,3 +6276,84 @@ gestures — gained that scan **after** they were measured and published: their 
 before this decision, and the milestone does not republish them. Rejected: hours of machine time to
 restate what the scan does not change enough to matter, and it would turn D45's annex into a new
 measured series nobody asked for.
+
+---
+
+## D48 — The application can write the document back out, and what the writer promises is a round trip, not the producer's bytes
+
+**Status: taken.** Delivered in the first PR of the milestone that lets a producer read its panel
+back and change one line of it.
+
+**[D17](#d17--the-contract-is-the-document-not-the-file-the-source-of-truth-is-the-apps-state) said
+the source of truth is the state the application holds per pane, and until now nothing had to test
+that literally.** The application read documents and never wrote one; while the only verb was
+`panel_set` it could, in principle, have kept the bytes as they arrived and handed them back. It
+cannot any more: the milestone this belongs to goes on to change a document a line at a time, and a
+patched document has no bytes of its own. So the writer is the piece of real work, and the whole
+decision is what it is allowed to promise.
+
+### 1. It cannot promise the producer's bytes, and pretending otherwise would be the mistake
+
+The parse is lossy **on purpose** — that is the contract's first rule and it is the right one: a
+document is somebody's summary, so an unknown field is dropped, an indentation past 64 is clipped, a
+list of buttons past eight is cut and a word none of the vocabularies knows falls away, rather than
+the whole panel being lost over a field nobody looks at. A writer that claimed fidelity to what
+arrived would therefore be claiming something the reader already threw away.
+
+**What it promises instead is that the round trip is closed:**
+
+```text
+parse(serialize(p)) == p          for every p the parser can produce
+serialize(parse(serialize(p))) == serialize(p)
+```
+
+which is the property a producer actually leans on — read it, edit it, publish it, and the panel is
+what the document says.
+
+### 2. It never grows a document, and that is a promise about bytes rather than values
+
+**This came out of the review of the design and it had already broken an acceptance criterion on
+paper.** The first shape wrote `"text"` on every line. A line published as `{"indent":1}` — twelve
+bytes — came back as `{"text":"","indent":1}`, twenty-two; a document of some twenty thousand such
+lines is legal going in and **over the 256 KiB ceiling coming out**. A panel painting perfectly would
+have answered *over 256 KiB* to a producer asking what was on it, for a document the contract's own
+parser had produced.
+
+The rule that fixes it is one line and it is the writer's whole shape: **emit no field the document
+did not carry**, empty `text` included, defaults included. Every other difference between what
+arrived and what goes out shrinks it — whitespace gone, escapes resolved, unknown fields dropped — so
+
+```text
+len(serialize(p)) ≤ len(the bytes p was parsed from)
+```
+
+and the tests that hold it are written over **compact** sources on purpose: a pretty-printed document
+shrinks by so much that the assertion would pass however much the writer added.
+
+**The price, named here so it is not read later as a bug**: a producer that published an explicit
+`"header": true` reads back a document without it. After the parse there is no difference between
+*the producer did not say* and *the producer said the default*, so writing one would assert something
+the application does not know.
+
+### 3. One line, and no newline anywhere
+
+The reply that carries a document is one line on a newline-framed channel, and it is **the only reply
+that is interpolated raw instead of being escaped** — because escaping a document would roughly
+double a large one and make the channel refuse an answer the file transport would have accepted,
+which is the two-transport drift **D17** forbids, seen from the reply side. What keeps that safe is
+not the reply: it is this writer, whose every string goes through the same escaping and whose
+structure carries no newline of its own. There is a test on the emitted bytes for exactly that, and
+it is the one property the round trip cannot see — a raw newline between two tokens re-parses
+perfectly.
+
+### Discarded
+
+| Discarded | Why |
+|---|---|
+| Keeping the producer's original bytes and handing those back | There are none once a document has been patched, which is the whole reason this exists |
+| A `Serialize` derive on the document's types | A dependency feature to buy the half the channel's reply already buys by hand, in the one crate that exists in order to survive the interface being rewritten, and whose manifest carries a written reason per dependency |
+| Writing through a generic JSON value | The clipping, the truncation and the per-field tolerance do not survive a round trip through a value that knows none of them, and the drift would be per field — which is exactly the failure the one-parser rule exists to prevent |
+| Emitting the defaults, so a reader need not know them | It asserts something the application does not know: after the parse, *absent* and *the default* are the same document |
+| Emitting `written_at` | It is the file's own date, held by the application, and the parser does not read it back: it would invent a contract field |
+| Dividing the expiry by sixty | The parse saturates at `u64::MAX` seconds, and a plain division comes back fifteen seconds short of it and does not saturate again. Rounding up overflows into the saturation and lands where it started, and is exact everywhere else |
+| Asserting on the emitted text rather than on the re-parsed panel | **D30**: a writer that emitted the expiry in seconds would satisfy a text assertion and still hand back a different document. The two exceptions are the two properties a round trip cannot reach — the newline and the growth |

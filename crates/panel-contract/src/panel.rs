@@ -19,15 +19,24 @@ use std::time::{Duration, SystemTime};
 ///
 /// | Shape | Peak | Factor | Interpret |
 /// |---|---|---|---|
-/// | Lines of a real panel | 1.8 MiB | 7× | 2.8 ms |
+/// | Lines of a real panel | 1.8 MiB | 7× | 2.5 ms |
 /// | A single giant line | 769 KiB | 3× | 0.1 ms |
-/// | Objects with one key, 32,766 of them — the worst case | **24 MiB** | **95×** | **22 ms** |
+/// | Objects with one key, 32,766 of them — the worst case | **24.5 MiB** | **98×** | **22 ms** |
 ///
-/// **What the ceiling does NOT bound is the time.** The normal case does not come close: the nine
-/// `panel.json` in the repo cost around **10 µs each**, so re-reading the four of four splits would be
-/// a quarter of 1 % of a frame. The one that bites is the pathological one —22 ms, a frame and a
-/// half—, and it is enough that it is possible: whoever reads this from a painting loop **cannot
-/// re-read on every frame**, it has to re-read only when the file has really changed.
+/// **Re-measured on 18 September 2026, when a line gained its optional key**, because a field added
+/// to the shape of a line is exactly the thing that could move this table. **It does not move the
+/// worst case, and the reason is worth keeping**: the peak follows the number of *values*, so the
+/// worst shape is the one packing the most objects into the ceiling — which means the *fewest* keys
+/// per object. A key on every line makes each object bigger and therefore fewer of them fit, which
+/// walks away from this row rather than towards it — the example's own run of that shape, with two
+/// keys per object instead of one, comes out at 68×. What the field costs is what it keeps once the
+/// panel is in hand, not what interpreting it reserves.
+///
+/// **What the ceiling does NOT bound is the time.** The normal case does not come close: a realistic
+/// panel is read in around **10 µs**, so re-reading the four of four splits would be a quarter of
+/// 1 % of a frame. The one that bites is the pathological one —22 ms, a frame and a half—, and it is
+/// enough that it is possible: whoever reads this from a painting loop **cannot re-read on every
+/// frame**, it has to re-read only when the file has really changed.
 ///
 /// And along the way it bounds the lines and their length, which is what makes it unnecessary to put a
 /// separate ceiling on them.
@@ -256,6 +265,20 @@ pub struct Line {
     /// it would show something different from what would be copied, because painting discards
     /// characters the string does have.
     pub link: Option<String>,
+    /// The name its producer gives this line so it can be addressed later, **never painted**.
+    ///
+    /// It is deliberately not [`Line::reference`]: that one is painted, clipped to the width of its
+    /// column, and legitimately repeated —`#1` twice in one panel is ordinary— so an address built on
+    /// it would change when the text changes and would name two lines at once.
+    ///
+    /// **It carries no bound of its own**, unlike `indent` or an action's command: those are bounded
+    /// against what painting them costs, and this is never painted. What holds it is [`MAX_BYTES`],
+    /// the same ceiling that holds every other string of the document.
+    ///
+    /// **Two lines may carry the same key and both keep it.** Reading somebody else's document is
+    /// not the moment to rewrite it, so the ambiguity is left exactly where the producer put it. What
+    /// is done about it belongs to whoever addresses a line, and nothing does yet.
+    pub key: Option<String>,
 }
 
 /// What a line is. The six of the contract, not one more.
@@ -602,7 +625,196 @@ fn line(raw: &serde_json::Value) -> Option<Line> {
             .unwrap_or(0)
             .min(MAX_INDENT) as usize,
         link: string(raw, "link"),
+        key: string(raw, "key"),
     })
+}
+
+/// Writes a panel back out as one line of JSON, or refuses it for being over [`MAX_BYTES`].
+///
+/// **This crate had no writer until this one**, and what it promises is not what a writer usually
+/// promises. It cannot hand back the bytes its producer sent, because [`parse`] is lossy on purpose
+/// —unknown fields dropped, `indent` clipped, `actions` truncated, a vocabulary word nobody knows
+/// falling to nothing— and because a document that has been patched never had bytes of its own. What
+/// it promises instead is a **round trip**:
+///
+/// ```text
+/// parse_document(&serialize(&p)?) == Ok(Panel { written_at: None, ..p })
+/// ```
+///
+/// for every panel [`parse`] can produce — so a document that has made one round trip never changes
+/// again, and reading one back, editing it and publishing it again is stable.
+///
+/// **And it never grows a document**, which is a promise about bytes rather than about values and is
+/// the reason nothing here is emitted unconditionally. An earlier shape of this function wrote
+/// `"text"` always: a line published as `{"indent":1}` came back as `{"text":"","indent":1}`, ten
+/// bytes longer, and a document of twenty thousand such lines —legal going in— was over the ceiling
+/// coming out. A panel that paints perfectly would have answered *over 256 KiB* to a producer asking
+/// what was on it. So the rule is: **emit no field the document did not carry**. Every other
+/// difference between the input and this output shrinks it —whitespace gone, escapes resolved,
+/// unknown fields dropped— which makes the bound hold in one direction only, and that is the
+/// direction that matters.
+///
+/// **No newline anywhere**, because the reply that carries this is one line on a newline-framed
+/// channel and this is the one reply that is interpolated raw rather than escaped. Every string here
+/// goes through [`serde_json::Value::String`], so a newline inside somebody's text comes out as two
+/// characters; the structure around them is this function's own.
+///
+/// **D48.**
+pub fn serialize(panel: &Panel) -> Result<String, Problem> {
+    let mut out = String::from("{");
+    let mut comma = Comma::default();
+
+    if let Some(version) = panel.version {
+        comma.before(&mut out);
+        out.push_str(&format!("\"v\":{version}"));
+    }
+    for (name, value) in [
+        ("updated_at", panel.updated_at.as_deref()),
+        ("phase", panel.phase.as_deref()),
+    ] {
+        if let Some(value) = value {
+            comma.before(&mut out);
+            out.push_str(&format!("\"{name}\":{}", quoted(value)));
+        }
+    }
+    // **Only when it is false, and only when it differs**, and that is not brevity for its own sake:
+    // after the parse there is no difference between «the producer did not say» and «the producer
+    // said the default», so writing one would assert something this crate does not know. The price is
+    // named in the contract document: a producer that published an explicit `"header": true` reads
+    // back a document without it.
+    if !panel.header {
+        comma.before(&mut out);
+        out.push_str("\"header\":false");
+    }
+    if panel.stale_after != STALE_AFTER {
+        // **`div_ceil` and not a plain division.** The parse does `saturating_mul(60)`, so a producer
+        // asking for `u64::MAX` minutes lands on `Duration::from_secs(u64::MAX)` —fifteen seconds past
+        // any multiple of sixty. Dividing gives a value whose multiplication does not saturate back
+        // and the round trip breaks at exactly that point; rounding up overflows into the saturation
+        // again and lands where it started. Everywhere the parse did not saturate, the seconds are an
+        // exact multiple of sixty and the two agree.
+        let minutes = panel.stale_after.as_secs().div_ceil(60);
+        comma.before(&mut out);
+        out.push_str(&format!("\"stale_after_minutes\":{minutes}"));
+    }
+    if let Some(attention) = panel.attention {
+        comma.before(&mut out);
+        out.push_str(&format!("\"attention\":\"{}\"", attention.name()));
+    }
+    if !panel.actions.is_empty() {
+        comma.before(&mut out);
+        out.push_str("\"actions\":[");
+        for (at, action) in panel.actions.iter().enumerate() {
+            if at > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"label\":{},\"send\":{}}}",
+                quoted(action.label()),
+                quoted(action.send())
+            ));
+        }
+        out.push(']');
+    }
+    // **Always, even when there are none**, because a document with no `lines` is one of the only two
+    // ways to be invalid: omitting it would emit something this crate's own parser refuses, which
+    // breaks the round trip at the top rather than in a field.
+    comma.before(&mut out);
+    out.push_str("\"lines\":[");
+    for (at, line) in panel.lines.iter().enumerate() {
+        if at > 0 {
+            out.push(',');
+        }
+        out.push_str(&serialize_line(line));
+    }
+    out.push_str("]}");
+
+    if out.len() as u64 > MAX_BYTES {
+        return Err(Problem::TooBig);
+    }
+    Ok(out)
+}
+
+/// Whether a comma is owed before the next field.
+///
+/// **A flag and not «is this the first»**, because the first field written is not a fixed one: every
+/// field of a panel but `lines` is optional, so any of them can open the object and no position can
+/// be relied on.
+#[derive(Default)]
+struct Comma(bool);
+
+impl Comma {
+    /// Writes the separator this field owes, if it owes one.
+    fn before(&mut self, out: &mut String) {
+        if self.0 {
+            out.push(',');
+        }
+        self.0 = true;
+    }
+}
+
+/// One line, **as a bare string where it can be**.
+///
+/// The bare form is what a producer writes for a gap or a plain sentence, and it is roughly half the
+/// bytes of the object that says the same thing — which is what keeps a panel of gaps from doubling
+/// against a ceiling the reply has to fit under. A line carrying a key is never bare, by
+/// construction: a key is a field, and a field needs an object to live in.
+fn serialize_line(line: &Line) -> String {
+    let bare = line.mark.is_none()
+        && line.reference.is_none()
+        && line.style.is_none()
+        && line.link.is_none()
+        && line.key.is_none()
+        && line.indent == 0;
+    if bare {
+        return quoted(&line.text);
+    }
+
+    let mut out = String::from("{");
+    let mut comma = Comma::default();
+    // Empty text is **absent** and not `""`: the parse cannot tell the two apart, and writing it is
+    // the growth this function promises not to cause.
+    if !line.text.is_empty() {
+        comma.before(&mut out);
+        out.push_str(&format!("\"text\":{}", quoted(&line.text)));
+    }
+    if let Some(mark) = line.mark {
+        comma.before(&mut out);
+        out.push_str(&format!("\"mark\":\"{}\"", mark.name()));
+    }
+    for (name, value) in [
+        ("ref", line.reference.as_deref()),
+        ("link", line.link.as_deref()),
+        ("key", line.key.as_deref()),
+    ] {
+        if let Some(value) = value {
+            comma.before(&mut out);
+            out.push_str(&format!("\"{name}\":{}", quoted(value)));
+        }
+    }
+    if let Some(style) = line.style {
+        comma.before(&mut out);
+        out.push_str(&format!("\"style\":\"{}\"", style.name()));
+    }
+    if line.indent > 0 {
+        comma.before(&mut out);
+        out.push_str(&format!("\"indent\":{}", line.indent));
+    }
+    out.push('}');
+    out
+}
+
+/// A string as JSON, escaped by the library rather than by hand.
+///
+/// It is the same call [`crate`]'s neighbour makes when it builds a reply line: the one thing that
+/// can go wrong in a document written by somebody else is a quote, a backslash or a newline inside
+/// their text, and that is exactly what this buys.
+fn quoted(text: &str) -> String {
+    // **Over the borrowed string, not over an owned copy of it.** Going through
+    // `Value::String(text.to_owned())` copied every string of the document once to build the value and
+    // again to print it, on a path that runs inside the frame and whose worst case is a quarter of a
+    // megabyte.
+    serde_json::to_string(text).unwrap_or_else(|_| String::from("\"\""))
 }
 
 fn string(raw: &serde_json::Value, field: &str) -> Option<String> {
@@ -652,6 +864,48 @@ fn style(name: &str) -> Option<Style> {
         "warn" => Some(Style::Warn),
         "error" => Some(Style::Error),
         _ => None,
+    }
+}
+
+// **The three vocabularies written back out, beside the three that read them in.** They live here and
+// not with their types because the pair is the thing that has to stay true: a word spelled one way
+// going in and another coming out is a round trip that fails on a value nobody named, and the only
+// cheap defence is that a reader changing one of these sees the other three lines above.
+
+impl Attention {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Wait => "wait",
+            Self::Block => "block",
+            Self::Done => "done",
+        }
+    }
+}
+
+impl Mark {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Done => "done",
+            Self::Current => "current",
+            Self::Pending => "pending",
+            Self::Wait => "wait",
+            Self::Block => "block",
+            Self::Info => "info",
+        }
+    }
+}
+
+impl Style {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Dim => "dim",
+            Self::Title => "title",
+            Self::Accent => "accent",
+            Self::Ok => "ok",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
     }
 }
 
@@ -723,6 +977,282 @@ mod tests {
             Err(Problem::Invalid(_))
         ));
         assert!(parse_document("{\"lines\": []}").is_ok());
+    }
+
+    /// Every shape [`parse`] can produce, in one panel, for the round trip to walk.
+    ///
+    /// **Built by hand and not read from a file**, because what has to be covered is the parser's
+    /// output space and not any particular producer's habits: all six marks, all seven styles,
+    /// `MAX_ACTIONS` buttons, the indent at its ceiling, a key, the saturating expiry, a bare line, a
+    /// gap, and text carrying the three characters that need escaping.
+    fn every_shape() -> Panel {
+        let mut lines = vec![
+            Line {
+                text: "a bare line".to_owned(),
+                ..Line::default()
+            },
+            Line::default(),
+            Line {
+                text: "quote \" backslash \\ newline \n".to_owned(),
+                key: Some("escapes".to_owned()),
+                ..Line::default()
+            },
+            Line {
+                text: "at the ceiling".to_owned(),
+                indent: MAX_INDENT as usize,
+                key: Some("indented".to_owned()),
+                ..Line::default()
+            },
+            Line {
+                key: Some("no text at all".to_owned()),
+                ..Line::default()
+            },
+        ];
+        for (at, mark) in [
+            Mark::Done,
+            Mark::Current,
+            Mark::Pending,
+            Mark::Wait,
+            Mark::Block,
+            Mark::Info,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            lines.push(Line {
+                text: format!("mark {at}"),
+                mark: Some(mark),
+                reference: Some(format!("#{at}")),
+                link: Some("https://example.invalid/a b".to_owned()),
+                ..Line::default()
+            });
+        }
+        for (at, style) in [
+            Style::Normal,
+            Style::Dim,
+            Style::Title,
+            Style::Accent,
+            Style::Ok,
+            Style::Warn,
+            Style::Error,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            lines.push(Line {
+                text: format!("style {at}"),
+                style: Some(style),
+                ..Line::default()
+            });
+        }
+        Panel {
+            version: None,
+            updated_at: Some("2026-09-18T20:11:03+02:00".to_owned()),
+            phase: Some("build".to_owned()),
+            header: false,
+            // The value the parse **saturates** on, which is the one point where writing the minutes
+            // back with a plain division does not come home. See `serialize`.
+            stale_after: Duration::from_secs(u64::MAX),
+            attention: Some(Attention::Wait),
+            // **No newline in the command, and that is not cosmetic.** `Action::new` refuses any
+            // character the panel would not paint as itself, a line break included, so a `send`
+            // carrying one is dropped and the list comes out empty — which left the writer's
+            // `actions` branch reached by no test at all. Proved by deleting that branch with the
+            // whole suite still green, which is exactly the disguise **D30** names.
+            actions: (0..MAX_ACTIONS)
+                .filter_map(|at| Action::new(&format!("button {at}"), &format!("echo {at}")))
+                .collect(),
+            lines,
+            written_at: None,
+        }
+    }
+
+    /// The property that replaces byte-fidelity, over everything the parser can build.
+    ///
+    /// **Asserted on the re-parsed panel and never on the emitted text.** A serializer that wrote the
+    /// expiry in seconds instead of minutes would satisfy any assertion about the text it produced and
+    /// still hand a producer a different document back, which is **D30**'s rule about asserting where
+    /// a value is recorded instead of on the effect it has.
+    #[test]
+    fn a_document_that_made_one_round_trip_never_changes_again() {
+        for panel in [
+            every_shape(),
+            parse_document(ACTUAL).expect("parse the composed document"),
+            Panel {
+                version: Some(1),
+                lines: Vec::new(),
+                ..every_shape()
+            },
+        ] {
+            let written = serialize(&panel).expect("write the panel out");
+            let read_back = parse_document(&written).expect("read back what was written");
+            assert_eq!(read_back, panel, "the round trip changed the panel");
+
+            let twice = serialize(&read_back).expect("write it out again");
+            assert_eq!(twice, written, "a second round trip moved the bytes");
+        }
+    }
+
+    /// **Writing a panel out never makes it bigger**, and the cases here are the tight ones.
+    ///
+    /// The bound is what keeps the channel's read able to answer for every document the file
+    /// transport accepts: a source at the ceiling whose output grew would come back as *over 256 KiB* from a
+    /// panel that paints perfectly. The sources are written **compact and minimal on purpose** — a
+    /// pretty-printed document shrinks by so much that the assertion would pass however much this
+    /// function added. Measured: **every one of these round-trips at zero slack**, byte for byte, so
+    /// any field the writer started emitting unconditionally pushes all ten over their own length and
+    /// not merely some of them.
+    ///
+    /// **`updated_at` and `actions` are covered by their absence rather than by a source of their
+    /// own**, and that is deliberate: it is emitting a field the document did **not** carry that
+    /// grows it, so a source where they are unset is exactly the one that catches an unconditional
+    /// emission of either.
+    #[test]
+    fn writing_a_panel_out_never_makes_it_bigger() {
+        for source in [
+            r#"{"lines":[{"indent":1}]}"#,
+            r#"{"lines":[{"key":"k"}]}"#,
+            r#"{"lines":[{"mark":"done"}]}"#,
+            r##"{"lines":[{"ref":"#1"}]}"##,
+            r#"{"lines":[{"style":"dim"}]}"#,
+            r#"{"lines":[{"link":"x"}]}"#,
+            r#"{"lines":["","a"]}"#,
+            r#"{"lines":[]}"#,
+            r#"{"v":1,"phase":"p","attention":"wait","stale_after_minutes":5,"lines":[]}"#,
+            r#"{"header":false,"lines":[{"text":"t","key":"k","indent":2}]}"#,
+        ] {
+            let panel = parse_document(source).expect("read the source");
+            let written = serialize(&panel).expect("write it out");
+            assert!(
+                written.len() <= source.len(),
+                "writing it out grew it: {} bytes in, {} out\n  in:  {source}\n  out: {written}",
+                source.len(),
+                written.len()
+            );
+        }
+    }
+
+    /// **No newline anywhere in what is written**, which the round trip cannot see.
+    ///
+    /// A raw newline emitted between two tokens re-parses perfectly, so the property above is blind to
+    /// it — and this is the one reply of the control channel that is interpolated raw into a
+    /// newline-framed line rather than escaped, so the byte that the round trip forgives is the byte
+    /// that splits one reply into two on the socket.
+    #[test]
+    fn what_is_written_out_carries_no_newline() {
+        let written = serialize(&every_shape()).expect("write the panel out");
+        assert!(
+            !written.contains('\n'),
+            "a newline reached the written document: {written}"
+        );
+    }
+
+    /// The ceiling applies to a panel **held in memory**, which until this delivery it never did.
+    #[test]
+    fn a_panel_too_big_to_write_is_refused_rather_than_written() {
+        let fits = Panel {
+            lines: (0..200)
+                .map(|at| Line {
+                    text: "x".repeat(1_000) + &at.to_string(),
+                    ..Line::default()
+                })
+                .collect(),
+            ..every_shape()
+        };
+        assert!(
+            serialize(&fits).is_ok(),
+            "a panel of some 200 KiB has to fit"
+        );
+
+        let does_not = Panel {
+            lines: (0..300)
+                .map(|at| Line {
+                    text: "x".repeat(1_000) + &at.to_string(),
+                    ..Line::default()
+                })
+                .collect(),
+            ..every_shape()
+        };
+        assert!(matches!(serialize(&does_not), Err(Problem::TooBig)));
+    }
+
+    /// The ceiling is refused **at the byte after it, and accepted at it**.
+    ///
+    /// **The two panels of the test above sit nowhere near the boundary** — one at some 200 KiB, one
+    /// at some 300 KiB — so turning `>` into `>=` leaves them both answering what they answered
+    /// before. That is the disguise **D30** names by name: a margin where the defect and the fix give
+    /// the same result. This one is built to land on the boundary exactly.
+    #[test]
+    fn a_panel_of_exactly_the_ceiling_is_written_and_one_byte_more_is_not() {
+        // Everything a panel of one bare line costs around the text itself — `{"lines":[""]}`, the
+        // quotes included — is what has to come off the ceiling to land exactly on it.
+        let bare = |text: String| Panel {
+            version: None,
+            updated_at: None,
+            phase: None,
+            header: true,
+            stale_after: STALE_AFTER,
+            attention: None,
+            actions: Vec::new(),
+            lines: vec![Line {
+                text,
+                ..Line::default()
+            }],
+            written_at: None,
+        };
+        let around = serialize(&bare(String::new()))
+            .expect("the empty shape fits")
+            .len();
+        let exactly = bare("x".repeat(MAX_BYTES as usize - around));
+
+        let written = serialize(&exactly).expect("a panel of exactly the ceiling is written out");
+        assert_eq!(
+            written.len() as u64,
+            MAX_BYTES,
+            "the setup missed the boundary"
+        );
+
+        let one_more = bare("x".repeat(MAX_BYTES as usize - around + 1));
+        assert!(matches!(serialize(&one_more), Err(Problem::TooBig)));
+    }
+
+    /// **A producer that uses no keys publishes exactly as it did before the field existed.**
+    ///
+    /// The criterion this binds is a promise of *no change*, which is the hardest kind to test and the
+    /// easiest to believe on a green suite: every test written before this field existed passes
+    /// whatever the field does, because none of them names it. So this asserts the two things that
+    /// would actually move — that no line comes back carrying a key nobody wrote, and that a document
+    /// with none is written out **byte for byte** as it arrived.
+    #[test]
+    fn a_producer_that_writes_no_keys_publishes_exactly_as_it_did_before() {
+        let keyless = r##"{"phase":"build","lines":["a gap and a line",{"text":"t","mark":"done","ref":"#1"}]}"##;
+        let panel = parse_document(keyless).expect("read the document");
+
+        assert!(
+            panel.lines.iter().all(|line| line.key.is_none()),
+            "a line came back with a key its producer never wrote"
+        );
+        assert_eq!(
+            serialize(&panel).expect("write it out"),
+            keyless,
+            "a document with no keys did not come back as the bytes it arrived as"
+        );
+    }
+
+    /// A key is read and kept, **and a repeated one is left exactly where the producer put it**.
+    ///
+    /// Reading somebody else's document is not the moment to rewrite it: what this crate must not do
+    /// is decide which of two lines an address means. The refusal belongs where the address is used,
+    /// not where the document is read — and nothing uses one yet, which is what this guards.
+    #[test]
+    fn a_repeated_key_is_left_alone_on_both_lines() {
+        let panel = parse_document(
+            r#"{"lines":[{"text":"first","key":"mr-2"},{"text":"second","key":"mr-2"}]}"#,
+        )
+        .expect("read the document");
+
+        let keys: Vec<_> = panel.lines.iter().map(|line| line.key.as_deref()).collect();
+        assert_eq!(keys, vec![Some("mr-2"), Some("mr-2")]);
     }
 
     #[test]

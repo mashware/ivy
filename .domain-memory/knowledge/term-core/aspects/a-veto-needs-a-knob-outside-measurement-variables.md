@@ -36,7 +36,9 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-`scripts/measure-frame.sh` exports `MEASURE_SIZE` (the window size) on every single batch, and `SIZE_VARIABLE` is one of the five entries in `MEASUREMENT_VARIABLES` (`crates/app/src/lib.rs`), so `any_measurement_variable` is true in every measured run and `settings::to_use` always takes the `Entry::Measuring` branch. Anything that must be switched OFF under the gate but ON in exactly one batch cannot be reached through that list — the batch that exists to measure it could never paint its own subject. The fix already in the codebase (`MEASURE_ACTIONS`, `MEASURE_CJK`, `MEASURE_EMOJI`, `CONTROL`, and now the strip's `MEASURE_HEADER`) is a knob declared OUTSIDE `MEASUREMENT_VARIABLES`, read as an opt-in on top of the gate rather than folded into it, with both directions of the invalidation enforced by `crates/app/tests/batches.rs::DECLARED`.
+`scripts/measure-frame.sh` exports `MEASURE_SIZE` (the window size) on every single batch, and `SIZE_VARIABLE` is one of the five entries in `MEASUREMENT_VARIABLES` (`crates/app/src/lib.rs`), so `any_measurement_variable` is true in every measured run and `settings::to_use` always takes the `Entry::Measuring` branch. Anything that must be switched OFF under the gate but ON in exactly one batch cannot be reached through that list — the batch that exists to measure it could never paint its own subject.
+
+The fix already in the codebase (`MEASURE_ACTIONS`, `MEASURE_CJK`, `MEASURE_EMOJI`, `CONTROL`, and now the strip's `MEASURE_HEADER`) is a knob declared OUTSIDE `MEASUREMENT_VARIABLES`, read as an opt-in on top of the gate rather than folded into it, with both directions of the invalidation enforced by `crates/app/tests/batches.rs::DECLARED`.
 
 ## Where it lives
 

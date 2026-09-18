@@ -199,7 +199,7 @@ fn initialized(message: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// The four tools this build serves, with the shape of what each takes.
+/// The five tools this build serves, with the shape of what each takes.
 fn tools() -> serde_json::Value {
     serde_json::json!({
         "tools": [
@@ -225,6 +225,16 @@ fn tools() -> serde_json::Value {
                     },
                     "required": ["source", "document"],
                 },
+            },
+            {
+                "name": "panel_get",
+                "description": "Read back the document this pane's status panel is showing, \
+                                including one that arrived through the pane's panel.json rather than \
+                                over this channel. It takes no arguments, claims nothing and changes \
+                                nothing: it is how a process that restarted, or that lost the \
+                                document it published, finds out what is on screen before publishing \
+                                again.",
+                "inputSchema": {"type": "object", "properties": {}},
             },
             {
                 "name": "split_open",
@@ -302,6 +312,7 @@ fn tools() -> serde_json::Value {
 /// malformed call is a tool error the agent reads, and finding it out must not require a pane.
 enum Ask {
     Publish(String, String),
+    ReadTheDocument,
     Open(Side, Option<String>, Vec<String>),
     Read(String, bool),
     Close(String),
@@ -322,7 +333,7 @@ fn called(
     // is even reached: a call for something nobody serves must not open the channel to find that out.
     if !matches!(
         name,
-        "panel_set" | "split_open" | "split_read" | "split_close"
+        "panel_set" | "panel_get" | "split_open" | "split_read" | "split_close"
     ) {
         return failed(id, -32602, &format!("no tool \"{name}\""));
     }
@@ -341,6 +352,10 @@ fn called(
             };
             Ask::Publish(source.to_owned(), document.to_string())
         }
+        // **It takes nothing, so there is nothing to validate.** Any arguments an agent sends are
+        // ignored rather than refused: refusing a field that reaches nothing would be inventing a
+        // shape this verb does not have.
+        "panel_get" => Ask::ReadTheDocument,
         "split_open" => {
             let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
             let Some(side) = arguments.get("side").and_then(serde_json::Value::as_str) else {
@@ -417,6 +432,7 @@ fn called(
     let it_was_a_close = matches!(ask, Ask::Close(_));
     let answer = match ask {
         Ask::Publish(source, document) => producer.publish(&source, &document),
+        Ask::ReadTheDocument => producer.read_the_document(),
         Ask::Open(side, program, args) => producer.open_a_pane(side, program.as_deref(), &args),
         Ask::Read(handle, scrollback) => producer.read_a_pane(&handle, scrollback),
         Ask::Close(handle) => producer.close_a_pane(&handle),
@@ -439,6 +455,9 @@ fn called(
         Ok(Answered::Opened(Some(handle))) => succeeded(id, text(&handle)),
         Ok(Answered::Opened(None)) => succeeded(id, text("opened, with no addressable identity")),
         Ok(Answered::Text(what)) => succeeded(id, text(&what)),
+        // **The document goes back as the JSON it is**, not wrapped in a sentence about it: what the
+        // caller wants is something it can read, edit and publish again.
+        Ok(Answered::Document(document)) => succeeded(id, text(&document)),
         Ok(Answered::Failed(why)) => succeeded(id, refusal(&why)),
         Err(failure) => {
             // The channel is gone; the next call opens a fresh one rather than reusing a dead
@@ -625,7 +644,7 @@ mod tests {
     /// than on the presence of one: a tool advertised before it is answered is a promise taken back
     /// later, and an answered tool left unadvertised is one no client will ever call.
     #[test]
-    fn the_four_verbs_this_build_serves_are_advertised() {
+    fn the_five_verbs_this_build_serves_are_advertised() {
         let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
 
         let tools = answered["result"]["tools"]
@@ -637,7 +656,13 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["panel_set", "split_open", "split_read", "split_close"]
+            [
+                "panel_set",
+                "panel_get",
+                "split_open",
+                "split_read",
+                "split_close"
+            ]
         );
     }
 

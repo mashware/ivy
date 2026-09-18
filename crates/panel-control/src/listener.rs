@@ -87,6 +87,12 @@ pub struct Delivery {
 pub enum What {
     /// Publish this, under this source.
     Publish { source: String, panel: Panel },
+    /// Hand back the document this pane's panel is showing.
+    ///
+    /// **It is the pane's and not the window's**, like [`What::Publish`] and unlike the three
+    /// `split_*` verbs: what it needs is the panel state, which the pane already holds, and not the
+    /// tree of panes, which only the window can see.
+    Get,
     /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
     ///
     /// **The pane is the caller's, not a name's**: the connection's own endpoint decided it, which is
@@ -117,6 +123,8 @@ pub enum Answer {
     Opened(Option<String>),
     /// What a pane showed.
     Text(String),
+    /// The document a pane's panel is showing, already written out as JSON.
+    Document(String),
     /// Refused, with the reason as the caller is to read it.
     Refused(String),
 }
@@ -495,6 +503,13 @@ fn answer(
             ),
             false,
         ),
+        // **The read of the document is the pane's, like the publication above and unlike the three
+        // below**: it needs the panel this pane already holds and not the tree, so it is answered in
+        // the pass that is already running rather than waiting for the window's own drain.
+        Incoming::Request(Request::PanelGet) => (
+            ask_the_window(Wants::Document, What::Get, connection, to_the_window, wake),
+            false,
+        ),
         Incoming::Request(Request::NotServed(tool)) => (
             Reply::Failed(format!("this build does not serve \"{tool}\"")),
             false,
@@ -532,6 +547,7 @@ enum Wants {
     Taken,
     Opened,
     Read,
+    Document,
 }
 
 impl Wants {
@@ -540,6 +556,7 @@ impl Wants {
             Self::Taken => "a publication or a close",
             Self::Opened => "an open",
             Self::Read => "a read",
+            Self::Document => "a read of the document",
         }
     }
 }
@@ -577,6 +594,9 @@ fn ask_the_window(
         Ok(Answer::Taken) if matches!(wants, Wants::Taken) => Reply::Ok,
         Ok(Answer::Opened(handle)) if matches!(wants, Wants::Opened) => Reply::Opened(handle),
         Ok(Answer::Text(text)) if matches!(wants, Wants::Read) => Reply::Text(text),
+        Ok(Answer::Document(document)) if matches!(wants, Wants::Document) => {
+            Reply::Document(document)
+        }
         // **A mismatched answer is refused rather than reshaped**, and only its *name* travels: a
         // window that answered `Text` to a close would otherwise echo the console's screen back over
         // the wire inside an error line, which is the opposite of what a refusal is for.
@@ -586,6 +606,7 @@ fn ask_the_window(
                 Answer::Taken => "a taken",
                 Answer::Opened(_) => "an open",
                 Answer::Text(_) => "a read",
+                Answer::Document(_) => "a read of the document",
                 Answer::Refused(_) => "a refusal",
             },
             wants.name()

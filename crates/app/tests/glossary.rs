@@ -1084,6 +1084,13 @@ const NOT_OURS: &[&str] = &[
     "split_open",
     "split_read",
     "split_close",
+    // **A field of the panel document, cited where the channel explains what it does with it.** The
+    // contract's crate declares it; the channel's crate carries the bytes and never names a type for
+    // them, which is the whole point of borrowing them raw.
+    "updated_at",
+    // A cargo feature of `serde_json`, named where this crate explains what NOT having it on costs:
+    // without it a map is sorted, which silently reordered a document's keys on the way back.
+    "preserve_order",
     // **The kernel's own names for what a command line may cost.** `execve` is where a request's
     // `program` and `args` end up, and `E2BIG` is what it answers when the argument list is past what
     // the system takes — cited where the wire bounds them, and `ARG_MAX` where that bound is sized.

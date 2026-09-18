@@ -398,6 +398,32 @@ impl PanelState {
         self.last_good.as_ref()
     }
 
+    /// Writes out the document this panel is showing, for whoever asked over the channel.
+    ///
+    /// **It lives here and not beside `deliver` and `release`**, which is where the channel's other
+    /// verbs land: that module's subject is *who is allowed to write*, and this one deliberately does
+    /// not care — placing it there would read as though reading were part of the hold.
+    ///
+    /// **It takes no hold and asks for none**, which is the asymmetry that makes the verb worth
+    /// having: the producer it exists for is the one that has *not* claimed the pane — an agent that
+    /// restarted, one whose context was compacted away, a second tool taking a console over. Gating
+    /// it on a hold would make its own reason unreachable.
+    ///
+    /// **And what comes back is the producer's document, never the application's rows.** The identity
+    /// row, the claim and the sentence about a console handed back are composed in
+    /// [`super::PanelState::lay_out`] and are not fields of a [`Panel`] at all, so a document built
+    /// from what is held here carries none of them. That is not a filter anybody has to remember: it
+    /// is where the two kinds of row live.
+    ///
+    /// **A document that arrived by file answers just as one that arrived over the channel does**,
+    /// which is the case the verb was asked for — the field below is filled by both.
+    pub fn document(&self) -> Result<String, String> {
+        let Some(panel) = self.last_good.as_ref() else {
+            return Err("nothing has been published on this console yet".to_owned());
+        };
+        panel_contract::serialize(panel).map_err(|problem| problem.to_string())
+    }
+
     /// The button that press reaches, if it reaches one.
     ///
     /// Three conditions, and each one is a decision rather than caution:

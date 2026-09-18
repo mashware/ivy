@@ -105,6 +105,14 @@ pub enum Request {
     /// start disagreeing field by field. It is the producer's own bytes, kept as a [`RawValue`], so
     /// the parser's ceiling measures what arrived and not a compact re-serialisation of it.
     PanelSet { source: String, document: String },
+    /// Hand back the document this pane's panel is showing.
+    ///
+    /// **It names nothing, and it cannot**: the connection's own endpoint already decided which pane
+    /// this is, so there is no word in this transport for asking about another. **And it asks for no
+    /// hold**, which is the asymmetry that makes it worth having — the producer it exists for is the
+    /// one that has *not* claimed the pane: an agent that restarted, one whose context was compacted
+    /// away, a second tool taking a console over.
+    PanelGet,
     /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
     ///
     /// **There is no environment here, and there cannot be one**: a pane's environment is exactly
@@ -277,6 +285,7 @@ fn interpret(line: &[u8]) -> Incoming {
 
     match envelope.tool.as_str() {
         "panel_set" => panel_set(&envelope),
+        "panel_get" => Incoming::Request(Request::PanelGet),
         "split_open" => split_open(&envelope),
         "split_read" => split_read(&envelope),
         "split_close" => split_close(&envelope),
@@ -419,6 +428,19 @@ pub enum Reply {
     Opened(Option<String>),
     /// What a pane showed.
     Text(String),
+    /// The document a pane's panel is showing, **already JSON**.
+    ///
+    /// **It is the one arm that does not escape its payload**, and that is a decision rather than an
+    /// oversight. A document inside [`Reply::Text`] would have every quote in it escaped, so one near
+    /// [`panel_contract::MAX_BYTES`] would roughly double and the client would refuse its own answer
+    /// for being over [`MAX_REQUEST`] — a document the file transport accepts, unreadable over the
+    /// channel, which is the two-transport drift the contract forbids seen from the reply side. It
+    /// would also give `text` two meanings, since that one is a console's screen.
+    ///
+    /// **Its content may come only from the contract crate's own writer**, whose promise of one
+    /// compact line with no newline anywhere is what keeps this interpolation safe on a
+    /// newline-framed channel.
+    Document(String),
     Failed(String),
 }
 
@@ -444,6 +466,10 @@ impl Reply {
                 let escaped = serde_json::Value::String(text.clone());
                 format!("{{\"ok\":true,\"text\":{escaped}}}\n")
             }
+            // **Interpolated raw**, for the reason the variant states. What guarantees the framing
+            // here is not this line but its only source: the contract's writer emits one compact line
+            // and puts every string of the document through the same escaping the arm above uses.
+            Self::Document(document) => format!("{{\"ok\":true,\"document\":{document}}}\n"),
             Self::Failed(reason) => {
                 let escaped = serde_json::Value::String(reason.clone());
                 format!("{{\"ok\":false,\"error\":{escaped}}}\n")

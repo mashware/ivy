@@ -260,11 +260,7 @@ impl Window {
                     .all_panes()
                     .filter_map(|pane| pane.control.as_ref())
                     .map(crate::control::PaneControl::did)
-                    .fold(self.control, |so_far, did| measure::Control {
-                        applied: so_far.applied + did.applied,
-                        refused: so_far.refused + did.refused,
-                        released: so_far.released + did.released,
-                    }),
+                    .fold(self.control, measure::Control::and),
             },
         )?;
 

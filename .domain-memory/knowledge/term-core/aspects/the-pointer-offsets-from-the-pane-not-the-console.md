@@ -35,7 +35,11 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-`Window::cell_under` does `point - pane_area.min` (`crates/app/src/lib.rs`), and so do `cell_to_extend_to` and `clamped_cell`, all three called with the pane rect by `route_the_buttons`, `select_while_dragging` and the wheel path in `pointer.rs`. Only the grid's SIZE comes from the console rect (`painter.rs`, `cells_in(panel_split.console.size())`). This works today only because the panel is cut from the RIGHT and the extra columns are clamped away on purpose. Anything that cuts chrome off the TOP of a pane (a header, a title bar) shifts every selection and every mouse report by a row, and makes a press on that chrome resolve to console row 0, reaching a program that asked for the mouse before the chrome's own intent is decided. Found by a design challenger during F2.11's header milestone, not by the three approach advisors who all named the painting path and none the pointer path — fixed there by feeding the pointer helpers the CONSOLE's rectangle instead of the pane's.
+`Window::cell_under` does `point - pane_area.min` (`crates/app/src/lib.rs`), and so do `cell_to_extend_to` and `clamped_cell`, all three called with the pane rect by `route_the_buttons`, `select_while_dragging` and the wheel path in `pointer.rs`. Only the grid's SIZE comes from the console rect (`painter.rs`, `cells_in(panel_split.console.size())`).
+
+This works today only because the panel is cut from the RIGHT and the extra columns are clamped away on purpose. Anything that cuts chrome off the TOP of a pane (a header, a title bar) shifts every selection and every mouse report by a row, and makes a press on that chrome resolve to console row 0, reaching a program that asked for the mouse before the chrome's own intent is decided.
+
+Found by a design challenger during F2.11's header milestone, not by the three approach advisors who all named the painting path and none the pointer path — fixed there by feeding the pointer helpers the CONSOLE's rectangle instead of the pane's.
 
 ## Where it lives
 

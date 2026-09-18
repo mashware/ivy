@@ -45,6 +45,24 @@
 #                    guard below throws the run away in both directions — a batch that asks for
 #                    strips and painted none, and any batch that painted one without asking.
 #
+#                V = the two consoles publishing over the CHANNEL and then READING THE DOCUMENT
+#                    BACK, once a second. It is the ONLY batch that answers a read, and its control
+#                    is **S** — same consoles, same load, same interval: V publishes exactly what S
+#                    publishes and then asks for it back, so it is S **plus a read** rather than a
+#                    different load under its name. An earlier shape had it publish once and only
+#                    read afterwards, which left S paying a panel re-layout and a repaint every
+#                    second that V did not — and the subtraction would have come out as the read
+#                    minus all of that, which can be zero or negative and would be published as
+#                    «answering a read costs nothing».
+#                    **The subtraction is between runs and not inside one**, unlike K, N
+#                    and O: both consoles carry the same load here, so there is no control console
+#                    within the run. Take the runs interleaved — S, V, S, V — and publish a range
+#                    rather than a point, saying plainly that it is not isolated.
+#                    **Writing a document out is the one thing this channel does whose cost follows
+#                    the SIZE of what somebody published** rather than the number of requests, which
+#                    is why its report declares the largest document it wrote and why the guard below
+#                    throws the run away in both directions.
+#
 #              There is NO drag batch with FOUR panes, and that is not an oversight: the gesture's
 #              cycle only returns the layout to where it started **with two**. With more, inserting
 #              splits the destination's weight and removing spreads it among those left, so weight
@@ -321,7 +339,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S or T}
+BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T or V}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -365,7 +383,8 @@ case "$BATCH" in
     R)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=button; ACTIONS=1 ;;   # two, and pressing a button on a panel: its control is C
     S)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1 ;;       # two, and both published over the CHANNEL instead of by file: its control is C
     T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S or T" >&2; exit 2 ;;
+    V)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; READS=1 ;;  # two, and the only one that READS THE DOCUMENT BACK over the channel: its control is S
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T or V" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -605,11 +624,17 @@ document_of() {  # document_of <which of the consoles>
 publish_over_the_channel() {  # publish_over_the_channel <directories>
     which=0
     publishers=""
+    # **The verb the load uses, and the two batches differ in this and in nothing else.** `S`
+    # publishes a whole document every second; `V` publishes one and then asks for it back every
+    # second. Same consoles, same dumping, same interval — which is what makes `S` an honest control
+    # for `V` rather than a run that happens to be nearby.
+    verb=publish
+    [ "${READS:-}" = 1 ] && verb=read
     for d in $1; do
         which=$((which + 1))
         "$PUBLISHER" \
             "$d" "${d##*agent-terminal-}" "bench" \
-            3600 1000 "$(document_of "$which")" >&2 &
+            3600 1000 "$(document_of "$which")" "$verb" >&2 &
         publishers="$publishers $!"
     done
 
@@ -696,7 +721,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|V) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -898,6 +923,45 @@ fi
 if [ "$STATUS" != 0 ]; then
     invalidate "the application finished with status $STATUS; what it said is in the .err next to it"
 fi
+
+# **The document read back, in both directions, and it is the guard `V` exists for.** Writing a
+# document out is the one thing this channel does whose cost follows the SIZE of what a producer
+# published rather than the number of requests that arrived, so a batch that claims to measure it and
+# answered none publishes the cost of a drain that never had a read in it. And any other batch
+# answering one has a reader its own load never asked for, which is work in its spans it does not
+# claim — **D13** in both readings.
+#
+# **The numbers come out with `sed` and the block sits below the status check**, and neither is style.
+# Under `set -e` an assignment whose pipeline **ends** in a `grep` with no match inherits its status 1
+# and **kills the script right there** — the report is never renamed, nothing is printed, and every
+# guard below, the status check included, never runs. That is why the line itself is safe with a
+# `grep … | head -1`, whose status is `head`'s, and why the first version of this block — which ended
+# in `grep -oE` — was fatal on any report missing the line. The trap is documented twice further down,
+# in the two guards it had already bitten, and this one walked into it anyway. `sed -n …p` exits 0
+# with no output, so the empty case reaches the `if` instead of ending the run.
+DOCUMENTS_LINE=$(grep -E "^documents:" "$REPORT" | head -1)
+if [ -z "$DOCUMENTS_LINE" ]; then
+    invalidate "the report does not declare what the control channel wrote out. Without that datum a \
+run that answered a read and one that answered none are indistinguishable, and the cost published \
+under «the control channel» has no size attached to it"
+else
+    READ_BACK=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/^documents: *\([0-9]*\) read back.*/\1/p')
+    READ_REFUSED=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/.*, \([0-9]*\) refused.*/\1/p')
+    READ_BACK=${READ_BACK:-0}
+    READ_REFUSED=${READ_REFUSED:-0}
+    if [ "${READS:-}" = 1 ] && [ "$READ_BACK" = 0 ]; then
+        invalidate "this batch reads the document back over the control channel and the window \
+answered none of the reads ($READ_REFUSED refused): the publisher never reached the pane, or nothing \
+was ever published on it, and what is published under «the control channel» is the cost of a drain \
+that never had a read in it"
+    fi
+    if [ "${READS:-}" != 1 ] && [ "$READ_BACK" != 0 ]; then
+        invalidate "this batch asks for no read of the document and yet the window answered \
+$READ_BACK: something other than its own load is asking, so its spans mix in work that does not \
+belong to what it claims to measure"
+    fi
+fi
+
 
 # **The strips, read in both directions, and this is the only guard that protects the OTHER runs.**
 # Every pair above catches a batch measuring something its own load did not ask for; this one also

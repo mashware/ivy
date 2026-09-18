@@ -550,6 +550,11 @@ pub struct SessionHeader {
 /// **The other two are published rather than checked**, because neither has a value a batch can
 /// promise: a refusal needs a second source and a release needs a connection to end, and the batch
 /// that measures the ordinary path does neither.
+///
+/// **Reading a document back is counted apart from applying one**, and that is not tidiness: the
+/// script reads `applied` in both directions, and a read puts nothing on a panel — folding it in
+/// would leave the number meaning something other than its own label, which is the mislabelled figure
+/// **D13** is about.
 #[derive(Default, Clone, Copy)]
 pub struct Control {
     /// Documents taken and put on a panel.
@@ -558,6 +563,46 @@ pub struct Control {
     pub refused: usize,
     /// Connections that ended and gave their pane back.
     pub released: usize,
+    /// Documents written back out and handed to whoever asked for one.
+    pub read_back: usize,
+    /// Reads refused, because nothing had been published on that console yet.
+    ///
+    /// **Counted apart, and not folded into `refused`.** That one means *a publication refused
+    /// because another source held the pane*, and a read is refused for a different reason entirely;
+    /// one number for both would be two populations under a label that names one. It also tells the
+    /// bench's two failures apart: a batch whose reads were all refused and one whose publisher never
+    /// reached the pane both leave `read_back` at zero, and only this number says which happened.
+    pub read_refused: usize,
+    /// The largest document this run wrote out, in bytes.
+    ///
+    /// **Without it a run publishes a cost with no size attached to it**, and a reader extrapolates
+    /// what a six-line panel cost to a document at the ceiling. This is the first path of this module
+    /// whose cost follows the size of what a producer published rather than the number of requests
+    /// that arrived, so the size has to travel with the number — the same reason the font discovery
+    /// publishes how many characters it searched.
+    pub largest_serialized: usize,
+}
+
+impl Control {
+    /// Two panes' numbers as one, **and which of the two rules each field is decided here**.
+    ///
+    /// **It is a method and not a closure at the fold**, and that is the whole reason it exists: every
+    /// field but the last is summed and that one is a maximum, nothing in their types says which, and
+    /// a fold written inline is a choice made where no test can reach it. Turning the maximum into a sum
+    /// compiled, kept every test green, and could only be caught by reading a two-pane report by hand.
+    ///
+    /// **The maximum is not tidiness**: the number answers *how big was the document behind that
+    /// cost*, and two panes' peaks added together name a document nobody ever wrote.
+    pub fn and(self, other: Self) -> Self {
+        Self {
+            applied: self.applied + other.applied,
+            refused: self.refused + other.refused,
+            released: self.released + other.released,
+            read_back: self.read_back + other.read_back,
+            read_refused: self.read_refused + other.read_refused,
+            largest_serialized: self.largest_serialized.max(other.largest_serialized),
+        }
+    }
 }
 
 /// What the panel's buttons did this run.
@@ -897,6 +942,21 @@ pub fn header(
         "control:      {} applied, {} refused, {} released",
         control.applied, control.refused, control.released
     )?;
+    // **A line of its own and not three more numbers on the one above**, because the script's readers
+    // are anchored to the shape of that line and every number appended to it is a chance to break one
+    // in silence.
+    //
+    // **The first is read in both directions; the second is what stops an extrapolation.** Writing a
+    // document out is the first thing this channel does whose cost follows the *size* of what a
+    // producer published rather than the number of requests that arrived, so a run that answers a
+    // read of a six-line panel and publishes only «the control channel costs N µs» invites a reader
+    // to carry that figure to the ceiling. The size travels with the number, the way the font
+    // discovery publishes how many characters it searched.
+    writeln!(
+        a,
+        "documents:    {} read back, {} refused, {} bytes the largest written out",
+        control.read_back, control.read_refused, control.largest_serialized
+    )?;
     // **Always, and both halves on one line.** A batch that asks for strips and painted none has
     // the gate broken or a window too short to cut one, and would publish «the strip costs
     // nothing»; one that asks for none and painted some measures a console a row shorter per pane
@@ -989,4 +1049,45 @@ fn machine() -> String {
         .ok()
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "unknown".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Every one of these numbers but the last is summed, and the last is a maximum — and nothing
+    /// in their types says which.** The choice used to live in a closure at the fold, where no test could reach it:
+    /// turning the maximum into a sum compiled and left the whole suite green, and the only way to
+    /// catch it was reading a two-pane report by hand. This is what binds it.
+    #[test]
+    fn two_panes_sum_their_counts_and_keep_the_larger_document() {
+        let one = Control {
+            applied: 3,
+            refused: 1,
+            released: 2,
+            read_back: 4,
+            read_refused: 2,
+            largest_serialized: 900,
+        };
+        let other = Control {
+            applied: 5,
+            refused: 0,
+            released: 1,
+            read_back: 6,
+            read_refused: 3,
+            largest_serialized: 120,
+        };
+
+        let both = one.and(other);
+
+        assert_eq!(both.applied, 8);
+        assert_eq!(both.refused, 1);
+        assert_eq!(both.released, 3);
+        assert_eq!(both.read_back, 10);
+        assert_eq!(both.read_refused, 5);
+        assert_eq!(
+            both.largest_serialized, 900,
+            "the size published named a document nobody wrote"
+        );
+    }
 }
