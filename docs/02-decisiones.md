@@ -6157,9 +6157,90 @@ is how they stop agreeing.
 | Re-running the seventeen published series with the strip on | Days of machine time to restate what is already known, and the two halves would still not be comparable with anything published before |
 | Splitting the history into «pre-header» and «post-header» | Two series that cannot be compared, and every later reader having to know which one they are holding |
 | A setting to switch the strip off | The decision taken is «always»; the only regime that needs it off is the bench, and that is the gate. A key would also have to join the manual's table and its floor |
-| Showing it only where a pane has siblings | A console that is alone can still be dragged onto another tab's layout later, and a strip that comes and goes teaches nobody that the gesture exists |
+| Showing it only where a pane has siblings | A console that is alone can still be dragged onto another tab's layout later, and a strip that comes and goes teaches nobody that the gesture exists. **The button the strip carries is the opposite case and it is decided the other way** — see **D46** |
 | Chrome overlaid by proximity, with no row of its own | **D20** already discarded it: it has to be discovered and leaves no room for the close button. Kept as the fallback if the measurement makes the row unaffordable |
 | A widget of its own for the strip | See above: it would have to re-earn the identity, the preview, the atomicity and the latch |
 
 **Measured.** The annex belongs to the batch that asks for a strip and to its control, and it is
 owed by the delivery that adds them. Until it is published, this decision claims no number.
+
+## D46 — The strip carries the button that closes its console, and a console with no sibling carries none
+
+**Decision.** At the right-hand end of every strip, a cross on a target two cells wide: pressing it closes that
+console and its siblings reabsorb its place, which is what `Ctrl+Shift+X` already does. **A console
+that is the only one of its tab carries no button**, only the handle — and neither does one whose
+strip has no room for the handle and the button at once. There is no confirmation.
+
+**It closes the console by name, not «the focused one».** The first shape of this moved the focus
+onto the pressed console and reused the chord's door, and that is wrong in a way only a third console
+shows: a button is pressed on the console it belongs to, which is very often **not** the one being
+typed in, so forcing the focus across handed the keyboard to the neighbour of the console that left.
+Somebody working in a third pane lost their place to a gesture aimed at neither. The by-name door
+moves the focus only if the console that leaves was holding it. For the same reason the ordinary
+«a click gives this console the keyboard» rule skips the press spent on the button: a press and a
+release inside one frame — a quick click — would otherwise focus the console on its way out.
+
+**Why the lone console has none, which is the decision inside the decision.** With no sibling there
+is nowhere to give the place back to, so closing it closes the **tab** — and on the last tab, the
+window, with whatever an agent was doing inside it. That is one click on a target two cells wide,
+against the three keys the chord asks for, and it is a different act from the one this button
+promises. The precedent is already in the window: **the tab bar is not painted with a single tab**
+either. What is lost is nothing — the chord and the tab's card still close it.
+
+**Why no confirmation.** This terminal has no dialogue and D45's strip is not the place to grow one.
+What limits the damage is the rule above and the fact that a destructive press is a press on a
+declared, visible two cells, rather than a modal surface every console would then have to answer.
+Said plainly rather than left implicit: **pressing it ends a program without asking**, and the
+milestone accepted that.
+
+**Why its own hit list and not the panel's buttons.** A panel button runs **the producer's** text
+under **D42**'s visible-before-it-runs rule; this one acts for the person, on the window's own
+chrome. Putting the second into the first's list gives one consumer two owners and two rules.
+
+**Why it acts on the press.** It is what the panel's buttons already do, and the press is the one
+instant whose position can be trusted: the queue's own event carries where the button went down,
+while egui's pointer state carries where the pointer **got to** — a frame that batches a press with
+a move after it would close a console nobody aimed at. Acting on the release would need the pressed
+button's identity kept across frames, which is a second latch of the kind `pointer.rs` already
+documents as fragile.
+
+**Why the name is noted and the console closed at the foot of the pass.** Not a borrow — the same
+walk already transforms the tree inline when somebody drops a console. It is the **rectangles**: the
+pass is walking a tiling computed before the close, and closing reabsorbs a pane's place among its
+siblings, so from that instant every one of them describes a console that has moved. And the pass
+**says the tree changed**, or the console that stayed is painted — and its grid announced to the
+program inside — in the half of the window it had while its neighbour was alive.
+
+**One click closes one console, and that needed saying in the code.** A pointer press **cannot be
+consumed** — egui needs it to decide who is being dragged — and egui can run the interface pass twice
+over the same input, so the second pass reads the same press again. The program's own presses already
+defend themselves by counting the frame; without the same count here, a tab of three consoles with
+the rightmost one's button pressed lost **two** programs to one click: the survivors refill the area
+and the new rightmost strip puts its button on the same abscissa the press is still sitting at. Two
+consoles hide it, because the survivor of the first close carries no button at all.
+
+**A strip with no room for both keeps the handle and loses the button.** Nothing stops a window being
+dragged narrow — no minimum size is asked of the desktop, which is why the strip's own cut is already
+clamped — and a button merely squeezed would take a narrow strip **whole**: every press on a console's
+top row ending its program, and the band that exists to be grabbed grabbable nowhere. The chord still
+closes that console.
+
+**The button does not take the strip's right-hand corner.** That corner is where a folded panel's
+handle sits, and **D45**'s delivery paid a review finding to keep it grabbable. The first version of
+this one put the cross flush against the edge, and the test that presses at that abscissa caught it
+at once: the console **closed** where somebody had reached to move it. The button starts where that
+corner ends, taken from the two constants that build it, and the one line the two share belongs to
+the grab — the same tie the strip already decides on the line it shares with the console.
+
+**What was discarded, and why.**
+
+| Discarded | Why |
+|---|---|
+| A confirmation before closing | A surface this terminal does not have. What answers the risk is the lone console's exception, not a dialogue |
+| A button on a console with no sibling | It would close the tab, and on the last tab the window. See above |
+| Reusing the panel's `PaintedButton` list | Ownership: that list runs the producer's text under **D42**, this acts for the person |
+| Closing inside the pointer's walk | The walk's rectangles would describe a tiling the close has just made false |
+| Acting on the release rather than the press | A second latch across frames, for a gesture whose position is only trustworthy at the press |
+| Closing through the chord's own door, «the focused one» | It makes the argument travel as a side effect on the keyboard, and on three consoles it moves the keyboard off the one being typed in |
+| Squeezing the button into a strip too narrow for it | The narrow strip becomes one big close button, and the handle disappears |
+| A guard so that the press which closes does not also arm the drag | **Asked for by the design and cut after measuring.** Its reason was that egui cannot consume a pointer button event. What is true is that egui does not decide a press is a drag **in the frame the press arrives in**, and by the next frame the console has been closed at the foot of that pass and nobody interacts with its widget again. Written, mutated away, and no test moved: a guard that fires in no frame that exists |

@@ -24,12 +24,16 @@
 //! **What did not stay**: `WheelOwner` came here with the other gesture types and was never
 //! mentioned again — the function that decides it is `Pane`'s, not the window's — so it went back
 //! beside it. `pane_called` is a lookup by name with nothing pointer-shaped about it, and went back
-//! beside `active_mut`. Both were found by the same audit.
+//! beside `active_mut`. Both were found by the same audit. And **dragging a divider of the tree**
+//! left for [`crate::tree`], where it is a method of the tab whose weights it shares out: the
+//! delivery before this one had already sent the panel's border to the module that owns panels, and
+//! a gesture over a piece of chrome belongs with that piece. What stays here is deciding **whose** a
+//! gesture is, and the gestures that belong to no single piece.
 //!
 //! It came out of `lib.rs` under **D28**.
 
 use crate::painter::CellMetrics;
-use crate::tiling::{DIVIDER_THICKNESS, Divider, Orientation, Side, can_split, half, side_of};
+use crate::tiling::{Orientation, Side, can_split, half, side_of};
 use crate::tree::Node;
 use crate::{Window, mouse};
 use eframe::egui;
@@ -302,9 +306,20 @@ impl Window {
         let queue = Self::collect_the_buttons(ui);
         let queue = self.answer_a_clicked_question(ui, rects, metrics, queue);
 
+        // **Which console the strip's button was pressed on is worked out here, under the same
+        // once-per-frame guard as the routing below, and acted on after the walk.** The guard is not
+        // shared for tidiness: the press is **not consumed** — egui needs it to decide who is being
+        // dragged — so a repeated pass reads the very same event again, and a close is not a
+        // keystroke that arrives twice, it is a **second console killed by one click**. With three
+        // consoles in a row and the rightmost one's button pressed, the second pass finds the
+        // siblings refilled over the whole area and the new rightmost strip's button on the same
+        // abscissa: the same press closes that one too. Two panes hide it, because the survivor of
+        // the first close carries no button at all.
         let frame_nr = ui.ctx().cumulative_frame_nr();
+        let mut asked_to_close = None;
         if self.last_frame_with_buttons != Some(frame_nr) {
             self.last_frame_with_buttons = Some(frame_nr);
+            asked_to_close = self.whose_button_was_pressed(rects, metrics, now, &queue);
             self.route_the_buttons(rects, &names, metrics, queue, now);
         }
         // **Where the button went down, which is where a selection starts.** egui keeps it while
@@ -342,7 +357,12 @@ impl Window {
             // giving it focus would leave the keyboard on one that is no longer the one being
             // touched. `clicked()` does not cover this case: when the pointer moves far enough,
             // egui decides it is a drag and the click never gets to exist.
-            if response.clicked() || response.drag_started() {
+            // **Except when the press was spent on that console's close button.** Pressing and
+            // releasing inside one frame — a quick click, or any frame this window took a tenth of a
+            // second over — makes egui report the click here as well, so the console about to leave
+            // would take the keyboard on its way out and hand it to its neighbour when it goes. The
+            // person typing in a third console loses their place to a gesture aimed at neither.
+            if (response.clicked() || response.drag_started()) && asked_to_close != Some(name) {
                 self.active_mut().focus = name;
             }
 
@@ -386,6 +406,15 @@ impl Window {
             // again.** See [`DragIntent`]. With no chord in the queue —which is what happens when
             // egui takes the drag as started one frame after the press— the one for a bare button
             // is taken, which is selecting.
+            // **Nothing here defends against the press that closed a console, and the design asked
+            // for one.** Its reason was that egui cannot consume a pointer button event, so a press
+            // on the close button would arm this latch as well — the button sits inside the strip,
+            // which is the door into moving the pane. Measured instead of argued: egui does not
+            // decide a press is a drag in the frame the press arrives in (it compares against the
+            // origin it has only just recorded, which is what this file's own drag helper documents
+            // having checked the hard way), and by the next frame the console has been closed at the
+            // foot of this pass and nobody interacts with its widget again. A guard here fires in no
+            // frame that exists; it was written, mutated away, and no test moved.
             if response.drag_started() {
                 self.drag_in_progress = Some(DragIntent::from_the_press(
                     self.chord_of_the_last_press,
@@ -497,6 +526,36 @@ impl Window {
             if to_the_program.was_a_report {
                 self.one_more_reported(true);
             }
+        }
+
+        // **The console the button was pressed on is closed here, with the walk over and the wheel
+        // already spent.** What forces the delay is not a borrow — the walk above transforms the
+        // tree inline when somebody drops a console — but the rectangles: `rects` and the names
+        // beside them were computed before this pass, and closing reabsorbs a pane's place among its
+        // siblings, so from that instant every one of them describes a console that has moved.
+        // Whatever still reads them in this pass has to read them whole.
+        //
+        // **By name, and not by moving the focus onto it and closing «the focused one».** That was
+        // the first shape and the design named it; both are wrong for the same reason. A button is
+        // pressed on the console it belongs to, which is very often **not** the one being typed in:
+        // forcing the focus across first made the closing hand the keyboard to the neighbour of the
+        // console that left, so pressing a third pane's button took the keyboard off the pane
+        // somebody was working in. The by-name door moves the focus **only if the console that
+        // leaves was holding it**. And the cost is not added here on purpose: this whole pass is
+        // already inside [`Self::handle_the_mouse`]'s stopwatch, and the focused door adds its own —
+        // which from in here would subtract the same microseconds from the frame twice (**D13**).
+        //
+        // Its refusal of a tab's only console cannot be reached from here — that console carries no
+        // button — and it is reported rather than swallowed, like every other impossible branch in
+        // this file.
+        if let Some(name) = asked_to_close {
+            if let Err(why) = self.close_a_pane_called(name, ui.ctx()) {
+                eprintln!("the button could not close its console: {why}");
+            }
+            // **And the caller is told**, or it would paint this frame over the tiling of the
+            // console that has just left — the same thing dropping one pane onto another already
+            // says here.
+            the_tree_changed = true;
         }
 
         // **The last thing, because the focus is only final now.** The loop above moves it when
@@ -733,83 +792,6 @@ impl Window {
             there_was_one.then_some((pointer, requested, chord))
         })
     }
-
-    /// Moves the divider with the pointer, and returns whether the fraction changed in this pass.
-    ///
-    /// It lives apart from the painting for the same reason as [`Self::handle_the_mouse`]: inside
-    /// the interface pass it cannot be checked without opening a window.
-    ///
-    /// **The fraction comes out of the pointer's absolute position, not of its displacement.** With
-    /// the displacement, every little bit the floor's clip discards would be lost for ever: the
-    /// pointer would keep advancing and the fraction would fall behind, so on coming back the
-    /// divider would not be where the mouse is. With the absolute position, the divider chases the
-    /// pointer and the clip only decides where it plants itself.
-    ///
-    /// And there is a second reason that was discovered later, more serious than the precision:
-    /// **the interface pass can run twice over the same input**, and with the displacement the
-    /// second pass would apply it again, moving the divider twice as far. With the absolute
-    /// position the second pass computes the same thing and changes nothing. It is the same trap
-    /// that forced consuming the keyboard's events instead of reading them.
-    pub(crate) fn drag_the_divider(
-        &mut self,
-        ui: &egui::Ui,
-        which: usize,
-        divider: Divider,
-    ) -> bool {
-        // `Sense::DRAG` and not `Sense::drag()`: the second adds `FOCUSABLE`, that is, the divider
-        // would ask for egui's keyboard focus and would compete with the application's geographic
-        // routing. It is the same trap that already cost a case with the click.
-        //
-        // **The identifier carries which one it is, and before it was a constant.** With a single
-        // divider it made no difference; with several, a shared identifier turns them all into
-        // **the same control** as far as egui is concerned, so dragging one would move another or
-        // none at all. It is exactly what `handle_the_mouse` already solved by indexing its own,
-        // one line away.
-        let id = ui.id().with(("divider", which));
-        let response = ui
-            .interact(divider.rect, id, egui::Sense::DRAG)
-            // The cursor is kept **while it is being dragged too**. It is not because the pointer
-            // leaves the line —egui takes the widget being dragged as «hovered», wherever the
-            // pointer is—: it is because of the frame in which it is released, where the drag has
-            // already finished and the pointer may have ended up outside. With `on_hover_cursor`
-            // there the cursor flickers to an arrow just as the maneuver ends.
-            .on_hover_and_drag_cursor(divider.orientation.cursor());
-
-        let Some(pointer) = response.interact_pointer_pos() else {
-            return false;
-        };
-
-        // **Measured inside the span of the two it separates**, not of the whole area: moving a
-        // divider shares out the weight of its two neighbors keeping their sum, and the rest never
-        // find out.
-        let slice = divider.between_the_two;
-        let usable = divider.orientation.length_of(slice) - DIVIDER_THICKNESS;
-        // With nothing to share out there is no fraction to choose, and with a **negative**
-        // `usable` the division changes sign: the divider would go to the side opposite the mouse.
-        // The tiling is left as the last real drag left it, which is what the user asked for the
-        // last time it made sense.
-        if usable <= 0.0 {
-            return false;
-        }
-
-        // The clip to `0..1` **is not for the geometry** —[`tile`] takes care of that on every
-        // frame, with its own floor— but for the state: without it, dragging past the edge would
-        // store a fraction of 5, which the exit report would publish as «at 500 %» and which would
-        // force travelling the way back before the divider moved.
-        let offset = divider.orientation.offset_from_the_start(slice, pointer);
-        let new = (offset / usable).clamp(0.0, 1.0);
-        // The guard above lets through a `usable` that is **not a number**, because `NaN <= 0.0` is
-        // false, and out of that comes a NaN fraction that the clip does not catch either: a
-        // `clamp` over a NaN returns NaN. And a NaN stored here never leaves — the window would
-        // stop painting and neither widening it nor dragging again would recover it. The area that
-        // is not a number is not hypothetical: it is the case [`CellMetrics::cells_in`] already
-        // documents, while the desktop has not yet said how big the window is.
-        if !new.is_finite() {
-            return false;
-        }
-
-        self.active_mut().move_divider(which, new)
-    }
 }
 
 /// **The second block, and the reason it is a second block rather than a second file.**
@@ -830,6 +812,69 @@ impl Window {
     // both of them *do* something — one throws a standing question away, the other writes a mark
     // the painter reads. It is also what keeps the first block under D28's 300 lines, which is the
     // cost this file's header already declares.
+
+    /// Which console's close button this frame's bare press hit, if it hit one.
+    ///
+    /// **It notes the name and closes nothing**, which is the whole shape of this. The caller closes
+    /// with the walk over, for the reason written at that call site: the rectangles of this pass
+    /// describe a tiling that closing immediately makes false.
+    ///
+    /// **And it does not take the press out of the queue, unlike the three doors below it.** The two
+    /// notices have to: their boxes are drawn **inside the console**, where the routing would go on
+    /// to report the press to a program that asked for the mouse. This one lands on the strip, where
+    /// the routing already declines it — `from_the_press` answers `MovePane` for anything on the
+    /// strip, so the press is never the program's and the latch is set to «not the program's» by the
+    /// routing itself. (The panel's buttons take theirs out for a different reason again: the press
+    /// has already been spent writing to a program, and leaving it would let a second door spend it
+    /// twice.) Removing it here would be a second mechanism for a case that has none, and the
+    /// delivery that cut the strip had already recorded the premise this rests on.
+    ///
+    /// **Only a completely bare press**, the same rule [`Self::answer_a_clicked_question`] applies
+    /// and for a stronger reason: the chord that moves a console is held down over the very strip
+    /// this button lives in, so a press carrying it is somebody else's gesture — and the thing this
+    /// one does cannot be undone.
+    ///
+    /// **The position comes from the queue's own event**, never from egui's latest pointer position:
+    /// that one is where the pointer got to, and a frame that batches a press with a move after it —
+    /// a flicked click, or any frame this window took a tenth of a second over — would close a
+    /// console nobody aimed at. The module documents that trap twice already.
+    ///
+    /// **The strip is asked first and the button second**, both through the functions that already
+    /// own those answers: a press on the line the strip and the console share belongs to the console
+    /// ([`crate::panel::pane::PaneChrome::strip_holds`]), and where the button sits is
+    /// [`crate::header::button_within`]'s to say — the same one the painting draws inside.
+    fn whose_button_was_pressed(
+        &self,
+        rects: &[egui::Rect],
+        metrics: &CellMetrics,
+        now: SystemTime,
+        queue: &[ButtonPress],
+    ) -> Option<usize> {
+        let bare = queue.iter().copied().find(|button| {
+            button.pressed
+                && button.button == egui::PointerButton::Primary
+                && button.chord.is_none()
+        })?;
+        let headers = self.headers;
+        // **One rectangle per console of this tab**, which is the question
+        // [`crate::header::Button::in_a_tab_of`] answers: on a tab of one, no strip carries a
+        // button at all and this walk cannot find one.
+        let button = crate::header::Button::in_a_tab_of(rects);
+
+        self.active()
+            .panes()
+            .into_iter()
+            .zip(rects)
+            .find_map(|(pane, rect)| {
+                let chrome = pane.chrome_within(*rect, metrics, now, headers);
+                let hit = chrome.strip_holds(bare.at)
+                    && chrome.header().is_some_and(|strip| {
+                        crate::header::button_within(strip, metrics, button)
+                            .is_some_and(|target| target.holds(bare.at))
+                    });
+                hit.then_some(pane.name)
+            })
+    }
 
     /// Answers the standing question a press was aimed at, and says which press was spent on it.
     ///

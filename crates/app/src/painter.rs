@@ -604,34 +604,49 @@ pub struct Blink {
     pub focused: bool,
 }
 
-/// The two things the frame resolves before it walks the panes, travelling together.
+/// The three things the frame resolves before it walks the panes, travelling together.
 ///
 /// **It is an argument count and it is said so**, rather than dressed up as a concept: painting a
 /// console reached eight arguments with the strip's decision, and the lint that guards this crate
-/// stops at seven. Riding the two in one value is the same answer [`Blink::focused`] already gave
-/// one level down, for the same reason its docblock gives — an eighth argument is where a reader
-/// stops being able to tell which value is which.
+/// stops at seven. Riding them in one value is the same answer [`Blink::focused`] already gave one
+/// level down, for the same reason its docblock gives — an eighth argument is where a reader stops
+/// being able to tell which value is which.
 ///
-/// **Neither of the two is purely the session's**: the strip's decision is, but the blink arrives
-/// **narrowed per console** with [`Blink::on`], because whether the cursor is lit depends on which
-/// console has the keyboard.
+/// **None of the three is purely the session's**: the strip's decision is, the blink arrives
+/// **narrowed per console** with [`Blink::on`] because whether the cursor is lit depends on which
+/// console has the keyboard, and the button depends on how many consoles the tab being painted has.
 #[derive(Clone, Copy)]
 pub(crate) struct HowToPaint {
     /// Whether this console's cursor is lit, and for how much longer.
     pub(crate) blink: Blink,
     /// Whether a strip is painted over it. See [`crate::header::Headers`].
     pub(crate) headers: crate::header::Headers,
+    /// Whether that strip carries the button that closes it. See [`crate::header::Button`].
+    pub(crate) button: crate::header::Button,
 }
 
 impl HowToPaint {
-    /// The two of them, in the order the frame resolves them.
+    /// The three of them, in the order the frame resolves them.
     ///
     /// **It exists to keep the call site one line long**, which is not a style preference here:
     /// `lib.rs` is a ratchet that may only shrink (**D28**), and the literal form of this value
     /// costs that file three lines for nothing. The tests build it as a literal, which is fine —
     /// they are not counted.
-    pub(crate) fn of(blink: Blink, headers: crate::header::Headers) -> Self {
-        Self { blink, headers }
+    /// **The third arrives as the consoles of the tab being painted**, which is what the caller is
+    /// holding — it is walking their rectangles — and what [`crate::header::Button::in_a_tab_of`]
+    /// turns into the answer. Handing over the list rather than the verdict is what keeps the one
+    /// production call site inside the line that `lib.rs`'s ratchet pays for; handing over the list
+    /// rather than its **length** is what stops another `usize` in scope reaching this argument.
+    pub(crate) fn of(
+        blink: Blink,
+        headers: crate::header::Headers,
+        consoles: &[eframe::egui::Rect],
+    ) -> Self {
+        Self {
+            blink,
+            headers,
+            button: crate::header::Button::in_a_tab_of(consoles),
+        }
     }
 }
 
@@ -851,7 +866,11 @@ pub(crate) fn paint_pane(
     discoverer: &mut crate::fonts::Discoverer,
     how: HowToPaint,
 ) -> crate::PaneOutcome {
-    let HowToPaint { blink, headers } = how;
+    let HowToPaint {
+        blink,
+        headers,
+        button,
+    } = how;
     // **The panel is timed apart from the console's queueing, with two clocks that are added
     // together: one around reading and tiling, and another around painting it.** They are two
     // and not one because the console's painting falls right in between and has a span of its
@@ -962,7 +981,7 @@ pub(crate) fn paint_pane(
     // after the console because that is the order the notices already follow — chrome the
     // application owns goes over what the program wrote, never under it.
     let header_cost = chrome.header().map_or(std::time::Duration::ZERO, |header| {
-        crate::header::paint(&ui.painter_at(header), header, theme, metrics)
+        crate::header::paint(&ui.painter_at(header), header, theme, metrics, button)
     });
     // **The border is only reported if there is a grip behind it.** With the panel clipped
     // below the grip the gesture registers no control at all —so as not to steal the point from

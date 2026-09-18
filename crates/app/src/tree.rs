@@ -17,7 +17,9 @@
 //!
 //! It came out of `lib.rs` under **D28**.
 
-use crate::tiling::{Orientation, Side, Tiling, Weight, tile, weights_for, weights_of};
+use crate::tiling::{
+    DIVIDER_THICKNESS, Divider, Orientation, Side, Tiling, Weight, tile, weights_for, weights_of,
+};
 use crate::{OpeningLayout, Pane, panel, session};
 use eframe::egui;
 use std::time::SystemTime;
@@ -664,7 +666,7 @@ pub(crate) struct Closing {
 /// **It is a transparent container on purpose, with no border of methods.** The seam that is needed
 /// is given by the type itself: when the panes stop being two and become a tree, what changes is
 /// the inside of this, and the list of tabs does not notice. Hiding it behind methods as well would
-/// force putting [`crate::Window::handle_the_mouse`] and [`crate::Window::drag_the_divider`] inside the painting,
+/// force putting [`crate::Window::handle_the_mouse`] and [`Tab::drag_the_divider`] inside the painting,
 /// and those were taken out precisely so they could be checked without opening any window.
 pub(crate) struct Tab {
     /// How its consoles are tiled. See [`Node`].
@@ -817,6 +819,97 @@ impl Tab {
         for child in children {
             Self::fractions_in(&child.node, fractions);
         }
+    }
+
+    /// Moves the divider with the pointer, and returns whether the fraction changed in this pass.
+    ///
+    /// It lives apart from the painting for the same reason as [`crate::Window::handle_the_mouse`]:
+    /// inside the interface pass it cannot be checked without opening a window.
+    ///
+    /// **It is the tab's and not the window's, and that is where it came from.** It lives beside
+    /// [`Tab::move_divider`] — the one thing it ends up calling — because a divider shares out the
+    /// weights of one tab and nothing above it ever finds out. The move is the one the delivery
+    /// before this made with the panel's border, which went to the module that owns panels: a
+    /// gesture over a piece of chrome belongs with that piece, and `pointer.rs` keeps the ones
+    /// whose subject is deciding **whose** a gesture is. It also pays for that file's own lines
+    /// under **D28**, which is the order this project takes pieces out in.
+    ///
+    /// **The fraction comes out of the pointer's absolute position, not of its displacement.** With
+    /// the displacement, every little bit the floor's clip discards would be lost for ever: the
+    /// pointer would keep advancing and the fraction would fall behind, so on coming back the
+    /// divider would not be where the mouse is. With the absolute position, the divider chases the
+    /// pointer and the clip only decides where it plants itself.
+    ///
+    /// And there is a second reason that was discovered later, more serious than the precision:
+    /// **the interface pass can run twice over the same input**, and with the displacement the
+    /// second pass would apply it again, moving the divider twice as far. With the absolute
+    /// position the second pass computes the same thing and changes nothing. It is the same trap
+    /// that forced consuming the keyboard's events instead of reading them.
+    pub(crate) fn drag_the_divider(
+        &mut self,
+        ui: &egui::Ui,
+        which: usize,
+        divider: Divider,
+    ) -> bool {
+        // `Sense::DRAG` and not `Sense::drag()`: the second adds `FOCUSABLE`, that is, the divider
+        // would ask for egui's keyboard focus and would compete with the application's geographic
+        // routing. It is the same trap that already cost a case with the click.
+        //
+        // **The identifier carries which one it is, and before it was a constant.** With a single
+        // divider it made no difference; with several, a shared identifier turns them all into
+        // **the same control** as far as egui is concerned, so dragging one would move another or
+        // none at all. It is exactly what `handle_the_mouse` already solved by indexing its own,
+        // one line away.
+        //
+        // **It does not carry which tab, and that is a constraint on the callers rather than an
+        // oversight.** While this was a method of the window it could only ever reach the active
+        // tab; as a method of the tab it could be called on any of them, and two tabs dragging
+        // dividers of the same number would be one control to egui. Whoever gives a background tab
+        // a divider to drag has to put the tab in here.
+        let id = ui.id().with(("divider", which));
+        let response = ui
+            .interact(divider.rect, id, egui::Sense::DRAG)
+            // The cursor is kept **while it is being dragged too**. It is not because the pointer
+            // leaves the line —egui takes the widget being dragged as «hovered», wherever the
+            // pointer is—: it is because of the frame in which it is released, where the drag has
+            // already finished and the pointer may have ended up outside. With `on_hover_cursor`
+            // there the cursor flickers to an arrow just as the maneuver ends.
+            .on_hover_and_drag_cursor(divider.orientation.cursor());
+
+        let Some(pointer) = response.interact_pointer_pos() else {
+            return false;
+        };
+
+        // **Measured inside the span of the two it separates**, not of the whole area: moving a
+        // divider shares out the weight of its two neighbors keeping their sum, and the rest never
+        // find out.
+        let slice = divider.between_the_two;
+        let usable = divider.orientation.length_of(slice) - DIVIDER_THICKNESS;
+        // With nothing to share out there is no fraction to choose, and with a **negative**
+        // `usable` the division changes sign: the divider would go to the side opposite the mouse.
+        // The tiling is left as the last real drag left it, which is what the user asked for the
+        // last time it made sense.
+        if usable <= 0.0 {
+            return false;
+        }
+
+        // The clip to `0..1` **is not for the geometry** —[`tile`] takes care of that on every
+        // frame, with its own floor— but for the state: without it, dragging past the edge would
+        // store a fraction of 5, which the exit report would publish as «at 500 %» and which would
+        // force travelling the way back before the divider moved.
+        let offset = divider.orientation.offset_from_the_start(slice, pointer);
+        let new = (offset / usable).clamp(0.0, 1.0);
+        // The guard above lets through a `usable` that is **not a number**, because `NaN <= 0.0` is
+        // false, and out of that comes a NaN fraction that the clip does not catch either: a
+        // `clamp` over a NaN returns NaN. And a NaN stored here never leaves — the window would
+        // stop painting and neither widening it nor dragging again would recover it. The area that
+        // is not a number is not hypothetical: it is the case [`CellMetrics::cells_in`] already
+        // documents, while the desktop has not yet said how big the window is.
+        if !new.is_finite() {
+            return false;
+        }
+
+        self.move_divider(which, new)
     }
 
     /// Moves divider number `which` to that fraction. Says whether anything changed.

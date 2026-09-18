@@ -109,6 +109,139 @@ const GRIP_CELLS: f32 = 3.0;
 const GRIP_LINES: usize = 3;
 const GRIP_THICKNESS: f32 = 1.0;
 
+/// How wide the close button is, in cells.
+///
+/// **In cells like the grip, and for the same reason** (**D10**): a window opened with a bigger font
+/// gets a bigger target instead of the same speck. Two and not three because it is a square-ish
+/// corner and the grip is a band.
+const BUTTON_CELLS: f32 = 2.0;
+
+/// How much of the button's shorter side each arm of the cross reaches from its centre, and how
+/// thick the two strokes are.
+const CROSS_REACH: f32 = 0.22;
+const CROSS_THICKNESS: f32 = 1.0;
+
+/// How much of the strip's right-hand end the button leaves alone, **and it is the folded panel's
+/// handle, taken from the two constants that build it** rather than copied as a number.
+///
+/// **That corner is spoken for and the delivery before this one paid a review finding for it**: with
+/// the panel folded, its handle sits exactly this far in from the pane's right edge, and cutting the
+/// strip after tiling the panel left that handle running the pane's whole height and swallowing the
+/// corner of the one band that exists to be grabbed. It is driven by a test that presses at this
+/// very abscissa (`the_strip_is_grabbed_at_the_corner_the_folded_panels_handle_would_take`).
+///
+/// **A button flush against the edge would take that press instead — and end a program with it.**
+/// The first version of this delivery did exactly that, and the test caught it: the console closed
+/// where somebody had reached to move it. Taken from the constants so the button follows the corner
+/// if either one ever moves.
+const CORNER_LEFT_TO_THE_GRAB: f32 = crate::PANEL_GRIP + crate::tiling::DIVIDER_THICKNESS;
+
+/// Whether this pane's strip carries the button that closes it.
+///
+/// **A pane with no sibling carries none, and that does not contradict [`Headers`] at the top of
+/// this module.**
+/// The strip is painted always, single console included, because a strip that came and went would
+/// teach nobody that a console can be moved (**D45**). The button is the opposite case: on a pane
+/// with no sibling it would not close a console, it would close the **tab** — and on the last tab,
+/// the window, with whatever an agent was doing inside it — one click away, on a target two cells
+/// wide. That gesture keeps the three-key chord it already has.
+///
+/// **A type and not a `bool`**, for the reason its neighbours give: it travels beside [`Headers`]
+/// into the same call, and two adjacent booleans are swapped without the compiler saying a word.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Button(bool);
+
+impl Button {
+    /// What every pane of a tab showing these consoles carries.
+    ///
+    /// **The count is the question, not the tree's shape.** A tab whose root is a leaf has one
+    /// console and every other tab has more, so both callers — the painting and the pointer — read
+    /// it off the list of rectangles they are already walking, and neither one walks the tree a
+    /// second time to ask something the length already answers.
+    ///
+    /// **And they hand over the list rather than its length**, which is not ceremony: with a `usize`
+    /// in the signature, the call sites of both callers have other `usize`s within reach — an index,
+    /// a count of effects — and passing the wrong one compiles and paints a button on a console that
+    /// must not carry one. A slice of rectangles is a thing neither of them can confuse.
+    pub(crate) fn in_a_tab_of(consoles: &[egui::Rect]) -> Self {
+        Self(consoles.len() > 1)
+    }
+
+    fn is_drawn(self) -> bool {
+        self.0
+    }
+}
+
+/// A strip's close button: the one rectangle, and the only way to ask whether a press hit it.
+///
+/// **A type and not a bare [`egui::Rect`], because the rule on its right edge is not optional.**
+/// [`egui::Rect::contains`] is inclusive on both edges, and the button's right edge is the abscissa
+/// where the corner left to the grab begins: asked with `contains`, that single column answered yes
+/// to the button **and** to the grab, and the press
+/// `the_strip_is_grabbed_at_the_corner_the_folded_panels_handle_would_take` drives lands exactly
+/// there — it closed the console it had come to move. With the rectangle handed out bare, writing
+/// `contains` again is one line away and nothing fails until somebody presses that column. Handed
+/// out as this, the only question it answers is the right one. It is the same shape
+/// [`crate::panel::pane::PaneChrome::strip_holds`] gives the tie on the strip's bottom edge.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct CloseButton(egui::Rect);
+
+impl CloseButton {
+    /// Where the cross is painted.
+    pub(crate) fn rect(self) -> egui::Rect {
+        self.0
+    }
+
+    /// Whether a press at that point hit it.
+    ///
+    /// **Only the right edge is decided here.** To the left is strip you may grab, and the bottom
+    /// edge is the strip's own tie with the console's first row, which
+    /// [`crate::panel::pane::PaneChrome::strip_holds`] settles in the one place both callers read —
+    /// so the pointer asks that first and this never sees a press from the row below.
+    pub(crate) fn holds(self, at: egui::Pos2) -> bool {
+        self.0.contains(at) && at.x < self.0.right()
+    }
+}
+
+/// The button of that strip, or nothing where the pane carries none **or has no room for one**.
+///
+/// **One place decides it and both callers read it here**: the painting draws the cross inside this
+/// rectangle and the pointer decides a press by it. With the geometry written twice, a delivery that
+/// moved the button in one of them would leave the other answering for where it used to be — a
+/// button that is painted in one corner and pressed in another.
+///
+/// **It is not flush with the right edge**: see [`CORNER_LEFT_TO_THE_GRAB`], which is the corner the
+/// previous delivery fought for and the reason this one does not take it.
+///
+/// **And there is no button at all unless the strip still has its grip to the left of it**, which is
+/// this project's rule about destructive surfaces applied to the other axis. Nothing stops a window
+/// being dragged narrow — no minimum size is asked of the desktop, which is why the cut itself is
+/// clamped one function above — and with the button simply squeezed, a strip a few points wide is
+/// **entirely** a close button: every press on a console's top row would end its program, and the
+/// band that exists to be grabbed could not be grabbed anywhere. The pane that is too narrow keeps
+/// the handle and loses the button; the chord still closes it.
+pub(crate) fn button_within(
+    strip: egui::Rect,
+    metrics: &CellMetrics,
+    button: Button,
+) -> Option<CloseButton> {
+    if !button.is_drawn() {
+        return None;
+    }
+
+    let right = strip.right() - CORNER_LEFT_TO_THE_GRAB;
+    let left = right - BUTTON_CELLS * metrics.width();
+    // The grip is centred, so what the button may not reach is the centre plus half of it.
+    let grip_ends = strip.center().x + GRIP_CELLS * metrics.width() / 2.0;
+
+    (left > grip_ends).then(|| {
+        CloseButton(egui::Rect::from_min_max(
+            egui::pos2(left, strip.top()),
+            egui::pos2(right, strip.bottom()),
+        ))
+    })
+}
+
 /// How tall the strip is, or zero where none is painted.
 ///
 /// **The same number feeds the geometry and the painting, and there is no regime in between.** A
@@ -157,6 +290,7 @@ pub(crate) fn paint(
     header: egui::Rect,
     theme: &crate::theme::Theme,
     metrics: &CellMetrics,
+    button: Button,
 ) -> std::time::Duration {
     let started = std::time::Instant::now();
 
@@ -167,8 +301,8 @@ pub(crate) fn paint(
     painter.rect_filled(header, 0.0, theme.panel_background());
 
     // **The grip is centred on the strip and not flush with a corner**, because the corners are
-    // spoken for: the close button lands on the right in the next delivery, and the left of a pane
-    // is where the tree's divider ends.
+    // spoken for: the close button lands on the right, and the left of a pane is where the tree's
+    // divider ends.
     let grip_width = GRIP_CELLS * metrics.width();
     let centre = header.center();
     // **The span is the INK, not the distance between the first line and the last.** Measured from
@@ -185,6 +319,32 @@ pub(crate) fn paint(
             ),
             0.0,
             theme.divider(),
+        );
+    }
+
+    // **The cross is drawn in the text's ink and the grip in the divider's, and the difference is
+    // deliberate.** The grip is an affordance: it has to be there when you look for it and quiet
+    // when you do not. The button ends a program, so it has to be findable at a glance — and a
+    // colour of its own would have to be chosen in both themes, join the twenty-two of the settings
+    // file (**D26**) and be explained in its manual, for a mark two cells wide.
+    if let Some(button) = button_within(header, metrics, button) {
+        let button = button.rect();
+        let reach = CROSS_REACH * button.height().min(button.width());
+        let centre = button.center();
+        let stroke = egui::Stroke::new(CROSS_THICKNESS, theme.foreground());
+        painter.line_segment(
+            [
+                centre - egui::vec2(reach, reach),
+                centre + egui::vec2(reach, reach),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                centre + egui::vec2(reach, -reach),
+                centre - egui::vec2(reach, -reach),
+            ],
+            stroke,
         );
     }
 
@@ -284,6 +444,123 @@ mod tests {
             console.height(),
             0.0,
             "a console with no room left has to be empty, not negative"
+        );
+    }
+
+    #[test]
+    fn the_button_is_at_the_right_end_of_the_strip_and_inside_it() {
+        let (strip, _) = set_the_header_aside(area(), &metrics(), Headers::PAINTED);
+        let strip = strip.expect("a session that paints headers sets a strip aside");
+        let button = button_within(
+            strip,
+            &metrics(),
+            Button::in_a_tab_of(&[egui::Rect::NOTHING; 2]),
+        )
+        .expect("a console with a sibling carries a button")
+        .rect();
+
+        // **The corner itself is not the button's**, and that is the point of the assertion: with
+        // the button flush against the edge, the press this project already drives at that abscissa
+        // — the one the folded panel's handle wants — closed the console instead of moving it.
+        assert_eq!(
+            button.right(),
+            strip.right() - CORNER_LEFT_TO_THE_GRAB,
+            "the button took the strip's right-hand corner, where a press means «move this console»"
+        );
+        assert_eq!(button.width(), 16.0, "two cells of the metric above");
+        assert_eq!(
+            (button.top(), button.bottom()),
+            (strip.top(), strip.bottom()),
+            "the button is shorter than the strip it lives in, so there is a band of it that looks \
+             pressable and is not"
+        );
+    }
+
+    #[test]
+    fn the_column_the_button_and_the_grab_share_belongs_to_the_grab() {
+        // **One abscissa of ambiguity, and it is the one this project already drives a press at.**
+        // `Rect::contains` is inclusive, so the button's right edge — which is where the corner left
+        // to the folded panel's handle begins — answered yes to both. What it costs is a console
+        // **closed** where somebody had reached to move it.
+        let (strip, _) = set_the_header_aside(area(), &metrics(), Headers::PAINTED);
+        let button = button_within(
+            strip.expect("a session that paints headers sets a strip aside"),
+            &metrics(),
+            Button::in_a_tab_of(&[egui::Rect::NOTHING; 2]),
+        )
+        .expect("a console with a sibling carries a button");
+        let edge = button.rect().right();
+
+        assert!(
+            !button.holds(egui::pos2(edge, button.rect().center().y)),
+            "the column the button shares with the grab closes the console"
+        );
+        assert!(
+            button.holds(egui::pos2(edge - 1.0, button.rect().center().y)),
+            "the column beside it does not close the console either, so the button is not pressable"
+        );
+    }
+
+    #[test]
+    fn a_console_with_no_sibling_carries_no_button() {
+        // **AC5's arithmetic half.** What it costs if this stops holding is not a cosmetic
+        // difference: on a tab of one console the close would take the tab, and on the last tab the
+        // window, with whatever was running inside it.
+        let (strip, _) = set_the_header_aside(area(), &metrics(), Headers::PAINTED);
+        let strip = strip.expect("a session that paints headers sets a strip aside");
+
+        assert!(
+            button_within(
+                strip,
+                &metrics(),
+                Button::in_a_tab_of(&[egui::Rect::NOTHING])
+            )
+            .is_none(),
+            "the only console of its tab carries a button, and one click on it closes the tab"
+        );
+        assert!(
+            button_within(
+                strip,
+                &metrics(),
+                Button::in_a_tab_of(&[egui::Rect::NOTHING; 2])
+            )
+            .is_some(),
+            "a console with a sibling carries no button, so the milestone's gesture does not exist"
+        );
+    }
+
+    #[test]
+    fn a_strip_with_no_room_for_both_keeps_the_handle_and_loses_the_button() {
+        // **The narrow window, which nothing stops**: no minimum size is asked of the desktop, and
+        // the cut one function above is clamped for exactly that case. Squeezed instead of dropped,
+        // the button would take a strip a few points wide **whole** — every press on a console's top
+        // row ending its program, and the band that exists to be grabbed grabbable nowhere.
+        let narrow = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(40.0, 400.0));
+        let (strip, _) = set_the_header_aside(narrow, &metrics(), Headers::PAINTED);
+        let strip = strip.expect("a strip is still set aside");
+
+        assert!(
+            button_within(
+                strip,
+                &metrics(),
+                Button::in_a_tab_of(&[egui::Rect::NOTHING; 2])
+            )
+            .is_none(),
+            "a strip with no room for the handle and the button still carries the button, so the \
+             whole of it closes the console"
+        );
+        // **And the pane one point wider than the floor does carry one**, or the assertion above
+        // would be satisfied by a button that never exists at all.
+        let roomy = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(120.0, 400.0));
+        let (roomy_strip, _) = set_the_header_aside(roomy, &metrics(), Headers::PAINTED);
+        assert!(
+            button_within(
+                roomy_strip.expect("a strip is set aside"),
+                &metrics(),
+                Button::in_a_tab_of(&[egui::Rect::NOTHING; 2])
+            )
+            .is_some(),
+            "a pane wide enough for both carries no button"
         );
     }
 

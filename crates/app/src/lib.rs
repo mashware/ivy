@@ -2299,7 +2299,7 @@ impl eframe::App for Window {
         // timed region is the whole call and shrinking it stops being moving one line.
         let dividers = tiling.dividers.clone();
         for (which, divider) in dividers.into_iter().enumerate() {
-            if self.drag_the_divider(ui, which, divider) {
+            if self.active_mut().drag_the_divider(ui, which, divider) {
                 let redoing = Instant::now();
                 tiling = tiling_of(self);
                 self.timed_separately += redoing.elapsed();
@@ -2351,6 +2351,13 @@ impl eframe::App for Window {
         // **The target that is painted indexes the earlier tiling**, and that is fine: there is
         // only a target while the drag is still in flight, and on that frame nobody has dropped, so
         // the tree did not change.
+        //
+        // **Closing a console by its button is the other way that pass can change the tree, and it
+        // cannot coexist with a target.** A target needs a pane being dragged by the primary button,
+        // which means that button is already down; the close needs a fresh **press** of the same
+        // button, which cannot arrive without a release in between. Said here because the index
+        // below is direct: if some later gesture gives the pass a second way to shorten this list,
+        // this is the line that stops being true.
         let drag_target = of_the_mouse.target;
 
         // It is indexed by hand instead of going through `active_mut`, which would lend the whole
@@ -2397,7 +2404,10 @@ impl eframe::App for Window {
                 &self.theme,
                 &metrics,
                 &mut self.discoverer,
-                painter::HowToPaint::of(blink.on(focused), headers),
+                // **How many consoles this tab has decides whether the strip carries its button**,
+                // and the list being walked is the answer: one rectangle per console of the active
+                // tab. See [`header::Button::in_a_tab_of`].
+                painter::HowToPaint::of(blink.on(focused), headers, &rects),
             );
             // **What the painting really drew, not what the program asked for**: it is what the
             // repaint deadline is armed from. See [`alarms::BlinkState::painted`].
@@ -10597,6 +10607,537 @@ mod tests {
         }
     }
 
+    /// Where the strip's close button really is, for that pane of that tiling.
+    ///
+    /// **Through the same function the painting draws inside**, deliberately: an expectation built
+    /// by hand here would go on agreeing with itself after the button moved.
+    fn close_button_of(
+        window: &Window,
+        rects: &[egui::Rect],
+        which: usize,
+        metrics: &CellMetrics,
+    ) -> egui::Rect {
+        let strip = header::set_the_header_aside(rects[which], metrics, window.headers)
+            .0
+            .expect("the pane carries a strip");
+        header::button_within(strip, metrics, header::Button::in_a_tab_of(rects))
+            .expect("a console with a sibling carries a button")
+            .rect()
+    }
+
+    #[test]
+    fn the_strips_button_closes_its_console_and_its_sibling_takes_the_place() {
+        // **AC4, and it is the milestone's only destructive surface.** What it has to be is the same
+        // act as `Ctrl+Shift+X` — the console gone and its place reabsorbed by the siblings — rather
+        // than a second way of closing with rules of its own.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let staying = window.active().panes()[1].name;
+        let target = close_button_of(&window, &rects, 0, &metrics);
+
+        let asked_to_close = one_frame_in(&mut window, &ctx, area, click_at(target.center()));
+
+        assert_eq!(
+            names_in_order(&window),
+            vec![staying],
+            "the press on the button did not close the console its strip belongs to"
+        );
+        assert!(
+            !asked_to_close,
+            "closing one console of two closed the window as well"
+        );
+        assert_eq!(
+            window.active().focus,
+            staying,
+            "the keyboard stayed with a console that no longer exists"
+        );
+        // **The place is asserted, not the count.** «It is gone» is satisfied by a tree that dropped
+        // the pane and left a hole; what the chord's path promises is that the siblings share the
+        // whole area out again.
+        let left = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        assert_eq!(left.len(), 1);
+        assert_eq!(
+            left[0].width(),
+            area.width(),
+            "the console that stayed did not take the place of the one that left"
+        );
+        // **And the grid its program was told about is the new one, in this same frame.** The
+        // rectangles the walk was painting with were computed before the close, so unless the pass
+        // says the tree changed, the console that stayed is painted — and measured, and announced to
+        // the program inside — in the half of the window it had while it still had a neighbour.
+        // Checked by mutating: with that notice removed, nothing else in the suite moved.
+        assert_eq!(
+            window.active().panes()[0].measured,
+            grid_of(left[0], &metrics),
+            "the console that stayed was announced the grid it had while its neighbour was alive"
+        );
+    }
+
+    #[test]
+    fn the_chord_that_moves_a_console_does_not_close_it_from_the_button() {
+        // **The button lives inside the band the move chord is held over**, so the two gestures meet
+        // on the same points and only what the press carries separates them. `Ctrl+Shift` belongs to
+        // the move — it is what D20 latched — and a chorded press that closed instead would end a
+        // program at the start of a gesture meant to carry it somewhere else. Mutating the bare-press
+        // condition away left the whole suite green, which is why this test exists.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let before = names_in_order(&window);
+        let target = close_button_of(&window, &rects, 0, &metrics).center();
+
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(target),
+                egui::Event::PointerButton {
+                    pos: target,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: with_shift(),
+                },
+            ],
+        );
+
+        assert_eq!(
+            names_in_order(&window),
+            before,
+            "the chord that moves a console closed it instead, on the band it is held over"
+        );
+    }
+
+    #[test]
+    fn a_button_that_is_not_the_left_one_closes_nothing_from_the_strip() {
+        // **The middle button is X11's paste**, and on this desktop it lands on the cross with the
+        // same coordinates the left one does: reaching for the top of a console to paste a prompt
+        // into an agent would end its program instead, with no confirmation and no way back. The
+        // right button is nobody's here yet, and the day it becomes somebody's it must not inherit
+        // this. The rule was written into the filter and **nothing held it**: taking the button out
+        // of it left the whole suite green.
+        for button in [egui::PointerButton::Middle, egui::PointerButton::Secondary] {
+            let ctx = egui::Context::default();
+            let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+            let area = area_of_cells(200.0);
+            one_frame_in(&mut window, &ctx, area, Vec::new());
+
+            let metrics = with_metrics(|metrics| metrics.clone());
+            let rects = window
+                .active()
+                .root
+                .place(area, metrics.width())
+                .parts
+                .clone();
+            let before = names_in_order(&window);
+            let target = close_button_of(&window, &rects, 0, &metrics).center();
+
+            one_frame_in(
+                &mut window,
+                &ctx,
+                area,
+                vec![
+                    egui::Event::PointerMoved(target),
+                    egui::Event::PointerButton {
+                        pos: target,
+                        button,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerButton {
+                        pos: target,
+                        button,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+
+            assert_eq!(
+                names_in_order(&window),
+                before,
+                "{button:?} on the cross closed the console, so a paste aimed at it ends a program"
+            );
+        }
+    }
+
+    #[test]
+    fn a_release_over_the_strips_button_closes_nothing() {
+        // **A selection ends wherever the hand stops, and the strip is one cell above the first row
+        // it marks.** Dragging upwards to take the top line of a console puts the release on that
+        // console's own cross — same bare left button, same position, and only `pressed` telling the
+        // two apart. Closing there ends a program at the end of a gesture that was about copying a
+        // line. Measured: with `pressed` taken out of the filter, the whole suite stayed green.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let before = names_in_order(&window);
+        let started_at = inside_the_console(
+            rects[0],
+            &metrics,
+            egui::vec2(metrics.width() * 2.0, metrics.height() * 2.5),
+        );
+        let ends_at = close_button_of(&window, &rects, 0, &metrics).center();
+
+        // The press, well inside the console: the premise is that nothing about it is the strip's.
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(started_at),
+                egui::Event::PointerButton {
+                    pos: started_at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        // And the release, dragged up onto the cross of that same console.
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(ends_at),
+                egui::Event::PointerButton {
+                    pos: ends_at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+
+        assert_eq!(
+            names_in_order(&window),
+            before,
+            "letting go of a selection over the cross closed the console it was being taken from"
+        );
+    }
+
+    #[test]
+    fn the_line_the_button_shares_with_the_console_does_not_close_it() {
+        // **The other tie, and this delivery already paid for the first one.** The button's bottom
+        // edge is the strip's, which is the console's first row: `Rect::contains` is inclusive, so
+        // without the strip being asked first that single line both closed the console and resolved
+        // to row 0 of its grid. Aiming at the first row of text would end the program.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let before = names_in_order(&window);
+        let button = close_button_of(&window, &rects, 0, &metrics);
+        let on_the_line = egui::pos2(button.center().x, button.bottom());
+
+        // The premise, asserted rather than assumed: the point really is the line the two share.
+        assert_eq!(
+            on_the_line.y,
+            console_of(rects[0], &metrics).top(),
+            "the press is not on the line the button and the console share, so this test measures \
+             nothing"
+        );
+
+        one_frame_in(&mut window, &ctx, area, click_at(on_the_line));
+
+        assert_eq!(
+            names_in_order(&window),
+            before,
+            "a press on the console's own first row closed it"
+        );
+    }
+
+    #[test]
+    fn the_cross_is_painted_inside_the_button_that_answers_for_it() {
+        // **Without this the button can be deleted from the painting and stay pressable**: measured,
+        // removing the cross left the whole suite green. What that ships is a destructive surface
+        // nobody can see — two cells of a strip that end a program when pressed and say nothing.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of_cells(200.0);
+        let shapes = ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+
+        let metrics = CellMetrics::measure(&ctx, egui::FontId::monospace(DEFAULT_FONT_SIZE));
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let button = close_button_of(&window, &rects, 0, &metrics);
+
+        let strokes = shapes
+            .iter()
+            .filter(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { points, .. } => {
+                    points.iter().all(|point| button.contains(*point))
+                }
+                _ => false,
+            })
+            .count();
+        assert_eq!(
+            strokes, 2,
+            "the button answers presses and paints no cross, so it is a couple of cells that end a \
+             program with nothing on screen to say so"
+        );
+    }
+
+    #[test]
+    fn a_repeated_pass_does_not_close_a_second_console_with_the_same_click() {
+        // **egui can run the interface pass twice over the same input, and a pointer press cannot be
+        // consumed** — it is what egui needs in order to decide who is being dragged. The program's
+        // presses already defend themselves by counting the frame; a close is not a keystroke that
+        // arrives twice, it is a **second program killed by one click**.
+        //
+        // **Three consoles, because two hide it**: after the first close the survivor is alone in its
+        // tab and carries no button, so the second pass finds nothing. With three, the siblings refill
+        // the area and the new rightmost strip puts its button on the same abscissa the press is
+        // still sitting at.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.tabs[0] = Tab::with_panes(
+            (0..3).map(|which| pane_with("sleep 30", which)).collect(),
+            &OpeningLayout::DEFAULT,
+            0,
+        );
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let target = close_button_of(&window, &rects, 2, &metrics).center();
+
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events: click_at(target),
+                ..Default::default()
+            },
+            |ui| {
+                let metrics =
+                    CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE));
+                // **The tiling is recomputed between the two passes**, which is what the real frame
+                // does: `eframe` runs the whole closure again and the layout comes out of the tree as
+                // it is now. Reusing the first pass's rectangles would hide the defect by accident.
+                for _ in 0..2 {
+                    let rects = window
+                        .active()
+                        .root
+                        .place(area, metrics.width())
+                        .parts
+                        .clone();
+                    window.handle_the_mouse(ui, &rects, &metrics);
+                }
+            },
+        )
+        .drop_without_applying_deltas();
+
+        assert_eq!(
+            names_in_order(&window).len(),
+            2,
+            "one click closed two consoles: the repeated pass read the same press again"
+        );
+    }
+
+    #[test]
+    fn closing_a_console_by_its_button_does_not_move_the_keyboard_off_another() {
+        // **Three consoles, because with two the question cannot be asked.** Closing one of two
+        // leaves the keyboard on the one that stays whatever the rule is; with three, closing the
+        // third has to leave the person typing exactly where they were. The version that said «close
+        // the focused one» and moved the focus onto the pressed console first got this wrong in the
+        // only way that matters: it took the keyboard off the console somebody was typing in and
+        // handed it to a **third** one, on a gesture aimed at neither.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.tabs[0] = Tab::with_panes(
+            (0..3).map(|which| pane_with("sleep 30", which)).collect(),
+            &OpeningLayout::DEFAULT,
+            0,
+        );
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        assert_eq!(rects.len(), 3, "the tab did not end up with three consoles");
+        let typing_in = window.active().panes()[0].name;
+        let leaving = window.active().panes()[2].name;
+        window.active_mut().focus = typing_in;
+
+        let target = close_button_of(&window, &rects, 2, &metrics);
+        one_frame_in(&mut window, &ctx, area, click_at(target.center()));
+
+        assert!(
+            !names_in_order(&window).contains(&leaving),
+            "the button did not close the console it belongs to"
+        );
+        assert_eq!(
+            window.active().focus,
+            typing_in,
+            "closing another console moved the keyboard: what was being typed now goes somewhere \
+             else, and nobody asked for that"
+        );
+    }
+
+    #[test]
+    fn the_button_closes_its_own_console_and_not_the_one_holding_the_keyboard() {
+        // **The press is what closes, and on a press nothing has moved the focus yet.** A click
+        // hands the keyboard over on **release** — egui says `clicked()` there — so a frame carrying
+        // only the button going down leaves the focus where it was. Closing «the focused one» there
+        // ends the console somebody was typing in while the one they aimed at stays: the worst
+        // possible outcome for a gesture with no confirmation and no way back.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let typing_in = window.active().panes()[0].name;
+        assert_eq!(
+            window.active().focus,
+            typing_in,
+            "the keyboard is not on the console this test is about, so it poses nothing"
+        );
+
+        // The button of the **other** one, and the button going down with no release after it.
+        let target = close_button_of(&window, &rects, 1, &metrics);
+        one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            vec![
+                egui::Event::PointerMoved(target.center()),
+                egui::Event::PointerButton {
+                    pos: target.center(),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+
+        assert_eq!(
+            names_in_order(&window),
+            vec![typing_in],
+            "the button closed the console with the keyboard instead of the one it belongs to"
+        );
+    }
+
+    #[test]
+    fn the_only_console_of_its_tab_has_no_button_and_a_press_there_closes_nothing() {
+        // **AC5, and what it costs is the whole window.** On a tab of one console the close has
+        // nowhere to give the place back to, so it would close the tab — and on the only tab, the
+        // window, with whatever an agent was doing inside it. One click, on a target two cells wide,
+        // with no confirmation. The chord and the tab's card still do it, and they are three keys
+        // and another surface.
+        let ctx = egui::Context::default();
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        window.tabs[0] =
+            Tab::with_panes(vec![pane_with("sleep 30", 0)], &OpeningLayout::DEFAULT, 0);
+        let area = area_of_cells(200.0);
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let rects = window
+            .active()
+            .root
+            .place(area, metrics.width())
+            .parts
+            .clone();
+        let strip = header::set_the_header_aside(rects[0], &metrics, window.headers)
+            .0
+            .expect("the pane carries a strip");
+        assert!(
+            header::button_within(strip, &metrics, header::Button::in_a_tab_of(&rects)).is_none(),
+            "the only console of its tab carries a button"
+        );
+
+        // **Pressed where the button would be if it had a sibling**, which is what makes this a test
+        // and not a tautology: the point is real, it is on the strip, and it has to do nothing.
+        let where_it_would_be = header::button_within(
+            strip,
+            &metrics,
+            header::Button::in_a_tab_of(&[egui::Rect::NOTHING; 2]),
+        )
+        .expect("two consoles would carry a button")
+        .rect();
+        let asked_to_close = one_frame_in(
+            &mut window,
+            &ctx,
+            area,
+            click_at(where_it_would_be.center()),
+        );
+
+        assert_eq!(
+            names_in_order(&window).len(),
+            1,
+            "the lone console closed itself"
+        );
+        assert!(
+            !asked_to_close,
+            "the press closed the tab and with it the window, which is what a lone console's button \
+             costs"
+        );
+    }
+
     #[test]
     fn a_measured_run_paints_no_strip_and_leaves_the_grid_it_always_had() {
         // **AC7, and it is what keeps the eighteen published batches comparable.** The
@@ -13450,6 +13991,7 @@ mod tests {
                         focused: true,
                     },
                     headers: header::Headers::PAINTED,
+                    button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                 },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
@@ -13965,6 +14507,7 @@ mod tests {
                             focused: true,
                         },
                         headers: header::Headers::PAINTED,
+                        button: header::Button::in_a_tab_of(&rects),
                     },
                 );
                 expected[which] = grid_of(rect, &metrics);
@@ -14019,7 +14562,7 @@ mod tests {
         let mut it_moved = vec![false; dividers.len()];
         ctx.run_ui(input, |ui| {
             for (which, divider) in dividers.iter().enumerate() {
-                it_moved[which] = window.drag_the_divider(ui, which, *divider);
+                it_moved[which] = window.active_mut().drag_the_divider(ui, which, *divider);
             }
         })
         .drop_without_applying_deltas();
@@ -14143,7 +14686,7 @@ mod tests {
             ctx.run_ui(input, |ui| {
                 // The same order as the real pass: first the dividers, then the mouse over the
                 // consoles.
-                window.drag_the_divider(ui, 0, divider);
+                window.active_mut().drag_the_divider(ui, 0, divider);
                 window.handle_the_mouse(
                     ui,
                     &rects,
@@ -14228,6 +14771,7 @@ mod tests {
                         focused: true,
                     },
                     headers: header::Headers::PAINTED,
+                    button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                 },
             );
         })
@@ -14587,6 +15131,7 @@ mod tests {
                         focused: true,
                     },
                     headers: header::Headers::PAINTED,
+                    button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                 },
             );
         })
@@ -14646,6 +15191,7 @@ mod tests {
                         focused: true,
                     },
                     headers: header::Headers::PAINTED,
+                    button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                 },
             );
             with_panel = pane.measured;
@@ -14697,6 +15243,7 @@ mod tests {
                         focused: true,
                     },
                     headers: header::Headers::PAINTED,
+                    button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
                 },
             );
             cut_along = pane
@@ -22698,6 +23245,86 @@ mod tests {
             selected_at(&window, 0),
             None,
             "the drag marked text in a console whose program had asked for the mouse"
+        );
+    }
+
+    #[test]
+    fn a_press_on_the_strip_is_not_reported_to_the_program_that_asked_for_the_mouse() {
+        // **AC12: the strip belongs to the window, whatever is running underneath.** The console's
+        // grid starts below it, so a press there has no cell to report — and reporting it as row 0
+        // would put a click inside somebody's `vim` where they had aimed at the band that moves the
+        // console. The delivery that cut the strip left this pinned as an assumption; here it is
+        // driven.
+        //
+        // **With a sentinel afterwards, because «nothing arrived» is satisfied by a race.** A test
+        // that only asserted the absence would pass just as well against a program that had not
+        // read anything yet: the second press is one that must arrive, and it is what makes the
+        // first one's absence mean something.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = a_pane_that_asks_for_the_mouse(
+            &rects,
+            &metrics,
+            "a_press_on_the_strip_is_not_reported_to_the_program_that_asked_for_the_mouse",
+        );
+        let strip = header::set_the_header_aside(rects[0], &metrics, window.headers)
+            .0
+            .expect("the pane carries a strip");
+        // Away from the right-hand end, where the button that closes the console is: this test is
+        // about the band, and closing it would take the program with it.
+        let on_the_strip = egui::pos2(strip.left() + metrics.width(), strip.center().y);
+        assert!(
+            !header::button_within(strip, &metrics, header::Button::in_a_tab_of(&rects))
+                .is_some_and(|target| target.holds(on_the_strip)),
+            "the press this test drives lands on the close button, so it measures something else"
+        );
+
+        let press = |window: &mut Window, at: egui::Pos2| {
+            ctx.run_ui(
+                egui::RawInput {
+                    events: vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |ui| {
+                    window.handle_the_mouse(
+                        ui,
+                        &rects,
+                        &CellMetrics::measure(ui.ctx(), egui::FontId::monospace(DEFAULT_FONT_SIZE)),
+                    );
+                },
+            )
+            .drop_without_applying_deltas();
+        };
+
+        press(&mut window, on_the_strip);
+        press(
+            &mut window,
+            inside_the_console(
+                rects[0],
+                &metrics,
+                egui::vec2(metrics.width() * 3.5, metrics.height() * 2.5),
+            ),
+        );
+
+        wait_for_the_pane_to_say(&mut window, 0, "^[[<0;4;3M");
+        assert_eq!(
+            window.active().panes()[0]
+                .screen
+                .to_text()
+                .matches("^[[<")
+                .count(),
+            1,
+            "the program received a second report: the press on the strip reached it as a click on \
+             its own first row"
         );
     }
 
