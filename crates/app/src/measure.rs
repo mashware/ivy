@@ -59,7 +59,8 @@ mod header;
 /// `measure::header` outside this file is the function below and never the module.
 pub use header::{
     Blinking, Buttons, CONSOLE_NAME, ChoosingTheFont, Control, Discovery, Drags, Rasterizing,
-    ReadingSettings, Reflow, Restoring, Saving, SessionHeader, SizeInPoints, TabBar, header, side,
+    ReadingSettings, Reflow, Restoring, Saving, SessionHeader, SizeInPoints, Strips, TabBar,
+    header, side,
 };
 
 /// How many samples are kept of each number.
@@ -181,13 +182,6 @@ pub struct Spans {
     /// pass whether or not anything came and the span covers the asking, so what the polling costs
     /// is in the report instead of hiding inside the frame's rest.
     control: Duration,
-    /// What painting the strip over this console cost.
-    ///
-    /// **Zero in every published batch, and declared all the same.** The measurement gate switches
-    /// the strip off, so no run of `scripts/measure-frame.sh` as it stands today paints one — but a
-    /// path that is only declared once somebody measures it is a path that arrives undeclared, and
-    /// **D13** rates a cost attributed to whoever did not pay it as worse than no number at all.
-    header: Duration,
 }
 
 impl Spans {
@@ -210,7 +204,6 @@ impl Spans {
             panel,
             buttons: Duration::ZERO,
             control: Duration::ZERO,
-            header: Duration::ZERO,
         }
     }
 
@@ -232,13 +225,6 @@ impl Spans {
         Self { control, ..self }
     }
 
-    /// The same round, saying what painting the strip over its console cost.
-    ///
-    /// Chained rather than a ninth argument, for the reason [`Spans::and_its_buttons`] gives.
-    pub fn and_its_header(self, header: Duration) -> Self {
-        Self { header, ..self }
-    }
-
     /// Merges the spans of **another pass of the same frame**.
     ///
     /// egui may repeat the pass over the same input, and `eframe` calls the two halves of the
@@ -255,7 +241,7 @@ impl Spans {
     /// The wait does not enter, and it is not an oversight: **it is not work**, it is how long the byte
     /// had been in the queue.
     fn declarable(&self) -> Duration {
-        self.interpreted + self.enqueued + self.panel + self.buttons + self.control + self.header
+        self.interpreted + self.enqueued + self.panel + self.buttons + self.control
     }
 
     fn and_also(self, other: Self) -> Self {
@@ -266,7 +252,6 @@ impl Spans {
             panel: self.panel + other.panel,
             buttons: self.buttons + other.buttons,
             control: self.control + other.control,
-            header: self.header + other.header,
         }
     }
 }
@@ -313,9 +298,6 @@ pub struct Timings {
     /// Kept out of `panel` by where the panel's clock starts rather than by a subtraction: see
     /// [`Spans::control`].
     control: Series,
-    /// Painting the strip over this console. Zero in every published batch, and declared all the
-    /// same: see [`Spans::header`].
-    header: Series,
     round: Series,
     /// The previous frame's spans, waiting for `eframe` to publish what it cost.
     pending: Option<Spans>,
@@ -387,7 +369,6 @@ impl Timings {
             self.panel.record(spans.panel);
             self.buttons.record(spans.buttons);
             self.control.record(spans.control);
-            self.header.record(spans.header);
             self.round.record(waited + cpu_cost);
         }
 
@@ -508,7 +489,6 @@ impl Timings {
             writeln!(a, "  the status panel:       {}", self.panel)?;
             writeln!(a, "  the panel's buttons:    {}", self.buttons)?;
             writeln!(a, "  the control channel:    {}", self.control)?;
-            writeln!(a, "  the console's header:   {}", self.header)?;
             // **This span's mean mixes two populations and it has to be said.** Almost every frame
             // only checks the file timestamp and paints the already-laid-out text; the few in which
             // the producer has published cost, on top of that, reading, interpreting and redoing the
@@ -695,6 +675,7 @@ mod tests {
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
                 control: Control::default(),
+                strips: Strips::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -768,6 +749,7 @@ mod tests {
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
                 control: Control::default(),
+                strips: Strips::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -875,6 +857,7 @@ mod tests {
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
                 control: Control::default(),
+                strips: Strips::default(),
             },
         )
         .expect("writing to memory does not fail");
@@ -1495,6 +1478,146 @@ mod tests {
         );
     }
 
+    fn with_strips(strips: Strips) -> String {
+        let mut salida = Vec::new();
+        header(
+            &mut salida,
+            SizeInPoints {
+                width: 1280.0,
+                height: 800.0,
+            },
+            &[(0, vec![(0, grid(49, 39)), (1, grid(49, 39))])],
+            0,
+            SessionHeader {
+                strips,
+                ..Default::default()
+            },
+        )
+        .expect("writing to memory does not fail");
+        String::from_utf8(salida).expect("the header is text")
+    }
+
+    /// **The line that says whether this run painted a strip over its consoles, and how many frames
+    /// had one.** It is a contract with `scripts/measure-frame.sh`, which reads the count with
+    /// `[0-9]+ frame\(s\) with a strip` and throws the run away in **both** directions.
+    ///
+    /// **What it really checks is that the two halves are independent**, which is the only reason
+    /// the line is worth its width: the count comes from the painting and the parenthesis from the
+    /// gate, and the case the guard exists for is the two of them disagreeing. A line that derived
+    /// either from the other would publish «the session paints them, 0 frames» as impossible and
+    /// «switched off, 412 frames» as unsayable — and the second of those is a run whose every
+    /// console is a row per pane shorter than the eighteen batches it is compared against.
+    #[test]
+    fn the_header_says_what_the_strips_painted_and_what_the_gate_resolved_apart() {
+        // What a batch `T` publishes: the gate let the strips through and they were painted.
+        let asked_and_painted = with_strips(Strips {
+            frames: 412,
+            total: Duration::from_micros(412 * 9),
+            painted_this_run: true,
+        });
+        assert!(
+            asked_and_painted.contains("header:       412 frame(s) with a strip painted")
+                && asked_and_painted.contains("9µs per frame")
+                && asked_and_painted.contains("(the session paints them;"),
+            "the header did not declare what the strips cost nor that this run paints them:\n\
+             {asked_and_painted}"
+        );
+
+        // What every other batch publishes, and what keeps its grid comparable with the published
+        // series: the gate switched the strips off and nothing painted one.
+        let neither = with_strips(Strips::default());
+        assert!(
+            neither.contains("header:       0 frame(s) with a strip painted (switched off"),
+            "a run with the strips off did not say so:\n{neither}"
+        );
+        assert!(
+            !neither.contains("per frame"),
+            "with no strip painted the header published a mean nobody measured:\n{neither}"
+        );
+
+        // **The two failures the script throws a run away for, and they are what the halves being
+        // independent buys.** Neither of these lines could be written by a report that read one half
+        // off the other, and the script cannot invalidate what the report cannot say.
+        let asked_and_none = with_strips(Strips {
+            painted_this_run: true,
+            ..Default::default()
+        });
+        assert!(
+            asked_and_none.contains(
+                "header:       0 frame(s) with a strip painted (the session paints them)"
+            ),
+            "a run whose gate let the strips through and painted none reads exactly like one that \
+             had them vetoed:\n{asked_and_none}"
+        );
+
+        let leaked = with_strips(Strips {
+            frames: 412,
+            total: Duration::from_micros(412 * 9),
+            painted_this_run: false,
+        });
+        assert!(
+            leaked.contains("412 frame(s) with a strip painted")
+                && leaked.contains("(switched off"),
+            "a strip that leaked into a run whose gate vetoed it is published as a run that paints \
+             them:\n{leaked}"
+        );
+    }
+
+    /// **The session's gate is written onto the tally and never over what the tally counted**, which
+    /// is the half of that line no formatting test can reach: the one above builds its four shapes by
+    /// hand, and in the application the flag has exactly one producer — [`Strips::under`], called
+    /// once, when the report is published.
+    ///
+    /// **The direction that lives only here is the leak.** The window test that drives the report
+    /// checks the count survives with the gate ON; with it OFF it checks the parenthesis alone, so
+    /// an `under` that handed back a fresh tally for a vetoed run would publish «0 frame(s) …
+    /// switched off» — which is exactly what a clean run publishes — and `scripts/measure-frame.sh`
+    /// could never fire the guard it reads that number for: a batch whose consoles are a row per
+    /// pane shorter than the eighteen it is compared against, with every other guard quiet.
+    ///
+    /// And the last third is the gate's own direction: what is published is the gate **this
+    /// session** resolved, not whatever flag the tally was carrying before it got here.
+    #[test]
+    fn the_gate_is_written_over_the_tally_and_not_over_what_it_counted() {
+        // What the window hands over: a count that came out of the painting and knows nothing about
+        // any gate, which is the value the counter really holds.
+        let counted = Strips {
+            frames: 412,
+            total: Duration::from_micros(412 * 9),
+            painted_this_run: false,
+        };
+
+        let asked = with_strips(counted.under(crate::header::Headers::PAINTED));
+        assert!(
+            asked.contains("412 frame(s) with a strip painted")
+                && asked.contains("9µs per frame")
+                && asked.contains("(the session paints them;"),
+            "putting the session's gate on the tally threw away what the painting had counted:\n\
+             {asked}"
+        );
+
+        let leaked = with_strips(counted.under(crate::header::Headers::NOT_PAINTED));
+        assert!(
+            leaked.contains("412 frame(s) with a strip painted")
+                && leaked.contains("(switched off"),
+            "a strip painted in a run whose gate vetoed it comes out of here reading like a run \
+             that painted none: the one failure that leaves no other trace in the report becomes \
+             unreportable:\n{leaked}"
+        );
+
+        let vetoed = with_strips(
+            Strips {
+                painted_this_run: true,
+                ..Default::default()
+            }
+            .under(crate::header::Headers::NOT_PAINTED),
+        );
+        assert!(
+            vetoed.contains("(switched off"),
+            "the flag the tally arrived with outranked the session's gate, so the report says this \
+             run paints strips because some earlier value said so:\n{vetoed}"
+        );
+    }
     fn with_reflow(reflow: Reflow) -> String {
         let mut salida = Vec::new();
         header(
@@ -1821,6 +1944,7 @@ mod tests {
                     },
                     buttons: Buttons::default(),
                     control: Control::default(),
+                    strips: Strips::default(),
                 },
             )
             .expect("writing to memory does not fail");

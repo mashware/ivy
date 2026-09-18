@@ -119,7 +119,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    894,
+    878,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -202,7 +202,22 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          the one that reads it once per walk — **less the one the clippy ceiling gave back**, \
          because grouping the blink and the strip into one value took the painting's call from \
          eight arguments to seven and two lines to one. Fifty-three out and six net in against 940 \
-         leaves **894**.",
+         leaves **894**. **And the delivery that declared the strip to the bench paid it with the \
+         piece its own subject names**: closing the frame — every console's spans folded, what the \
+         window timed apart subtracted, and the rest recorded — went out to `report.rs`, **20 \
+         production lines**, which is the module that already held the pass that stops a round \
+         escaping that same sum, and whose one idea a review widened by a step to say so. Against \
+         that, declaring the strips spends **four** lines back here: the field a pane's outcome \
+         carries the cost out through, the one the window keeps the accounting in, and the two of \
+         the call that hands each strip over. **What made it four rather than seven was the review**: \
+         the first shape kept the frame's tally and the run's on two separate fields and summed and \
+         subtracted inline, and a mutation round walked straight through it — deleting the \
+         subtraction that keeps the strips out of the framework's figure (**D13**) left the whole \
+         suite green, and so did turning the sum over the panes into a replacement. Both now live in \
+         one type in `report.rs` with a test on them, and the window holds one field instead of two. \
+         Twenty out and four in against 894 leaves **878** — the figures are the diff's own, taken \
+         by matching the two files' production lines rather than by counting them by hand, which is \
+         how the first telling of this line got both of them wrong.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.

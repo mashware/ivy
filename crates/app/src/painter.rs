@@ -980,9 +980,13 @@ pub(crate) fn paint_pane(
     // published as that span's, and one painted inside no span at all as the framework's. It goes
     // after the console because that is the order the notices already follow — chrome the
     // application owns goes over what the program wrote, never under it.
-    let header_cost = chrome.header().map_or(std::time::Duration::ZERO, |header| {
-        crate::header::paint(&ui.painter_at(header), header, theme, metrics, button)
-    });
+    //
+    // **And it is handed back to the window rather than put into the round below**, because the
+    // round is only closed on a frame this console produced output in: see
+    // [`crate::PaneOutcome::strip_cost`].
+    let strip_cost = chrome
+        .header()
+        .map(|header| crate::header::paint(&ui.painter_at(header), header, theme, metrics, button));
     // **The border is only reported if there is a grip behind it.** With the panel clipped
     // below the grip the gesture registers no control at all —so as not to steal the point from
     // the tree's divider—, and reporting the border anyway made the injected gesture press
@@ -1008,8 +1012,7 @@ pub(crate) fn paint_pane(
                 panel_cost,
             )
             .and_its_buttons(buttons)
-            .and_its_control(refreshed.applying)
-            .and_its_header(header_cost),
+            .and_its_control(refreshed.applying),
         );
     }
 
@@ -1020,6 +1023,7 @@ pub(crate) fn paint_pane(
         first_button: pane.panel_state.buttons_drawn().next(),
         color,
         blinking,
+        strip_cost,
     }
 }
 

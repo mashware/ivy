@@ -1,22 +1,28 @@
-//! Publishing the measurement report, and the two passes that keep it honest.
+//! The frame's accounting, and what gets published of it.
 //!
 //! **The window's own accounting, not the bench's.** [`crate::injected`] is the half that pretends to
 //! be a hand; [`crate::measure`] holds the spans and the guards that read them. What lives here is the
-//! moment they meet: the window walking every tab and every console at exit to say what each one cost,
-//! plus the two passes that make sure nothing goes unaccounted — measuring the consoles you cannot see
-//! and closing the rounds that were never painted.
+//! moment they meet: closing each frame — folding every console's spans and keeping what none of them
+//! timed — the window walking every tab and every console at exit to say what each one cost, and the
+//! pass that stops a round escaping that sum by never being painted.
 //!
-//! **Two methods and not three, and the third is the lesson.** Publishing the report first came here
-//! with `measure_the_ones_out_of_sight` for company, on the reading that both are about measuring. A
-//! blind idiom audit sent it back: that method gives the consoles of an unseen tab the grid they
-//! would really have, so the program inside formats for its own width instead of for the eighty
-//! start-up columns. **That is the milestone's promise, not an accounting of it** — only the
-//! stopwatch inside it is measurement, and a name with «measure» in it is what made the mistake easy.
+//! **One idea and three methods, and what the third one changed is worth saying.** The module landed
+//! with two, on the argument that only what the window is **able to say** belongs here; a blind idiom
+//! audit then pointed out that the argument was drawn too tightly, because the sentence «a frame's
+//! cost is split by subtraction» describes a **subtraction somebody performs**, and that somebody was
+//! still in `lib.rs`. [`Window::close_the_frame`] is that subtraction, and it arrived under **D28**
+//! with the delivery that declared the strips. The idea is unchanged and its boundary moved one step
+//! out: the arithmetic of a frame, and the report that publishes it.
 //!
-//! What is left is one idea: a frame's cost is split by subtraction, so work that is not declared is
-//! published as the framework's cost — the figure **D3** judges egui by. Publishing the report says
-//! what each console cost, and closing the rounds nobody painted stops a round escaping that sum.
-//! Not what the window does; what it is able to say it did.
+//! **What was kept out, and it is the lesson.** `measure_the_ones_out_of_sight` first came here for
+//! company, on the reading that both are about measuring. The same audit sent it back: that method
+//! gives the consoles of an unseen tab the grid they would really have, so the program inside formats
+//! for its own width instead of for the eighty start-up columns. **That is the milestone's promise,
+//! not an accounting of it** — only the stopwatch inside it is measurement, and a name with «measure»
+//! in it is what made the mistake easy.
+//!
+//! Why any of it is declared at all: a frame's cost is split by subtraction, so work that is not
+//! declared is published as the framework's cost — the figure **D3** judges egui by.
 //!
 //! **Not into `measure.rs`, which is the module whose name matches it**, and the first telling of
 //! this put the weak reason first. The strong one is that `measure.rs` **holds no `impl Window` at
@@ -33,7 +39,157 @@
 use crate::tiling::DIVIDER_THICKNESS;
 use crate::{Window, measure};
 
+/// What the strips have cost — the frame in progress on one side, the whole run on the other.
+///
+/// **One type because the two are one decision taken twice a frame, and splitting them across the
+/// window is how half of it gets forgotten.** The half in progress is summed per pane and per pass;
+/// the half that is published is closed once per frame. Keeping them apart on [`Window`] is what the
+/// tab bar does, and the tab bar is also where the rule below lives only as a comment.
+#[derive(Default)]
+pub(crate) struct Strips {
+    /// What the strips of the frame in progress have cost, still unrecorded, or nothing when no pane
+    /// has cut one.
+    ///
+    /// **`None` and `Some(ZERO)` are different answers, and [`Strips::close_the_frame`] reads them
+    /// apart**: `None` is a frame in which no pane cut a strip at all, `Some(ZERO)` one in which a
+    /// pane drew a band faster than the clock could measure. Counting the second as the first would
+    /// make the number the measurement script reads answer a question nobody asked.
+    pending: Option<std::time::Duration>,
+    /// What the run has published so far, frame by frame.
+    run: measure::Strips,
+}
+
+impl Strips {
+    /// Takes what one pane's strip cost this frame: **into** the frame's tally and **out of** the
+    /// frame's rest, in one statement.
+    ///
+    /// **The two halves live in one method because forgetting either publishes a lie, and they are
+    /// different lies.** Without the tally the report cannot name what the strips cost, and it would
+    /// have to be got by subtracting two batches. Without the subtraction the strips are left inside
+    /// «the rest of the frame», which is published as the interface framework's cost — the figure
+    /// **D3** judges egui by (**D13**). The tab bar's accumulation states the same rule in a comment
+    /// one file away; here it is a method, which is the difference between a rule and a rule a test
+    /// can hold.
+    ///
+    /// **It sums and does not replace**, because a frame has as many strips as its tab has panes and
+    /// what the report publishes is what **one frame** pays for all of them. With a replacement and
+    /// two consoles the published mean is half the real one, and nothing else in the report
+    /// disagrees with it.
+    ///
+    /// **The rest of the frame arrives as an argument and is not reached through the window**,
+    /// because the only caller is the walk over the panes, which holds the active tab mutably for as
+    /// long as it runs: two disjoint fields can be borrowed there, a `&mut Window` cannot. And the
+    /// cost arrives as the `Option` the painting handed back, so «no strip was cut» is answered in
+    /// the one place that also answers what a strip costs.
+    pub(crate) fn a_strip_was_painted(
+        &mut self,
+        rest_of_the_frame: &mut std::time::Duration,
+        cost: Option<std::time::Duration>,
+    ) {
+        let Some(cost) = cost else {
+            return;
+        };
+        *self.pending.get_or_insert_default() += cost;
+        *rest_of_the_frame += cost;
+    }
+
+    /// Closes the frame: what its passes accumulated becomes one sample of the run.
+    ///
+    /// **Once per frame and not once per pass**, for the reason the tab bar's own close gives: egui
+    /// repeats the pass over the same input and both passes really paint, so recording there would
+    /// publish a mean per pass under a label that says «per frame». The work of both passes is
+    /// summed, which is what [`Strips::a_strip_was_painted`] does; the frame is still one.
+    pub(crate) fn close_the_frame(&mut self) {
+        if let Some(pending) = self.pending.take() {
+            self.run.record(pending);
+        }
+    }
+
+    /// What the run has to publish, with the session's gate on it.
+    fn published(&self, gate: crate::header::Headers) -> measure::Strips {
+        self.run.under(gate)
+    }
+
+    /// What the frame in progress has accumulated and nobody has recorded yet.
+    ///
+    /// **It exists so a test can assert over the real walk** — that a painted strip reached this
+    /// tally at all — rather than over a call it made itself, which proves the accumulator works and
+    /// not that the painting feeds it. Same reason as [`measure::Timings::recorded_panel`].
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> Option<std::time::Duration> {
+        self.pending
+    }
+
+    /// How many frames of this run painted a strip, as the report will publish it.
+    #[cfg(test)]
+    pub(crate) fn frames(&self) -> usize {
+        self.run.frames
+    }
+}
+
 impl Window {
+    /// Closes the previous frame: each console closes its spans and the window keeps whatever none
+    /// of them timed.
+    ///
+    /// **It came out of `lib.rs` under D28 with the delivery that declared the strips**, and it
+    /// lands here rather than anywhere else because this module is already the one that holds what
+    /// the window can *say* it did: the subtraction this performs is the mechanism the report's
+    /// «rest of the frame» is, and [`Window::close_the_unpainted_rounds`] beside it exists to stop
+    /// a round escaping that same sum.
+    pub(crate) fn close_the_frame(&mut self, cpu_cost: std::time::Duration) {
+        let timed = self
+            .all_panes_mut()
+            .filter_map(|pane| pane.timings.close_frame(cpu_cost))
+            .reduce(|one, other| one + other);
+
+        // **It is always emptied, whether there is a rest to record or not.** Dragging it into the
+        // next frame would be subtracting from one frame work that happened in another, which is
+        // the kind of error this instrument is after. See [`Window::timed_separately`] for why it
+        // exists.
+        let separately = std::mem::take(&mut self.timed_separately);
+
+        // **The mirror goes into the subtraction AND into its series, and both are needed.** The
+        // accumulator above discounts but publishes no row at all; a series publishes but discounts
+        // nothing. With only one of the two, this work —walking the tree of every tab, on every
+        // frame— would end up inside the figure D3 judges the framework with, or auditable but
+        // without subtracting.
+        let mirror = std::mem::take(&mut self.mirror_this_frame);
+        if !mirror.is_zero() {
+            self.saving.record_mirror(mirror);
+        }
+
+        // **The bar is recorded here and not where it is painted**, for the same reason as the
+        // mirror: the thing above happens once per **pass** and this once per **frame**, so
+        // counting there would publish an average per pass under the «per frame» label. What is
+        // added up is the work of both passes, which happened in full.
+        let tab_bar = std::mem::take(&mut self.tab_bar_this_frame);
+        if !tab_bar.is_zero() {
+            self.tab_bar_cost.record(tab_bar);
+        }
+
+        // **The strips are recorded here too, and for the bar's reason**: this runs once per frame
+        // and the painting once per pass. What is added up is the work of both passes, which
+        // happened in full, under a count that really says frames.
+        //
+        // **And the guard is «was anything painted», not «did it cost anything».** A strip painted
+        // in under the clock's resolution is a frame that had one, and skipping it would make the
+        // count the script reads answer a question nobody asked — see [`measure::Strips`].
+        self.strips.close_the_frame();
+
+        // **And the raw-input hook's is declared here, AFTER emptying.** See
+        // [`Window::spent_injecting`]: it ran after the frame being closed had finished, so it
+        // belongs to the one that is starting. Adding it above would subtract it from the one that
+        // did not pay for it.
+        self.timed_separately += std::mem::take(&mut self.spent_injecting);
+
+        // With nobody's spans there is no rest to record: the whole frame would be counted as rest
+        // and the series would end up measuring above all the frames in which nothing was
+        // happening.
+        if let Some(timed) = timed {
+            self.rest_of_frame
+                .record(cpu_cost, timed + separately + mirror);
+        }
+    }
     /// Writes the session report to whatever destination it is given.
     ///
     /// **It receives the destination instead of printing**, for the same reason as each console's
@@ -88,6 +244,12 @@ impl Window {
                     ceiling: self.blink.ceiling,
                 },
                 buttons: self.buttons,
+                // **What was painted comes from the counter and what was asked for from the gate,
+                // and the two are never derived from each other.** That disagreement is the one
+                // thing this line exists to be able to report: a run that asked for strips and drew
+                // none, and a run that drew some without asking, are both thrown away by
+                // `scripts/measure-frame.sh`, and neither is visible from the other half.
+                strips: self.strips.published(self.headers),
                 // **Summed here, at the end, out of each pane's own count, plus what the panes that
                 // already closed banked on the window.** The channel is drained from two places —
                 // the painting and the sweep over the consoles nobody looks at — and a counter each

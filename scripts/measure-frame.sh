@@ -36,6 +36,15 @@
 #                    section reads as «it costs nothing» — and the other way round too, if a batch
 #                    that is not this one searched for any.
 #
+#                T = the two consoles with a STRIP over each of them. It is the ONLY batch that
+#                    paints one: every other run has it switched off by the measurement gate, which
+#                    is what keeps the eighteen published batches comparable with each other. Its
+#                    control is C — same consoles, same load, and the only difference is the band.
+#                    **Its grid is not the grid of any other batch**: a strip takes a row off every
+#                    console, so T's own report is the only place that number can be read, and the
+#                    guard below throws the run away in both directions — a batch that asks for
+#                    strips and painted none, and any batch that painted one without asking.
+#
 #              There is NO drag batch with FOUR panes, and that is not an oversight: the gesture's
 #              cycle only returns the layout to where it started **with two**. With more, inserting
 #              splits the destination's weight and removing spreads it among those left, so weight
@@ -312,7 +321,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R or S}
+BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S or T}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -355,7 +364,8 @@ case "$BATCH" in
     Q)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; EMOJI=1 ;;     # two, and both dumping EMOJI: the only one that rasterises colour glyphs
     R)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=button; ACTIONS=1 ;;   # two, and pressing a button on a panel: its control is C
     S)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1 ;;       # two, and both published over the CHANNEL instead of by file: its control is C
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R or S" >&2; exit 2 ;;
+    T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S or T" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -686,7 +696,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -711,6 +721,18 @@ export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$BATCH" \
 # **and** asking for four panes would give the same report with the file not even read: four
 # consoles, the same grid, and no guard firing. The report's `restored:` line is what tells the two
 # things apart, and that is why it is checked below.
+# **The strip's knob is exported by PRESENCE and so it cannot travel with an empty value**, unlike
+# its five neighbours above. The application asks whether the variable is there, not what it says —
+# that is what keeps the eighteen published batches comparable, because a knob read as `= 1` would
+# turn every batch that forgot it into a batch with strips — so exporting `MEASURE_HEADER=""` on
+# every run would paint one everywhere. It is unset for the same reason `MEASURE_TABS` is below: one
+# the user had exported by hand would otherwise reach the application and put a row under every
+# console of a batch that is compared against runs with none.
+if [ "${HEADER:-}" = 1 ]; then
+    export MEASURE_HEADER=1
+else
+    unset MEASURE_HEADER
+fi
 if [ "$RESTORES" = 0 ]; then
     export MEASURE_TABS="$TABS" MEASURE_PANES="$PANES"
 else
@@ -875,6 +897,47 @@ fi
 # done — and at a glance a truncated report looks quite like a good one.
 if [ "$STATUS" != 0 ]; then
     invalidate "the application finished with status $STATUS; what it said is in the .err next to it"
+fi
+
+# **The strips, read in both directions, and this is the only guard that protects the OTHER runs.**
+# Every pair above catches a batch measuring something its own load did not ask for; this one also
+# catches a batch measuring the right thing with the wrong window. A strip takes a row off **every**
+# console, so a run it leaked into publishes a grid one row per pane shorter than every batch it is
+# compared against — and nothing else gives that away: the report is complete, the guards are quiet
+# and the numbers look a little better.
+#
+# **The count is what the painting produced and `$HEADER` is what the batch asked for**, and the
+# report keeps them apart on purpose: deriving either from the other would make this pair unable to
+# report the one case it exists for.
+#
+# **It goes BELOW the status check, like the settings guard above and for its reason**: a report
+# truncated by a panic has no `header:` line either, and diagnosing that as «it asked for a strip and
+# painted none» would cover up the real failure.
+#
+# **And the number is pulled with `sed` and not with a `grep` in an assignment**, which is the trap
+# this script already documents one guard up: under `set -e` an assignment whose last command is a
+# `grep` with no match inherits its status 1 and **kills the script right there** — the report is not
+# renamed, nothing is printed, and every guard below never runs. The first version of this block was
+# written that way and its own missing-line case was the one that triggered it. `sed -n …p` exits 0
+# with no output, so the empty case reaches the `if` instead of ending the run.
+HEADER_LINE=$(grep -E "^header:" "$REPORT" | head -1)
+if [ -z "$HEADER_LINE" ]; then
+    invalidate "the report does not declare whether a strip was painted over the consoles. Without \
+that datum a run with the strip on and one with it off are indistinguishable, and they do not share \
+a grid"
+else
+    WITH_STRIP=$(printf '%s' "$HEADER_LINE" | sed -n 's/^header: *\([0-9]*\) frame.*/\1/p')
+    WITH_STRIP=${WITH_STRIP:-0}
+    if [ "${HEADER:-}" = 1 ] && [ "$WITH_STRIP" = 0 ]; then
+        invalidate "this batch asks for a strip over every console to measure what painting it costs \
+and not one frame painted one: the gate did not let it through. A window too short to hold the band is \
+not the explanation — the cut is clamped and a degenerate strip still counts its frame"
+    fi
+    if [ "${HEADER:-}" != 1 ] && [ "$WITH_STRIP" != 0 ]; then
+        invalidate "this batch asks for no strip and yet $WITH_STRIP frame(s) painted one: every \
+console of this run is a row per pane shorter than the batches it is compared against, so its grid \
+describes a window none of them was measured with"
+    fi
 fi
 
 # **The settings guard, and this one invalidates on two counts.** Ever since the terminal reads a

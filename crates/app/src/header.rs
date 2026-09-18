@@ -6,9 +6,12 @@
 //! saying it costs every console a row of its own — which is exactly what D20 weighed and refused
 //! **as part of F2.6**. What is amended here is not that arithmetic but what pays for it: the
 //! measurement bench switches the strip off, so the eighteen published batches keep the grid they
-//! were measured with, and what the strip costs **will be** measured in a batch of its own. That
-//! batch does not exist yet: no batch of `scripts/measure-frame.sh` asks for a strip, so the span
-//! this module returns is structurally zero in every run there is today.
+//! were measured with, and what the strip costs is measured in a batch of its own — `T` of
+//! `scripts/measure-frame.sh`, the one run that sets [`HEADER_VARIABLE`], against `C` as its
+//! control. **The two cannot be told apart by their spans alone**, because a strip takes a row off
+//! every console and so `T`'s grid is not `C`'s: that is why the report declares what was painted
+//! and what was asked for on a line of its own, and why the script throws a run away in either
+//! direction (see [`crate::measure::Strips`]).
 //!
 //! **The mould is the tab bar's, and copying it is deliberate.** [`crate::tab_bar`] already cuts a
 //! height off the top of an area and hands back what is left, already clamps that cut, and already
@@ -38,10 +41,11 @@ use eframe::egui;
 pub(crate) struct Headers(bool);
 
 impl Headers {
-    /// What every session that is not a measurement batch gets, and what the tests build with.
+    /// What a session gets unless the gate takes it away — every ordinary one, and the one measured
+    /// batch that asks for strips on purpose. The tests build with it.
     pub(crate) const PAINTED: Self = Self(true);
 
-    /// A measured run, which is the only regime that goes without.
+    /// A measured run that did not ask for them, which is every batch but `T`.
     pub(crate) const NOT_PAINTED: Self = Self(false);
 
     /// The decision, taken once from the environment the session was launched with.
@@ -280,9 +284,10 @@ pub(crate) fn set_the_header_aside(
 ///
 /// **Its own span and not part of the console's**, for the rule **D13** states: the frame's cost is
 /// split by subtraction, so any work that is not declared is published as the interface framework's
-/// — the very figure **D3** judges egui by. With the gate on, no measured run reaches this function
-/// and the number it returns is zero in every published batch; that is the point, not an excuse for
-/// leaving it undeclared.
+/// — the very figure **D3** judges egui by. Under the gate only one batch reaches this function,
+/// which is what keeps the rest of the published series comparable; that is the point, not an
+/// excuse for leaving the span undeclared. What it costs there is published on the report's own
+/// `header:` line (see [`crate::measure::Strips`]).
 #[must_use = "it carries what the strip cost the frame. Dropping it publishes that cost as the \
               framework's, which is the figure D3 judges egui by (D13)"]
 pub(crate) fn paint(

@@ -184,6 +184,23 @@ struct PaneOutcome {
     /// where it stands — and a console that trips one of them wakes nobody however loudly its
     /// program asks. See [`alarms::BlinkState::painted`].
     blinking: bool,
+    /// What painting the strip over this console cost **on this frame**, output or none, and
+    /// nothing at all when no strip was cut.
+    ///
+    /// **It comes back through here instead of travelling inside the round's spans, and that is the
+    /// whole difference.** A round is only closed on a frame where this console produced output, so
+    /// a strip — which is painted on every frame the pane is painted — would have been sampled over
+    /// the dumping frames alone and a quiet console would have published none at all. The window
+    /// sums it over its panes and records it once per frame, next to where the tab bar's is
+    /// recorded: see [`measure::Strips`]. **Not on the bar's terms**, which is the one difference
+    /// that matters here — the bar's accumulator is a duration gated on not being zero, so it drops
+    /// a frame it painted faster than the clock can see.
+    ///
+    /// **An `Option` and not a zero, because the report's count is read against the gate.** A strip
+    /// drawn in less than the clock's resolution is still a frame that had one, and a zero cannot
+    /// say that apart from a frame that had none — which is precisely the pair the measurement
+    /// script throws a run away for.
+    strip_cost: Option<std::time::Duration>,
 }
 
 /// The environment variable that says how many tabs to open with.
@@ -1275,6 +1292,14 @@ struct Window {
     /// what the report **names**: without naming it, the only way to know what the bar costs would
     /// be to subtract two different batches.
     tab_bar_cost: measure::TabBar,
+    /// What the strips have cost — the frame in progress, and the run the report publishes.
+    ///
+    /// **One field and not two, and the type is what holds the rule**: what a strip costs goes into
+    /// this tally **and** out of the frame's rest in the same statement, because either one
+    /// forgotten publishes a lie — see [`report::Strips`], where the two lies are named. The tab
+    /// bar's pair keeps them apart on this struct and states the rule in a comment; this one states
+    /// it where a test can reach it.
+    strips: report::Strips,
     /// What the panel's buttons drew and what was pressed this run. **For the report, which has to
     /// declare a painted path it did not have before** (D13).
     buttons: measure::Buttons,
@@ -1607,54 +1632,6 @@ impl Window {
 
         requested.attempts -= 1;
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(how_much));
-    }
-
-    /// Closes the previous frame: each console closes its spans and the window keeps whatever none
-    /// of them timed.
-    fn close_the_frame(&mut self, cpu_cost: std::time::Duration) {
-        let timed = self
-            .all_panes_mut()
-            .filter_map(|pane| pane.timings.close_frame(cpu_cost))
-            .reduce(|one, other| one + other);
-
-        // **It is always emptied, whether there is a rest to record or not.** Dragging it into the
-        // next frame would be subtracting from one frame work that happened in another, which is
-        // the kind of error this instrument is after. See [`Window::timed_separately`] for why it
-        // exists.
-        let separately = std::mem::take(&mut self.timed_separately);
-
-        // **The mirror goes into the subtraction AND into its series, and both are needed.** The
-        // accumulator above discounts but publishes no row at all; a series publishes but discounts
-        // nothing. With only one of the two, this work —walking the tree of every tab, on every
-        // frame— would end up inside the figure D3 judges the framework with, or auditable but
-        // without subtracting.
-        let mirror = std::mem::take(&mut self.mirror_this_frame);
-        if !mirror.is_zero() {
-            self.saving.record_mirror(mirror);
-        }
-
-        // **The bar is recorded here and not where it is painted**, for the same reason as the
-        // mirror: the thing above happens once per **pass** and this once per **frame**, so
-        // counting there would publish an average per pass under the «per frame» label. What is
-        // added up is the work of both passes, which happened in full.
-        let tab_bar = std::mem::take(&mut self.tab_bar_this_frame);
-        if !tab_bar.is_zero() {
-            self.tab_bar_cost.record(tab_bar);
-        }
-
-        // **And the raw-input hook's is declared here, AFTER emptying.** See
-        // [`Window::spent_injecting`]: it ran after the frame being closed had finished, so it
-        // belongs to the one that is starting. Adding it above would subtract it from the one that
-        // did not pay for it.
-        self.timed_separately += std::mem::take(&mut self.spent_injecting);
-
-        // With nobody's spans there is no rest to record: the whole frame would be counted as rest
-        // and the series would end up measuring above all the frames in which nothing was
-        // happening.
-        if let Some(timed) = timed {
-            self.rest_of_frame
-                .record(cpu_cost, timed + separately + mirror);
-        }
     }
 
     /// Gives the consoles of the tabs that are not seen the grid they would have if they were.
@@ -2423,6 +2400,16 @@ impl eframe::App for Window {
                     pane_outcome.color.failed,
                 );
             }
+            // **Noting and subtracting are the same decision, so they are taken together** — the
+            // rule the tab bar's own accumulation states: without subtracting, the strip is
+            // published as the framework's cost (**D13**); without noting, the report cannot name
+            // it and what it costs would have to be got by subtracting two batches.
+            //
+            // **Summed over the panes here and recorded once when the frame closes**, because the
+            // strip is painted per pane and per pass while the count the report publishes says
+            // frames: see [`measure::Strips`].
+            self.strips
+                .a_strip_was_painted(&mut self.timed_separately, pane_outcome.strip_cost);
             // **Summed over every pane and every frame, not per frame.** What the report answers is
             // «did this run draw any button at all», which is what makes a batch's zero mean the
             // seeding failed rather than that one frame happened to be short.
@@ -5717,6 +5704,7 @@ mod tests {
             timed_separately: std::time::Duration::ZERO,
             tab_bar_this_frame: std::time::Duration::ZERO,
             tab_bar_cost: measure::TabBar::default(),
+            strips: report::Strips::default(),
             reflow: measure::Reflow::default(),
             persistence: session::Persistence::at(None),
             restoring: None,
@@ -21402,6 +21390,105 @@ mod tests {
         assert_eq!(names.len(), tabs, "there are tabs with the same name");
     }
 
+    /// **A strip that was painted is summed into the frame's tally and subtracted from its rest**,
+    /// and both numbers are checked exactly.
+    ///
+    /// **It is driven here and not through a frame, and that is the finding it comes from.** The
+    /// window test that drives a real pass asserts `timed_separately >= what the strips cost`, which
+    /// is a comparison against an accumulator a dozen other paths also feed — colour glyphs, the tab
+    /// bar, reflowing, the pointer. A mutation round found that inequality still holding with the
+    /// subtraction deleted: that is **D30**'s second disguise, a margin where the defect and the fix
+    /// give the same result. Two exact equalities over the real function do not have it.
+    ///
+    /// The two mutations it exists to kill, both of which survived the whole suite before it:
+    /// deleting the subtraction, which publishes the strips as the interface framework's cost
+    /// (**D13**), and turning the sum into a replacement, which publishes what **one** console's
+    /// strip cost under a label that says the frame's.
+    #[test]
+    fn a_strip_that_was_painted_is_summed_into_the_tally_and_out_of_the_frames_rest() {
+        let mut strips = report::Strips::default();
+        let mut rest = Duration::from_millis(100);
+
+        strips.a_strip_was_painted(&mut rest, Some(Duration::from_millis(3)));
+        strips.a_strip_was_painted(&mut rest, Some(Duration::from_millis(5)));
+        // **And a pane that cut no strip changes neither number**, which is the branch the walk now
+        // leans on: it stopped asking the question at the call site.
+        strips.a_strip_was_painted(&mut rest, None);
+
+        assert_eq!(
+            strips.pending(),
+            Some(Duration::from_millis(8)),
+            "the second console's strip replaced the first instead of adding to it: a frame of two \
+             would publish half what it really paid, and nothing else in the report would disagree"
+        );
+        assert_eq!(
+            rest,
+            Duration::from_millis(108),
+            "what the strips cost did not leave the frame's rest, so it is published as the \
+             interface framework's cost — the figure D3 judges egui by (D13)"
+        );
+    }
+
+    /// **A window saved with its strips on comes back with the same tree, and the strip reaches no
+    /// file** (AC9).
+    ///
+    /// **It is true by construction and that is exactly why it is written down.** Nothing in this
+    /// milestone touches persistence, so this criterion was the one its delivery plan gave to
+    /// nobody — and what this project distrusts most is a promise nothing drives. Two things could
+    /// break it without any other test moving: a field for the strip added to
+    /// [`session::StoredLeaf`], and a panel width measured against the pane instead of against the
+    /// console, which is the very defect the first PR of this milestone existed to prevent.
+    ///
+    /// **The control is the same layout with the strips off**, and it is what makes the second
+    /// assertion mean something: a document that came out identical because nothing was painted at
+    /// all would satisfy a round trip on its own.
+    ///
+    /// **What it does NOT cover, because AC9 does not ask it to**: `describe` reads two fields of a
+    /// pane — its panel's width and whether it is folded — so this is blind to anything the strip
+    /// does to the console's **geometry**. A mutation that took forty points of width off every
+    /// console left it green. That belongs to AC11 and to the pane tests, and saying so here is what
+    /// stops the next reader treating this as the guard for it.
+    #[test]
+    fn a_saved_window_comes_back_with_the_same_tree_and_the_strip_reaches_no_file() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+
+        // A layout with something to lose: two consoles, one of them folded and both of them at a
+        // width nobody would get back by accident.
+        let of_the_session = |headers| {
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.headers = headers;
+            window.active_mut().panes_mut()[0].panel_width = 52;
+            window.active_mut().panes_mut()[1].panel_width = 24;
+            window.active_mut().panes_mut()[1].folded = true;
+            ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+            window
+        };
+
+        let with_strips = of_the_session(header::Headers::PAINTED);
+        let described = with_strips.describe();
+
+        let written = session::serialize(&described).expect("a live window can be described");
+        let read_back = session::interpret(&written).expect("what it describes is read back");
+        let reopened =
+            Window::materialize(&ctx, &read_back, "cat").expect("the consoles coming back do open");
+
+        assert_eq!(
+            reopened.iter().map(Tab::describe).collect::<Vec<_>>(),
+            described.tabs,
+            "a window with a strip over every console did not come back as it was saved"
+        );
+
+        // **The control, and the half that says the strip is not persisted.** With the strips off
+        // the panes are a row taller each; if any of that reached the file the two documents would
+        // differ, and a later milestone's layout would open narrower or wider than it was left.
+        assert_eq!(
+            of_the_session(header::Headers::NOT_PAINTED).describe(),
+            described,
+            "what a console's strip takes off its pane reached the layout file"
+        );
+    }
+
     /// A valid document of two tabs: the first with two consoles of different widths and one
     /// folded, the second with a single one.
     fn saving_two_tabs() -> session::Validated {
@@ -22557,6 +22644,69 @@ mod tests {
         );
     }
 
+    /// **What the strip costs is declared on a frame where its console produced nothing**, which is
+    /// the whole reason it is a span of the window and not of a round.
+    ///
+    /// A round is closed only when bytes arrived — a frame at rest is not a lightning-fast round
+    /// trip, it is a round trip that did not happen — so while the strip's cost travelled inside one
+    /// it was recorded on the dumping frames alone: a console sitting at a prompt painted its band
+    /// on every frame and published none of them, and a quiet control console published «the strip
+    /// costs nothing». That is the shape this pass reproduces: nothing has pumped, so no console has
+    /// anything pending, and the strips are painted all the same.
+    ///
+    /// **The `NOT_PAINTED` window is the control**, and without it this would pass with the
+    /// painting torn out: what is asserted is that a band that *was* drawn is declared, not that a
+    /// counter can be incremented.
+    #[test]
+    fn what_the_strip_costs_is_declared_on_a_frame_its_console_produced_no_output_in() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+
+        let mut window = window_of_tabs([["sleep 30", "sleep 30"]]);
+        ui_pass(&mut window, &ctx, area, egui::RawInput::default());
+
+        // **The premise of the test, asserted rather than assumed.** If a console had something
+        // pending, the round would close and the old wiring would have declared the strip too — the
+        // test would be green over the defect it exists for.
+        assert!(
+            window
+                .active()
+                .panes()
+                .iter()
+                .all(|pane| pane.pending_measurement.is_none()),
+            "a console had output pending, so this frame is not the quiet one the defect needs"
+        );
+
+        let painted = window
+            .strips
+            .pending()
+            .expect("the strips were painted and nothing recorded what they cost");
+        assert!(
+            window.timed_separately >= painted,
+            "what the strips cost is not inside what gets subtracted from the frame: it would be \
+             published as the framework's cost"
+        );
+
+        window.close_the_frame(std::time::Duration::from_millis(1));
+        assert_eq!(
+            window.strips.frames(),
+            1,
+            "the frame closed without the report being able to say a strip was painted in it"
+        );
+
+        // The control: the measurement gate switches the strips off, and then there is nothing to
+        // declare because there is nothing on screen.
+        let mut without = window_of_tabs([["sleep 30", "sleep 30"]]);
+        without.headers = header::Headers::NOT_PAINTED;
+        ui_pass(&mut without, &ctx, area, egui::RawInput::default());
+        without.close_the_frame(std::time::Duration::from_millis(1));
+        assert!(
+            without.strips.pending().is_none() && without.strips.frames() == 0,
+            "a run with the strips off declared a band nobody painted, and its grid is the one \
+             every published batch is compared against"
+        );
+    }
+
     /// **That the report publishes what the window measured, and not a blank table.** The
     /// formatting of the line has its test in the measurement box; what this one ties down is **the
     /// wiring**: handing the heading an empty tally instead of the window's left the whole suite
@@ -22584,6 +22734,102 @@ mod tests {
         assert!(
             report.contains("2 tabs marked"),
             "the report did not say whether the bar got to mark any card:\n{report}"
+        );
+    }
+
+    /// **That the report publishes the strip tally the window kept, and the gate the window
+    /// resolved** — the wiring, not the wording, whose test is in the measurement box.
+    ///
+    /// It is the mistake its sibling above already paid for once: handing the heading an empty
+    /// tally instead of the window's left the whole suite green, the line came out saying nothing,
+    /// and the batch's script threw the run away with nobody able to say why. Here there are two
+    /// wires and not one, and they come from different places — the count from what the painting
+    /// recorded, the parenthesis from the gate the session resolved — so each is driven apart.
+    #[test]
+    fn the_report_publishes_the_strip_tally_and_the_gate_the_window_resolved() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        let mut rest = std::time::Duration::ZERO;
+        window
+            .strips
+            .a_strip_was_painted(&mut rest, Some(std::time::Duration::from_millis(4)));
+        window.strips.close_the_frame();
+        // **A span is seeded so a report gets published at all.** `publish_the_report` returns
+        // early when no console has timed anything, and then the assertions below fail on an empty
+        // text — which reads like the wiring being broken and is really the fixture missing.
+        window.tabs[0].panes_mut()[0]
+            .timings
+            .record_outbound(std::time::Duration::from_micros(10));
+
+        let report = report_of(&window);
+        assert!(
+            report.contains("header:       1 frame(s) with a strip painted · 4ms in total")
+                && report.contains("(the session paints them;"),
+            "the report did not publish the tally the window was keeping:\n{report}"
+        );
+
+        // **The other wire, and the run every published batch is**: the gate switched the strips
+        // off, so the parenthesis has to say so however the counter reads.
+        window.headers = header::Headers::NOT_PAINTED;
+        let vetoed = report_of(&window);
+        assert!(
+            vetoed.contains("(switched off"),
+            "a run with the strips vetoed did not say so, and its grid is the one the published \
+             series is compared against:\n{vetoed}"
+        );
+    }
+
+    /// **The count the report publishes is a count of frames, and nothing drove more than one.**
+    /// Every other test closes the frame once, so the whole tally rested on a single sample: a
+    /// close that recorded a fixed frame, or one that never emptied what it had already recorded,
+    /// publishes the same «1 frame(s)» as the real thing and is found by nobody.
+    ///
+    /// **The middle frame is the half that protects the other seventeen batches.** The number is
+    /// read by `scripts/measure-frame.sh` in both directions, and the direction that fires on a run
+    /// which asked for no strip is a count above zero: a close that counted a frame in which no
+    /// pane cut a band would invalidate correct runs of every batch there is, and the failure would
+    /// arrive as an unexplainable invalidation somewhere else entirely.
+    ///
+    /// **Asserted over the published line, count and total and mean together, and not over the
+    /// counter.** The mean is what a batch is read by, and it is the one that catches a close that
+    /// records an empty frame: the total stays put and gets divided by one frame more, which is the
+    /// strip published as cheaper than it is.
+    #[test]
+    fn a_frame_nobody_cut_a_strip_in_is_not_counted_and_two_that_did_are_two() {
+        let mut window = window_with("sleep 30", "sleep 30");
+        let mut rest = std::time::Duration::ZERO;
+
+        // A frame of two consoles, both of them with a band over the top.
+        window
+            .strips
+            .a_strip_was_painted(&mut rest, Some(Duration::from_millis(3)));
+        window
+            .strips
+            .a_strip_was_painted(&mut rest, Some(Duration::from_millis(5)));
+        window.strips.close_the_frame();
+
+        // And a frame in which no pane cut one — the shape of every run with the gate off, and of
+        // any frame a pane is too short for the band.
+        window.strips.close_the_frame();
+
+        window
+            .strips
+            .a_strip_was_painted(&mut rest, Some(Duration::from_millis(8)));
+        window.strips.close_the_frame();
+
+        // A span is seeded so a report gets published at all: see the test above, which paid for
+        // this line once already.
+        window.tabs[0].panes_mut()[0]
+            .timings
+            .record_outbound(std::time::Duration::from_micros(10));
+
+        let report = report_of(&window);
+        assert!(
+            report.contains(
+                "header:       2 frame(s) with a strip painted · 16ms in total · 8ms per frame"
+            ),
+            "the frames a strip was painted in are not counted one by one, or a frame nobody \
+             painted one in was counted: the count is read in both directions and the mean is what \
+             the batch is compared by:\n{report}"
         );
     }
 

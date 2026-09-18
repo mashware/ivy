@@ -535,6 +535,8 @@ pub struct SessionHeader {
     pub buttons: Buttons,
     /// What the control channel did.
     pub control: Control,
+    /// What the strips over the consoles cost, and whether this run painted any.
+    pub strips: Strips,
 }
 
 /// What the panel's control channel did this run.
@@ -594,6 +596,85 @@ pub struct Blinking {
     pub ceiling: Option<bool>,
 }
 
+/// What the strips over the consoles cost this run, **and whether this run paints any**.
+///
+/// **It is a span of the window and not of a round, and that is the whole point of the type.** Every
+/// other cost a console pays travels inside [`crate::measure::Spans`], which is closed only on a
+/// frame where that console produced output — a frame at rest is not a lightning-fast round trip, it
+/// is a round trip that did not happen. The strip is the opposite case: it is painted on **every**
+/// frame the pane is painted, output or none, so a per-round series would publish a mean taken over
+/// the dumping frames alone and a quiet console would publish no strip at all. Its sibling here is
+/// [`TabBar`], which is painted per frame for the same reason.
+///
+/// **Where the two part company is the zero**, and it is what the `Option` one file away exists
+/// for: the bar's frame is counted only when it cost something, and a strip's frame is counted
+/// because it was **drawn**, cost or none. A band drawn faster than the clock can see is a frame
+/// that had one.
+///
+/// **The frames are counted where the painting happened**, like [`Blinking::frames`] and never from
+/// the gate: a batch that asks for strips and paints none, and a batch that asks for none and paints
+/// some, are the two failures the measurement script throws a run away for, and neither is visible
+/// from what was configured.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Strips {
+    /// Frames in which at least one strip **was painted**.
+    ///
+    /// **Frames and not strips**, so the mean below is what one frame of this window pays for all of
+    /// its consoles' strips — which is what a batch is compared against its control by. How many
+    /// consoles there were is already in the grid block at the top of this same header.
+    pub frames: usize,
+    /// What all of them cost together, every pane of every frame summed.
+    pub total: Duration,
+    /// Whether this run paints them at all — the gate's answer, not the count's.
+    ///
+    /// **Named for what the value says and not for what a batch does with it.** It is fed from
+    /// [`crate::header::Headers`], which asserts «this session paints strips»; the report is
+    /// published on **every** run and not only on a measured one, so a field called «asked for»
+    /// would have an ordinary terminal printing that somebody asked for something nobody asked for.
+    /// What a batch asked is the knob at [`crate::header::HEADER_VARIABLE`], and the only reader
+    /// that needs it is the script, which has it in its own environment.
+    ///
+    /// **Published beside the count and not instead of it.** The two together are what the script
+    /// reads in both directions; on its own, either one is a run that validates clean while
+    /// measuring something other than what it claims.
+    pub painted_this_run: bool,
+}
+
+impl Strips {
+    /// The same tally, saying what the session's gate resolved.
+    ///
+    /// **It exists so the gate arrives as [`crate::header::Headers`] and not as a bare `bool`**,
+    /// which is the whole reason that newtype exists one file away: at the call site there are two
+    /// booleans within reach and swapping them compiles. Chained rather than a field of the tally
+    /// because the window accumulates the count frame by frame and learns nothing new about its own
+    /// gate while doing it.
+    pub(crate) fn under(self, gate: crate::header::Headers) -> Self {
+        Self {
+            painted_this_run: gate.are_painted(),
+            ..self
+        }
+    }
+
+    /// Records what the strips cost **in a frame**, with its passes already summed.
+    ///
+    /// The caller is the frame close and not the painting, for the reason [`TabBar::record`] gives:
+    /// egui repeats the pass over the same input and both passes really paint, so recording there
+    /// would give a mean per pass under a label that says «per frame».
+    ///
+    /// **It takes no zero check, unlike the bar's caller**: what decides whether a frame is counted
+    /// is whether a strip was **drawn**, and that question is answered one file away by an `Option`
+    /// rather than here by a duration.
+    pub fn record(&mut self, how_long: Duration) {
+        self.frames += 1;
+        self.total += how_long;
+    }
+
+    /// What they cost on average, or nothing if none was ever painted.
+    fn per_frame(&self) -> Option<Duration> {
+        self.total.checked_div(self.frames as u32)
+    }
+}
+
 pub fn header(
     a: &mut dyn std::io::Write,
     window: SizeInPoints,
@@ -611,6 +692,7 @@ pub fn header(
         blink,
         buttons,
         control,
+        strips,
     } = session;
     let profile = if cfg!(debug_assertions) {
         "debug — the number that counts is the one from --release"
@@ -815,6 +897,46 @@ pub fn header(
         "control:      {} applied, {} refused, {} released",
         control.applied, control.refused, control.released
     )?;
+    // **Always, and both halves on one line.** A batch that asks for strips and painted none has
+    // the gate broken or a window too short to cut one, and would publish «the strip costs
+    // nothing»; one that asks for none and painted some measures a console a row shorter per pane
+    // than every batch it is compared against, and nothing else in the run gives that away — the
+    // grid it publishes is simply smaller. The script reads the line in both directions, the way it
+    // already reads the buttons, the fonts and the emoji.
+    //
+    // **The count and the parenthesis are independent, and that is the point.** The number says what
+    // was **painted** and the parenthesis says what was **asked for**; a line that inferred either
+    // from the other could not report the one case this guard exists for, which is the two of them
+    // disagreeing.
+    //
+    // **The mean only comes out when there was something to paint.** A «0 per frame» invites reading
+    // that the strip is free, which is the opposite of what a run with the gate on is saying.
+    let gate = if strips.painted_this_run {
+        "the session paints them"
+    } else {
+        "switched off: the measurement gate vetoes the strip, which is what keeps this run \
+         comparable with the published series"
+    };
+    match strips.per_frame() {
+        Some(mean) => writeln!(
+            a,
+            "header:       {} frame(s) with a strip painted · {:?} in total · {mean:?} per frame \
+             ({gate}; every console's strip of that frame, subtracted from it)",
+            strips.frames, strips.total
+        )?,
+        // **This branch IS the zero case, and saying so is the point**: `per_frame` divides by the
+        // frames, so it answers nothing exactly when none was painted. The count is still read off
+        // the tally rather than written as a literal `0`, so the line and the tally cannot drift
+        // apart if what decides the mean ever changes — but it is not a guard and it does not
+        // pretend to be one. A tally with frames at zero and a total above it is a shape the three
+        // public fields allow and `record` cannot produce; nothing here reports it, and nothing
+        // needs to.
+        None => writeln!(
+            a,
+            "header:       {} frame(s) with a strip painted ({gate})",
+            strips.frames
+        )?,
+    }
     writeln!(a, "renderer:     glow")?;
     writeln!(a, "profile:      {profile}")?;
     writeln!(a, "machine:      {}", machine())
