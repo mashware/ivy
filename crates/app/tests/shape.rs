@@ -49,6 +49,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     (
+        "src/panel/document.rs",
+        include_str!("../src/panel/document.rs"),
+    ),
+    (
         "src/panel/buttons.rs",
         include_str!("../src/panel/buttons.rs"),
     ),
@@ -119,7 +123,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    878,
+    831,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -217,7 +221,16 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          one type in `report.rs` with a test on them, and the window holds one field instead of two. \
          Twenty out and four in against 894 leaves **878** — the figures are the diff's own, taken \
          by matching the two files' production lines rather than by counting them by hand, which is \
-         how the first telling of this line got both of them wrong.",
+         how the first telling of this line got both of them wrong. **And the off-frame panel read \
+         paid for itself with the piece that already owns how a pane gets its panel**: the delivery \
+         first spent two lines here — constructing the committed state before the channel, and \
+         retaining a closed pane's read tally — then grouping that tally with the counters the \
+         window already keeps gave one back. Moving the state and channel construction together to \
+         `panel/pane.rs` then took four lines out. **878 + 2 - 1 - 4 leaves 875**. **The review that \
+         made every pane share one window read accumulator paid for its wiring with the constructor \
+         that already belongs to opening**: threading the accumulator through new panes first added \
+         80 production lines here, then the 124-line pane-launching block moved to `opening.rs`. \
+         **875 + 80 - 124 leaves 831**.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.
@@ -310,7 +323,7 @@ fn no_module_is_over_its_ceiling() {
         .map(|(_, src)| production_lines(src).len())
         .sum();
     assert!(
-        MODULES.len() >= 29 && total >= 6_000,
+        MODULES.len() >= 31 && total >= 6_000,
         "the walk found {total} production lines over {} modules: it stopped matching, and this \
          guard is measuring nothing",
         MODULES.len()

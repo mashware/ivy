@@ -17,12 +17,15 @@
 //! label is what gets sent, character for character; and a press only reaches a button this pass
 //! drew **whole**, on a panel it did not have to lay out again.
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 mod buttons;
+mod document;
 mod driving;
 pub(crate) mod pane;
 use buttons::buttons_drawn;
+pub(crate) use document::Reader as DocumentReader;
 use driving::Holder;
 pub(crate) use driving::Released;
 
@@ -196,7 +199,13 @@ impl PartialOrd for AttentionState {
 /// so hides a broken producer behind a plausible summary from an hour ago.
 #[derive(Default)]
 pub struct PanelState {
-    last_good: Option<Panel>,
+    last_good: Option<Arc<Panel>>,
+    /// The producer document a connection may recover without asking the window to run a pass.
+    ///
+    /// **A pointer behind a mutex, not panel state behind a lock.** Painting, holds and presses stay
+    /// owned by the interface thread. A connection only clones this immutable pointer under the
+    /// guard and pays serialization after releasing it.
+    committed: document::Committed,
     /// What was laid out, and what it was laid out for.
     ///
     /// **It exists for cost, and the scenario is the present**: while a console dumps, the window repaints
@@ -362,7 +371,7 @@ impl PanelState {
                 // The file's own date, kept as the baseline a later hold compares against. The
                 // contract's parser already carries it on the panel, so this is not a second read.
                 self.file_seen = panel.written_at;
-                self.last_good = Some(panel);
+                self.commit(panel);
                 self.problem = None;
                 self.layout = None;
             }
@@ -395,33 +404,7 @@ impl PanelState {
     /// centralizes.
     #[cfg(test)]
     pub(crate) fn last_understood(&self) -> Option<&Panel> {
-        self.last_good.as_ref()
-    }
-
-    /// Writes out the document this panel is showing, for whoever asked over the channel.
-    ///
-    /// **It lives here and not beside `deliver` and `release`**, which is where the channel's other
-    /// verbs land: that module's subject is *who is allowed to write*, and this one deliberately does
-    /// not care — placing it there would read as though reading were part of the hold.
-    ///
-    /// **It takes no hold and asks for none**, which is the asymmetry that makes the verb worth
-    /// having: the producer it exists for is the one that has *not* claimed the pane — an agent that
-    /// restarted, one whose context was compacted away, a second tool taking a console over. Gating
-    /// it on a hold would make its own reason unreachable.
-    ///
-    /// **And what comes back is the producer's document, never the application's rows.** The identity
-    /// row, the claim and the sentence about a console handed back are composed in
-    /// [`super::PanelState::lay_out`] and are not fields of a [`Panel`] at all, so a document built
-    /// from what is held here carries none of them. That is not a filter anybody has to remember: it
-    /// is where the two kinds of row live.
-    ///
-    /// **A document that arrived by file answers just as one that arrived over the channel does**,
-    /// which is the case the verb was asked for — the field below is filled by both.
-    pub fn document(&self) -> Result<String, String> {
-        let Some(panel) = self.last_good.as_ref() else {
-            return Err(driving::NOTHING_PUBLISHED.to_owned());
-        };
-        panel_contract::serialize(panel).map_err(|problem| problem.to_string())
+        self.last_good.as_deref()
     }
 
     /// The button that press reaches, if it reaches one.
@@ -568,7 +551,7 @@ impl PanelState {
         if !still_valid {
             self.layout = Some(PanelLayout {
                 rows: lay_out(
-                    self.last_good.as_ref(),
+                    self.last_good.as_deref(),
                     id,
                     width,
                     theme,
@@ -1253,6 +1236,77 @@ fn clip(rows: &[Row], fit: usize) -> (&[Row], usize) {
 mod tests {
     use super::*;
     use panel_contract::{PANEL_FILE, PanelDir};
+
+    #[test]
+    fn a_document_acquired_before_close_survives_but_a_later_read_does_not() {
+        let mut state = PanelState::default();
+        state.commit(panel_contract::parse_document(r#"{"lines":["kept"]}"#).expect("a panel"));
+        let reader = state.reader();
+
+        let acquired = reader.acquire().expect("the pane is alive");
+        drop(state);
+
+        assert!(
+            reader.read().is_none(),
+            "an admitted read kept later acquisitions alive after pane closure"
+        );
+        assert!(
+            acquired
+                .read()
+                .expect("the acquired read finishes")
+                .contains("kept")
+        );
+    }
+
+    #[test]
+    fn concurrent_reads_return_one_complete_committed_version() {
+        let mut state = PanelState::default();
+        let old = panel_contract::parse_document(r#"{"phase":"old","lines":["a"]}"#)
+            .expect("the old panel");
+        let new = panel_contract::parse_document(r#"{"phase":"new","lines":["b"]}"#)
+            .expect("the new panel");
+        let old_written = panel_contract::serialize(&old).expect("serialize the old panel");
+        let new_written = panel_contract::serialize(&new).expect("serialize the new panel");
+        state.commit(old.clone());
+        let reader = state.reader();
+        let start = Arc::new(std::sync::Barrier::new(9));
+
+        let readers: Vec<_> = (0..8)
+            .map(|_| {
+                let reader = reader.clone();
+                let start = Arc::clone(&start);
+                let old_written = old_written.clone();
+                let new_written = new_written.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    for _ in 0..100 {
+                        let written = reader
+                            .read()
+                            .expect("the pane stays alive")
+                            .expect("the committed document serializes");
+                        assert!(
+                            written == old_written || written == new_written,
+                            "a read mixed or changed a committed document: {written}"
+                        );
+                        std::thread::yield_now();
+                    }
+                })
+            })
+            .collect();
+
+        start.wait();
+        for turn in 0..100 {
+            state.commit(if turn % 2 == 0 {
+                new.clone()
+            } else {
+                old.clone()
+            });
+            std::thread::yield_now();
+        }
+        for reader in readers {
+            reader.join().expect("the concurrent reader finished");
+        }
+    }
 
     /// A panel read from a real file, to test the layout without going through the painting.
     fn panel_with(file: &str) -> Panel {

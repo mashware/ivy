@@ -6504,3 +6504,84 @@ writes.
 | Letting an insert carry a key the document already has | It makes that key name two lines, so every later op addressing it is refused for the life of the hold and the only way out is republishing the whole document — the cost this verb exists to remove. Reached by an ordinary copy-paste, and by retrying a patch whose answer timed out |
 | One sentence for «nothing published» and «the file rules this panel» | **The design's premise was refuted by its own sibling verb.** It argued the two cannot be told apart from outside, and a read of the same pane tells them apart, answering *nothing has been published on this console yet*. A producer that had just read its document back would have been told, one request later, that the document was the file's |
 | Leaving the ops unbounded on the wire | `MAX_REQUEST` is the document's ceiling plus an envelope sized for fixed keys and a name. A patch rewriting sixty keyed lines of a near-ceiling document exceeds it — and that is `Unrecoverable`, so the connection ends and the hold with it, and the panel falls back to its file. The bound is on the encoded bytes, the same shape `source` already has, and the refusal leaves the connection alive |
+
+---
+
+## D49 — Reading a panel does not depend on the window, and reads only what it has committed
+
+**Status: taken.** Delivered after the read-and-patch milestone exposed that its recovery verb stopped
+working precisely when a producer needed it most.
+
+**`panel_get` used to be put in the same bounded inbox as a write and answered only when an interface
+pass drained it.** A minimised or occluded window may have no such pass, so the request waited for
+five seconds and timed out while the document it asked for was already in memory. Re-attaching after
+a producer restarted is the verb's stated use, and a window nobody is looking at is an ordinary time
+to do it; visibility cannot be its availability boundary.
+
+### 1. The connection reads one immutable committed document
+
+`PanelState` remains the sole owner of publication, patching, file refresh and painting. Beside that
+state it publishes a shared pointer to the same immutable `Panel`, replaced only by the transitions
+that successfully replace `last_good`. A connection upgrades a weak pane capability, clones that
+pointer under a short mutex, releases the mutex, then serialises and answers on its own thread.
+
+The clone is the read's consistency point. A concurrent commit may land wholly before it or wholly
+after it; no reader can observe half of each document. The size-dependent work is outside the frame,
+and the interface thread pays only a pointer replacement inside the publication work it already
+declares.
+
+**Queued is not committed.** A `panel_set` or `panel_patch` accepted by the bounded window queue is
+still invisible to a read until the interface thread applies it. This keeps the existing order: a
+document that has not been accepted and cannot yet be painted is not reported as the pane's document.
+Failures, release and unchanged file refreshes replace neither representation.
+
+### 2. Closing admits a read at the weak capability, and never waits for serialisation
+
+Connection threads are deliberately not joined when their pane closes. A read that upgrades the
+pane's weak capability first may finish successfully after closure: the upgrade admits that read
+while the pane still exists, but it does **not** choose a document version. The later pointer clone
+under the mutex is the separate consistency point that selects one complete committed document. A
+read that starts after the strong capability is gone gets the existing `this pane is gone` refusal,
+and that refusal is counted like every other refused read. Closing never waits for a ceiling-sized
+answer to be written.
+
+Read totals and the largest serialised size therefore belong to one concurrent accumulator created
+with the window and shared by every pane: an accepted read may finish after its pane leaves, and no
+closed-pane tracker needs to be retained. The final report closes admission and waits only for the
+callbacks already admitted before it reads that accumulator; it does not wait for their socket
+replies. Ordinary pane close remains non-blocking. The remaining per-pane publication and patch
+counts keep their close banking. This preserves the existing `documents:` vocabulary while making
+its counts survive the lifetime the decision permits.
+
+### 3. What is measured, and what is not
+
+Batch `V` remains the bidirectional execution guard: it requires reads and a non-zero serialised size
+in `V`, and forbids reads in every other batch. It no longer claims that the frame delta
+against `S` is serialisation latency, because serialisation and socket output happen on a connection
+thread outside every frame span. The frame report covers only the pointer clone or replacement that
+actually occurs in frame-owned work.
+
+The off-frame callback has measurements of its own. These numbers include weak-capability upgrade,
+pointer clone, serialisation and metric locking; they exclude listener dispatch, reply encoding and
+socket output. Measured on the release binary on 19 September 2026,
+on an AMD Ryzen AI 9 365 (10 cores, 20 threads), five runs each: the ordinary and ceiling cases run
+20,000 and 1,000 sequential reads respectively; the concurrent case runs 250 reads on each of eight
+threads. The range is across the five whole runs, not samples selected from inside one run.
+
+| Case | Evidence |
+|---|---|
+| Ordinary committed document, one reader | 47 bytes: **740 ns–1.018 µs per callback**. |
+| Document at the 256 KiB ceiling, one reader | 260,110 bytes: **375.612–382.219 µs per callback**. |
+| Document at the ceiling, eight concurrent readers | Per-thread mean **348.261–361.043 µs per callback**; wall time **98.411–108.150 ms** for 2,000 completed callbacks. |
+
+### Discarded
+
+| Discarded | Why |
+|---|---|
+| Serialising eagerly on every successful commit | It puts size-dependent work into file refresh and `panel_set` even when nobody reads; `panel_patch` already serialises for its own ceiling but the other paths do not |
+| Draining a second read lane from `App::logic` | It creates another queue and ordering path, walks panes while hidden, and still makes availability depend on what a platform schedules for an occluded window |
+| Putting all panel state behind a lock or actor | Painting, presses, file refresh and writes already have one interface owner; moving them all changes the ownership model to make one read concurrent |
+| Letting a read see a queued write | A queued request may still be refused and is not what the pane shows; exposing it would make `panel_get` stop meaning the committed document |
+| Making close wait for in-flight reads | It puts up to one ceiling-sized serialisation and reply on the interface close path, despite the reader already having selected an immutable value |
+| Keeping a strong pane capability in each connection | A forgotten connection would extend the pane's lifetime; a weak capability says exactly which side wins when the read has not started |
+| Treating batch `V` minus `S` as read latency | The expensive work is deliberately off-frame, so subtraction would attach a connection thread's work to a frame number that never measured it |

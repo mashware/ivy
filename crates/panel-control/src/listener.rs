@@ -68,6 +68,9 @@ const MAX_CONNECTIONS: usize = 8;
 /// A connection, as the window knows it. Opaque, per pane, never reused.
 pub type Connection = u64;
 
+/// Reads the last document committed by this pane without asking the window to run a pass.
+pub type ReadDocument = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+
 /// What a connection asks of the window.
 #[derive(Debug)]
 pub struct Delivery {
@@ -87,11 +90,7 @@ pub struct Delivery {
 pub enum What {
     /// Publish this, under this source.
     Publish { source: String, panel: Panel },
-    /// Hand back the document this pane's panel is showing.
-    ///
-    /// **It is the pane's and not the window's**, like [`What::Publish`] and unlike the three
-    /// `split_*` verbs: what it needs is the panel state, which the pane already holds, and not the
-    /// tree of panes, which only the window can see.
+    /// Compatibility path for callers that still let the pane answer `panel_get` in its pass.
     Get,
     /// Change part of this pane's published document, leaving the rest of it alone.
     ///
@@ -130,7 +129,7 @@ pub enum Answer {
     Opened(Option<String>),
     /// What a pane showed.
     Text(String),
-    /// The document a pane's panel is showing, already written out as JSON.
+    /// Compatibility answer for a [`What::Get`] handled by an older channel owner.
     Document(String),
     /// Refused, with the reason as the caller is to read it.
     Refused(String),
@@ -168,6 +167,27 @@ impl Channel {
         to_the_window: SyncSender<Delivery>,
         wake: Arc<dyn Fn() + Send + Sync>,
     ) -> io::Result<Self> {
+        Self::open_inner(dir, id, to_the_window, None, wake)
+    }
+
+    /// Binds a pane whose document reads are answered without a window pass.
+    pub fn open_with_reader(
+        dir: &Path,
+        id: &str,
+        to_the_window: SyncSender<Delivery>,
+        read_document: ReadDocument,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> io::Result<Self> {
+        Self::open_inner(dir, id, to_the_window, Some(read_document), wake)
+    }
+
+    fn open_inner(
+        dir: &Path,
+        id: &str,
+        to_the_window: SyncSender<Delivery>,
+        read_document: Option<ReadDocument>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> io::Result<Self> {
         let listener = endpoint::bind(dir, id)?;
         let stop = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicUsize::new(1));
@@ -192,7 +212,17 @@ impl Channel {
                 // person that *a* channel is gone and leaves them to guess which — the same gap
                 // **D41** records for the console notices, met here where it is cheap to close.
                 let id = id.to_owned();
-                move || accept_until_stopped(&id, &listener, &stop, &alive, &to_the_window, &wake)
+                move || {
+                    accept_until_stopped(
+                        &id,
+                        &listener,
+                        &stop,
+                        &alive,
+                        &to_the_window,
+                        &read_document,
+                        &wake,
+                    )
+                }
             })?;
 
         Ok(Self {
@@ -247,6 +277,7 @@ fn accept_until_stopped(
     stop: &Arc<AtomicBool>,
     alive: &Arc<AtomicUsize>,
     to_the_window: &SyncSender<Delivery>,
+    read_document: &Option<ReadDocument>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     let next = AtomicU64::new(0);
@@ -272,6 +303,7 @@ fn accept_until_stopped(
                     stop,
                     alive,
                     to_the_window,
+                    read_document,
                     wake,
                 );
             }
@@ -311,6 +343,7 @@ fn serve(
     stop: &Arc<AtomicBool>,
     alive: &Arc<AtomicUsize>,
     to_the_window: &SyncSender<Delivery>,
+    read_document: &Option<ReadDocument>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     // The acceptor itself is one of the living, so the comparison is against the cap plus it.
@@ -337,9 +370,17 @@ fn serve(
             let stop = Arc::clone(stop);
             let alive = Arc::clone(alive);
             let to_the_window = to_the_window.clone();
+            let read_document = read_document.clone();
             let wake = Arc::clone(wake);
             move || {
-                converse(stream, connection, &stop, &to_the_window, &wake);
+                converse(
+                    stream,
+                    connection,
+                    &stop,
+                    &to_the_window,
+                    &read_document,
+                    &wake,
+                );
                 alive.fetch_sub(1, Ordering::Relaxed);
             }
         });
@@ -376,6 +417,7 @@ fn converse(
     connection: Connection,
     stop: &AtomicBool,
     to_the_window: &SyncSender<Delivery>,
+    read_document: &Option<ReadDocument>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) {
     let mut stream = stream;
@@ -402,15 +444,27 @@ fn converse(
     }
     let mut framing = Framing::default();
     let mut chunk = [0_u8; 4096];
+    let mut closing_read_answered = false;
 
-    'connected: while !stop.load(Ordering::Relaxed) {
+    'connected: loop {
+        let closing = stop.load(Ordering::Relaxed);
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(read) => framing.feed(&chunk[..read]),
             // **The timeout expiring is not a failure**: it is the loop coming back to look at the
             // stop flag, which is the whole reason the timeout is set.
-            Err(failure) if failure.kind() == io::ErrorKind::WouldBlock => continue,
-            Err(failure) if failure.kind() == io::ErrorKind::Interrupted => continue,
+            Err(failure) if failure.kind() == io::ErrorKind::WouldBlock => {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                continue;
+            }
+            Err(failure) if failure.kind() == io::ErrorKind::Interrupted => {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                continue;
+            }
             // **How a read failed is named, never guessed.** **D38** made the pseudoterminal report
             // its `ErrorKind` *and* the operating system's number for precisely this class, and a
             // channel that ends with the failure thrown away puts the next person back to guessing.
@@ -426,19 +480,24 @@ fn converse(
             }
         }
 
-        // **The drain consults `stop` on every request.** A client that pipelined a run of
-        // publications and then stopped reading would otherwise hold this thread through all of them
-        // — each waiting out [`crate::wire::REPLY_DEADLINE`] — after `Channel::drop` had already
-        // raised the flag, against the docblock above that promises the worst case is
-        // `ANSWER_DEADLINE + REPLY_DEADLINE`. One relaxed load per request is the whole fix.
-        while !stop.load(Ordering::Relaxed) {
-            let Some(incoming) = framing.take() else {
-                break;
-            };
-            let (reply, last) = answer(incoming, connection, to_the_window, wake);
+        // **A read already received when closing wins the pane-lifetime race.** Other requests stop
+        // at the flag so a pipelined run cannot hold this thread through all of their deadlines;
+        // `panel_get` still reaches the weak capability and receives either the admitted document
+        // or the exact pane-gone refusal instead of losing its reply at transport shutdown.
+        while let Some(incoming) = framing.take() {
+            if stop.load(Ordering::Relaxed) {
+                if !is_the_one_closing_read(&incoming, closing_read_answered) {
+                    break;
+                }
+                closing_read_answered = true;
+            }
+            let (reply, last) = answer(incoming, connection, to_the_window, read_document, wake);
             if write_reply(&mut stream, &reply).is_err() || last {
                 break 'connected;
             }
+        }
+        if closing {
+            break;
         }
     }
 
@@ -453,11 +512,17 @@ fn converse(
     wake();
 }
 
+/// Only one read already received is admitted after shutdown starts.
+fn is_the_one_closing_read(incoming: &Incoming, already_answered: bool) -> bool {
+    !already_answered && matches!(incoming, Incoming::Request(Request::PanelGet))
+}
+
 /// Turns one understood line into the reply it deserves, and says whether the connection is over.
 fn answer(
     incoming: Incoming,
     connection: Connection,
     to_the_window: &SyncSender<Delivery>,
+    read_document: &Option<ReadDocument>,
     wake: &Arc<dyn Fn() + Send + Sync>,
 ) -> (Reply, bool) {
     match incoming {
@@ -510,11 +575,17 @@ fn answer(
             ),
             false,
         ),
-        // **The read of the document is the pane's, like the publication above and unlike the three
-        // below**: it needs the panel this pane already holds and not the tree, so it is answered in
-        // the pass that is already running rather than waiting for the window's own drain.
+        // **The read never enters the window queue.** A minimised or occluded window may run no
+        // interface pass, and recovering this document is most useful precisely then. The callback
+        // owns the pane-lifetime boundary and returns one complete committed version.
         Incoming::Request(Request::PanelGet) => (
-            ask_the_window(Wants::Document, What::Get, connection, to_the_window, wake),
+            match read_document {
+                Some(read_document) => match read_document() {
+                    Ok(document) => Reply::Document(document),
+                    Err(why) => Reply::Failed(why),
+                },
+                None => ask_the_window(Wants::Document, What::Get, connection, to_the_window, wake),
+            },
             false,
         ),
         // **And so is the patch**, for the same reason and one more: it needs the hold, which lives
@@ -575,7 +646,7 @@ impl Wants {
             Self::Taken => "a publication or a close",
             Self::Opened => "an open",
             Self::Read => "a read",
-            Self::Document => "a read of the document",
+            Self::Document => "a document read",
         }
     }
 }
@@ -625,7 +696,7 @@ fn ask_the_window(
                 Answer::Taken => "a taken",
                 Answer::Opened(_) => "an open",
                 Answer::Text(_) => "a read",
-                Answer::Document(_) => "a read of the document",
+                Answer::Document(_) => "a document read",
                 Answer::Refused(_) => "a refusal",
             },
             wants.name()
@@ -664,10 +735,11 @@ mod tests {
         let (sender, inbox) = sync_channel(8);
         let woken = Arc::new(AtomicUsize::new(0));
         let counting = Arc::clone(&woken);
-        let channel = Channel::open(
+        let channel = Channel::open_with_reader(
             dir.path(),
             dir.id(),
             sender,
+            Arc::new(|| Err("nothing has been published on this console yet".to_owned())),
             Arc::new(move || {
                 counting.fetch_add(1, Ordering::Relaxed);
             }),
@@ -774,6 +846,91 @@ mod tests {
         assert!(
             matches!(&reply, Reply::Failed(why) if why.contains("not draining")),
             "a full queue did not refuse the publication: {reply:?}"
+        );
+    }
+
+    /// A read is available precisely when the bounded write queue cannot make progress.
+    #[test]
+    fn a_document_is_read_while_the_window_queue_is_full_and_nobody_is_woken() {
+        let dir = PanelDir::create().expect("create the panel directory");
+        let (sender, inbox) = sync_channel::<Delivery>(1);
+        let (answering, _unheard) = sync_channel::<Answer>(1);
+        sender
+            .try_send(Delivery {
+                connection: 7,
+                what: What::Closed,
+                answer: answering,
+            })
+            .expect("fill the window queue");
+        let woken = Arc::new(AtomicUsize::new(0));
+        let counting = Arc::clone(&woken);
+        let _channel = Channel::open_with_reader(
+            dir.path(),
+            dir.id(),
+            sender,
+            Arc::new(|| Ok(r#"{"lines":[]}"#.to_owned())),
+            Arc::new(move || {
+                counting.fetch_add(1, Ordering::Relaxed);
+            }),
+        )
+        .expect("open the channel");
+        let mut client = endpoint::connect(dir.path(), dir.id()).expect("connect to the pane");
+
+        client
+            .write_all(b"{\"tool\":\"panel_get\"}\n")
+            .expect("ask for the document");
+
+        assert_eq!(
+            read_reply(&mut client),
+            r#"{"ok":true,"document":{"lines":[]}}"#
+        );
+        assert!(
+            matches!(
+                inbox.try_recv().expect("the queued write remains").what,
+                What::Closed
+            ),
+            "reading drained the window queue"
+        );
+        assert_eq!(woken.load(Ordering::Relaxed), 0, "reading woke the window");
+    }
+
+    #[test]
+    fn shutdown_admits_one_buffered_document_read_and_no_more() {
+        let read = Incoming::Request(Request::PanelGet);
+        let write = Incoming::Request(Request::PanelSet {
+            source: "test".to_owned(),
+            document: r#"{"lines":[]}"#.to_owned(),
+        });
+
+        assert!(is_the_one_closing_read(&read, false));
+        assert!(!is_the_one_closing_read(&read, true));
+        assert!(!is_the_one_closing_read(&write, false));
+    }
+
+    /// The original Rust constructor and delivery variants remain a source-compatible fallback.
+    #[test]
+    fn the_original_channel_api_still_hands_panel_get_to_its_owner() {
+        let dir = PanelDir::create().expect("create the panel directory");
+        let (sender, inbox) = sync_channel(1);
+        let _channel = Channel::open(dir.path(), dir.id(), sender, Arc::new(|| {}))
+            .expect("open through the original API");
+        let mut client = endpoint::connect(dir.path(), dir.id()).expect("connect to the pane");
+
+        client
+            .write_all(b"{\"tool\":\"panel_get\"}\n")
+            .expect("ask for the document");
+        let delivery = inbox
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the owner receives the old delivery");
+        assert!(matches!(delivery.what, What::Get));
+        delivery
+            .answer
+            .send(Answer::Document(r#"{"lines":["compatible"]}"#.to_owned()))
+            .expect("answer through the old variant");
+
+        assert_eq!(
+            read_reply(&mut client),
+            r#"{"ok":true,"document":{"lines":["compatible"]}}"#
         );
     }
 

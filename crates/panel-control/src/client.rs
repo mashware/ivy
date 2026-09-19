@@ -271,13 +271,20 @@ mod tests {
     use std::time::Duration;
 
     fn a_pane() -> (PanelDir, Channel, Receiver<Delivery>) {
+        a_pane_reading(Arc::new(|| Err("nothing has been published".to_owned())))
+    }
+
+    fn a_pane_reading(
+        read_document: crate::listener::ReadDocument,
+    ) -> (PanelDir, Channel, Receiver<Delivery>) {
         let dir = PanelDir::create().expect("create the panel directory");
         let (sender, inbox) = sync_channel(8);
         let nobody = Arc::new(AtomicUsize::new(0));
-        let listening = Channel::open(
+        let listening = Channel::open_with_reader(
             dir.path(),
             dir.id(),
             sender,
+            read_document,
             Arc::new(move || {
                 nobody.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }),
@@ -327,21 +334,12 @@ mod tests {
     /// `updated_at`.
     #[test]
     fn a_document_comes_back_in_the_order_the_pane_sent_it() {
-        let (dir, _channel, inbox) = a_pane();
-        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
         let sent = "{\"updated_at\":\"x\",\"phase\":\"build\",\"lines\":[\"one\"]}";
-
-        let window = std::thread::spawn(move || {
-            let delivery = inbox
-                .recv_timeout(Duration::from_secs(5))
-                .expect("the window is handed the question");
-            assert!(matches!(delivery.what, What::Get));
-            let _ = delivery.answer.send(Answer::Document(sent.to_owned()));
-        });
+        let (dir, _channel, _inbox) = a_pane_reading(Arc::new(move || Ok(sent.to_owned())));
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
 
         let answered = producer.read_the_document().expect("read the document");
 
-        window.join().expect("the window thread finished");
         assert_eq!(answered, Answered::Document(sent.to_owned()));
     }
 

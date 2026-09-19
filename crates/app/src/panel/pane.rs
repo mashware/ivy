@@ -17,6 +17,22 @@ use crate::painter::CellMetrics;
 use crate::tiling::{DIVIDER_THICKNESS, Orientation};
 use crate::{PANEL_GRIP, Pane, panel};
 
+/// Creates the interface-owned panel state before its channel receives the weak read capability.
+pub(crate) fn state_and_control(
+    ctx: &egui::Context,
+    dir: Option<&PanelDir>,
+    reads: crate::control::ReadActivity,
+) -> (panel::PanelState, Option<crate::control::PaneControl>) {
+    let state = panel::PanelState::default();
+    let control = dir.and_then(|dir| {
+        let waker = ctx.clone();
+        crate::control::PaneControl::open(dir, state.reader(), reads, move || {
+            waker.request_repaint()
+        })
+    });
+    (state, control)
+}
+
 /// What one refresh of a pane's panel cost, split by **which transport it was spent on**.
 ///
 /// The two never travel as one number, and that is the whole reason this type exists rather than a

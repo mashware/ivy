@@ -15,13 +15,13 @@
 //! to survive a window that was opened for nothing.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, sync_channel};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::SystemTime;
 
 use eframe::egui;
 use panel_contract::PanelDir;
-use panel_control::{Answer, Channel, Delivery, Side as WireSide, What};
+use panel_control::{Answer, Channel, Delivery, ReadDocument, Side as WireSide, What};
 
 use crate::measure::Control;
 use crate::painter::CellMetrics;
@@ -39,6 +39,182 @@ use crate::{Pane, Window, the_users_shell};
 /// publication comes back refused, the producer is told instead of the window growing, and the queue
 /// drains as soon as a pass runs. Eight is one per connection the pane serves.
 const MAX_PENDING: usize = 8;
+
+/// Read counters shared with connection threads and retained after their pane closes.
+///
+/// The mutex makes the count and maximum one coherent observation. Separate atomics could publish
+/// a count from after a read beside a maximum from before it, which is not a state that ever existed.
+#[derive(Default)]
+struct Reads {
+    did: Control,
+    active: usize,
+    accepting: bool,
+}
+
+struct ReadShared {
+    state: Mutex<Reads>,
+    finished: Condvar,
+}
+
+#[derive(Clone)]
+pub(crate) struct ReadActivity(Arc<ReadShared>);
+
+impl Default for ReadActivity {
+    fn default() -> Self {
+        Self(Arc::new(ReadShared {
+            state: Mutex::new(Reads {
+                accepting: true,
+                ..Reads::default()
+            }),
+            finished: Condvar::new(),
+        }))
+    }
+}
+
+struct ActiveRead(ReadActivity);
+
+impl ReadActivity {
+    fn begin(&self) -> Option<ActiveRead> {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read");
+        if !state.accepting {
+            return None;
+        }
+        state.active += 1;
+        Some(ActiveRead(self.clone()))
+    }
+
+    fn finish(&self) {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read");
+        state.accepting = false;
+        while state.active != 0 {
+            state = self
+                .0
+                .finished
+                .wait(state)
+                .expect("document read metrics are changed only while completing a read");
+        }
+    }
+
+    fn succeeded(&self, bytes: usize) {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read");
+        state.did.read_back += 1;
+        state.did.largest_serialized = state.did.largest_serialized.max(bytes);
+    }
+
+    fn refused(&self) {
+        self.0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read")
+            .did
+            .read_refused += 1;
+    }
+
+    pub(crate) fn did(&self) -> Control {
+        self.0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read")
+            .did
+    }
+}
+
+impl ActiveRead {
+    fn succeeded(&self, bytes: usize) {
+        let mut state = self
+            .0
+            .0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read");
+        state.did.read_back += 1;
+        state.did.largest_serialized = state.did.largest_serialized.max(bytes);
+    }
+
+    fn refused(&self) {
+        self.0
+            .0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read")
+            .did
+            .read_refused += 1;
+    }
+}
+
+impl Drop for ActiveRead {
+    fn drop(&mut self) {
+        let mut state = self
+            .0
+            .0
+            .state
+            .lock()
+            .expect("document read metrics are changed only while completing a read");
+        state.active -= 1;
+        if state.active == 0 {
+            self.0.0.finished.notify_all();
+        }
+    }
+}
+
+/// What the window owns for the whole run, including reads that finish after a pane closes.
+#[derive(Default)]
+pub(crate) struct WindowActivity {
+    banked: Control,
+    reads: ReadActivity,
+}
+
+impl WindowActivity {
+    pub(crate) fn retain(&mut self, did: Control) {
+        self.banked = self.banked.and(did);
+    }
+
+    pub(crate) fn did(&self) -> Control {
+        self.banked.and(self.reads.did())
+    }
+
+    pub(crate) fn read_activity(&self) -> ReadActivity {
+        self.reads.clone()
+    }
+
+    pub(crate) fn finish_reads(&self) {
+        self.reads.finish();
+    }
+}
+
+fn measured_reader(reader: crate::panel::DocumentReader, reads: ReadActivity) -> ReadDocument {
+    Arc::new(move || {
+        let Some(active) = reads.begin() else {
+            return Err("this pane is gone".to_owned());
+        };
+        match reader.read() {
+            Some(Ok(document)) => {
+                active.succeeded(document.len());
+                Ok(document)
+            }
+            Some(Err(why)) => {
+                active.refused();
+                Err(why)
+            }
+            None => {
+                active.refused();
+                Err("this pane is gone".to_owned())
+            }
+        }
+    })
+}
 
 /// What a pane keeps of its channel.
 pub struct PaneControl {
@@ -71,6 +247,8 @@ pub struct PaneControl {
     /// contribute would publish a number that is smaller than the truth — which **D13** rates worse
     /// than no number.
     did: Control,
+    /// Read work may complete after this pane is closed, so its tally has an owner outside the pane.
+    reads: ReadActivity,
 }
 
 impl PaneControl {
@@ -79,16 +257,29 @@ impl PaneControl {
     /// **A pane with no channel is a complete pane.** It publishes by file, exactly as every pane
     /// did before this milestone, which is the same decision a pane whose directory could not be
     /// created already gets.
-    pub fn open(dir: &PanelDir, wake: impl Fn() + Send + Sync + 'static) -> Option<Self> {
+    pub fn open(
+        dir: &PanelDir,
+        reader: crate::panel::DocumentReader,
+        reads: ReadActivity,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Option<Self> {
         let (sender, inbox) = sync_channel(MAX_PENDING);
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
-        match Channel::open(dir.path(), dir.id(), sender, Arc::clone(&wake)) {
+        let read_document = measured_reader(reader, reads.clone());
+        match Channel::open_with_reader(
+            dir.path(),
+            dir.id(),
+            sender,
+            read_document,
+            Arc::clone(&wake),
+        ) {
             Ok(channel) => Some(Self {
                 _channel: channel,
                 inbox,
                 wake,
                 waiting_on_the_window: Vec::new(),
                 did: Control::default(),
+                reads,
             }),
             // **Binding nothing on a platform that cannot assert who may connect is policy, not a
             // fault, so it is not reported.** Said once per pane at every start it reads as a broken
@@ -137,22 +328,14 @@ impl PaneControl {
                     // when the caller is already gone, which changes nothing about what is on screen.
                     let _ = delivery.answer.send(answer);
                 }
-                // **Answered here and not in the window's queue**, for the same reason the
-                // publication above is: what it needs is this pane's panel, which is in hand, and not
-                // the tree of panes, which is not. It is also what keeps it out of the trap a request
-                // only the window can answer falls into — queued during a painting, after the frame's
-                // own drain has already run, and answered by no pass at all while the window is at
-                // rest.
                 What::Get => {
                     let answer = match state.document() {
                         Ok(document) => {
-                            self.did.read_back += 1;
-                            self.did.largest_serialized =
-                                self.did.largest_serialized.max(document.len());
+                            self.reads.succeeded(document.len());
                             Answer::Document(document)
                         }
                         Err(why) => {
-                            self.did.read_refused += 1;
+                            self.reads.refused();
                             Answer::Refused(why)
                         }
                     };
@@ -223,7 +406,13 @@ impl PaneControl {
 
 impl PaneControl {
     /// What this pane's channel has done, for the report.
+    #[cfg(test)]
     pub fn did(&self) -> Control {
+        self.did.and(self.reads.did())
+    }
+
+    /// Counters whose work cannot finish after this pane is dropped.
+    pub(crate) fn did_in_the_window(&self) -> Control {
         self.did
     }
 }
@@ -495,11 +684,12 @@ impl Window {
         };
 
         let name = self.next_pane_name;
-        let opened = Pane::launching_with_args(
+        let opened = Pane::launching_with_args_counting_reads(
             ctx,
             program.as_deref().unwrap_or(&the_users_shell()),
             &args,
             name,
+            self.control.read_activity(),
         );
         // **The name is spent even if the program never starts**, as the chord's split also does:
         // what opens afterwards must not be called the same as what never got to exist.
@@ -629,7 +819,8 @@ mod tests {
         let dir = PanelDir::create().expect("create the panel directory");
         let woken = Arc::new(AtomicUsize::new(0));
         let counting = Arc::clone(&woken);
-        let control = PaneControl::open(&dir, move || {
+        let state = PanelState::default();
+        let control = PaneControl::open(&dir, state.reader(), ReadActivity::default(), move || {
             counting.fetch_add(1, Ordering::Relaxed);
         })
         .expect("bind the channel");
@@ -637,7 +828,7 @@ mod tests {
         Driven {
             dir,
             control,
-            state: PanelState::default(),
+            state,
             woken,
         }
     }
@@ -707,7 +898,7 @@ mod tests {
         );
 
         let asking = Asking::start(driven.producer());
-        let Answered::Document(document) = answered(&mut driven, &asking) else {
+        let Answered::Document(document) = answered_without_a_pass(&asking) else {
             panic!("a read answers with a document");
         };
         let read_back = panel_contract::parse_document(&document).expect("it parses as a panel");
@@ -735,7 +926,7 @@ mod tests {
         );
 
         let asking = Asking::start(driven.producer());
-        let Answered::Document(document) = answered(&mut driven, &asking) else {
+        let Answered::Document(document) = answered_without_a_pass(&asking) else {
             panic!("a read answers with a document");
         };
         let read_back = panel_contract::parse_document(&document).expect("it parses as a panel");
@@ -753,13 +944,14 @@ mod tests {
     /// A pane nobody has published to says so, **instead of answering an empty document**.
     #[test]
     fn a_console_with_nothing_published_says_so_rather_than_answering_an_empty_document() {
-        let mut driven = a_driven_pane();
+        let driven = a_driven_pane();
 
         let asking = Asking::start(driven.producer());
-        let Answered::Failed(why) = answered(&mut driven, &asking) else {
+        let Answered::Failed(why) = answered_without_a_pass(&asking) else {
             panic!("a read of nothing is refused");
         };
-        assert!(why.contains("nothing has been published"), "{why}");
+        assert_eq!(why, "nothing has been published on this console yet");
+        assert_eq!(driven.control.did().read_refused, 1);
     }
 
     /// The run's own numbers, **because a path in the frame that nothing counts is published as the
@@ -771,7 +963,7 @@ mod tests {
         assert_eq!(driven.control.did().read_back, 0);
 
         let asking = Asking::start(driven.producer());
-        let Answered::Document(document) = answered(&mut driven, &asking) else {
+        let Answered::Document(document) = answered_without_a_pass(&asking) else {
             panic!("a read answers with a document");
         };
 
@@ -788,23 +980,209 @@ mod tests {
         );
     }
 
-    /// Runs the apply point until the question is answered, the way frames would.
-    ///
-    /// **A loop and not a sleep**, for the reason `frames_until` gives one screen up: the question is
-    /// answered on another thread, and a fixed wait is a test that passes on a fast machine.
-    fn answered(driven: &mut Driven, asking: &Asking) -> Answered {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            driven.control.apply(&mut driven.state, SystemTime::now());
-            match asking.answered.try_recv() {
-                Ok(answer) => return answer,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Err(gone) => panic!("the producer's thread is gone ({gone})"),
-            }
+    #[test]
+    fn the_window_accumulator_keeps_a_completion_and_refusal_after_pane_close() {
+        let mut window = WindowActivity::default();
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                1,
+                "test",
+                panel_contract::parse_document(r#"{"lines":["kept"]}"#).expect("a panel"),
+                SystemTime::now(),
+            )
+            .expect("commit the panel");
+        let reader = measured_reader(state.reader(), window.read_activity());
+
+        let written = reader().expect("the read before close succeeds");
+        drop(state);
+        assert_eq!(reader(), Err("this pane is gone".to_owned()));
+        window.retain(Control {
+            patched: 3,
+            largest_serialized: 900,
+            ..Control::default()
+        });
+
+        let did = window.did();
+        assert_eq!(did.read_back, 1);
+        assert_eq!(did.read_refused, 1);
+        assert_eq!(did.patched, 3);
+        assert_eq!(did.largest_serialized, 900_usize.max(written.len()));
+    }
+
+    #[test]
+    fn finishing_the_report_waits_for_admitted_callbacks_and_closes_admission() {
+        let reads = ReadActivity::default();
+        let admitted = reads.begin().expect("the run still admits reads");
+        let finishing = reads.clone();
+        let (done, observed) = std::sync::mpsc::sync_channel(1);
+        let report = std::thread::spawn(move || {
+            finishing.finish();
+            done.send(()).expect("say the report boundary completed");
+        });
+
+        assert!(
+            observed.recv_timeout(Duration::from_millis(25)).is_err(),
+            "the report passed an admitted callback that had not completed"
+        );
+        admitted.succeeded(37);
+        drop(admitted);
+        observed
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the report did not resume after the callback completed");
+        report.join().expect("the report thread finished");
+
+        assert!(
+            reads.begin().is_none(),
+            "the final report left admission open"
+        );
+        assert_eq!(reads.did().read_back, 1);
+        assert_eq!(reads.did().largest_serialized, 37);
+    }
+
+    /// Manual release-mode measurement for D49. Ignored because elapsed time is evidence, not a
+    /// correctness gate; run it several times on the same machine and publish the range.
+    #[test]
+    #[ignore = "manual release-mode latency measurement"]
+    fn measure_off_frame_document_reads() {
+        fn reader_for(document: &str) -> (PanelState, ReadDocument, usize) {
+            let mut state = PanelState::default();
+            let panel =
+                panel_contract::parse_document(document).expect("the measured panel parses");
+            state
+                .deliver(1, "measurement", panel, SystemTime::now())
+                .expect("install the measured panel");
+            let bytes = state.document().expect("measure its serialized size").len();
+            let reader = measured_reader(state.reader(), ReadActivity::default());
+            (state, reader, bytes)
         }
-        panic!("the pane never answered the question");
+
+        fn serial(rounds: u32, reader: &ReadDocument) -> Duration {
+            let started = Instant::now();
+            for _ in 0..rounds {
+                std::hint::black_box(reader().expect("the measured read succeeds"));
+            }
+            started.elapsed() / rounds
+        }
+
+        let (_ordinary_state, ordinary, ordinary_bytes) =
+            reader_for(r#"{"phase":"build","lines":["one","two","three"]}"#);
+
+        let ceiling_limit = usize::try_from(panel_contract::MAX_BYTES).expect("the ceiling fits");
+        let mut text_bytes = ceiling_limit - 2_048;
+        let (ceiling_state, ceiling, ceiling_bytes) = loop {
+            let document = format!(r#"{{"lines":["{}"]}}"#, "x".repeat(text_bytes));
+            if let Ok(panel) = panel_contract::parse_document(&document) {
+                let mut state = PanelState::default();
+                state
+                    .deliver(1, "measurement", panel, SystemTime::now())
+                    .expect("install the ceiling panel");
+                if let Ok(written) = state.document()
+                    && written.len() >= ceiling_limit - 4_096
+                {
+                    let reader = measured_reader(state.reader(), ReadActivity::default());
+                    break (state, reader, written.len());
+                }
+            }
+            text_bytes -= 512;
+        };
+
+        let ordinary_mean = serial(20_000, &ordinary);
+        let ceiling_mean = serial(1_000, &ceiling);
+
+        let barrier = Arc::new(std::sync::Barrier::new(9));
+        let readers: Vec<_> = (0..8)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+                let reader = Arc::clone(&ceiling);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    serial(250, &reader)
+                })
+            })
+            .collect();
+        let concurrent_started = Instant::now();
+        barrier.wait();
+        let concurrent: Vec<_> = readers
+            .into_iter()
+            .map(|reader| reader.join().expect("the measured reader finished"))
+            .collect();
+        let concurrent_wall = concurrent_started.elapsed();
+        let concurrent_mean = concurrent.iter().sum::<Duration>() / concurrent.len() as u32;
+
+        println!(
+            "ordinary: {ordinary_bytes} bytes, {ordinary_mean:?}/read; ceiling: {ceiling_bytes} \
+             bytes, {ceiling_mean:?}/read; eight readers: {concurrent_mean:?}/read mean, \
+             {concurrent_wall:?} wall for 2,000 reads"
+        );
+        std::hint::black_box(ceiling_state);
+    }
+
+    /// Waits for a document without running the interface-owned apply point at all.
+    fn answered_without_a_pass(asking: &Asking) -> Answered {
+        asking
+            .answered
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the document read depended on an interface pass")
+    }
+
+    /// A queued write is not a committed document, and reading never wakes or drains the window.
+    #[test]
+    fn a_read_while_no_pass_runs_sees_the_last_commit_not_the_queued_write() {
+        let mut driven = a_driven_pane();
+        std::fs::write(
+            driven.dir.path().join(panel_contract::PANEL_FILE),
+            r#"{"phase":"old","lines":["committed"]}"#,
+        )
+        .expect("publish the committed document by file");
+        driven.state.refresh(driven.dir.path());
+
+        let publishing = Publishing::start(
+            driven.producer(),
+            "flow",
+            r#"{"phase":"new","lines":["queued"]}"#,
+        );
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while driven.woken.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        let wakes_before_read = driven.woken.load(Ordering::Relaxed);
+        assert!(
+            wakes_before_read > 0,
+            "the queued publication never arrived"
+        );
+
+        let asking = Asking::start(driven.producer());
+        let Answered::Document(before) = answered_without_a_pass(&asking) else {
+            panic!("the committed document was not returned");
+        };
+        assert_eq!(
+            panel_contract::parse_document(&before)
+                .expect("the old document parses")
+                .phase
+                .as_deref(),
+            Some("old")
+        );
+        assert_eq!(
+            driven.woken.load(Ordering::Relaxed),
+            wakes_before_read,
+            "reading woke the window"
+        );
+
+        driven.control.apply(&mut driven.state, SystemTime::now());
+        assert_eq!(publishing.answer(), Answered::Ok);
+
+        let asking = Asking::start(driven.producer());
+        let Answered::Document(after) = answered_without_a_pass(&asking) else {
+            panic!("the newly committed document was not returned");
+        };
+        assert_eq!(
+            panel_contract::parse_document(&after)
+                .expect("the new document parses")
+                .phase
+                .as_deref(),
+            Some("new")
+        );
     }
 
     /// A producer publishing from a thread of its own **and staying connected afterwards**.

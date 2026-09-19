@@ -19,9 +19,7 @@ impl Window {
     /// The report reads the live panes directly and adds [`Window::control`] on top, so a pane that
     /// closes has to hand its numbers over here or they leave with it.
     fn bank_control(&mut self, did: measure::Control) {
-        self.control.applied += did.applied;
-        self.control.refused += did.refused;
-        self.control.released += did.released;
+        self.control.retain(did);
     }
 
     /// Closes the tab that is being seen. If it is the only one, what is closed is the window.
@@ -77,11 +75,11 @@ impl Window {
         // **Its channel counters are banked before it leaves**, or a tab closed mid-run takes what
         // its consoles published with it and the report under-counts — which can invalidate a run
         // that was correct. Read here, while the panes still exist.
-        let its_control: Vec<measure::Control> = self.tabs[leaving]
+        let its_control: Vec<_> = self.tabs[leaving]
             .panes_mut()
             .into_iter()
             .filter_map(|pane| pane.control.as_ref())
-            .map(crate::control::PaneControl::did)
+            .map(crate::control::PaneControl::did_in_the_window)
             .collect();
         for did in its_control {
             self.bank_control(did);
@@ -160,7 +158,7 @@ impl Window {
         if let Some(did) = leaving
             .control
             .as_ref()
-            .map(crate::control::PaneControl::did)
+            .map(crate::control::PaneControl::did_in_the_window)
         {
             self.bank_control(did);
         }
@@ -226,7 +224,7 @@ impl Window {
         if let Some(did) = leaving
             .control
             .as_ref()
-            .map(crate::control::PaneControl::did)
+            .map(crate::control::PaneControl::did_in_the_window)
         {
             self.bank_control(did);
         }

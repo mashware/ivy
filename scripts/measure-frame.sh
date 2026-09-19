@@ -49,15 +49,11 @@
 #                    BACK, once a second. It is the ONLY batch that answers a read, and its control
 #                    is **S** — same consoles, same load, same interval: V publishes exactly what S
 #                    publishes and then asks for it back, so it is S **plus a read** rather than a
-#                    different load under its name. An earlier shape had it publish once and only
-#                    read afterwards, which left S paying a panel re-layout and a repaint every
-#                    second that V did not — and the subtraction would have come out as the read
-#                    minus all of that, which can be zero or negative and would be published as
-#                    «answering a read costs nothing».
-#                    **The subtraction is between runs and not inside one**, unlike K, N
-#                    and O: both consoles carry the same load here, so there is no control console
-#                    within the run. Take the runs interleaved — S, V, S, V — and publish a range
-#                    rather than a point, saying plainly that it is not isolated.
+#                    different load under its name. **S is workload parity, not a latency control**:
+#                    the read is serialised and answered on the connection thread, outside every
+#                    frame span, so no S/V subtraction measures it. V proves only that the off-frame
+#                    path executes under the ordinary dumping load; read latency comes from D49's
+#                    separate release-mode benchmark.
 #                    **Writing a document out is the one thing this channel does whose cost follows
 #                    the SIZE of what somebody published** rather than the number of requests, which
 #                    is why its report declares the largest document it wrote and why the guard below
@@ -384,7 +380,7 @@ case "$BATCH" in
     S)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1 ;;       # two, and both published over the CHANNEL instead of by file: its control is C
     T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
     U)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; PATCHES=1 ;; # two, and the only one that PATCHES the document over the channel: its control is S (and S, U and V publish one field the file batches do not — see `document_of`)
-    V)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; READS=1 ;;  # two, and the only one that READS THE DOCUMENT BACK over the channel: its control is S
+    V)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; READS=1 ;;  # two, and the only one that PROVES THE OFF-FRAME READ PATH RAN: its control is S, but their frame delta is not read latency
     *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U or V" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
@@ -972,12 +968,11 @@ if [ "$STATUS" != 0 ]; then
     invalidate "the application finished with status $STATUS; what it said is in the .err next to it"
 fi
 
-# **The document read back, in both directions, and it is the guard `V` exists for.** Writing a
-# document out is the one thing this channel does whose cost follows the SIZE of what a producer
-# published rather than the number of requests that arrived, so a batch that claims to measure it and
-# answered none publishes the cost of a drain that never had a read in it. And any other batch
-# answering one has a reader its own load never asked for, which is work in its spans it does not
-# claim — **D13** in both readings.
+# **The document read back, in both directions, and it is the execution guard `V` exists for.** The
+# document is serialised and answered on the connection thread, outside every frame span, so the
+# difference between `V` and `S` is NOT read latency and must not be published as such. The count and
+# largest size prove that the off-frame path really ran under the ordinary dumping load. Any other
+# batch answering a read has workload its own load never asked for, so the guard remains symmetric.
 #
 # **The numbers come out with `sed` and the block sits below the status check**, and neither is style.
 # Under `set -e` an assignment whose pipeline **ends** in a `grep` with no match inherits its status 1
@@ -990,23 +985,28 @@ fi
 DOCUMENTS_LINE=$(grep -E "^documents:" "$REPORT" | head -1)
 if [ -z "$DOCUMENTS_LINE" ]; then
     invalidate "the report does not declare what the control channel wrote out. Without that datum a \
-run that answered a read and one that answered none are indistinguishable, and the cost published \
-under «the control channel» has no size attached to it"
+run that exercised the off-frame read path and one that answered none are indistinguishable, and \
+batch V has neither its execution proof nor the size of the document it serialised"
 else
     READ_BACK=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/^documents: *\([0-9]*\) read back.*/\1/p')
     READ_REFUSED=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/.*, \([0-9]*\) refused.*/\1/p')
+    LARGEST_SERIALIZED=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/.*, \([0-9]*\) bytes the largest written out$/\1/p')
     READ_BACK=${READ_BACK:-0}
     READ_REFUSED=${READ_REFUSED:-0}
+    LARGEST_SERIALIZED=${LARGEST_SERIALIZED:-0}
     if [ "${READS:-}" = 1 ] && [ "$READ_BACK" = 0 ]; then
         invalidate "this batch reads the document back over the control channel and the window \
 answered none of the reads ($READ_REFUSED refused): the publisher never reached the pane, or nothing \
-was ever published on it, and what is published under «the control channel» is the cost of a drain \
-that never had a read in it"
+was ever published on it, so the off-frame path this batch exists to exercise never ran"
+    fi
+    if [ "${READS:-}" = 1 ] && [ "$LARGEST_SERIALIZED" = 0 ]; then
+        invalidate "this batch read a document back but declared no serialized size: its count and \
+size disagree, so batch V cannot prove which off-frame work ran"
     fi
     if [ "${READS:-}" != 1 ] && [ "$READ_BACK" != 0 ]; then
         invalidate "this batch asks for no read of the document and yet the window answered \
-$READ_BACK: something other than its own load is asking, so its spans mix in work that does not \
-belong to what it claims to measure"
+$READ_BACK: something other than its own load is asking, so its report contains off-frame work that \
+does not belong to this batch"
     fi
 
     # **The patching pair, read in both directions like every other, and then a third guard nothing

@@ -339,6 +339,22 @@ only reason it exists. Three things follow, and they are the whole of it:
 - **Reading changes nothing.** It takes no hold, so it does not stop the file being read, it does not
   refuse anybody else, and a panel driven by its `panel.json` goes on being driven by it.
 
+**A read does not wait for the window to paint or run an interface pass.** The channel answers from
+the last document the application committed for that pane, so `panel_get` remains available while
+the window is minimised or occluded. Serialising the answer and writing it to the connection happen
+outside the frame.
+
+That committed boundary is deliberate. A `panel_set` or `panel_patch` merely waiting in the
+window's bounded queue is not visible yet: until the interface thread accepts it, `panel_get`
+returns the previous committed document. Once accepted, the complete new document replaces the old
+one in a single step; a concurrent read gets one whole version or the other, never a mixture.
+
+**Closing does not wait for a read already under way.** A read that upgraded this pane's weak
+capability before closure may finish and answer successfully; one that starts after closure gets
+`{"ok":false,"error":"this pane is gone"}`. The upgrade admits the read but does not choose its
+version: the later pointer clone selects one complete committed document. Neither step keeps the pane
+itself alive or delays its closing.
+
 **What comes back is not byte-for-byte what you sent, and it is not meant to be.** The document is
 read tolerantly — an unknown field is dropped, an indentation past 64 is clipped, a word none of the
 vocabularies knows falls away — so what you get is the document **as the application understands it**.

@@ -85,6 +85,20 @@ fn every_declared_load_is_read_in_both_directions() {
     );
 }
 
+#[test]
+fn a_read_batch_requires_a_nonzero_largest_serialized_document() {
+    assert!(
+        MEASURE.contains(
+            r#"LARGEST_SERIALIZED=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/.*, \([0-9]*\) bytes the largest written out$/\1/p')"#
+        ),
+        "the measurement script no longer extracts the largest serialized document from the report"
+    );
+    assert!(
+        invalidates_on("[ \"${READS:-}\" = 1 ] && [ \"$LARGEST_SERIALIZED\" = 0 ]"),
+        "batch V can publish a read count without proving that any document bytes were serialized"
+    );
+}
+
 /// **The asymmetric guard this file protects, because the symmetric ones protect each other.**
 ///
 /// Every pair above is symmetric — declared and measured none, declared none and measured some — and

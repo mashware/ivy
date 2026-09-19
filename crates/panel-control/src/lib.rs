@@ -23,12 +23,12 @@
 //!
 //! # What this build serves
 //!
-//! The four verbs of the frozen wire format: `panel_set`, and the three `split_*` that let a
-//! connection **open a console of its own, read it and close it**. `panel_set` is the only one that
-//! needs nobody else — a document applied where the file's refresh already happens — and the three
-//! others travel to the window, which is the only party with a tree: a console is named by an opaque
+//! The six verbs of the frozen wire format: `panel_set`, `panel_get`, `panel_patch`, and the three
+//! `split_*` that let a connection **open a console of its own, read it and close it**. The three
+//! panel verbs need nobody else — their work stays with the pane — and the three split verbs travel
+//! to the window, which is the only party with a tree: a console is named by an opaque
 //! handle scoped to the connection that opened it, and the person's first byte into it revokes the
-//! handle (**D44**). All four are advertised, because all four are answered.
+//! handle (**D44**). All six are advertised, because all six are answered.
 
 pub mod client;
 pub mod endpoint;
@@ -36,5 +36,5 @@ pub mod listener;
 pub mod wire;
 
 pub use client::{Answered, Producer};
-pub use listener::{Answer, Channel, Connection, Delivery, What};
+pub use listener::{Answer, Channel, Connection, Delivery, ReadDocument, What};
 pub use wire::{MAX_REQUEST, Reply, Request, Side};

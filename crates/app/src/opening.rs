@@ -14,6 +14,125 @@ use crate::painter::CellMetrics;
 use crate::*;
 use eframe::egui;
 
+impl Pane {
+    pub(crate) fn new_counting_reads(
+        ctx: &egui::Context,
+        name: usize,
+        reads: control::ReadActivity,
+    ) -> term_core::Result<Self> {
+        Self::launching_counting_reads(ctx, &the_users_shell(), name, reads)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn launching(
+        ctx: &egui::Context,
+        program: &str,
+        name: usize,
+    ) -> term_core::Result<Self> {
+        Self::launching_counting_reads(ctx, program, name, control::ReadActivity::default())
+    }
+
+    pub(crate) fn launching_counting_reads(
+        ctx: &egui::Context,
+        program: &str,
+        name: usize,
+        reads: control::ReadActivity,
+    ) -> term_core::Result<Self> {
+        Self::with_panel_counting_reads(
+            ctx,
+            program,
+            &[],
+            panel_or_none(PanelDir::create()),
+            name,
+            reads,
+        )
+    }
+
+    pub(crate) fn launching_with_args_counting_reads(
+        ctx: &egui::Context,
+        program: &str,
+        args: &[String],
+        name: usize,
+        reads: control::ReadActivity,
+    ) -> term_core::Result<Self> {
+        Self::with_panel_counting_reads(
+            ctx,
+            program,
+            args,
+            panel_or_none(PanelDir::create()),
+            name,
+            reads,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_panel(
+        ctx: &egui::Context,
+        program: &str,
+        args: &[String],
+        panel: Option<PanelDir>,
+        name: usize,
+    ) -> term_core::Result<Self> {
+        Self::with_panel_counting_reads(
+            ctx,
+            program,
+            args,
+            panel,
+            name,
+            control::ReadActivity::default(),
+        )
+    }
+
+    fn with_panel_counting_reads(
+        ctx: &egui::Context,
+        program: &str,
+        args: &[String],
+        panel: Option<PanelDir>,
+        name: usize,
+        reads: control::ReadActivity,
+    ) -> term_core::Result<Self> {
+        let identity = identity_of(panel.as_ref());
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (pty, output) = match Pty::spawn_with_env(program, &borrowed, INITIAL_GRID, &identity) {
+            Ok(spawned) => spawned,
+            Err(failure) => {
+                eprintln!(
+                    "'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}"
+                );
+                Pty::spawn_with_env(FALLBACK_SHELL, &[], INITIAL_GRID, &identity)?
+            }
+        };
+
+        let waker = ctx.clone();
+        let pty_output = PtyOutput::new(output, move || waker.request_repaint());
+        let (panel_state, control) = panel::pane::state_and_control(ctx, panel.as_ref(), reads);
+
+        Ok(Self {
+            name,
+            pty,
+            pty_output,
+            panel,
+            control,
+            panel_state,
+            to_reread: Flag::raised(),
+            screen: Screen::new(INITIAL_GRID),
+            received: Vec::new(),
+            keystrokes: Vec::new(),
+            held: None,
+            measured: INITIAL_GRID,
+            timings: Timings::default(),
+            pending_measurement: None,
+            panel_reread_unpainted: std::time::Duration::ZERO,
+            control_unpainted: std::time::Duration::ZERO,
+            reflowed: std::time::Duration::ZERO,
+            pending_wheel: WheelInput::default(),
+            panel_width: panel::DEFAULT_WIDTH,
+            folded: false,
+            taken_over: None,
+        })
+    }
+}
+
 impl Window {
     /// A window with as many tabs as it is asked for.
     ///
@@ -39,11 +158,13 @@ impl Window {
         // the same criterion as `panel_or_none`. Half a dozen tabs of which one is half-built is
         // worse than not starting up at all, because the failure is discovered on reaching it.
         let per_tab = layout.how_many_panes();
+        let control = control::WindowActivity::default();
+        let reads = control.read_activity();
         let tabs: Vec<Tab> = (0..how_many)
-            .map(|name| Tab::new(ctx, name, name * per_tab, &layout))
+            .map(|name| Tab::new_counting_reads(ctx, name, name * per_tab, &layout, reads.clone()))
             .collect::<term_core::Result<_>>()?;
 
-        Self::with_these_tabs(ctx, tabs, size)
+        Self::with_these_tabs(ctx, tabs, size, control)
     }
 
     /// The window the application opens: factory-fresh, or with whatever was left saved.
@@ -71,15 +192,21 @@ impl Window {
             OpenWith::Factory { tabs, layout } => Self::with_tabs(ctx, tabs, layout, size),
             OpenWith::Restored(saved) => {
                 let panes = saved.leaves();
+                let control = control::WindowActivity::default();
                 // **Opening them is what is timed, not reading the file, and the difference
                 // matters.** What grows with the size of the layout are the `fork`s and `exec`s
                 // here: reading a four-leaf document and a two-hundred-leaf one cost almost the
                 // same. What reading cost travels with the persistence, which already knows how
                 // long its own load took.
                 let before = Instant::now();
-                match Self::materialize(ctx, &saved, program) {
+                match Self::materialize_counting_reads(
+                    ctx,
+                    &saved,
+                    program,
+                    control.read_activity(),
+                ) {
                     Ok(tabs) => {
-                        Self::with_these_tabs(ctx, tabs, size).map(|mut window| {
+                        Self::with_these_tabs(ctx, tabs, size, control).map(|mut window| {
                             // **Only when they really were opened.** If materializing fails it
                             // opens factory-fresh, and a factory window declaring «restored» would
                             // be the disguise this line exists to remove.
@@ -140,6 +267,7 @@ impl Window {
         ctx: &egui::Context,
         tabs: Vec<Tab>,
         size: Option<egui::Vec2>,
+        control: control::WindowActivity,
     ) -> term_core::Result<Self> {
         let next_name = tabs.len();
         // **Counted from the list and not from the parameter**, for the same reason explained below
@@ -171,7 +299,7 @@ impl Window {
             tab_bar_cost: measure::TabBar::default(),
             strips: crate::report::Strips::default(),
             buttons: measure::Buttons::default(),
-            control: measure::Control::default(),
+            control,
             reflow: measure::Reflow::default(),
             persistence: session::Persistence::at(None),
             restoring: None,

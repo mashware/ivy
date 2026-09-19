@@ -709,17 +709,18 @@ impl Tab {
     /// are—, and with two the wrong one can be taken: whoever called with three names and a layout
     /// of four would open a tab that is neither of the two. Counted here, there is nothing to keep
     /// aligned.
-    pub(crate) fn new(
+    pub(crate) fn new_counting_reads(
         ctx: &egui::Context,
         name: usize,
         first_pane_name: usize,
         layout: &OpeningLayout,
+        reads: crate::control::ReadActivity,
     ) -> term_core::Result<Self> {
         // **If any console fails the tab is not opened**, and the `?` over the `collect` is what
         // achieves it: the same criterion the age-old two already had.
         let how_many = layout.how_many_panes();
         let panes: Vec<Pane> = (first_pane_name..first_pane_name + how_many)
-            .map(|name| Pane::new(ctx, name))
+            .map(|name| Pane::new_counting_reads(ctx, name, reads.clone()))
             .collect::<term_core::Result<_>>()?;
 
         Ok(Self::with_panes(panes, layout, name))
@@ -727,7 +728,7 @@ impl Tab {
 
     /// How a tab is opened: the focus on the left and the divider where [`crate::tiling::INITIAL_FRACTION`] says.
     ///
-    /// It exists apart from [`Tab::new`] so that the tests come in through here with consoles of
+    /// It exists apart from [`Tab::new_counting_reads`] so that the tests come in through here with consoles of
     /// their own instead of building the struct by hand — otherwise, the day opening a tab means
     /// something more, the tests would go on opening the old one.
     pub(crate) fn with_panes(panes: Vec<Pane>, layout: &OpeningLayout, name: usize) -> Self {
@@ -737,7 +738,7 @@ impl Tab {
         //
         // **`expect` and not a silent fallback**, for the same reason as in [`weights_of`]: a tab
         // with no console at all does not exist —[`opening_layout_of`] rejects zero on both axes
-        // and [`Tab::new`] opens one console per name—, and a fallback would turn that
+        // and [`Tab::new_counting_reads`] opens one console per name—, and a fallback would turn that
         // impossibility into something plausible. Zero would be the worst of all: it is the name of
         // **the first console of the first tab**, so the focus would point at a console of another
         // tab and the keys would go where nobody expects them. Besides, with no leaf at all,
@@ -1040,10 +1041,12 @@ impl Node {
         saving: &session::StoredNode,
         program: &str,
         next_name: &mut usize,
+        reads: &crate::control::ReadActivity,
     ) -> term_core::Result<Self> {
         match saving {
             session::StoredNode::Leaf(leaf) => {
-                let mut pane = Pane::launching(ctx, program, *next_name)?;
+                let mut pane =
+                    Pane::launching_counting_reads(ctx, program, *next_name, reads.clone())?;
                 *next_name += 1;
                 // **The width is raised to the drag floor, and a review asked for this.** A file
                 // can bring a zero, and **no gesture can leave one**: asking for less than the
@@ -1076,7 +1079,7 @@ impl Node {
                         .ok_or("the layout carries something that cannot be a weight")?;
                     parts.push((
                         weight,
-                        Self::materialize(ctx, &child.node, program, next_name)?,
+                        Self::materialize(ctx, &child.node, program, next_name, reads)?,
                     ));
                 }
                 Ok(in_branch_with_weights((*orientation).into(), parts))
@@ -1104,8 +1107,9 @@ impl Tab {
         program: &str,
         next_name: &mut usize,
         name: usize,
+        reads: &crate::control::ReadActivity,
     ) -> term_core::Result<Self> {
-        let root = Node::materialize(ctx, &saved.root, program, next_name)?;
+        let root = Node::materialize(ctx, &saved.root, program, next_name, reads)?;
         // **The focus on the first one, just like when opening a new tab**, and for the same
         // reason: typing before the first click always happens, and with a focus that points at
         // nobody those keys would be lost. That there is at least one leaf is guaranteed by the

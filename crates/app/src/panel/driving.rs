@@ -123,7 +123,7 @@ impl PanelState {
             source: source.to_owned(),
             file_refused: false,
         });
-        self.last_good = Some(Panel {
+        self.commit(Panel {
             written_at: Some(now),
             ..panel
         });
@@ -186,7 +186,7 @@ impl PanelState {
         // twice what it does.
         let written = panel_contract::serialize(&patched).map_err(|problem| problem.to_string())?;
 
-        self.last_good = Some(Panel {
+        self.commit(Panel {
             written_at: Some(now),
             ..patched
         });

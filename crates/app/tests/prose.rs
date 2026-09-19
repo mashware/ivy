@@ -64,6 +64,10 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     (
+        "src/panel/document.rs",
+        include_str!("../src/panel/document.rs"),
+    ),
+    (
         "src/panel/buttons.rs",
         include_str!("../src/panel/buttons.rs"),
     ),
@@ -135,8 +139,8 @@ const SOURCES: &[(&str, &str)] = &[
 /// the file's own: a floor is re-measured by the delivery that touches the list, not by the one that
 /// happens to read the comment.
 ///
-/// **15 150 and not a rounder number, and the slack was measured rather than chosen.** With the
-/// corpus at 15 692 the slack is 542, so every file carrying more than that is defended by the total
+/// **15 160 and not a rounder number, and the slack was measured rather than chosen.** With the
+/// corpus at 15 701 the slack is 541, so every file carrying more than that is defended by the total
 /// alone; the **nineteen** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
 /// `examples/leak.rs` (59), `src/painter/blocks.rs` (87), `examples/sweep.rs` (134),
 /// `src/alarms.rs` (136), `src/report.rs` (136), `src/mouse.rs` (165), `examples/fonts.rs` (168),
@@ -153,7 +157,7 @@ const SOURCES: &[(&str, &str)] = &[
 /// that lies; the real answer is a per-file floor stated as a table, which is
 /// [issue #183](https://github.com/mashware/agent-terminal/issues/183) — and the two-thousand-line
 /// drift above is the strongest argument yet for closing it.
-const COMMENT_LINES_AT_LEAST: usize = 15_150;
+const COMMENT_LINES_AT_LEAST: usize = 15_160;
 const COMMENT_LINES_PER_FILE_AT_LEAST: usize = 1;
 
 /// How many **different** listed words a line needs before it is called Spanish.
@@ -602,8 +606,8 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
 #[test]
 fn the_walk_still_reads_the_comments_of_every_file() {
     assert!(
-        SOURCES.len() >= 29,
-        "the list of translated files has {} entries and this delivery left twenty-nine, which is \
+        SOURCES.len() >= 30,
+        "the list of translated files has {} entries and this delivery left thirty, which is \
          every file of the crate: it only ever grows, so this is somebody emptying it and every \
          check downstream going quiet",
         SOURCES.len()

@@ -198,6 +198,9 @@ impl Window {
     /// worded, not that anyone prints it — and that, in this project, has already let things
     /// through with the suite green.
     pub(crate) fn publish_the_report(&self, to: &mut dyn std::io::Write) -> std::io::Result<()> {
+        // No read admitted before this boundary may land after the only report of the run. This
+        // waits for the callback, not for the connection to write its reply to a stalled client.
+        self.control.finish_reads();
         if !self.all_panes().any(|pane| pane.timings.has_any()) {
             return Ok(());
         }
@@ -259,8 +262,8 @@ impl Window {
                 control: self
                     .all_panes()
                     .filter_map(|pane| pane.control.as_ref())
-                    .map(crate::control::PaneControl::did)
-                    .fold(self.control, measure::Control::and),
+                    .map(crate::control::PaneControl::did_in_the_window)
+                    .fold(self.control.did(), measure::Control::and),
             },
         )?;
 

@@ -913,107 +913,6 @@ pub(crate) enum WheelOwner {
 }
 
 impl Pane {
-    /// Launches this pane's shell and leaves it ready for the first frame.
-    fn new(ctx: &egui::Context, name: usize) -> term_core::Result<Self> {
-        Self::launching(ctx, &the_users_shell(), name)
-    }
-
-    /// The same, with the program said by hand.
-    ///
-    /// It exists because the program [`Pane::new`] picks is the user's, and a test that depended on
-    /// it does not test this code: it tests the configuration of whoever runs it.
-    fn launching(ctx: &egui::Context, program: &str, name: usize) -> term_core::Result<Self> {
-        // The directory is created **before** launching, because the program may publish in its
-        // first second and the variable we tell it has to point at something that already exists.
-        // If launching fails afterwards, the directory deletes itself: the value dies along the
-        // error path.
-        Self::with_panel(ctx, program, &[], panel_or_none(PanelDir::create()), name)
-    }
-
-    /// The same, with the arguments a connection asked the program to run with.
-    ///
-    /// **Only a connection chooses arguments**, so this is the door `split_open` comes in by and the
-    /// user's own launching keeps passing none. It exists rather than a parameter with a default
-    /// because `&[]` at thirty call sites says nothing and this one call says exactly what it is.
-    fn launching_with_args(
-        ctx: &egui::Context,
-        program: &str,
-        args: &[String],
-        name: usize,
-    ) -> term_core::Result<Self> {
-        Self::with_panel(ctx, program, args, panel_or_none(PanelDir::create()), name)
-    }
-
-    /// And the same with the directory already resolved, including the case where it could not be
-    /// created.
-    ///
-    /// That case cannot be provoked from a test without touching the whole process's environment,
-    /// and it is precisely the one that has to be left demonstrated: that the console starts just
-    /// the same and that its program is not left with an inherited identity.
-    fn with_panel(
-        ctx: &egui::Context,
-        program: &str,
-        args: &[String],
-        panel: Option<PanelDir>,
-        name: usize,
-    ) -> term_core::Result<Self> {
-        let identity = identity_of(panel.as_ref());
-        // The spawn takes borrowed strings, and the arguments a connection chose arrive owned.
-        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-
-        // If what the environment says no longer exists —a deleted profile, an uninstalled shell—,
-        // it falls back to the fallback one instead of not opening. Being left with no window while
-        // `/bin/sh` is at hand, and with an error nobody is going to understand, is the worse of
-        // the two outcomes.
-        let (pty, output) = match Pty::spawn_with_env(program, &borrowed, INITIAL_GRID, &identity) {
-            Ok(spawned) => spawned,
-            Err(failure) => {
-                eprintln!(
-                    "'{program}' could not be launched ({failure}); opening {FALLBACK_SHELL}"
-                );
-                Pty::spawn_with_env(FALLBACK_SHELL, &[], INITIAL_GRID, &identity)?
-            }
-        };
-
-        // All the bridge needs from the window is how to wake it. Asking for the repaint does not
-        // panic, which is the condition the bridge sets: if it did, its thread would die and would
-        // publish a death that has not happened.
-        let waker = ctx.clone();
-        let pty_output = PtyOutput::new(output, move || waker.request_repaint());
-
-        // **The channel is opened after the program, and that order is not arbitrary.** A pane whose
-        // program could not be launched has no pane, so binding an endpoint for it would leave a
-        // socket in a directory that is about to delete itself.
-        let control = panel.as_ref().and_then(|dir| {
-            let waker = ctx.clone();
-            control::PaneControl::open(dir, move || waker.request_repaint())
-        });
-
-        Ok(Self {
-            name,
-            pty,
-            pty_output,
-            panel,
-            control,
-            panel_state: panel::PanelState::default(),
-            to_reread: Flag::raised(),
-            screen: Screen::new(INITIAL_GRID),
-            received: Vec::new(),
-            keystrokes: Vec::new(),
-            held: None,
-            measured: INITIAL_GRID,
-            timings: Timings::default(),
-            pending_measurement: None,
-            panel_reread_unpainted: std::time::Duration::ZERO,
-            control_unpainted: std::time::Duration::ZERO,
-            reflowed: std::time::Duration::ZERO,
-            pending_wheel: WheelInput::default(),
-            panel_width: panel::DEFAULT_WIDTH,
-            folded: false,
-            taken_over: None,
-        })
-    }
-
     /// Which cell of this console that point falls in, **clamped to what the console really takes
     /// up**.
     ///
@@ -1311,7 +1210,7 @@ struct Window {
     /// `applied`/`refused`/`released` with it — and `measure-frame.sh` can then invalidate a run
     /// that was correct, which is the exact **D13** failure the `Control` docblock itself invokes.
     /// Live panes are still added on top when the report is built.
-    control: measure::Control,
+    control: control::WindowActivity,
     /// What it has cost to reflow the consoles' text when their width changed.
     ///
     /// **It lives in the window and not in each pane even though the work is the console's**,
@@ -1893,7 +1792,7 @@ impl Window {
 
         let before = Instant::now();
         let name = self.next_pane_name;
-        let opened = Pane::new(ctx, name);
+        let opened = Pane::new_counting_reads(ctx, name, self.control.read_activity());
         // **The name is spent even if the program never gets to start**, just as when opening a
         // tab: whatever is opened afterwards must not be called the same as what never got to
         // exist, because the report may already have named the failed attempt on the error output.
@@ -1977,7 +1876,13 @@ impl Window {
         // opens, and whoever presses the chord has not asked for four consoles. That a batch's tabs
         // and this one can differ deceives nobody, because the report publishes each pane's grid.
         let with_what = OpeningLayout::DEFAULT;
-        let opened = Tab::new(ctx, self.next_name, self.next_pane_name, &with_what);
+        let opened = Tab::new_counting_reads(
+            ctx,
+            self.next_name,
+            self.next_pane_name,
+            &with_what,
+            self.control.read_activity(),
+        );
         // **The names are spent even if the opening fails**, so that they are never reused: if the
         // failed attempt left a line on the error output, whatever is opened afterwards must not be
         // called the same as what never got to exist. It holds for the tab and for its two panes
@@ -2607,17 +2512,27 @@ impl Window {
     /// **It returns the tabs and not a window**, so that whoever opens the window remains the only
     /// one that assembles the rest of its state — the stopwatches, the watcher and the counters
     /// come out of the built list, not out of what the file said.
+    #[cfg(test)]
     pub(crate) fn materialize(
         ctx: &egui::Context,
         validated: &session::Validated,
         program: &str,
+    ) -> term_core::Result<Vec<Tab>> {
+        Self::materialize_counting_reads(ctx, validated, program, control::ReadActivity::default())
+    }
+
+    fn materialize_counting_reads(
+        ctx: &egui::Context,
+        validated: &session::Validated,
+        program: &str,
+        reads: control::ReadActivity,
     ) -> term_core::Result<Vec<Tab>> {
         let mut next_pane = 0;
         validated
             .tabs()
             .iter()
             .enumerate()
-            .map(|(which, tab)| Tab::materialize(ctx, tab, program, &mut next_pane, which))
+            .map(|(which, tab)| Tab::materialize(ctx, tab, program, &mut next_pane, which, &reads))
             .collect()
     }
 }
@@ -5160,7 +5075,12 @@ mod tests {
     fn a_file_published_while_the_channel_holds_the_panel_is_read_when_the_hold_ends() {
         let dir = PanelDir::create().expect("create the panel directory");
         let mut pane = pane_with("sleep 30", 0);
-        pane.control = control::PaneControl::open(&dir, || {});
+        pane.control = control::PaneControl::open(
+            &dir,
+            pane.panel_state.reader(),
+            control::ReadActivity::default(),
+            || {},
+        );
         let mut producer =
             panel_control::Producer::of(dir.path(), dir.id()).expect("connect as a producer");
 
@@ -5220,13 +5140,76 @@ mod tests {
     /// Binds a control channel to the console called `name`, so a request can reach the window.
     fn attach_a_channel(window: &mut Window, name: usize) {
         let dir = PanelDir::create().expect("a panel directory");
-        let control = control::PaneControl::open(&dir, || {}).expect("bind the channel");
+        let reads = window.control.read_activity();
         let pane = window
             .all_panes_mut()
             .find(|pane| pane.name == name)
             .expect("that console exists");
+        let control = control::PaneControl::open(&dir, pane.panel_state.reader(), reads, || {})
+            .expect("bind the channel");
         pane.panel = Some(dir);
         pane.control = Some(control);
+    }
+
+    #[test]
+    fn reads_from_two_real_panes_survive_one_closing_in_the_final_report() {
+        let ctx = egui::Context::default();
+        let mut window = Window::with_tabs(&ctx, 1, OpeningLayout::DEFAULT, None)
+            .expect("open a production-shaped window");
+
+        for (at, text) in ["left", "a longer right document"].into_iter().enumerate() {
+            window.tabs[0].panes_mut()[at]
+                .panel_state
+                .deliver(
+                    at as u64,
+                    "test",
+                    panel_contract::parse_document(&format!(r#"{{"lines":["{text}"]}}"#))
+                        .expect("a panel"),
+                    SystemTime::now(),
+                )
+                .expect("commit the panel");
+        }
+        let producer_for = |name| {
+            let pane = window
+                .all_panes()
+                .find(|pane| pane.name == name)
+                .expect("that pane exists");
+            let dir = pane.panel.as_ref().expect("the pane has a channel");
+            panel_control::Producer::of(dir.path(), dir.id()).expect("connect as a producer")
+        };
+        let mut left = producer_for(0);
+        let mut right = producer_for(1);
+
+        let panel_control::Answered::Document(left_document) =
+            left.read_the_document().expect("read the left document")
+        else {
+            panic!("the left pane did not answer with its document");
+        };
+        let panel_control::Answered::Document(right_document) =
+            right.read_the_document().expect("read the right document")
+        else {
+            panic!("the right pane did not answer with its document");
+        };
+        let largest = left_document.len().max(right_document.len());
+
+        window
+            .close_a_pane_called(0, &ctx)
+            .expect("close the left pane");
+        assert_eq!(
+            left.read_the_document().expect("the closing pane answers"),
+            panel_control::Answered::Failed("this pane is gone".to_owned())
+        );
+        window.tabs[0].panes_mut()[0]
+            .timings
+            .record_outbound(std::time::Duration::from_micros(10));
+
+        let report = report_of(&window);
+        assert!(
+            report.contains(&format!(
+                "documents:    2 read back, 1 refused, 0 patched, 0 patches refused, {largest} bytes the largest written out"
+            )),
+            "the final report lost reads across a real pane close:\n{report}"
+        );
     }
 
     /// Puts one request in the window's queue and runs the pass that answers it.
@@ -5687,7 +5670,7 @@ mod tests {
     ///
     /// The two halves of the frame tested here —pumping and resizing— do not touch the desktop
     /// window, so there is no need to open one: the struct is armed by hand with the same pieces as
-    /// [`Pane::new`].
+    /// [`Pane::new_counting_reads`].
     fn pane_with(program: &str, name: usize) -> Pane {
         let (pty, output) = Pty::spawn("sh", &["-c", program], INITIAL_GRID)
             .expect("could not open the pseudoterminal");
@@ -5765,7 +5748,7 @@ mod tests {
             discovery: measure::Discovery::default(),
             color: measure::Rasterizing::default(),
             buttons: measure::Buttons::default(),
-            control: measure::Control::default(),
+            control: control::WindowActivity::default(),
             // These consoles have no directory, so there is nothing to watch; the watcher is armed
             // anyway —over an empty list— so that the tests' window does not declare itself blind
             // and turn on the fallback, which is a path with a test of its own.
