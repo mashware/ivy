@@ -8,8 +8,8 @@
 //! ticket's day, and a second workspace member costs entries in six guard lists this delivery
 //! already has to pay.
 //!
-//! **It exposes the four verbs the channel serves**: `panel_set`, and the three `split_*` that let an
-//! agent open, read and close a console of its own. Each one is advertised because each one is
+//! **It exposes the six verbs the channel serves**: `panel_set`, `panel_get`, `panel_patch`, and the
+//! three `split_*` that let an agent open, read and close a console of its own. Each one is advertised because each one is
 //! answered; the scoping that makes them safe —the handle belongs to this connection, and the
 //! person's first keystroke takes the console back— lives on the window's side of the channel.
 //!
@@ -199,7 +199,7 @@ fn initialized(message: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// The five tools this build serves, with the shape of what each takes.
+/// The six tools this build serves, with the shape of what each takes.
 fn tools() -> serde_json::Value {
     serde_json::json!({
         "tools": [
@@ -235,6 +235,31 @@ fn tools() -> serde_json::Value {
                                 document it published, finds out what is on screen before publishing \
                                 again.",
                 "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "panel_patch",
+                "description": "Change part of this pane's status panel without republishing the \
+                                rest of it. Each op names what it does: \"replace\", \"before\", \
+                                \"after\" and \"delete\" address a line by the \"key\" its \
+                                producer gave it, \"first\" and \"last\" put a line at either end \
+                                of the body, and \"set\" changes one of \"phase\", \
+                                \"attention\", \"header\" or \"stale_after_minutes\". Either the \
+                                whole list applies or none of it does: a key that names no line, or \
+                                two, refuses the patch and leaves the panel exactly as it was. It \
+                                needs this pane claimed with panel_set first, and buttons are not \
+                                patchable.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "ops": {
+                            "type": "array",
+                            "description": "The edits, applied in order; each one sees what the \
+                                            ones before it did.",
+                            "items": {"type": "object"},
+                        },
+                    },
+                    "required": ["ops"],
+                },
             },
             {
                 "name": "split_open",
@@ -313,9 +338,26 @@ fn tools() -> serde_json::Value {
 enum Ask {
     Publish(String, String),
     ReadTheDocument,
+    Patch(String),
     Open(Side, Option<String>, Vec<String>),
     Read(String, bool),
     Close(String),
+}
+
+/// What to call an empty `ok`, **decided from what was asked and never from the shape of the reply**.
+///
+/// **A word per verb rather than a flag per exception, and a function rather than a `let`.** The
+/// first shape was a bool asking whether the call was a close, and the second verb to answer an
+/// empty `ok` walked straight into it: a patch reported «published», on a channel whose entire
+/// distinction is that publishing replaces the document and patching edits one line of it. An agent
+/// reading that concludes it re-sent everything. It is out here so a test can reach it without a
+/// pane — which is what the `let` could not offer, and is why nothing caught the first mistake.
+fn what_it_did(ask: &Ask) -> &'static str {
+    match ask {
+        Ask::Close(_) => "closed",
+        Ask::Patch(_) => "patched",
+        Ask::Publish(..) | Ask::ReadTheDocument | Ask::Open(..) | Ask::Read(..) => "published",
+    }
 }
 
 /// Runs a tool call.
@@ -333,7 +375,7 @@ fn called(
     // is even reached: a call for something nobody serves must not open the channel to find that out.
     if !matches!(
         name,
-        "panel_set" | "panel_get" | "split_open" | "split_read" | "split_close"
+        "panel_set" | "panel_get" | "panel_patch" | "split_open" | "split_read" | "split_close"
     ) {
         return failed(id, -32602, &format!("no tool \"{name}\""));
     }
@@ -356,6 +398,16 @@ fn called(
         // ignored rather than refused: refusing a field that reaches nothing would be inventing a
         // shape this verb does not have.
         "panel_get" => Ask::ReadTheDocument,
+        "panel_patch" => {
+            let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
+            // **Its presence and its shape are checked here, and what each op says is not**: the
+            // contract's own reader is the only party that decides that, and it answers in the
+            // sentences a producer reads on every transport.
+            let Some(ops) = arguments.get("ops").filter(|ops| ops.is_array()) else {
+                return succeeded(id, refusal("panel_patch needs an \"ops\" list"));
+            };
+            Ask::Patch(ops.to_string())
+        }
         "split_open" => {
             let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
             let Some(side) = arguments.get("side").and_then(serde_json::Value::as_str) else {
@@ -429,27 +481,20 @@ fn called(
         Err(failure) => return succeeded(id, refusal(&failure)),
     };
 
-    let it_was_a_close = matches!(ask, Ask::Close(_));
+    let did = what_it_did(&ask);
     let answer = match ask {
         Ask::Publish(source, document) => producer.publish(&source, &document),
         Ask::ReadTheDocument => producer.read_the_document(),
+        Ask::Patch(ops) => producer.patch(&ops),
         Ask::Open(side, program, args) => producer.open_a_pane(side, program.as_deref(), &args),
         Ask::Read(handle, scrollback) => producer.read_a_pane(&handle, scrollback),
         Ask::Close(handle) => producer.close_a_pane(&handle),
     };
 
     match answer {
-        // **A close and a publication answer with the same empty `ok`**, so the sentence is chosen
-        // from what was asked and not from the shape of the reply: reporting «published» after a
-        // successful close would be a wrong number under a label that reads as a measurement.
-        Ok(Answered::Ok) => succeeded(
-            id,
-            text(if it_was_a_close {
-                "closed"
-            } else {
-                "published"
-            }),
-        ),
+        // **Three verbs answer with the same empty `ok`**, so the word comes from what was asked and
+        // never from the shape of the reply.
+        Ok(Answered::Ok) => succeeded(id, text(did)),
         // **The handle is the whole answer to an open**, and a null one is not an error: the console
         // exists and is usable, it is only this channel that cannot address it.
         Ok(Answered::Opened(Some(handle))) => succeeded(id, text(&handle)),
@@ -640,11 +685,28 @@ mod tests {
         assert!(answered["result"]["capabilities"]["tools"].is_object());
     }
 
-    /// **This build advertises the four verbs it serves**, and the assertion is on the whole list rather
+    /// **Three verbs answer with the same empty `ok`, and each says which one it was.**
+    ///
+    /// The word is what an agent reads back, and on this channel publishing and patching are the two
+    /// things it must not confuse: one replaced the whole document, the other changed a line of it.
+    /// Asserted here rather than through a call because reaching the reply needs a pane, which is
+    /// exactly why the first version of this — a bool for the close and «published» for everything
+    /// else — shipped saying «published» to a patch.
+    #[test]
+    fn each_verb_that_answers_an_empty_ok_says_which_one_it_was() {
+        assert_eq!(what_it_did(&Ask::Patch(String::new())), "patched");
+        assert_eq!(what_it_did(&Ask::Close(String::new())), "closed");
+        assert_eq!(
+            what_it_did(&Ask::Publish(String::new(), String::new())),
+            "published"
+        );
+    }
+
+    /// **This build advertises the six verbs it serves**, and the assertion is on the whole list rather
     /// than on the presence of one: a tool advertised before it is answered is a promise taken back
     /// later, and an answered tool left unadvertised is one no client will ever call.
     #[test]
-    fn the_five_verbs_this_build_serves_are_advertised() {
+    fn the_six_verbs_this_build_serves_are_advertised() {
         let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
 
         let tools = answered["result"]["tools"]
@@ -659,6 +721,7 @@ mod tests {
             [
                 "panel_set",
                 "panel_get",
+                "panel_patch",
                 "split_open",
                 "split_read",
                 "split_close"
@@ -675,6 +738,32 @@ mod tests {
 
         assert!(answered.get("error").is_none(), "{answered}");
         assert_eq!(answered["result"]["isError"], true);
+    }
+
+    /// **And a patch whose `ops` are missing or are not a list is refused here, without a pane.**
+    ///
+    /// The point is the second half: finding out that an argument is wrong must not need a channel,
+    /// so this runs with no pane at all and still gets an answer. What each op *says* is not judged
+    /// here — that is the contract's, at the other end — so a well-shaped list of nonsense is not in
+    /// this test, and would not be refused by this code.
+    #[test]
+    fn a_patch_whose_ops_are_missing_or_not_a_list_comes_back_as_a_tool_error() {
+        for arguments in [
+            "{}",
+            "{\"ops\":{\"op\":\"delete\"}}",
+            "{\"ops\":\"delete\"}",
+        ] {
+            let answered = ask(&format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\
+                 \"params\":{{\"name\":\"panel_patch\",\"arguments\":{arguments}}}}}"
+            ));
+
+            assert!(answered.get("error").is_none(), "{answered}");
+            assert_eq!(
+                answered["result"]["isError"], true,
+                "a patch with arguments {arguments} was not refused"
+            );
+        }
     }
 
     /// A tool that does not exist is a protocol error, because the client asked for something this

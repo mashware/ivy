@@ -14,6 +14,7 @@
 use std::io::{self, Write};
 use std::time::Duration;
 
+use panel_contract::Patch;
 use serde_json::value::RawValue;
 
 /// The most a source name may take **on the wire**.
@@ -113,6 +114,19 @@ pub enum Request {
     /// one that has *not* claimed the pane: an agent that restarted, one whose context was compacted
     /// away, a second tool taking a console over.
     PanelGet,
+    /// Change part of this pane's published document, leaving the rest of it alone.
+    ///
+    /// **The ops arrive read**, which is the whole shape of this verb: everything decidable without
+    /// the document — an op nobody serves, a field that is not patchable, a value of the wrong kind,
+    /// more ops than the ceiling allows — is decided on the connection's own thread by
+    /// [`panel_contract::parse_ops`], and never in a frame. What travels is the one question that
+    /// needs the panel: does this key name a line there.
+    ///
+    /// **It carries no `source`**, unlike a publication. The hold already names its holder and a
+    /// patch cannot exist without a hold, so a name here would either reach nothing — which is what
+    /// `split_open`'s absent `env` is on record for refusing — or rename a holder mid-hold, which
+    /// nobody asked for.
+    PanelPatch { ops: Patch },
     /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
     ///
     /// **There is no environment here, and there cannot be one**: a pane's environment is exactly
@@ -258,6 +272,8 @@ struct Envelope<'a> {
     pane: Option<&'a RawValue>,
     #[serde(default, borrow)]
     scrollback: Option<&'a RawValue>,
+    #[serde(default, borrow)]
+    ops: Option<&'a RawValue>,
 }
 
 /// Turns one line into a request.
@@ -286,6 +302,7 @@ fn interpret(line: &[u8]) -> Incoming {
     match envelope.tool.as_str() {
         "panel_set" => panel_set(&envelope),
         "panel_get" => Incoming::Request(Request::PanelGet),
+        "panel_patch" => panel_patch(&envelope),
         "split_open" => split_open(&envelope),
         "split_read" => split_read(&envelope),
         "split_close" => split_close(&envelope),
@@ -325,6 +342,42 @@ fn panel_set(envelope: &Envelope<'_>) -> Incoming {
         // the connection's own thread, never in the frame.
         document: document.get().to_owned(),
     })
+}
+
+/// The patch, understood at the wire.
+///
+/// **Its refusals are `Malformed`**, like every other request's: a patch whose ops cannot be read is
+/// one line an agent got wrong, and taking its channel away for it would be the connection-ending
+/// reserved for a line whose boundary was never seen. **Reaching this function at all is the part
+/// that has to be bought**, and the bound below is what buys it — a line past [`MAX_REQUEST`] is
+/// `Unrecoverable` before any of this runs.
+fn panel_patch(envelope: &Envelope<'_>) -> Incoming {
+    let Some(ops) = envelope.ops else {
+        return Incoming::Malformed("a patch carries no \"ops\"".to_owned());
+    };
+    // **The ops are bounded on the wire for the reason `source` is, and it is the same failure.**
+    // [`MAX_REQUEST`] is the document's ceiling plus an envelope sized for fixed keys and a name;
+    // ops are neither, and nothing else holds them. Without this, a producer rewriting sixty keyed
+    // lines of a near-ceiling document sends a line past that bound — which is `Unrecoverable`, so
+    // its connection ends and its hold with it, and the panel falls back to its file. That is the
+    // whole cost this verb exists to remove, charged for using it. Checked on the wire bytes, and
+    // refused as malformed so the connection lives and the producer can send fewer ops.
+    if ops.get().len() > panel_contract::MAX_BYTES as usize {
+        return Incoming::Malformed(format!(
+            "a patch's \"ops\" are over {} KiB",
+            panel_contract::MAX_BYTES / 1024
+        ));
+    }
+    let Ok(ops) = serde_json::from_str::<serde_json::Value>(ops.get()) else {
+        return Incoming::Malformed("a patch's \"ops\" could not be read".to_owned());
+    };
+    // **Read here and not at the pane**, which is what keeps this verb's work inside the frame down
+    // to the one question the document answers. The sentence is the contract's own, so a producer
+    // reads the same words whichever transport ever carries these ops.
+    match panel_contract::parse_ops(&ops) {
+        Ok(ops) => Incoming::Request(Request::PanelPatch { ops }),
+        Err(problem) => Incoming::Malformed(problem.to_string()),
+    }
 }
 
 /// `split_open`: the side is required, the program and its arguments are not, and **there is no
@@ -687,6 +740,67 @@ mod tests {
             Incoming::Malformed(_)
         ));
         assert!(matches!(one("\n"), Incoming::Malformed(_)));
+    }
+
+    /// **A patch is read at the wire, and everything it can refuse there refuses the line and not the
+    /// connection.**
+    ///
+    /// The three shapes this covers are the three doors: no `ops` at all, an `ops` that is not a
+    /// list, and an `ops` whose contents the contract refuses. The last is the one worth pinning —
+    /// it is the contract's reader running on the connection's own thread, which is what keeps that
+    /// work out of the frame — and the refusal comes back carrying the contract's own sentence,
+    /// **not wrapped in a second one**.
+    #[test]
+    fn a_patch_the_wire_can_refuse_refuses_the_line_and_not_the_connection() {
+        assert!(matches!(
+            one("{\"tool\":\"panel_patch\"}\n"),
+            Incoming::Malformed(_)
+        ));
+        assert!(matches!(
+            one("{\"tool\":\"panel_patch\",\"ops\":\"replace\"}\n"),
+            Incoming::Malformed(_)
+        ));
+
+        let Incoming::Malformed(why) = one(
+            "{\"tool\":\"panel_patch\",\"ops\":[{\"op\":\"set\",\"field\":\"actions\",\"value\":null}]}\n",
+        ) else {
+            panic!("a field that is not patchable is refused at the wire");
+        };
+        assert_eq!(
+            why,
+            "\"actions\" is not patchable: a button reaches a shell, so it is only ever set with the whole document",
+            "the contract's sentence reached the producer wrapped in something else"
+        );
+
+        // **Ops past the document's ceiling are refused, and the connection survives it.** Sized to
+        // land in the window where that is decidable at all: the envelope is `ENVELOPE` bytes wide,
+        // so ops a little over `MAX_BYTES` still make a line under `MAX_REQUEST` and reach this
+        // function. Without the bound they would be read, and the same patch a hundred bytes longer
+        // would pass the line ceiling too and be `Unrecoverable` — the connection ended, and the
+        // producer's hold with it, for a patch doing exactly what this verb is for.
+        let over = format!(
+            "{{\"tool\":\"panel_patch\",\"ops\":[{{\"op\":\"last\",\"line\":\"{}\"}}]}}\n",
+            "f".repeat(panel_contract::MAX_BYTES as usize + 100)
+        );
+        assert!(
+            over.len() < MAX_REQUEST,
+            "the line has to reach the verb for this to be about the verb: {} bytes",
+            over.len()
+        );
+        let mut framing = Framing::default();
+        framing.feed(over.as_bytes());
+        let Some(Incoming::Malformed(why)) = framing.take() else {
+            panic!("a patch whose ops are past the ceiling did not come back refused");
+        };
+        assert!(why.contains("over 256 KiB"), "{why}");
+
+        // And a patch the wire has nothing against becomes a request, with its ops already read.
+        let Incoming::Request(Request::PanelPatch { ops }) =
+            one("{\"tool\":\"panel_patch\",\"ops\":[{\"op\":\"delete\",\"key\":\"one\"}]}\n")
+        else {
+            panic!("a patch the wire serves becomes a request");
+        };
+        assert_eq!(ops.len(), 1);
     }
 
     /// **A request is only taken out once its line is complete**, which is the property the socket

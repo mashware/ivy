@@ -309,6 +309,8 @@ per-field tolerance: everything above this line is unchanged and this section ad
 ← {"ok":true}
 → {"tool":"panel_get"}
 ← {"ok":true,"document":{ ...the panel document... }}
+→ {"tool":"panel_patch","ops":[ ...the edits... ]}
+← {"ok":true}
 → {"tool":"split_open","side":"right","program":"cargo","args":["test"]}
 ← {"ok":true,"pane":"<opaque handle>"}
 → {"tool":"split_read","pane":"<opaque handle>","scrollback":false}
@@ -347,6 +349,102 @@ publishing back what you received leaves the panel exactly as it is: read, edit,
 
 A pane where nothing has been published yet answers
 `{"ok":false,"error":"nothing has been published on this console yet"}`.
+
+### `panel_patch` — changing part of it without republishing the rest
+
+**It edits the document you published, one line or one field at a time**, and it needs the pane
+claimed: publish once with `panel_set`, then patch it for as long as your connection lives.
+
+```
+→ {"tool":"panel_patch","ops":[
+     {"op":"after","key":"mr-1","line":{"key":"mr-2","text":"per-event counters","mark":"current"}},
+     {"op":"delete","key":"title"},
+     {"op":"set","field":"attention","value":"done"}]}
+← {"ok":true}
+```
+
+**The seven ops**, and `K` is a `key` some line of your document carries, `L` a line exactly as you
+would write it inside `lines`:
+
+| Op | What it does |
+|---|---|
+| `{"op":"replace","key":K,"line":L}` | The line carrying `K` becomes `L` |
+| `{"op":"before","key":K,"line":L}` | `L` goes immediately before it |
+| `{"op":"after","key":K,"line":L}` | Immediately after it |
+| `{"op":"first","line":L}` | `L` goes at the start of `lines` |
+| `{"op":"last","line":L}` | At the end of `lines` |
+| `{"op":"delete","key":K}` | The line carrying `K` goes |
+| `{"op":"set","field":F,"value":V}` | One scalar of the document |
+
+`F` is one of `phase`, `attention`, `header` or `stale_after_minutes`. **`V` may be `null`, and for
+all four it means *as if the document had never said it*** — absence for `phase` and `attention`, the
+default for `header` and `stale_after_minutes`, because absence is what produces a default.
+
+**Either the whole list applies or none of it does.** A key that names no line, or that names two,
+refuses the **patch** — not the op — and the panel is left exactly as it was, down to the byte a
+`panel_get` hands back. That is what makes a patch safe to send without reading first: the worst
+outcome is that nothing happened and you were told why.
+
+**The ops see each other, in the order you wrote them.** An `after` may name a key an earlier op
+inserted, a `replace` may address a line the same request created, and deleting a key twice refuses
+the second time. A list of edits is read the way a person writes one.
+
+**What it refuses, each with the sentence you get back:**
+
+```
+← {"ok":false,"error":"no line of this panel carries the key \"tets\""}
+← {"ok":false,"error":"the key \"mr-2\" names 2 lines of this panel"}
+← {"ok":false,"error":"the key \"mr-2\" is already on a line of this panel, so this would give it two"}
+← {"ok":false,"error":"this console's panel is its file's: publish with panel_set before patching"}
+← {"ok":false,"error":"this panel is held by \"ci\" until that connection closes"}
+← {"ok":false,"error":"\"actions\" is not patchable: a button reaches a shell, so it is only ever set with the whole document"}
+← {"ok":false,"error":"over 256 KiB"}
+← {"ok":false,"error":"a patch carries at most 64 ops and this one carries 65"}
+← {"ok":false,"error":"a patch carries no ops"}
+← {"ok":false,"error":"a patch's \"ops\" are over 256 KiB"}
+← {"ok":false,"error":"\"updated_at\" is a field of a panel and not one a patch may set"}
+```
+
+**A repeated key is refused rather than guessed at.** Two lines may carry one key — the document is
+yours and reading it is not the moment to rewrite it — so both keep it, and the ambiguity is reported
+the moment you try to address it. Give the lines you mean to patch keys of their own.
+
+**And a patch will not create one.** An insert whose line carries a key some line already has is
+refused before it lands, rather than leaving you with an address that names two lines and refuses
+everything until you republish the whole document. That matters for one case in particular: **a patch
+whose answer timed out may still have been applied**, and the honest thing to do is send it again —
+the resend is refused rather than doubling the line.
+
+**Your ops are bounded on the wire too, at the same 256 KiB.** They are the one field of this channel
+that can carry a whole document's worth of text, and a request line past the transport's bound ends
+the connection instead of being answered — which would take your claim with it. Over the bound, the
+patch comes back refused and the connection lives.
+
+**`v`, `updated_at`, `lines` and `written_at` are fields of a panel that a patch may not set**, and
+they say so rather than coming back as fields that do not exist: `lines` is what the ops are for, and
+the other three are the document's own bookkeeping.
+
+**Buttons are not patchable, and that is scope rather than security.** You already set any `actions`
+you like with a `panel_set`, so a patch would add no reach; what it would add is a second path into
+the one shape of this contract that reaches a shell, for a convenience nobody asked for.
+
+**At most 64 ops in one request, and the 65th refuses the patch.** It is not a byte limit — the
+transport's own bound already holds those — it is a bound on the work one request puts inside a frame.
+A truncated instruction would be an edit that silently did not happen with `{"ok":true}` on the wire,
+which is the exact failure this verb exists to remove.
+
+**And one rule that will surprise you once, so it is written here rather than discovered**: *what an
+op says* is not tolerated the way *what an op carries* is.
+
+- A `line` an op carries **is a document line** and is read with the document's own tolerance: a
+  `mark` nobody knows is dropped, an `indent` past 64 is clipped, and the line stands.
+- A field named by a `set` **is part of the instruction** and is not tolerated:
+  `{"op":"set","field":"attention","value":"waiting"}` refuses the whole patch, where the same word
+  inside a published document is dropped and the panel still paints.
+
+The document did not change; what can be said *about* it diverges. A document is your summary and
+losing it over a field nobody looks at would be the worst thing to do with it — an instruction nobody
+can read has no sensible reading at all.
 
 ### The three `split_*` verbs
 
@@ -413,6 +511,16 @@ itself.
 - **A `source` is a name and takes at most 256 bytes.** A longer one comes back as a malformed
   request and the connection survives. The bound is what keeps the envelope bounded, so a document of
   exactly the ceiling is never pushed over the transport's bound by the name it carries.
+- **Patching needs the hold; reading does not.** `panel_get` exists for the producer that has *not*
+  claimed the pane, and `panel_patch` cannot exist without a claim. A pane with nothing on it answers
+  the patch exactly what it answers a read — *nothing has been published on this console yet* — and a
+  pane whose document is its file's says the move: *publish with panel_set before patching*.
+- **A patch that applies stamps the panel's date, and a patch that is refused stamps nothing.** A
+  producer that fails to patch for an hour still goes stale, which is exactly the failure the stale
+  notice exists to expose.
+- **The 256 KiB ceiling is on the result, not on the request.** A patch of a few hundred bytes whose
+  result would be over it comes back as the same `over 256 KiB` the file gets, and the panel does not
+  change. It is the only way a small request can be stopped from producing an oversized document.
 - **A pane serves eight connections at a time.** Not a defence — reaching the endpoint already
   requires being this user — but a bound on what a client looping on `connect` can make the window
   spend.
@@ -434,6 +542,9 @@ itself.
   of being discovered by the person looking at the panel — which is the thing that made writing a new
   producer expensive.
 - **It writes nothing to disk**, so a producer that has no business owning a file does not have to.
+- **It edits.** A document of six hundred lines whose third one changed is six hundred lines over the
+  file transport and one op over this one — and the file has no word for saying *this line*, because
+  it has no way of knowing whose document it is overwriting.
 
 ---
 

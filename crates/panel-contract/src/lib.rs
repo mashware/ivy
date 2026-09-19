@@ -22,11 +22,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 mod panel;
+mod patch;
 
 pub use panel::{
     Action, Attention, Line, MAX_ACTIONS, MAX_BYTES, MAX_INDENT, MAX_SEND, Mark, Panel, Problem,
     STALE_AFTER, Style, is_shown_as_itself, parse_document, read, read_if_newer, serialize,
 };
+pub use patch::{MAX_OPS, Op, Patch, Scalar, parse_ops};
 
 /// The only file the contract puts inside the directory. It is written by whoever does the work,
 /// not by this crate.

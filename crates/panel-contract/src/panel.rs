@@ -382,6 +382,18 @@ pub enum Problem {
     Unreadable(std::io::Error),
     /// It was read, but it is not a panel: it is not JSON, or it carries no lines.
     Invalid(String),
+    /// An instruction about a document was refused, with the sentence its sender reads.
+    ///
+    /// **It is the one variant whose `Display` is the sentence and nothing else**, and that is the
+    /// difference it exists for: every other variant here says why a *document* could not be had, so
+    /// wrapping it in «not understood (…)» tells the reader something true. A patch that named a key
+    /// nobody carries was not misunderstood — it was understood exactly, and refused — and the
+    /// contract publishes the words a producer gets back.
+    ///
+    /// **It widens this enum rather than adding a second one** because `serialize`'s ceiling refuses
+    /// a patched document too: one caller reading two error vocabularies for one verb would have to
+    /// translate between them to say anything at all.
+    Refused(String),
 }
 
 impl std::fmt::Display for Problem {
@@ -392,6 +404,7 @@ impl std::fmt::Display for Problem {
             Self::TooBig => write!(f, "over {} KiB", MAX_BYTES / 1024),
             Self::Unreadable(failure) => write!(f, "could not be read ({failure})"),
             Self::Invalid(reason) => write!(f, "not understood ({reason})"),
+            Self::Refused(why) => write!(f, "{why}"),
         }
     }
 }
@@ -565,10 +578,8 @@ fn parse(text: &str) -> Result<Panel, Problem> {
         stale_after: raw
             .get("stale_after_minutes")
             .and_then(serde_json::Value::as_u64)
-            .map_or(STALE_AFTER, |minutes| {
-                Duration::from_secs(minutes.saturating_mul(60))
-            }),
-        attention: string_ref(&raw, "attention").and_then(attention),
+            .map_or(STALE_AFTER, expiry_of),
+        attention: string_ref(&raw, "attention").and_then(attention_named),
         actions: raw
             .get("actions")
             .and_then(serde_json::Value::as_array)
@@ -580,9 +591,21 @@ fn parse(text: &str) -> Result<Panel, Problem> {
                     .collect()
             })
             .unwrap_or_default(),
-        lines: lines.iter().filter_map(line).collect(),
+        lines: lines.iter().filter_map(read_line).collect(),
         written_at: None,
     })
+}
+
+/// How long a producer's number of minutes is, **read in one place because two readers reach it**.
+///
+/// A document says `stale_after_minutes` and a patch's `set` says it too, and the saturation is what
+/// makes them the same value: `u64::MAX` minutes lands on `Duration::from_secs(u64::MAX)` rather
+/// than wrapping. Written twice, the two would be one edit away from disagreeing — and a panel
+/// published through one verb would go stale on a different clock from the same panel patched
+/// through the other, which no test walks and nobody would see. The writer's `div_ceil` is the
+/// inverse of exactly this function, and the comment over it names this one.
+pub(crate) fn expiry_of(minutes: u64) -> Duration {
+    Duration::from_secs(minutes.saturating_mul(60))
 }
 
 /// Turns an element of the list into a button, or **discards it**.
@@ -597,7 +620,7 @@ fn action(raw: &serde_json::Value) -> Option<Action> {
 ///
 /// An element that is neither a string nor an object —a number, a null— is not a line of anything:
 /// painting it as a blank line would be inventing content out of garbage.
-fn line(raw: &serde_json::Value) -> Option<Line> {
+pub(crate) fn read_line(raw: &serde_json::Value) -> Option<Line> {
     // A loose string is a normal line, and the empty string is a gap: the two cases are the same
     // here, and it is whoever paints that knows an empty text leaves a space.
     if let Some(text) = raw.as_str() {
@@ -687,12 +710,13 @@ pub fn serialize(panel: &Panel) -> Result<String, Problem> {
         out.push_str("\"header\":false");
     }
     if panel.stale_after != STALE_AFTER {
-        // **`div_ceil` and not a plain division.** The parse does `saturating_mul(60)`, so a producer
+        // **`div_ceil` and not a plain division.** [`expiry_of`] saturates, so a producer
         // asking for `u64::MAX` minutes lands on `Duration::from_secs(u64::MAX)` —fifteen seconds past
         // any multiple of sixty. Dividing gives a value whose multiplication does not saturate back
         // and the round trip breaks at exactly that point; rounding up overflows into the saturation
-        // again and lands where it started. Everywhere the parse did not saturate, the seconds are an
-        // exact multiple of sixty and the two agree.
+        // again and lands where it started. Everywhere [`expiry_of`] did not saturate — and both a
+        // published document and a patch's `set` reach it — the seconds are an exact multiple of
+        // sixty and the two agree.
         let minutes = panel.stale_after.as_secs().div_ceil(60);
         comma.before(&mut out);
         out.push_str(&format!("\"stale_after_minutes\":{minutes}"));
@@ -833,7 +857,7 @@ fn string_ref<'a>(raw: &'a serde_json::Value, field: &str) -> Option<&'a str> {
     raw.get(field).and_then(serde_json::Value::as_str)
 }
 
-fn attention(name: &str) -> Option<Attention> {
+pub(crate) fn attention_named(name: &str) -> Option<Attention> {
     match name {
         "wait" => Some(Attention::Wait),
         "block" => Some(Attention::Block),

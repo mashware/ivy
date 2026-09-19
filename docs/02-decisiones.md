@@ -6357,3 +6357,150 @@ perfectly.
 | Emitting `written_at` | It is the file's own date, held by the application, and the parser does not read it back: it would invent a contract field |
 | Dividing the expiry by sixty | The parse saturates at `u64::MAX` seconds, and a plain division comes back fifteen seconds short of it and does not saturate again. Rounding up overflows into the saturation and lands where it started, and is exact everywhere else |
 | Asserting on the emitted text rather than on the re-parsed panel | **D30**: a writer that emitted the expiry in seconds would satisfy a text assertion and still hand back a different document. The two exceptions are the two properties a round trip cannot reach — the newline and the growth |
+
+---
+
+## D47 — A line carries an address its producer chose, and a patch is all-or-nothing over it
+
+**Status: taken.** Delivered in the second PR of the milestone that lets a producer read its panel
+back and change one line of it, on top of
+[D48](#d48--the-application-can-write-the-document-back-out-and-what-the-writer-promises-is-a-round-trip-not-the-producers-bytes)'s
+writer.
+
+**The verb that existed was the whole document or nothing.** A producer with a six-hundred-line panel
+whose third line changed re-sent six hundred, and for the producer this terminal exists for — an
+agent paying per token for what it says — that is the cost of the panel and not the cost of the
+change. Nothing in the contract could say *this line*, because nothing in a document named a line.
+
+### 1. The address is a field of the document, not of the channel
+
+`key` goes on a line, so it reaches **both transports** and a document that has been through one is
+readable by the other (**D17**). The alternative — an index into `lines` — was discarded before it
+was written: a position is invalidated by every insertion above it, so a producer would have to read
+the document back before every patch, and the verb that saves a round trip would cost one.
+
+**It is deliberately not `ref`.** That field is painted, clipped to the width of its column and
+legitimately repeated — `#1` twice in one panel is ordinary — so an address built on it would change
+whenever the text did and would name two lines at once.
+
+**It carries no bound of its own, and the bound it first had was justified by a false reason.** The
+design gave it `MAX_KEY = 128` on the grounds that *every other field of this contract carries one*,
+which is not true: `text`, `phase`, `updated_at`, `ref` and `link` are all unbounded strings. The
+three that are bounded — `indent`, `send`, `actions` — are bounded against what **painting** them
+costs, and a key is never painted. `MAX_BYTES` holds it as it holds every other string.
+
+### 2. A repeated key keeps both lines and refuses whoever addresses it
+
+The first answer was that the first line keeps the key and the rest lose it. The challenge showed
+that contradicts the rule this whole verb rests on: **a patch must never silently mutate the
+producer's document**, and stripping an address while reading one is exactly that. It also puts a
+pass over every line inside `parse`, on the **file** path as well, in a crate that publishes an
+allocation table nobody was going to re-measure.
+
+So both lines keep it, and the op that names it comes back
+`{"ok":false,"error":"the key \"mr-2\" names two lines of this panel"}` — told to the party that can
+act on it, at the moment it matters, by the transport that can answer.
+
+### 3. All or nothing, by value, and the precedent is D15
+
+`Panel::patched_with` returns a **new** panel and the caller installs it or drops it. Three reasons,
+and the third is not an analogy:
+
+- the acceptance criterion demands it — *refused with the reason, and the panel does not change*
+  cannot be true of a request whose other ops applied;
+- the transport already draws the line between a **summary** tolerated per field and an
+  **instruction** that has no partial reading;
+- **D15** transforms the pane tree by value and replaces it only if the transformation reaches the
+  end, so no path leaves a live console outside the tree. Same shape, same reason.
+
+**And the ops within one request see each other's effects**, applied in order to that working copy.
+Resolving every op against the document as it arrived makes two `after` ops on one key ambiguous
+about their final order and makes *insert a line, then replace it* unexpressible. It costs nothing in
+atomicity, because the copy is one nobody is painting.
+
+### 4. `MAX_OPS = 64` bounds work in a frame, not bytes
+
+The bytes are already held by the transport's own ceiling, so a second byte bound would be a
+constant with no job. What this bounds is the walk: without it, an unbounded list of ops over a
+document of tens of thousands of lines is unbounded work **in one frame**, per patch. The keys are
+resolved in **one pass** — the index is built once and repaired as ops insert and delete — and the
+ceiling is what makes that pass worth its constant.
+
+**What that pass actually costs, corrected in review and written here rather than quietly fixed.**
+The first version of this section claimed the result was `O(lines + ops)`. It is not: repairing the
+index on an insert or a delete walks every position it holds, so a patch is
+`O(lines + ops × keyed lines)`. At the document ceiling that lands in the same order of magnitude as
+the figure `MAX_OPS` was chosen against, so the number still does its job — but the claim that was
+published was false, and a false complexity is the same error as a false measurement.
+
+**And what a patch costs in a frame is more than the walk**, which the same review found stated
+nowhere: applying one clones the panel, builds the index over it and writes the result out to weigh
+it against the ceiling. All three scale with the document and not with the patch, so a one-op patch
+on a panel at the ceiling costs about what publishing that panel costs. That is the verb's price and
+not a defect — what it saves is the bytes on the wire and the producer's own tokens, which is what it
+was asked for — but it is the kind of thing that has to be written down before somebody measures it
+and calls it a regression.
+
+**Surplus ops are refused and never truncated**, which is the opposite of what `actions` does and
+deliberately so: a truncated button is a button nobody sees, and a truncated instruction is an edit
+that silently did not happen with the producer told `{"ok":true}`.
+
+### 5. What an op says is not tolerated the way what an op carries is
+
+A `line` an op carries **is a document line**, read by the same reader `parse` uses, so a `mark`
+nobody knows is dropped and the line stands. A field named by a `set` **is part of the instruction**,
+so `{"op":"set","field":"attention","value":"waiting"}` refuses the patch — where the same word
+inside a `panel_set` document is dropped and the panel still paints.
+
+**This is the sharpest point of the design and it is written into the published contract** rather than
+discovered: a document is somebody's summary and losing it over a field nobody looks at would be the
+worst thing to do with it; a request is an instruction, and one nobody can read has no sensible
+reading at all. The document did not change; what can be said *about* it diverges.
+
+### 6. `actions` is refused by name, as scope and not as security
+
+The security framing was false and the challenge was right to say so: a holder already sets any
+buttons it likes through `Action::new` with a `panel_set`, so a patch bypasses no gate and adds no
+reach. What it would add is a second path into the one shape of this contract that reaches a shell,
+for a convenience nobody asked for. The refusal says so in its own sentence, so a producer does not
+read it as a typo.
+
+### 7. What it costs in the frame, and what the run has to declare
+
+A patch enters the frame, so **D13** applies: `patched` and `patches_refused` are counted, the report
+names them on its `documents:` line beside the read's, and `largest_serialized` is fed by the ceiling
+check the patch already pays rather than by a second write. Batch `U` is the only one that patches,
+its control is `S`, and the script invalidates the run in **three** directions rather than the usual
+two — the third being **no patch may be refused**. That third fits no pair, which is why
+`crates/app/tests/batches.rs` guards it by name rather than through the symmetric loop (it is not the
+script's only asymmetric guard: `ACTIONS=1` with nothing pressed is another). It is the one load this
+bench can promise: the publisher holds the pane it patches and every op names a key it published
+itself, so a refusal means the run measured the parse and the answer instead of the walk, the index
+and the install — and left on screen exactly the panel a successful patch would have. **And the
+numbers it reads are pulled out of the report by the words beside them**, so an empty capture is
+invalidated rather than read as a zero, and a second guard holds those words against what the report
+writes.
+
+**What was discarded, and why.**
+
+| Discarded | Why |
+|---|---|
+| Addressing a line by its index in `lines` | Every insertion above it invalidates it, so a producer would have to read the document back before each patch — the round trip the verb exists to save |
+| Addressing by `ref` | Painted, clipped and legitimately repeated: an address that changes when the text does |
+| A repeated key keeping only the first line | It rewrites somebody else's document while reading it, and puts a pass over every line inside `parse` on the file path too |
+| A bound on `key` | Its stated reason was false — the unbounded fields of this contract outnumber the bounded ones, and the bounded ones are bounded against painting |
+| Applying the ops that work and reporting the rest | The acceptance criterion, the instruction-versus-summary line, and **D15**'s precedent all say the same thing |
+| Every op resolved against the document as it arrived | Two `after` ops on one key become ambiguous, and *insert then replace* becomes unexpressible |
+| Truncating at `MAX_OPS` | An edit that silently did not happen, with `{"ok":true}` on the wire |
+| A `source` on the patch request | The hold already names its holder and a patch cannot exist without a hold: it would reach nothing, or rename a holder mid-hold |
+| A second error type for a refused op | `serialize` answers in `Problem` and the ceiling is `Problem::TooBig`; two vocabularies for one verb makes every caller translate |
+| A field beside its value — `Set { field, value }` | Two parallel enums the parser has to keep in step and no type can: a `header` paired with a phase string was constructible, and the applying code, obliged to answer for a pair the parser cannot produce, absorbed it into «as if unsaid» and cleared a field nobody had named. One enum carrying its own value leaves four total arms and no impossible pair. **Caught by two reviewers blinded to each other and to this document** |
+| Accepting an empty `ops` list | Applying none of no ops succeeds by definition: the pane would answer `{"ok":true}`, count a patch and stamp the date, so a producer looping on empty patches keeps a panel looking fresh without ever publishing — the exact silence the stale notice exists to break |
+| Wrapping a refusal in `Problem::Invalid`'s «not understood» | The patch was understood exactly and refused, and the contract publishes the sentence the producer reads |
+| Serializing the patched document a second time to measure it | The ceiling check already wrote it out, and paying it twice would publish this path as costing about double |
+| Making `panel_patch` take no hold, like `panel_get` | A read exists for the producer that has *not* claimed the pane; a write by a second producer is the collision the hold exists to stop |
+| Giving the patching batch a document of its own | Its control would publish different bytes, which is not a control. The key goes on all three channel batches and on no file-seeded one — **which does leave `S` publishing thirteen bytes its own control `C` does not**, said in the batch table and in the script rather than left to be found: a key is never painted and never read by the application, and putting it on every batch would move all eighteen measured runs instead of three |
+| Setting `phase` as the patching batch's scalar op | **Caught in review, and it is D13 exactly.** `phase` is painted on the identity row, so the batch would have drawn «· patched ·» where its control draws nothing — ten cells laid out every frame, and a row that wraps differently on a narrow panel — and the difference published as what a patch costs. The expiry is read and never drawn, and the op sets it to what the document already declares |
+| Letting an insert carry a key the document already has | It makes that key name two lines, so every later op addressing it is refused for the life of the hold and the only way out is republishing the whole document — the cost this verb exists to remove. Reached by an ordinary copy-paste, and by retrying a patch whose answer timed out |
+| One sentence for «nothing published» and «the file rules this panel» | **The design's premise was refuted by its own sibling verb.** It argued the two cannot be told apart from outside, and a read of the same pane tells them apart, answering *nothing has been published on this console yet*. A producer that had just read its document back would have been told, one request later, that the document was the file's |
+| Leaving the ops unbounded on the wire | `MAX_REQUEST` is the document's ceiling plus an envelope sized for fixed keys and a name. A patch rewriting sixty keyed lines of a near-ceiling document exceeds it — and that is `Unrecoverable`, so the connection ends and the hold with it, and the panel falls back to its file. The bound is on the encoded bytes, the same shape `source` already has, and the refusal leaves the connection alive |

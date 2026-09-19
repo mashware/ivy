@@ -158,6 +158,27 @@ impl PaneControl {
                     };
                     let _ = delivery.answer.send(answer);
                 }
+                // **The patch lands beside the publication and not beside the reads**, because it
+                // is a write: it needs the hold, it stamps the date, and what it leaves behind is
+                // what the next painting draws.
+                What::Patch { ops } => {
+                    let answer = match state.patch(delivery.connection, &ops, now) {
+                        Ok(written) => {
+                            self.did.patched += 1;
+                            // **The size of what the patch left behind, not of the ops that
+                            // arrived**, and it comes back from the ceiling check rather than from a
+                            // second write: the document a following read would hand over is the one
+                            // whose size explains this path's cost.
+                            self.did.largest_serialized = self.did.largest_serialized.max(written);
+                            Answer::Taken
+                        }
+                        Err(why) => {
+                            self.did.patches_refused += 1;
+                            Answer::Refused(why)
+                        }
+                    };
+                    let _ = delivery.answer.send(answer);
+                }
                 What::Closed => {
                     if state.release(delivery.connection) == Released::Given {
                         self.did.released += 1;
@@ -411,7 +432,7 @@ impl Window {
                     // there is nobody to answer and nothing to say.
                     continue;
                 }
-                What::Publish { .. } | What::Get => {
+                What::Publish { .. } | What::Get | What::Patch { .. } => {
                     Answer::Refused("that request is not the window's".to_owned())
                 }
             };
@@ -1188,6 +1209,424 @@ mod tests {
         assert!(
             pane.woken.load(Ordering::Relaxed) > after_arrival,
             "a request that waits for the window did not wake it"
+        );
+    }
+
+    /// One producer that stays connected and does what the test asks, **one verb at a time**.
+    ///
+    /// **The sequence is what these tests are about**, which is why neither `Publishing` nor `Asking`
+    /// serves them: a patch needs the hold a publication took, and what it did to the panel is read
+    /// back through the verb a producer would use. Three connections doing those three things would
+    /// be three producers, and the second of them would be refused — which is the rule working, and
+    /// not the test that was wanted.
+    struct Session {
+        asked: SyncSender<Verb>,
+        answered: Receiver<Answered>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    /// What a session is told to do next.
+    enum Verb {
+        Publish(String, String),
+        Patch(String),
+        Get,
+    }
+
+    impl Session {
+        fn start(mut producer: Producer) -> Self {
+            let (asked, to_do) = sync_channel(0);
+            let (answering, answered) = channel();
+            let thread = std::thread::spawn(move || {
+                while let Ok(verb) = to_do.recv() {
+                    let answer = match verb {
+                        Verb::Publish(source, document) => producer.publish(&source, &document),
+                        Verb::Patch(ops) => producer.patch(&ops),
+                        Verb::Get => producer.read_the_document(),
+                    };
+                    let _ = answering.send(answer.expect("the request reached the pane"));
+                }
+            });
+
+            Self {
+                asked,
+                answered,
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for Session {
+        fn drop(&mut self) {
+            drop(std::mem::replace(&mut self.asked, sync_channel(0).0));
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    impl Driven {
+        /// A connection that publishes this document first and stays open.
+        fn session_holding(&mut self, source: &str, document: &str) -> Session {
+            let session = Session::start(self.producer());
+            let taken = self.ask(
+                &session,
+                Verb::Publish(source.to_owned(), document.to_owned()),
+            );
+            assert!(
+                matches!(taken, Answered::Ok),
+                "the pane refused the publication these tests start from"
+            );
+            session
+        }
+
+        /// Asks one verb and runs frames until it is answered, the way frames would.
+        fn ask(&mut self, session: &Session, verb: Verb) -> Answered {
+            session.asked.send(verb).expect("the session is listening");
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                self.control.apply(&mut self.state, SystemTime::now());
+                match session.answered.try_recv() {
+                    Ok(answer) => return answer,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(gone) => panic!("the producer's thread is gone ({gone})"),
+                }
+            }
+            panic!("the pane never answered the request");
+        }
+
+        /// What a `panel_get` hands back right now, as the document's own text.
+        ///
+        /// **Read through the verb and not off the field**, which is the disguise D30 names: asserting
+        /// on `last_good` would pass a build whose patch never reached the document a producer can
+        /// see.
+        fn document_as_a_producer_reads_it(&mut self, session: &Session) -> String {
+            let Answered::Document(document) = self.ask(session, Verb::Get) else {
+                panic!("a read answers with a document");
+            };
+            document
+        }
+    }
+
+    /// **AC2**: three edits in one request, and nothing else moved.
+    #[test]
+    fn three_edits_in_one_request_land_and_leave_the_rest_of_the_panel_alone() {
+        let mut driven = a_driven_pane();
+        let session = driven.session_holding(
+            "flow",
+            r#"{"phase":"build","lines":[
+                {"key":"title","text":"243"},
+                {"key":"mr-1","text":"read it back"},
+                {"key":"mr-3","text":"the strip"}
+            ]}"#,
+        );
+
+        let patched = driven.ask(
+            &session,
+            Verb::Patch(
+                r#"[{"op":"after","key":"mr-1","line":{"key":"mr-2","text":"patch one line"}},
+                    {"op":"replace","key":"mr-3","line":{"key":"mr-3","text":"the strip, done","mark":"done"}},
+                    {"op":"delete","key":"title"}]"#
+                    .to_owned(),
+            ),
+        );
+        assert!(matches!(patched, Answered::Ok), "{patched:?}");
+
+        let read_back =
+            panel_contract::parse_document(&driven.document_as_a_producer_reads_it(&session))
+                .expect("what comes back parses as a panel");
+        assert_eq!(
+            read_back
+                .lines
+                .iter()
+                .map(|line| (line.key.as_deref(), line.text.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some("mr-1"), "read it back"),
+                (Some("mr-2"), "patch one line"),
+                (Some("mr-3"), "the strip, done"),
+            ]
+        );
+        assert_eq!(
+            read_back.phase.as_deref(),
+            Some("build"),
+            "a field no op named changed anyway"
+        );
+    }
+
+    /// **AC3**: a key that names nothing refuses the whole patch, and the panel does not move.
+    ///
+    /// **Both sides are read through a `panel_get`** and not off `last_good`: the field is where the
+    /// document is recorded, and what this claims is that a producer sees the same panel before and
+    /// after — which is the effect, and the only thing a producer can act on.
+    #[test]
+    fn a_key_that_names_nothing_refuses_the_patch_and_the_document_a_producer_sees_is_unchanged() {
+        let mut driven = a_driven_pane();
+        let session = driven.session_holding(
+            "flow",
+            r#"{"lines":[{"key":"mr-1","text":"read it back"},"","tail"]}"#,
+        );
+        let before = driven.document_as_a_producer_reads_it(&session);
+
+        let refusal = driven.ask(
+            &session,
+            Verb::Patch(
+                r#"[{"op":"replace","key":"mr-1","line":{"key":"mr-1","text":"applied"}},
+                    {"op":"delete","key":"tets"}]"#
+                    .to_owned(),
+            ),
+        );
+
+        let Answered::Failed(why) = refusal else {
+            panic!("a key that names nothing is refused, and this answered {refusal:?}");
+        };
+        assert!(why.contains("\"tets\""), "the refusal names the key: {why}");
+        assert_eq!(
+            driven.document_as_a_producer_reads_it(&session),
+            before,
+            "the op before the bad one applied, so the patch was not all-or-nothing"
+        );
+    }
+
+    /// **AC4**: a publication after any number of patches is the whole truth again.
+    #[test]
+    fn a_publication_after_patches_leaves_nothing_of_the_patched_state() {
+        let mut driven = a_driven_pane();
+        let session = driven.session_holding(
+            "flow",
+            r#"{"phase":"build","attention":"wait","lines":[{"key":"mr-1","text":"one"}]}"#,
+        );
+        for ops in [
+            r#"[{"op":"last","line":{"key":"mr-2","text":"two"}}]"#,
+            r#"[{"op":"set","field":"phase","value":"review"}]"#,
+        ] {
+            let patched = driven.ask(&session, Verb::Patch(ops.to_owned()));
+            assert!(matches!(patched, Answered::Ok), "{patched:?}");
+        }
+
+        // **What the patches did is read back BEFORE the publication wipes it**, and without this the
+        // test proves nothing: every assertion after the publication expects the *unpatched* values,
+        // so a patch that answered `{"ok":true}` and changed nothing would satisfy all of them.
+        let patched_state =
+            panel_contract::parse_document(&driven.document_as_a_producer_reads_it(&session))
+                .expect("what comes back parses as a panel");
+        assert_eq!(patched_state.lines.len(), 2);
+        assert_eq!(patched_state.lines[1].key.as_deref(), Some("mr-2"));
+        assert_eq!(patched_state.phase.as_deref(), Some("review"));
+
+        let published = driven.ask(
+            &session,
+            Verb::Publish("flow".to_owned(), r#"{"lines":["only this"]}"#.to_owned()),
+        );
+        assert!(matches!(published, Answered::Ok), "{published:?}");
+
+        let read_back =
+            panel_contract::parse_document(&driven.document_as_a_producer_reads_it(&session))
+                .expect("what comes back parses as a panel");
+        assert_eq!(read_back.lines.len(), 1);
+        assert_eq!(read_back.lines[0].text, "only this");
+        assert_eq!(read_back.lines[0].key, None);
+        assert_eq!(
+            read_back.phase, None,
+            "a patched field outlived its document"
+        );
+        assert_eq!(read_back.attention, None);
+    }
+
+    /// **AC5**: a small request whose result is over the ceiling is refused, and nothing is installed.
+    ///
+    /// **The document is built just under the ceiling and the patch adds far more than the margin**,
+    /// so the defect and the fix cannot give the same answer — which is the second disguise D30 names
+    /// for a test about a limit.
+    #[test]
+    fn a_patch_whose_result_is_over_the_ceiling_is_refused_and_changes_nothing() {
+        let mut driven = a_driven_pane();
+        // Room for the envelope of the document and for the line's own punctuation, and no more.
+        let filling = "f".repeat(panel_contract::MAX_BYTES as usize - 64);
+        let session = driven.session_holding(
+            "flow",
+            &format!(r#"{{"lines":[{{"key":"bulk","text":"{filling}"}}]}}"#),
+        );
+        let before = driven.document_as_a_producer_reads_it(&session);
+
+        let refusal = driven.ask(
+            &session,
+            Verb::Patch(format!(
+                r#"[{{"op":"last","line":"{}"}}]"#,
+                "g".repeat(4096)
+            )),
+        );
+
+        let Answered::Failed(why) = refusal else {
+            panic!("a result over the ceiling is refused, and this answered {refusal:?}");
+        };
+        assert!(
+            why.contains("over") && why.contains("KiB"),
+            "the refusal is the contract's own ceiling sentence: {why}"
+        );
+        assert_eq!(
+            driven.document_as_a_producer_reads_it(&session),
+            before,
+            "a document over the ceiling was installed anyway"
+        );
+    }
+
+    /// The two refusals that come from the hold, **and the wrong-holder one is the publication's own
+    /// sentence**.
+    #[test]
+    fn a_patch_needs_the_hold_a_publication_takes() {
+        let mut driven = a_driven_pane();
+
+        let stranger = Session::start(driven.producer());
+        let unheld = driven.ask(
+            &stranger,
+            Verb::Patch(r#"[{"op":"set","field":"phase","value":"build"}]"#.to_owned()),
+        );
+        let Answered::Failed(why) = unheld else {
+            panic!("a patch with nothing published is refused, and this answered {unheld:?}");
+        };
+        // **The same sentence a read of this pane answers**, and asserted against that read rather
+        // than against a literal: a producer that has just been told nothing is published must not be
+        // told, one request later, that the panel belongs to a file.
+        let Answered::Failed(read) = driven.ask(&stranger, Verb::Get) else {
+            panic!("a read of a pane with nothing on it is refused too");
+        };
+        assert_eq!(why, read);
+        assert!(why.contains("nothing has been published"), "{why}");
+
+        // And once something IS published by somebody else, the refusal changes to the one that says
+        // the move.
+        let _holder = driven.session_holding("flow", r#"{"lines":["held"]}"#);
+        let Answered::Failed(its_files) = driven.ask(
+            &stranger,
+            Verb::Patch(r#"[{"op":"set","field":"phase","value":"build"}]"#.to_owned()),
+        ) else {
+            panic!("a patch from a second connection is refused");
+        };
+        assert!(
+            its_files.contains("until that connection closes"),
+            "a held pane names its holder: {its_files}"
+        );
+
+        let publishing = driven.ask(
+            &stranger,
+            Verb::Publish("other".to_owned(), r#"{"lines":["mine"]}"#.to_owned()),
+        );
+        let Answered::Failed(same) = publishing else {
+            panic!("a publication from a second connection is refused too");
+        };
+        // One sentence for one refusal: a producer that reads two wordings has to work out whether
+        // they mean the same thing.
+        assert_eq!(its_files, same);
+    }
+
+    /// **A panel whose holder let go, with what it published still on screen, is the other state the
+    /// two refusals exist to tell apart** — and the one no test reached.
+    ///
+    /// `release` takes the hold and leaves the document, so this pane has something to patch and
+    /// nobody driving it. The patch that arrives then must be told the move rather than «nothing has
+    /// been published»: the read this test makes first hands that document straight back, so the two
+    /// sentences one request apart would contradict each other about one pane.
+    #[test]
+    fn a_patch_reaching_a_panel_whose_holder_let_go_is_told_to_publish_first() {
+        let mut driven = a_driven_pane();
+        let mut published =
+            driven.publishing("flow", r#"{"lines":[{"key":"one","text":"still"}]}"#);
+        assert!(matches!(published.answer(), Answered::Ok));
+        published.disconnect();
+        driven.frames_until(|state| state.held_by().is_none());
+
+        let session = Session::start(driven.producer());
+        let document = driven.document_as_a_producer_reads_it(&session);
+        assert!(
+            document.contains("still"),
+            "what the holder published did not survive its release: {document}"
+        );
+
+        let Answered::Failed(why) = driven.ask(
+            &session,
+            Verb::Patch(r#"[{"op":"set","field":"phase","value":"build"}]"#.to_owned()),
+        ) else {
+            panic!("a patch on a panel nobody holds is refused");
+        };
+        assert!(
+            why.contains("publish with panel_set"),
+            "the refusal denies a document the read above just handed over: {why}"
+        );
+    }
+
+    /// **AC7's half that lives here**: the two numbers the report publishes count what they say.
+    #[test]
+    fn a_patch_is_counted_apart_from_a_publication_and_with_the_size_it_left_behind() {
+        let mut driven = a_driven_pane();
+        let session = driven.session_holding("flow", r#"{"lines":[{"key":"one","text":"a"}]}"#);
+        let after_publishing = driven.control.did();
+        assert_eq!(after_publishing.patched, 0);
+
+        let patched = driven.ask(
+            &session,
+            Verb::Patch(r#"[{"op":"replace","key":"one","line":{"key":"one","text":"a much longer line than before"}}]"#.to_owned()),
+        );
+        assert!(matches!(patched, Answered::Ok), "{patched:?}");
+        let counted = driven.control.did();
+
+        assert_eq!(counted.patched, 1);
+        assert_eq!(counted.patches_refused, 0);
+        assert_eq!(
+            counted.applied, after_publishing.applied,
+            "a patch was counted as a document applied"
+        );
+        assert_eq!(
+            counted.largest_serialized,
+            driven.document_as_a_producer_reads_it(&session).len(),
+            "the size published is not the document the patch left behind"
+        );
+
+        let refused = driven.ask(
+            &session,
+            Verb::Patch(r#"[{"op":"delete","key":"nobody"}]"#.to_owned()),
+        );
+        assert!(matches!(refused, Answered::Failed(_)), "{refused:?}");
+        assert_eq!(driven.control.did().patches_refused, 1);
+        assert_eq!(
+            driven.control.did().patched,
+            1,
+            "a refused patch was counted as one that applied"
+        );
+    }
+
+    /// **AC6 on this side of the channel**: a producer that uses no keys behaves exactly as before.
+    #[test]
+    fn a_producer_that_addresses_nothing_can_still_reach_the_ends_and_nothing_else() {
+        let mut driven = a_driven_pane();
+        let session = driven.session_holding("flow", r#"{"lines":["one","two"]}"#);
+
+        let at_the_end = driven.ask(
+            &session,
+            Verb::Patch(r#"[{"op":"last","line":"three"}]"#.to_owned()),
+        );
+        assert!(matches!(at_the_end, Answered::Ok), "{at_the_end:?}");
+
+        let by_text = driven.ask(
+            &session,
+            Verb::Patch(r#"[{"op":"delete","key":"one"}]"#.to_owned()),
+        );
+        assert!(
+            matches!(by_text, Answered::Failed(_)),
+            "a line's text became an address: {by_text:?}"
+        );
+
+        let read_back =
+            panel_contract::parse_document(&driven.document_as_a_producer_reads_it(&session))
+                .expect("what comes back parses as a panel");
+        assert_eq!(
+            read_back
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["one", "two", "three"]
         );
     }
 }

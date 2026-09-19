@@ -339,7 +339,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T or V}
+BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U or V}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -383,8 +383,9 @@ case "$BATCH" in
     R)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=button; ACTIONS=1 ;;   # two, and pressing a button on a panel: its control is C
     S)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1 ;;       # two, and both published over the CHANNEL instead of by file: its control is C
     T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
+    U)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; PATCHES=1 ;; # two, and the only one that PATCHES the document over the channel: its control is S (and S, U and V publish one field the file batches do not — see `document_of`)
     V)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; READS=1 ;;  # two, and the only one that READS THE DOCUMENT BACK over the channel: its control is S
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T or V" >&2; exit 2 ;;
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U or V" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -543,7 +544,18 @@ fi
 # `crates/panel-control/examples/publish.rs`). One body because a channel batch with a document of
 # its own would be measuring a different panel from its control — `C` is `S`'s control — and nothing
 # but this one function keeps two copies from drifting.
-document_body() {  # document_body <which of the consoles> <turn>
+document_body() {  # document_body <which of the consoles> <turn> [the key on the note line]
+    # **An address on one line, and only where it is asked for.** A key is never painted and the
+    # parse only stores it, so this changes nothing about what a panel costs to draw — but it does
+    # change the bytes, and a batch compared against another has to publish the same ones. Only the
+    # channel batches ask for it, which keeps every file-seeded document exactly as it was.
+    # **An `if` and not `[ … ] && …`**, because this function's body runs inside a command
+    # substitution: with `set -e` on, a bare test that comes out false is the last command of
+    # its list and would end the subshell, handing the caller half a document and no error.
+    note_key=''
+    if [ -n "${3:-}" ]; then
+        note_key="\"key\":\"$3\","
+    fi
     # **The attention goes into what is seeded now that the tab shows it.** Without it, the bar
     # would be painted with nobody asking for anything: it would walk the same — the walk does not
     # depend on there being attention — but it would paint not a single symbol, and the batch would
@@ -583,7 +595,7 @@ document_body() {  # document_body <which of the consoles> <turn>
   "",
   {"ref":"load","text":"$MIB MiB per console, TUI-style dump","mark":"current"},
   {"ref":"panel","text":"regime $BATCH — this is what is being measured","mark":"info"},
-  {"ref":"note","text":"the layout is redone on every good re-read","mark":"info"},
+  {$note_key"ref":"note","text":"the layout is redone on every good re-read","mark":"info"},
   "",
   {"text":"six lines and a warning: the size of a real working panel","mark":"done"}
 ]}
@@ -606,11 +618,45 @@ publish() {  # publish <directory> <n> <which of the consoles>
     mv "$tmp" "$1/panel.json"   # in one go, as the contract requires
 }
 
-# **What batch S publishes is that same body**, with the turn left as the literal `{n}` for the
-# publisher to substitute per publication.
+# **What the channel batches publish is that same body**, with the turn left as the literal `{n}` for
+# the publisher to substitute per publication — **and with an address on one of its lines**, which is
+# the one difference from what the file-seeded batches write.
+#
+# **The key goes on all three channel batches and not only on the one that patches.** `U` needs a line
+# it can name; `S` is its control and `V`'s, and a control that publishes fewer bytes than the batch
+# it is compared against is not a control. The file batches are left byte for byte as they were, so
+# nothing outside this trio moves.
+#
+# **What that costs, said here and in the batch table rather than left to be discovered.** `S`'s own
+# control is `C`, which is file-seeded, so `S` now publishes thirteen bytes `C` does not — and `S`
+# publishes thirteen bytes more than the `S` runs already measured for the reading milestone. A key
+# is **never painted and never read** by the application (nothing in `crates/app/src/panel.rs`
+# touches it), so what it costs is one more string kept by a parse that already runs once a second;
+# the alternative — putting it on every batch — would move all eighteen measured runs instead of
+# three, which is worse for the same reason.
 document_of() {  # document_of <which of the consoles>
-    document_body "$1" '{n}'
+    document_body "$1" '{n}' note
 }
+
+# **What batch U sends after each publication**, declared here beside the document for the same
+# reason the document is declared here at all: a load written inside the publisher is a load this
+# table does not say out loud.
+#
+# **Two ops, one of each kind the frame pays differently for**: one addressed by key, which is the
+# only work a patch adds that the document's size drives, and one scalar, which is the cheapest op
+# there is. **Both write back exactly what is already there** — the replacement is the line it
+# replaces word for word, and the scalar is the expiry the document already declares — so what is
+# painted after the patch is what would have been painted without it. The batch differs from its
+# control in the work, not in the picture.
+#
+# **The scalar is the expiry and not the phase, and that is not interchangeable.** `phase` is
+# painted, on the identity row: setting it would have made this batch draw «· patched ·» where its
+# control draws nothing, ten cells laid out every frame and a row that wraps differently on a narrow
+# panel — and the difference published as what a patch costs. The expiry is read and never drawn,
+# and 600 is what the document above already says, so setting it moves no pixel. **D13**, caught in
+# review.
+OPS='[{"op":"replace","key":"note","line":{"key":"note","ref":"note","text":"the layout is redone on every good re-read","mark":"info"}},
+      {"op":"set","field":"stale_after_minutes","value":600}]'
 
 # **One publisher per console, each holding its connection open for the whole run.** A connection per
 # publication would claim and release the pane every turn, which measures the holder's churn instead
@@ -624,17 +670,19 @@ document_of() {  # document_of <which of the consoles>
 publish_over_the_channel() {  # publish_over_the_channel <directories>
     which=0
     publishers=""
-    # **The verb the load uses, and the two batches differ in this and in nothing else.** `S`
-    # publishes a whole document every second; `V` publishes one and then asks for it back every
-    # second. Same consoles, same dumping, same interval — which is what makes `S` an honest control
-    # for `V` rather than a run that happens to be nearby.
+    # **The verb the load uses, and the three batches differ in this and in nothing else.** `S`
+    # publishes a whole document every second; `V` publishes one and then asks for it back; `U`
+    # publishes one and then changes a line of it by name. Same consoles, same dumping, same
+    # interval, same bytes published — which is what makes `S` an honest control for either of them
+    # rather than a run that happens to be nearby.
     verb=publish
     [ "${READS:-}" = 1 ] && verb=read
+    [ "${PATCHES:-}" = 1 ] && verb=patch
     for d in $1; do
         which=$((which + 1))
         "$PUBLISHER" \
             "$d" "${d##*agent-terminal-}" "bench" \
-            3600 1000 "$(document_of "$which")" "$verb" >&2 &
+            3600 1000 "$(document_of "$which")" "$verb" "$OPS" >&2 &
         publishers="$publishers $!"
     done
 
@@ -721,7 +769,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|V) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -959,6 +1007,45 @@ that never had a read in it"
         invalidate "this batch asks for no read of the document and yet the window answered \
 $READ_BACK: something other than its own load is asking, so its spans mix in work that does not \
 belong to what it claims to measure"
+    fi
+
+    # **The patching pair, read in both directions like every other, and then a third guard nothing
+    # else here has.** A patch is the one verb of this channel a batch can promise will be accepted:
+    # its publisher holds the pane it patches and every op names a key it published itself. So a
+    # refusal is not a state of the world to be reported — it is this batch measuring the parse and
+    # the refusal instead of the walk, the index and the install, and publishing the difference as
+    # what patching costs. The panel it leaves behind is the published one either way, so nothing on
+    # screen gives it away.
+    PATCHED=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/.*, \([0-9]*\) patched,.*/\1/p')
+    PATCHES_REFUSED=$(printf '%s' "$DOCUMENTS_LINE" | sed -n 's/.*, \([0-9]*\) patches refused,.*/\1/p')
+    # **An extraction that came back empty is invalidated, not defaulted to zero**, and that is the
+    # difference between a guard and a decoration. The line is there — the block above proved it —
+    # so an empty capture means the wording moved and this `sed` no longer matches it. Defaulting to
+    # zero would then read as «no patches», which silences the third guard below on the batch that
+    # patches and the reverse guard on every batch that does not: the whole pair would go quiet on a
+    # rewording, and the reports would all agree with each other.
+    if [ -z "$PATCHED" ] || [ -z "$PATCHES_REFUSED" ]; then
+        invalidate "the «documents:» line does not carry the patch counts where this script reads \
+them: «$DOCUMENTS_LINE». The wording moved and every guard below reads zero, so a run that patched \
+nothing and one that patched everything would both pass"
+        PATCHED=0
+        PATCHES_REFUSED=0
+    fi
+    if [ "${PATCHES:-}" = 1 ] && [ "$PATCHED" = 0 ]; then
+        invalidate "this batch changes the document over the control channel and the window applied \
+none of the patches ($PATCHES_REFUSED refused): the publisher never reached the pane, or it never \
+took the hold a patch needs, and what is published under «the control channel» is the cost of a \
+drain that never had a patch in it"
+    fi
+    if [ "${PATCHES:-}" != 1 ] && [ "$PATCHED" != 0 ]; then
+        invalidate "this batch changes no document and yet the window applied $PATCHED patches: \
+something other than its own load is patching, so its spans mix in work that does not belong to \
+what it claims to measure"
+    fi
+    if [ "${PATCHES:-}" = 1 ] && [ "$PATCHES_REFUSED" != 0 ]; then
+        invalidate "this batch had $PATCHES_REFUSED of its patches refused: a refusal skips the \
+write-out and the install, so what the run would publish as the cost of patching is the cost of \
+stopping half way through one"
     fi
 fi
 

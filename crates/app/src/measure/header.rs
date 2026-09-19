@@ -573,6 +573,32 @@ pub struct Control {
     /// bench's two failures apart: a batch whose reads were all refused and one whose publisher never
     /// reached the pane both leave `read_back` at zero, and only this number says which happened.
     pub read_refused: usize,
+    /// Documents changed in place, a line or a field at a time.
+    ///
+    /// **Counted apart from `applied` for the reason that one is counted apart from a read**: a
+    /// patch and a publication both put a new document on a panel, and they are not the same work —
+    /// one reads a body it was handed and the other walks the one that is there, indexes its keys
+    /// and writes the result out to weigh it. Folding them together would leave the number that
+    /// invalidates a run in both directions counting two populations under a label that names one.
+    pub patched: usize,
+    /// Patches the pane refused, **which is not every patch that was refused**.
+    ///
+    /// Everything a document is not needed to decide — an op nobody serves, a field that is not
+    /// patchable, a value of the wrong kind, more ops than the ceiling allows — is refused on the
+    /// connection's own thread and never reaches a pane, so it reaches neither of these numbers. What
+    /// lands here are the four the panel itself decides: no hold, a key that names nothing, a key
+    /// that names two lines, and a result over the ceiling. That is the right population for a
+    /// measurement — the others cost no frame — and it is said out loud because a reader would
+    /// otherwise take a zero here for «every patch was accepted».
+    ///
+    /// **A batch that patches declares this must be zero, and no other counter here is asserted that
+    /// way.** The others are published because no batch can promise them — a refusal needs a second
+    /// source, a release needs a connection to end. This one a batch *can* promise: its publisher
+    /// holds the pane it patches, and every op it sends names a key it published itself. A run whose
+    /// patches were all refused leaves the panel exactly as the publication left it, paints the same
+    /// pixels and costs the parse and the refusal instead of the walk — and it would be published as
+    /// the cost of patching.
+    pub patches_refused: usize,
     /// The largest document this run wrote out, in bytes.
     ///
     /// **Without it a run publishes a cost with no size attached to it**, and a reader extrapolates
@@ -600,6 +626,8 @@ impl Control {
             released: self.released + other.released,
             read_back: self.read_back + other.read_back,
             read_refused: self.read_refused + other.read_refused,
+            patched: self.patched + other.patched,
+            patches_refused: self.patches_refused + other.patches_refused,
             largest_serialized: self.largest_serialized.max(other.largest_serialized),
         }
     }
@@ -954,8 +982,12 @@ pub fn header(
     // discovery publishes how many characters it searched.
     writeln!(
         a,
-        "documents:    {} read back, {} refused, {} bytes the largest written out",
-        control.read_back, control.read_refused, control.largest_serialized
+        "documents:    {} read back, {} refused, {} patched, {} patches refused, {} bytes the largest written out",
+        control.read_back,
+        control.read_refused,
+        control.patched,
+        control.patches_refused,
+        control.largest_serialized
     )?;
     // **Always, and both halves on one line.** A batch that asks for strips and painted none has
     // the gate broken or a window too short to cut one, and would publish «the strip costs
@@ -1067,6 +1099,8 @@ mod tests {
             released: 2,
             read_back: 4,
             read_refused: 2,
+            patched: 7,
+            patches_refused: 1,
             largest_serialized: 900,
         };
         let other = Control {
@@ -1075,6 +1109,8 @@ mod tests {
             released: 1,
             read_back: 6,
             read_refused: 3,
+            patched: 2,
+            patches_refused: 4,
             largest_serialized: 120,
         };
 
@@ -1085,6 +1121,8 @@ mod tests {
         assert_eq!(both.released, 3);
         assert_eq!(both.read_back, 10);
         assert_eq!(both.read_refused, 5);
+        assert_eq!(both.patched, 9);
+        assert_eq!(both.patches_refused, 5);
         assert_eq!(
             both.largest_serialized, 900,
             "the size published named a document nobody wrote"

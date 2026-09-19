@@ -33,6 +33,7 @@ const DECLARED: &[(&str, &str)] = &[
     ("CONTROL", "control"),
     ("HEADER", "header"),
     ("READS", "documents"),
+    ("PATCHES", "documents"),
 ];
 
 /// Whether the script has a conditional on this test that ends up invalidating the run.
@@ -81,6 +82,31 @@ fn every_declared_load_is_read_in_both_directions() {
         missing.is_empty(),
         "a batch could publish a load as costing nothing:\n  {}",
         missing.join("\n  ")
+    );
+}
+
+/// **The asymmetric guard this file protects, because the symmetric ones protect each other.**
+///
+/// Every pair above is symmetric — declared and measured none, declared none and measured some — and
+/// the symmetry is what makes a deleted half visible to the loop. The patching batch has a third
+/// that fits no pair: **none of its patches may be refused**. It is the only load of this bench a
+/// batch can promise, because its publisher holds the pane it patches and every op names a key it
+/// published itself, and it is worth asserting because a refused patch skips the write-out and the
+/// install — while leaving on screen exactly the panel a successful one would have. A run that
+/// refused every patch publishes the cost of stopping half way through one under the name of
+/// patching, and looks perfect. (It does pay the clone and the index: the ops are only known to
+/// resolve by resolving them, which is what all-or-nothing costs.)
+///
+/// **It is not the script's only asymmetric guard**, and saying otherwise was the first version of
+/// this comment: `ACTIONS=1` with nothing pressed is another, and nothing in this file protects it
+/// either. That one is not added here because it is not this delivery's, and a guard added without
+/// its own reasoning is the kind nobody dares delete later.
+#[test]
+fn a_refused_patch_cannot_be_published_as_the_cost_of_patching() {
+    assert!(
+        invalidates_on("[ \"$PATCHES_REFUSED\" != 0 ]"),
+        "nothing invalidates a patching batch whose patches were all refused: the run would publish \
+         the cost of the refusal under the name of the work"
     );
 }
 
@@ -177,6 +203,40 @@ fn every_line_the_script_reads_is_one_the_application_writes() {
         assert!(
             HEADER.contains(&format!("\"{line}:")),
             "{knob}: the report does not write a «{line}:» line for the script to read"
+        );
+    }
+}
+
+/// **The line's name is not what the script reads — the words inside it are.**
+///
+/// The guard above holds the «documents:» heading and nothing under it, and the numbers are pulled
+/// out by `sed` patterns anchored on the prose beside them. Rewording «patched» to «patches applied»
+/// leaves that heading standing, every assertion above green, and each `sed` matching nothing — and
+/// a capture that matches nothing used to become a zero, which reads as «no patches» and silences
+/// both directions of the pair at once. The script now invalidates an empty capture, and this is the
+/// other half: the anchors it reads by have to be words the report actually writes.
+#[test]
+fn every_word_the_scripts_patterns_anchor_on_is_one_the_report_writes() {
+    const HEADER: &str = include_str!("../src/measure/header.rs");
+
+    // The literal each `sed` in the script leans on, and the substring of the report line that has to
+    // carry it. Kept as a list rather than derived from the script, for the reason `MODULES` in
+    // `shape.rs` gives: a pattern extractor turns a rewritten `sed` into a target silently skipped.
+    const ANCHORS: &[(&str, &str)] = &[
+        ("read back", "read back"),
+        ("patched,", "patched,"),
+        ("patches refused,", "patches refused,"),
+    ];
+
+    for (in_the_script, in_the_report) in ANCHORS {
+        assert!(
+            MEASURE.contains(in_the_script),
+            "no pattern in the script reads «{in_the_script}» any more: this guard is stale"
+        );
+        assert!(
+            HEADER.contains(in_the_report),
+            "the script pulls a number out by «{in_the_script}» and the report no longer writes \
+             «{in_the_report}»: every run reads that count as zero"
         );
     }
 }

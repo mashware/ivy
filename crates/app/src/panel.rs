@@ -419,7 +419,7 @@ impl PanelState {
     /// which is the case the verb was asked for — the field below is filled by both.
     pub fn document(&self) -> Result<String, String> {
         let Some(panel) = self.last_good.as_ref() else {
-            return Err("nothing has been published on this console yet".to_owned());
+            return Err(driving::NOTHING_PUBLISHED.to_owned());
         };
         panel_contract::serialize(panel).map_err(|problem| problem.to_string())
     }
@@ -2573,6 +2573,80 @@ mod tests {
         assert!(
             rows.0.iter().any(|row| row.text.contains("the new")),
             "the layout kept the old: {rows:?}"
+        );
+    }
+
+    /// **A patch that lands ages the panel and repaints it; one that is refused does neither.**
+    ///
+    /// Both halves had a claim in a docblock and no test. Without the stamp, a producer keeping a
+    /// panel alive by patching would never go stale — the failure the notice exists to expose. Without
+    /// the layout being dropped, the next pass paints the text from before the patch while a read
+    /// over the channel hands back the text after it, and every assertion made through that channel
+    /// still passes. **Asserted on what gets painted**, not on the cache field, for the same reason
+    /// the publishing test above is.
+    #[test]
+    fn a_patch_ages_the_panel_and_repaints_it_and_a_refusal_does_neither() {
+        let theme = Theme::default();
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":[{"key":"one","text":"the old"}]}"#)
+                    .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("nobody was holding it");
+        state.lay_out_if_needed("a1b2", 40, &theme, None, None);
+        let published = state
+            .last_understood()
+            .expect("there is a panel")
+            .written_at
+            .expect("it was stamped on arrival");
+
+        let ops = panel_contract::parse_ops(
+            &serde_json::from_str(
+                r#"[{"op":"replace","key":"one","line":{"key":"one","text":"the new"}}]"#,
+            )
+            .expect("the ops are JSON"),
+        )
+        .expect("the ops are read");
+        state
+            .patch(7, &ops, published + Duration::from_secs(1))
+            .expect("the holder may patch");
+
+        let rows = state
+            .lay_out_if_needed("a1b2", 40, &theme, None, None)
+            .expect("there is a panel");
+        assert!(
+            rows.0.iter().any(|row| row.text.contains("the new")),
+            "the layout survived the patch, so the pane paints what the patch replaced: {rows:?}"
+        );
+        let after = state
+            .last_understood()
+            .expect("there is a panel")
+            .written_at
+            .expect("a patch stamps the date");
+        assert!(
+            after > published,
+            "the patch left the panel ageing from the publication"
+        );
+
+        // And a refusal stamps nothing: a producer that fails to patch for an hour still goes stale.
+        let nowhere = panel_contract::parse_ops(
+            &serde_json::from_str(r#"[{"op":"delete","key":"nobody"}]"#).expect("the ops are JSON"),
+        )
+        .expect("the ops are read");
+        state
+            .patch(7, &nowhere, after + Duration::from_secs(600))
+            .expect_err("a key that names nothing refuses");
+        assert_eq!(
+            state
+                .last_understood()
+                .expect("there is a panel")
+                .written_at,
+            Some(after),
+            "a refused patch restamped the date, so a silent producer would never go stale"
         );
     }
 

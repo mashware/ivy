@@ -9,52 +9,85 @@
 //! is the turn number, substituted into the literal `{n}`, so a run's publications are told apart on
 //! screen exactly as the file-seeded ones are.
 //!
-//! **And it reads the document back where the batch asks it to**, which is the other half of the same
-//! argument: the reading batch measures what answering a read costs, and nothing else in the bench
-//! ever asks for one.
+//! **And it reads the document back, or patches it, where the batch asks it to**, which is the other
+//! half of the same argument: those batches measure what answering each of those verbs costs, and
+//! nothing else in the bench ever asks for one.
 //!
-//! **The reading batch publishes AND reads every turn, and that is what makes its control honest.**
-//! The first shape had it publish once and then only read, which looks tighter and is not: a
-//! publication drops the panel's layout cache and changes the text, so the batch it is compared
-//! against pays a re-layout and a repaint every second that the reading batch would not — and the
-//! subtraction would come out as the cost of a read *minus* all of that, which can be zero or
-//! negative and would be published as «answering a read costs nothing». Publishing the same document
-//! on the same cadence and asking for it back makes the reading batch its control **plus one read**,
-//! which is the only shape whose difference is the thing being measured.
+//! **The reading and patching batches publish AND then ask, every turn, and that is what makes their
+//! control honest.** The first shape had the reader publish once and then only read, which looks
+//! tighter and is not: a publication drops the panel's layout cache and changes the text, so the
+//! batch it is compared against pays a re-layout and a repaint every second that the reading batch
+//! would not — and the subtraction would come out as the cost of a read *minus* all of that, which
+//! can be zero or negative and would be published as «answering a read costs nothing». Publishing
+//! the same document on the same cadence and then asking makes each of them its control **plus one
+//! verb**, which is the only shape whose difference is the thing being measured.
+//!
+//! **The patching batch's ops come in as an argument, like its document**, and for the same reason:
+//! a load written here is a load the batch table does not declare, and the table is where somebody
+//! reads what a run did.
 //!
 //! ```text
-//! publish <directory> <identifier> <source> <how many> <every so many ms> <document> [publish|read]
+//! publish <directory> <identifier> <source> <how many> <every so many ms> <document>
+//!         [publish|read|patch] [the ops, when the verb is patch]
 //! ```
 
 use std::time::Duration;
 
 use panel_control::{Answered, Producer};
 
+const USAGE: &str = "publish <directory> <identifier> <source> <how many> <every so many ms> \
+                     <document> [publish|read|patch] [the ops, when the verb is patch]";
+
+/// What this process does to the pane after it has published, every turn.
+enum Then {
+    Nothing,
+    Read,
+    Patch(String),
+}
+
 fn main() {
     let asked: Vec<String> = std::env::args().skip(1).collect();
-    let ([dir, id, source, how_many, every_ms, document], verb) = match &asked[..] {
+    let ([dir, id, source, how_many, every_ms, document], verb, ops) = match &asked[..] {
         [dir, id, source, how_many, every_ms, document] => (
             [dir, id, source, how_many, every_ms, document],
-            "publish".to_owned(),
+            "publish",
+            None,
         ),
         [dir, id, source, how_many, every_ms, document, verb] => (
             [dir, id, source, how_many, every_ms, document],
-            verb.clone(),
+            verb.as_str(),
+            None,
+        ),
+        [dir, id, source, how_many, every_ms, document, verb, ops] => (
+            [dir, id, source, how_many, every_ms, document],
+            verb.as_str(),
+            Some(ops.clone()),
         ),
         _ => {
-            eprintln!(
-                "publish <directory> <identifier> <source> <how many> <every so many ms> <document> [publish|read]"
-            );
+            eprintln!("{USAGE}");
             std::process::exit(2);
         }
     };
     // **A verb nobody serves ends the process instead of falling back to publishing**, because a
     // silent fallback is how a batch measures the load of the batch beside it under its own name.
-    if verb != "publish" && verb != "read" {
-        eprintln!("publish: the verb is \"publish\" or \"read\", not \"{verb}\"");
-        std::process::exit(2);
-    }
-    let reading = verb == "read";
+    // **And a patch whose ops are missing or empty ends it too**, which is the batch's own guard
+    // rather than the contract's: the pane refuses an empty list, so every turn would be a refusal,
+    // and what the run then publishes as the cost of patching is the cost of being turned down.
+    let after = match (verb, ops) {
+        ("publish", _) => Then::Nothing,
+        ("read", _) => Then::Read,
+        ("patch", Some(ops)) if carries_an_op(&ops) => Then::Patch(ops),
+        ("patch", _) => {
+            eprintln!(
+                "publish: the patching verb needs its ops, and at least one of them\n{USAGE}"
+            );
+            std::process::exit(2);
+        }
+        (other, _) => {
+            eprintln!("publish: the verb is \"publish\", \"read\" or \"patch\", not \"{other}\"");
+            std::process::exit(2);
+        }
+    };
     let how_many: usize = how_many.parse().expect("how many is a number");
     let every = Duration::from_millis(every_ms.parse().expect("the interval is a number"));
 
@@ -74,18 +107,23 @@ fn main() {
         // **The publication happens in both batches**, so the one that reads is the other one plus a
         // read rather than a different load wearing its name.
         let published = pane.publish(source, &document);
-        let answered = if reading {
-            report("publish", published);
-            pane.read_the_document()
-        } else {
-            published
+        let answered = match &after {
+            Then::Nothing => published,
+            Then::Read => {
+                report("publish", published);
+                pane.read_the_document()
+            }
+            Then::Patch(ops) => {
+                report("publish", published);
+                pane.patch(ops)
+            }
         };
         match answered {
             Ok(Answered::Ok) => {}
             // What a read comes back with, **and only the batch that asked for one may see it**: a
             // document answered to a publication is the pane answering the wrong verb, which is the
             // case the arm below exists to report and not one to pass over in silence.
-            Ok(Answered::Document(_)) if reading => {}
+            Ok(Answered::Document(_)) if matches!(after, Then::Read) => {}
             // **Said and not fatal.** A refusal is a real answer — another source holds the pane —
             // and the run's own report is what decides whether the batch is valid, not this process.
             Ok(Answered::Failed(why)) => eprintln!("publish: refused ({why})"),
@@ -96,6 +134,13 @@ fn main() {
             Ok(Answered::Opened(_) | Answered::Text(_) | Answered::Document(_)) => {
                 eprintln!("publish: the pane answered something else to a publication");
             }
+            // **An argument this process got wrong is not the channel dying**, and saying so
+            // matters: the run is about to end either way, and the line left on screen is the only
+            // thing whoever reads the log has.
+            Err(failure) if failure.kind() == std::io::ErrorKind::InvalidInput => {
+                eprintln!("publish: what was sent could not be built ({failure})");
+                return;
+            }
             Err(failure) => {
                 eprintln!("publish: the channel is gone ({failure})");
                 return;
@@ -103,6 +148,15 @@ fn main() {
         }
         std::thread::sleep(every);
     }
+}
+
+/// Whether the ops handed in carry at least one op.
+///
+/// **Read here rather than trusted**, because the shape of this argument is what the batch's whole
+/// load is: a list that parses and holds nothing is refused by the pane, and a run of refusals looks
+/// from the report exactly like a run of patches that cost less than expected.
+fn carries_an_op(ops: &str) -> bool {
+    serde_json::from_str::<Vec<serde_json::Value>>(ops).is_ok_and(|ops| !ops.is_empty())
 }
 
 /// Says what an answer was, when nothing else is going to look at it.

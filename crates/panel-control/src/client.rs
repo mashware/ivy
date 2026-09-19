@@ -126,6 +126,29 @@ impl Producer {
         self.ask(serde_json::json!({"tool": "panel_get"}))
     }
 
+    /// Changes part of the document this connection published, leaving the rest of it alone.
+    ///
+    /// **It needs the hold that a publication takes**, unlike [`Producer::read_the_document`]: there
+    /// is no state where a connection holds a pane and there is nothing to patch, so *nothing has
+    /// been published yet* and *this pane's panel is its file's* are one refusal, and it names the
+    /// move — publish first.
+    ///
+    /// **What happens here is the framing, not the reading.** The ops are checked to be JSON and
+    /// compacted, for the same two reasons a document is: a list that is not JSON at all is refused
+    /// to its author instead of travelling to the window, and a compact line cannot carry the newline
+    /// the framing rests on. **What each op says is decided at the other end** — by
+    /// `panel_contract::parse_ops`, on the connection's thread inside the application — so an op
+    /// nobody serves or a field that is not patchable travels and comes back as a refusal.
+    pub fn patch(&mut self, ops: &str) -> io::Result<Answered> {
+        let ops: serde_json::Value = serde_json::from_str(ops).map_err(|failure| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("the ops are not JSON ({failure})"),
+            )
+        })?;
+        self.ask(serde_json::json!({"tool": "panel_patch", "ops": ops}))
+    }
+
     /// Closes a console this connection opened.
     pub fn close_a_pane(&mut self, pane: &str) -> io::Result<Answered> {
         self.ask(serde_json::json!({"tool": "split_close", "pane": pane}))
@@ -429,6 +452,37 @@ mod tests {
         assert!(
             inbox.recv_timeout(Duration::from_millis(200)).is_err(),
             "it reached the window anyway"
+        );
+    }
+
+    /// Ops that are not JSON are refused **to their author, here**, exactly as a document that is not
+    /// JSON is: a list nobody can read must not travel to the window and come back as a refusal its
+    /// sender has to guess the origin of.
+    #[test]
+    fn ops_that_are_not_json_never_leave_the_producer() {
+        let (dir, _channel, inbox) = a_pane();
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
+
+        let refused = producer.patch("[{op: delete}");
+
+        assert_eq!(
+            refused.expect_err("it was refused").kind(),
+            io::ErrorKind::InvalidInput
+        );
+        // **This second half is the one that names the test, and on its own it proves nothing**: a
+        // request that DID leave would be refused at the wire, on the connection's own thread, and
+        // reach no delivery either. What makes it worth keeping is the pane's own answer: a producer
+        // that had written would have one waiting, and one that stopped at home has nothing to read.
+        assert!(
+            inbox.recv_timeout(Duration::from_millis(200)).is_err(),
+            "the pane was handed something to answer"
+        );
+        // And the connection is still usable afterwards, which is the point of refusing at home
+        // rather than letting the wire do it: a producer that got its own argument wrong keeps its
+        // hold and can send the corrected ops down the same socket.
+        assert!(
+            producer.patch(r#"[{"op":"last","line":"after"}]"#).is_ok(),
+            "a bad argument took the connection with it"
         );
     }
 

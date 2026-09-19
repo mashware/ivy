@@ -1084,6 +1084,11 @@ const NOT_OURS: &[&str] = &[
     "split_open",
     "split_read",
     "split_close",
+    // **And the read verb, which is a name on the wire and nowhere else.** Its two siblings are
+    // functions of the channel's crate —`panel_set` and `panel_patch` both have one, because each
+    // has an envelope to read— and this one takes no arguments at all, so there is nothing for a
+    // function to read and no identifier for the guard to find.
+    "panel_get",
     // **A field of the panel document, cited where the channel explains what it does with it.** The
     // contract's crate declares it; the channel's crate carries the bytes and never names a type for
     // them, which is the whole point of borrowing them raw.

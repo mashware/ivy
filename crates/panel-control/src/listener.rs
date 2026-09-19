@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use interprocess::TryClone;
 use interprocess::local_socket::{Listener, Stream, prelude::*};
-use panel_contract::Panel;
+use panel_contract::{Panel, Patch};
 
 use crate::endpoint;
 use crate::wire::{Framing, Incoming, Reply, Request, Side, write_reply};
@@ -93,6 +93,13 @@ pub enum What {
     /// `split_*` verbs: what it needs is the panel state, which the pane already holds, and not the
     /// tree of panes, which only the window can see.
     Get,
+    /// Change part of this pane's published document, leaving the rest of it alone.
+    ///
+    /// **The ops arrive already read**, refused on the connection's own thread for everything a
+    /// document is not needed to refuse. What is left for the pane is the one question the document
+    /// answers — does this key name a line here — plus what applying the answer costs, which scales
+    /// with the document and not with the patch (see `panel_contract::patch`).
+    Patch { ops: Patch },
     /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
     ///
     /// **The pane is the caller's, not a name's**: the connection's own endpoint decided it, which is
@@ -508,6 +515,18 @@ fn answer(
         // the pass that is already running rather than waiting for the window's own drain.
         Incoming::Request(Request::PanelGet) => (
             ask_the_window(Wants::Document, What::Get, connection, to_the_window, wake),
+            false,
+        ),
+        // **And so is the patch**, for the same reason and one more: it needs the hold, which lives
+        // on the panel state this pane holds and nowhere else.
+        Incoming::Request(Request::PanelPatch { ops }) => (
+            ask_the_window(
+                Wants::Taken,
+                What::Patch { ops },
+                connection,
+                to_the_window,
+                wake,
+            ),
             false,
         ),
         Incoming::Request(Request::NotServed(tool)) => (
@@ -959,6 +978,49 @@ mod tests {
             .answer
             .send(Answer::Taken)
             .expect("answer the close");
+        assert_eq!(read_reply(&mut client), "{\"ok\":true}");
+    }
+
+    /// **A patch is the pane's, like a publication and unlike the three verbs above**, and its ops
+    /// reach it already read.
+    ///
+    /// The window here is the test: it takes the delivery, checks what it was handed, and answers.
+    /// That is what pins that this verb no longer falls to the unknown-tool refusal, that what
+    /// travels is the read op list and not the text it arrived as, and that an empty `ok` is the
+    /// shape the wire declared for it — a reply wanting any other shape turns the pane's answer into
+    /// a refusal the producer cannot act on.
+    #[test]
+    fn a_patch_travels_to_the_pane_with_its_ops_already_read() {
+        let pane = a_pane();
+        let mut client = pane.connect();
+
+        client
+            .write_all(
+                b"{\"tool\":\"panel_patch\",\"ops\":[{\"op\":\"delete\",\"key\":\"mr-1\"},\
+                  {\"op\":\"set\",\"field\":\"attention\",\"value\":\"done\"}]}\n",
+            )
+            .expect("ask for a patch");
+
+        let delivery = pane.next_delivery();
+        let What::Patch { ops } = delivery.what else {
+            panic!("the pane was not asked to patch: {:?}", delivery.what);
+        };
+        assert_eq!(
+            ops.ops(),
+            [
+                panel_contract::Op::Delete {
+                    key: "mr-1".to_owned()
+                },
+                panel_contract::Op::Set(panel_contract::Scalar::Attention(Some(
+                    panel_contract::Attention::Done
+                ))),
+            ]
+        );
+
+        delivery
+            .answer
+            .send(Answer::Taken)
+            .expect("answer the patch");
         assert_eq!(read_reply(&mut client), "{\"ok\":true}");
     }
 
