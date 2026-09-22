@@ -2,7 +2,8 @@
 //!
 //! Its sibling [`glossary`](../glossary.rs) guards *identifiers* and says so in its own header —
 //! «comments, rustdoc and string literals, for the same reason: prose has its own delivery». That
-//! delivery has now landed for all twenty-three files of this crate, and nothing was left watching it.
+//! delivery has now landed for every Rust file under `src/` and `examples/`, and nothing was left
+//! watching it.
 //! AC3 of the milestone («comments and rustdoc in English») is marked `test` and had no test: a
 //! later delivery could put a Spanish comment back into any of these files and the suite would
 //! stay green, which is the exact shape of hole this milestone keeps paying for.
@@ -13,7 +14,7 @@
 //! is the criterion the two sibling guards already use — short words, closed set, compared as
 //! whole words — extended from function words to the grammar and the domain nouns that make up
 //! Spanish prose. The threshold is three and not one because this repository **quotes Spanish on
-//! purpose**: comment lines of these twenty-three files carry a Spanish literal inside an English
+//! purpose**: comment lines of these source and example files carry a Spanish literal inside an English
 //! sentence, and at one marker every one of them would break the build.
 //!
 //! **What it does not see, with the sentences that prove it.** A Spanish sentence carrying no word
@@ -25,8 +26,8 @@
 //!
 //! **The non-ASCII half of the sibling oracle is deliberately absent, and it was measured before
 //! being dropped.** `settings.rs` judges thirteen short on-screen messages and can afford
-//! `is_ascii()`; here **2 041 of the 13 844 comment lines are not pure ASCII** — angle quotes, em
-//! dashes, `µs`, Japanese, emoji — so that test reports a seventh of the corpus. The narrower
+//! `is_ascii()`; here **2 745 of the 18 141 comment lines are not pure ASCII** — angle quotes, em
+//! dashes, `µs`, Japanese, emoji — so that test reports a material part of the corpus. The narrower
 //! variant — a Spanish accent or `ñ` anywhere in the line — leaves **five** lines, and it would
 //! need a line-by-line exemption for every one of them: two are deliberate Spanish citations
 //! («pestañas» and «válido», both in `src/settings.rs`) and **the other three are English sentences
@@ -34,10 +35,11 @@
 //! an eñe. It was eight until this delivery translated the panel's three claim phrases. A line-level exemption is a hole: it would also excuse a fresh Spanish sentence written
 //! on that same line. One oracle, with its limits stated, was chosen over two with an escape hatch.
 //!
-//! **What a green here means, exactly**: no comment line in these twenty-three files carries three
+//! **What a green here means, exactly**: no comment line in the declared source and example files carries three
 //! different common Spanish words. It does **not** mean every comment is good English.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 /// The files whose prose is English, with their text pulled in **at compile time**.
 ///
@@ -47,84 +49,106 @@ use std::collections::BTreeSet;
 /// left four tests green. Here the same mistake does not compile.
 ///
 /// **`src/lib.rs` is here, and adding it was the one line an earlier delivery promised it would
-/// be.** It is nearly half the crate's prose on its own — 5 809 of the 13 844 comment lines —
+/// be.** It is the largest source in the corpus — 6 216 of the 18 141 comment lines —
 /// and it is why the list is written as data and every floor below is a lower bound rather than an
 /// exact count: the file it watches will keep growing. It carried 7 319 until the module ceiling
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
-const SOURCES: &[(&str, &str)] = &[
-    ("src/lib.rs", include_str!("../src/lib.rs")),
-    ("src/alarms.rs", include_str!("../src/alarms.rs")),
-    ("src/control.rs", include_str!("../src/control.rs")),
+const SOURCES: &[(&str, &str, usize)] = &[
+    ("src/lib.rs", include_str!("../src/lib.rs"), 6_216),
+    ("src/alarms.rs", include_str!("../src/alarms.rs"), 136),
+    ("src/closing.rs", include_str!("../src/closing.rs"), 115),
+    ("src/control.rs", include_str!("../src/control.rs"), 362),
     (
         "src/panel/driving.rs",
         include_str!("../src/panel/driving.rs"),
+        114,
     ),
-    ("src/panel/pane.rs", include_str!("../src/panel/pane.rs")),
-    ("src/injected.rs", include_str!("../src/injected.rs")),
-    ("src/panel.rs", include_str!("../src/panel.rs")),
+    (
+        "src/panel/pane.rs",
+        include_str!("../src/panel/pane.rs"),
+        333,
+    ),
+    ("src/injected.rs", include_str!("../src/injected.rs"), 316),
+    ("src/panel.rs", include_str!("../src/panel.rs"), 1_067),
     (
         "src/panel/document.rs",
         include_str!("../src/panel/document.rs"),
+        9,
     ),
     (
         "src/panel/buttons.rs",
         include_str!("../src/panel/buttons.rs"),
+        24,
     ),
-    ("src/measure.rs", include_str!("../src/measure.rs")),
+    ("src/measure.rs", include_str!("../src/measure.rs"), 780),
     (
         "src/measure/header.rs",
         include_str!("../src/measure/header.rs"),
+        579,
     ),
-    ("src/session.rs", include_str!("../src/session.rs")),
-    ("src/fonts.rs", include_str!("../src/fonts.rs")),
-    ("src/header.rs", include_str!("../src/header.rs")),
-    ("src/settings.rs", include_str!("../src/settings.rs")),
-    ("src/keyboard.rs", include_str!("../src/keyboard.rs")),
-    ("src/painter.rs", include_str!("../src/painter.rs")),
+    ("src/session.rs", include_str!("../src/session.rs"), 737),
+    ("src/fonts.rs", include_str!("../src/fonts.rs"), 977),
+    ("src/header.rs", include_str!("../src/header.rs"), 224),
+    ("src/settings.rs", include_str!("../src/settings.rs"), 599),
+    ("src/keyboard.rs", include_str!("../src/keyboard.rs"), 985),
+    ("src/painter.rs", include_str!("../src/painter.rs"), 829),
     (
         "src/painter/notices.rs",
         include_str!("../src/painter/notices.rs"),
+        222,
     ),
     (
         "src/painter/blocks.rs",
         include_str!("../src/painter/blocks.rs"),
+        87,
     ),
-    ("src/pty_output.rs", include_str!("../src/pty_output.rs")),
-    ("src/watcher.rs", include_str!("../src/watcher.rs")),
-    ("src/theme.rs", include_str!("../src/theme.rs")),
-    ("src/mouse.rs", include_str!("../src/mouse.rs")),
-    ("src/opening.rs", include_str!("../src/opening.rs")),
-    ("src/pointer.rs", include_str!("../src/pointer.rs")),
-    ("src/report.rs", include_str!("../src/report.rs")),
-    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
-    ("src/tiling.rs", include_str!("../src/tiling.rs")),
-    ("src/tree.rs", include_str!("../src/tree.rs")),
-    ("src/main.rs", include_str!("../src/main.rs")),
-    ("examples/fonts.rs", include_str!("../examples/fonts.rs")),
-    ("examples/sweep.rs", include_str!("../examples/sweep.rs")),
-    ("examples/leak.rs", include_str!("../examples/leak.rs")),
+    (
+        "src/pty_output.rs",
+        include_str!("../src/pty_output.rs"),
+        456,
+    ),
+    ("src/watcher.rs", include_str!("../src/watcher.rs"), 203),
+    ("src/theme.rs", include_str!("../src/theme.rs"), 202),
+    ("src/mouse.rs", include_str!("../src/mouse.rs"), 167),
+    ("src/opening.rs", include_str!("../src/opening.rs"), 148),
+    ("src/pointer.rs", include_str!("../src/pointer.rs"), 661),
+    ("src/report.rs", include_str!("../src/report.rs"), 238),
+    ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 171),
+    ("src/tiling.rs", include_str!("../src/tiling.rs"), 276),
+    ("src/tree.rs", include_str!("../src/tree.rs"), 512),
+    ("src/main.rs", include_str!("../src/main.rs"), 1),
+    (
+        "examples/fonts.rs",
+        include_str!("../examples/fonts.rs"),
+        168,
+    ),
+    (
+        "examples/sweep.rs",
+        include_str!("../examples/sweep.rs"),
+        134,
+    ),
+    ("examples/leak.rs", include_str!("../examples/leak.rs"), 59),
     (
         "examples/screen_demo.rs",
         include_str!("../examples/screen_demo.rs"),
+        34,
     ),
 ];
 
-/// How many comment lines the walk has to still find, in total and in the thinnest file.
+/// How many comment lines the walk has to still find, in total and in each file.
 ///
 /// **Without a floor this test passes by being empty**, which is how the guards of this suite die:
 /// somebody reshapes the comment detection, the walk finds nothing, every file looks clean and
-/// nothing says otherwise. Measured as this delivery leaves the tree: **15 692** comment lines, the
-/// thinnest file being `src/main.rs` with **one** — it is four lines of `fn main`, and a floor that
-/// demanded more of it would have to be a table instead of a number.
+/// nothing says otherwise. The table above is that per-file floor: each row records what the same
+/// [`comment_lines`] walk measured when the row was last paid. It is a lower bound rather than an
+/// equality, so adding an explanation stays green and removing one below the recorded count asks
+/// the delivery to lower that file's claim explicitly.
 ///
-/// **Two floors and not one over the sum**, the lesson the sibling paid for twice, and adding
-/// `src/lib.rs` is what makes it matter: `src/main.rs`, `examples/leak.rs` and
-/// `examples/screen_demo.rs` together carry 94 lines, so losing all three sits inside the total
-/// floor's slack — reported by nothing but the per-file one. That is the case the second floor is
-/// for. **What the total floor does still catch is the big one**: `src/lib.rs` carries 6 112 of the
-/// 15 692, so losing it drops the corpus to 9 580 and the total fires loudly. The two floors answer
-/// different halves, which is why there are two.
+/// **The total stays beside the table, but it is no longer the first guard to see an ordinary
+/// loss.** A current per-file floor sees that immediately. The total is the backstop across valid
+/// edits that deliberately lower several rows: their combined cost cannot silently spend the
+/// repository-wide floor as well.
 ///
 /// **The floor is a number over the corpus, so a split has to raise it.** The tiling and the tree
 /// left `src/lib.rs` carrying 723 comment lines with them, and until they were listed here the
@@ -139,26 +163,11 @@ const SOURCES: &[(&str, &str)] = &[
 /// the file's own: a floor is re-measured by the delivery that touches the list, not by the one that
 /// happens to read the comment.
 ///
-/// **15 160 and not a rounder number, and the slack was measured rather than chosen.** With the
-/// corpus at 15 701 the slack is 541, so every file carrying more than that is defended by the total
-/// alone; the **nineteen** below it are not — `src/main.rs` (1), `examples/screen_demo.rs` (34),
-/// `examples/leak.rs` (59), `src/painter/blocks.rs` (87), `examples/sweep.rs` (134),
-/// `src/alarms.rs` (136), `src/report.rs` (136), `src/mouse.rs` (165), `examples/fonts.rs` (168),
-/// `src/tab_bar.rs` (171), `src/theme.rs` (202), `src/watcher.rs` (203),
-/// `src/painter/notices.rs` (222), `src/tiling.rs` (272), `src/injected.rs` (291),
-/// `src/measure/header.rs` (401), `src/tree.rs` (451), `src/pty_output.rs` (456) and
-/// `src/pointer.rs` (536) — and that is what the per-file floor is for and why it is stated here
-/// rather than left to be discovered. A floor loose enough to let a mid-sized file be gutted was
-/// checked by doing exactly that, on the number this replaced.
-///
-/// **This list moves whenever anybody writes a comment, and that is the flaw rather than the
-/// maintenance.** The slack is the corpus minus the floor, so every line of prose added anywhere
-/// raises it and can pull another file under. Re-enumerated here because the alternative is a list
-/// that lies; the real answer is a per-file floor stated as a table, which is
-/// [issue #183](https://github.com/mashware/agent-terminal/issues/183) — and the two-thousand-line
-/// drift above is the strongest argument yet for closing it.
+/// **The files are proved separately from their contents.** `include_str!` still makes a renamed or
+/// deleted declared file a compile error. [`rust_sources`] walks only to find the opposite mistake:
+/// a real file nobody declared. It never supplies the text being judged, so a path cannot disappear
+/// from the guard merely because the directory walk did not return it.
 const COMMENT_LINES_AT_LEAST: usize = 15_160;
-const COMMENT_LINES_PER_FILE_AT_LEAST: usize = 1;
 
 /// How many **different** listed words a line needs before it is called Spanish.
 ///
@@ -185,7 +194,8 @@ const MARKERS_TO_CALL_IT_SPANISH: usize = 3;
 /// They were the Spanish comment fixtures of the settings parser; the prose delivery translated them
 /// to `# a comment` and `# only comments`, so there is nothing left to exempt.
 /// [`no_island_is_stale`] is what makes that a fact instead of a claim: an entry naming text the
-/// twenty-three files no longer contain fails, so this list cannot keep exempting what left the tree.
+/// declared source and example files no longer contain fails, so this list cannot keep exempting
+/// what left the tree.
 ///
 /// The whole payload of `examples/screen_demo.rs` — «pantalla de prueba del pintor», «Colores con
 /// nombre», the rows of `rojo verde amarillo` — is Spanish and needs no entry: it is **exempt by
@@ -235,8 +245,8 @@ const ISLANDS: &[(&str, &str)] = &[
 ///
 /// The list is closed, and the threshold above is what covers its remaining softness: a handful of
 /// entries — «con», «la», «es» — do exist in some corner of English, and one of them alone is never
-/// a verdict. Measured over all 15 692 comment lines of the twenty-three files: **zero** English lines
-/// reach three markers.
+/// a verdict. Measured over all 18 141 comment lines of the declared source and example files:
+/// **zero** English lines reach three markers.
 const SPANISH_WORDS: &[&str] = &[
     // ── The function words, from the sibling list in src/settings.rs ──
     "de",
@@ -509,7 +519,7 @@ fn fold(text: &str) -> String {
 /// a naive walk drops and which is where the longest prose in this crate lives.
 ///
 /// **It is a line walk and not a lexer, and the price is stated rather than hidden.** A `//` inside
-/// a string literal reads as a comment: there is exactly one in the twenty-three files,
+/// a string literal reads as a comment: there is exactly one in the declared files,
 /// `src/settings.rs:1911` asserting `code.starts_with("//")`, and it is English. A `/*` inside a
 /// literal would be worse — it would open a comment that never closes and hand the rest of the file
 /// over as prose — so the leftover depth comes back with the lines and every file is asserted to
@@ -517,7 +527,7 @@ fn fold(text: &str) -> String {
 /// difference here is that a false positive on an English literal costs nothing while a missed
 /// block-comment line costs the guard.
 ///
-/// **Not one of the twenty-three files uses `/* */` today**, and that has a consequence worth writing
+/// **Not one of the declared files uses `/* */` today**, and that has a consequence worth writing
 /// down: replacing the block-comment arm with `if false` left the corpus at its full count and every
 /// floor green — measured, and it was the one mutation of eleven that stayed green.
 /// [`the_walk_finds_a_block_comment_and_notices_one_that_never_closes`] is what covers that arm, on
@@ -541,6 +551,46 @@ fn comment_lines(src: &str) -> (Vec<(usize, String)>, usize) {
     (found, depth)
 }
 
+/// The Rust files whose prose this guard has to declare.
+///
+/// This walk discovers names only. The text still comes from [`SOURCES`] through `include_str!`, so
+/// removing or renaming a declared file is a compile error; the walk closes the opposite hole, a
+/// new file that exists on disk but has no row and therefore no floor.
+fn rust_sources() -> BTreeSet<String> {
+    fn walk(dir: &Path, root: &Path, found: &mut BTreeSet<String>) {
+        let entries = std::fs::read_dir(dir)
+            .unwrap_or_else(|failure| panic!("cannot read {}: {failure}", dir.display()));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|failure| {
+                panic!("cannot read an entry in {}: {failure}", dir.display())
+            });
+            let path = entry.path();
+            let file_type = entry.file_type().unwrap_or_else(|failure| {
+                panic!("cannot read the file type of {}: {failure}", path.display())
+            });
+            if file_type.is_dir() {
+                walk(&path, root, found);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("a file found below the app crate has that crate as its prefix")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                assert!(
+                    found.insert(relative.clone()),
+                    "the source walk found {relative} twice"
+                );
+            }
+        }
+    }
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut found = BTreeSet::new();
+    walk(&root.join("src"), root, &mut found);
+    walk(&root.join("examples"), root, &mut found);
+    found
+}
+
 /// The different listed words a line carries, with the declared Spanish removed first.
 fn spanish_markers(line: &str) -> BTreeSet<String> {
     let mut text = fold(line);
@@ -560,7 +610,7 @@ fn spanish_markers(line: &str) -> BTreeSet<String> {
 
 /// A file whose Spanish lives on a **continuation** line, carrying no `//` of its own.
 ///
-/// The shape exists nowhere in the twenty-three files, so the walk's block-comment arm has no subject in
+/// The shape exists nowhere in the declared files, so the walk's block-comment arm has no subject in
 /// the tree and no floor can defend it. This is its subject.
 const A_FILE_WITH_A_BLOCK_COMMENT: &str = "fn one() {}\n\
                                            /*\n\
@@ -605,15 +655,29 @@ fn the_walk_finds_a_block_comment_and_notices_one_that_never_closes() {
 /// The walk is still finding the prose — **per file and in total**.
 #[test]
 fn the_walk_still_reads_the_comments_of_every_file() {
-    assert!(
-        SOURCES.len() >= 30,
-        "the list of translated files has {} entries and this delivery left thirty, which is \
-         every file of the crate: it only ever grows, so this is somebody emptying it and every \
-         check downstream going quiet",
-        SOURCES.len()
+    let declared: BTreeSet<String> = SOURCES
+        .iter()
+        .map(|(name, _, _)| (*name).to_owned())
+        .collect();
+    assert_eq!(
+        declared.len(),
+        SOURCES.len(),
+        "SOURCES has {} rows but only {} different paths: a duplicate gives one file two floors \
+         while another file can be absent",
+        SOURCES.len(),
+        declared.len()
     );
+    let discovered = rust_sources();
+    let undeclared: Vec<_> = discovered.difference(&declared).collect();
+    let absent: Vec<_> = declared.difference(&discovered).collect();
+    assert!(
+        undeclared.is_empty() && absent.is_empty(),
+        "SOURCES is not the app crate's Rust source set; without a row a file has no prose floor. \
+         Undeclared files: {undeclared:?}; declared paths absent from disk: {absent:?}"
+    );
+
     let mut total = 0usize;
-    for (name, src) in SOURCES {
+    for (name, src, floor) in SOURCES {
         let (lines, depth) = comment_lines(src);
         assert_eq!(
             depth, 0,
@@ -621,16 +685,17 @@ fn the_walk_still_reads_the_comments_of_every_file() {
              closes, and from there this walk is handing code to the oracle as if it were prose"
         );
         assert!(
-            lines.len() >= COMMENT_LINES_PER_FILE_AT_LEAST,
-            "{name} yielded {} comment lines: either its prose is gone, or the detection stopped \
-             matching for this file alone — which no total would notice",
-            lines.len()
+            lines.len() >= *floor,
+            "{name} yielded {} comment lines below its recorded floor of {floor}: either its prose \
+             shrank without the row being lowered deliberately, or detection stopped matching for \
+             this file alone — which the corpus total can miss",
+            lines.len(),
         );
         total += lines.len();
     }
     assert!(
         total >= COMMENT_LINES_AT_LEAST,
-        "the walk found {total} comment lines and there are 15 692: the detection stopped matching \
+        "the walk found {total} comment lines and there are 18 141: the detection stopped matching \
          and this guard is judging almost nothing"
     );
 }
@@ -663,7 +728,7 @@ const REAL_SPANISH: &[&str] = &[
 /// **The list went from six entries to two, and shrinking is what it is supposed to do.** Four of
 /// the six quoted the panel's three claim phrases; this delivery translated those phrases — the
 /// contract's own table publishes them in English now — so the lines stopped quoting Spanish and
-/// stopped being examples of anything. Sweeping the twenty-three files for a replacement found none:
+/// stopped being examples of anything. Sweeping the declared files for a replacement found none:
 /// **two** lines are all the tree still has that are English and cite Spanish, and both are in
 /// `src/settings.rs`, where the citations are the evidence for its own oracle being evadable. An
 /// invented third would be the failure this list was written against.
@@ -702,7 +767,7 @@ fn the_oracle_answers_what_it_promises() {
     // [`no_island_is_stale`] does for the sibling list.
     for line in ENGLISH_QUOTING_SPANISH {
         assert!(
-            SOURCES.iter().any(|(_, src)| src.contains(line)),
+            SOURCES.iter().any(|(_, src, _)| src.contains(line)),
             "«{line}» is here as a line of these files and no file contains it: it was reworded, or \
              invented, and either way it stopped being evidence about the oracle"
         );
@@ -772,7 +837,7 @@ fn the_oracle_answers_what_it_promises() {
 /// Every declared island is still in the tree, and none of them is Spanish enough to fail on its own.
 ///
 /// **The first half is what keeps this list from rotting into a blanket exemption.** An entry naming
-/// text the twenty-three files no longer contain excuses nothing and is read by the next reader as
+/// text the declared files no longer contain excuses nothing and is read by the next reader as
 /// «still Spanish on purpose» — which is how `// celda` and `/* celda */` were nearly kept here
 /// after the prose delivery had already translated those fixtures to `# a comment`.
 ///
@@ -794,8 +859,10 @@ fn no_island_is_stale() {
     for (island, why) in ISLANDS {
         let folded = fold(island);
         assert!(
-            SOURCES.iter().any(|(_, src)| fold(src).contains(&folded)),
-            "«{island}» is exempted here as «{why}» and no longer appears in any of the twenty-three \
+            SOURCES
+                .iter()
+                .any(|(_, src, _)| fold(src).contains(&folded)),
+            "«{island}» is exempted here as «{why}» and no longer appears in any declared source \
              files: it was translated, or reworded, and what is left is a standing permission for \
              Spanish that nothing needs"
         );
@@ -817,7 +884,7 @@ fn no_island_is_stale() {
 ///
 /// **It sweeps the corpus, and it used to sweep a list of fixtures.** Until this delivery the count
 /// came from [`ENGLISH_QUOTING_SPANISH`] — two hand-written strings — so the test named after a
-/// property of the twenty-three files never opened one, and emptying [`ISLANDS`] did not fail it. The
+/// property of the declared files never opened one, and emptying [`ISLANDS`] did not fail it. The
 /// number it published was arrived at by hand and then written into the prose as if measured. Now
 /// the walk the file already owns does the counting, which is also what makes the figure below true
 /// rather than asserted.
@@ -840,7 +907,7 @@ fn the_islands_are_what_keeps_the_english_prose_green() {
     };
 
     let mut saved = Vec::new();
-    for (name, src) in SOURCES {
+    for (name, src, _) in SOURCES {
         for (line, text) in comment_lines(src).0 {
             if without_islands(&text) >= MARKERS_TO_CALL_IT_SPANISH
                 && spanish_markers(&text).len() < MARKERS_TO_CALL_IT_SPANISH
@@ -862,7 +929,7 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
     let mut reported = Vec::new();
     let mut examined = 0usize;
 
-    for (name, src) in SOURCES {
+    for (name, src, _) in SOURCES {
         let (lines, _) = comment_lines(src);
         examined += lines.len();
         for (line, text) in lines {
@@ -883,8 +950,8 @@ fn no_comment_in_the_translated_files_reads_as_spanish() {
     // one would go on passing.
     assert!(
         examined >= COMMENT_LINES_AT_LEAST,
-        "this guard judged {examined} comment lines and there are 13 844: whatever it reports, it is \
-         not reporting on the prose of these twenty-three files"
+        "this guard judged {examined} comment lines and there are 18 141: whatever it reports, it is \
+         not reporting on the prose of the declared source and example files"
     );
 
     assert!(
