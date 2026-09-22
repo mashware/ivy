@@ -7559,6 +7559,23 @@ mod tests {
     }
 
     #[test]
+    fn a_window_that_measured_nothing_publishes_no_report() {
+        // A header with no spans looks like a valid measured run at a glance. The outer script
+        // rejects it, but this is the branch that prevents the application from writing it at all.
+        let window = window_with("sleep 30", "sleep 30");
+        assert!(
+            window.all_panes().all(|pane| !pane.timings.has_any()),
+            "the fixture recorded a timing, so it cannot exercise the silent-report branch"
+        );
+
+        let report = report_of(&window);
+        assert!(
+            report.is_empty(),
+            "a window that measured nothing published something that looks like a report:\n{report}"
+        );
+    }
+
+    #[test]
     fn the_report_says_how_many_tabs_there_were_and_which_one_was_visible() {
         // **Without this, two different measurement batches produce indistinguishable reports.**
         // The spans below are taken with every tab pumping, so a two-tab batch and a one-tab batch
