@@ -7086,13 +7086,16 @@ mod tests {
         assert!(requests.is_empty(), "the old chord went on splitting");
         assert_eq!(
             pane.keystrokes,
-            keyboard::bytes(&egui::Event::Key {
-                key: egui::Key::D,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: with_shift(),
-            })
+            keyboard::bytes(
+                &egui::Event::Key {
+                    key: egui::Key::D,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: with_shift(),
+                },
+                keyboard::CursorKeys::Normal,
+            )
             .expect("the keyboard table does not translate Ctrl+Shift+D")
             .into_owned(),
             "the old chord did not reach the program: it stayed in the limbo of being nobody's"
@@ -24193,6 +24196,51 @@ mod tests {
         pane.screen.advance(b"\x1b[H\x1b[2J");
     }
 
+    #[test]
+    fn the_six_navigation_keys_reach_a_real_program_in_the_form_it_asked_for() {
+        // The program itself turns application cursor keys on, so the mode Home and End are
+        // translated against is the one the screen parsed from it — not one the test set by hand.
+        // What is read back is what `cat -v` printed, in a mode the probe proved: with the echo on,
+        // the kernel would print the same carets and the test would pass without the program.
+        let mut pane = pane_with(
+            "stty -echo -icanon && printf '\\033[?1h' && echo ready && cat -v",
+            0,
+        );
+        wait_for_this_console_to_say(&mut pane, "ready");
+        assert!(
+            pane.screen.application_cursor_keys(),
+            "premise: the program's CSI ?1h never reached the screen"
+        );
+        confirm_the_console_is_in_the_mode_it_asked_for(&mut pane);
+
+        let ctx = egui::Context::default();
+        let mut modifiers = egui::Modifiers::NONE;
+        let plain = |key| key_press(key, egui::Modifiers::NONE);
+        enqueue(
+            &ctx,
+            vec![
+                plain(egui::Key::Insert),
+                plain(egui::Key::Delete),
+                plain(egui::Key::PageUp),
+                plain(egui::Key::PageDown),
+                plain(egui::Key::Home),
+                plain(egui::Key::End),
+                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                key_press(egui::Key::Delete, egui::Modifiers::CTRL),
+            ],
+        );
+        pane.send_keys(
+            &ctx,
+            Instant::now(),
+            &mut modifiers,
+            1,
+            &keyboard::Keymap::default(),
+            true,
+        );
+
+        wait_for_this_console_to_say(&mut pane, "^[[2~^[[3~^[[5~^[[6~^[OH^[OF^[[3;5~");
+    }
+
     /// Turns the wheel over that console, with whatever chord it is told.
     ///
     /// **The pointer moves first**: the wheel goes to the console under the pointer, and without
@@ -25364,18 +25412,30 @@ mod tests {
         // **`PageUp` on its own belongs to whoever runs inside** —a pager uses it—, and taking it
         // away would be breaking `less` inside our window. Checked by mutating: deleting the
         // «Shift» requirement the suite stayed green, because nothing covered this side.
+        //
+        // Since D52 these keys have bytes, so which side kept the key is told by the bytes: the
+        // scrollback action writes none. And reaching the program is typing, so the view comes
+        // back to where the program writes — which D52 names as the price of giving these keys to
+        // the program. Insert and Delete ride along: they pay the same price and no shortcut
+        // claims them, so they are the half of the six this test is not about Shift for.
         let ctx = egui::Context::default();
 
-        for key in [
-            egui::Key::PageUp,
-            egui::Key::PageDown,
-            egui::Key::Home,
-            egui::Key::End,
+        for (key, sequence) in [
+            (egui::Key::PageUp, "\x1b[5~"),
+            (egui::Key::PageDown, "\x1b[6~"),
+            (egui::Key::Home, "\x1b[H"),
+            (egui::Key::End, "\x1b[F"),
+            (egui::Key::Insert, "\x1b[2~"),
+            (egui::Key::Delete, "\x1b[3~"),
         ] {
             let mut pane = pane_with_scrollback();
             let mut modifiers = egui::Modifiers::NONE;
             pane.screen.scroll_by(term_core::Scroll::Lines(3));
-            let before = pane.screen.view().scroll();
+            assert_ne!(
+                pane.screen.view().scroll(),
+                0,
+                "premise: the console was not scrolled back"
+            );
 
             enqueue(&ctx, vec![key_press(key, egui::Modifiers::NONE)]);
             pane.send_keys(
@@ -25388,10 +25448,14 @@ mod tests {
             );
 
             assert_eq!(
+                String::from_utf8_lossy(&pane.keystrokes),
+                sequence,
+                "{key:?} without Shift did not reach the program inside"
+            );
+            assert_eq!(
                 pane.screen.view().scroll(),
-                before,
-                "{key:?} without Shift moved the scrollback: we have taken it away from the program \
-                 inside"
+                0,
+                "{key:?} reached the program and the view stayed in the scrollback"
             );
         }
     }
@@ -25400,9 +25464,10 @@ mod tests {
     fn the_scrollback_keys_do_not_go_down_to_be_translated_into_bytes() {
         // **They are consumed, and nothing tied that down.** Checked by mutating: deleting the
         // consumption, the test asserting «nothing reached the program» stayed green — because
-        // those four keys **have no bytes** in this milestone's table, so the defect and the fix
-        // gave the same result. What has to be tied down is that the event **disappears from the
-        // queue**: the day the table translates them, leaving them there sends them to the program.
+        // those four keys **had no bytes** in the keyboard milestone's table, so the defect and
+        // the fix gave the same result. What has to be tied down is that the event **disappears
+        // from the queue**: one frame can run more than one pass over the same input (see
+        // `send_keys`), and a key left there would be translated by the next pass.
         let ctx = egui::Context::default();
         let mut pane = pane_with_scrollback();
         let mut modifiers = egui::Modifiers::NONE;
@@ -25429,6 +25494,73 @@ mod tests {
                 |event| matches!(event, egui::Event::Key { key, .. } if *key == egui::Key::PageUp)
             ),
             "the scrollback key stayed in the queue: whoever looks at it later sends it to the program"
+        );
+        // Since D52 the key does have bytes, so this half now binds as well.
+        assert!(
+            pane.keystrokes.is_empty(),
+            "the scrollback key reached the program as {:?}",
+            String::from_utf8_lossy(&pane.keystrokes)
+        );
+    }
+
+    #[test]
+    fn an_unbound_scrollback_key_reaches_the_program_with_its_modifier() {
+        // `key.scroll-page-up = none` gives the chord back, and what comes back is Shift+PageUp —
+        // not a bare PageUp, which a pager would read as a different key.
+        let ctx = egui::Context::default();
+        let mut pane = pane_with_scrollback();
+        let mut modifiers = egui::Modifiers::NONE;
+        let mut keymap = keyboard::Keymap::default();
+        keymap.bind(keyboard::Action::ScrollPageUp, None);
+
+        enqueue(
+            &ctx,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+                key_press(egui::Key::PageUp, egui::Modifiers::SHIFT),
+            ],
+        );
+        pane.send_keys(&ctx, Instant::now(), &mut modifiers, 2, &keymap, true);
+
+        assert_eq!(
+            String::from_utf8_lossy(&pane.keystrokes),
+            "\x1b[5;2~",
+            "the unbound scrollback chord did not reach the program in xterm's form"
+        );
+    }
+
+    #[test]
+    fn home_takes_the_form_the_program_asked_for_through_the_door_that_types() {
+        // Driven through `send_keys` and not the translation helper: the mode is read there, and
+        // dropping that read would leave every helper test green.
+        let ctx = egui::Context::default();
+        let mut pane = pane_with_scrollback();
+        let mut modifiers = egui::Modifiers::NONE;
+        let keymap = keyboard::Keymap::default();
+
+        pane.screen.advance(b"\x1b[?1h");
+        assert!(
+            pane.screen.application_cursor_keys(),
+            "premise: the screen did not take the mode the program asked for"
+        );
+        enqueue(
+            &ctx,
+            vec![key_press(egui::Key::Home, egui::Modifiers::NONE)],
+        );
+        pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
+        assert_eq!(String::from_utf8_lossy(&pane.keystrokes), "\x1bOH");
+
+        pane.keystrokes.clear();
+        pane.screen.advance(b"\x1b[?1l");
+        enqueue(
+            &ctx,
+            vec![key_press(egui::Key::Home, egui::Modifiers::NONE)],
+        );
+        pane.send_keys(&ctx, Instant::now(), &mut modifiers, 1, &keymap, true);
+        assert_eq!(
+            String::from_utf8_lossy(&pane.keystrokes),
+            "\x1b[H",
+            "the mode was withdrawn and Home kept the application form"
         );
     }
 

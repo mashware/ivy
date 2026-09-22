@@ -8,8 +8,9 @@
 //! came out of the window's core under **D28**, which gives a module a ceiling and records what that
 //! file is at so the number can only go down.
 //!
-//! **Where this milestone stops, and why.** Alt, the function keys and the numeric
-//! keypad are left out. None of them is needed to type commands in a shell or to move around an editor,
+//! **Where this milestone stopped, and why.** Alt, the function keys and the numeric
+//! keypad were left out — Alt everywhere except on the six navigation keys, which **D52** later
+//! brought in with their modifiers. None of them is needed to type commands in a shell or to move around an editor,
 //! which is what the milestone has to be able to demonstrate; and the three of them drag along a decision that is not
 //! the one to make here —Alt prepends an escape to what the key sends, and the other two change their bytes
 //! depending on the mode the program is in—. Adding them without being able to see them working would be writing
@@ -37,8 +38,16 @@ pub fn somebody_typed(input: &eframe::egui::InputState) -> bool {
     })
 }
 
+/// Which form the keys that DECCKM governs take: the program inside chooses it with `CSI ?1h` /
+/// `CSI ?1l`, and it is read from the screen — never assumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorKeys {
+    Normal,
+    Application,
+}
+
 /// The bytes that correspond to an event, or nothing if that event does not translate.
-pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
+pub fn bytes(event: &Event, cursor_keys: CursorKeys) -> Option<Cow<'static, [u8]>> {
     match event {
         // The text already comes resolved by the system: accents, dead keys and input methods
         // included. Translating it from the physical key instead of from here would be badly redoing
@@ -100,7 +109,7 @@ pub fn bytes(event: &Event) -> Option<Cow<'static, [u8]>> {
             pressed: true,
             modifiers,
             ..
-        } => key_bytes(*key, *modifiers),
+        } => key_bytes(*key, *modifiers, cursor_keys),
 
         _ => None,
     }
@@ -566,11 +575,22 @@ pub fn paste_or_hold(
     }
 }
 
-fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
-    // Alt and the macOS command key are left out of the milestone, and «out» means silence: Alt
-    // prepends an escape, so sending the bare byte would not be an approximation, it would be a different
+fn key_bytes(
+    key: Key,
+    modifiers: Modifiers,
+    cursor_keys: CursorKeys,
+) -> Option<Cow<'static, [u8]>> {
+    if modifiers.mac_cmd {
+        return None;
+    }
+    // Before the Alt silence below, because for these six keys Alt has a form of its own.
+    if let Some(bytes_out) = navigation_key(key, modifiers, cursor_keys) {
+        return Some(bytes_out);
+    }
+    // Alt is left out of the milestone for every other key, and «out» means silence: Alt prepends
+    // an escape, so sending the bare byte would not be an approximation, it would be a different
     // key. Shift does pass, because it does not change the control code — it is what `xterm` does.
-    if modifiers.alt || modifiers.mac_cmd {
+    if modifiers.alt {
         return None;
     }
     if modifiers.ctrl
@@ -602,6 +622,41 @@ fn key_bytes(key: Key, modifiers: Modifiers) -> Option<Cow<'static, [u8]>> {
         _ => return None,
     };
     Some(Cow::Borrowed(bytes_out))
+}
+
+/// Insert, Delete, Page Up, Page Down, Home and End, in the form `xterm` sends them and the `TERM`
+/// this terminal advertises describes (`kich1`, `kdch1`, `kpp`, `knp`, `khome`, `kend`). **D52.**
+///
+/// **Every modifier goes into the sequence as xterm's parameter** — `1 + Shift + 2·Alt + 4·Ctrl`,
+/// so `Ctrl+Delete` is `CSI 3;5~` — instead of being dropped as it is for the arrows: for these keys
+/// the modifier changes the sequence, and the plain one would be a different key (`Ctrl+Delete`
+/// deleting one character instead of a word). With a parameter Home and End ignore DECCKM, as in
+/// `xterm`; only the bare key switches to `SS3`.
+fn navigation_key(
+    key: Key,
+    modifiers: Modifiers,
+    cursor_keys: CursorKeys,
+) -> Option<Cow<'static, [u8]>> {
+    // The bare key in each cursor mode, and the two bytes the parameter form wraps: `CSI n;m ~`
+    // for the tilde keys (Delete is `CSI 3;m ~`), `CSI 1;m H` / `CSI 1;m F` for Home and End.
+    let (normal, application, code, last): (&'static [u8], &'static [u8], u8, u8) = match key {
+        Key::Insert => (b"\x1b[2~", b"\x1b[2~", b'2', b'~'),
+        Key::Delete => (b"\x1b[3~", b"\x1b[3~", b'3', b'~'),
+        Key::PageUp => (b"\x1b[5~", b"\x1b[5~", b'5', b'~'),
+        Key::PageDown => (b"\x1b[6~", b"\x1b[6~", b'6', b'~'),
+        Key::Home => (b"\x1b[H", b"\x1bOH", b'1', b'H'),
+        Key::End => (b"\x1b[F", b"\x1bOF", b'1', b'F'),
+        _ => return None,
+    };
+    let parameter =
+        1 + u8::from(modifiers.shift) + 2 * u8::from(modifiers.alt) + 4 * u8::from(modifiers.ctrl);
+    Some(match (parameter, cursor_keys) {
+        (1, CursorKeys::Normal) => Cow::Borrowed(normal),
+        (1, CursorKeys::Application) => Cow::Borrowed(application),
+        (m, _) => {
+            Cow::Owned(format!("\x1b[{};{m}{}", char::from(code), char::from(last)).into_bytes())
+        }
+    })
 }
 
 /// Ctrl with a letter gives the control codes from 1 to 26.
@@ -694,6 +749,12 @@ impl crate::Pane {
         // interpreted in the other half of the frame. (Asking it inside the closure would compile
         // as well —the two fields are disjoint borrows—, so this is a choice, not a wall.)
         let bracketed = self.screen.bracketed_paste();
+        // Same reasoning as the one above: set by the program, so it cannot change within the pass.
+        let cursor_keys = if self.screen.application_cursor_keys() {
+            CursorKeys::Application
+        } else {
+            CursorKeys::Normal
+        };
         // **With a paste held, its answer is read before anything else.** The bytes are not written
         // and the question owns `Enter` and `Escape` until it is answered; everything else still
         // reaches the program, because a held paste is not a frozen console. It is composed against
@@ -913,7 +974,7 @@ impl crate::Pane {
                     }
                 }
 
-                match bytes(event) {
+                match bytes(event, cursor_keys) {
                     Some(bytes) => {
                         self.keystrokes.extend_from_slice(&bytes);
                         false
@@ -1042,13 +1103,16 @@ mod tests {
     use super::*;
 
     fn chord_of(key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {
-        bytes(&Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers,
-        })
+        bytes(
+            &Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+            CursorKeys::Normal,
+        )
         .map(|b| b.into_owned())
     }
 
@@ -1061,7 +1125,7 @@ mod tests {
     }
 
     fn text(s: &str) -> Option<Vec<u8>> {
-        bytes(&Event::Text(s.into())).map(|b| b.into_owned())
+        bytes(&Event::Text(s.into()), CursorKeys::Normal).map(|b| b.into_owned())
     }
 
     #[test]
@@ -1145,13 +1209,20 @@ mod tests {
         // and paste before emitting any key. If this case disappeared, **Ctrl+C would stop
         // interrupting** and no key test would notice.
         assert_eq!(
-            bytes(&Event::Copy).map(|b| b.into_owned()),
+            bytes(&Event::Copy, CursorKeys::Normal).map(|b| b.into_owned()),
             Some(vec![3]),
             "Ctrl+C has to keep interrupting"
         );
-        assert_eq!(bytes(&Event::Cut).map(|b| b.into_owned()), Some(vec![24]));
         assert_eq!(
-            bytes(&Event::Paste("whatever there was".into())).map(|b| b.into_owned()),
+            bytes(&Event::Cut, CursorKeys::Normal).map(|b| b.into_owned()),
+            Some(vec![24])
+        );
+        assert_eq!(
+            bytes(
+                &Event::Paste("whatever there was".into()),
+                CursorKeys::Normal
+            )
+            .map(|b| b.into_owned()),
             Some(vec![22]),
             "real pasting is for another milestone; here it is worth what it is worth in a terminal"
         );
@@ -1189,14 +1260,14 @@ mod tests {
         };
 
         assert_eq!(
-            bytes(&key(ctrl_shift)).map(|b| b.into_owned()),
+            bytes(&key(ctrl_shift), CursorKeys::Normal).map(|b| b.into_owned()),
             None,
             "the application's paste shortcut reached the program: with an image on the clipboard \
              the framework now hands this chord over as a key, and letting it through opens visual \
              block in vim where somebody meant to paste"
         );
         assert_eq!(
-            bytes(&key(ctrl)).map(|b| b.into_owned()),
+            bytes(&key(ctrl), CursorKeys::Normal).map(|b| b.into_owned()),
             Some(vec![22]),
             "Ctrl+V stopped delivering its control byte, which is the whole of D33: that byte is how \
              a program hosted in a pane is told to go and read the clipboard itself"
@@ -1282,7 +1353,7 @@ mod tests {
             modifiers: Modifiers::CTRL,
         };
         assert_eq!(
-            bytes(&in_another_layout).map(|b| b.into_owned()),
+            bytes(&in_another_layout, CursorKeys::Normal).map(|b| b.into_owned()),
             Some(vec![4]),
             "closes the input, does not delete"
         );
@@ -1334,7 +1405,7 @@ mod tests {
             repeat: false,
             modifiers: Modifiers::NONE,
         };
-        assert!(bytes(&release).is_none());
+        assert!(bytes(&release, CursorKeys::Normal).is_none());
     }
 
     #[test]
@@ -1349,7 +1420,7 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         assert_eq!(
-            bytes(&repeated).map(|b| b.into_owned()),
+            bytes(&repeated, CursorKeys::Normal).map(|b| b.into_owned()),
             Some(b"\x1b[B".to_vec())
         );
     }
@@ -1359,9 +1430,110 @@ mod tests {
         // They are out on purpose, and what matters is that it shows as silence and not as a wrong
         // byte that the program inside would interpret as something else.
         assert_eq!(press(Key::F1), None);
-        assert_eq!(press(Key::Home), None);
-        assert_eq!(press(Key::PageUp), None);
-        assert_eq!(press(Key::Delete), None);
+        assert_eq!(press(Key::F12), None);
+    }
+
+    fn in_application_mode(key: Key, modifiers: Modifiers) -> Option<Vec<u8>> {
+        bytes(
+            &Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+            CursorKeys::Application,
+        )
+        .map(|b| b.into_owned())
+    }
+
+    #[test]
+    fn the_four_tilde_keys_send_what_xterm_sends_in_either_cursor_mode() {
+        let expected: [(Key, &[u8]); 4] = [
+            (Key::Insert, b"\x1b[2~"),
+            (Key::Delete, b"\x1b[3~"),
+            (Key::PageUp, b"\x1b[5~"),
+            (Key::PageDown, b"\x1b[6~"),
+        ];
+        for (key, sequence) in expected {
+            assert_eq!(press(key).as_deref(), Some(sequence), "{key:?}");
+            // DECCKM governs Home, End and the arrows only; these four must not follow it.
+            assert_eq!(
+                in_application_mode(key, Modifiers::NONE).as_deref(),
+                Some(sequence),
+                "{key:?} changed form under application cursor keys"
+            );
+        }
+    }
+
+    #[test]
+    fn home_and_end_follow_the_cursor_key_mode_the_program_chose() {
+        assert_eq!(press(Key::Home).as_deref(), Some(&b"\x1b[H"[..]));
+        assert_eq!(press(Key::End).as_deref(), Some(&b"\x1b[F"[..]));
+        assert_eq!(
+            in_application_mode(Key::Home, Modifiers::NONE).as_deref(),
+            Some(&b"\x1bOH"[..])
+        );
+        assert_eq!(
+            in_application_mode(Key::End, Modifiers::NONE).as_deref(),
+            Some(&b"\x1bOF"[..])
+        );
+    }
+
+    #[test]
+    fn a_modifier_on_the_six_keys_travels_as_xterms_parameter() {
+        // Every modifier is a different bit, so each one is checked alone and the three together:
+        // a parameter that confused Alt with Ctrl would pass a test that only tried Ctrl.
+        let ctrl_shift = Modifiers {
+            ctrl: true,
+            shift: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        let all_three = Modifiers {
+            alt: true,
+            ..ctrl_shift
+        };
+        assert_eq!(
+            chord_of(Key::Delete, Modifiers::SHIFT).as_deref(),
+            Some(&b"\x1b[3;2~"[..])
+        );
+        assert_eq!(
+            chord_of(Key::PageUp, Modifiers::ALT).as_deref(),
+            Some(&b"\x1b[5;3~"[..])
+        );
+        assert_eq!(
+            chord_of(Key::Delete, Modifiers::CTRL).as_deref(),
+            Some(&b"\x1b[3;5~"[..])
+        );
+        assert_eq!(
+            chord_of(Key::Insert, all_three).as_deref(),
+            Some(&b"\x1b[2;8~"[..])
+        );
+        assert_eq!(
+            chord_of(Key::Home, Modifiers::CTRL).as_deref(),
+            Some(&b"\x1b[1;5H"[..])
+        );
+        assert_eq!(
+            chord_of(Key::End, ctrl_shift).as_deref(),
+            Some(&b"\x1b[1;6F"[..])
+        );
+        // With a parameter, Home and End do not take the SS3 form: SS3 has nowhere to carry it.
+        assert_eq!(
+            in_application_mode(Key::Home, Modifiers::CTRL).as_deref(),
+            Some(&b"\x1b[1;5H"[..])
+        );
+    }
+
+    #[test]
+    fn the_macos_command_key_still_silences_the_six_keys() {
+        let command = Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(chord_of(Key::Home, command), None);
+        assert_eq!(chord_of(Key::Delete, command), None);
     }
 
     #[test]
@@ -1482,7 +1654,7 @@ mod tests {
 
     #[test]
     fn an_event_that_is_not_from_the_keyboard_is_ignored() {
-        assert!(bytes(&Event::WindowFocused(true)).is_none());
+        assert!(bytes(&Event::WindowFocused(true), CursorKeys::Normal).is_none());
     }
 
     // ── The paste that is held instead of sent ───────────────────────────────────────────────────

@@ -1127,6 +1127,17 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 /// it closed is what makes the guard below safe to break the build with — and the failure message
 /// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
 const NOT_OURS: &[&str] = &[
+    // **terminfo capability names and the escape they describe.** The keyboard cites the entries of
+    // the `TERM` it advertises to say which sequence each key sends; they are names in
+    // `xterm-256color`'s terminfo entry, not identifiers of this tree.
+    "smkx",
+    "kich1",
+    "kdch1",
+    "kpp",
+    "knp",
+    "khome",
+    "kend",
+    "SS3",
     // **The three verbs of the control channel's wire format.** They are names on a wire and not
     // identifiers of the app crate: the channel's crate is what declares them, and the app cites
     // them where it explains what it does with each one.

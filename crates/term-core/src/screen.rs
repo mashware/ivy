@@ -286,6 +286,16 @@ impl Screen {
         self.term.mode().contains(TermMode::BRACKETED_PASTE)
     }
 
+    /// Whether the inner program has asked for **application cursor keys** (DECCKM, `CSI ?1h`).
+    ///
+    /// It is what a curses program sends on starting, through the `smkx` of the `TERM` this crate
+    /// advertises, and from then on terminfo tells it that Home is `ESC O H` rather than `ESC [ H`.
+    /// A `bool` and not the engine's flags, for the same reason as
+    /// [`bracketed_paste`](Screen::bracketed_paste).
+    pub fn application_cursor_keys(&self) -> bool {
+        self.term.mode().contains(TermMode::APP_CURSOR)
+    }
+
     /// What the inner program has asked the terminal about the mouse.
     ///
     /// **It returns its own type and not the engine's flags**, for the same reason as
@@ -890,6 +900,29 @@ mod tests {
         screen.advance(b"\x1b[?2004l");
         assert!(
             !screen.bracketed_paste(),
+            "it was withdrawn and it stayed set"
+        );
+    }
+
+    #[test]
+    fn the_program_can_ask_for_and_withdraw_application_cursor_keys() {
+        // Home and End change form while this is on, so the answer has to follow the program: a
+        // curses program turns it on when it starts and off when it hands the terminal back.
+        let mut screen = Screen::new(Size::default());
+        assert!(
+            !screen.application_cursor_keys(),
+            "no one has asked for it and it is already set"
+        );
+
+        screen.advance(b"\x1b[?1h");
+        assert!(
+            screen.application_cursor_keys(),
+            "it was asked for and it did not find out"
+        );
+
+        screen.advance(b"\x1b[?1l");
+        assert!(
+            !screen.application_cursor_keys(),
             "it was withdrawn and it stayed set"
         );
     }

@@ -6761,3 +6761,76 @@ in `W`, because outside every span it would be published as the framework's cost
 | An opener worker, queue or retry | A human-rate command needs none of their lifecycle; what it does need is not to run on the interface thread, and a thread per click, detached, is all of that |
 | Supporting `file:`, `mailto:` or producer-chosen schemes | The feature is web navigation; widening the scheme set widens the untrusted capability without a present requirement |
 | Dedicated nested timing spans from the first version | The existing panel and mouse spans already own the work; counters and batch `W` declare it without risking double subtraction |
+
+## D52 — Home, End, Insert, Delete, Page Up and Page Down go to the program in `xterm`'s form, modifiers included
+
+**Status: taken.** The keyboard milestone (F1.3) translated Enter, Tab, Backspace, Escape and the
+four arrows, and every other named key went silent — held that way by a test. Six of them are on
+every keyboard and used daily in a shell, an editor and a pager, and pressing them did nothing with
+nothing on screen saying why.
+
+### The decision
+
+**1. The sequences are the ones the advertised `TERM` describes.** The terminal launches its
+programs with `TERM=xterm-256color`, so what a curses program expects is what that terminfo entry
+says, and `xterm`, Alacritty and WezTerm send the same: Insert `CSI 2~` (`kich1`), Delete `CSI 3~`
+(`kdch1`), Page Up `CSI 5~` (`kpp`), Page Down `CSI 6~` (`knp`), Home `CSI H` and End `CSI F`.
+
+**2. Home and End follow application cursor keys (DECCKM); the four tilde keys do not.** A program
+that sends `CSI ?1h` — curses does it through `smkx` — is told by terminfo that Home is `SS3 H` and
+End `SS3 F` (`khome`, `kend`), so while the screen holds that mode they go out in that form. The
+mode is read from the screen once per keyboard pass, like bracketed paste, because only the program's
+own output can change it and that is interpreted outside the pass.
+
+**3. A modifier travels as `xterm`'s parameter, and this is a choice to widen, not something the
+ticket forced.** `1 + Shift + 2·Alt + 4·Ctrl`: `Ctrl+Delete` is `CSI 3;5~`, `Ctrl+Home` is
+`CSI 1;5H`, and with a parameter Home and End keep the `CSI` form in either mode, because `SS3` has
+nowhere to carry it. The free option was on the table — the code already sends the plain key when
+Ctrl accompanies something that is not a letter, and silence for Alt — and it was turned down for
+the reason `key_bytes` already gives about Alt: for these keys the modifier changes the sequence, so
+the plain one is a different key (`Ctrl+Delete` would delete one character instead of a word). The
+macOS command key still silences them.
+
+**What that leaves inconsistent, said rather than implied:** after this decision `Ctrl+Home` carries
+its modifier and `Ctrl+Left` does not — the arrows keep sending the plain sequence with Ctrl and keep
+ignoring DECCKM, so word-jump does not work in a shell. It is the same mechanism and it is left out
+on purpose: the arrows also feed the wheel-as-arrows path of the alternate screen, and that widens
+the change past the six keys this decision is about.
+
+**4. The scrollback shortcuts keep the keys first.** The keymap is consulted before translation, so
+`Shift+PageUp`, `Shift+PageDown`, `Shift+Home` and `Shift+End` still move the scrollback and send
+nothing. What changed is what happens when one of them is given back with `none`: it now reaches the
+program as `CSI 5;2~` and so on, where before it was silent. The same goes for chords nobody binds —
+outside Windows, `Shift+Insert` and `Shift+Delete` now send `CSI 2;2~` and `CSI 3;2~`, where
+they did nothing.
+
+**And a bare one is typing now, with typing's price.** A console scrolled back into its history
+that receives any of the six keys bare sends it to the program, and — like every key that reaches
+the program here — brings the view back to where the program writes. Before, the key did nothing
+and the view stayed where it was. This is this terminal's rule for typing, not a precedent borrowed
+from `xterm`, whose own snap-on-key (`scrollKey`) is off by default; `Shift` is still how to move
+through the history.
+
+**What Windows does before any of this, for F2.7 to decide.** The desktop layer (the vendored
+`egui-winit`, **D33**) turns chords over two of these keys into clipboard requests on Windows only,
+before they are keys, looking at one modifier and ignoring the rest: **any** chord with Ctrl over
+Insert is a copy, **any** with Shift over Delete is a cut, and **any** with Shift over Insert is a
+paste — so `Ctrl+Shift+Delete`, `Ctrl+Alt+Insert` or `Ctrl+Shift+Insert` are caught as well, and
+the last one copies the selection. They arrive without their modifiers, the same wall the annex of
+**D26** describes for `Ctrl+Shift+C`, and what reaches the program is what `bytes` does with a bare
+request: a copy is `0x03`, an interrupt, and a cut is `0x18` — `nano` exits on it. The one that
+still becomes a key is the paste over a clipboard with no text, because D33's patch lets it fall
+through, and that one does go out as `CSI 2;2~`. None of this is new with this decision — it held
+while these keys had no bytes of their own — and none of it can be seen from Linux, where the suite
+runs.
+
+### What was discarded, and why
+
+| Discarded | Why |
+|---|---|
+| `CSI 1~` / `CSI 4~` for Home and End (the VT220 «Find» and «Select» keys, what rxvt sends) | Not what `xterm-256color` describes, which is the `TERM` this terminal advertises |
+| Dropping the modifier and sending the plain key, as the arrows do | A different key: `Ctrl+Delete` deleting one character, `Shift+PageUp` given back and arriving as a bare `PageUp` |
+| Silence under a modifier, as Alt gets for every other key | Six keys dead again as soon as a modifier is held, which is the defect this decision exists to remove |
+| A complete extended keyboard protocol (kitty's, `modifyOtherKeys`) | A protocol a program has to ask for, covering every key; the parameter form above is part of the plain PC-style function-key encoding and needs no request |
+| Moving the arrows to DECCKM and to the modifier parameter in the same change | The arrows are also what the wheel sends on the alternate screen; changing them is a change of its own |
+| Reading the mode per key event | It cannot change inside a pass; one read, where bracketed paste is already read, is the established shape |
