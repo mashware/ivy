@@ -92,6 +92,20 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/examples/screen_demo.rs",
 ];
 
+/// Files covered by the complete citations manifest but not yet declared glossary-clean.
+///
+/// Together with [`GLOSSARY_CLEAN_FILES`] this partitions [`CITATIONS_CHECKED`]. A file moves from
+/// here to the clean list when its retired identifiers are removed; it never disappears from both.
+const GLOSSARY_PENDING_FILES: &[&str] = &[
+    "app/src/main.rs",
+    "app/src/painter/blocks.rs",
+    "app/tests/batches.rs",
+    "app/tests/prose.rs",
+    "app/tests/scripts.rs",
+    "app/tests/shape.rs",
+    "app/tests/vendor_patch.rs",
+];
+
 /// Files whose **citations** are checked, though their identifiers are not yet.
 ///
 /// **Every file of the crate, and that is what closes the class.** The first version listed only the
@@ -600,19 +614,40 @@ fn segments(name: &str) -> Vec<String> {
 /// only one of them is the shape of hole this file keeps finding: a list that looks watched and is not.
 /// The label comes back with the files so a failure can name what was declared, not just the path.
 fn guarded_targets(root: &Path) -> Vec<(String, Vec<PathBuf>)> {
-    // **A floor per list, not one over the sum.** Measured: emptying `GLOSSARY_CLEAN_FILES` entirely
-    // left the eight tests green, because the finished crates still gave targets and the «this has no
-    // files» guard is never asked of a list with no entries. The two lists only ever grow, so a floor
-    // here gets in nobody's way: it is there to notice one of them being emptied.
-    assert!(
-        FINISHED_CRATES.len() >= 4
-            && GLOSSARY_CLEAN_FILES.len() >= 27
-            && CITATIONS_CHECKED.len() >= 33,
-        "the three lists this guard reads have {} crates, {} files and {} citation entries: they \
-         only ever grow, so this is one of them being emptied and every check downstream going \
-         quiet",
-        FINISHED_CRATES.len(),
+    // The citations list already proves that it names every file in the crate. Partitioning that
+    // complete list makes a clean file impossible to drop silently: it must remain clean or move to
+    // the explicit pending set. A length floor only notices some removals and becomes stale as the
+    // list grows.
+    let clean: HashSet<&str> = GLOSSARY_CLEAN_FILES.iter().copied().collect();
+    let pending: HashSet<&str> = GLOSSARY_PENDING_FILES.iter().copied().collect();
+    let citations: HashSet<&str> = CITATIONS_CHECKED.iter().map(|(path, _)| *path).collect();
+    assert_eq!(
+        clean.len(),
         GLOSSARY_CLEAN_FILES.len(),
+        "the glossary-clean list contains a duplicate path"
+    );
+    assert_eq!(
+        pending.len(),
+        GLOSSARY_PENDING_FILES.len(),
+        "the glossary-pending list contains a duplicate path"
+    );
+    assert!(
+        clean.is_disjoint(&pending),
+        "a file cannot be both glossary-clean and pending"
+    );
+    let classified: HashSet<&str> = clean.union(&pending).copied().collect();
+    assert_eq!(
+        classified, citations,
+        "every citation-checked file must be classified as glossary-clean or pending"
+    );
+
+    // The remaining floors protect the two independent claims from collapsing to an empty or tiny
+    // list before their own completeness checks run.
+    assert!(
+        FINISHED_CRATES.len() >= 4 && CITATIONS_CHECKED.len() >= 33,
+        "the remaining guarded lists have {} crates and {} citation entries: they only ever grow, \
+         so this is one of them being emptied and every check downstream going quiet",
+        FINISHED_CRATES.len(),
         CITATIONS_CHECKED.len()
     );
     let mut out = Vec::new();
