@@ -247,6 +247,7 @@ impl Window {
                     ceiling: self.blink.ceiling,
                 },
                 buttons: self.buttons,
+                links: self.links,
                 // **What was painted comes from the counter and what was asked for from the gate,
                 // and the two are never derived from each other.** That disagreement is the one
                 // thing this line exists to be able to report: a run that asked for strips and drew

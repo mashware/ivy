@@ -34,6 +34,7 @@ const DECLARED: &[(&str, &str)] = &[
     ("HEADER", "header"),
     ("READS", "documents"),
     ("PATCHES", "documents"),
+    ("LINKS", "links"),
 ];
 
 /// Whether the script has a conditional on this test that ends up invalidating the run.
@@ -121,6 +122,39 @@ fn a_refused_patch_cannot_be_published_as_the_cost_of_patching() {
         invalidates_on("[ \"$PATCHES_REFUSED\" != 0 ]"),
         "nothing invalidates a patching batch whose patches were all refused: the run would publish \
          the cost of the refusal under the name of the work"
+    );
+}
+
+/// **Batch W's own direction has to name every source, and the per-gesture demand has to exist.**
+///
+/// The pair above only proves that *some* condition on `LINKS = 1` invalidates. A guard that read
+/// the plain count alone would satisfy it and publish a run in which OSC 8 or the panel never
+/// opened a thing under the name of all three — measured: dropping two of the four checks left every
+/// other test in this file green. And one activation per source is not the work either: a gesture
+/// counts once its release is sent, landed or not, so the sum has to reach the gestures completed.
+#[test]
+fn batch_w_demands_every_source_and_an_opened_link_per_gesture() {
+    // The knob is read twice — by the seeding and by the guard — so the guard is the occurrence
+    // whose next line reads the report's counts.
+    let lines: Vec<&str> = MEASURE.lines().collect();
+    let direction = lines
+        .windows(2)
+        .find(|pair| {
+            pair[0].contains("if [ \"${LINKS:-}\" = 1 ]; then") && pair[1].contains("$LINK_")
+        })
+        .map(|pair| pair[1])
+        .expect("batch W's own direction is not in the script");
+    for count in ["$LINK_FOUND", "$LINK_PLAIN", "$LINK_OSC", "$LINK_PANEL"] {
+        assert!(
+            direction.contains(&format!("[ \"{count}\" = 0 ]")),
+            "batch W can publish a run in which {count} is zero: «{direction}»"
+        );
+    }
+    assert!(
+        invalidates_on(
+            "[ \"$GESTURE\" = link ] && [ \"$((LINK_PLAIN + LINK_OSC + LINK_PANEL))\" -lt \"$INJECTED\" ]"
+        ),
+        "nothing invalidates a batch W run whose gestures mostly opened nothing"
     );
 }
 
@@ -240,6 +274,10 @@ fn every_word_the_scripts_patterns_anchor_on_is_one_the_report_writes() {
         ("read back", "read back"),
         ("patched,", "patched,"),
         ("patches refused,", "patches refused,"),
+        (" sources found ", " sources found "),
+        (" plain ", " plain "),
+        (" OSC 8 ", " OSC 8 "),
+        (" panel activations$", " panel activations\""),
     ];
 
     for (in_the_script, in_the_report) in ANCHORS {

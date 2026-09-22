@@ -14,6 +14,20 @@ panel-contract = { path = "../panel-contract" }
 # (D3).
 panel-control = { path = "../panel-control" }
 
+# A producer controls every string offered as a link. This parses the complete candidate before the
+# app hands it to the desktop, so `http` and `https` with a host are one boundary shared by terminal
+# text, OSC 8 and the panel instead of three partial string checks.
+url = "2.5"
+
+# The desktop's own opener, the one egui's `links` feature would call — named directly because that
+# feature swallows its error into `log`, and a click the opener could not act on has to say why
+# (D51). What it does with the address differs by platform: on Linux it runs the default browser, or
+# `xdg-open` and its relatives, with the address as one argument; on macOS it asks AppKit's
+# `NSWorkspace`; on Windows it runs the registered `http` handler's command line with the address
+# substituted in. Under WSL it runs `cmd.exe /c start <address>`, escaping only `^` and `&` —
+# which is why `links::WebTarget` percent-encodes what else `cmd` would read.
+webbrowser = "1.2"
+
 # Retirement snapshots must open a producer-controlled path without letting a FIFO block the
 # interface thread. This package is already in the workspace graph; the direct dependency names the
 # one Unix open flag the standard library deliberately leaves platform-specific.

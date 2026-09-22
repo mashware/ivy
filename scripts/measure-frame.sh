@@ -321,6 +321,26 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
         printf '\033[?1000h\033[?1002h\033[?1006h'
     fi
 
+    # **Batch W writes both terminal link sources on the top two rows and keeps them out of the
+    # scrolling.** The ordinary load runs below them: the scroll region starts at the third row, so
+    # the dump never carries the links away and a point the injector found is still a link when it
+    # clicks — which is what lets the guard demand an activation for every gesture. They start at the
+    # twenty-first column, after a space of their own, because the load paints its own counter from
+    # the top-left corner and a stray character glued to «https» would end the plain link. The
+    # region is asserted again on every rewrite, inside the saved cursor, so anything that resets the
+    # margins costs at most one rewrite's interval.
+    if [ "${MEASURE_LINKS:-}" = 1 ]; then
+        printf '\033[3;r\033[3;1H'
+        "$LOAD" run --mib "${MEASURE_MIB:-44}" --at 30 --tag "${MEASURE_BATCH:-x}" &
+        load_pid=$!
+        while kill -0 "$load_pid" 2>/dev/null; do
+            printf '\0337\033[3;r\033[1;20H https://example.test/plain\033[K\033[2;20H \033]8;;https://example.test/osc\033\\OSC-link\033]8;;\033\\\033[K\0338'
+            sleep 0.02
+        done
+        wait "$load_pid"
+        exit $?
+    fi
+
     # **Only batch P asks for the CJK load.** The usual one is bit for bit the same as in every
     # published annex: changing it would leave a new batch unable to compare with any of them.
     if [ "${MEASURE_CJK:-}" = 1 ]; then
@@ -335,7 +355,7 @@ if [ "${MEASURE_AS_CONSOLE:-}" = "1" ]; then
 fi
 
 # ── Batch mode ──────────────────────────────────────────────────────────────────
-BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U or V}
+BATCH=${1:?the batch is missing: A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V or W}
 MIB=${2:-44}
 OUTPUT="$ROOT/target/measurements"
 mkdir -p "$OUTPUT"
@@ -381,7 +401,8 @@ case "$BATCH" in
     T)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; HEADER=1 ;;        # two, and the only one that PAINTS THE STRIP over each console: its control is C
     U)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; PATCHES=1 ;; # two, and the only one that PATCHES the document over the channel: its control is S (and S, U and V publish one field the file batches do not — see `document_of`)
     V)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=0; GESTURE=console; CONTROL=1; READS=1 ;;  # two, and the only one that PROVES THE OFF-FRAME READ PATH RAN: its control is S, but their frame delta is not read latency
-    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U or V" >&2; exit 2 ;;
+    W)       TABS=1; PANES=2x1; DUMPING=2; DRAGS=100000; GESTURE=link; LINKS=1 ;; # two, and OPENING links of all three sources with the desktop hand-off suppressed: its nearest is C, but its consoles also rewrite two link rows and its panel paints a link label, so W − C is not the gesture alone
+    *) echo "unknown batch «$BATCH»: use A, B, C, D, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V or W" >&2; exit 2 ;;
 esac
 # **Why the dragging batch asks for a hundred thousand gestures**: the number is deliberately above
 # what fits, because what is needed is for the gesture to last **from start to finish**. A batch that
@@ -570,6 +591,7 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
     # this straight in front of `"lines"`, so a value with no trailing comma would leave every other
     # batch publishing a panel that is not JSON — which is how the first version of this was found.
     actions=''
+    panel_link=''
     # **Read as $ACTIONS and not as $MEASURE_ACTIONS**: this seeding runs in the batch's own shell,
     # where the batch table set it, while the MEASURE_ prefixed ones are what the window and its
     # consoles see. Reading the child's name here left the document with no buttons and the batch
@@ -585,6 +607,9 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
   {"label":"Close the console","send":"echo console"},
   {"label":"Say what it cost","send":"echo cost"}],'
     fi
+    if [ "${LINKS:-}" = 1 ]; then
+        panel_link=',"link":"https://example.test/panel"'
+    fi
     cat <<JSON
 {"v":1,"stale_after_minutes":600,"attention":"$attention",$actions"lines":[
   {"text":"Batch $BATCH · publication $2","style":"title"},
@@ -593,7 +618,7 @@ document_body() {  # document_body <which of the consoles> <turn> [the key on th
   {"ref":"panel","text":"regime $BATCH — this is what is being measured","mark":"info"},
   {$note_key"ref":"note","text":"the layout is redone on every good re-read","mark":"info"},
   "",
-  {"text":"six lines and a warning: the size of a real working panel","mark":"done"}
+  {"text":"six lines and a warning: the size of a real working panel","mark":"done"$panel_link}
 ]}
 JSON
 }
@@ -765,7 +790,7 @@ seed() {
 case "$BATCH" in
     A) : ;;                       # no panel: nobody publishes anything
     B) seed quiet & ;;
-    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V) seed talkative & ;;
+    C|D|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W) seed talkative & ;;
 esac
 
 echo "batch $BATCH · $TABS tab(s) of $PANES · $DUMPING of $DIRECTORIES consoles dumping $MIB MiB · window $WINDOW_SIZE · do not touch the machine until it closes" >&2
@@ -782,6 +807,7 @@ export MEASURE_AS_CONSOLE=1 MEASURE_MIB="$MIB" MEASURE_BATCH="$BATCH" \
     MEASURE_RUNS="$RUNS" MEASURE_TRIES="$DUMPING" \
     MEASURE_SIZE="$WINDOW_SIZE" MEASURE_DRAGS="$DRAGS" MEASURE_GESTURE="$GESTURE" MEASURE_CJK="${CJK:-}" \
     MEASURE_EMOJI="${EMOJI:-}" MEASURE_ACTIONS="${ACTIONS:-}" \
+    MEASURE_LINKS="${LINKS:-}" \
     XDG_CONFIG_HOME="$CONFIG" \
     SHELL="$ROOT/scripts/measure-frame.sh"
 # **The two that ask for a layout are not exported when the batch restores, and that is what batch L
@@ -937,6 +963,31 @@ fi
 if [ "${ACTIONS:-}" != 1 ] && [ "$DRAWN" != 0 ]; then
     invalidate "this batch declares no buttons and yet it drew $DRAWN: something other than its own \
 load is seeding them, so its spans mix in work that does not belong to what it claims to measure"
+fi
+
+# **The links, read in both directions like the buttons.** Batch W must find and activate every
+# source — a run where one source never reached the grid would publish two thirds of the work under
+# the name of all of it — and every other batch must activate none. Sources are only looked for
+# while W asks for them, so the other direction reads the activations alone. That every gesture
+# opened something is checked with the drags below, where the injected count is read.
+#
+# **An empty capture invalidates instead of becoming a zero**: a reworded report line would
+# otherwise read as «no activations» and silence both directions at once.
+LINKS_LINE=$(grep -E "^links:" "$REPORT" | head -1)
+LINK_FOUND=$(printf '%s' "$LINKS_LINE" | sed -n 's/^links: *\([0-9]*\) sources found .*$/\1/p')
+LINK_PLAIN=$(printf '%s' "$LINKS_LINE" | sed -n 's/^links:.* · \([0-9]*\) plain .*$/\1/p')
+LINK_OSC=$(printf '%s' "$LINKS_LINE" | sed -n 's/^links:.* · \([0-9]*\) OSC 8 .*$/\1/p')
+LINK_PANEL=$(printf '%s' "$LINKS_LINE" | sed -n 's/^links:.* · \([0-9]*\) panel activations$/\1/p')
+if [ -z "$LINK_FOUND" ] || [ -z "$LINK_PLAIN" ] || [ -z "$LINK_OSC" ] || [ -z "$LINK_PANEL" ]; then
+    invalidate "the report's links line could not be read: «$LINKS_LINE»"
+fi
+if [ "${LINKS:-}" = 1 ]; then
+    if [ "$LINK_FOUND" = 0 ] || [ "$LINK_PLAIN" = 0 ] || [ "$LINK_OSC" = 0 ] || [ "$LINK_PANEL" = 0 ]; then
+        invalidate "batch W did not find and activate all three link sources: $LINKS_LINE"
+    fi
+fi
+if [ "${LINKS:-}" != 1 ] && { [ "$LINK_PLAIN" != 0 ] || [ "$LINK_OSC" != 0 ] || [ "$LINK_PANEL" != 0 ]; }; then
+    invalidate "this batch asks for no link activations and yet reports some: $LINKS_LINE"
 fi
 
 # **The control channel, read in both directions, exactly like the buttons above.** A batch that
@@ -1233,6 +1284,14 @@ the gesture"
 marked: that is not even one per gesture, so most of them came in somewhere else and the run publishes \
 the cost of something else under its label"
     fi
+    # **Batch W demands an opened link for every gesture it completed**, not one per source: a
+    # gesture counts once its release is sent whether or not its press landed on a link, so a run
+    # whose points went stale would publish presses that fell into selection or focus under the
+    # name of opening links.
+    if [ "$GESTURE" = link ] && [ "$((LINK_PLAIN + LINK_OSC + LINK_PANEL))" -lt "$INJECTED" ]; then
+        invalidate "$INJECTED link gestures were completed and only $((LINK_PLAIN + LINK_OSC + LINK_PANEL)) \
+opened a link: the rest landed somewhere else, so the run measures something other than opening links"
+    fi
     if [ "$GESTURE" != mark ] && [ "$MARKED" != 0 ]; then
         invalidate "this batch measures «$WHICH_GESTURE» and yet it left text marked in $MARKED frames: \
 its gesture is falling down the selection path, so it measures something else"
@@ -1309,14 +1368,16 @@ fi
 # the guard watches is that that path gets walked.
 #
 # **It is only demanded where the batch moves the layout.** In a still batch there is nothing to
-# save, and neither in the one that marks text, the one that sends the mouse to the program, **nor
-# the one that presses a button on the panel**: none of them touches the tree or the share-out, so
+# save, and neither in the one that marks text, the one that sends the mouse to the program, the one
+# that presses a button on the panel **nor the one that opens links**: none of them touches the tree
+# or the share-out, so
 # their runs do not attempt to save
 # even once and demanding it would invalidate them while being right for the wrong reason. That the
 # list of exempt gestures grows is not an oversight: it is that «injects gestures» and «moves the
 # layout» stopped being the same thing the moment there was a gesture that does not move it, and
 # since then every new gesture that does not move it comes in here.
-if [ "$DRAGS" != 0 ] && [ "$GESTURE" != mark ] && [ "$GESTURE" != mouse ] && [ "$GESTURE" != button ]; then
+if [ "$DRAGS" != 0 ] && [ "$GESTURE" != mark ] && [ "$GESTURE" != mouse ] && [ "$GESTURE" != button ] \
+    && [ "$GESTURE" != link ]; then
     ATTEMPTS=$(sed -n 's/^writing the layout to disk *([0-9]* writes of \([0-9]*\) attempts)$/\1/p' "$REPORT" | head -1)
     if [ -z "$ATTEMPTS" ]; then
         invalidate "drags were asked for and the report declares no attempt at saving the layout"

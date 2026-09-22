@@ -27,7 +27,8 @@ mod view;
 
 pub use screen::{Cell, Half, MouseReporting, SCROLLBACK, Screen, Scroll};
 pub use view::{
-    CellWidth, CombiningSpan, Cursor, CursorShape, TermColor, Underline, View, ViewCell,
+    CellWidth, CombiningSpan, Cursor, CursorShape, Link, LinkSource, TermColor, Underline, View,
+    ViewCell,
 };
 
 /// Error of any operation on the pseudoterminal.

@@ -50,7 +50,7 @@ transports feed it.
 | Field | Required | What it does |
 |---|---|---|
 | `v` | recommended | Contract version |
-| `updated_at` | recommended | ISO 8601. **It is read and not painted yet** —like `link`, see Pending— and **the stale notice does not come from here** (see rules) |
+| `updated_at` | recommended | ISO 8601. **It is read and not painted yet** —see Pending— and **the stale notice does not come from here** (see rules) |
 | `phase` | no | What is being run **right now**. Free text, and painted literally — **inside the identity line**, so `header: false` hides it too |
 | `attention` | no | **Whether this pane claims something, and of what kind.** `wait` `block` `done`. Absent = it claims nothing. See below |
 | `header` | no (`true` by default) | Whether the app adds its identity line at the top: the pane's identifier and its `phase` |
@@ -154,9 +154,34 @@ it is not painted blank: an empty line where there was garbage would be inventin
 | `mark` | `done` `current` `pending` `wait` `block` `info` — the app chooses the symbol, the color and the alignment |
 | `ref` | Short label aligned in a column. **It does not have to be a number**: `#1`, `Now`, `Context`. **Short for real**: whatever goes past the width of its column is clipped, and the column cannot push the text out of the panel |
 | `style` | `normal` `dim` `title` `accent` `ok` `warn` `error` — meant for lines without a `mark`, but **it can come alongside one**: then the mark sets the symbol and the style the color |
-| `link` | A URL. **It is read and not painted yet** — see Pending |
+| `link` | **A web address this line points at.** It is painted as a compact label and one click on the label opens it in the desktop's browser. See below |
 | `indent` | Manual indentation, in cells (inherited by the continuation lines). **It is bounded to 64** when read, and **when painted also against the panel's width**: an indentation of 40 is not honored whole in a panel of 36, because it would leave the text outside |
 | `key` | The name **you** give this line, so it can be addressed later. **It is never painted**, it has no bound of its own — the document's ceiling holds it, as it holds every other string — and it is kept exactly as you wrote it, repeated keys included |
+
+#### `link`
+
+```json
+{"text": "Review", "link": "https://example.test/panel"}
+```
+
+- **How it looks**: a short label beside the line —`!42 ↗` for a merge request, `#257 ↗` for a pull
+  request or an issue, `pipeline 913 ↗`, otherwise the host and the address's last segment— or on a
+  row of its own under the line when the line leaves no room for it. Hovering over the label shows
+  **the whole address** before anybody clicks — in the form the browser will load, which can differ
+  from how you spelled it: the host lowercased, an international host in punycode, `:443` dropped.
+- **A plain click on the label opens it.** No modifier: the panel has no text selection competing
+  for the button. The address goes to the desktop's own opener — **never to the pane's shell**, never
+  fetched by this application. If the desktop's opener reports it could not start anything, one line
+  on the terminal's standard error says why; nothing changes on screen. A browser that starts and
+  then fails is past what the terminal can see.
+- **Only complete `http` and `https` addresses with a host open.** A relative path, a missing host,
+  whitespace, a control or invisible formatting character, `file:`, `mailto:` or any other scheme
+  leaves the label painted and inert: no hand, no tooltip, and a click on it is an ordinary click.
+- **The click opens what was painted.** If you publish a new document between the frame a person
+  read and the frame their click lands in, the click opens the address under the pixels they saw,
+  not the new one. A label the panel clipped, or one painted on the frame the document changed, is
+  not clickable — the same rule as a button.
+- The decision, with what was discarded, in [02-decisiones.md](02-decisiones.md) → D51.
 
 **A line with no `key` is a line.** Nothing about publishing changes if you never write one, and
 nothing about how a panel is painted changes if you do — the field exists for what a channel can say
@@ -620,11 +645,9 @@ itself.
       above. The risks are in [03-arquitectura.md](03-arquitectura.md) → Security, and what replaced
       the row that said the document's origin is checked is there too
 - [ ] **`open` — a button that opens an address** (`{"label": "View PR", "open": "https://…"}`).
-      Left out of the milestone that delivered `send`, and for the same reason `link` was left out of
-      the whole of F1.6: it is the only field that would **open** something coming from a document
-      that may be of outside origin, so painting it and sanitizing the address that goes with it
-      deserve a review of their own. A `send` reaches a shell this application already owns; an
-      `open` reaches the desktop's URL handler, which it does not
+      Still out, and now for a narrower reason: `link` already opens an address from a document of
+      outside origin through the desktop's URL handler (D51), so what an `open` would add is a second
+      shape for the same act — a button rather than a line — and nobody has asked for it yet
 - [x] **How the source and the order of every delivery are expressed** (D17) — **done, and the order
       turned out to be free**: the source is the **holder's name**, claimed on the first publication
       over the channel and released when the connection closes, and while it is held the file is not
@@ -643,12 +666,12 @@ itself.
       pane's identity and its directory have existed since F1.5; F1.6 added reading whatever gets
       published there, painting it, finding out on its own that it has changed and saying when it is
       old
-- [ ] **`link` and `updated_at`, which today are read and not painted.** For `updated_at` what is
-      left is deciding whether it is worth showing what the producer *says* when the notice that
-      comes out of the file's real date is already there. `link` was left out of the whole F1.6
-      milestone on purpose: it is the only field that would **open** something coming from a document
-      that may be of outside origin —a cloned repo, a container—, so painting it and sanitizing the
-      address that goes with it deserve a review of their own
+- [x] **`link`** — **done**: specified above. It was left out of F1.6 on purpose because it is the
+      only field that **opens** something coming from a document that may be of outside origin; the
+      review it was waiting for is D51
+- [ ] **`updated_at`, which today is read and not painted.** What is left is deciding whether it is
+      worth showing what the producer *says* when the notice that comes out of the file's real date is
+      already there
 - [x] That `header: false` should not depend on a `meta.json` existing next to it — **done in F1.6**:
       the flag is read from the `panel.json` itself, its default value does not look at any
       neighboring file, and whoever paints honors it. **What it does not hide is the application's

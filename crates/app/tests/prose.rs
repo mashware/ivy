@@ -55,7 +55,7 @@ use std::path::Path;
 /// moved the measurement bench's injected gestures out into `src/injected.rs`, which is the next
 /// entry down.
 const SOURCES: &[(&str, &str, usize)] = &[
-    ("src/lib.rs", include_str!("../src/lib.rs"), 6_216),
+    ("src/lib.rs", include_str!("../src/lib.rs"), 6_207),
     ("src/alarms.rs", include_str!("../src/alarms.rs"), 136),
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
     ("src/control.rs", include_str!("../src/control.rs"), 362),
@@ -74,7 +74,18 @@ const SOURCES: &[(&str, &str, usize)] = &[
         include_str!("../src/panel/pane.rs"),
         333,
     ),
-    ("src/injected.rs", include_str!("../src/injected.rs"), 316),
+    ("src/injected.rs", include_str!("../src/injected.rs"), 330),
+    (
+        "src/injected/links.rs",
+        include_str!("../src/injected/links.rs"),
+        11,
+    ),
+    ("src/links.rs", include_str!("../src/links.rs"), 46),
+    (
+        "src/links/console.rs",
+        include_str!("../src/links/console.rs"),
+        29,
+    ),
     ("src/panel.rs", include_str!("../src/panel.rs"), 1_067),
     (
         "src/panel/document.rs",
@@ -85,6 +96,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
         "src/panel/buttons.rs",
         include_str!("../src/panel/buttons.rs"),
         24,
+    ),
+    (
+        "src/panel/links.rs",
+        include_str!("../src/panel/links.rs"),
+        40,
     ),
     ("src/measure.rs", include_str!("../src/measure.rs"), 780),
     (
@@ -115,9 +131,14 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ),
     ("src/watcher.rs", include_str!("../src/watcher.rs"), 203),
     ("src/theme.rs", include_str!("../src/theme.rs"), 202),
-    ("src/mouse.rs", include_str!("../src/mouse.rs"), 167),
+    ("src/mouse.rs", include_str!("../src/mouse.rs"), 205),
     ("src/opening.rs", include_str!("../src/opening.rs"), 148),
     ("src/pointer.rs", include_str!("../src/pointer.rs"), 661),
+    (
+        "src/pointer/links.rs",
+        include_str!("../src/pointer/links.rs"),
+        28,
+    ),
     ("src/report.rs", include_str!("../src/report.rs"), 238),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs"), 171),
     ("src/tiling.rs", include_str!("../src/tiling.rs"), 276),

@@ -533,6 +533,8 @@ pub struct SessionHeader {
     pub blink: Blinking,
     /// What the panel's buttons drew and what was pressed.
     pub buttons: Buttons,
+    /// What links were painted and activated.
+    pub links: Links,
     /// What the control channel did.
     pub control: Control,
     /// What the strips over the consoles cost, and whether this run painted any.
@@ -668,6 +670,16 @@ pub struct Buttons {
     pub pressed: usize,
 }
 
+/// Link sources the bench's injector found, frame by frame, and accepted activations per source,
+/// split so a batch must exercise every source.
+#[derive(Default, Clone, Copy)]
+pub struct Links {
+    pub found: usize,
+    pub plain: usize,
+    pub osc8: usize,
+    pub panel: usize,
+}
+
 /// What a blinking cursor cost this run, **and why it cost that**.
 ///
 /// **It is declared even though every published batch reads zero**, because **D13**'s rule is about
@@ -782,6 +794,7 @@ pub fn header(
         reflow,
         blink,
         buttons,
+        links,
         control,
         strips,
     } = session;
@@ -978,6 +991,11 @@ pub fn header(
         a,
         "buttons:      {} drawn whole, {} pressed",
         buttons.painted, buttons.pressed
+    )?;
+    writeln!(
+        a,
+        "links:        {} sources found · {} plain · {} OSC 8 · {} panel activations",
+        links.found, links.plain, links.osc8, links.panel
     )?;
     // **Always, and all three on one line.** The first is read in both directions by the script; the
     // other two are published because a batch cannot promise them — a refusal needs a second source

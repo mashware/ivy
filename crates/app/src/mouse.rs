@@ -2,8 +2,9 @@
 //!
 //! **Two halves, and the seam between them is the point.** [`encode`] and everything under it is a
 //! pure function from a gesture to the bytes a terminal would send, sibling of [`keyboard`]: it
-//! writes nowhere. The `impl Pane` block at the end is the other half — who keeps the gesture, what
-//! the scrollback does with it and what finally reaches the program — and that one **does** write.
+//! writes nowhere. The `impl Pane` block at the end is the other half — which cell a pointer falls
+//! in, who keeps the gesture, what the scrollback does with it and what finally reaches the
+//! program — and that one **does** write.
 //! It came out of the window's core under **D28**, which gives a module a ceiling and records what
 //! that file is at so the number can only go down.
 //!
@@ -24,7 +25,9 @@ use crate::{Cell, Scroll, WheelInput, WheelOutcome, WheelOwner};
 use eframe::egui;
 use eframe::egui::{Modifiers, PointerButton};
 use std::time::{Duration, Instant};
-use term_core::MouseReporting;
+use term_core::{Half, MouseReporting};
+
+use crate::painter::CellMetrics;
 
 /// The highest column or row that the old encoding can report.
 ///
@@ -185,6 +188,99 @@ fn legacy_form(report: MouseReport, button: u8, at: CellPos) -> Option<Vec<u8>> 
 /// does with it and what finally reaches the program. It came out of the window's core under
 /// **D28**, which records what that file is at so the number can only go down.
 impl crate::Pane {
+    /// Which cell of this console that point falls in, **clamped to what the console really takes
+    /// up**.
+    ///
+    /// **What arrives is the console's rectangle, not the pane's** ([`Self::console_within`]): the
+    /// corner it counts from has to be the corner the grid was measured from, or the two disagree
+    /// the moment anything is taken off the pane — a panel from the side, a header from the top.
+    ///
+    /// **And the clamping is still not a convenience: it is what stops anything being selected over
+    /// the panel.** A cell divides the rectangle a whole number of times only by luck, so the
+    /// leftover strip on the right belongs to no column and a point there is not pointing at text.
+    ///
+    /// Returns **nothing when the point falls outside the console's grid**, which is what whoever
+    /// starts a selection has to respect; whoever extends one clamps, because dragging beyond the
+    /// border is the normal gesture of selecting to the end.
+    pub(crate) fn cell_under(
+        &self,
+        console: egui::Rect,
+        point: egui::Pos2,
+        metrics: &CellMetrics,
+    ) -> Option<Cell> {
+        let offset = point - console.min;
+        let column = offset.x / metrics.width();
+        let row = offset.y / metrics.height();
+        (column >= 0.0
+            && row >= 0.0
+            && column < f32::from(self.measured.cols)
+            && row < f32::from(self.measured.rows))
+        .then(|| Cell {
+            row: row as u16,
+            col: column as u16,
+            half: Half::from_fraction(column.fract()),
+        })
+    }
+
+    /// The same arithmetic, but **rejecting nothing**: it is the one used by whoever is already
+    /// dragging.
+    ///
+    /// **Dragging out of the console and going on marking is the age-old gesture**, so here a point
+    /// from outside is not an error: it is somebody wanting to reach the end of the line.
+    ///
+    /// **And it does not clamp, because clamping here would change nothing.** The engine takes the
+    /// point to its grid on its own when converting it into a range —read in its source, not
+    /// assumed— and the cast to `u16` saturates instead of wrapping around. A clamp of our own
+    /// would be a mechanism with no scenario: checked by removing it, no test changes its outcome.
+    ///
+    /// **What this function does decide is which HALF of the cell is being talked about, and there
+    /// is a case there that cost a defect.** Past the right border the half has to be the **right**
+    /// one: the engine **excludes** the last cell when the selection ends on its left, so giving it
+    /// «left» lost **the last character of the line** — right in the gesture that exists to grab it
+    /// whole.
+    pub(crate) fn cell_to_extend_to(
+        &self,
+        console: egui::Rect,
+        point: egui::Pos2,
+        metrics: &CellMetrics,
+    ) -> Cell {
+        let offset = point - console.min;
+        let last_column = f32::from(self.measured.cols.saturating_sub(1));
+        let column = offset.x / metrics.width();
+        let row = offset.y / metrics.height();
+        let half = if column >= last_column {
+            Half::Right
+        } else {
+            Half::from_fraction(column.fract())
+        };
+        Cell {
+            row: row as u16,
+            col: column as u16,
+            half,
+        }
+    }
+
+    /// The cell under the point, **taken to the grid** if the point went outside it.
+    ///
+    /// **Clamping here and not letting it through, the other way round from extending a
+    /// selection.** There the point is handed to the engine, which takes it to its grid on its own;
+    /// here what is done with the cell is **to tell the program about it**, and a column its grid
+    /// does not have is an invented cell. It happens as soon as a drag ends outside the console
+    /// where it began, which is the normal end of a gesture.
+    pub(crate) fn clamped_cell(
+        &self,
+        console: egui::Rect,
+        point: egui::Pos2,
+        metrics: &CellMetrics,
+    ) -> Cell {
+        let released_at = self.cell_to_extend_to(console, point, metrics);
+        Cell {
+            row: released_at.row.min(self.measured.rows.saturating_sub(1)),
+            col: released_at.col.min(self.measured.cols.saturating_sub(1)),
+            half: released_at.half,
+        }
+    }
+
     /// Moves the scrollback by what the wheel has asked for, **keeping what does not add up to a
     /// line**.
     ///

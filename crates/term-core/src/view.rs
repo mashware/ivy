@@ -265,6 +265,43 @@ pub struct Cursor {
     pub shape: CursorShape,
 }
 
+/// Where a link painted in a console came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkSource {
+    /// Characters written directly into the grid spell the destination.
+    Plain,
+    /// The producer attached a semantic destination with the OSC 8 terminal sequence.
+    Osc8,
+}
+
+/// A link resolved from one cell of this exact painted snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    /// The exact candidate carried by the painted snapshot, before the app's web policy validates it.
+    pub target: String,
+    /// Whether the destination was visible text or semantic terminal metadata.
+    pub source: LinkSource,
+}
+
+/// One run of visible cells carrying the same OSC 8 destination.
+///
+/// It is sparse on purpose: putting a pointer in every [`ViewCell`] would enlarge the dense type
+/// rebuilt for every visible cell and every frame, while most screens contain no semantic link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Osc8Span {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) target: String,
+}
+
+/// Side metadata that keeps link resolution out of the dense cell type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ViewMetadata {
+    pub(crate) row_wraps: Vec<bool>,
+    pub(crate) continued_from_above: bool,
+    pub(crate) osc8: Vec<Osc8Span>,
+}
+
 /// A snapshot of the visible grid.
 ///
 /// **Dense**: there are exactly `size.rows * size.cols` cells, and the one at row `f` column `c` is
@@ -283,6 +320,12 @@ pub struct View {
     /// Each cell that carries something points to its span here; those that carry nothing —almost all— take no space.
     /// See [`CombiningSpan`] for why they do not go inside the cell.
     combining: Vec<char>,
+    /// Whether each visible row continues into the next one without a program-written break.
+    row_wraps: Vec<bool>,
+    /// Whether row zero is itself the continuation of a row above the visible snapshot.
+    continued_from_above: bool,
+    /// Semantic links present in the snapshot, stored once per contiguous run rather than per cell.
+    osc8: Vec<Osc8Span>,
     /// Where the cursor is, **if it is visible at all**.
     ///
     /// **It is optional since there is history, and it is not prudence**: scrolling up through the history the
@@ -305,14 +348,19 @@ impl View {
         size: Size,
         cells: Vec<ViewCell>,
         combining: Vec<char>,
+        metadata: ViewMetadata,
         cursor: Option<Cursor>,
         scroll: usize,
     ) -> Self {
         debug_assert_eq!(cells.len(), size.rows as usize * size.cols as usize);
+        debug_assert_eq!(metadata.row_wraps.len(), size.rows as usize);
         Self {
             size,
             cells,
             combining,
+            row_wraps: metadata.row_wraps,
+            continued_from_above: metadata.continued_from_above,
+            osc8: metadata.osc8,
             cursor,
             scroll,
         }
@@ -380,6 +428,186 @@ impl View {
     /// All the cells, in reading order.
     pub fn cells(&self) -> &[ViewCell] {
         &self.cells
+    }
+
+    /// Resolves the link painted under one visible cell.
+    ///
+    /// OSC 8 wins over a URL-shaped label. Plain URLs are reconstructed only for the clicked
+    /// logical line, joining rows only where the terminal marked a wrap. A candidate that touches a
+    /// clipped edge is refused because the snapshot cannot prove that its whole target was painted.
+    pub fn link_at(&self, row: u16, col: u16) -> Option<Link> {
+        if row >= self.size.rows || col >= self.size.cols {
+            return None;
+        }
+        let clicked = row as usize * self.size.cols as usize + col as usize;
+        if let Some(span) = self
+            .osc8
+            .iter()
+            .find(|span| span.start <= clicked && clicked < span.end)
+        {
+            return Some(Link {
+                target: span.target.clone(),
+                source: LinkSource::Osc8,
+            });
+        }
+
+        self.plain_link_at(row as usize, clicked)
+    }
+
+    fn plain_link_at(&self, clicked_row: usize, clicked: usize) -> Option<Link> {
+        let rows = self.size.rows as usize;
+        let cols = self.size.cols as usize;
+        let mut first_row = clicked_row;
+        while first_row > 0 && self.row_wraps[first_row - 1] {
+            first_row -= 1;
+        }
+        let clipped_start = first_row == 0 && self.continued_from_above;
+
+        let mut last_row = clicked_row;
+        while last_row + 1 < rows && self.row_wraps[last_row] {
+            last_row += 1;
+        }
+        let clipped_end = last_row + 1 == rows && self.row_wraps[last_row];
+
+        let mut glyphs = Vec::with_capacity((last_row - first_row + 1) * cols);
+        for row in first_row..=last_row {
+            let start = row * cols;
+            let mut col = 0;
+            while col < cols {
+                let flat = start + col;
+                let cell = &self.cells[flat];
+                match cell.width {
+                    CellWidth::WideTail | CellWidth::WrapFiller => {
+                        col += 1;
+                        continue;
+                    }
+                    CellWidth::WideHead => {
+                        glyphs.push(Glyph {
+                            c: cell.c,
+                            start: flat,
+                            end: if col + 1 < cols { flat + 2 } else { flat + 1 },
+                        });
+                    }
+                    CellWidth::Single => glyphs.push(Glyph {
+                        c: cell.c,
+                        start: flat,
+                        end: flat + 1,
+                    }),
+                }
+                col += 1;
+            }
+        }
+
+        for start in 0..glyphs.len() {
+            let scheme_len = if chars_at(&glyphs, start, "https://") {
+                8
+            } else if chars_at(&glyphs, start, "http://") {
+                7
+            } else {
+                continue;
+            };
+            if start == 0 {
+                if clipped_start {
+                    continue;
+                }
+            } else if !plain_start_boundary(glyphs[start - 1].c) {
+                continue;
+            }
+
+            let mut end = start + scheme_len;
+            while end < glyphs.len() && !plain_end_boundary(glyphs[end].c) {
+                end += 1;
+            }
+            if end == glyphs.len() && clipped_end {
+                continue;
+            }
+            end = trim_plain_end(&glyphs, start, end);
+            if end <= start + scheme_len {
+                continue;
+            }
+            let cell_start = glyphs[start].start;
+            let cell_end = glyphs[end - 1].end;
+            if !(cell_start <= clicked && clicked < cell_end) {
+                continue;
+            }
+
+            let mut target = String::new();
+            for glyph in &glyphs[start..end] {
+                target.push(glyph.c);
+                target.extend(self.combining_of(&self.cells[glyph.start]).iter().copied());
+            }
+            return Some(Link {
+                target,
+                source: LinkSource::Plain,
+            });
+        }
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Glyph {
+    c: char,
+    start: usize,
+    end: usize,
+}
+
+fn chars_at(glyphs: &[Glyph], start: usize, expected: &str) -> bool {
+    expected
+        .chars()
+        .enumerate()
+        .all(|(offset, c)| glyphs.get(start + offset).is_some_and(|glyph| glyph.c == c))
+}
+
+fn plain_start_boundary(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '(' | '[' | '{' | '<' | '"' | '\'')
+}
+
+fn plain_end_boundary(c: char) -> bool {
+    c.is_whitespace() || c.is_control() || matches!(c, '<' | '>' | '"' | '\'' | '`')
+}
+
+/// Where a plain address ends once the sentence around it is taken off.
+///
+/// **The two trims repeat until neither moves the end**, because prose nests them: in
+/// «(see https://x.test/a.)» the bracket hides the full stop, and one pass of each left the stop
+/// inside the address.
+fn trim_plain_end(glyphs: &[Glyph], start: usize, mut end: usize) -> usize {
+    loop {
+        let before = end;
+        while end > start && matches!(glyphs[end - 1].c, '.' | ',' | ';' | ':' | '!' | '?') {
+            end -= 1;
+        }
+
+        if let Some(close) = end
+            .checked_sub(1)
+            .filter(|_| end > start)
+            .map(|index| glyphs[index].c)
+        {
+            let open = match close {
+                ')' => Some('('),
+                ']' => Some('['),
+                '}' => Some('{'),
+                _ => None,
+            };
+            if let Some(open) = open {
+                let opens = glyphs[start..end]
+                    .iter()
+                    .filter(|glyph| glyph.c == open)
+                    .count();
+                let closes = glyphs[start..end]
+                    .iter()
+                    .filter(|glyph| glyph.c == close)
+                    .count();
+                if closes > opens {
+                    end -= 1;
+                }
+            }
+        }
+
+        if end == before {
+            return end;
+        }
     }
 }
 
@@ -560,6 +788,11 @@ mod tests {
             Size { rows: 1, cols: 1 },
             vec![ViewCell::default()],
             combining,
+            ViewMetadata {
+                row_wraps: vec![false],
+                continued_from_above: false,
+                osc8: Vec::new(),
+            },
             None,
             0,
         )
@@ -571,6 +804,35 @@ mod tests {
             combining: span,
             ..ViewCell::default()
         }
+    }
+
+    fn text_view(rows: &[&str], row_wraps: Vec<bool>, continued_from_above: bool) -> View {
+        let cols = rows.first().expect("at least one row").chars().count();
+        assert!(rows.iter().all(|row| row.chars().count() == cols));
+        let cells = rows
+            .iter()
+            .flat_map(|row| {
+                row.chars().map(|c| ViewCell {
+                    c,
+                    ..ViewCell::default()
+                })
+            })
+            .collect();
+        View::new(
+            Size {
+                rows: rows.len() as u16,
+                cols: cols as u16,
+            },
+            cells,
+            Vec::new(),
+            ViewMetadata {
+                row_wraps,
+                continued_from_above,
+                osc8: Vec::new(),
+            },
+            None,
+            0,
+        )
     }
 
     #[test]
@@ -607,5 +869,27 @@ mod tests {
         let cell = cell_pointing_to(CombiningSpan::new(0, 2));
 
         let _ = view.combining_of(&cell);
+    }
+
+    #[test]
+    fn a_plain_candidate_starting_at_a_clipped_top_edge_is_inert() {
+        let view = text_view(&["https://x "], vec![false], true);
+
+        assert_eq!(
+            view.link_at(0, 2),
+            None,
+            "the snapshot treated its clipped edge as proof of a URL boundary"
+        );
+    }
+
+    #[test]
+    fn a_plain_candidate_continuing_below_the_snapshot_is_inert() {
+        let view = text_view(&["https://ex", "ample.test"], vec![true, true], false);
+
+        assert_eq!(
+            view.link_at(0, 2),
+            None,
+            "the snapshot activated a target whose ending had not been painted"
+        );
     }
 }

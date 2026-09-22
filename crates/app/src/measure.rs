@@ -58,9 +58,9 @@ mod header;
 /// surface is exactly what `report.rs` and the window reach for. The module itself stays private, so
 /// `measure::header` outside this file is the function below and never the module.
 pub use header::{
-    Blinking, Buttons, CONSOLE_NAME, ChoosingTheFont, Control, Discovery, Drags, Rasterizing,
-    ReadingSettings, Reflow, Restoring, Saving, SessionHeader, SizeInPoints, Strips, TabBar,
-    header, side,
+    Blinking, Buttons, CONSOLE_NAME, ChoosingTheFont, Control, Discovery, Drags, Links,
+    Rasterizing, ReadingSettings, Reflow, Restoring, Saving, SessionHeader, SizeInPoints, Strips,
+    TabBar, header, side,
 };
 
 /// How many samples are kept of each number.
@@ -700,6 +700,7 @@ mod tests {
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
+                links: Links::default(),
                 control: Control::default(),
                 strips: Strips::default(),
             },
@@ -774,6 +775,7 @@ mod tests {
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
+                links: Links::default(),
                 control: Control::default(),
                 strips: Strips::default(),
             },
@@ -882,6 +884,7 @@ mod tests {
                 reflow: Reflow::default(),
                 blink: Blinking::default(),
                 buttons: Buttons::default(),
+                links: Links::default(),
                 control: Control::default(),
                 strips: Strips::default(),
             },
@@ -1969,6 +1972,7 @@ mod tests {
                         ceiling: Some(false),
                     },
                     buttons: Buttons::default(),
+                    links: Links::default(),
                     control: Control::default(),
                     strips: Strips::default(),
                 },

@@ -20,6 +20,28 @@ use crate::{
 };
 use eframe::egui;
 
+mod links;
+
+/// How many drag gestures to inject, from what the variable said.
+///
+/// **Zero when there is no variable, and that is what makes this not exist for whoever uses the
+/// application**: with no gestures asked for not a single event is injected and the new path does
+/// not get to run. A value that is not understood is ignored just as if it were not there, as in
+/// [`crate::how_many_tabs`] and [`crate::window_size`]: whoever measures finds out on reading the drags the
+/// report declares.
+///
+/// **It receives the value and does not read it**, for the same reason as [`crate::how_many_tabs`]:
+/// `std::env::set_var` has a contract over all the environment and this suite reads it plenty from
+/// several threads.
+pub(crate) fn how_many_drags(value: Option<&str>) -> usize {
+    value.and_then(|value| value.parse().ok()).unwrap_or(0)
+}
+
+/// What the environment variable says, already resolved.
+pub(crate) fn drags_at_startup() -> usize {
+    how_many_drags(std::env::var(crate::DRAGS_VARIABLE).ok().as_deref())
+}
+
 /// The drag gestures the measurement batch does to itself. See [`crate::DRAGS_VARIABLE`].
 ///
 /// **It alternates the side it drops by, and the reason is NOT geometry** — that was checked by
@@ -98,6 +120,10 @@ pub(crate) struct InjectedDrags {
     /// button costs nothing». It is the previous frame's, exactly like the panel's border, because
     /// this hook runs before the interface pass.
     pub(crate) a_button_at: Option<egui::Pos2>,
+    /// Painted points for plain, OSC 8 and panel links, in that order.
+    pub(crate) links_at: [Option<egui::Pos2>; 3],
+    /// The frame whose painting `links_at` comes from, so the next frame's starts it afresh.
+    pub(crate) links_painted_in: Option<u64>,
     /// What a cell of the font measures, for the panel gesture: its travel is counted in cells.
     ///
     /// **And it arrives empty on purpose, because at startup it cannot be known.** egui **has no
@@ -135,6 +161,8 @@ impl InjectedDrags {
     pub(crate) fn new(how_many: usize, which: InjectedGesture) -> Option<Self> {
         (how_many > 0).then_some(Self {
             a_button_at: None,
+            links_at: [None; 3],
+            links_painted_in: None,
             asked_for: how_many,
             step: 0,
             completed: 0,
@@ -197,6 +225,7 @@ impl InjectedDrags {
                 self.select_a_stretch(painted, frame_nr)
             }
             InjectedGesture::PressAButton => self.press_a_button(frame_nr),
+            InjectedGesture::ActivateLinks => self.activate_a_link(frame_nr),
         }
     }
 
@@ -634,6 +663,8 @@ pub(crate) enum InjectedGesture {
     /// composing of what that button sends, and a travel would add a selection's cost under this
     /// label.
     PressAButton,
+    /// Activate plain, OSC 8 and panel links in rotation without launching a browser.
+    ActivateLinks,
     /// **The same travel as marking, over a console whose program asked for the mouse.** What
     /// changes is not the gesture but where it goes: instead of extending a selection, a report
     /// goes out for every cell it crosses. That is why it reuses the injector of [`Self::Select`]
@@ -658,6 +689,7 @@ impl InjectedGesture {
             Self::Select => "marking text",
             Self::MouseToProgram => "handing the mouse to the program",
             Self::PressAButton => "pressing a button on the panel",
+            Self::ActivateLinks => "opening links",
         }
     }
 }
@@ -676,6 +708,7 @@ pub(crate) fn gesture_of(value: Option<&str>) -> InjectedGesture {
         Some("mark") => InjectedGesture::Select,
         Some("mouse") => InjectedGesture::MouseToProgram,
         Some("button") => InjectedGesture::PressAButton,
+        Some("link") => InjectedGesture::ActivateLinks,
         _ => InjectedGesture::MovePane,
     }
 }

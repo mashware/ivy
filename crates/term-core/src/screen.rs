@@ -11,7 +11,7 @@ use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::vte::ansi::{CursorShape as AlacrittyShape, CursorStyle, Processor};
 
 use crate::Size;
-use crate::view::{self, CellWidth, Cursor, View, ViewCell};
+use crate::view::{self, CellWidth, Cursor, Osc8Span, View, ViewCell, ViewMetadata};
 
 /// Dimensions in the vocabulary of `alacritty_terminal`.
 ///
@@ -332,6 +332,28 @@ impl Screen {
         let mut cells = vec![ViewCell::default(); size.rows as usize * cols];
         // Empty in the common case: it only grows with the cells that carry something attached.
         let mut combining = Vec::new();
+        let mut row_wraps = vec![false; size.rows as usize];
+        let mut osc8 = Vec::<Osc8Span>::new();
+
+        // The visible iterator cannot tell whether its first row continues one just outside it.
+        // Read that one boundary while the engine coordinates are still available, then carry only
+        // our boolean into the snapshot.
+        let grid = self.term.grid();
+        let display_offset = grid.display_offset() as i32;
+        let history = grid.history_size() as i32;
+        let top_line = -display_offset;
+        let previous_line = top_line - 1;
+        let continued_from_above = previous_line >= -history
+            && grid[Line(previous_line)][Column(cols.saturating_sub(1))]
+                .flags
+                .contains(Flags::WRAPLINE);
+        let hyperlink_above = (previous_line >= -history)
+            .then(|| grid[Line(previous_line)][Column(cols.saturating_sub(1))].hyperlink())
+            .flatten();
+        let next_line = size.rows as i32 - display_offset;
+        let hyperlink_below = (next_line < grid.screen_lines() as i32)
+            .then(|| grid[Line(next_line)][Column(0)].hyperlink())
+            .flatten();
 
         let contents = self.term.renderable_content();
         // **The selection range is pulled out ONCE and queried per cell**, and whoever answers is the
@@ -367,6 +389,27 @@ impl Screen {
                 range.contains_cell(&indexed, contents.cursor.point, cursor_shape)
             });
             let mut cell = view::cell_from(indexed.cell, selected, &mut combining);
+            if indexed.cell.flags.contains(Flags::WRAPLINE) {
+                row_wraps[row as usize] = true;
+            }
+            if let Some(hyperlink) = indexed.cell.hyperlink() {
+                let flat = row as usize * cols + col;
+                let continues_last = osc8
+                    .last()
+                    .is_some_and(|span| span.end == flat && span.target == hyperlink.uri());
+                if continues_last {
+                    let span = osc8
+                        .last_mut()
+                        .expect("the span was present one line above");
+                    span.end += 1;
+                } else {
+                    osc8.push(Osc8Span {
+                        start: flat,
+                        end: flat + 1,
+                        target: hyperlink.uri().to_owned(),
+                    });
+                }
+            }
             // **A wide character's companion is highlighted along with its head, and THIS crate sets that.**
             // The engine only does the opposite path —it marks the head when the companion falls inside,
             // so that its text does not come out cut off— and that is enough for it because its painter draws the background of a
@@ -396,7 +439,33 @@ impl Screen {
             shape: view::shape_from(contents.cursor.shape),
         });
 
-        View::new(size, cells, combining, cursor, contents.display_offset)
+        // A semantic label cut by the top or bottom of the retained snapshot is not enough to
+        // activate its hidden target. Refuse only the boundary span; complete links elsewhere stay
+        // usable even when the logical terminal line itself is longer than the viewport.
+        osc8.retain(|span| {
+            let clipped_above = span.start == 0
+                && hyperlink_above
+                    .as_ref()
+                    .is_some_and(|hyperlink| hyperlink.uri() == span.target);
+            let clipped_below = span.end == cells.len()
+                && hyperlink_below
+                    .as_ref()
+                    .is_some_and(|hyperlink| hyperlink.uri() == span.target);
+            !clipped_above && !clipped_below
+        });
+
+        View::new(
+            size,
+            cells,
+            combining,
+            ViewMetadata {
+                row_wraps,
+                continued_from_above,
+                osc8,
+            },
+            cursor,
+            contents.display_offset,
+        )
     }
 
     /// Starts a selection at that cell, **throwing away any that existed**.
@@ -1767,6 +1836,244 @@ mod tests {
             view.combining_of(&cell),
             &['\u{FE0F}'],
             "what is attached was lost when scrolling up through the scrollback"
+        );
+    }
+
+    fn link_targets(view: &View) -> Vec<(u16, u16, view::Link)> {
+        let mut links = Vec::new();
+        for row in 0..view.size().rows {
+            for col in 0..view.size().cols {
+                if let Some(link) = view.link_at(row, col) {
+                    links.push((row, col, link));
+                }
+            }
+        }
+        links
+    }
+
+    #[test]
+    fn a_plain_url_crosses_engine_wraps_and_style_changes() {
+        let mut screen = Screen::new(Size { rows: 4, cols: 12 });
+        screen.advance(b"See https://exa\x1b[31mmple.test/a\x1b[0m now");
+
+        let links = link_targets(&screen.view());
+        assert!(
+            links.iter().any(|(row, _, link)| {
+                *row > 0
+                    && link.source == view::LinkSource::Plain
+                    && link.target == "https://example.test/a"
+            }),
+            "the engine wrap or the style boundary split the visible URL: {links:?}"
+        );
+    }
+
+    #[test]
+    fn a_program_written_line_break_does_not_create_a_url() {
+        let mut screen = Screen::new(Size { rows: 3, cols: 20 });
+        screen.advance(b"https://example.\r\ntest/path");
+
+        let links = link_targets(&screen.view());
+        assert!(
+            links
+                .iter()
+                .all(|(_, _, link)| link.target != "https://example.test/path"),
+            "two physical lines were joined even though the program wrote the break: {links:?}"
+        );
+    }
+
+    #[test]
+    fn plain_url_punctuation_keeps_balanced_parentheses_and_drops_the_sentence() {
+        let mut screen = Screen::new(Size { rows: 3, cols: 48 });
+        screen.advance(b"See (https://example.test/a_(b)). next");
+
+        let links = link_targets(&screen.view());
+        assert!(
+            links
+                .iter()
+                .any(|(_, _, link)| link.target == "https://example.test/a_(b)"),
+            "the balanced URL did not survive its surrounding punctuation: {links:?}"
+        );
+        assert!(
+            links.iter().all(|(_, _, link)| !link.target.ends_with('.')),
+            "sentence punctuation became part of the target: {links:?}"
+        );
+    }
+
+    #[test]
+    fn trailing_sentence_marks_and_unmatched_brackets_are_not_targets() {
+        for suffix in [".", ",", ";", ":", "!", "?", ")", "]", "}"] {
+            let mut screen = Screen::new(Size { rows: 2, cols: 40 });
+            screen.advance(format!("https://example.test/x{suffix} next").as_bytes());
+            let links = link_targets(&screen.view());
+            assert!(
+                links
+                    .iter()
+                    .any(|(_, _, link)| link.target == "https://example.test/x"),
+                "the trailing {suffix:?} was not removed according to the literal grammar: {links:?}"
+            );
+            assert!(
+                links
+                    .iter()
+                    .all(|(_, _, link)| !link.target.ends_with(suffix)),
+                "the trailing {suffix:?} became part of the target: {links:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_declared_plain_url_boundary_is_honored() {
+        for prefix in [" ", "(", "[", "{", "<", "\"", "'"] {
+            for suffix in [" ", "<", ">", "\"", "'", "`", "\t"] {
+                let mut screen = Screen::new(Size { rows: 2, cols: 40 });
+                let text = format!("{prefix}https://example.test/x{suffix}");
+                screen.advance(text.as_bytes());
+                assert!(
+                    link_targets(&screen.view())
+                        .iter()
+                        .any(|(_, _, link)| link.target == "https://example.test/x"),
+                    "the declared boundary pair {prefix:?} / {suffix:?} was not recognized"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_wide_character_before_and_inside_a_plain_url_keeps_cell_hit_testing_exact() {
+        let mut screen = Screen::new(Size { rows: 3, cols: 30 });
+        screen.advance("日 https://例.test/x".as_bytes());
+        let view = screen.view();
+
+        let wide_head = link_targets(&view)
+            .into_iter()
+            .find(|(_, _, link)| link.target == "https://例.test/x")
+            .expect("the URL with a wide character was not recognized");
+        assert_eq!(wide_head.2.source, view::LinkSource::Plain);
+        let wide_col = (0..view.size().cols)
+            .find(|col| view.cell(0, *col).is_some_and(|cell| cell.c == '例'))
+            .expect("the wide URL character is visible");
+        assert_eq!(
+            view.link_at(0, wide_col + 1)
+                .expect("the wide tail should belong to its head's target")
+                .target,
+            "https://例.test/x"
+        );
+    }
+
+    #[test]
+    fn an_osc_8_target_wins_over_its_url_shaped_label() {
+        let mut screen = Screen::new(Size { rows: 3, cols: 48 });
+        screen.advance(
+            b"\x1b]8;;https://destination.test/osc\x1b\\https://label.test/plain\x1b]8;;\x1b\\",
+        );
+
+        let link = screen
+            .view()
+            .link_at(0, 10)
+            .expect("the OSC 8 label did not retain its semantic target");
+        assert_eq!(link.source, view::LinkSource::Osc8);
+        assert_eq!(link.target, "https://destination.test/osc");
+    }
+
+    #[test]
+    fn an_osc_8_wide_labels_two_cells_resolve_to_one_target() {
+        let mut screen = Screen::new(Size { rows: 2, cols: 10 });
+        screen.advance(b"\x1b]8;;https://example.test/wide\x1b\\");
+        screen.advance("日".as_bytes());
+        screen.advance(b"\x1b]8;;\x1b\\");
+        let view = screen.view();
+
+        assert_eq!(
+            view.link_at(0, 0),
+            view.link_at(0, 1),
+            "the wide label's companion did not retain the sparse OSC 8 span"
+        );
+        assert_eq!(
+            view.link_at(0, 1).expect("the companion is linked").source,
+            view::LinkSource::Osc8
+        );
+    }
+
+    #[test]
+    fn an_osc_8_label_clipped_by_scrollback_is_not_resolved() {
+        let mut screen = Screen::new(Size { rows: 2, cols: 8 });
+        screen.advance(b"\x1b]8;;https://example.test/hidden\x1b\\");
+        screen.advance(b"a-semantic-label-longer-than-the-view");
+        screen.advance(b"\x1b]8;;\x1b\\");
+
+        assert!(
+            link_targets(&screen.view()).is_empty(),
+            "a visible suffix of an OSC 8 label activated its hidden target"
+        );
+    }
+
+    #[test]
+    fn an_osc_8_label_that_continues_below_the_view_is_not_resolved() {
+        // The label starts on the view's rows and goes on past its bottom edge: what is visible is
+        // a prefix of it, and a prefix is not the text that named the target.
+        let mut screen = Screen::new(Size { rows: 2, cols: 8 });
+        screen.advance(b"\x1b]8;;https://example.test/below\x1b\\");
+        screen.advance(b"abcdefghijklmnopqrstuvwx");
+        screen.advance(b"\x1b]8;;\x1b\\\r\nz1\r\nz2\r\nz3\r\nz4");
+        screen.scroll_by(Scroll::ToTop);
+        let view = screen.view();
+        assert_eq!(
+            view.cell(0, 0).expect("the top row is visible").c,
+            'a',
+            "the view does not start at the label, so it would not be clipped at the bottom"
+        );
+
+        assert!(
+            link_targets(&view).is_empty(),
+            "a visible prefix of an OSC 8 label activated a target whose label runs off the view"
+        );
+    }
+
+    #[test]
+    fn a_full_stop_hidden_by_a_closing_bracket_is_still_the_sentences() {
+        let mut screen = Screen::new(Size { rows: 2, cols: 48 });
+        screen.advance(b"(see https://example.test/a.) next");
+
+        let links = link_targets(&screen.view());
+        assert!(
+            links
+                .iter()
+                .any(|(_, _, link)| link.target == "https://example.test/a"),
+            "the bracket kept the full stop inside the address: {links:?}"
+        );
+    }
+
+    #[test]
+    fn a_scheme_embedded_in_a_word_and_an_uppercase_scheme_are_inert() {
+        for text in ["xhttps://example.test", "HTTPS://example.test"] {
+            let mut screen = Screen::new(Size { rows: 2, cols: 32 });
+            screen.advance(text.as_bytes());
+            assert!(
+                link_targets(&screen.view()).is_empty(),
+                "the literal plain-link grammar accepted {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plain_url_in_scrollback_resolves_from_the_painted_offset() {
+        let mut screen = Screen::new(Size { rows: 3, cols: 40 });
+        screen.advance(b"https://example.test/history\r\n");
+        for line in 0..6 {
+            screen.advance(format!("filler {line}\r\n").as_bytes());
+        }
+        assert!(
+            link_targets(&screen.view()).is_empty(),
+            "the old URL unexpectedly remained on the active screen"
+        );
+
+        screen.scroll_by(Scroll::ToTop);
+        let view = screen.view();
+        assert!(view.scroll() > 0);
+        assert!(
+            link_targets(&view)
+                .iter()
+                .any(|(_, _, link)| link.target == "https://example.test/history"),
+            "the retained snapshot lost link resolution when its rows came from scrollback"
         );
     }
 }

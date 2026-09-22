@@ -40,6 +40,8 @@ use eframe::egui;
 use std::time::{Duration, Instant, SystemTime};
 use term_core::Cell;
 
+pub(crate) mod links;
+
 /// What the mouse's pass over the consoles leaves for the rest of the frame.
 ///
 /// **Two things and not one because the second cannot be deduced from the first**: when somebody
@@ -305,6 +307,7 @@ impl Window {
         // believing a button was still down for ever, stealing the next release.
         let queue = Self::collect_the_buttons(ui);
         let queue = self.answer_a_clicked_question(ui, rects, metrics, queue);
+        let link_was_released = links::has_primary(&queue, false);
 
         // **Which console the strip's button was pressed on is worked out here, under the same
         // once-per-frame guard as the routing below, and acted on after the walk.** The guard is not
@@ -316,9 +319,11 @@ impl Window {
         // abscissa: the same press closes that one too. Two panes hide it, because the survivor of
         // the first close carries no button at all.
         let frame_nr = ui.ctx().cumulative_frame_nr();
+        self.a_link_gesture_ended(frame_nr);
         let mut asked_to_close = None;
         if self.last_frame_with_buttons != Some(frame_nr) {
             self.last_frame_with_buttons = Some(frame_nr);
+            let queue = self.open_link_presses(metrics, frame_nr, queue);
             asked_to_close = self.whose_button_was_pressed(rects, metrics, now, &queue);
             self.route_the_buttons(rects, &names, metrics, queue, now);
         }
@@ -362,7 +367,11 @@ impl Window {
             // second over — makes egui report the click here as well, so the console about to leave
             // would take the keyboard on its way out and hand it to its neighbour when it goes. The
             // person typing in a third console loses their place to a gesture aimed at neither.
-            if (response.clicked() || response.drag_started()) && asked_to_close != Some(name) {
+            let link_gesture = self.a_link_gesture_holds(name);
+            if (response.clicked() || response.drag_started())
+                && asked_to_close != Some(name)
+                && !link_gesture
+            {
                 self.active_mut().focus = name;
             }
 
@@ -372,6 +381,7 @@ impl Window {
             // a drag**: put after it, it would never run. Without this there is no way to stop
             // having something selected other than waiting for the program to clear the screen.
             if response.clicked()
+                && !link_gesture
                 && let Some(pane) = self.pane_called(name)
             {
                 pane.screen.clear_selection();
@@ -416,11 +426,13 @@ impl Window {
             // foot of this pass and nobody interacts with its widget again. A guard here fires in no
             // frame that exists; it was written, mutated away, and no test moved.
             if response.drag_started() {
-                self.drag_in_progress = Some(DragIntent::from_the_press(
-                    self.chord_of_the_last_press,
-                    the_press_fell_on(chrome.as_ref(), self.where_the_last_press_fell),
-                    self.the_press_went_to_the_program,
-                ));
+                self.drag_in_progress = (!link_gesture).then(|| {
+                    DragIntent::from_the_press(
+                        self.chord_of_the_last_press,
+                        the_press_fell_on(chrome.as_ref(), self.where_the_last_press_fell),
+                        self.the_press_went_to_the_program,
+                    )
+                });
             }
 
             if self.drag_in_progress == Some(DragIntent::Select) {
@@ -557,6 +569,8 @@ impl Window {
             // says here.
             the_tree_changed = true;
         }
+
+        self.a_link_gesture_was_released(link_was_released, frame_nr);
 
         // **The last thing, because the focus is only final now.** The loop above moves it when
         // somebody presses on another console, and the painting follows in this same frame: marking

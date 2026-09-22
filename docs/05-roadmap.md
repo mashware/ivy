@@ -283,6 +283,16 @@ It came out of reading Part I against this table — the phase promises «copy, 
 through the scrollback» and three of the four had an owner. **Its place in the order is not decided
 here**, only that it exists and that it is a milestone and not a corner of somebody else's.
 
+**Opening a link is not a milestone, and it landed outside the table on purpose.** Every terminal
+this phase measures itself against opens the addresses a program prints, and until
+[#257](https://github.com/mashware/agent-terminal/issues/257) this one showed them in the console
+and could do nothing else with them, and the panel did not even show its `line.link`: it had been
+read and left unpainted since F1.6. It is the D19 bar, not an idea coming in through the front door: `Ctrl`+click on an
+address or an OSC 8 hyperlink in a console, a click on a panel's link label, and only `http` and
+`https` reaching the desktop's browser. What it decided — the gestures, the painted snapshot a click
+resolves against, and the one boundary every address crosses — is **D51**, and batch `W` is what
+declares its work to the bench.
+
 **F2.8 is done before F2.6 and F2.7, and the number is not recycled.** Milestone identifiers live in
 commits, decisions and in the knowledge store, so renumbering costs more than accepting that the
 table is out of order. The reason for bringing it forward: it is the only thing in Phase 2 that

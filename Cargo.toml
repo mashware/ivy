@@ -9,11 +9,13 @@ edition = "2024"
 [workspace.dependencies]
 # Without the default features, which multiply the packages and with them the time
 # `clippy --workspace --all-targets` takes — and this milestone runs it constantly. What stays out is
-# not only `wgpu` and accessibility: also `links` (opening URLs, which a terminal will want the day it
-# supports OSC 8), the web screen reader and `winit/default` — hence the `winit` dependency that
-# `crates/app` declares to put back one of the things that default used to bring.
-# The last three here are not optional: without `default_fonts` there is nothing to paint text with,
-# and without the two window backends there is no window on Linux.
+# not only `wgpu` and accessibility: also the web screen reader and `winit/default` — hence the
+# `winit` dependency that `crates/app` declares to put back one of the things that default used to
+# bring. `default_fonts` is not optional because without it there is nothing to paint text with, nor
+# are the two window backends because without them there is no window on Linux. `links` stays out
+# although this terminal opens links (D51): its hand-off reports a failure only through `log`, which
+# this binary never installs, so `crates/app` calls the same opener itself and hears the errors it
+# reports.
 # Careful about trimming further: today `libwayland` is loaded at run time because the `dlopen`
 # feature arrives indirectly, through the clipboard. Dropping the clipboard would bring it down, and
 # then compiling would demand libwayland and the binary would stop starting on an X11 machine

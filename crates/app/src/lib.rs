@@ -41,6 +41,7 @@ pub mod fonts;
 mod header;
 mod injected;
 pub mod keyboard;
+mod links;
 pub mod measure;
 pub mod mouse;
 mod opening;
@@ -84,7 +85,7 @@ use painter::CellMetrics;
 use panel_contract::PanelDir;
 use pty_output::{PtyOutput, Silences};
 use std::time::{Instant, SystemTime};
-use term_core::{Cell, Half, Pty, Screen, Scroll, Size};
+use term_core::{Cell, Pty, Screen, Scroll, Size};
 use theme::Theme;
 use watcher::{Flag, Watcher};
 
@@ -170,6 +171,8 @@ struct PaneOutcome {
     /// survived the clip — and a button the clip cut in half is not drawn as far as a press is
     /// concerned. The report's line is read by the script in both directions (**D13**).
     buttons_painted: usize,
+    /// Where the bench's link gesture can click, only when the measurement batch asks for it.
+    links: links::ForTheBench,
     /// What it cost to rasterize color glyphs **while this pane was being painted**.
     ///
     /// **It travels through here and not through an accumulator of the window because it has to be
@@ -614,26 +617,6 @@ fn size_at_startup() -> Option<egui::Vec2> {
     window_size(std::env::var(SIZE_VARIABLE).ok().as_deref())
 }
 
-/// How many drag gestures to inject, from what the variable said.
-///
-/// **Zero when there is no variable, and that is what makes this not exist for whoever uses the
-/// application**: with no gestures asked for not a single event is injected and the new path does
-/// not get to run. A value that is not understood is ignored just as if it were not there, as in
-/// [`how_many_tabs`] and [`window_size`]: whoever measures finds out on reading the drags the
-/// report declares.
-///
-/// **It receives the value and does not read it**, for the same reason as [`how_many_tabs`]:
-/// `std::env::set_var` has a contract over all the environment and this suite reads it plenty from
-/// several threads.
-fn how_many_drags(value: Option<&str>) -> usize {
-    value.and_then(|value| value.parse().ok()).unwrap_or(0)
-}
-
-/// What the environment variable says, already resolved.
-fn drags_at_startup() -> usize {
-    how_many_drags(std::env::var(DRAGS_VARIABLE).ok().as_deref())
-}
-
 /// Opens the window and does not come back until it is closed.
 ///
 /// **The environment is read here, and nowhere else.** [`Window::with_tabs`] receives the number
@@ -693,7 +676,7 @@ pub fn run() -> eframe::Result {
     // window's size is not saved, because leaving it to the desktop is what makes the measurements
     // comparable. See [`SIZE_VARIABLE`].
     let requested = size_at_startup();
-    let injected_drags = drags_at_startup();
+    let injected_drags = injected::drags_at_startup();
     // **Read here with the rest of the environment, and not inside the closure**, which is where
     // every other gate of this function is read. It is **applied** to the window after it is built,
     // like the theme and the injected gestures beside it — `Window::opening` is born painting strips
@@ -812,6 +795,12 @@ struct Pane {
     /// apart is which flag its notice reaches.
     to_reread: Flag,
     screen: Screen,
+    /// The terminal snapshot and rectangle that produced the pixels currently on screen.
+    ///
+    /// Link resolution reads this instead of [`Self::screen`]: output can be interpreted between a
+    /// paint and a click, and then the live grid is already newer than what the person aimed at.
+    /// Selection and the program's mouse reports still read the live grid.
+    painted_console: Option<links::PaintedConsole>,
     /// What is picked up from the bridge in one frame, reused between frames so as not to allocate
     /// memory in every one. It never grows beyond the budget: it is asked for with a cap and
     /// interpreted whole.
@@ -913,94 +902,6 @@ pub(crate) enum WheelOwner {
 }
 
 impl Pane {
-    /// Which cell of this console that point falls in, **clamped to what the console really takes
-    /// up**.
-    ///
-    /// **What arrives is the console's rectangle, not the pane's** ([`Pane::console_within`]): the
-    /// corner it counts from has to be the corner the grid was measured from, or the two disagree
-    /// the moment anything is taken off the pane — a panel from the side, a header from the top.
-    ///
-    /// **And the clamping is still not a convenience: it is what stops anything being selected over
-    /// the panel.** A cell divides the rectangle a whole number of times only by luck, so the
-    /// leftover strip on the right belongs to no column and a point there is not pointing at text.
-    ///
-    /// Returns **nothing when the point falls outside the console's grid**, which is what whoever
-    /// starts a selection has to respect; whoever extends one clamps, because dragging beyond the
-    /// border is the normal gesture of selecting to the end.
-    fn cell_under(
-        &self,
-        console: egui::Rect,
-        point: egui::Pos2,
-        metrics: &CellMetrics,
-    ) -> Option<Cell> {
-        let offset = point - console.min;
-        let column = offset.x / metrics.width();
-        let row = offset.y / metrics.height();
-        (column >= 0.0
-            && row >= 0.0
-            && column < f32::from(self.measured.cols)
-            && row < f32::from(self.measured.rows))
-        .then(|| Cell {
-            row: row as u16,
-            col: column as u16,
-            half: Half::from_fraction(column.fract()),
-        })
-    }
-
-    /// The same arithmetic, but **rejecting nothing**: it is the one used by whoever is already
-    /// dragging.
-    ///
-    /// **Dragging out of the console and going on marking is the age-old gesture**, so here a point
-    /// from outside is not an error: it is somebody wanting to reach the end of the line.
-    ///
-    /// **And it does not clamp, because clamping here would change nothing.** The engine takes the
-    /// point to its grid on its own when converting it into a range —read in its source, not
-    /// assumed— and the cast to `u16` saturates instead of wrapping around. A clamp of our own
-    /// would be a mechanism with no scenario: checked by removing it, no test changes its outcome.
-    ///
-    /// **What this function does decide is which HALF of the cell is being talked about, and there
-    /// is a case there that cost a defect.** Past the right border the half has to be the **right**
-    /// one: the engine **excludes** the last cell when the selection ends on its left, so giving it
-    /// «left» lost **the last character of the line** — right in the gesture that exists to grab it
-    /// whole.
-    fn cell_to_extend_to(
-        &self,
-        console: egui::Rect,
-        point: egui::Pos2,
-        metrics: &CellMetrics,
-    ) -> Cell {
-        let offset = point - console.min;
-        let last_column = f32::from(self.measured.cols.saturating_sub(1));
-        let column = offset.x / metrics.width();
-        let row = offset.y / metrics.height();
-        let half = if column >= last_column {
-            Half::Right
-        } else {
-            Half::from_fraction(column.fract())
-        };
-        Cell {
-            row: row as u16,
-            col: column as u16,
-            half,
-        }
-    }
-
-    /// The cell under the point, **taken to the grid** if the point went outside it.
-    ///
-    /// **Clamping here and not letting it through, the other way round from extending a
-    /// selection.** There the point is handed to the engine, which takes it to its grid on its own;
-    /// here what is done with the cell is **to tell the program about it**, and a column its grid
-    /// does not have is an invented cell. It happens as soon as a drag ends outside the console
-    /// where it began, which is the normal end of a gesture.
-    fn clamped_cell(&self, console: egui::Rect, point: egui::Pos2, metrics: &CellMetrics) -> Cell {
-        let released_at = self.cell_to_extend_to(console, point, metrics);
-        Cell {
-            row: released_at.row.min(self.measured.rows.saturating_sub(1)),
-            col: released_at.col.min(self.measured.cols.saturating_sub(1)),
-            half: released_at.half,
-        }
-    }
-
     /// Applies the size the last UI pass measured.
     ///
     /// **The order between the two halves is not indifferent: the grid first and the program
@@ -1202,6 +1103,10 @@ struct Window {
     /// What the panel's buttons drew and what was pressed this run. **For the report, which has to
     /// declare a painted path it did not have before** (D13).
     buttons: measure::Buttons,
+    /// Link sources the bench found and accepted activations, published for the measurement gate.
+    links: measure::Links,
+    /// Where an accepted link goes: the desktop's opener, or a recorder under test.
+    desktop: links::Desktop,
     /// The channel counters of panes **that have already closed**, so a run that closes one does not
     /// lose what it did.
     ///
@@ -1306,6 +1211,11 @@ struct Window {
     /// See the reason where it is used: button events cannot be consumed, so a repeated pass would
     /// send the same click twice.
     last_frame_with_buttons: Option<u64>,
+    /// The pane whose link owns the current primary-button gesture, until its release.
+    ///
+    /// Keeping this beyond the press frame prevents egui from turning a Ctrl+click with a small
+    /// movement into selection, pane movement or a program mouse report on the following frame.
+    link_press_in_progress: Option<pointer::links::LinkGesture>,
     /// The last cell the program was told about while dragging, and of which console.
     ///
     /// **It serves not to repeat the same report.** A slow drag spends dozens of frames over the
@@ -2248,6 +2158,7 @@ impl eframe::App for Window {
         // once per pane— and they were two places where the condition could drift apart: sized for
         // a batch whose entries never get in, or the other way round.
         let there_is_a_gesture = self.injected_drags.is_some();
+        let measuring_links = self.measuring_links();
         let mut painted = if there_is_a_gesture {
             Vec::with_capacity(rects.len())
         } else {
@@ -2285,7 +2196,8 @@ impl eframe::App for Window {
                 // **How many consoles this tab has decides whether the strip carries its button**,
                 // and the list being walked is the answer: one rectangle per console of the active
                 // tab. See [`header::Button::in_a_tab_of`].
-                painter::HowToPaint::of(blink.on(focused), headers, &rects),
+                painter::HowToPaint::of(blink.on(focused), headers, &rects)
+                    .measuring_links(measuring_links),
             );
             // **What the painting really drew, not what the program asked for**: it is what the
             // repaint deadline is armed from. See [`alarms::BlinkState::painted`].
@@ -2326,6 +2238,9 @@ impl eframe::App for Window {
             {
                 injected_drags.a_button_at = Some(first.center());
             }
+            pane_outcome
+                .links
+                .hand_over(&mut self.links, &mut self.injected_drags);
             if there_is_a_gesture {
                 painted.push((rect, pane_outcome.panel_divider));
                 if pane_outcome.width_changed {
@@ -2539,13 +2454,14 @@ mod tests {
     // where that is said. They build tilings and weights directly to assert the arithmetic;
     // the window itself only ever asks for the result.
     use super::*;
-    use crate::injected::{InjectedGesture, gesture_of};
+    use crate::injected::{InjectedGesture, gesture_of, how_many_drags};
     use crate::session::SAVE_DELAY;
     use crate::tab_bar::{TAB_BAR_MARGIN, tab_rect};
     use crate::tiling::{Divider, INITIAL_FRACTION, Weight, side_of, tile, weights_of};
     use crate::tree::Child;
     use crate::tree::Node;
     use std::time::{Duration, Instant};
+    use term_core::Half;
 
     /// Leaves exactly these events in the window's queue, in this order.
     ///
@@ -6141,6 +6057,7 @@ mod tests {
             panel_state: panel::PanelState::default(),
             to_reread: Flag::raised(),
             screen: Screen::new(INITIAL_GRID),
+            painted_console: None,
             timings: Timings::default(),
             pending_measurement: None,
             panel_reread_unpainted: std::time::Duration::ZERO,
@@ -6205,6 +6122,8 @@ mod tests {
             discovery: measure::Discovery::default(),
             color: measure::Rasterizing::default(),
             buttons: measure::Buttons::default(),
+            links: measure::Links::default(),
+            desktop: links::Desktop::Recorded(Vec::new()),
             control: control::WindowActivity::default(),
             // These consoles have no directory, so there is nothing to watch; the watcher is armed
             // anyway —over an empty list— so that the tests' window does not declare itself blind
@@ -6255,6 +6174,7 @@ mod tests {
             presses_for_the_program: Vec::new(),
             last_cell_reported: None,
             last_frame_with_buttons: None,
+            link_press_in_progress: None,
             drag_in_progress: None,
             last_painted: Vec::new(),
             next_name,
@@ -8688,6 +8608,541 @@ mod tests {
         );
 
         asked_to_close
+    }
+
+    /// Runs a real application frame and returns the URLs it handed to the desktop.
+    fn urls_opened_in(
+        window: &mut Window,
+        ctx: &egui::Context,
+        area: egui::Rect,
+        events: Vec<egui::Event>,
+        passes: usize,
+    ) -> Vec<String> {
+        window.desktop = links::Desktop::Recorded(Vec::new());
+        let mut frame = eframe::Frame::_new_kittest();
+        eframe::App::logic(window, ctx, &mut frame);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(area),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for _ in 0..passes {
+                    eframe::App::ui(window, ui, &mut frame);
+                }
+            },
+        );
+        output.drop_without_applying_deltas();
+        match std::mem::replace(&mut window.desktop, links::Desktop::Recorded(Vec::new())) {
+            links::Desktop::Recorded(opened) => opened,
+            links::Desktop::System => unreachable!("the tests' window never opens a real browser"),
+        }
+    }
+
+    fn ctrl_click_at(at: egui::Pos2) -> Vec<egui::Event> {
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        };
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: ctrl,
+            },
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: ctrl,
+            },
+        ]
+    }
+
+    fn point_in_painted_cell(window: &Window, row: f32, column: f32) -> egui::Pos2 {
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let painted = window.active().panes()[0]
+            .painted_console
+            .as_ref()
+            .expect("the console was not retained after painting");
+        painted.area.min
+            + egui::vec2(
+                metrics.width() * (column + 0.5),
+                metrics.height() * (row + 0.5),
+            )
+    }
+
+    #[test]
+    fn the_first_ctrl_click_opens_plain_and_osc8_links_without_hovering() {
+        for (painted, column, expected) in [
+            (
+                b"https://example.test/plain".as_slice(),
+                8.0,
+                "https://example.test/plain",
+            ),
+            (
+                b"\x1b]8;;https://example.test/osc\x1b\\label\x1b]8;;\x1b\\".as_slice(),
+                2.0,
+                "https://example.test/osc",
+            ),
+        ] {
+            let ctx = egui::Context::default();
+            let area = area_of(800.0);
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.active_mut().panes_mut()[0].screen.advance(painted);
+            one_frame_in(&mut window, &ctx, area, Vec::new());
+            let at = point_in_painted_cell(&window, 0.0, column);
+
+            assert_eq!(
+                urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1),
+                [expected],
+                "the first click did not open the target that was already painted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_console_click_uses_the_old_pixels_and_does_not_clear_the_selection() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        let pane = &mut window.active_mut().panes_mut()[0];
+        pane.screen.advance(b"https://example.test/painted");
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        // Apply the size measured by the first UI pass before seeding a selection: resizing a
+        // terminal clears its selection by contract and is not part of the click being tested.
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = point_in_painted_cell(&window, 0.0, 8.0);
+
+        // The live screen changes after paint. The click must still mean what the person can see.
+        let pane = &mut window.active_mut().panes_mut()[0];
+        pane.screen
+            .advance(b"\x1b[2J\x1b[Hhttps://example.test/new");
+        pane.screen.start_selection(Cell {
+            row: 0,
+            col: 0,
+            half: Half::Left,
+        });
+        pane.screen.extend_selection(Cell {
+            row: 0,
+            col: 4,
+            half: Half::Right,
+        });
+        assert!(
+            pane.screen.has_selection(),
+            "the test did not seed a selection"
+        );
+        assert_eq!(
+            urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1),
+            ["https://example.test/painted"]
+        );
+        assert!(
+            window.active().panes()[0].screen.has_selection(),
+            "opening a link cleared the console selection"
+        );
+        // What the program hears is asserted over a real one that asked for the mouse, in
+        // `a_ctrl_click_on_a_bracketed_url_opens_it_once_and_the_program_hears_nothing`: the queue of
+        // live presses is empty after any whole click, so asserting on it here proved nothing.
+    }
+
+    #[test]
+    fn a_repeated_pass_opens_one_url_for_one_physical_click() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"https://example.test/once");
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = point_in_painted_cell(&window, 0.0, 8.0);
+
+        assert_eq!(
+            urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 2),
+            ["https://example.test/once"],
+            "egui's second pass opened the same physical click again"
+        );
+    }
+
+    #[test]
+    fn a_measured_link_counts_its_source_and_never_launches_the_desktop() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.injected_drags = InjectedDrags::new(1, injected::InjectedGesture::ActivateLinks);
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"https://example.test/measured");
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = point_in_painted_cell(&window, 0.0, 8.0);
+
+        assert!(
+            urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1).is_empty(),
+            "a measured activation launched a real browser"
+        );
+        assert_eq!(window.links.plain, 1);
+        assert!(
+            window.links.found > 0,
+            "the measured link had no painted region"
+        );
+        assert!(window.injected_drags.as_ref().unwrap().links_at[0].is_some());
+        assert_eq!(window.injected_drags.as_ref().unwrap().with_effect, 1);
+    }
+
+    /// **AC1 and AC8**, with the design's literal text, over a real program that asked for the mouse
+    /// and echoes what reaches it.
+    ///
+    /// **The silence is proved with an ordered control, not by waiting.** After the link click, a
+    /// bare click lands elsewhere in the same console; the pseudoterminal keeps order, so once the
+    /// control's report is on screen a report for the link's press would already be there too.
+    #[test]
+    fn a_ctrl_click_on_a_bracketed_url_opens_it_once_and_the_program_hears_nothing() {
+        let ctx = egui::Context::default();
+        let rects = [
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0)),
+            egui::Rect::from_min_size(egui::pos2(910.0, 0.0), egui::vec2(900.0, 600.0)),
+        ];
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = a_pane_that_asks_for_the_mouse(
+            &rects,
+            &metrics,
+            "a_ctrl_click_on_a_bracketed_url_opens_it_once_and_the_program_hears_nothing",
+        );
+        let console = window.active_mut().panes_mut()[0].console_within(
+            rects[0],
+            &metrics,
+            SystemTime::now(),
+            header::Headers::PAINTED,
+        );
+        let pane = &mut window.active_mut().panes_mut()[0];
+        pane.screen
+            .advance(b"\x1b[6;1HSee (https://example.test/a_(b)).");
+        let cell_at = |row: f32, col: f32| {
+            console.min
+                + egui::vec2(
+                    (col + 0.5) * metrics.width(),
+                    (row + 0.5) * metrics.height(),
+                )
+        };
+        let on_the_link = cell_at(5.0, 27.0);
+        let elsewhere = cell_at(9.0, 3.0);
+
+        // One empty pass, then the snapshot is the one that pass painted.
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            window.handle_the_mouse(ui, &rects, &metrics);
+        })
+        .drop_without_applying_deltas();
+        let pane = &mut window.active_mut().panes_mut()[0];
+        pane.painted_console = Some(links::PaintedConsole {
+            view: pane.screen.view(),
+            area: console,
+            frame: ctx.cumulative_frame_nr(),
+        });
+        ctx.run_ui(
+            egui::RawInput {
+                events: ctrl_click_at(on_the_link),
+                ..Default::default()
+            },
+            |ui| {
+                window.handle_the_mouse(ui, &rects, &metrics);
+            },
+        )
+        .drop_without_applying_deltas();
+
+        let links::Desktop::Recorded(opened) = &window.desktop else {
+            unreachable!("the tests' window records")
+        };
+        assert_eq!(opened, &["https://example.test/a_(b)"]);
+        assert!(
+            window.active().panes()[0].keystrokes.is_empty(),
+            "opening a link wrote something to the pane's shell"
+        );
+
+        deliver_to_the_mouse(&mut window, &ctx, &rects, &metrics, click_at(elsewhere));
+        wait_for_the_pane_to_say(&mut window, 0, ";4;10M");
+        let heard = window.active().panes()[0].screen.to_text();
+        assert!(
+            !heard.contains(";28;6M") && !heard.contains(";28;6m"),
+            "the program received a report for the press the link took: {heard:?}"
+        );
+    }
+
+    /// **AC2**, with the design's literal label.
+    #[test]
+    fn a_ctrl_click_on_an_osc_8_label_opens_its_target_once() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"\x1b]8;;https://example.test/osc\x1b\\documentation\x1b]8;;\x1b\\");
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = point_in_painted_cell(&window, 0.0, 4.0);
+
+        assert_eq!(
+            urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1),
+            ["https://example.test/osc"]
+        );
+    }
+
+    /// **AC5**: without `Ctrl`, a press over a link keeps the owner it had before links existed.
+    #[test]
+    fn a_bare_or_shifted_click_on_a_console_link_opens_nothing() {
+        for modifiers in [
+            egui::Modifiers::NONE,
+            egui::Modifiers {
+                shift: true,
+                ..egui::Modifiers::NONE
+            },
+        ] {
+            let ctx = egui::Context::default();
+            let area = area_of(800.0);
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.active_mut().panes_mut()[0]
+                .screen
+                .advance(b"https://example.test/bare");
+            one_frame_in(&mut window, &ctx, area, Vec::new());
+            let at = point_in_painted_cell(&window, 0.0, 8.0);
+            let events = vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers,
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers,
+                },
+            ];
+            assert!(
+                urls_opened_in(&mut window, &ctx, area, events, 1).is_empty(),
+                "a click with {modifiers:?} opened the link: that press belongs to selection"
+            );
+        }
+    }
+
+    #[test]
+    fn a_console_link_the_gate_refuses_opens_nothing() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"\x1b]8;;file:///etc/passwd\x1b\\label\x1b]8;;\x1b\\");
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = point_in_painted_cell(&window, 0.0, 2.0);
+
+        assert!(
+            urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1).is_empty(),
+            "an OSC 8 target outside http and https reached the desktop"
+        );
+    }
+
+    #[test]
+    fn only_ctrl_alone_opens_a_console_link() {
+        let with = |extra: fn(egui::Modifiers) -> egui::Modifiers| {
+            let ctx = egui::Context::default();
+            let area = area_of(800.0);
+            let mut window = window_with("sleep 30", "sleep 30");
+            window.active_mut().panes_mut()[0]
+                .screen
+                .advance(b"https://example.test/chord");
+            one_frame_in(&mut window, &ctx, area, Vec::new());
+            let at = point_in_painted_cell(&window, 0.0, 8.0);
+            let events = ctrl_click_at(at)
+                .into_iter()
+                .map(|event| match event {
+                    egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers,
+                    } => egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers: extra(modifiers),
+                    },
+                    other => other,
+                })
+                .collect();
+            urls_opened_in(&mut window, &ctx, area, events, 1)
+        };
+
+        assert_eq!(
+            with(|chord| chord),
+            ["https://example.test/chord"],
+            "the control chord opened nothing, so the refusals below would prove nothing"
+        );
+        for (name, extra) in [
+            (
+                "Ctrl+Shift, which moves a pane (D20)",
+                (|chord| egui::Modifiers {
+                    shift: true,
+                    ..chord
+                }) as fn(egui::Modifiers) -> egui::Modifiers,
+            ),
+            ("Ctrl+Alt", |chord| egui::Modifiers { alt: true, ..chord }),
+            ("Ctrl+Command", |chord| egui::Modifiers {
+                mac_cmd: true,
+                ..chord
+            }),
+        ] {
+            assert!(with(extra).is_empty(), "{name} opened the link under it");
+        }
+    }
+
+    #[test]
+    fn a_console_link_opens_in_the_form_the_browser_receives() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"\x1b]8;;HTTPS://Example.Test/A\x1b\\label\x1b]8;;\x1b\\");
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = point_in_painted_cell(&window, 0.0, 2.0);
+
+        assert_eq!(
+            urls_opened_in(&mut window, &ctx, area, ctrl_click_at(at), 1),
+            ["https://example.test/A"]
+        );
+    }
+
+    #[test]
+    fn a_painted_console_answers_only_the_frames_it_is_on_screen_for_and_only_inside_its_area() {
+        let mut screen = Screen::new(Size { rows: 4, cols: 40 });
+        screen.advance(b"https://example.test/painted");
+        with_metrics(|metrics| {
+            let area = egui::Rect::from_min_size(
+                egui::pos2(10.0, 10.0),
+                egui::vec2(40.0 * metrics.width(), 4.0 * metrics.height()),
+            );
+            let painted = links::PaintedConsole {
+                view: screen.view(),
+                area,
+                frame: 10,
+            };
+            let on_the_link = area.min + egui::vec2(8.5 * metrics.width(), 0.5 * metrics.height());
+            assert!(painted.link_at(on_the_link, metrics, 11).is_some());
+            assert!(
+                painted.link_at(on_the_link, metrics, 12).is_none(),
+                "a snapshot two frames old answered a click, so pixels no longer on screen opened"
+            );
+
+            // The area a panel has just taken back: the grid is still the wide one for a frame.
+            let shrunk = links::PaintedConsole {
+                view: screen.view(),
+                area: egui::Rect::from_min_size(
+                    area.min,
+                    egui::vec2(4.0 * metrics.width(), area.height()),
+                ),
+                frame: 10,
+            };
+            assert!(
+                shrunk.link_at(on_the_link, metrics, 10).is_none(),
+                "a cell past the painted area opened, where the panel now paints"
+            );
+        });
+    }
+
+    #[test]
+    fn a_release_queued_before_the_link_press_does_not_end_its_gesture() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        window.active_mut().panes_mut()[0]
+            .screen
+            .advance(b"https://example.test/held");
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = point_in_painted_cell(&window, 0.0, 8.0);
+        let mut events = ctrl_click_at(at);
+        // An earlier click's release arrives in the same frame, before the press; the new press is
+        // still down when the frame ends.
+        let release = events.pop().expect("the helper ends on a release");
+        events.insert(1, release);
+
+        assert_eq!(
+            urls_opened_in(&mut window, &ctx, area, events, 1),
+            ["https://example.test/held"]
+        );
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let pane = window.active().panes()[0].name;
+        assert!(
+            window.a_link_gesture_holds(pane),
+            "an older release ended the gesture of a press still held, so its drag becomes a selection"
+        );
+    }
+
+    #[test]
+    fn a_direct_click_opens_the_link_label_the_panel_painted() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        let dir = PanelDir::create().expect("create the pane's directory");
+        std::fs::write(
+            dir.path().join(panel_contract::PANEL_FILE),
+            br#"{"v":1,"lines":[{"text":"Review","link":"https://example.test/panel"}]}"#,
+        )
+        .expect("publish the linked panel");
+        window.active_mut().panes_mut()[0].panel = Some(dir);
+        window.active().panes()[0].to_reread.raise();
+
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = window.active().panes()[0]
+            .panel_state
+            .links_drawn()
+            .next()
+            .expect("the settled panel painted no link label")
+            .center();
+
+        assert_eq!(
+            urls_opened_in(&mut window, &ctx, area, click_at(at), 1),
+            ["https://example.test/panel"]
+        );
+    }
+
+    #[test]
+    fn a_panel_label_of_a_pane_no_longer_on_screen_opens_nothing() {
+        let ctx = egui::Context::default();
+        let area = area_of(800.0);
+        let mut window = window_with("sleep 30", "sleep 30");
+        let dir = PanelDir::create().expect("create the pane's directory");
+        std::fs::write(
+            dir.path().join(panel_contract::PANEL_FILE),
+            br#"{"v":1,"lines":[{"text":"Review","link":"https://example.test/panel"}]}"#,
+        )
+        .expect("publish the linked panel");
+        window.active_mut().panes_mut()[0].panel = Some(dir);
+        window.active().panes()[0].to_reread.raise();
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        one_frame_in(&mut window, &ctx, area, Vec::new());
+        let at = window.active().panes()[0]
+            .panel_state
+            .links_drawn()
+            .next()
+            .expect("the settled panel painted no link label")
+            .center();
+
+        // The pane's last painting is from long ago — a tab that was switched away, say — while its
+        // panel still holds the settled regions that painting left.
+        window.active_mut().panes_mut()[0]
+            .painted_console
+            .as_mut()
+            .expect("the pane was painted")
+            .frame = 0;
+        assert!(
+            urls_opened_in(&mut window, &ctx, area, click_at(at), 1).is_empty(),
+            "a click opened a label from a painting that is no longer on screen"
+        );
     }
 
     #[test]
@@ -14524,6 +14979,7 @@ mod tests {
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
+                    measure_links: false,
                 },
             );
             if outcome.color.rasterized + outcome.color.failed > 0 {
@@ -15040,6 +15496,7 @@ mod tests {
                         },
                         headers: header::Headers::PAINTED,
                         button: header::Button::in_a_tab_of(&rects),
+                        measure_links: false,
                     },
                 );
                 expected[which] = grid_of(rect, &metrics);
@@ -15304,6 +15761,7 @@ mod tests {
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
+                    measure_links: false,
                 },
             );
         })
@@ -15664,6 +16122,7 @@ mod tests {
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
+                    measure_links: false,
                 },
             );
         })
@@ -15724,6 +16183,7 @@ mod tests {
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
+                    measure_links: false,
                 },
             );
             with_panel = pane.measured;
@@ -15776,6 +16236,7 @@ mod tests {
                     },
                     headers: header::Headers::PAINTED,
                     button: header::Button::in_a_tab_of(&[egui::Rect::NOTHING]),
+                    measure_links: false,
                 },
             );
             cut_along = pane

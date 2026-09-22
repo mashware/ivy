@@ -6,16 +6,17 @@
 //! D6, and it is the reason the panel works for an agent, a deployment or a script without knowing
 //! anything about any of them.
 //!
-//! **And since the milestone that gives the panel buttons, one thing here is not translation**: what
-//! a producer declares under `actions` is painted with its command underneath, and a press on it
-//! writes that command into the pane's program. The vocabulary is still the producer's — the
-//! application reads no meaning out of the text — but where the bytes go is a fact about its own
-//! panes, so it is the application's to decide. **D42**.
+//! **Two producer values also leave interactive geometry here.** What a producer declares under
+//! `actions` is painted with its command underneath, and a press on it writes that command into the
+//! pane's program. A `line.link` gets a compact label whose exact target is disclosed on hover; this
+//! module records that raw target but does not decide whether it is safe to open. The vocabulary is
+//! still the producer's — the application reads no meaning out of the text — but where a gesture goes
+//! is a fact about its own panes, so it is the application's to decide. **D42, D51**.
 //!
-//! That is the one place in this module where being wrong costs more than a badly drawn panel, and
-//! it is why two properties here are held by mechanism rather than by care: what is painted under a
-//! label is what gets sent, character for character; and a press only reaches a button this pass
-//! drew **whole**, on a panel it did not have to lay out again.
+//! Those are the places where being wrong costs more than a badly drawn panel, and it is why their
+//! properties are held by mechanism rather than by care: what is painted under a button label is what
+//! gets sent, character for character; and a gesture only reaches an interactive region this pass drew
+//! **whole**, on a panel it did not have to lay out again.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -23,11 +24,13 @@ use std::time::{Duration, SystemTime};
 mod buttons;
 mod document;
 mod driving;
+mod links;
 pub(crate) mod pane;
 use buttons::buttons_drawn;
 pub(crate) use document::Reader as DocumentReader;
 use driving::RetirementState;
 pub(crate) use driving::{Holder, Released, Retirement};
+use links::{LaidOutLink, PaintedLink};
 
 use eframe::egui::{Align2, Color32, Painter, Pos2, Rect};
 use panel_contract::{Action, Attention, Line, Mark, Panel, Problem, Style, is_shown_as_itself};
@@ -322,6 +325,12 @@ struct Drawn {
     /// again.
     settled: bool,
     buttons: Vec<PaintedButton>,
+    /// Link targets belong to the painting that produced their rectangles.
+    ///
+    /// **The target is owned here rather than recovered from `last_good`.** A producer can commit a
+    /// new document after this frame and before its press is routed. Looking the target up by line
+    /// number then would let new bytes retarget old pixels.
+    links: Vec<PaintedLink>,
 }
 
 /// A button as it was drawn: which action it is, and the rectangle it occupied.
@@ -789,12 +798,7 @@ fn wrap_verbatim(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32,
             .nth(slot)
             .map_or(rest.len(), |(at, _)| at);
         let (row, after) = rest.split_at(cut);
-        rows.push(Row {
-            column: indent,
-            text: row.to_owned(),
-            color,
-            role: RowRole::Text,
-        });
+        rows.push(Row::text(indent, row.to_owned(), color));
         if after.is_empty() {
             return;
         }
@@ -811,6 +815,21 @@ struct Row {
     /// What this row is **for**, which is what lets the painting know which rectangle belongs to
     /// which button without laying the panel out a second time.
     role: RowRole,
+    /// A compact link label painted on this row, independently of its body text.
+    link: Option<LaidOutLink>,
+}
+
+impl Row {
+    /// A row of plain text, which is what every row is until a button or a link claims it.
+    fn text(column: usize, text: String, color: Color32) -> Self {
+        Self {
+            column,
+            text,
+            color,
+            role: RowRole::Text,
+            link: None,
+        }
+    }
 }
 
 /// What a laid-out row is for.
@@ -943,12 +962,7 @@ fn lay_out(
     // The blank row is written by the layout, not by the painting: separated from the body, what the
     // application puts reads as what it is and not as the producer's first line.
     if !rows.is_empty() {
-        rows.push(Row {
-            column: 0,
-            text: String::new(),
-            color: Color32::TRANSPARENT,
-            role: RowRole::Text,
-        });
+        rows.push(Row::text(0, String::new(), Color32::TRANSPARENT));
     }
 
     let Some(panel) = panel else {
@@ -1004,13 +1018,8 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
     let text = sanitize(&line.text);
 
     // A real gap carries no prefix and takes no column: it is just a blank row.
-    if text.is_empty() && reference.is_empty() && line.mark.is_none() {
-        return vec![Row {
-            column: 0,
-            text: String::new(),
-            color,
-            role: RowRole::Text,
-        }];
+    if text.is_empty() && reference.is_empty() && line.mark.is_none() && line.link.is_none() {
+        return vec![Row::text(0, String::new(), color)];
     }
 
     // **The head is bounded before being composed, not after.** Symbol, reference and indent are painted
@@ -1059,13 +1068,12 @@ fn lay_out_line(line: &Line, column: usize, width: usize, theme: &Theme) -> Vec<
             // its own symbol. It is legal form of the contract.
             first.column = 0;
         }
-        None => rows.push(Row {
-            column: 0,
-            text: head,
-            color,
-            role: RowRole::Text,
-        }),
+        None => rows.push(Row::text(0, head, color)),
     }
+    if let Some(target) = line.link.as_deref() {
+        links::attach(&mut rows, target, indent, width, color);
+    }
+
     rows
 }
 
@@ -1079,12 +1087,7 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
     let mut pending: Vec<&str> = text.split_whitespace().rev().collect();
 
     if pending.is_empty() {
-        rows.push(Row {
-            column: indent,
-            text: String::new(),
-            color,
-            role: RowRole::Text,
-        });
+        rows.push(Row::text(indent, String::new(), color));
         return;
     }
 
@@ -1114,12 +1117,7 @@ fn wrap(rows: &mut Vec<Row>, indent: usize, text: &str, color: Color32, width: u
         }
         // The first row is placed by the caller, sticking the head to it; the rest carry their indent.
         let column = if rows.is_empty() { 0 } else { indent };
-        rows.push(Row {
-            column,
-            text: line,
-            color,
-            role: RowRole::Text,
-        });
+        rows.push(Row::text(column, line, color));
     }
 }
 
@@ -1181,32 +1179,36 @@ pub fn paint(
 
     let text_left = rect.left() + MARGIN * metrics.width();
     let mut overflowed: std::collections::BTreeSet<RowRole> = std::collections::BTreeSet::new();
+    let mut links_painted = Vec::new();
     for (n, row) in visible.iter().enumerate() {
         let x = text_left + row.column as f32 * metrics.width();
         let y = rect.top() + n as f32 * metrics.height();
-        if row.text.is_empty() {
-            continue;
+        if !row.text.is_empty() {
+            // **The panel discovers fonts too.** What it shows is what its producer publishes —free
+            // text, in any language—, and without noting it a summary in Japanese stayed as boxes
+            // forever because nothing triggered the search.
+            discoverer.note_text(&row.text);
+            let inked = painter.text(
+                Pos2::new(x, y),
+                Align2::LEFT_TOP,
+                &row.text,
+                metrics.font(),
+                row.color,
+            );
+            // **What a row really measures is asked of whoever drew it**, and that closes the last
+            // way a press could send a command nobody could read. This module lays text out counting
+            // characters, and a character is not a column: twenty-nine kanji are fifty-eight columns,
+            // so a command in Japanese is drawn past the strip's edge and the painter clips what
+            // sticks out — the person sees a fragment and the press would send the whole string.
+            if inked.right() > rect.right() {
+                overflowed.insert(row.role);
+            }
         }
-        // **The panel discovers fonts too.** What it shows is what its producer publishes —free text, in
-        // any language—, and without noting it a summary in Japanese stayed as boxes forever because
-        // nothing triggered the search.
-        discoverer.note_text(&row.text);
-        let inked = painter.text(
-            Pos2::new(x, y),
-            Align2::LEFT_TOP,
-            &row.text,
-            metrics.font(),
-            row.color,
-        );
-        // **What a row really measures is asked of whoever drew it**, and that closes the last way a
-        // press could send a command nobody could read. This module lays text out counting
-        // characters, and a character is not a column: twenty-nine kanji are fifty-eight columns, so
-        // a command in Japanese is drawn past the strip's edge and the painter clips what sticks
-        // out — the person sees a fragment and the press would send the whole string. There is no
-        // table here that knows a glyph's width and there does not need to be: the text engine just
-        // drew it and returns where it ended.
-        if inked.right() > rect.right() {
-            overflowed.insert(row.role);
+
+        if let Some(link) = &row.link {
+            links_painted.push(links::paint_label(
+                painter, link, y, metrics, theme, discoverer,
+            ));
         }
     }
 
@@ -1230,10 +1232,16 @@ pub fn paint(
         !overflowed.contains(&RowRole::ButtonLabel(button.action))
             && !overflowed.contains(&RowRole::ButtonBody(button.action))
     });
+    // **D51 gives this to the panel's painting, not to the buttons' walk**: `walked` is published
+    // under the buttons' name, so only `buttons_drawn` belongs inside the `walking` clock above. No
+    // test can tell which span a few microseconds landed in; the clock's placement is the guard.
+    let links = links::reachable(links_painted);
     state.drawn = Some(Drawn {
         settled,
         buttons: drawn,
+        links,
     });
+    links::disclose_hovered(painter, state.drawn.as_ref(), id);
     walked
 }
 
@@ -2262,6 +2270,7 @@ mod tests {
                 action: 0,
                 area: PLACE,
             }],
+            links: Vec::new(),
         });
         state.problem = Some(Problem::Invalid("old failure".to_owned()));
         let result = Retirement {
@@ -4127,6 +4136,175 @@ mod pressing {
             .center()
     }
 
+    fn on_the_first_link(state: &PanelState) -> Pos2 {
+        state
+            .links_drawn()
+            .next()
+            .expect("a link was drawn")
+            .center()
+    }
+
+    #[test]
+    fn a_compact_link_sits_beside_a_short_line_and_below_a_full_one() {
+        let beside = panel_contract::parse_document(
+            r#"{"header":false,"lines":[{"text":"Review","link":"https://example.test/pull/257"}]}"#,
+        )
+        .expect("a panel");
+        let beside = lay_out(
+            Some(&beside),
+            "a1b2",
+            30,
+            &Theme::default(),
+            None,
+            None,
+            None,
+        );
+        let row = beside
+            .iter()
+            .find(|row| row.link.is_some())
+            .expect("the line carries its link");
+        assert!(!row.text.is_empty(), "the short line should share its row");
+        assert!(
+            row.link.as_ref().expect("a link").column > row.text.chars().count(),
+            "the compact label was not placed beside the text"
+        );
+
+        let below = panel_contract::parse_document(
+            r#"{"header":false,"lines":[{"text":"This line consumes every available cell in its first row","link":"https://example.test/pull/257"}]}"#,
+        )
+        .expect("a panel");
+        let below = lay_out(
+            Some(&below),
+            "a1b2",
+            20,
+            &Theme::default(),
+            None,
+            None,
+            None,
+        );
+        let row = below
+            .iter()
+            .find(|row| row.link.is_some())
+            .expect("the line carries its link");
+        assert!(
+            row.text.is_empty(),
+            "a label that cannot fit beside the text should hang below it"
+        );
+    }
+
+    #[test]
+    fn a_settled_painted_link_reaches_the_exact_raw_target() {
+        let target = "https://example.test/panel?a=1&b=two";
+        let document = format!(r#"{{"lines":[{{"text":"Review","link":"{target}"}}]}}"#);
+        let state = painted(&document, a_wide_strip());
+
+        assert_eq!(state.link_at(on_the_first_link(&state)), Some(target));
+    }
+
+    #[test]
+    fn a_new_document_cannot_retarget_the_previous_paintings_link_region() {
+        let strip = a_wide_strip();
+        let dir = PanelDir::create().expect("create the directory");
+        let old = "https://example.test/old";
+        publish(
+            &dir,
+            &format!(r#"{{"lines":[{{"text":"Review","link":"{old}"}}]}}"#),
+        );
+        let mut state = PanelState::default();
+        state.refresh(dir.path());
+        paint_the_state(&mut state, strip, SystemTime::now());
+        paint_the_state(&mut state, strip, SystemTime::now());
+        let old_pixels = on_the_first_link(&state);
+
+        age_the_file(&dir, 1);
+        publish(
+            &dir,
+            r#"{"lines":[{"text":"Review","link":"https://example.test/new"}]}"#,
+        );
+        state.refresh(dir.path());
+
+        assert_eq!(
+            state.link_at(old_pixels),
+            Some(old),
+            "the current document retargeted geometry painted from the previous one"
+        );
+    }
+
+    #[test]
+    fn a_label_the_strip_cuts_at_its_side_is_not_reachable() {
+        let document = r#"{"lines":[{"text":"Review","link":"https://example.test/releases/a-very-long-release-name"}]}"#;
+        assert_eq!(
+            painted(document, a_wide_strip()).links_drawn().count(),
+            1,
+            "the control strip reached no label, so the narrow one would prove nothing"
+        );
+
+        // Too narrow for the label beside the line, so it hangs below — and runs past the right edge.
+        let narrow = Rect::from_min_size(a_wide_strip().min, eframe::egui::vec2(120.0, 600.0));
+        let cut = painted(document, narrow);
+        assert_eq!(
+            cut.links_drawn().count(),
+            0,
+            "a label cut at the strip's side stayed reachable"
+        );
+    }
+
+    #[test]
+    fn an_address_the_gate_refuses_leaves_its_label_unreachable() {
+        for refused in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "htps://example.test/typo",
+        ] {
+            let document = format!(r#"{{"lines":[{{"text":"Review","link":"{refused}"}}]}}"#);
+            let state = painted(&document, a_wide_strip());
+            assert_eq!(
+                state.links_drawn().count(),
+                0,
+                "{refused:?} got a reachable label, so it would show a hand and a tooltip for a click \
+                 that opens nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reachable_label_carries_the_form_the_browser_receives() {
+        let state = painted(
+            r#"{"lines":[{"text":"Review","link":"HTTPS://Example.Test/Panel"}]}"#,
+            a_wide_strip(),
+        );
+        assert_eq!(
+            state.link_at(on_the_first_link(&state)),
+            Some("https://example.test/Panel")
+        );
+    }
+
+    #[test]
+    fn clipped_and_unsettled_links_are_inert() {
+        let document = r#"{"lines":[{"text":"Review","link":"https://example.test/panel"}]}"#;
+        let strip = a_wide_strip();
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, document);
+        let mut unsettled = PanelState::default();
+        unsettled.refresh(dir.path());
+        paint_the_state(&mut unsettled, strip, SystemTime::now());
+        assert_eq!(unsettled.links_drawn().count(), 1);
+        assert!(unsettled.link_at(on_the_first_link(&unsettled)).is_none());
+
+        let clipped = painted(
+            document,
+            Rect::from_min_size(strip.min, eframe::egui::vec2(strip.width(), 1.0)),
+        );
+        assert_eq!(clipped.links_drawn().count(), 0);
+        assert!(clipped.link_at(strip.center()).is_none());
+
+        let mut hidden = painted(document, strip);
+        let old_pixels = on_the_first_link(&hidden);
+        hidden.nothing_was_drawn();
+        assert_eq!(hidden.links_drawn().count(), 0);
+        assert!(hidden.link_at(old_pixels).is_none());
+    }
+
     #[test]
     fn a_button_that_was_drawn_is_reached_by_a_press_on_it() {
         let state = painted(RUN, a_wide_strip());
@@ -4346,6 +4524,7 @@ mod pressing {
         let state = painted(r#"{"lines": ["just a summary"]}"#, a_wide_strip());
 
         assert_eq!(state.buttons_drawn().count(), 0);
+        assert_eq!(state.links_drawn().count(), 0);
         assert!(state.button_at(a_wide_strip().center()).is_none());
     }
 }

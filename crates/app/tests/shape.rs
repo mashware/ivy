@@ -51,6 +51,15 @@ const MODULES: &[(&str, &str)] = &[
         include_str!("../src/control/retiring.rs"),
     ),
     ("src/injected.rs", include_str!("../src/injected.rs")),
+    (
+        "src/injected/links.rs",
+        include_str!("../src/injected/links.rs"),
+    ),
+    ("src/links.rs", include_str!("../src/links.rs")),
+    (
+        "src/links/console.rs",
+        include_str!("../src/links/console.rs"),
+    ),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     (
         "src/panel/document.rs",
@@ -60,6 +69,7 @@ const MODULES: &[(&str, &str)] = &[
         "src/panel/buttons.rs",
         include_str!("../src/panel/buttons.rs"),
     ),
+    ("src/panel/links.rs", include_str!("../src/panel/links.rs")),
     (
         "src/panel/driving.rs",
         include_str!("../src/panel/driving.rs"),
@@ -90,6 +100,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/mouse.rs", include_str!("../src/mouse.rs")),
     ("src/opening.rs", include_str!("../src/opening.rs")),
     ("src/pointer.rs", include_str!("../src/pointer.rs")),
+    (
+        "src/pointer/links.rs",
+        include_str!("../src/pointer/links.rs"),
+    ),
     ("src/report.rs", include_str!("../src/report.rs")),
     ("src/tab_bar.rs", include_str!("../src/tab_bar.rs")),
     ("src/tiling.rs", include_str!("../src/tiling.rs")),
@@ -127,7 +141,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    827,
+    784,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -237,7 +251,16 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          **875 + 80 - 124 leaves 831**. **The retirement probe then paid for the context its hidden \
          panes need by shortening that sizing entry point**: passing the context added one \
          production line, and the shorter name and parameter folded its six-line signature into \
-         one. **831 + 1 - 5 leaves 827**.",
+         one. **831 + 1 - 5 leaves 827**. **The delivery that makes links openable paid it by moving \
+         out a piece that was ready to go**: the three helpers that turn a pointer's position \
+         into a cell — which links do not use — went out to `mouse.rs`, the module that already answers what a pane does with \
+         a mouse gesture, **48 production lines**, and reading how many gestures the bench \
+         asks for went to `injected.rs`, the bench's own module, **6** more, against the **11** \
+         links spend here — the `mod`, a pane's painted snapshot, the outcome field that carries \
+         the bench's points, the window's tally, where an opened link goes and the gesture holder, \
+         the bench's flag read once and handed to the painter, and the call that hands what a pane \
+         found to the report and the injector, which rustfmt lays out on three. Everything else of \
+         the feature went to modules of its own. **827 + 11 - 48 - 6 leaves 784**.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.
@@ -330,7 +353,7 @@ fn no_module_is_over_its_ceiling() {
         .map(|(_, src)| production_lines(src).len())
         .sum();
     assert!(
-        MODULES.len() >= 31 && total >= 6_000,
+        MODULES.len() >= 37 && total >= 6_000,
         "the walk found {total} production lines over {} modules: it stopped matching, and this \
          guard is measuring nothing",
         MODULES.len()

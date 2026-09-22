@@ -6656,3 +6656,108 @@ path, so this operation is currently POSIX-only.
 | Deleting `panel.json` | The file's producer is unknowable and may not be the retiring connection; exact-generation suppression prevents resurrection without destroying somebody else's publication |
 | Reusing ordinary connection close | A crash and an intentional clear would become indistinguishable, throwing away the evidence D43 exists to preserve |
 | Closing every auxiliary console | D44 gives the console back on the person's first input; retirement cannot take it away again |
+
+## D51 — A link belongs to the pixels that named it, and only web addresses reach the desktop
+
+**Status: taken.** The console and the status panel already paint addresses, but neither has owned
+the act of opening one. Adding that act makes three old boundaries meet: the mouse already belongs
+to selection, the hosted program or pane movement; panel documents and terminal output are
+untrusted; and the pane's shell is an execution boundary rather than a desktop service.
+
+### The decision
+
+**1. The console opens with `Ctrl` plus the primary button; the panel opens with the primary button
+on its own link label.**
+
+A bare console press keeps selecting text or reporting the mouse to the hosted program, and
+`Ctrl+Shift` keeps moving panes. The panel has no competing text-selection contract, so its explicit
+link label needs no modifier. Both effects cross one once-per-frame barrier before selection or
+mouse reporting: a second egui pass cannot turn one physical press into two browser requests.
+
+The console recognizes two sources from the exact `View` and rectangle used for its last paint. OSC
+8 is semantic and wins when its sparse span covers the cell. Otherwise the terminal core recognizes
+the plain `http://` or `https://` range containing the cell, across engine-marked wrapped rows and
+style changes. The lexical boundary is a contract rather than an accident of a parser: whitespace,
+controls and quote/angle delimiters end the raw range; ordinary sentence punctuation is left out;
+and a closing round, square or curly bracket is left out only while it is unmatched inside the
+candidate. A range that leaves the visible grid is not active.
+
+**2. The target comes from the last painting, never from a producer reread at click time.**
+
+The application pumps program output and can commit a panel document before it routes the mouse.
+Looking up the current cell or current line from geometry painted in the preceding pass could
+therefore open a value the person never saw. Each pane retains the exact engine-independent `View`
+and console rectangle its painter just used, without cloning them. Wrapped-row facts and sparse OSC
+8 spans travel beside its unchanged `ViewCell`s; plain URL parsing still runs only for the clicked
+logical line. A settled panel link carries its exact target in its own painted region. The later
+press never indexes the new terminal grid or `last_good` through stale geometry, and the first
+`Ctrl+click` works without requiring a prior hover frame.
+
+The panel follows the existing prototype: it paints a deterministic compact label beside the line,
+or below it when there is no room, and exposes the exact destination on hover. OSC 8 exposes its
+exact target under Ctrl-hover. A hidden, clipped or unsettled region is inert. A full duplicate URL
+is not required to fit in the pane: doing so would make a valid labelled link disappear precisely
+where the panel is narrowest.
+
+**3. One application boundary accepts only complete absolute `http` and `https` URLs with a host.**
+
+Plain text, OSC 8 and `line.link` all pass through the same `WebTarget` value. Relative references,
+missing hosts, controls, whitespace, invisible formatting characters, malformed values and every other
+scheme are inert: nothing reachable is painted for them, so no hand and no tooltip either. **What is
+kept is the parser's form of the address, not the producer's spelling**, because the desktop's opener
+parses it again and loads that form — host lowercased, an international host in punycode — and the
+tooltip has to show what will load. The characters a command interpreter reads — `|`, `"`, `<`, `>`
+and a `%` that is not an escape — are percent-encoded in that form, because under WSL the opener
+passes the address to `cmd.exe /c start` and escapes only `^` and `&`; for a browser the address is
+the same one. Two gaps under WSL are known and left: two valid escapes can still spell a `%NAME%`
+that `cmd.exe` expands, and when `cmd.exe` cannot start the opener falls back to
+`powershell.exe Start`, which reads `;`, `$` and more of its own syntax. That one string goes to the desktop's own opener (the `webbrowser` crate, the one
+egui's `links` feature would call), on a thread of its own, since on Linux it asks `xdg-settings`
+on every call and waits for a text browser to exit. This application never concatenates it into a
+command, sends it to the PTY, interprets it as a template or fetches it. Redirects belong to the
+browser.
+
+**A click the opener could not act on says so, on standard error**: when the opener reports that it
+found nothing to start or could not start it, one line names the address and its error — the channel
+**D38** already uses for a console that stops receiving. That is why the opener is called directly
+rather than through egui's `links` feature: that feature reports a failure only through `log`, and
+this binary installs no logger, so a person with no configured browser clicked and nothing happened,
+with no trace anywhere. **What it cannot say** is a browser that started and then failed — a locked
+profile, a launcher that exits with an error: the opener returns as soon as the process starts, and
+past that nothing reaches this application. Nothing is painted over the console
+for it: the person asked for the answer on the terminal they launched from, not for another notice
+competing with D41's for half the console.
+
+**4. Link work is declared inside the measurements that already own it.**
+
+Plain URL recognition runs only on hover or click, not while rebuilding every ordinary visible
+snapshot. Building a `View` does record one wrap fact per row and only the OSC 8 spans that exist,
+without enlarging `ViewCell`; retaining it replaces its old drop rather than cloning it. Panel link
+layout stays in the panel's cached layout and visible-row walk. Reports count the sources the bench found and
+the activations per source; the work stays inside the existing console, panel and mouse spans, and
+in particular a panel label's reachability is part of the panel's painting, not of the buttons' walk
+the report subtracts from it. Batch `W` exercises all three sources with desktop launch suppressed;
+both of its consoles carry the same link rows and panel label, and only the one its injector clicks
+takes the gesture. The links sit on the top two rows, outside the scroll region the load runs in,
+so every gesture lands on a link and the guard can demand an opened link per gesture. Finding where
+to click is the bench's own work: it walks a console's top rows inside that console's span, and only
+in `W`, because outside every span it would be published as the framework's cost.
+
+### What was discarded, and why
+
+| Discarded | Why |
+|---|---|
+| A bare console click | It would steal the gesture D20 gives to selection and D23 can give to the hosted program |
+| Semantic links only | Ordinary shell and agent output prints plain URLs; excluding them leaves the reported failure in place |
+| Copying a URI into every `ViewCell` or indexing every plain URL | Almost every cell has neither; sparse OSC spans and click-time plain parsing keep the hot cell type unchanged |
+| Resolving the live terminal cell or current panel document on click | Output and documents can change after the pixels under the pointer were painted, retargeting old geometry |
+| Requiring a Ctrl-hover frame before Ctrl-click | Keydown and click can arrive in one egui input batch; the approved first gesture must not be inert |
+| Painting every complete panel URL in full | Long targets consume scarce pane rows and can make the link inert in the narrow layout where the compact label is needed most |
+| Reusing panel shell actions or adding an `open` action | A URL and executable shell text have different payloads, gestures and trust boundaries; `line.link` already names this contract |
+| Passing the target to `xdg-open`, `open`, `start` or a pane shell | Command construction reintroduces shell interpretation and platform branching that the opener crate already owns |
+| Opening through egui's `links` feature | It calls the same opener and swallows its error into `log`, which this binary never installs: a failed click would say nothing anywhere |
+| A notice over the console when opening fails | Another notice competing with D41's for half the console, for a failure that belongs to the desktop's configuration; the person chose standard error |
+| Keeping the producer's spelling of the address | The opener re-parses it, so the tooltip would show one address while the browser loads another — the homograph case is exactly that |
+| An opener worker, queue or retry | A human-rate command needs none of their lifecycle; what it does need is not to run on the interface thread, and a thread per click, detached, is all of that |
+| Supporting `file:`, `mailto:` or producer-chosen schemes | The feature is web navigation; widening the scheme set widens the untrusted capability without a present requirement |
+| Dedicated nested timing spans from the first version | The existing panel and mouse spans already own the work; counters and batch `W` declare it without risking double subtraction |

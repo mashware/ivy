@@ -623,6 +623,8 @@ pub(crate) struct HowToPaint {
     pub(crate) headers: crate::header::Headers,
     /// Whether that strip carries the button that closes it. See [`crate::header::Button`].
     pub(crate) button: crate::header::Button,
+    /// Whether batch W needs painted points for its injector.
+    pub(crate) measure_links: bool,
 }
 
 impl HowToPaint {
@@ -646,7 +648,13 @@ impl HowToPaint {
             blink,
             headers,
             button: crate::header::Button::in_a_tab_of(consoles),
+            measure_links: false,
         }
+    }
+
+    pub(crate) fn measuring_links(mut self, yes: bool) -> Self {
+        self.measure_links = yes;
+        self
     }
 }
 
@@ -828,6 +836,7 @@ fn paint_cursor(
 /// second entry was cheaper than an argument on `paint` because `lib.rs` sat against **D28**'s
 /// recorded number and the call site had to keep exactly the shape it had; that constraint went with
 /// the delivery that moved [`paint_pane`] into this module, and `paint` does take the focus.
+#[cfg(test)]
 pub(crate) fn paint_a_console(
     painter: &Painter,
     console: &crate::Pane,
@@ -837,17 +846,31 @@ pub(crate) fn paint_a_console(
     discoverer: &mut crate::fonts::Discoverer,
     ink: CursorInk,
 ) -> bool {
-    let blinking = paint(
+    let view = console.screen.view();
+    let blinking = paint_a_console_view(painter, &view, theme, metrics, area, discoverer, ink);
+    notices::paint_them_over_it(painter, console, theme, metrics, area);
+    blinking
+}
+
+/// Paints from a snapshot the caller can retain as the authority for later pointer effects.
+fn paint_a_console_view(
+    painter: &Painter,
+    view: &term_core::View,
+    theme: &Theme,
+    metrics: &CellMetrics,
+    area: Rect,
+    discoverer: &mut crate::fonts::Discoverer,
+    ink: CursorInk,
+) -> bool {
+    paint(
         painter,
-        &console.screen.view(),
+        view,
         theme,
         metrics,
         area.left_top(),
         discoverer,
         ink,
-    );
-    notices::paint_them_over_it(painter, console, theme, metrics, area);
-    blinking
+    )
 }
 
 /// Paints a console clipped to its rectangle, and returns what queueing the painting cost.
@@ -870,6 +893,7 @@ pub(crate) fn paint_pane(
         blink,
         headers,
         button,
+        measure_links,
     } = how;
     // **The panel is timed apart from the console's queueing, with two clocks that are added
     // together: one around reading and tiling, and another around painting it.** They are two
@@ -932,15 +956,33 @@ pub(crate) fn paint_pane(
     // **The engine's bit is asked for here and not in the window's walk**, because reading it costs
     // one call and reading it through a `View` would cost a snapshot of the whole grid. It says what
     // the program wants, never what gets drawn: `paint_cursor` answers that.
-    let blinking = paint_a_console(
+    let view = pane.screen.view();
+    let blinking = paint_a_console_view(
         &ui.painter_at(panel_split.console),
-        pane,
+        &view,
         theme,
         metrics,
         panel_split.console,
         discoverer,
         blink.ink(pane.screen.cursor_blinks()),
     );
+    notices::paint_them_over_it(
+        &ui.painter_at(panel_split.console),
+        pane,
+        theme,
+        metrics,
+        panel_split.console,
+    );
+    let painted = crate::links::PaintedConsole {
+        view,
+        area: panel_split.console,
+        frame: ui.ctx().cumulative_frame_nr(),
+    };
+    painted.disclose_hovered_link(ui, metrics);
+    // **Inside the console's span on purpose**: only batch W walks this, and outside every span it
+    // would be published as the framework's cost (**D13**).
+    let console_links = measure_links.then(|| painted.a_point_per_source(metrics));
+    pane.painted_console = Some(painted);
     // **Rasterizing a color glyph runs INSIDE the painting, so it is subtracted from the
     // painting.** It is the only expensive thing this project does in there: looking up and
     // registering a face are done outside because they rebuild the atlas, but uploading a
@@ -969,6 +1011,15 @@ pub(crate) fn paint_pane(
             discoverer,
         );
     }
+    let links = console_links
+        .map(|console| {
+            crate::links::ForTheBench::of(
+                console,
+                &pane.panel_state,
+                ui.ctx().cumulative_frame_nr(),
+            )
+        })
+        .unwrap_or_default();
     // **Subtracted OUT of the panel's span and not folded into it**, the same shape the colour
     // glyphs above already have. That span means six named things and its docblock enumerates them
     // so that nothing creeps in; letting a seventh in would be a published series quietly changing
@@ -1021,6 +1072,7 @@ pub(crate) fn paint_pane(
         width_changed,
         buttons_painted: pane.panel_state.buttons_drawn().count(),
         first_button: pane.panel_state.buttons_drawn().next(),
+        links,
         color,
         blinking,
         strip_cost,
