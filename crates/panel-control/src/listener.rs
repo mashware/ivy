@@ -99,6 +99,8 @@ pub enum What {
     /// answers — does this key name a line here — plus what applying the answer costs, which scales
     /// with the document and not with the patch (see `panel_contract::patch`).
     Patch { ops: Patch },
+    /// Intentionally retire the session this connection currently holds.
+    Retire,
     /// Open a pane beside the caller's own, optionally running a program of the caller's choosing.
     ///
     /// **The pane is the caller's, not a name's**: the connection's own endpoint decided it, which is
@@ -125,6 +127,8 @@ pub enum What {
 pub enum Answer {
     /// A publication was applied.
     Taken,
+    /// Retirement committed, with the auxiliary consoles detached and preserved.
+    Retired { closed: usize, preserved: usize },
     /// A pane was opened; the handle is `None` where the pane has no addressable identity.
     Opened(Option<String>),
     /// What a pane showed.
@@ -600,6 +604,16 @@ fn answer(
             ),
             false,
         ),
+        Incoming::Request(Request::PanelRetire) => (
+            ask_the_window(
+                Wants::Retired,
+                What::Retire,
+                connection,
+                to_the_window,
+                wake,
+            ),
+            false,
+        ),
         Incoming::Request(Request::NotServed(tool)) => (
             Reply::Failed(format!("this build does not serve \"{tool}\"")),
             false,
@@ -635,6 +649,7 @@ fn publish(
 #[derive(Debug, Clone, Copy)]
 enum Wants {
     Taken,
+    Retired,
     Opened,
     Read,
     Document,
@@ -644,6 +659,7 @@ impl Wants {
     fn name(self) -> &'static str {
         match self {
             Self::Taken => "a publication or a close",
+            Self::Retired => "a retirement",
             Self::Opened => "an open",
             Self::Read => "a read",
             Self::Document => "a document read",
@@ -682,6 +698,9 @@ fn ask_the_window(
     match answer.recv_timeout(ANSWER_DEADLINE) {
         Ok(Answer::Refused(why)) => Reply::Failed(why),
         Ok(Answer::Taken) if matches!(wants, Wants::Taken) => Reply::Ok,
+        Ok(Answer::Retired { closed, preserved }) if matches!(wants, Wants::Retired) => {
+            Reply::Retired { closed, preserved }
+        }
         Ok(Answer::Opened(handle)) if matches!(wants, Wants::Opened) => Reply::Opened(handle),
         Ok(Answer::Text(text)) if matches!(wants, Wants::Read) => Reply::Text(text),
         Ok(Answer::Document(document)) if matches!(wants, Wants::Document) => {
@@ -694,6 +713,7 @@ fn ask_the_window(
             "the window answered {} to {}",
             match other {
                 Answer::Taken => "a taken",
+                Answer::Retired { .. } => "a retirement",
                 Answer::Opened(_) => "an open",
                 Answer::Text(_) => "a read",
                 Answer::Document(_) => "a document read",
@@ -1136,6 +1156,31 @@ mod tests {
             .send(Answer::Taken)
             .expect("answer the close");
         assert_eq!(read_reply(&mut client), "{\"ok\":true}");
+    }
+
+    /// Retirement keeps the connection identity and returns the window's exact outcome counts.
+    #[test]
+    fn retirement_travels_to_the_window_and_its_counts_return() {
+        let pane = a_pane();
+        let mut client = pane.connect();
+
+        client
+            .write_all(b"{\"tool\":\"panel_retire\"}\n")
+            .expect("retire");
+        let delivery = pane.next_delivery();
+        assert!(matches!(delivery.what, What::Retire));
+        delivery
+            .answer
+            .send(Answer::Retired {
+                closed: 3,
+                preserved: 1,
+            })
+            .expect("answer retirement");
+
+        assert_eq!(
+            read_reply(&mut client),
+            "{\"ok\":true,\"closed\":3,\"preserved\":1}"
+        );
     }
 
     /// **A patch is the pane's, like a publication and unlike the three verbs above**, and its ops

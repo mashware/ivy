@@ -46,6 +46,10 @@ const MODULES: &[(&str, &str)] = &[
     ("src/alarms.rs", include_str!("../src/alarms.rs")),
     ("src/closing.rs", include_str!("../src/closing.rs")),
     ("src/control.rs", include_str!("../src/control.rs")),
+    (
+        "src/control/retiring.rs",
+        include_str!("../src/control/retiring.rs"),
+    ),
     ("src/injected.rs", include_str!("../src/injected.rs")),
     ("src/panel.rs", include_str!("../src/panel.rs")),
     (
@@ -123,7 +127,7 @@ const IMPL_CEILING: usize = 300;
 /// recorded.
 const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
     "src/lib.rs",
-    831,
+    827,
     "the window's core, and the file nobody ever split. D28 has the order its pieces come out \
          in; it cannot come under the ceiling in one change because 16 953 lines of tests reach \
          into its private items. **It came in at 3 119; the bench's injected gestures were the \
@@ -230,7 +234,10 @@ const OVER_CEILING_TODAY: &[(&str, usize, &str)] = &[(
          made every pane share one window read accumulator paid for its wiring with the constructor \
          that already belongs to opening**: threading the accumulator through new panes first added \
          80 production lines here, then the 124-line pane-launching block moved to `opening.rs`. \
-         **875 + 80 - 124 leaves 831**.",
+         **875 + 80 - 124 leaves 831**. **The retirement probe then paid for the context its hidden \
+         panes need by shortening that sizing entry point**: passing the context added one \
+         production line, and the shorter name and parameter folded its six-line signature into \
+         one. **831 + 1 - 5 leaves 827**.",
 )];
 
 /// The production lines of a module: no comments, and nothing from `mod tests` onwards.

@@ -149,6 +149,11 @@ impl Producer {
         self.ask(serde_json::json!({"tool": "panel_patch", "ops": ops}))
     }
 
+    /// Intentionally ends the session currently holding this pane's panel.
+    pub fn retire(&mut self) -> io::Result<Answered> {
+        self.ask(serde_json::json!({"tool": "panel_retire"}))
+    }
+
     /// Closes a console this connection opened.
     pub fn close_a_pane(&mut self, pane: &str) -> io::Result<Answered> {
         self.ask(serde_json::json!({"tool": "split_close", "pane": pane}))
@@ -202,6 +207,14 @@ impl Producer {
             held.and_then(|held| serde_json::from_str::<String>(held.get()).ok())
         };
         match raw.ok {
+            Some(true) if raw.closed.is_some() || raw.preserved.is_some() => {
+                match (raw.closed, raw.preserved) {
+                    (Some(closed), Some(preserved)) => Ok(Answered::Retired { closed, preserved }),
+                    _ => Ok(Answered::Failed(
+                        "the pane answered retirement without both counts".to_owned(),
+                    )),
+                }
+            }
             Some(true) => match raw.pane {
                 // **Present and possibly null**: an open answers with the handle, or with a JSON null
                 // where the console has no addressable identity, and those are two different
@@ -234,6 +247,10 @@ impl Producer {
 #[derive(serde::Deserialize)]
 struct Reply<'a> {
     ok: Option<bool>,
+    #[serde(default)]
+    closed: Option<usize>,
+    #[serde(default)]
+    preserved: Option<usize>,
     #[serde(default, borrow)]
     pane: Option<&'a serde_json::value::RawValue>,
     #[serde(default, borrow)]
@@ -249,6 +266,11 @@ struct Reply<'a> {
 pub enum Answered {
     /// It was applied, and the reply carried nothing else.
     Ok,
+    /// A session was retired, with its auxiliary-console outcome.
+    Retired {
+        closed: usize,
+        preserved: usize,
+    },
     /// A console was opened; the handle is `None` where it has no addressable identity.
     Opened(Option<String>),
     /// What a console showed.
@@ -376,6 +398,32 @@ mod tests {
         let panel = window.join().expect("the window thread finished");
         assert_eq!(panel.lines.len(), 2);
         assert_eq!(panel.phase.as_deref(), Some("build"));
+    }
+
+    /// The producer sends the zero-argument request and retains both result counts.
+    #[test]
+    fn a_producer_retires_and_reads_the_auxiliary_console_outcome() {
+        let (dir, _channel, inbox) = a_pane();
+        let mut producer = Producer::of(dir.path(), dir.id()).expect("open the channel");
+        let window = std::thread::spawn(move || {
+            let delivery = inbox
+                .recv_timeout(Duration::from_secs(5))
+                .expect("the retirement");
+            assert!(matches!(delivery.what, What::Retire));
+            let _ = delivery.answer.send(Answer::Retired {
+                closed: 2,
+                preserved: 1,
+            });
+        });
+
+        assert_eq!(
+            producer.retire().expect("retire"),
+            Answered::Retired {
+                closed: 2,
+                preserved: 1,
+            }
+        );
+        window.join().expect("the window thread finished");
     }
 
     /// **The three `split_*` verbs have a client half too, and their payloads survive the round trip.**

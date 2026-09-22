@@ -14,7 +14,7 @@
 //! with the delivery that declared the strips. The idea is unchanged and its boundary moved one step
 //! out: the arithmetic of a frame, and the report that publishes it.
 //!
-//! **What was kept out, and it is the lesson.** `measure_the_ones_out_of_sight` first came here for
+//! **What was kept out, and it is the lesson.** `size_hidden` first came here for
 //! company, on the reading that both are about measuring. The same audit sent it back: that method
 //! gives the consoles of an unseen tab the grid they would really have, so the program inside formats
 //! for its own width instead of for the eighty start-up columns. **That is the milestone's promise,
@@ -393,7 +393,7 @@ impl Window {
     /// **Zero queueing is the truth, not a filler**: that console queued no painting at all. **The
     /// panel's span is no longer zero**, and that is the difference from the first version of this
     /// sweep: a background console **does** reread its `panel.json` —how much width it has left
-    /// depends on whether there is a panel—, and [`Window::measure_the_ones_out_of_sight`] times
+    /// depends on whether there is a panel—, and [`Window::size_hidden`] times
     /// that read and hands it over here. And **the wait is declared as `None` on purpose**, which
     /// is what keeps the four averages from being touched —see [`measure::Timings::close_frame`]—;
     /// what is kept is what was interpreted and what the panel cost, which is exactly what the

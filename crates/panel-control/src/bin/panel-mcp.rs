@@ -8,10 +8,10 @@
 //! ticket's day, and a second workspace member costs entries in six guard lists this delivery
 //! already has to pay.
 //!
-//! **It exposes the six verbs the channel serves**: `panel_set`, `panel_get`, `panel_patch`, and the
-//! three `split_*` that let an agent open, read and close a console of its own. Each one is advertised because each one is
-//! answered; the scoping that makes them safe —the handle belongs to this connection, and the
-//! person's first keystroke takes the console back— lives on the window's side of the channel.
+//! **It exposes the seven verbs the channel serves**: `panel_set`, `panel_get`, `panel_patch`, the
+//! retirement verb, and the three `split_*` that let an agent open, read and close a console of its
+//! own. Each one is advertised because each one is answered; their authority lives on the window's
+//! side of the channel.
 //!
 //! **Which pane it drives is not a parameter and cannot be one.** The two variables the program
 //! inherited name its own pane's directory, the endpoint inside it is what the connection opens, and
@@ -24,9 +24,9 @@ use panel_control::{Answered, MAX_REQUEST, Producer, Side};
 /// The version answered when the client does not ask for one.
 ///
 /// **What a client asks for is echoed back when it asks**, which is unusual enough to say why: this
-/// server has no behaviour that varies with the version — it advertises one tool and hands a JSON
-/// document straight through — so refusing a client over a date would break the connection for a
-/// difference that does not exist anywhere in this file.
+/// server has no behaviour that varies with the version — it advertises the same seven operations
+/// and forwards each call through the pane's channel — so refusing a client over a date would break
+/// the connection for a difference that does not exist anywhere in this file.
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
 fn main() {
@@ -199,7 +199,7 @@ fn initialized(message: &serde_json::Value) -> serde_json::Value {
     })
 }
 
-/// The six tools this build serves, with the shape of what each takes.
+/// The seven tools this build serves, with the shape of what each takes.
 fn tools() -> serde_json::Value {
     serde_json::json!({
         "tools": [
@@ -234,6 +234,13 @@ fn tools() -> serde_json::Value {
                                 nothing: it is how a process that restarted, or that lost the \
                                 document it published, finds out what is on screen before publishing \
                                 again.",
+                "inputSchema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "panel_retire",
+                "description": "Intentionally end the session currently driving this pane: remove \
+                                its panel and close auxiliary consoles this connection still owns, \
+                                while preserving consoles the person has taken over.",
                 "inputSchema": {"type": "object", "properties": {}},
             },
             {
@@ -338,6 +345,7 @@ fn tools() -> serde_json::Value {
 enum Ask {
     Publish(String, String),
     ReadTheDocument,
+    Retire,
     Patch(String),
     Open(Side, Option<String>, Vec<String>),
     Read(String, bool),
@@ -356,6 +364,7 @@ fn what_it_did(ask: &Ask) -> &'static str {
     match ask {
         Ask::Close(_) => "closed",
         Ask::Patch(_) => "patched",
+        Ask::Retire => "retired",
         Ask::Publish(..) | Ask::ReadTheDocument | Ask::Open(..) | Ask::Read(..) => "published",
     }
 }
@@ -375,7 +384,13 @@ fn called(
     // is even reached: a call for something nobody serves must not open the channel to find that out.
     if !matches!(
         name,
-        "panel_set" | "panel_get" | "panel_patch" | "split_open" | "split_read" | "split_close"
+        "panel_set"
+            | "panel_get"
+            | "panel_retire"
+            | "panel_patch"
+            | "split_open"
+            | "split_read"
+            | "split_close"
     ) {
         return failed(id, -32602, &format!("no tool \"{name}\""));
     }
@@ -398,6 +413,8 @@ fn called(
         // ignored rather than refused: refusing a field that reaches nothing would be inventing a
         // shape this verb does not have.
         "panel_get" => Ask::ReadTheDocument,
+        // Like `panel_get`, it takes no arguments; unknown arguments reach nothing and are ignored.
+        "panel_retire" => Ask::Retire,
         "panel_patch" => {
             let arguments = params.get("arguments").unwrap_or(&serde_json::Value::Null);
             // **Its presence and its shape are checked here, and what each op says is not**: the
@@ -485,6 +502,7 @@ fn called(
     let answer = match ask {
         Ask::Publish(source, document) => producer.publish(&source, &document),
         Ask::ReadTheDocument => producer.read_the_document(),
+        Ask::Retire => producer.retire(),
         Ask::Patch(ops) => producer.patch(&ops),
         Ask::Open(side, program, args) => producer.open_a_pane(side, program.as_deref(), &args),
         Ask::Read(handle, scrollback) => producer.read_a_pane(&handle, scrollback),
@@ -495,6 +513,9 @@ fn called(
         // **Three verbs answer with the same empty `ok`**, so the word comes from what was asked and
         // never from the shape of the reply.
         Ok(Answered::Ok) => succeeded(id, text(did)),
+        Ok(Answered::Retired { closed, preserved }) => {
+            succeeded(id, text(&retirement_result(closed, preserved)))
+        }
         // **The handle is the whole answer to an open**, and a null one is not an error: the console
         // exists and is usable, it is only this channel that cannot address it.
         Ok(Answered::Opened(Some(handle))) => succeeded(id, text(&handle)),
@@ -529,6 +550,12 @@ fn open(pane: &mut Option<Producer>) -> Result<&mut Producer, String> {
 /// One line of text as a tool's result, which is what every verb that is not an error answers with.
 fn text(what: &str) -> serde_json::Value {
     serde_json::json!({"content": [{"type": "text", "text": what}]})
+}
+
+fn retirement_result(closed: usize, preserved: usize) -> String {
+    format!(
+        "retired; closed {closed} auxiliary console(s); preserved {preserved} taken-over console(s)"
+    )
 }
 
 fn refusal(why: &str) -> serde_json::Value {
@@ -702,11 +729,11 @@ mod tests {
         );
     }
 
-    /// **This build advertises the six verbs it serves**, and the assertion is on the whole list rather
+    /// **This build advertises the seven verbs it serves**, and the assertion is on the whole list rather
     /// than on the presence of one: a tool advertised before it is answered is a promise taken back
     /// later, and an answered tool left unadvertised is one no client will ever call.
     #[test]
-    fn the_six_verbs_this_build_serves_are_advertised() {
+    fn the_seven_verbs_this_build_serves_are_advertised() {
         let answered = ask("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
 
         let tools = answered["result"]["tools"]
@@ -721,11 +748,29 @@ mod tests {
             [
                 "panel_set",
                 "panel_get",
+                "panel_retire",
                 "panel_patch",
                 "split_open",
                 "split_read",
                 "split_close"
             ]
+        );
+        let retire = tools
+            .iter()
+            .find(|tool| tool["name"] == "panel_retire")
+            .expect("retirement is advertised");
+        assert_eq!(
+            retire["inputSchema"],
+            serde_json::json!({"type": "object", "properties": {}})
+        );
+    }
+
+    /// The MCP result is a literal cross-repository contract, including its count labels.
+    #[test]
+    fn retirement_result_names_both_outcomes_exactly() {
+        assert_eq!(
+            retirement_result(2, 1),
+            "retired; closed 2 auxiliary console(s); preserved 1 taken-over console(s)"
         );
     }
 

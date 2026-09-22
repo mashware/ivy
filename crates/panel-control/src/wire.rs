@@ -114,6 +114,10 @@ pub enum Request {
     /// one that has *not* claimed the pane: an agent that restarted, one whose context was compacted
     /// away, a second tool taking a console over.
     PanelGet,
+    /// Intentionally end the session that currently holds this pane's panel.
+    ///
+    /// It carries no identity: the endpoint names the pane and the connection is the authority.
+    PanelRetire,
     /// Change part of this pane's published document, leaving the rest of it alone.
     ///
     /// **The ops arrive read**, which is the whole shape of this verb: everything decidable without
@@ -302,6 +306,7 @@ fn interpret(line: &[u8]) -> Incoming {
     match envelope.tool.as_str() {
         "panel_set" => panel_set(&envelope),
         "panel_get" => Incoming::Request(Request::PanelGet),
+        "panel_retire" => Incoming::Request(Request::PanelRetire),
         "panel_patch" => panel_patch(&envelope),
         "split_open" => split_open(&envelope),
         "split_read" => split_read(&envelope),
@@ -477,6 +482,11 @@ fn split_close(envelope: &Envelope<'_>) -> Incoming {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     Ok,
+    /// A session was retired; auxiliary consoles were either detached or preserved after takeover.
+    Retired {
+        closed: usize,
+        preserved: usize,
+    },
     /// A pane was opened; the handle is `None` where the pane has no addressable identity.
     Opened(Option<String>),
     /// What a pane showed.
@@ -508,6 +518,9 @@ impl Reply {
     pub fn line(&self) -> String {
         match self {
             Self::Ok => "{\"ok\":true}\n".to_owned(),
+            Self::Retired { closed, preserved } => {
+                format!("{{\"ok\":true,\"closed\":{closed},\"preserved\":{preserved}}}\n")
+            }
             Self::Opened(pane) => match pane {
                 Some(handle) => {
                     let escaped = serde_json::Value::String(handle.clone());
@@ -590,6 +603,19 @@ mod tests {
         assert_eq!(
             String::from_utf8(client.taken).expect("the reply is text"),
             reply.line()
+        );
+    }
+
+    /// Both counts are fields of a successful retirement, not prose a client has to parse.
+    #[test]
+    fn a_retirement_reply_carries_closed_and_preserved_counts() {
+        assert_eq!(
+            Reply::Retired {
+                closed: 2,
+                preserved: 1,
+            }
+            .line(),
+            "{\"ok\":true,\"closed\":2,\"preserved\":1}\n"
         );
     }
 
@@ -841,6 +867,18 @@ mod tests {
             Some(Incoming::Request(Request::SplitClose { .. }))
         ));
         assert_eq!(framing.take(), None);
+    }
+
+    /// Retirement is a connection-scoped instruction with no payload of its own.
+    #[test]
+    fn panel_retire_is_read_as_the_zero_argument_request() {
+        let mut framing = Framing::default();
+        framing.feed(b"{\"tool\":\"panel_retire\"}\n");
+
+        assert_eq!(
+            framing.take(),
+            Some(Incoming::Request(Request::PanelRetire))
+        );
     }
 
     /// **The ceiling is what stops a line from being held, so the assertion is on what is held** and

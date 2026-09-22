@@ -1571,11 +1571,7 @@ impl Window {
     /// With the window minimized or occluded there is no interface pass and this does not run, just
     /// as the painting that measures the visible one does not run: nobody ends up worse off than
     /// the one that is seen.
-    pub(crate) fn measure_the_ones_out_of_sight(
-        &mut self,
-        area: egui::Rect,
-        metrics: &CellMetrics,
-    ) {
+    pub(crate) fn size_hidden(&mut self, ctx: &egui::Context, area: egui::Rect, m: &CellMetrics) {
         // A single clock for all of them, and here one really is enough: the only thing that
         // depends on the time is whether a pane's panel is stale, and nothing is painted afterwards
         // that could contradict it.
@@ -1596,11 +1592,11 @@ impl Window {
             // whatever layout it has, and giving it a template's would announce to its program a
             // grid that is not its own — which is exactly the defect F2.1 fixed for the tabs and
             // that here would come back through the tree's door.
-            let tiling = tab.root.place(area, metrics.width());
+            let tiling = tab.root.place(area, m.width());
             for (pane, rect) in tab.panes_mut().into_iter().zip(tiling.parts) {
-                let refreshed = pane.refresh_its_panel();
+                let refreshed = pane.refresh_its_panel(ctx);
                 let before_the_panel = Instant::now();
-                let panel_split = pane.chrome_within(rect, metrics, now, headers);
+                let panel_split = pane.chrome_within(rect, m, now, headers);
                 // **The span's boundary is the same as in the painting**, which also closes its
                 // stopwatch after tiling: `tile_with_its_panel` asks whether the panel is visible,
                 // and that question goes as far as composing the text of a warning when the
@@ -1618,7 +1614,7 @@ impl Window {
                     pane.control_unpainted = refreshed.applying;
                 }
 
-                pane.measured = metrics.cells_in(panel_split.console().size());
+                pane.measured = m.cells_in(panel_split.console().size());
             }
         }
     }
@@ -2383,12 +2379,12 @@ impl eframe::App for Window {
 
         // The ones not painted have nowhere else to find out their size: this is the only half of
         // the frame that knows the area they would be given.
-        self.measure_the_ones_out_of_sight(area, &metrics);
+        self.size_hidden(ui.ctx(), area, &metrics);
 
         // **The bar is painted here, last, and that is an invariant of the milestone and not a
         // preference.** Its card says what each tab's panes claim, and this frame's panels are not
         // reread until this line: those of the tab on screen, when painting them just above; those
-        // of the rest, in `measure_the_ones_out_of_sight`. Painting it earlier, the card would go
+        // of the rest, in `size_hidden`. Painting it earlier, the card would go
         // **one frame behind** — and in a reactive window that is not «one frame», it is forever:
         // the frame the watcher asked for would be spent painting the old card and nobody would ask
         // for another.
@@ -5098,7 +5094,7 @@ mod tests {
         pane.panel = Some(dir);
         let until = Instant::now() + Duration::from_secs(5);
         while pane.panel_state.held_by().is_none() && Instant::now() < until {
-            pane.refresh_its_panel();
+            pane.refresh_its_panel(&egui::Context::default());
         }
         assert!(pane.panel_state.held_by().is_some(), "nobody took the pane");
 
@@ -5112,7 +5108,7 @@ mod tests {
         )
         .expect("publish by file");
         pane.to_reread.raise();
-        pane.refresh_its_panel();
+        pane.refresh_its_panel(&egui::Context::default());
         assert!(
             pane.panel_state.held_by().is_some(),
             "the hold ended before the publication was refused, so nothing was refused"
@@ -5122,9 +5118,9 @@ mod tests {
         let _ = held.join().expect("the producer finished");
         let until = Instant::now() + Duration::from_secs(5);
         while pane.panel_state.held_by().is_some() && Instant::now() < until {
-            pane.refresh_its_panel();
+            pane.refresh_its_panel(&egui::Context::default());
         }
-        pane.refresh_its_panel();
+        pane.refresh_its_panel(&egui::Context::default());
 
         assert_eq!(
             pane.panel_state
@@ -5462,6 +5458,467 @@ mod tests {
             why.contains("went back"),
             "the refusal is not the reason the console was taken: {why}"
         );
+    }
+
+    /// An intentional session reset removes exactly that producer's work: its panel disappears,
+    /// untouched auxiliary consoles close, a console the person took over survives, and repeating
+    /// the same request reports the same transition without closing anything else. A later
+    /// publication is a new generation and makes the panel visible again.
+    #[test]
+    fn retiring_a_session_clears_its_panel_and_only_its_untouched_consoles() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let connection = 7;
+        window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console")
+            .panel_state
+            .deliver(
+                connection,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["old work"]}"#).expect("a panel"),
+                SystemTime::now(),
+            )
+            .expect("the producer owns the panel");
+        {
+            let origin = window
+                .all_panes_mut()
+                .find(|pane| pane.name == 0)
+                .expect("the origin console");
+            origin.panel_state.an_agent_opened_it();
+            origin
+                .panel_state
+                .the_person_took_it_over("the person took this console back");
+        }
+
+        let open = |window: &mut Window, side| {
+            let name = window.next_pane_name;
+            let answer = ask_the_window(
+                window,
+                &ctx,
+                0,
+                connection,
+                panel_control::What::Open {
+                    side,
+                    program: Some("/bin/sleep".to_owned()),
+                    args: vec!["8".to_owned()],
+                },
+            );
+            let panel_control::Answer::Opened(Some(handle)) = answer else {
+                panic!("the auxiliary console was not opened: {answer:?}");
+            };
+            (name, handle)
+        };
+        let (untouched, _) = open(&mut window, panel_control::Side::Right);
+        let (also_untouched, _) = open(&mut window, panel_control::Side::Top);
+        let (taken_over, taken_over_handle) = open(&mut window, panel_control::Side::Bottom);
+        window
+            .all_panes_mut()
+            .find(|pane| pane.name == taken_over)
+            .expect("the second auxiliary console")
+            .hand_it_back_to_the_person();
+
+        let panel_control::Answer::Refused(why) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            connection + 1,
+            panel_control::What::Retire,
+        ) else {
+            panic!("a connection that does not own the panel retired it");
+        };
+        assert!(why.contains("held by"), "not the refusal: {why}");
+        assert!(
+            window
+                .all_panes()
+                .find(|pane| pane.name == 0)
+                .expect("the origin console")
+                .panel_state
+                .is_visible(SystemTime::now()),
+            "a refused retirement changed the panel"
+        );
+
+        let panel_control::Answer::Retired {
+            closed: 2,
+            preserved: 1,
+        } = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            connection,
+            panel_control::What::Retire,
+        )
+        else {
+            panic!("the owned session was not retired with its exact counts");
+        };
+        assert!(
+            window.all_panes().all(|pane| pane.name != untouched),
+            "the untouched auxiliary console survived"
+        );
+        assert!(
+            window.all_panes().all(|pane| pane.name != also_untouched),
+            "the second untouched auxiliary console survived"
+        );
+        assert_eq!(
+            window.control.retired_waiting(),
+            2,
+            "a detached PTY was destroyed before the retirement answer returned"
+        );
+        assert!(
+            window.all_panes().any(|pane| pane.name == taken_over),
+            "the person's auxiliary console was closed"
+        );
+        assert!(
+            !window
+                .all_panes()
+                .find(|pane| pane.name == 0)
+                .expect("the origin console")
+                .panel_state
+                .is_visible(SystemTime::now()),
+            "the retired panel stayed visible"
+        );
+
+        let panes_before = window.all_panes().count();
+        let panel_control::Answer::Refused(why) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            connection,
+            panel_control::What::Open {
+                side: panel_control::Side::Right,
+                program: Some("/bin/sleep".to_owned()),
+                args: vec!["8".to_owned()],
+            },
+        ) else {
+            panic!("the retired connection opened work before publishing a new panel");
+        };
+        assert!(
+            why.contains("publish a new panel"),
+            "not the refusal: {why}"
+        );
+        assert_eq!(
+            window.all_panes().count(),
+            panes_before,
+            "a refused post-retirement open changed the tree"
+        );
+
+        let panel_control::Answer::Retired {
+            closed: 2,
+            preserved: 1,
+        } = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            connection,
+            panel_control::What::Retire,
+        )
+        else {
+            panic!("a retry did not return the committed transition");
+        };
+        assert!(
+            window.all_panes().any(|pane| pane.name == taken_over),
+            "an idempotent retry closed the preserved console"
+        );
+        assert_eq!(
+            window.control.retired_waiting(),
+            0,
+            "the next pass did not reap the one detached PTY left queued"
+        );
+        let panel_control::Answer::Refused(why) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            connection,
+            panel_control::What::Read {
+                pane: taken_over_handle,
+                scrollback: false,
+            },
+        ) else {
+            panic!("retirement preserved ownership of the person's console");
+        };
+        assert!(
+            why.contains("no console of yours"),
+            "not the refusal: {why}"
+        );
+
+        window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console")
+            .panel_state
+            .deliver(
+                connection,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["new work"]}"#).expect("a panel"),
+                SystemTime::now(),
+            )
+            .expect("the next publication starts a new generation");
+        assert!(
+            window
+                .all_panes()
+                .find(|pane| pane.name == 0)
+                .expect("the origin console")
+                .panel_state
+                .is_visible(SystemTime::now()),
+            "a later publication did not bring the panel back"
+        );
+    }
+
+    #[test]
+    fn a_disconnect_after_an_admitted_retirement_does_not_release_its_authority_early() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let connection = 7;
+        let origin = window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console");
+        origin
+            .panel_state
+            .deliver(
+                connection,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["old work"]}"#).expect("a panel"),
+                SystemTime::now(),
+            )
+            .expect("the producer owns the panel");
+
+        let (retiring, retired) = std::sync::mpsc::sync_channel(1);
+        let (closing, _closed) = std::sync::mpsc::sync_channel(1);
+        let control = origin.control.as_mut().expect("the pane has its channel");
+        control.enqueue_for_tests(panel_control::Delivery {
+            connection,
+            what: panel_control::What::Retire,
+            answer: retiring,
+        });
+        control.enqueue_for_tests(panel_control::Delivery {
+            connection,
+            what: panel_control::What::Closed,
+            answer: closing,
+        });
+        control.apply(&mut origin.panel_state, SystemTime::now());
+        assert_eq!(
+            origin.panel_state.held_by(),
+            Some("flow"),
+            "disconnect released a retirement that the window had already admitted"
+        );
+
+        with_metrics(|metrics| {
+            window.answer_the_windows_requests(
+                &ctx,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0)),
+                metrics,
+            )
+        });
+        let panel_control::Answer::Retired {
+            closed: 0,
+            preserved: 0,
+        } = retired
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the admitted retirement was answered")
+        else {
+            panic!("the admitted retirement did not commit its empty result");
+        };
+        let origin = window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin survives its own retirement");
+        origin
+            .control
+            .as_mut()
+            .expect("the pane has its channel")
+            .apply(&mut origin.panel_state, SystemTime::now());
+        assert!(
+            !origin.panel_state.is_visible(SystemTime::now()),
+            "disconnect turned an admitted clear into an ordinary crash release"
+        );
+        assert!(
+            origin.panel_state.held_by().is_none(),
+            "the processed closure kept the retired connection's hold"
+        );
+    }
+
+    #[test]
+    fn a_publication_after_a_queued_retirement_cannot_overtake_it() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let connection = 7;
+        let origin = window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console");
+        origin
+            .panel_state
+            .deliver(
+                connection,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["old work"]}"#).expect("the old panel"),
+                SystemTime::now(),
+            )
+            .expect("the producer owns the panel");
+        let (retiring, retired) = std::sync::mpsc::sync_channel(1);
+        let (publishing, published) = std::sync::mpsc::sync_channel(1);
+        let control = origin.control.as_mut().expect("the pane has its channel");
+        control.enqueue_for_tests(panel_control::Delivery {
+            connection,
+            what: panel_control::What::Retire,
+            answer: retiring,
+        });
+        control.enqueue_for_tests(panel_control::Delivery {
+            connection,
+            what: panel_control::What::Publish {
+                source: "flow".to_owned(),
+                panel: panel_contract::parse_document(r#"{"lines":["new work"]}"#)
+                    .expect("the new panel"),
+            },
+            answer: publishing,
+        });
+        control.apply(&mut origin.panel_state, SystemTime::now());
+        assert!(
+            published.try_recv().is_err(),
+            "the later publication overtook retirement"
+        );
+
+        with_metrics(|metrics| {
+            window.answer_the_windows_requests(
+                &ctx,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0)),
+                metrics,
+            )
+        });
+        assert!(matches!(
+            retired.recv_timeout(Duration::from_secs(1)),
+            Ok(panel_control::Answer::Retired { .. })
+        ));
+        let origin = window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console");
+        origin
+            .control
+            .as_mut()
+            .expect("the pane has its channel")
+            .apply(&mut origin.panel_state, SystemTime::now());
+        assert!(matches!(
+            published.recv_timeout(Duration::from_secs(1)),
+            Ok(panel_control::Answer::Taken)
+        ));
+        assert_eq!(
+            origin
+                .panel_state
+                .last_understood()
+                .expect("the next generation is visible")
+                .lines[0]
+                .text,
+            "new work"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_disconnect_preserves_the_panel_and_every_auxiliary_console() {
+        let ctx = egui::Context::default();
+        let mut window = window_with("sleep 8", "sleep 8");
+        attach_a_channel(&mut window, 0);
+        let connection = 7;
+        window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console")
+            .panel_state
+            .deliver(
+                connection,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["evidence"]}"#).expect("the panel"),
+                SystemTime::now(),
+            )
+            .expect("the producer owns the panel");
+        let auxiliary = window.next_pane_name;
+        let panel_control::Answer::Opened(Some(handle)) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            connection,
+            panel_control::What::Open {
+                side: panel_control::Side::Right,
+                program: Some("/bin/sleep".to_owned()),
+                args: vec!["8".to_owned()],
+            },
+        ) else {
+            panic!("the auxiliary console was not opened");
+        };
+
+        let (closing, _closed) = std::sync::mpsc::sync_channel(1);
+        let origin = window
+            .all_panes_mut()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console");
+        let control = origin.control.as_mut().expect("the pane has its channel");
+        control.enqueue_for_tests(panel_control::Delivery {
+            connection,
+            what: panel_control::What::Closed,
+            answer: closing,
+        });
+        control.apply(&mut origin.panel_state, SystemTime::now());
+        with_metrics(|metrics| {
+            window.answer_the_windows_requests(
+                &ctx,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0)),
+                metrics,
+            )
+        });
+
+        let origin = window
+            .all_panes()
+            .find(|pane| pane.name == 0)
+            .expect("the origin console survived");
+        assert!(
+            origin.panel_state.is_visible(SystemTime::now()),
+            "ordinary disconnect cleared the panel evidence"
+        );
+        assert!(
+            window.all_panes().any(|pane| pane.name == auxiliary),
+            "ordinary disconnect closed an auxiliary console"
+        );
+        let panel_control::Answer::Refused(why) = ask_the_window(
+            &mut window,
+            &ctx,
+            0,
+            connection,
+            panel_control::What::Read {
+                pane: handle,
+                scrollback: false,
+            },
+        ) else {
+            panic!("a handle survived the connection that owned it");
+        };
+        assert!(
+            why.contains("no console of yours"),
+            "not the refusal: {why}"
+        );
+    }
+
+    #[test]
+    fn retirement_validation_refuses_every_incomplete_tree_change_atomically() {
+        let window = window_with("sleep 8", "sleep 8");
+        let names = window.all_panes().map(|pane| pane.name).collect::<Vec<_>>();
+        let focus = window.active().focus;
+
+        for targets in [vec![usize::MAX], vec![names[0], names[0]], names.clone()] {
+            assert!(
+                window.validate_detaching_panes(&targets).is_err(),
+                "an invalid retirement target set was accepted: {targets:?}"
+            );
+            assert_eq!(
+                window.all_panes().map(|pane| pane.name).collect::<Vec<_>>(),
+                names,
+                "validation changed the tree before accepting the whole retirement"
+            );
+            assert_eq!(window.active().focus, focus, "validation changed focus");
+        }
     }
 
     /// **The row that says the person took the console over is only published where an agent had a
@@ -14809,7 +15266,7 @@ mod tests {
         let mut pane = pane_with("sleep 30", 0);
         pane.panel = Some(PanelDir::create().expect("create the pane's directory"));
         publish_at(&pane, contents);
-        pane.refresh_its_panel();
+        pane.refresh_its_panel(&egui::Context::default());
         pane
     }
 
@@ -16559,7 +17016,7 @@ mod tests {
             pane.panel = Some(PanelDir::create().expect("create the pane's directory"));
             publish_at(pane, r#"{"lines":["working"]}"#);
             pane.to_reread.raise();
-            pane.refresh_its_panel();
+            pane.refresh_its_panel(&ctx);
         }
 
         // **That the panel is really in place and takes room from it, or this proves nothing**:
@@ -17955,7 +18412,7 @@ mod tests {
     fn what_the_panel_of_the_one_being_closed_cost_does_not_leave_with_it_either() {
         // **AC11's third leg**, and the only one that lives neither in the measurement nor in what
         // the pumping left behind: what **re-reading its `panel.json`** cost while its tab was in
-        // the background. `measure_the_ones_out_of_sight` times it and leaves it in
+        // the background. `size_hidden` times it and leaves it in
         // `panel_reread_unpainted`, and whoever collects it —`close_the_unpainted_rounds`— only
         // goes through it **if that console also parsed something**: a stopped console, which is
         // the case of an agent waiting for an answer, carries it over to the next frame. If it is
@@ -19452,7 +19909,7 @@ mod tests {
         pane.panel = Some(PanelDir::create().expect("create the pane's directory"));
         publish_at(pane, contents);
         pane.to_reread.raise();
-        pane.refresh_its_panel();
+        pane.refresh_its_panel(&egui::Context::default());
     }
 
     /// Where a pane's panel border is grabbed, in points.

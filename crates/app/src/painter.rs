@@ -882,7 +882,7 @@ pub(crate) fn paint_pane(
     // **Rereading goes before tiling**, because how much width the console has left depends on
     // whether there is a panel or not: a console whose producer has just published for the
     // first time narrows in this very frame, not in the next one.
-    let refreshed = pane.refresh_its_panel();
+    let refreshed = pane.refresh_its_panel(ui.ctx());
     // **The clock starts AFTER the refresh and what the refresh cost is added back below**, rather
     // than spanning it and subtracting the channel's share out. The boundary of the «panel» span is
     // unchanged — it is still the read plus the tiling plus the border — but the control channel is

@@ -26,8 +26,8 @@ mod driving;
 pub(crate) mod pane;
 use buttons::buttons_drawn;
 pub(crate) use document::Reader as DocumentReader;
-use driving::Holder;
-pub(crate) use driving::Released;
+use driving::RetirementState;
+pub(crate) use driving::{Holder, Released, Retirement};
 
 use eframe::egui::{Align2, Color32, Painter, Pos2, Rect};
 use panel_contract::{Action, Attention, Line, Mark, Panel, Problem, Style, is_shown_as_itself};
@@ -241,6 +241,12 @@ pub struct PanelState {
     /// **It dies with the connection**, which is not a detail: without a release, an agent that
     /// crashed would freeze this pane's panel for ever and its file would never be read again.
     holder: Option<Holder>,
+    /// The last intentional retirement, until another document is successfully committed.
+    ///
+    /// **It is an idempotency record, not authority that survives a generation.** Only the same
+    /// connection may receive its original result, and [`PanelState::commit`] removes it for both
+    /// channel and file publications before anybody can retire the new document.
+    retirement: RetirementState,
     /// The date of the last file this panel actually looked at.
     ///
     /// **It is the baseline a hold compares against to tell a real file publication from a raised
@@ -298,6 +304,9 @@ pub enum Refreshed {
     Read,
     /// A connection holds this panel, so nothing was read.
     Declined,
+    /// A retired snapshot needs one later look to distinguish an identical metadata stamp from an
+    /// in-place publication whose bytes changed.
+    Deferred(std::time::Duration),
 }
 
 /// What one painting of a panel left behind for a press to land on.
@@ -342,6 +351,10 @@ impl PanelState {
     /// painting. Two clocks for a stretch that is published as one is the easiest way for the number to
     /// stop meaning what it says.
     pub fn refresh(&mut self, dir: &std::path::Path) -> Refreshed {
+        self.refresh_file(dir)
+    }
+
+    fn refresh_file(&mut self, dir: &std::path::Path) -> Refreshed {
         // **The return is before the file is read, and that is the invariant rather than an
         // optimisation.** While a connection holds this pane there is exactly one writer, and reading
         // the file would put a second one back — settled, as it was before D17, by whichever of the
@@ -362,8 +375,12 @@ impl PanelState {
             return Refreshed::Declined;
         }
 
-        // The date it is compared against is that of the last good read, which is the one the contract
-        // itself returns. Keeping it separately would be having two copies of the same datum.
+        match self.refresh_after_retirement(dir) {
+            driving::RetirementRefresh::NotRetired => {}
+            driving::RetirementRefresh::Read => return Refreshed::Read,
+            driving::RetirementRefresh::Deferred(delay) => return Refreshed::Deferred(delay),
+        }
+
         let seen = self.last_good.as_ref().and_then(|panel| panel.written_at);
 
         match panel_contract::read_if_newer(dir, seen) {
@@ -2216,6 +2233,296 @@ mod tests {
             .expect("the producer declared a claim");
 
         assert!(claim.backed, "a claim somebody is holding up was dimmed");
+    }
+
+    /// Retirement removes every reachable form of the producer document in one state swap: the
+    /// painter, an already-cloned off-frame reader, claims and old button hitboxes must all agree.
+    #[test]
+    fn the_holder_retires_the_document_and_every_route_to_its_old_state() {
+        let dir = PanelDir::create().expect("create the directory");
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(
+                    r#"{"attention":"wait","actions":[{"label":"Run","send":"make run"}],"lines":["ready"]}"#,
+                )
+                .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("nobody was holding it");
+        let reader = state.reader();
+        state
+            .lay_out_if_needed("a1b2", 40, &Theme::default(), None, None)
+            .expect("there is a layout");
+        state.drawn = Some(Drawn {
+            settled: true,
+            buttons: vec![PaintedButton {
+                action: 0,
+                area: PLACE,
+            }],
+        });
+        state.problem = Some(Problem::Invalid("old failure".to_owned()));
+        let result = Retirement {
+            closed: 2,
+            preserved: 1,
+        };
+
+        assert_eq!(
+            state
+                .retire(
+                    7,
+                    PanelState::retirement_baseline(dir.path()).expect("snapshot the file"),
+                    result,
+                )
+                .expect("the holder may retire"),
+            result
+        );
+
+        assert!(state.last_understood().is_none());
+        assert_eq!(
+            state.document().expect_err("there is no document"),
+            driving::NOTHING_PUBLISHED
+        );
+        assert_eq!(
+            reader
+                .read()
+                .expect("the pane still exists")
+                .expect_err("the committed reader was cleared"),
+            driving::NOTHING_PUBLISHED
+        );
+        assert!(state.held_by().is_none());
+        assert!(state.attention(SystemTime::now()).is_none());
+        assert!(state.drawn.is_none());
+        assert!(state.layout.is_none());
+        assert!(state.problem.is_none());
+        assert!(!state.is_visible(SystemTime::now()));
+    }
+
+    #[test]
+    fn a_connection_that_does_not_hold_the_panel_cannot_retire_it() {
+        let dir = PanelDir::create().expect("create the directory");
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "same name",
+                panel_contract::parse_document(r#"{"lines":["kept"]}"#)
+                    .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("nobody was holding it");
+
+        let refusal = state
+            .retire(
+                8,
+                PanelState::retirement_baseline(dir.path()).expect("snapshot the file"),
+                Retirement::default(),
+            )
+            .expect_err("a fresh connection has no authority");
+
+        assert!(
+            refusal.contains("same name"),
+            "the holder was not named: {refusal}"
+        );
+        assert_eq!(state.held_by(), Some("same name"));
+        assert!(
+            state
+                .document()
+                .expect("the document survived")
+                .contains("kept")
+        );
+    }
+
+    #[test]
+    fn a_retirement_retry_keeps_its_result_until_a_new_mcp_publication() {
+        let dir = PanelDir::create().expect("create the directory");
+        let mut state = PanelState::default();
+        let panel = || {
+            panel_contract::parse_document(r#"{"lines":["one generation"]}"#)
+                .expect("the document is a panel")
+        };
+        state
+            .deliver(7, "flow", panel(), SystemTime::now())
+            .expect("publish the first generation");
+        let baseline = PanelState::retirement_baseline(dir.path()).expect("snapshot the file");
+        let original = Retirement {
+            closed: 3,
+            preserved: 1,
+        };
+        state
+            .retire(7, baseline.clone(), original)
+            .expect("retire once");
+
+        assert_eq!(
+            state
+                .retire(7, baseline.clone(), Retirement::default())
+                .expect("the retry is idempotent"),
+            original
+        );
+
+        state
+            .deliver(7, "flow", panel(), SystemTime::now())
+            .expect("publish a new generation");
+        let next = Retirement {
+            closed: 1,
+            preserved: 2,
+        };
+        assert_eq!(
+            state
+                .retire(7, baseline, next)
+                .expect("the new generation may retire"),
+            next
+        );
+    }
+
+    #[test]
+    fn retirement_suppresses_that_file_generation_but_a_later_one_invalidates_the_retry() {
+        let dir = PanelDir::create().expect("create the directory");
+        publish(&dir, r#"{"lines":["the old file"]}"#);
+        let retired_date = std::fs::metadata(dir.path().join(PANEL_FILE))
+            .and_then(|metadata| metadata.modified())
+            .expect("read the retired file date");
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["the agent"]}"#)
+                    .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("publish over the file");
+        let baseline = PanelState::retirement_baseline(dir.path()).expect("snapshot the file");
+        state
+            .retire(7, baseline.clone(), Retirement::default())
+            .expect("retire the held generation");
+
+        state.refresh(dir.path());
+        assert!(
+            state.last_understood().is_none(),
+            "a queued notice resurrected the retired file generation"
+        );
+        state
+            .retire(7, baseline.clone(), Retirement::default())
+            .expect("the unchanged file did not end idempotency");
+
+        publish(&dir, r#"{"lines":["the later file"]}"#);
+        std::fs::File::open(dir.path().join(PANEL_FILE))
+            .expect("open the later file")
+            .set_modified(retired_date)
+            .expect("keep the same timestamp");
+        state.refresh(dir.path());
+
+        assert_eq!(
+            state
+                .last_understood()
+                .expect("the later file was read")
+                .lines[0]
+                .text,
+            "the later file"
+        );
+        assert!(
+            state.retire(7, baseline, Retirement::default()).is_err(),
+            "a successful file publication left the old retirement authoritative"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_atomic_republication_of_identical_bytes_is_a_new_file_generation() {
+        let dir = PanelDir::create().expect("create the directory");
+        let document = r#"{"lines":["the same file"]}"#;
+        publish(&dir, document);
+        let path = dir.path().join(PANEL_FILE);
+        let retired_date = std::fs::metadata(&path)
+            .and_then(|metadata| metadata.modified())
+            .expect("read the retired file date");
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["the agent"]}"#)
+                    .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("publish over the file");
+        let baseline = PanelState::retirement_baseline(dir.path()).expect("snapshot the file");
+        state
+            .retire(7, baseline, Retirement::default())
+            .expect("retire the held generation");
+
+        let replacement = dir.path().join("panel.next");
+        std::fs::write(&replacement, document).expect("write an atomic replacement");
+        std::fs::File::open(&replacement)
+            .expect("open the replacement")
+            .set_modified(retired_date)
+            .expect("preserve its timestamp and bytes");
+        std::fs::rename(replacement, path).expect("publish the replacement atomically");
+        state.refresh(dir.path());
+
+        assert_eq!(
+            state
+                .last_understood()
+                .expect("the replacement was read")
+                .lines[0]
+                .text,
+            "the same file"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retirement_rejects_a_named_pipe_without_blocking_the_interface() {
+        let dir = PanelDir::create().expect("create the directory");
+        let path = dir.path().join(PANEL_FILE);
+        let planted = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("launch mkfifo");
+        assert!(planted.success(), "the pipe could not be planted");
+
+        let (finished, result) = std::sync::mpsc::channel();
+        let panel_dir = dir.path().to_path_buf();
+        std::thread::spawn(move || finished.send(PanelState::retirement_baseline(&panel_dir)));
+        let failure = result
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("opening the pipe blocked the interface")
+            .expect_err("a pipe was accepted as a panel generation");
+        assert_eq!(failure.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn an_ordinary_release_preserves_the_committed_document() {
+        let mut state = PanelState::default();
+        state
+            .deliver(
+                7,
+                "flow",
+                panel_contract::parse_document(r#"{"lines":["evidence"]}"#)
+                    .expect("the document is a panel"),
+                SystemTime::now(),
+            )
+            .expect("publish");
+        let reader = state.reader();
+
+        assert_eq!(state.release(7), Released::Given);
+        assert!(state.held_by().is_none());
+        assert!(
+            state
+                .document()
+                .expect("the document stays")
+                .contains("evidence")
+        );
+        assert!(
+            reader
+                .read()
+                .expect("the pane stays alive")
+                .expect("the committed document stays")
+                .contains("evidence")
+        );
     }
 
     #[test]

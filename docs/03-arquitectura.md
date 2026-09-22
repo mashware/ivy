@@ -48,11 +48,14 @@ An MCP server exposing tools to the agent running in the pane:
 | Tool | What it does | Served |
 |---|---|---|
 | `panel_set` | Publish its pane's state | Yes, since F3's third PR |
+| `panel_get` | Read its pane's last committed document | Yes |
+| `panel_patch` | Change addressed parts of the document it holds | Yes |
+| `panel_retire` | Intentionally end the session state this connection owns | Yes, D50 |
 | `split_open` | Open a new pane | Yes, since F3's fourth PR |
 | `split_read` | Read a pane's output | Yes, since F3's fourth PR |
 | `split_close` | Close it | Yes, since F3's fourth PR |
 
-All four are advertised because all four are answered. The three `split_*` acts on **the panes this
+All seven are advertised because all seven are answered. The three `split_*` act on **the panes this
 connection opened**, named by an **opaque handle** the window hands back — sixteen random bytes,
 scoped to (the pane whose channel asked, the connection) — and **the person's first byte into one of
 them takes it back**: from then on the handle answers with the reason and never with the buffer.
@@ -72,6 +75,27 @@ endpoint the connection opened**, and no message carries a pane's identifier at 
 an **opaque handle scoped to the connection that opened it** (D44), so reaching a console somebody
 else opened is not refused, it is unsayable. See the Security table below for why a check on
 `PANEL_ID` would have been worth nothing.
+
+`panel_retire` is the explicit end of that connection's session (**D50**). It is accepted only from
+the connection currently holding the panel. In one logical window transition it removes the
+document —and therefore its actions and attention—, releases the hold, detaches auxiliary consoles
+that connection still controls and forgets all its handles. A console the person took over stays.
+The answer is sent after the panel and tree commit and before the detached pseudoterminals are
+destroyed through ordinary pane and PTY destruction.
+
+Retirement does **not** delete `panel.json`: the file cannot prove who produced it. The live pane
+keeps a bounded snapshot of the file's metadata and bytes at retirement, so that unchanged file
+cannot resurrect; a later valid file whose observed snapshot differs publishes normally. Closing a
+pane already removes its private directory, and restoring creates a fresh identity, so the marker
+does not belong in the saved layout. Connection loss is deliberately different: a crash, EOF or
+accidental disconnect releases the hold but preserves the last document and every console.
+Compaction is not retirement.
+
+This repository supplies no lifecycle adapter. A harness may claim automatic clear-session support
+only after a real integration run proves its explicit lifecycle event reaches `panel_retire` through
+the already-connected server. Unsupported harnesses remain unsupported rather than being emulated
+with terminal parsing or a fresh connection. The control endpoint, including retirement, remains
+unavailable on Windows until F2.7 supplies and tests the named pipe security boundary.
 
 ### 3. Input — PTY (app → agent)
 
@@ -107,6 +131,7 @@ every version of the agent. That is what channel 1 is for.
 | An agent writing into somebody else's pane | **The pane is the endpoint the connection opened, and `panel_set` carries no pane identifier for anybody to check.** The earlier wording here said the server «scopes by `PANEL_ID`», and that was not a mitigation: `PANEL_ID` is put in the child's environment, so every descendant of a pane inherits it and any process of the same uid reads it out of `/proc/<pid>/environ` — it is a name, not a credential, and it is eight hex digits drawn for collision avoidance rather than unguessability. What does the work is the directory's `0700` and the fact that there is nothing in a message to trust. **Through the file there is no scoping either**: whoever can write in the directory is the producer (D17). The three `split_*` verbs do name a console, and what they name it with is an **opaque per-connection handle** — sixteen random bytes, checked against the pair (origin pane, connection) — so a console the connection did not open cannot be said. **D44** |
 | An agent reading a console the person then types into | **The handle is revoked by the person's own input, and the revocation is an application boundary rather than a confidentiality one** (F10). A keystroke or a paste, a wheel turn, and a mouse report end it (a panel button's press does not: that is the application acting on the person's behalf). From that byte on, `split_read` and `split_close` answer with the reason, and the console's own row says it. **The program the agent opened keeps reading what the person types afterwards** — the promise is «the app stops handing you that buffer», and it is written that way wherever it is promised |
 | Two producers publishing to one pane | **The first connection to publish holds the pane under a source it declares; while it does, the file is not read at all and a second source is refused by name.** The hold dies with the connection, so an agent that crashes does not freeze that panel for the life of the window. **D43** |
+| A hook clearing another session's panel or consoles | **Only the connection currently holding the panel can send `panel_retire`.** A source name, `PANEL_ID`, `PANEL_DIR`, a command-hook process or an opaque console handle grants no retirement authority. The observed file snapshot is suppressed in application-owned state rather than deleted, because its producer is unknowable. **D50** |
 | Reading the buffer and sending it to a model | It exfiltrates whatever is on screen: tokens, keys, API responses. Choosing what gets sent must be explicit, never automatic |
 | Setting `ANTHROPIC_API_KEY` when launching a panel | Forbidden: it would change the user's billing (see D4) |
 | Secrets in the panel | The panel is persisted text; it is no place for credentials |

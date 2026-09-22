@@ -10,8 +10,12 @@
 //! It sits beside the panel rather than inside it for the reason the size rule gives (**D28**): what
 //! the panel is and how it is painted is one subject, and who is allowed to write it is another.
 
+use std::io::{self, Read as _};
 use std::path::Path;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
+
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
 
 use panel_contract::{Panel, Patch};
 
@@ -76,9 +80,132 @@ pub enum Released {
     Nothing,
 }
 
+/// What the window's one retirement transition did with this connection's auxiliary consoles.
+///
+/// **These are effects, not requested numbers.** The window computes them from the live tree after
+/// rechecking takeover, then gives the value to [`PanelState::retire`] as the result to commit. A
+/// retry receives the value first committed even if it proposes the empty result after the panes
+/// have already gone.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Retirement {
+    pub closed: usize,
+    pub preserved: usize,
+}
+
+/// The file transport generation observed immediately before retirement commits.
+///
+/// The value is opaque so a caller cannot synthesize a date and accidentally suppress somebody's
+/// later publication. It is live-pane state only: pane closure removes its private directory, and a
+/// restored pane receives a fresh identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetirementBaseline {
+    file: FileGeneration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum FileGeneration {
+    Missing,
+    Present {
+        modified: SystemTime,
+        length: u64,
+        bytes: Vec<u8>,
+        #[cfg(unix)]
+        device: u64,
+        #[cfg(unix)]
+        inode: u64,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FileStamp {
+    Missing,
+    Present {
+        modified: SystemTime,
+        length: u64,
+        #[cfg(unix)]
+        device: u64,
+        #[cfg(unix)]
+        inode: u64,
+    },
+}
+
+const RETIRED_CONTENT_PROBE: Duration = Duration::from_millis(500);
+
+pub(super) enum RetirementRefresh {
+    NotRetired,
+    Read,
+    Deferred(Duration),
+}
+
+enum RetiredFile {
+    Checked(Option<FileGeneration>),
+    Deferred(Duration),
+}
+
+impl FileGeneration {
+    fn stamp(&self) -> FileStamp {
+        match self {
+            Self::Missing => FileStamp::Missing,
+            Self::Present {
+                modified,
+                length,
+                #[cfg(unix)]
+                device,
+                #[cfg(unix)]
+                inode,
+                ..
+            } => FileStamp::Present {
+                modified: *modified,
+                length: *length,
+                #[cfg(unix)]
+                device: *device,
+                #[cfg(unix)]
+                inode: *inode,
+            },
+        }
+    }
+
+    fn into_panel(self) -> Option<Panel> {
+        let Self::Present {
+            modified,
+            length,
+            bytes,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        if length > panel_contract::MAX_BYTES || bytes.len() as u64 != length {
+            return None;
+        }
+        let document = std::str::from_utf8(&bytes).ok()?;
+        let mut panel = panel_contract::parse_document(document).ok()?;
+        panel.written_at = Some(modified);
+        Some(panel)
+    }
+}
+
+/// One retired producer generation, kept only until the next successful publication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RetiredGeneration {
+    connection: panel_control::Connection,
+    result: Retirement,
+}
+
+#[derive(Debug, Default)]
+pub(super) enum RetirementState {
+    #[default]
+    Active,
+    Retired {
+        generation: FileGeneration,
+        producer: RetiredGeneration,
+        next_content_probe: Instant,
+    },
+}
+
 /// Who is driving a panel, and under what name.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Holder {
+pub(crate) struct Holder {
     /// **The connection and not the source**, because the source is a label its own holder chooses:
     /// two connections calling themselves the same thing are two producers, and letting the second
     /// one publish because the name matched is exactly the collision the hold exists to stop.
@@ -96,6 +223,104 @@ pub(super) struct Holder {
 }
 
 impl PanelState {
+    /// Snapshots the current file generation for an intentional retirement.
+    ///
+    /// Missing is a real generation: there was no file to resurrect. Other metadata failures are
+    /// returned so the window can refuse before changing either the panel or its tree.
+    pub fn retirement_baseline(dir: &Path) -> io::Result<RetirementBaseline> {
+        snapshot(dir).map(|file| RetirementBaseline { file })
+    }
+
+    /// Verifies retirement authority without changing the panel or tree.
+    ///
+    /// `Some` is an idempotent retry whose original result must be returned without touching either.
+    pub(crate) fn retirement_status(
+        &self,
+        connection: panel_control::Connection,
+    ) -> Result<Option<Retirement>, String> {
+        if let RetirementState::Retired { producer, .. } = self.retirement
+            && producer.connection == connection
+        {
+            return Ok(Some(producer.result));
+        }
+        let Some(holder) = &self.holder else {
+            return Err("this connection does not hold this console's panel".to_owned());
+        };
+        if holder.connection != connection {
+            return Err(held_by_somebody_else(&holder.source));
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn was_retired_by(&self, connection: panel_control::Connection) -> bool {
+        matches!(
+            self.retirement,
+            RetirementState::Retired { producer, .. } if producer.connection == connection
+        )
+    }
+
+    pub(super) fn is_retired(&self) -> bool {
+        matches!(self.retirement, RetirementState::Retired { .. })
+    }
+
+    pub(super) fn retired_probe_is_due(&self) -> bool {
+        matches!(
+            self.retirement,
+            RetirementState::Retired {
+                next_content_probe,
+                ..
+            } if Instant::now() >= next_content_probe
+        )
+    }
+
+    fn changed_retired_file(&mut self, dir: &Path) -> io::Result<RetiredFile> {
+        let RetirementState::Retired {
+            generation,
+            next_content_probe,
+            ..
+        } = &mut self.retirement
+        else {
+            return Ok(RetiredFile::Checked(None));
+        };
+        let now = Instant::now();
+        if file_stamp(dir)? == generation.stamp() && now < *next_content_probe {
+            return Ok(RetiredFile::Deferred(
+                next_content_probe.saturating_duration_since(now),
+            ));
+        }
+        *next_content_probe = now + RETIRED_CONTENT_PROBE;
+        snapshot(dir)
+            .map(|current| RetiredFile::Checked((current != *generation).then_some(current)))
+    }
+
+    /// Keeps the retired file invisible, or commits the first later valid file snapshot.
+    pub(super) fn refresh_after_retirement(&mut self, dir: &Path) -> RetirementRefresh {
+        if !self.is_retired() {
+            return RetirementRefresh::NotRetired;
+        }
+        let changed = match self.changed_retired_file(dir) {
+            Ok(RetiredFile::Deferred(delay)) => return RetirementRefresh::Deferred(delay),
+            Ok(RetiredFile::Checked(None)) => {
+                self.problem = None;
+                return RetirementRefresh::Read;
+            }
+            // Retirement ends only after a valid later publication commits. A broken attempt stays
+            // invisible and will be tried again on the next notice or blind rescan.
+            Ok(RetiredFile::Checked(Some(changed))) => changed,
+            Err(_) => {
+                self.problem = None;
+                return RetirementRefresh::Read;
+            }
+        };
+        if let Some(panel) = changed.into_panel() {
+            self.file_seen = panel.written_at;
+            self.commit(panel);
+            self.layout = None;
+        }
+        self.problem = None;
+        RetirementRefresh::Read
+    }
+
     /// Takes a document that arrived over the channel, if the connection handing it over may.
     ///
     /// **The date is stamped here, on arrival.** The contract's parser leaves it empty because a
@@ -195,6 +420,44 @@ impl PanelState {
         Ok(written.len())
     }
 
+    /// Intentionally removes the document published by this connection.
+    ///
+    /// **This differs from [`Self::release`] in the only way that matters:** a disconnect keeps the
+    /// last committed document as evidence, while an explicit retirement clears the interface copy,
+    /// the off-frame reader and every route by which an old action could still be pressed. A foreign
+    /// connection changes nothing, even when it uses the same source name.
+    ///
+    /// The tree is the window's, so it computes `result` before this infallible state swap. Repeating
+    /// the request on the same connection returns the original result. Any later successful channel
+    /// or file publication goes through [`PanelState::commit`] and ends that idempotent generation.
+    pub fn retire(
+        &mut self,
+        connection: panel_control::Connection,
+        baseline: RetirementBaseline,
+        result: Retirement,
+    ) -> Result<Retirement, String> {
+        if let Some(result) = self.retirement_status(connection)? {
+            return Ok(result);
+        }
+
+        self.last_good = None;
+        self.committed.clear();
+        self.layout = None;
+        self.problem = None;
+        self.drawn = None;
+        self.holder = None;
+        self.file_seen = match &baseline.file {
+            FileGeneration::Missing => None,
+            FileGeneration::Present { modified, .. } => Some(*modified),
+        };
+        self.retirement = RetirementState::Retired {
+            generation: baseline.file,
+            producer: RetiredGeneration { connection, result },
+            next_content_probe: Instant::now() + RETIRED_CONTENT_PROBE,
+        };
+        Ok(result)
+    }
+
     /// Gives the panel back to its file, if this is the connection that was holding it.
     ///
     /// **What was published stays on screen.** The agent is gone and what it last said is still the
@@ -226,4 +489,77 @@ impl PanelState {
     pub(crate) fn refused_the_file(&self) -> bool {
         self.holder.as_ref().is_some_and(|held| held.file_refused)
     }
+}
+
+fn snapshot(dir: &Path) -> io::Result<FileGeneration> {
+    let path = dir.join(panel_contract::PANEL_FILE);
+    let file = match open_snapshot(&path) {
+        Ok(file) => file,
+        Err(problem) if problem.kind() == io::ErrorKind::NotFound => {
+            return Ok(FileGeneration::Missing);
+        }
+        Err(problem) => return Err(problem),
+    };
+    // Metadata and bytes come from the same open file description. Reading the path first and
+    // opening it afterwards would let an atomic rename splice the old metadata to the new bytes.
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the panel path is not a regular file",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(
+        metadata
+            .len()
+            .min(panel_contract::MAX_BYTES + 1)
+            .try_into()
+            .expect("the panel ceiling fits in memory"),
+    );
+    file.take(panel_contract::MAX_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    Ok(FileGeneration::Present {
+        modified: metadata.modified()?,
+        length: metadata.len(),
+        bytes,
+        #[cfg(unix)]
+        device: metadata.dev(),
+        #[cfg(unix)]
+        inode: metadata.ino(),
+    })
+}
+
+fn file_stamp(dir: &Path) -> io::Result<FileStamp> {
+    match std::fs::metadata(dir.join(panel_contract::PANEL_FILE)) {
+        Ok(metadata) => Ok(FileStamp::Present {
+            modified: metadata.modified()?,
+            length: metadata.len(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+        }),
+        Err(problem) if problem.kind() == io::ErrorKind::NotFound => Ok(FileStamp::Missing),
+        Err(problem) => Err(problem),
+    }
+}
+
+#[cfg(unix)]
+fn open_snapshot(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_snapshot(path: &Path) -> io::Result<std::fs::File> {
+    let metadata = std::fs::metadata(path)?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the panel path is not a regular file",
+        ));
+    }
+    std::fs::File::open(path)
 }

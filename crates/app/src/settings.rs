@@ -526,7 +526,7 @@ pub fn interpret(text: &str) -> Result<(Settings, Warnings), ConfigProblem> {
 impl crate::Window {
     /// Puts on the window whatever whoever uses it configured, **except the font**.
     ///
-    /// The family named in the file is applied by [`choose_the_font`] instead, and it is not tidiness:
+    /// The family named in the file is applied by [`crate::choose_the_font`] instead, and it is not tidiness:
     /// everything here puts a value on the window, while that one talks to the text engine, needs the
     /// context and can cost tens of milliseconds. It runs beside this, at start-up.
     ///

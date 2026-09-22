@@ -63,7 +63,10 @@ MR» — whatever the task itself declares makes sense at that moment.
 
 **What you can do:** answer the agent without typing. And in the other direction, the agent can ask
 the app for things: open itself a pane to run the tests separately, without touching the one it has
-in front of it.
+in front of it. And when a harness can declare that `/clear` ended the current session through its
+existing MCP connection, that pane loses the old panel and the auxiliary consoles the session still
+controlled; a console you took over stays. A compacted session is still the same session and keeps
+everything.
 
 **What changes underneath:** up to here the app was a screen to look at; from here on it is a place
 to work in. And the work stops being only the agents': **any tool —a deployment, a CI, a company
@@ -298,8 +301,24 @@ more expensive every assumption that turned out to be a Linux one gets.
 ## Phase 3 — Bidirectional
 
 - [ ] `actions`: buttons declared in the contract that write to their pane's PTY
-- [ ] **MCP** server with `panel_set`, `split_open`, `split_read`, `split_close`
-- [ ] Scoped by `PANEL_ID`: each agent reaches its own pane and no other
+- [x] **MCP** server with `panel_set`, `panel_get`, `panel_patch`, `panel_retire`, `split_open`,
+      `split_read`, `split_close`
+- [ ] Scoped by the pane's endpoint and the live connection: each agent reaches its own pane and only
+      the auxiliary consoles that connection opened
+
+`panel_retire` is the intentional session boundary (**D50**), not another spelling of disconnect.
+It clears the document, actions, attention and hold together, detaches untouched auxiliary consoles
+that connection owns, preserves the ones the person took over, and answers before their
+pseudoterminals are destroyed. A crash or accidental disconnect still preserves the last document
+and every console; `/compact` does nothing. The observed file snapshot present at retirement is
+suppressed in terminal-owned state rather than deleting `panel.json`, because the file cannot say who
+produced it.
+
+Automatic `/clear` retirement is only promised where a harness integration proves that its explicit
+lifecycle event invokes this tool on the already-connected MCP server. This repository supplies the
+operation but no harness adapter; unsupported integrations remain unsupported rather than opening a
+fresh connection or inferring lifecycle from content. The operation is also absent on Windows with
+the rest of the control channel until F2.7 proves the named pipe on a real host.
 
 **Do not start without rereading the security table in [03-arquitectura.md](03-arquitectura.md).** A
 file that declares commands and a button that runs them is code execution in the user's shell; the

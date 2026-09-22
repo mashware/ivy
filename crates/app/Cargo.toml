@@ -14,6 +14,11 @@ panel-contract = { path = "../panel-contract" }
 # (D3).
 panel-control = { path = "../panel-control" }
 
+# Retirement snapshots must open a producer-controlled path without letting a FIFO block the
+# interface thread. This package is already in the workspace graph; the direct dependency names the
+# one Unix open flag the standard library deliberately leaves platform-specific.
+libc = "0.2"
+
 # **So that a handle is not guessable, which is the whole of its job.** `PANEL_ID` is in every
 # descendant's environment and any sibling of this user reads it out of `/proc/<pid>/environ`, so a
 # name is not a credential and a small integer is reachable by a typo; a handle is sixteen random

@@ -311,6 +311,8 @@ per-field tolerance: everything above this line is unchanged and this section ad
 ← {"ok":true,"document":{ ...the panel document... }}
 → {"tool":"panel_patch","ops":[ ...the edits... ]}
 ← {"ok":true}
+→ {"tool":"panel_retire"}
+← {"ok":true,"closed":2,"preserved":1}
 → {"tool":"split_open","side":"right","program":"cargo","args":["test"]}
 ← {"ok":true,"pane":"<opaque handle>"}
 → {"tool":"split_read","pane":"<opaque handle>","scrollback":false}
@@ -365,6 +367,49 @@ publishing back what you received leaves the panel exactly as it is: read, edit,
 
 A pane where nothing has been published yet answers
 `{"ok":false,"error":"nothing has been published on this console yet"}`.
+
+### `panel_retire` — intentionally ending this connection's session
+
+**It removes what `/clear` ended, and only what this connection still controls.** It takes no
+arguments: the endpoint already addresses the origin pane and the live connection is the authority.
+The request is accepted only when that connection holds the panel. A fresh connection is refused,
+including one with the same source or `PANEL_ID`.
+
+One successful transition does all of this before it answers:
+
+- removes the committed document, so its actions and attention disappear with it;
+- releases the producer hold;
+- detaches every auxiliary console still owned by this `(origin pane, connection)`;
+- preserves every auxiliary console the person has taken over; and
+- forgets every handle issued to the retired connection, including those for preserved consoles.
+
+The reply carries the result it committed:
+
+```json
+{"ok":true,"closed":2,"preserved":1}
+```
+
+`closed` counts untouched auxiliary consoles detached for destruction. `preserved` counts
+user-taken consoles kept open. The panel and tree have already changed when this answer is sent;
+the detached pseudoterminals are destroyed afterwards through ordinary pane and PTY destruction, so their
+shutdown delay cannot make a committed retirement look like a timeout.
+
+**Retirement never deletes or rewrites `panel.json`.** The file cannot identify its producer and may
+contain somebody else's publication. Instead the live pane keeps a bounded snapshot of the file's
+metadata and bytes at retirement. That unchanged file stays suppressed while the pane lives; a
+later valid file whose observed snapshot differs publishes normally even when its timestamp is
+identical. Pane closure removes the private directory and restoration creates a fresh pane identity,
+so this marker is not layout state.
+
+A same-connection retry before any later MCP or file publication returns the original counts and
+changes nothing again. Until `panel_set` begins the next generation, that retired connection cannot
+open another auxiliary console; its former handles have already been forgotten. Any later
+publication invalidates that retired generation. `panel_retire` is an ordering barrier: a later
+request on that connection is not applied before the window has committed or refused it, even when
+the caller already timed out waiting for the answer. `/compact` never
+sends this request: it is the same session, and `panel_get` is how it recovers its document. A crash,
+EOF or accidental disconnect sends no retirement either; ordinary connection close keeps the last
+document and every auxiliary console as evidence (**D43**, **D44**, **D50**).
 
 ### `panel_patch` — changing part of it without republishing the rest
 
@@ -512,7 +557,8 @@ itself.
   identity row, and confesses a file publication it refused. **D43**.
 - **The hold ends when the connection closes** — including when the producer dies, which is the case
   it exists for. What was last published stays on screen; the file takes over from its next
-  publication.
+  publication. An intentional `panel_retire` is the separate exception: it clears the session state
+  and the untouched auxiliary consoles its own connection still controls (**D50**).
 - **There is no sequence number and there is not going to be one.** One endpoint per pane plus the
   file unread means exactly one writer, and one connection's requests cannot reorder themselves.
 - **A document delivered carries no date, so the application stamps its arrival.** That is what keeps
@@ -540,6 +586,10 @@ itself.
 - **A pane serves eight connections at a time.** Not a defence — reaching the endpoint already
   requires being this user — but a bound on what a client looping on `connect` can make the window
   spend.
+- **Automatic retirement needs a connection-bound clear event.** This repository supplies the tool,
+  not harness adapters. Support is claimed per harness only after a real `/clear` integration proves
+  the existing MCP connection is used. A command hook, empty document, fresh connection or parsed
+  terminal screen is not a substitute.
 
 ### What this transport does not give
 
@@ -547,7 +597,7 @@ itself.
   process on the machine open it, and nothing in the milestone that built this channel can compile or
   run Windows code to prove otherwise; what cannot be proven is not bound. **F2.7** is where the pipe,
   its descriptor and the assertion over both arrive together. Until then a Windows pane publishes by
-  file, which works exactly as it always did.
+  file, which works exactly as it always did; `panel_retire` is therefore unavailable there too.
 - **It does not survive the producer.** That is the point, not a gap: a hold that outlived its holder
   would freeze that panel for the life of the window.
 

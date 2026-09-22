@@ -607,6 +607,18 @@ pub struct Control {
     /// that arrived, so the size has to travel with the number — the same reason the font discovery
     /// publishes how many characters it searched.
     pub largest_serialized: usize,
+    /// Intentional session retirements committed by the window.
+    pub retired: usize,
+    /// Auxiliary consoles detached by those retirements.
+    pub auxiliary_closed: usize,
+    /// User-taken auxiliary consoles preserved by those retirements.
+    pub auxiliary_preserved: usize,
+    /// Detached consoles whose resources have subsequently been destroyed.
+    pub auxiliary_reaped: usize,
+    /// Time spent committing panel and tree retirement transitions.
+    pub retirement_time: std::time::Duration,
+    /// Time spent destroying already-detached consoles.
+    pub reaping_time: std::time::Duration,
 }
 
 impl Control {
@@ -629,6 +641,12 @@ impl Control {
             patched: self.patched + other.patched,
             patches_refused: self.patches_refused + other.patches_refused,
             largest_serialized: self.largest_serialized.max(other.largest_serialized),
+            retired: self.retired + other.retired,
+            auxiliary_closed: self.auxiliary_closed + other.auxiliary_closed,
+            auxiliary_preserved: self.auxiliary_preserved + other.auxiliary_preserved,
+            auxiliary_reaped: self.auxiliary_reaped + other.auxiliary_reaped,
+            retirement_time: self.retirement_time + other.retirement_time,
+            reaping_time: self.reaping_time + other.reaping_time,
         }
     }
 }
@@ -989,6 +1007,16 @@ pub fn header(
         control.patches_refused,
         control.largest_serialized
     )?;
+    writeln!(
+        a,
+        "retirement:   {} committed, {} auxiliary closed, {} preserved, {} reaped · {:?} transition · {:?} reaping",
+        control.retired,
+        control.auxiliary_closed,
+        control.auxiliary_preserved,
+        control.auxiliary_reaped,
+        control.retirement_time,
+        control.reaping_time
+    )?;
     // **Always, and both halves on one line.** A batch that asks for strips and painted none has
     // the gate broken or a window too short to cut one, and would publish «the strip costs
     // nothing»; one that asks for none and painted some measures a console a row shorter per pane
@@ -1102,6 +1130,7 @@ mod tests {
             patched: 7,
             patches_refused: 1,
             largest_serialized: 900,
+            ..Control::default()
         };
         let other = Control {
             applied: 5,
@@ -1112,6 +1141,7 @@ mod tests {
             patched: 2,
             patches_refused: 4,
             largest_serialized: 120,
+            ..Control::default()
         };
 
         let both = one.and(other);

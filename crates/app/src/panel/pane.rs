@@ -100,7 +100,7 @@ impl Pane {
     /// file that was never read, which **D13** rates worse than no number at all. There is now no
     /// subtraction anywhere for anybody to forget, and the order the two happen in is not the
     /// caller's to get wrong either.
-    pub(crate) fn refresh_its_panel(&mut self) -> PanelRefresh {
+    pub(crate) fn refresh_its_panel(&mut self, ctx: &egui::Context) -> PanelRefresh {
         // **What arrived over the channel is applied first, and the order is the decision.** A
         // connection that closed this frame gives its pane back before the file is consulted, so the
         // next file publication takes over in the same pass instead of waiting for the one after;
@@ -121,7 +121,11 @@ impl Pane {
             });
 
         let started = std::time::Instant::now();
-        if let (true, Some(dir)) = (self.to_reread.take(), self.panel.as_ref()) {
+        let deferred_probe_is_due = self.panel_state.retired_probe_is_due();
+        if let (true, Some(dir)) = (
+            self.to_reread.take() || deferred_probe_is_due,
+            self.panel.as_ref(),
+        ) {
             // **A refusal gives the notice back, and without that the publication is lost for
             // good.** The file's date does not change again on its own, so a notice swallowed while
             // the panel was held would mean the first pass after the release had nothing to go back
@@ -133,10 +137,18 @@ impl Pane {
             // the notice from becoming a confession: the flag is also raised by a split, by an open
             // tab and by the blind watcher, and handing it back for those made a held panel look at
             // the file every frame for the life of the hold and confess a publication nobody made.
-            if self.panel_state.refresh(dir.path()) == panel::Refreshed::Declined
-                && self.panel_state.refused_the_file()
-            {
-                self.to_reread.raise();
+            match self.panel_state.refresh(dir.path()) {
+                panel::Refreshed::Declined if self.panel_state.refused_the_file() => {
+                    self.to_reread.raise();
+                }
+                panel::Refreshed::Deferred(delay) => {
+                    // The watcher already spent its one notice. Its deadline stays in the panel
+                    // state and this arms the exact pass that will compare bytes, even if the
+                    // window is idle. The notice itself stays down, so an active window does not
+                    // stat the same file once per frame until that deadline.
+                    ctx.request_repaint_after(delay);
+                }
+                panel::Refreshed::Read | panel::Refreshed::Declined => {}
             }
         }
 
@@ -529,6 +541,9 @@ impl panel::PanelState {
     /// `panel.rs` takes a piece out of it first (**D28**), and this is the piece: everything the
     /// application has to say about a panel, in one place.
     pub(super) fn warning(&self, now: SystemTime) -> Option<String> {
+        if self.is_retired() {
+            return None;
+        }
         // **The person's line is joined with whatever the panel has to confess**, not chosen over it:
         // the two say different things, and a console can have been taken over while its file is also
         // unreadable.

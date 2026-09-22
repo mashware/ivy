@@ -60,6 +60,11 @@ const SOURCES: &[(&str, &str, usize)] = &[
     ("src/closing.rs", include_str!("../src/closing.rs"), 115),
     ("src/control.rs", include_str!("../src/control.rs"), 362),
     (
+        "src/control/retiring.rs",
+        include_str!("../src/control/retiring.rs"),
+        1,
+    ),
+    (
         "src/panel/driving.rs",
         include_str!("../src/panel/driving.rs"),
         114,

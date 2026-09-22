@@ -14,7 +14,7 @@
 //! put a new document between the paint and the press, and then a mechanism would have to be built
 //! to survive a window that was opened for nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::SystemTime;
@@ -25,10 +25,12 @@ use panel_control::{Answer, Channel, Delivery, ReadDocument, Side as WireSide, W
 
 use crate::measure::Control;
 use crate::painter::CellMetrics;
-use crate::panel::{PanelState, Released};
+use crate::panel::{PanelState, Retirement};
 use crate::tab_bar::set_the_tab_bar_aside;
 use crate::tiling::{Side, can_split};
 use crate::{Pane, Window, the_users_shell};
+
+mod retiring;
 
 /// How many deliveries a pane's inbox may hold before a publication is refused.
 ///
@@ -174,6 +176,8 @@ impl Drop for ActiveRead {
 pub(crate) struct WindowActivity {
     banked: Control,
     reads: ReadActivity,
+    /// Panes detached by retirement, destroyed only after its answer has been sent.
+    retired_panes: VecDeque<Pane>,
 }
 
 impl WindowActivity {
@@ -191,6 +195,35 @@ impl WindowActivity {
 
     pub(crate) fn finish_reads(&self) {
         self.reads.finish();
+    }
+
+    pub(crate) fn retired(&mut self, result: Retirement, spent: std::time::Duration) {
+        self.banked.retired += 1;
+        self.banked.auxiliary_closed += result.closed;
+        self.banked.auxiliary_preserved += result.preserved;
+        self.banked.retirement_time += spent;
+    }
+
+    pub(crate) fn reaped(&mut self, spent: std::time::Duration) {
+        self.banked.auxiliary_reaped += 1;
+        self.banked.reaping_time += spent;
+    }
+
+    fn queue_retired(&mut self, panes: impl IntoIterator<Item = Pane>) {
+        self.retired_panes.extend(panes);
+    }
+
+    fn next_retired(&mut self) -> Option<Pane> {
+        self.retired_panes.pop_front()
+    }
+
+    fn has_retired(&self) -> bool {
+        !self.retired_panes.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retired_waiting(&self) -> usize {
+        self.retired_panes.len()
     }
 }
 
@@ -227,6 +260,8 @@ pub struct PaneControl {
     /// message would be deriving a second time something the transport already decided — and it
     /// would put on the wire the very field the design refuses to have on it.
     inbox: Receiver<Delivery>,
+    #[cfg(test)]
+    test_sender: std::sync::mpsc::SyncSender<Delivery>,
     /// Where the window is told that there is something to pick up.
     ///
     /// **The same closure the channel hands its threads, kept here for a second reason**: what a
@@ -264,6 +299,8 @@ impl PaneControl {
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Option<Self> {
         let (sender, inbox) = sync_channel(MAX_PENDING);
+        #[cfg(test)]
+        let test_sender = sender.clone();
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
         let read_document = measured_reader(reader, reads.clone());
         match Channel::open_with_reader(
@@ -276,6 +313,8 @@ impl PaneControl {
             Ok(channel) => Some(Self {
                 _channel: channel,
                 inbox,
+                #[cfg(test)]
+                test_sender,
                 wake,
                 waiting_on_the_window: Vec::new(),
                 did: Control::default(),
@@ -363,20 +402,17 @@ impl PaneControl {
                     let _ = delivery.answer.send(answer);
                 }
                 What::Closed => {
-                    if state.release(delivery.connection) == Released::Given {
-                        self.did.released += 1;
-                    }
-                    // **And the window is told that this connection is over**, because the handles it
-                    // was given are the window's to forget: left behind, they would name consoles the
-                    // connection no longer has for as long as the window lives.
-                    self.waiting_on_the_window.push(delivery);
-                    (self.wake)();
+                    self.apply_closed(state, delivery);
                 }
                 // **The three `split_*` verbs are the window's, and a pane has no tree.** They are
                 // held here until the window's drain takes them, which is where the handles, the
                 // focus and the revocation live — and the window is woken for it, because the drain
                 // of this very pass has already run: without that, a request arriving while the
                 // window is at rest would be answered by no pass at all.
+                What::Retire => {
+                    self.defer_retirement(delivery);
+                    break;
+                }
                 What::Open { .. } | What::Read { .. } | What::Close { .. } => {
                     self.waiting_on_the_window.push(delivery);
                     (self.wake)();
@@ -392,6 +428,13 @@ impl PaneControl {
     /// window cannot do from inside a painting is act on the tree, so these wait for it there.
     pub fn take_waiting_on_the_window(&mut self) -> Vec<Delivery> {
         std::mem::take(&mut self.waiting_on_the_window)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enqueue_for_tests(&self, delivery: Delivery) {
+        self.test_sender
+            .send(delivery)
+            .expect("the test pane still receives control deliveries");
     }
 
     /// Puts a delivery in the window's queue, **for a test about the window rather than the socket**.
@@ -484,6 +527,19 @@ impl OpenedByAgents {
             .retain(|_, opened| !(opened.origin == origin && opened.connection == connection));
     }
 
+    /// Every still-live console this connection opened, once each and in stable name order.
+    fn panes_for_connection(&self, origin: usize, connection: u64) -> Vec<usize> {
+        let mut panes: Vec<_> = self
+            .handles
+            .values()
+            .filter(|opened| opened.origin == origin && opened.connection == connection)
+            .map(|opened| opened.pane)
+            .collect();
+        panes.sort_unstable();
+        panes.dedup();
+        panes
+    }
+
     /// Drops every handle naming a console that is not among the living.
     ///
     /// **It runs once per pass, and that is what keeps the map honest without every close path
@@ -567,6 +623,9 @@ impl Window {
         // egui by (**D13**). It goes to `timed_separately`, which is the window's own work and is
         // already subtracted, exactly where the chord's split puts the same two jobs.
         let before = std::time::Instant::now();
+        // Only panes queued by an earlier pass are reaped. A retirement accepted below therefore
+        // has its answer sent in this pass before any of its detached PTYs can be destroyed.
+        self.reap_one_retired();
         // **Handles that name a console nobody is holding are dropped here, once per pass.** A pane
         // can go by the chord, by a tab, or by the tree collapsing it, and every one of those paths
         // would otherwise have to remember to prune: keeping the two in step by hand is exactly how a
@@ -611,6 +670,7 @@ impl Window {
                 What::Close { pane } => {
                     self.closing_for_a_connection(origin, delivery.connection, &pane, ctx)
                 }
+                What::Retire => self.retiring_for_a_connection(origin, delivery.connection, ctx),
                 // **A closed connection takes its handles with it**, which is what D44 promises and
                 // what keeps the map bounded: an agent that opens consoles and dies must not leave
                 // names behind for as long as the window lives.
@@ -626,6 +686,9 @@ impl Window {
                 }
             };
             let _ = delivery.answer.send(answer);
+        }
+        if self.control.has_retired() {
+            ctx.request_repaint();
         }
         self.timed_separately += before.elapsed();
     }
@@ -665,6 +728,12 @@ impl Window {
             .iter()
             .position(|pane| pane.name == origin)
             .ok_or_else(gone)?;
+        if self.tabs[tab_index].panes()[at]
+            .panel_state
+            .was_retired_by(connection)
+        {
+            return Err("publish a new panel before opening another console".to_owned());
+        }
         let its_area = self.tabs[tab_index].root.place(area, metrics.width()).parts[at];
         if !can_split(its_area, cut_along, metrics, self.headers) {
             return Err(

@@ -73,6 +73,10 @@ const MODULES: &[(&str, &str)] = &[
     ("app/src/alarms.rs", include_str!("../src/alarms.rs")),
     ("app/src/control.rs", include_str!("../src/control.rs")),
     (
+        "app/src/control/retiring.rs",
+        include_str!("../src/control/retiring.rs"),
+    ),
+    (
         "app/src/panel/driving.rs",
         include_str!("../src/panel/driving.rs"),
     ),

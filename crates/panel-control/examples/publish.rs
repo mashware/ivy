@@ -131,7 +131,12 @@ fn main() {
             // asks for them.** A payload here would mean the pane answered the wrong request, which
             // is worth a line and not a panic: this process's job is the load, and the batch's own
             // report is what decides whether the run counts.
-            Ok(Answered::Opened(_) | Answered::Text(_) | Answered::Document(_)) => {
+            Ok(
+                Answered::Retired { .. }
+                | Answered::Opened(_)
+                | Answered::Text(_)
+                | Answered::Document(_),
+            ) => {
                 eprintln!("publish: the pane answered something else to a publication");
             }
             // **An argument this process got wrong is not the channel dying**, and saying so

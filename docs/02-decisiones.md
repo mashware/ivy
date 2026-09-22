@@ -6585,3 +6585,74 @@ threads. The range is across the five whole runs, not samples selected from insi
 | Making close wait for in-flight reads | It puts up to one ceiling-sized serialisation and reply on the interface close path, despite the reader already having selected an immutable value |
 | Keeping a strong pane capability in each connection | A forgotten connection would extend the pane's lifetime; a weak capability says exactly which side wins when the read has not started |
 | Treating batch `V` minus `S` as read latency | The expensive work is deliberately off-frame, so subtraction would attach a connection thread's work to a frame number that never measured it |
+
+## D50 — An intentional session retirement clears what its own connection controls; a disconnect still preserves it
+
+**Status: taken.** Delivered after the panel's bidirectional channel exposed the difference between
+an agent disappearing and the same agent deliberately ending its session.
+
+**D43 deliberately leaves the last document on screen when a connection closes, and D44 deliberately
+leaves the consoles it opened alive.** Both are right for a crash: destroying the only evidence of
+what happened, or closing visible consoles because their agent died, would turn failure into data
+loss. They are wrong for `/clear`, which is an explicit statement that this session and its work are
+over. A transport close cannot carry that distinction, so retirement is a separate request.
+
+### The decision
+
+**1. `panel_retire` belongs to the connection that already holds the panel.**
+
+The request names no pane, source, document or console. Its endpoint addresses the pane and its live
+connection is the authority. A fresh connection is refused even if it presents the same source or
+inherits the same `PANEL_ID`: those are names, not credentials. `/compact` sends no retirement — it
+is the same session, and `panel_get` remains its recovery path.
+
+**2. One logical transition removes the session's visible state and only the consoles it still
+controls.**
+
+The document, actions, attention and hold disappear together. Auxiliary consoles still owned by the
+retiring `(origin pane, connection)` leave the tree; a console the person took over stays, and every
+handle issued to the retired connection is forgotten. The reply is sent after that logical commit
+and before the detached pseudoterminals are destroyed, so D32's close delay cannot turn completed
+retirement into a five-second channel timeout. Destruction proceeds afterwards through ordinary pane
+and PTY destruction. Its transition and reaping costs are named separately in reports; **this decision records
+no measured figure for either**.
+
+The retired connection cannot open another auxiliary console until `panel_set` begins its next
+generation. Otherwise an idempotent retry would truthfully return the old counts while leaving new
+work from the supposedly retired session alive.
+
+Retirement is also a barrier in that connection's request order: a later `panel_set` remains queued
+until the window has committed or refused the retirement. A timeout changes who is still waiting for
+the answer, not the order in which accepted requests take effect.
+
+**3. The observed file snapshot retired with the session stays suppressed without deleting
+`panel.json`.**
+
+The file cannot identify its producer, so the holder has no authority to delete it: it may contain a
+publication from somebody else that D43 refused while the connection held the pane. The terminal
+keeps a bounded snapshot of the file's metadata and bytes while that pane lives. That unchanged
+snapshot cannot resurrect the retired panel; a later valid file whose observed snapshot differs is
+read normally even if its timestamp was preserved. Pane closure already deletes its private directory
+and a restored pane receives a fresh identity, so there is no retirement marker to persist across an
+application restart. The marker is application state, never producer content.
+
+**4. Only an explicit harness event may use this operation.**
+
+A crash, EOF or accidental disconnect still follows D43 and D44: release the hold, preserve the
+document and preserve the consoles. This repository supplies the connection-owned operation, not a
+harness adapter. Automatic `/clear` support is claimed for a harness only after a real run proves its
+lifecycle event invokes this tool on the existing connection; a command hook, fresh connection,
+empty-document sentinel or terminal parsing does not pretend to be that route. On Windows the
+control endpoint is still absent until F2.7 proves the named pipe's permissions and cancellation
+path, so this operation is currently POSIX-only.
+
+### What was discarded, and why
+
+| Discarded | Why |
+|---|---|
+| Treating an empty panel as retirement | Empty content is valid producer data; interpreting it as lifecycle would violate D6 and make data a hidden command |
+| Letting any new pane connection retire the holder | `PANEL_ID`, `PANEL_DIR`, process ancestry and same-user files are names or same-user data; none proves ownership of D43's live connection |
+| A bearer token for command hooks | It creates a second authority system and makes console destruction available outside the connection that opened them |
+| Deleting `panel.json` | The file's producer is unknowable and may not be the retiring connection; exact-generation suppression prevents resurrection without destroying somebody else's publication |
+| Reusing ordinary connection close | A crash and an intentional clear would become indistinguishable, throwing away the evidence D43 exists to preserve |
+| Closing every auxiliary console | D44 gives the console back on the person's first input; retirement cannot take it away again |

@@ -34,6 +34,20 @@ impl Committed {
             .panel = Some(panel);
     }
 
+    /// Removes the committed document from every reader without ending the pane's lifetime.
+    ///
+    /// **Retirement is not pane closure.** Existing readers keep the weak capability and may read a
+    /// later publication, but from this swap until that publication they get the contract's honest
+    /// «nothing has been published» answer. Keeping this beside [`Self::replace`] makes the
+    /// interface-owned document and the off-frame document one transition rather than two callers'
+    /// responsibility.
+    pub(super) fn clear(&self) {
+        self.shared
+            .lock()
+            .expect("the committed panel pointer is only cloned or replaced")
+            .panel = None;
+    }
+
     pub(super) fn reader(&self) -> Reader {
         Reader {
             shared: Arc::downgrade(&self.shared),
@@ -105,6 +119,10 @@ impl PanelState {
         let panel = Arc::new(panel);
         self.last_good = Some(Arc::clone(&panel));
         self.committed.replace(panel);
+        // A successful publication starts a new generation. From this point a retry of an earlier
+        // retirement is not idempotent: it is an attempt to retire this new publication, and must
+        // pass the holder check again.
+        self.retirement = super::RetirementState::Active;
     }
 
     /// Writes the producer's last committed document without taking a hold.

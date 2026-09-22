@@ -5,6 +5,7 @@
 //! or the focused console goes away. The methods still reach the window's private fields, which is
 //! exactly what a child module of the crate root is for.
 
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use eframe::egui;
@@ -235,6 +236,76 @@ impl Window {
         self.some_closed_by_hand = true;
         self.rearm_the_watcher(ctx);
         self.timed_separately += its_cost;
+        Ok(())
+    }
+
+    /// Detaches several named consoles after validating the whole removal.
+    ///
+    /// Nothing is changed until every name is known, unique, and leaves at least one console in its
+    /// tab. Once those checks hold, `Node::close` cannot refuse: no earlier removal can erase a
+    /// different named leaf, and the per-tab remainder keeps a root to close from.
+    pub(crate) fn detach_panes_called(
+        &mut self,
+        names: &[usize],
+        ctx: &egui::Context,
+    ) -> Result<Vec<Pane>, String> {
+        self.validate_detaching_panes(names)?;
+
+        let mut detached = Vec::with_capacity(names.len());
+        let mut pending_cost = std::time::Duration::ZERO;
+        for &name in names {
+            let tab = self
+                .tabs
+                .iter()
+                .position(|tab| tab.panes().iter().any(|pane| pane.name == name))
+                .expect("the complete retirement was validated before changing the tree");
+            let Closing {
+                mut leaving,
+                focus: inherited,
+            } = self.tabs[tab]
+                .root
+                .close(name)
+                .expect("a validated retirement target remains in its tree");
+            pending_cost += leaving.take_what_this_frame_left();
+            if let Some(did) = leaving
+                .control
+                .as_ref()
+                .map(crate::control::PaneControl::did_in_the_window)
+            {
+                self.bank_control(did);
+            }
+            if self.tabs[tab].focus == name {
+                self.tabs[tab].focus = inherited;
+            }
+            detached.push(leaving);
+        }
+
+        if !detached.is_empty() {
+            self.rearm_the_watcher(ctx);
+        }
+        self.timed_separately += pending_cost;
+        Ok(detached)
+    }
+
+    pub(crate) fn validate_detaching_panes(&self, names: &[usize]) -> Result<(), String> {
+        let mut unique = HashSet::with_capacity(names.len());
+        let mut per_tab: HashMap<usize, usize> = HashMap::new();
+        for &name in names {
+            if !unique.insert(name) {
+                return Err("the retirement names one console twice".to_owned());
+            }
+            let tab = self
+                .tabs
+                .iter()
+                .position(|tab| tab.panes().iter().any(|pane| pane.name == name))
+                .ok_or_else(|| "a console owned by this connection is gone".to_owned())?;
+            *per_tab.entry(tab).or_default() += 1;
+        }
+        for (tab, removing) in per_tab {
+            if self.tabs[tab].panes().len() <= removing {
+                return Err("retirement would leave a tab without a console".to_owned());
+            }
+        }
         Ok(())
     }
 }
