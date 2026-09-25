@@ -278,6 +278,9 @@ fn every_word_the_scripts_patterns_anchor_on_is_one_the_report_writes() {
         (" plain ", " plain "),
         (" OSC 8 ", " OSC 8 "),
         (" panel activations$", " panel activations\""),
+        (" drawn.*$", " drawn whole,"),
+        (" pressed.*$", " pressed\""),
+        (" applied.*$", " applied,"),
     ];
 
     for (in_the_script, in_the_report) in ANCHORS {
@@ -326,6 +329,88 @@ fn every_declared_knob_is_asked_for_by_some_batch() {
             rows().any(|row| row.contains(&format!("{knob}=1"))),
             "no batch asks for «{knob}»: its two guards can never fire, and whichever batch was \
              meant to measure that load publishes the «{line}:» line of a run that did nothing"
+        );
+    }
+}
+
+/// Runs the script's guards — from the function that invalidates a run to the end of the file — over
+/// `report`, as they run after a launch that exited with `status`. Returns what they printed on standard error and whether
+/// the report ended up renamed `.INVALID`.
+///
+/// **It runs the script and does not read it**, and that is the point: the defect this holds is a
+/// line that reads correctly and ends the run under `set -eu`. It was verified wrongly once by
+/// running the bare `grep` instead of the script, which is what the settings guard's comment records.
+/// The launch is replaced by the exit status it would have left; nothing above that function is
+/// needed by what follows it.
+fn run_the_guards(name: &str, report: &str, status: u8) -> (String, bool) {
+    let guards = &MEASURE[MEASURE
+        .find("\ninvalidate() {")
+        .expect("the script no longer defines invalidate()")..];
+    let dir = std::env::temp_dir().join(format!("batches-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("report.txt");
+    std::fs::write(&path, report).unwrap();
+
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("set -eu\nSTATUS={status}\n{guards}"))
+        .env("REPORT", &path)
+        .env_remove("ACTIONS")
+        .env_remove("CONTROL")
+        .env_remove("LINKS")
+        .env_remove("CJK")
+        .env_remove("EMOJI")
+        .env_remove("READS")
+        .env_remove("PATCHES")
+        .env_remove("HEADER")
+        .output()
+        .expect("sh could not be run");
+    let invalid = dir.join("report.txt.INVALID").exists();
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        invalid,
+    )
+}
+
+/// **A run whose application crashed is invalidated for the crash, whatever its report lost.**
+///
+/// The application writes the report on the way out, so a panic leaves it truncated — here, empty.
+/// Two things used to stand between that report and the status check: a guard whose number came out
+/// of an assignment ending in `grep` ended the script in silence, report unrenamed, and a guard
+/// above the check that did invalidate named a missing line instead of the crash.
+#[test]
+fn a_crashed_run_is_invalidated_for_the_crash_whatever_its_report_lost() {
+    let (said, invalid) = run_the_guards("crashed", "", 101);
+
+    assert!(
+        invalid,
+        "a run that exited with status 101 kept its report's good name; it said: «{said}»"
+    );
+    assert!(
+        said.contains("status 101"),
+        "a run that exited with status 101 was invalidated for something other than the crash: «{said}»"
+    );
+}
+
+/// **A report missing the line a guard reads is invalidated by that guard**, rather than ending the
+/// script on the assignment that reads it — or, once that assignment survives, reading the missing
+/// numbers as zeros. The status is zero, so the crash check cannot be what speaks: this is the half
+/// the test above cannot see once that check comes first. Each fixture carries every line above the
+/// guard it aims at, so the guard that speaks is the one it names and not a later one.
+#[test]
+fn a_report_missing_the_line_a_guard_reads_is_invalidated_by_that_guard() {
+    let links = "links: 0 sources found · 0 plain · 0 OSC 8 · 0 panel activations\n";
+    let buttons = "buttons:      0 drawn whole, 0 pressed\n";
+    for (lost, report) in [
+        ("buttons", links.to_owned()),
+        ("control", format!("{buttons}{links}")),
+    ] {
+        let (said, invalid) = run_the_guards(lost, &report, 0);
+        assert!(
+            invalid && said.contains(&format!("{lost} line could not be read")),
+            "a report with no «{lost}:» line was not invalidated for it; it said: «{said}»"
         );
     }
 }

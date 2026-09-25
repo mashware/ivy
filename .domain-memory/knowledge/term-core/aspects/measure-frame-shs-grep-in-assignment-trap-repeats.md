@@ -3,40 +3,48 @@ id: asp_measure-frame-shs-grep-in-assignment-trap-repeats_ss93ek
 slug: measure-frame-shs-grep-in-assignment-trap-repeats
 name: >-
   measure-frame.sh runs under set -eu: what kills the script is a grep LAST in
-  the pipeline, not a grep in an assignment — and the trap was repeated a fifth
-  time
+  the pipeline — and making it survive wakes the `:-0` default that could never
+  run
 type: aspect
 status: active
 superseded_by: null
 confidence: 80
 created_at: '2026-09-18T18:06:28.625Z'
-updated_at: '2026-09-18T21:00:43.338Z'
-last_verified: '2026-09-18T21:00:43.338Z'
+updated_at: '2026-09-25T14:02:41.040Z'
+last_verified: '2026-09-25T14:02:41.040Z'
 file_paths:
   - scripts/measure-frame.sh
   - crates/app/tests/batches.rs
-symbols: []
+  - crates/app/src/measure/header.rs
+symbols:
+  - DRAWN
+  - PRESSED
+  - APPLIED
+  - run_the_guards
 content_hashes:
-  scripts/measure-frame.sh: 'sha256:180b8517595b278aa0eb55476f7fdeaab7a027bf5da0ea0dcd80803c2a95bd15'
-  crates/app/tests/batches.rs: 'sha256:e7236d7aafdb21e69cb4435981784470bd64fadf38f967d5bce2597cf0f9460e'
+  scripts/measure-frame.sh: 'sha256:465f0d9927c9fbebf177895a7c675b43daa5fd1baa5c2ab6e50b91c84020a588'
+  crates/app/tests/batches.rs: 'sha256:ed7f6662b7fe6768618501a19661b55b628c6a2eb84dca8e5e130b4f80c5aba8'
+  crates/app/src/measure/header.rs: 'sha256:1de81a58761d6cb65bfddb9b6f0222b4639b5e4b62a99f539af7a7caf69ceb55'
 tags: []
 feature_id: feat_term-core_nx0g1r
 ---
 
 ## What it does
 
-`scripts/measure-frame.sh` runs under `set -eu`, so an assignment whose command substitution ends with a status of 1 ENDS THE SCRIPT right there — the report is not renamed `.INVALID`, nothing is printed, and every guard below it never runs, including the `$STATUS != 0` check that would have said the application panicked. It is documented in the file and has been repeated anyway, most recently by the `documents:` guard of issue 243 (September 2026). Three PRE-EXISTING ones have it too and are on `main`: `DRAWN` and `PRESSED` (read off `buttons:`) and `APPLIED` (off `control:`) — they survive only because those lines are always written, and the case that fires them is precisely the one the status check exists for: a report truncated by a panic, so the run that most needs diagnosing is the one published unmarked. Ticketed separately as #239.
+`scripts/measure-frame.sh` runs under `set -eu`, so an assignment whose command substitution ends with a status of 1 ENDS THE SCRIPT right there — the report is not renamed `.INVALID`, nothing is printed, and every guard below it never runs. It was repeated six times in this one file; the last three (`DRAWN`, `PRESSED` off `buttons:`, `APPLIED` off `control:`) were fixed by #239 in September 2026.
 
-**The fifth repetition is the one that names the real rule.** The 243 guard was written as `X=$(printf '%s' "$LINE" | grep -oE "[0-9]+ read back" | grep -oE "^[0-9]+")` — fatal — **immediately below a line of the same block that was safe**: `LINE=$(grep -E "^documents:" "$REPORT" | head -1)`.
+> **What separates a fatal extraction from a safe one is whether `grep` is the LAST command of the pipeline**, not whether there is a grep in an assignment. A pipeline's status is its last command's, so `grep … | head -1` exits 0 whatever `grep` matched, while `… | grep -oE …` inherits the 1. The 243 guard was written fatal immediately below a safe `LINE=$(grep -E "^documents:" "$REPORT" | head -1)`.
 
-> **What separates them is not `grep` in an assignment: it is whether `grep` is the LAST command of the pipeline.** A pipeline's status is its last command's, so `grep … | head -1` exits 0 whatever `grep` matched, while `… | grep -oE …` inherits the 1. That is why the file's two existing warnings did not prevent this one — they say «do not put a grep in an assignment», and the assignment right above does exactly that and is correct.
+Reproduced: `sh -c 'set -eu; X=$(printf "" | grep -oE "a" | grep -oE "b"); echo SURVIVED'` prints nothing and exits 1.
 
-Reproduced before and after: `sh -c 'set -eu; X=$(printf "" | grep -oE "a" | grep -oE "b"); echo SURVIVED'` prints nothing and exits 1.
+**The trap behind the trap (found by #239's review).** Making the extraction survive — `sed -n 's/…/\1/p'`, which exits 0 with no output — wakes up the `X=${X:-0}` on the next line, which could never run before because the script died first. A missing or REWORDED line then goes from a silent death to a **silent zero**, and a zero satisfies the «declared none, measured none» direction of every pair, so both directions go quiet for every batch that does not declare that load. **When you make an extraction non-fatal, delete its `:-0` in the same change**: an empty capture invalidates («the report's X line could not be read»), as the links and documents guards already did, and the words the `sed` anchors on go into `ANCHORS` in `crates/app/tests/batches.rs` so a rewording of `crates/app/src/measure/header.rs` fails the suite.
 
-**The shape that survives, and it is four things together**: the *line* with `grep … | head -1`; the *numbers* with `sed -n 's/…/\1/p'`, which exits 0 with no output; a `[ -z "$LINE" ]` branch so the missing-line case reaches an `invalidate` instead of ending the run; and the whole block **below** the `$STATUS` check, so a report truncated by a panic is still named.
+**The crash check is the FIRST guard** since #239, right after `invalidate()`: a report truncated by a panic is missing lines, so any guard above it invalidates for the line the crash took away — true, and it hides the crash.
 
-**And the line cannot also move to `sed`**, which is how this was got wrong twice in the same delivery: `crates/app/tests/batches.rs`'s `every_line_the_script_reads_is_one_the_application_writes` asserts the script reads it with the literal `grep -E "^<name>:"`. The line keeps that shape and only the numbers change.
+**The line itself cannot move to `sed`**: `every_line_the_script_reads_is_one_the_application_writes` asserts the literal `grep -E "^<name>:"`. Only the numbers change shape.
+
+**It is now held by running the script, not by reading it.** `run_the_guards` in `batches.rs` carves the script from `invalidate()` to the end, runs it under `sh` with `set -eu` and a given status over a fixture report. Each fixture must carry every line above the guard it aims at and assert that guard's own message — the first version asserted only «INVALID BATCH» and passed on the later `documents:` guard. Mutations checked: reverting any extraction, removing either empty-capture check, or moving the status check back each turn a test red.
 
 ## Where it lives
 
-`scripts/measure-frame.sh` (the `control:`, `buttons:`, `header:`, settings and `documents:` guards), and `crates/app/tests/batches.rs` (`every_line_the_script_reads_is_one_the_application_writes`, which pins the `grep` shape of the line itself).
+`scripts/measure-frame.sh` (the status check right after `invalidate()`; the `buttons:`, `links:`, `control:`, `documents:`, `header:` and settings guards) and `crates/app/tests/batches.rs` (`run_the_guards`, `a_crashed_run_is_invalidated_for_the_crash_whatever_its_report_lost`, `a_report_missing_the_line_a_guard_reads_is_invalidated_by_that_guard`, `ANCHORS`, `every_line_the_script_reads_is_one_the_application_writes`).

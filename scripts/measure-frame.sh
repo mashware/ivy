@@ -885,6 +885,16 @@ invalidate() {
     exit 1
 }
 
+# The application publishes the report on the way out, so if it finished badly the report is half
+# done — and at a glance a truncated report looks quite like a good one.
+#
+# **It is the first guard, and that is not style.** Every guard reads a line of the report, and a
+# report truncated by a panic is missing lines: a guard placed above this one invalidates the run
+# for the line it could not read — true, and it hides the crash that took the line away.
+if [ "$STATUS" != 0 ]; then
+    invalidate "the application finished with status $STATUS; what it said is in the .err next to it"
+fi
+
 # **The font-discovery guard, and it reads both ways like the ones above.** Batch P is the only one
 # that dumps in Japanese, and therefore the only one that walks the path of searching the machine
 # for fonts. Without this number, a run in which the load never got out — or in which the machine
@@ -947,10 +957,13 @@ fi
 # them to a test cannot see it — and two unanchored `[0-9]+` over the whole file would in any case be
 # free to pick up somebody else's number.
 BUTTONS_LINE=$(grep -E "^buttons:" "$REPORT" | head -1)
-DRAWN=$(printf '%s' "$BUTTONS_LINE" | grep -oE "[0-9]+ drawn" | grep -oE "^[0-9]+")
-PRESSED=$(printf '%s' "$BUTTONS_LINE" | grep -oE "[0-9]+ pressed" | grep -oE "^[0-9]+")
-DRAWN=${DRAWN:-0}
-PRESSED=${PRESSED:-0}
+DRAWN=$(printf '%s' "$BUTTONS_LINE" | sed -n 's/^.*[^0-9]\([0-9][0-9]*\) drawn.*$/\1/p')
+PRESSED=$(printf '%s' "$BUTTONS_LINE" | sed -n 's/^.*[^0-9]\([0-9][0-9]*\) pressed.*$/\1/p')
+# **An empty capture invalidates instead of becoming a zero**, for the reason the links below give:
+# a reworded line would otherwise read as «no buttons» and silence both directions at once.
+if [ -z "$DRAWN" ] || [ -z "$PRESSED" ]; then
+    invalidate "the report's buttons line could not be read: «$BUTTONS_LINE»"
+fi
 if [ "${ACTIONS:-}" = 1 ] && [ "$DRAWN" = 0 ]; then
     invalidate "this batch declares buttons to measure what painting and pressing one costs and it \
 drew none: the seeding never reached the panel, or the strip was too short for a whole button, and \
@@ -1000,8 +1013,10 @@ fi
 # checked: a refusal needs a second source and a release needs a connection to end, and neither is
 # something the ordinary batch can promise. A guard that demanded them would fire on a correct run.
 CONTROL_LINE=$(grep -E "^control:" "$REPORT" | head -1)
-APPLIED=$(printf '%s' "$CONTROL_LINE" | grep -oE "[0-9]+ applied" | grep -oE "^[0-9]+")
-APPLIED=${APPLIED:-0}
+APPLIED=$(printf '%s' "$CONTROL_LINE" | sed -n 's/^.*[^0-9]\([0-9][0-9]*\) applied.*$/\1/p')
+if [ -z "$APPLIED" ]; then
+    invalidate "the report's control line could not be read: «$CONTROL_LINE»"
+fi
 if [ "${CONTROL:-}" = 1 ] && [ "$APPLIED" = 0 ]; then
     invalidate "this batch publishes over the control channel and the window applied nothing: \
 nothing bound its endpoint, or the publisher never reached it, and what is published under «the \
@@ -1011,12 +1026,6 @@ if [ "${CONTROL:-}" != 1 ] && [ "$APPLIED" != 0 ]; then
     invalidate "this batch declares no publisher over the control channel and yet the window applied \
 $APPLIED document(s): something other than its own load is publishing, so its spans mix in work that \
 does not belong to what it claims to measure"
-fi
-
-# The application publishes the report on the way out, so if it finished badly the report is half
-# done — and at a glance a truncated report looks quite like a good one.
-if [ "$STATUS" != 0 ]; then
-    invalidate "the application finished with status $STATUS; what it said is in the .err next to it"
 fi
 
 # **The document read back, in both directions, and it is the execution guard `V` exists for.** The
