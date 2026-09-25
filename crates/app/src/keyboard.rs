@@ -82,17 +82,18 @@ pub fn bytes(event: &Event, cursor_keys: CursorKeys) -> Option<Cow<'static, [u8]
         // the desktop's work.
         Event::Text(text) if !text.is_empty() => Some(Cow::Owned(text.as_bytes().to_vec())),
 
-        // **Copy and cut never arrive as keys, and paste arrives as one only when there was nothing
-        // to paste.** The layer that translates the operating system's events looks at Ctrl+C, Ctrl+X
-        // and Ctrl+V *before* emitting anything and turns them into copy, cut and paste, without
-        // emitting the key event. On a normal desktop that is what is expected; in a terminal, Ctrl+C
-        // is the way to interrupt a hung program, so they have to be caught through this door or
-        // nothing gets interrupted.
+        // **Copy and cut are resolved before they are keys, and D33 carves two exceptions out of
+        // that.** Upstream, the layer that translates the operating system's events looks at Ctrl+C,
+        // Ctrl+X and Ctrl+V *before* emitting anything and turns them into copy, cut and paste,
+        // without emitting the key event. On a normal desktop that is what is expected; in a terminal,
+        // Ctrl+C is the way to interrupt a hung program, so they have to be caught through this door
+        // or nothing gets interrupted.
         //
-        // The exception is the paste chord over a clipboard holding no text — an image, or nothing.
-        // That case used to be swallowed whole and now falls through as an ordinary key, which is the
-        // whole of **D33**; the arm below is what keeps the application's own paste shortcut from
-        // riding that fall-through into the program.
+        // The vendored copy (**D33**) changes two of those decisions. The paste chord over a clipboard
+        // holding no text — an image, or nothing — falls through as an ordinary key, and the arm below
+        // keeps the application's own paste shortcut from riding that fall-through into the program.
+        // And `Ctrl+Shift+X` is no longer a cut at all: it arrives as the key, which is the terminal's
+        // close chord. A bare `Ctrl+X` is still a cut, and still `0x18` here.
         //
         // **What this costs, said plainly:** as long as the clipboard does not exist, in this window
         // you cannot copy. These events do not carry the modifiers, so from here there is no
@@ -2513,6 +2514,12 @@ impl Chord {
         if chord.ctrl && matches!(chord.key, eframe::egui::Key::C | eframe::egui::Key::V) {
             return None;
         }
+        // **And a cut, for the copy's reason, but only without Shift.** The vendored framework still
+        // turns a bare `Ctrl+X` into a cut before it is a key; `Ctrl+Shift+X` it lets through since
+        // D33's second change, which is what makes it the close chord.
+        if chord.ctrl && !chord.shift && chord.key == eframe::egui::Key::X {
+            return None;
+        }
         // **A chord with no modifier key stays with the program inside.** Allowing it would be
         // letting whoever configures take away the `a` from typing without anything warning them.
         (chord.ctrl || chord.shift || chord.alt).then_some(chord)
@@ -2976,6 +2983,27 @@ mod keymap_tests {
             assert!(
                 Chord::from_written(text).is_some(),
                 "«{text}» was rejected, and that one does arrive"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_cut_chord_cannot_be_claimed_and_the_close_chord_can() {
+        // **The same promise as copy's, over X, and split by Shift** because the vendored framework
+        // splits it (D33's second change): `Ctrl+X` is still turned into a cut before it is a key,
+        // `Ctrl+Shift+X` arrives as one. Refusing both would refuse the factory close chord; refusing
+        // neither accepts a shortcut that never fires.
+        for text in ["ctrl+x", "ctrl+alt+x"] {
+            assert_eq!(
+                Chord::from_written(text),
+                None,
+                "«{text}» was accepted, and it arrives as a cut, never as the key"
+            );
+        }
+        for text in ["ctrl+shift+x", "ctrl+shift+alt+x", "shift+x", "alt+x"] {
+            assert!(
+                Chord::from_written(text).is_some(),
+                "«{text}» was rejected, and that one does arrive as a key"
             );
         }
     }

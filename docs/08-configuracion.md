@@ -130,8 +130,9 @@ Keys are written the way the keyboard calls them: `e`, `f4`, `space`, `delete`, 
 `pageup`, `pagedown`, `left`, `right`, `up`, `down`. The usual abbreviations work too (`prior`,
 `next`, `pgup`, `pgdn`, `esc`), and the arrows with their symbol (`←`, `↑`, `→`, `↓`).
 
-**`Ctrl+C` and `Ctrl+V` cannot be bound to anything.** The desktop takes them before they get here,
-so a shortcut with those chords would never fire and you would have no way of knowing why.
+**`Ctrl+C`, `Ctrl+V` and `Ctrl+X` cannot be bound to anything.** The desktop takes them before they
+get here, so a shortcut with those chords would never fire and you would have no way of knowing why.
+`Ctrl+X` is refused only without Shift: `Ctrl+Shift+X` does arrive, and it is the close shortcut.
 
 ### `none` gives you the chord back
 

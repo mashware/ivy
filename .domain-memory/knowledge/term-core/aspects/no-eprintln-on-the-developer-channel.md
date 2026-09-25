@@ -30,7 +30,19 @@ feature_id: feat_term-core_nx0g1r
 
 ## What it does
 
-**`eprintln!` must not be used for this project's developer-channel lines, and least of all inside a `Drop`**: it panics when standard error is a closed pipe (`agent-terminal 2>&1 | head` once `head` exits). The app learned it in `pty_output.rs` — its `say` is `writeln!(stderr().lock())` with the error ignored — and **the rule did not travel across crates**: D56's first version of the «program left running» line used `eprintln!` inside `Drop for Pty`, which runs on the interface pass (a panic takes the window down) and, if the drop runs during an unwind, aborts. Caught by review round 1 of #271. term-core has no `say` of its own; the line there is `let _ = writeln!(std::io::stderr().lock(), …)` with the reason beside it.
+**`eprintln!` must not be used for this project's developer-channel lines, and least of all inside a
+`Drop`**: it panics when standard error is a closed pipe (`agent-terminal 2>&1 | head` once `head`
+exits).
+
+The app learned it in `pty_output.rs` — its `say` is `writeln!(stderr().lock())` with the error
+ignored — and **the rule did not travel across crates**. D56's first version of the «program left
+running» line used `eprintln!` inside `Drop for Pty`, which runs on the interface pass, so a panic
+there takes the window down; and if the drop runs during an unwind, the process aborts.
+
+Caught by review round 1 of #271, not by the suite: nothing in it closes standard error. term-core
+has no `say` of its own, so the line there is `let _ = writeln!(std::io::stderr().lock(), …)` with
+the reason beside it. Before adding a line to the developer channel anywhere, search the crate for
+`eprintln!` — a new one is the defect, whatever the message says.
 
 ## Where it lives
 

@@ -32,8 +32,9 @@ eframe = { version = "0.36", default-features = false, features = [
 # returns without emitting anything — not the paste, and not the key event either. So `Ctrl+V` over a
 # clipboard holding an image, or holding nothing, reaches the program inside a console as **nothing at
 # all**, and D11's promise —that chord is worth what its control byte is worth— cannot be kept. The
-# copy under `vendor/` changes one `return` into a conditional one; everything else is the published
-# 0.36.1, byte for byte.
+# copy under `vendor/` changes one `return` into a conditional one — and, since #274, keeps Shift out
+# of the Ctrl+X that `is_cut_command` claims, so the close chord arrives as a key; everything else is
+# the published 0.36.1, byte for byte.
 #
 # **Why a copy in the tree and not a fork on a server:** F2.7 is the first build on macOS and Windows,
 # and a path needs neither a fetch nor credentials, so it resolves identically on all three. And a

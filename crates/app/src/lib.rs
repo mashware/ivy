@@ -4928,8 +4928,10 @@ mod tests {
         // the `copy_at` ones prove.
         //
         // Cutting is not told apart by modifiers because **a terminal does not cut**: what is on
-        // screen is not an editor to take text out of. With Shift or without it, it belongs to the
-        // program.
+        // screen is not an editor to take text out of. A cut that arrives belongs to the program,
+        // with Shift or without it. Since D33's second change `Ctrl+Shift+X` is not one of them — it
+        // arrives as a key and closes the console — so the cut seen here with Shift held is what a
+        // dedicated Cut key, or Windows' Shift+Delete, still produces.
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         // The window keeps this between frames; here the variable does it, which is the same thing.

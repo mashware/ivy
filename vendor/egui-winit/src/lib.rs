@@ -1025,7 +1025,8 @@ impl State {
                     self.egui_input.events.push(egui::Event::Copy);
                     return;
                 } else if is_paste_command(self.modifiers, active_key) {
-                    // **The only change this vendored copy carries.** Upstream returns here
+                    // **The first of the two changes this vendored copy carries** (the other is
+                    // in `is_cut_command`). Upstream returns here
                     // unconditionally, so a paste chord pressed over a clipboard with no text
                     // reaches the application as nothing at all — not the paste, and not the key
                     // event either. In a terminal emulator that key has an owner other than the
@@ -1433,8 +1434,12 @@ fn is_printable_char(chr: char) -> bool {
 }
 
 fn is_cut_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {
+    // **This copy's second change (D33).** Upstream's arm is `command && X`, which ignores Shift, so
+    // `Ctrl+Shift+X` — a terminal's close shortcut — became a cut before it was a key, the key was
+    // never emitted, and the application could only read it as a cut. Excluding Shift leaves a bare
+    // `Ctrl+X` a cut exactly as before and lets the chord arrive as the key, repeat flag included.
     keycode == egui::Key::Cut
-        || (modifiers.command && keycode == egui::Key::X)
+        || (modifiers.command && !modifiers.shift && keycode == egui::Key::X)
         || (cfg!(target_os = "windows") && modifiers.shift && keycode == egui::Key::Delete)
 }
 

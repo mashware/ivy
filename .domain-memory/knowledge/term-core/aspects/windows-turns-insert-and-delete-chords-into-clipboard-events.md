@@ -43,4 +43,4 @@ So on Windows `Ctrl+Shift+Delete`, `Ctrl+Alt+Insert` or `Ctrl+Shift+Insert` are 
 
 ## Where it lives
 
-vendor/egui-winit/src/lib.rs (is_cut_command / is_copy_command / is_paste_command and the branch in on_keyboard_input that uses them); crates/app/src/keyboard.rs (bytes: Copy → 3, Cut → 24). Evidence: read on origin/main eaaf701, 22 Sep 2026, lines 1020-1061 and 1435-1451; found by the two review rounds of #258.
+vendor/egui-winit/src/lib.rs (is_cut_command / is_copy_command / is_paste_command and the branch in on_keyboard_input that uses them); crates/app/src/keyboard.rs (bytes: Copy → 3, Cut → 24). Evidence: read on origin/main eaaf701, 22 Sep 2026, lines 1020-1061 and 1435-1451 at that commit (#274 later moved them and patched the Ctrl+X arm to exclude Shift — the Windows arm this card describes was left as upstream on purpose, D33); found by the two review rounds of #258.

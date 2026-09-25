@@ -7,8 +7,13 @@
 //! program inside a console as **nothing at all** — no byte, no event — because upstream
 //! `egui-winit`'s paste-shortcut branch does an unconditional `return` the moment it decides a
 //! chord means paste, whether or not it actually produced one. D33 fixes it with a copy of the
-//! crate under `vendor/egui-winit` whose only change makes that `return` conditional on having
+//! crate under `vendor/egui-winit` whose first change makes that `return` conditional on having
 //! pushed a `Paste`.
+//!
+//! **The second change (#274)** is one arm of `is_cut_command`, which upstream matches on `command
+//! && X` whatever Shift says — so `Ctrl+Shift+X`, this terminal's close chord, became a cut before it
+//! was a key and reached the program as `0x18`. The copy excludes Shift there. Every close test in
+//! this crate seeds `Key::X` with Ctrl+Shift; before that change the desktop never delivered it.
 //!
 //! **No test in this repository, or any that could be added to it, can exercise that fix
 //! behaviourally.** `winit::event::KeyEvent` carries `pub(crate) platform_specific`
@@ -31,10 +36,10 @@
 //!
 //! a) the workspace manifest still patches `egui-winit` to the vendored copy;
 //! b) the vendored copy's paste branch still gates its `return` on having pushed a paste, instead
-//!    of upstream's unconditional one;
+//!    of upstream's unconditional one — and its `is_cut_command` still leaves Shift out of Ctrl+X;
 //! c) nothing else in the vendored copy has been *edited* — every file but `src/lib.rs` is locked by
-//!    a content hash, and `src/lib.rs` is locked **outside** its patched branch, so a change anywhere
-//!    else in the crate is caught even though this test never re-reads the crates.io copy;
+//!    a content hash, and `src/lib.rs` is locked **outside** its two patched places, so a change
+//!    anywhere else in the crate is caught even though this test never re-reads the crates.io copy;
 //! d) and no file has been *added to* or *removed from* it. Hashing a list of known files is silent
 //!    about a file that was not on the list, which a review confirmed by adding one and watching all
 //!    of (a) to (c) stay green — so the directory is walked and compared against the list, not merely
@@ -51,7 +56,7 @@
 //! The published source **was** read to build the numbers below, and only there —
 //! `diff -rq` against `egui-winit-0.36.1/` confirms that only `src/lib.rs` differs at all (the
 //! registry's own bookkeeping files, `.cargo-ok` and friends, aside), and a further, narrower diff —
-//! the same file with its patched branch cut out of both copies — confirms the rest of `src/lib.rs`
+//! the same file with its patched places cut out of both copies — confirms the rest of `src/lib.rs`
 //! is byte-for-byte the published one too. That check is not repeated at test time; its result is
 //! what [`LOCKED_FILES`] and [`LIB_RS_RESIDUAL_HASH`] encode.
 //!
@@ -83,7 +88,8 @@ fn repo() -> PathBuf {
         .expect("the repository root is two levels above this crate")
 }
 
-/// The substring of `source` from the last `{` of `anchor` to its matching `}`, both included.
+/// The substring of `source` from the start of `anchor` to the `}` matching the `{` it ends in, both
+/// included — so a function's signature comes with its body.
 ///
 /// **Leans on the same assumption `shape.rs` names for its own brace walk: every `{` in the text
 /// closes with a `}`**, which is true of Rust source that compiles. `anchor` must itself end in the
@@ -121,6 +127,14 @@ fn brace_block<'a>(source: &'a str, anchor: &str) -> &'a str {
 /// The whole `else if is_paste_command(…) { … }` branch, comments included.
 fn paste_branch(lib_rs: &str) -> &str {
     brace_block(lib_rs, "is_paste_command(self.modifiers, active_key) {")
+}
+
+/// The whole `fn is_cut_command(…) { … }`, comments included — the copy's second change (D33).
+fn cut_command(lib_rs: &str) -> &str {
+    brace_block(
+        lib_rs,
+        "fn is_cut_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
+    )
 }
 
 /// The first non-blank, trimmed line of `text` after skipping `skip` leading lines.
@@ -185,13 +199,15 @@ const LOCKED_FILES: &[(&str, u64, usize)] = &[
     ("src/window_settings.rs", 0xb35505c8f99ec593, 7753),
 ];
 
-/// FNV-1a-64 of `vendor/egui-winit/src/lib.rs` with the paste branch cut out.
+/// FNV-1a-64 of `vendor/egui-winit/src/lib.rs` with the paste branch and `is_cut_command` cut out.
 ///
-/// Recorded once, by diffing this residual against the same cut made in the published crate's own
-/// `src/lib.rs` — the two were byte-for-byte identical. See the module doc comment for why that
-/// comparison lives here as a number instead of being repeated at test time.
-const LIB_RS_RESIDUAL_HASH: u64 = 0xddcae09259067989;
-const LIB_RS_RESIDUAL_LEN: usize = 93_788;
+/// The first cut was recorded by diffing its residual against the same cut made in the published
+/// crate's own `src/lib.rs` — the two were byte-for-byte identical. The second cut was added with the
+/// second change, and its residual computed from the tree **before** that change was made, by a script
+/// that first reproduced the old constant exactly — so what it removes is upstream's function and
+/// nothing else. See the module doc comment for why the comparison lives here as a number.
+const LIB_RS_RESIDUAL_HASH: u64 = 0xf753be09fca5207c;
+const LIB_RS_RESIDUAL_LEN: usize = 93_531;
 
 #[test]
 fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
@@ -206,7 +222,7 @@ fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
             "`vendor/egui-winit/{rel}` changed size ({} bytes, recorded {expected_len}): this file \
              is supposed to be byte-for-byte the published egui-winit 0.36.1, and D33's whole \
              argument for a copy instead of a fork rests on the difference from crates.io being \
-             exactly one hunk, in `src/lib.rs`, and nowhere else",
+             confined to two places in `src/lib.rs`, and nowhere else",
             bytes.len()
         );
         assert_eq!(
@@ -221,23 +237,22 @@ fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
     let lib_rs_path = vendor_root.join("src/lib.rs");
     let lib_rs = fs::read_to_string(&lib_rs_path)
         .unwrap_or_else(|e| panic!("{}: {e}", lib_rs_path.display()));
-    let branch = paste_branch(&lib_rs);
-    let residual = lib_rs.replacen(branch, "", 1);
+    let residual = lib_rs.replacen(paste_branch(&lib_rs), "", 1);
+    let residual = residual.replacen(cut_command(&residual), "", 1);
 
     assert_eq!(
         residual.len(),
         LIB_RS_RESIDUAL_LEN,
-        "`src/lib.rs` changed outside the one patched branch: its length without the \
-         `is_paste_command` block moved from {LIB_RS_RESIDUAL_LEN} to {}. The published crate's \
-         `src/lib.rs`, cut the same way, was verified identical to this residual when the guard was \
-         written — a change here means the vendored copy no longer differs from crates.io in \
-         exactly one place",
+        "`src/lib.rs` changed outside its two patched places: its length without the \
+         `is_paste_command` branch and `is_cut_command` moved from {LIB_RS_RESIDUAL_LEN} to {}. The \
+         published crate's `src/lib.rs`, cut the same way, matches this residual — a change here \
+         means the vendored copy differs from crates.io somewhere nobody is watching",
         residual.len()
     );
     assert_eq!(
         fnv1a64(residual.as_bytes()),
         LIB_RS_RESIDUAL_HASH,
-        "`src/lib.rs` changed outside the one patched branch: same length as recorded, different \
+        "`src/lib.rs` changed outside its two patched places: same length as recorded, different \
          content"
     );
 
@@ -246,7 +261,7 @@ fn nothing_else_in_the_vendored_copy_has_drifted_from_the_published_crate() {
     // confirmed by adding one and watching all three tests stay green. Today such a file compiles
     // into nothing unless something declares it — but «harmless because nothing references it yet»
     // is the argument that ages worst, and the whole point of this file is that the copy differs
-    // from the published crate in one place and no other.
+    // from the published crate in two known places and no other.
     let mut present: Vec<String> = Vec::new();
     walk_files(&vendor_root, &vendor_root, &mut present);
     present.sort();
@@ -333,8 +348,8 @@ fn the_vendored_return_is_gated_on_having_actually_pushed_a_paste() {
     );
 
     // **The two lines the `return` hangs off, pinned as well.** The drift hash above cuts this whole
-    // branch out before hashing — it has to, since this is the one place the copy is *supposed* to
-    // differ — so nothing else in this file watches what happens inside it. A review pointed out what
+    // branch out before hashing — it has to, since this is one of the two places the copy is
+    // *supposed* to differ — so nothing else in this file watches what happens inside it. A review pointed out what
     // that lets through on the next rebase: invert the emptiness test and every ordinary paste is
     // swallowed while an empty clipboard pastes nothing at all, with all three tests green. Both
     // lines below are upstream's own, unchanged by the patch, and neither has any business moving.
@@ -349,4 +364,58 @@ fn the_vendored_return_is_gated_on_having_actually_pushed_a_paste() {
              so a change here means the copy has drifted where nothing is watching it"
         );
     }
+}
+
+#[test]
+fn the_vendored_cut_command_leaves_ctrl_shift_x_to_be_a_key() {
+    let path = repo().join("vendor/egui-winit/src/lib.rs");
+    let lib_rs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let function = cut_command(&lib_rs);
+    let arms: Vec<&str> = function
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("//"))
+        .collect();
+
+    // **The second change, and what it is for (#274).** Upstream's `command && X` ignores Shift, so
+    // `Ctrl+Shift+X` — this terminal's close chord — became a cut before it was a key, the key was
+    // never emitted, and the program received a cut's `0x18` instead. With Shift excluded the chord
+    // arrives as `Key::X`, which is what the keymap and every close test in this crate seed.
+    assert!(
+        arms.contains(&"|| (modifiers.command && !modifiers.shift && keycode == egui::Key::X)"),
+        "`is_cut_command`'s Ctrl+X arm no longer excludes Shift: `Ctrl+Shift+X` is a cut again, the \
+         close chord never reaches the keymap, and the program in the focused console receives \
+         `0x18` instead of the console closing. Found instead:\n{}",
+        arms.join("\n")
+    );
+    // **And the other two arms are upstream's, untouched.** A bare `Ctrl+X` stays a cut — the byte
+    // `nano` exits on — and Windows keeps its Shift+Delete, left alone on purpose until F2.7 decides
+    // it (D33's amendment). Without these the change above could widen into dropping cut altogether
+    // and this guard would still pass.
+    for arm in [
+        "keycode == egui::Key::Cut",
+        "|| (cfg!(target_os = \"windows\") && modifiers.shift && keycode == egui::Key::Delete)",
+    ] {
+        assert!(
+            arms.contains(&arm),
+            "`is_cut_command` no longer contains upstream's `{arm}`: the patch excludes Shift from \
+             one arm and changes nothing else in this function"
+        );
+    }
+    // **And nothing else.** This function is cut out of the residual hash, so an arm added here is
+    // watched by nobody else — and the likeliest one is upstream's own `command && X` coming back
+    // beside the patched arm on a rebase, which passes every check above and makes `Ctrl+Shift+X`
+    // a cut again.
+    let expected = [
+        "fn is_cut_command(modifiers: egui::Modifiers, keycode: egui::Key) -> bool {",
+        "keycode == egui::Key::Cut",
+        "|| (modifiers.command && !modifiers.shift && keycode == egui::Key::X)",
+        "|| (cfg!(target_os = \"windows\") && modifiers.shift && keycode == egui::Key::Delete)",
+        "}",
+    ];
+    assert_eq!(
+        arms, expected,
+        "`is_cut_command` holds code beyond its signature and three arms: whatever was added is \
+         outside every hash in this file"
+    );
 }

@@ -5200,6 +5200,44 @@ about to build on two new ones. It fits the symptom; the patch fixes the cause.
   condition, and it is the reason the copy carries its diff in a comment at the changed line rather
   than in a patch file: whoever removes it has to see what it was for.
 
+### Amended on 25 September 2026: a second change, for the close chord (#274)
+
+**What was broken, said in product terms.** `Ctrl+Shift+X`, the factory shortcut for closing the
+focused console, never closed it from a real keyboard: the program inside received `^X` (0x18) — the
+byte `nano` exits on — and the console stayed. Seen by the user twice while reproducing #271;
+`Ctrl+Shift+D` worked in the same window.
+
+**Why, and why it is the same shape as the first change.** `is_cut_command` is `command && X` and
+ignores Shift, and on a match the copy pushes `Event::Cut` and **returns before the key**. So the chord
+was a cut before it was a key: the shortcut table, which matches only keys, never saw it, and the
+terminal wrote the cut as its control byte. It is the copy chord's story again (D26's annex): a chord
+the desktop turns into a clipboard request, with a whole family of tests seeding a key — here some
+twenty of them, `Key::X` with Ctrl+Shift — that the desktop never delivered. So the suite was green
+over a shortcut nobody could use, and **by all the evidence it never worked**: `is_cut_command` is
+upstream's and older than the chord.
+
+**The change**: that arm becomes `command && !shift && X`. A bare `Ctrl+X` is a cut exactly as before
+and still reaches the program as 0x18; `Ctrl+Shift+X` arrives as the key, **repeat flag included**, so
+holding it closes one console and not one after another; `key.close-pane = none` hands it back to the
+program as the same byte it got before. The copy and paste chords are untouched, and so — **on
+purpose** — is the same function's Windows arm, `shift && Delete`, which has the same shape: it turns
+Shift+Delete and Ctrl+Shift+Delete into a cut before they are keys, so on Windows they would reach the
+program as `0x18` instead of D52's `CSI 3;2~`/`CSI 3;6~`. Nothing here can observe it; F2.7 decides it
+on the platform, and the guard pins that arm as upstream's so the change is a visible decision.
+
+**What was discarded.** Handling `Event::Cut` with Shift in `keyboard.rs` as a lookup of the chord,
+with no change to the copy. It keeps the copy at one change, and it pays for it with state of its own:
+a cut carries no repeat flag and autorepeat pushes one per repeat, so it needs a latch — set on the cut,
+cleared on the X's release or on losing focus — to keep holding the chord from closing every console
+in the tab. The patch fixes the cause in one condition; the latch rebuilds, downstream, the
+information the copy throws away. Chosen by the user at the fix's gate.
+
+**What guards it.** `crates/app/tests/vendor_patch.rs` now cuts **two** places out of `src/lib.rs`
+before hashing the rest — the paste branch and `is_cut_command` — and pins the new arm and upstream's
+other two. The residual's constant was computed from the tree before the change, by a script that
+first reproduced the old constant exactly. The behaviour itself is out of reach of any test, for the
+reason above, so it is checked by hand (D53).
+
 ## D34 — The step between cells is a whole number of pixels
 
 **Decided.** The cell's width and height are taken **down** to a whole device pixel, in
@@ -6969,6 +7007,8 @@ so F2.7 names the observer it uses on each of them.
 | `Ctrl+Shift+C` | text marked | nothing; the marked text is on the clipboard (**D22**, **D26**) |
 | a letter, `Enter`, `Ctrl+C` | a shell prompt | the letter, `\r`, `0x03` |
 | `Ctrl+Left`, `Ctrl+Delete`, `Shift+Insert` | `cat -v` | `CSI 1;5D`, `CSI 3;5~`, `CSI 2;2~` (**D52**) |
+| `Ctrl+Shift+X`, pressed once and then held | three consoles | nothing reaches any program; each press closes the focused console, and holding closes only one (**D33**'s second change) |
+| `Ctrl+X` | `cat -v` | `0x18` (`^X`) — still a cut, still the program's |
 
 **Where the list is expected to disagree, which is what F2.7 comes to decide.**
 
