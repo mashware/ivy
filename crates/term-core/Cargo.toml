@@ -7,6 +7,11 @@ edition.workspace = true
 alacritty_terminal = "0.26"
 portable-pty = "0.9"
 
+# Closing a console hangs up its program by pid instead of through `portable-pty`'s `kill`, whose
+# 50 ms grid was the whole cost of the close. Already in the tree through that crate.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # **The engine, again and on purpose.** The benches in `examples/` measure the engine **below this
 # crate's facade**: an example compiles as its own binary and does not see the crate's normal
 # dependencies. Without this, measuring what the scrollback costs would mean opening a hole in the

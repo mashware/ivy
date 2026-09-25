@@ -1232,6 +1232,13 @@ const NOT_OURS: &[&str] = &[
     // a session of its own, and the one that is *named* for outliving the shell that launched it.
     "setsid",
     "nohup",
+    // What hanging a program up is written against: the system call that reaps it, the Windows call
+    // `portable-pty` kills with, and the shell builtin a test uses to make a program deaf to it.
+    "waitpid",
+    "TerminateProcess",
+    "trap",
+    // The program that may refuse it: `sudo`, once authenticated, is the unmeasured candidate D55 names.
+    "sudo",
     // The kernel constants and tools this tree names but does not own. `MAX_CANON` is here to be
     // *contradicted*: it is 255, and the 4 096 that bounds a canonical line is `N_TTY_BUF_SIZE`,
     // a compile-time constant of the `n_tty` driver. A comment that could not name the wrong one

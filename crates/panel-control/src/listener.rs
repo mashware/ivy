@@ -253,8 +253,9 @@ impl Drop for Channel {
     /// [`crate::wire::REPLY_DEADLINE`] on top of that — **the worst case is the sum of the two**, and
     /// saying only the first would be the understatement this file exists to avoid. None of them
     /// outlives its pane beyond that and nothing is leaked; what
-    /// joining would buy is a pane close that blocks the window for that long, on top of the ~50 ms
-    /// per console `portable-pty` already costs there (**D32**). The threads hold only what they
+    /// joining would buy is a pane close that blocks the window for that long — which, against the
+    /// 1.2–1.4 ms **D55** measured for closing a console whose program dies of the hang-up, would
+    /// have been nearly all of the close. The threads hold only what they
     /// own — their own channel ends and their own `Arc`s — so there is nothing for a survivor to
     /// touch that the pane has taken away.
     ///

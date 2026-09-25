@@ -27,15 +27,15 @@
 //! and a row outside its band is printed as such and makes the example exit non-zero. Inferring the
 //! label from the duration was the first version's mistake: on a busy machine an ordinary close at
 //! 130 ms would have been published as «somebody survived», and this crate's own deadline would have
-//! been published as the library's poll.
+//! been published as the program's own dying.
 //!
 //! The seven rows, in the order they run:
 //!
 //! | Row | Program | What it measures |
 //! |---|---|---|
-//! | `a live shell` | a program alive and quiet | the ordinary close — the cost paid on every console |
+//! | `a live program` | a program alive and quiet | the ordinary close — the cost paid on every console |
 //! | `already dead` | a program that has exited | the floor: what `Drop` costs with nothing to kill |
-//! | `ignores SIGHUP` | `trap '' HUP` | what the library's grace period costs |
+//! | `ignores SIGHUP` | `trap '' HUP` | what the grace after the hang-up costs |
 //! | `grandchild, echo on` | a survivor, echo left on | the accidental rescue: it finishes anyway |
 //! | `grandchild, -echo` | the same, `stty -echo` alone | **the hang**, with exactly one flag changed |
 //! | `grandchild, raw -echo` | the same, `stty raw -echo` | the hang with the whole raw mode, as a TUI sets it |
@@ -58,8 +58,8 @@ const SECONDS_ALIVE: u32 = 15;
 
 /// How long a `Drop` is given before it is called a hang.
 ///
-/// **It has to sit between the two facts it separates**: comfortably above the ~200 ms the library's
-/// grace period costs, and far below the seconds the programs live. At five seconds a hang is
+/// **It has to sit between the two facts it separates**: comfortably above the ~200 ms the grace
+/// after the hang-up costs, and far below the seconds the programs live. At five seconds a hang is
 /// reported as one after five seconds; with a deadline longer than `SECONDS_ALIVE` every row would
 /// return and the example would print «nothing hangs» on a build that hangs.
 const DEADLINE: Duration = Duration::from_secs(5);
@@ -81,11 +81,11 @@ const HELD: &str = "held";
 enum Expected {
     /// Nothing left to kill: the program had already gone before the close.
     Floor,
-    /// The library's fixed poll after its SIGHUP, paid on the caller's thread.
-    Poll,
-    /// That poll and this crate's abandon deadline: a holder of the slave end survived.
-    PollAndGiveUp,
-    /// The library's whole grace period before it resorts to SIGKILL.
+    /// The program dying after the hang-up, looked at every millisecond.
+    Dying,
+    /// That and this crate's abandon deadline: a holder of the slave end survived.
+    DyingAndGiveUp,
+    /// The whole grace after the hang-up, before resorting to SIGKILL.
     Grace,
 }
 
@@ -94,25 +94,27 @@ impl Expected {
     fn note(self) -> &'static str {
         match self {
             Expected::Floor => "nothing left to kill",
-            Expected::Poll => "the library's fixed poll after SIGHUP",
-            Expected::PollAndGiveUp => "that poll plus this crate's abandon deadline",
-            Expected::Grace => "the library's grace period, paid on the caller's thread",
+            Expected::Dying => "the program dying after SIGHUP",
+            Expected::DyingAndGiveUp => "its dying plus this crate's abandon deadline",
+            Expected::Grace => "the whole grace after SIGHUP, paid on the caller's thread",
         }
     }
 
     /// The milliseconds that claim implies, as `(at least, at most)`.
     ///
-    /// The pieces, each measured: ~0 with nothing to kill; one 50 ms interval of the library's poll
-    /// —its first attempt is immediate, so a program that dies at once pays none of it—; +100 ms of
-    /// this crate's abandon deadline when a holder survives; and four 50 ms intervals of grace when
-    /// the program ignores SIGHUP. The margins are wide because this is a check for a number that
-    /// does not match its own explanation, not a performance assertion.
+    /// The pieces, each measured: ~0 with nothing to kill; a millisecond or two for a program to die
+    /// of the hang-up, looked at every millisecond; +100 ms of this crate's abandon deadline when a
+    /// holder survives; and the 200 ms of grace when the program ignores SIGHUP. The ceiling of
+    /// `Dying` is what catches a return of `portable-pty`'s own `kill`, whose 50 ms between looks
+    /// was this row's whole cost — 50.72 ms median when this crate still called it. The margins are
+    /// otherwise wide because this is a check for a number that does not match its own explanation,
+    /// not a performance assertion.
     fn band(self) -> (f64, f64) {
         match self {
             Expected::Floor => (0.0, 20.0),
-            Expected::Poll => (20.0, 120.0),
-            Expected::PollAndGiveUp => (120.0, 280.0),
-            Expected::Grace => (150.0, 320.0),
+            Expected::Dying => (0.0, 20.0),
+            Expected::DyingAndGiveUp => (100.0, 160.0),
+            Expected::Grace => (200.0, 320.0),
         }
     }
 }
@@ -151,11 +153,11 @@ fn main() {
     // shell left after the `exec` — which is the point, since a shell of its own would be a second
     // process to kill.
     off_band += measure(
-        "a live shell",
+        "a live program",
         &format!("printf {READY} && exec sleep {SECONDS_ALIVE}"),
         READY,
         false,
-        Expected::Poll,
+        Expected::Dying,
     );
 
     // The floor. `exec true` leaves no program to kill, so what is left is the bookkeeping.
@@ -167,8 +169,8 @@ fn main() {
         Expected::Floor,
     );
 
-    // Ignoring the signal `child.kill()` actually sends. The library then waits out its grace period
-    // before resorting to SIGKILL, and that wait is paid on the caller's thread.
+    // Ignoring the hang-up closing sends. The close then waits out the whole grace before resorting
+    // to SIGKILL, and that wait is paid on the caller's thread.
     off_band += measure(
         "ignores SIGHUP",
         &format!("trap '' HUP && printf {READY} && exec sleep {SECONDS_ALIVE}"),
@@ -190,7 +192,7 @@ fn main() {
         &with_survivor(""),
         HELD,
         false,
-        Expected::Poll,
+        Expected::Dying,
     );
 
     // **The hang, with exactly one flag changed from the row above.** With `-echo` there is nothing
@@ -202,7 +204,7 @@ fn main() {
         &with_survivor("stty -echo && "),
         HELD,
         false,
-        Expected::PollAndGiveUp,
+        Expected::DyingAndGiveUp,
     );
 
     // **The same hang with the whole raw mode**, which is how a TUI actually sets it: `stty raw`
@@ -214,14 +216,13 @@ fn main() {
         &with_survivor("stty raw -echo && "),
         HELD,
         false,
-        Expected::PollAndGiveUp,
+        Expected::DyingAndGiveUp,
     );
 
     // **The sibling shape, and the reason it is a row and not a worry.** A *stopped* child never dies
     // of a signal it can hold, so `child.wait()` beside the reader's join has the same unbounded
-    // shape and would block for ever — that is the adjacent risk. It does not happen, and reading the
-    // library says why: after its grace period `kill()` falls through to a real `SIGKILL`, which
-    // nobody holds, stopped processes included. So **the number below is that grace period**, not the
+    // shape and would block for ever — that is the adjacent risk. It does not happen: after its grace
+    // the hang-up falls through to a real `SIGKILL`, which nobody holds, stopped processes included. So **the number below is that grace**, not the
     // cost of the wait: what the row proves is that the wait is reached and returns at all.
     off_band += measure(
         "stopped child",

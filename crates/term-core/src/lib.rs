@@ -19,6 +19,8 @@ use std::sync::mpsc::{
 use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use portable_pty::{Child, CommandBuilder, MasterPty, native_pty_system};
 
@@ -279,11 +281,11 @@ static STARTED: std::sync::LazyLock<std::time::Instant> =
 /// **It separates «microseconds» from «never», and it is only ever spent when somebody outlived the
 /// program and kept the slave end open.** With nobody holding it, the child's death gives the reader
 /// end of file and the thread is gone before this is consulted — measured: the ordinary close costs
-/// what the library's poll costs and not a millisecond more.
+/// what the program's dying costs and not a millisecond more.
 ///
 /// **It is spent per console, not per gesture**, and that is the number to quote: closing a tab drops
 /// every pane it had, in series, inside the same interface pass. Four consoles each holding a
-/// survivor is four times this, on top of four of the library's polls.
+/// survivor is four times this, on top of four programs dying.
 ///
 /// **What survives, precisely**, because the obvious examples are not all right: a plain `sleep 60 &`
 /// does inherit the slave end and does keep the read from ending — and it stays in the child's own
@@ -296,6 +298,25 @@ static STARTED: std::sync::LazyLock<std::time::Instant> =
 /// **not** a threshold anybody measured for how long a frozen window is tolerable: no number here
 /// claims that. It is chosen to be plainly inside «a delay» and plainly outside «microseconds».
 const READER_GIVE_UP: Duration = Duration::from_millis(100);
+
+/// How long a program has, after the hang-up that closing its console sends, before it is killed.
+///
+/// **It is the grace `portable-pty`'s own `kill` gives, kept on purpose**: four looks 50 ms apart
+/// after the first. A program that catches the hang-up to save its state is owed that time, and no
+/// measurement here says how much of it any real program needs — so the number stays the library's
+/// rather than one invented here. What this crate stopped taking from the library is the grid, not
+/// the grace: see [`HANGUP_CHECK_EVERY`].
+#[cfg(unix)]
+const HANGUP_GRACE: Duration = Duration::from_millis(200);
+
+/// How often closing looks whether the hung-up program has gone.
+///
+/// **The library looks every 50 ms, and that step was the whole cost of closing a console**: a shell
+/// dies one or two milliseconds after the hang-up, misses the first look, and the window waited out
+/// the step — once per console, inside the interface pass. At this pace the close costs about what
+/// the dying costs, and the looks are `try_wait`, a non-blocking system call.
+#[cfg(unix)]
+const HANGUP_CHECK_EVERY: Duration = Duration::from_millis(1);
 
 /// How many reads fit in the channel before the reader thread stops reading.
 ///
@@ -721,6 +742,53 @@ fn deliver(
     }
 }
 
+/// Hangs up the program and gives it [`HANGUP_GRACE`] to go before killing it.
+///
+/// **It is `portable-pty`'s own `kill` with a finer grid, and not a call to it**: that one sleeps
+/// 50 ms between looks, and a program that dies a millisecond after the hang-up paid the whole step
+/// on the interface pass. The signals are the same two, sent to the child's pid and never its group
+/// — who else closing a console should reach is an open question this does not answer.
+///
+/// **Signalling by pid is safe only while the child is unreaped**, which is why every signal here
+/// follows a `try_wait` that said so: a reaped pid can be handed to somebody else's process.
+#[cfg(unix)]
+fn hang_up(child: &mut (dyn Child + Send + Sync)) {
+    // **Only a positive pid is signalled.** Zero would reach this application's own process group
+    // and a negative one somebody's group. Without such a pid closing does what it did before this
+    // crate signalled by itself — the library's `kill`, grid and all.
+    let Some(pid) = child
+        .process_id()
+        .and_then(|pid| libc::pid_t::try_from(pid).ok())
+        .filter(|pid| *pid > 0)
+    else {
+        let _ = child.kill();
+        return;
+    };
+    // SAFETY: `kill` takes plain integers and touches no memory of this process.
+    let signal = |number| unsafe { libc::kill(pid, number) == 0 };
+    // An error from `try_wait` counts as gone: `waitpid` failing means there is no child of ours to
+    // wait for, so the `wait` that follows fails at once instead of blocking — and signalling a pid
+    // that is not known to be ours is the one thing this must never do. A SIGHUP refused for a
+    // child that *is* ours ends it here too, as the library's `kill` did: see D55.
+    if !matches!(child.try_wait(), Ok(None)) || !signal(libc::SIGHUP) {
+        return;
+    }
+    let deadline = Instant::now() + HANGUP_GRACE;
+    while Instant::now() < deadline {
+        thread::sleep(HANGUP_CHECK_EVERY);
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+    }
+    signal(libc::SIGKILL);
+}
+
+/// Elsewhere the library's `kill` has no grid to pay: on Windows it is `TerminateProcess`, at once.
+#[cfg(not(unix))]
+fn hang_up(child: &mut (dyn Child + Send + Sync)) {
+    let _ = child.kill();
+}
+
 impl Drop for Pty {
     fn drop(&mut self) {
         // First the flag: with the channel full, the thread is not inside `read` but waiting for
@@ -752,12 +820,14 @@ impl Drop for Pty {
         // And then the usual order: killing the child is what closes its end of the
         // pseudoterminal and triggers the end of file in the reader thread. Waiting for the thread
         // before that would hang it, because it would still be blocked inside `read`.
-        let _ = self.child.kill();
-        // Bounded, and the bound is the library's: after its grace period that `kill` falls through
-        // to a real `SIGKILL`, which nobody holds — not even a stopped process, the shape that would
-        // otherwise never be reaped. The one hole is that the library gives up early if the SIGHUP
-        // itself could not be delivered, and this call discards that: with the child already gone
-        // there is nothing to wait for anyway.
+        hang_up(self.child.as_mut());
+        // Bounded when the signals are delivered: after its grace the hang-up falls through to a real
+        // `SIGKILL`, which nobody holds — not even a stopped process, the shape that would otherwise
+        // never be reaped. When `try_wait` failed instead, there is no child of ours left to wait
+        // for and this fails at once. **Not bounded if the system refuses the signals**, and this
+        // then waits for the program to leave on its own — the same hole the library's `kill` left.
+        // D55 records it: reasoned from the source, not observed here, with `sudo` as the candidate
+        // nobody could measure.
         let _ = self.child.wait();
         // **The reader is waited for with a deadline, and abandoned if it does not come.** Killing
         // the child closes *the child's* end of the pseudoterminal and nothing else: anything the
@@ -1747,7 +1817,7 @@ mod tests {
     /// as proof is the drain and the receiver's lifetime — with this marker the reader is parked
     /// inside `read` either way — and they stay because they are what the window does.
     ///
-    /// On the fixed tree it passes in 0.20 s, which is the library's 50 ms poll plus the 100 ms
+    /// On the fixed tree it passes in about 0.15 s, which is the program's dying plus the 100 ms
     /// abandoned deadline plus the drain: the deadline really was spent.
     ///
     /// The drop itself runs on a thread of its own, answering through a channel, for the same reason
@@ -1758,8 +1828,8 @@ mod tests {
         use std::sync::mpsc;
 
         /// **Both bounds carry weight, and the band between them is where this test binds.**
-        /// Measured after the fix, this shape returns in some 150 ms — 50 ms of the library's fixed
-        /// poll after its SIGHUP, plus the 100 ms this crate gives the reader before abandoning it —
+        /// Measured after the fix, this shape returns in some 100 ms — a millisecond or two for the
+        /// program to die of the hang-up, plus the 100 ms this crate gives the reader before abandoning it —
         /// so a deadline anywhere near that would go red because the machine was busy. And the
         /// survivor only lives five seconds: a deadline past that would watch the close «return»
         /// because the program died on its own rather than because `Drop` came back, and publish the
@@ -1824,8 +1894,9 @@ mod tests {
         // in general.** Anything under it means the close came back *without* spending the abandon
         // deadline, and in this shape there is only one way that happens: the reader was woken by
         // something — the echo left on by accident, a survivor that was never there — so the row is
-        // measuring the easy case under this one's name. Measured: with the echo on it returns in
-        // 0.10 s, and with no survivor in 0.05 s. The bound is the constant itself, so a future
+        // measuring the easy case under this one's name. Measured when closing still paid the
+        // library's 50 ms step: with the echo on it returned in 0.10 s, and with no survivor in
+        // 0.05 s — and on the day of D55, with that step gone, in 1.20–1.37 ms both. The bound is the constant itself, so a future
         // delivery that makes abandoning cheaper moves it instead of going red.
         assert!(
             took >= READER_GIVE_UP,
@@ -1853,12 +1924,12 @@ mod tests {
     ///
     /// **The bound is [`READER_GIVE_UP`] itself, not a number typed here.** With nothing holding the
     /// slave end the child's death gives the reader end of file, so the thread has already gone and
-    /// the wait returns at once: what is left is the library's own fixed poll, some 50 ms. Asserting
-    /// «under the deadline» therefore has two-fold headroom over what this costs and still fails the
+    /// the wait returns at once: what is left is the program's dying, a millisecond or two. Asserting
+    /// «under the deadline» therefore has ample headroom over what this costs and still fails the
     /// moment the deadline starts being paid on a healthy close — and it moves on its own if the
     /// constant ever changes, which a literal would not.
     ///
-    /// It is **not** a performance assertion: nothing here claims 50 ms is fast, only that the
+    /// It is **not** a performance assertion: nothing here claims the close is fast, only that the
     /// hundred milliseconds this crate reserves for a survivor are not spent when there is none.
     #[test]
     fn closing_an_ordinary_console_does_not_spend_the_abandon_deadline() {
@@ -1897,6 +1968,133 @@ mod tests {
             "closing a console nobody outlived took {took:?}, which is at least the \
              {READER_GIVE_UP:?} reserved for abandoning a reader: the deadline is being paid on \
              every close, and a tab pays it once per pane inside the interface pass"
+        );
+    }
+
+    /// Waits until the console's program says `marker`, drains it to quiet, and times dropping it.
+    ///
+    /// The shape every closing test here needs, and the one that keeps a regression from taking the
+    /// suite with it: the drop runs on a thread of its own and answers through a channel, so a close
+    /// that never comes back is a red test after two seconds rather than a `cargo test` that never
+    /// ends. The drain parks the reader inside `read`, for the reasons the tests above give.
+    fn time_the_close(pty: Pty, output: Receiver<Vec<u8>>, marker: &str) -> Duration {
+        use std::sync::mpsc;
+
+        wait_for_marker(&output, marker);
+        while output.recv_timeout(Duration::from_millis(50)).is_ok() {}
+
+        let (done, answer) = mpsc::channel();
+        let closing = thread::spawn(move || {
+            let started = Instant::now();
+            drop(pty);
+            let _ = done.send(started.elapsed());
+        });
+        // Well under the life of every program these tests close — five seconds, or no end at all:
+        // a close that came back only because the program ended on its own would otherwise pass for
+        // a close that worked.
+        let took = answer
+            .recv_timeout(Duration::from_secs(2))
+            .expect("closing the console returned");
+        let _ = closing.join();
+        // Released only after the close, as everywhere in this module.
+        drop(output);
+        took
+    }
+
+    /// **Closing a console whose program dies on hang-up costs what the dying costs, not a step of
+    /// somebody's grid.** `portable-pty`'s own `kill` looks once right after its SIGHUP and then
+    /// sleeps 50 ms between looks, so a program that needs any time at all to die —a shell takes one
+    /// or two milliseconds— paid the whole step, once per console, inside the interface pass.
+    ///
+    /// **The bound is a literal on purpose, and it is the library's step, not a constant of this
+    /// crate.** It states the defect: every close on the old path took *at least* that, because the
+    /// sleep is a floor, so no machine however fast passes it by luck. And the fixed path measures a
+    /// couple of milliseconds, so a loaded machine has some twenty-fold headroom before it could fail
+    /// for a reason that is not the defect.
+    ///
+    /// `sleep` keeps the default hang-up disposition, which is what a shell or an agent does as far
+    /// as this close is concerned: it dies of the signal.
+    #[test]
+    fn closing_a_console_does_not_wait_out_the_librarys_poll_step() {
+        const LIBRARY_STEP: Duration = Duration::from_millis(50);
+        const MARKER: &str = "up";
+
+        let script = format!("printf {MARKER} && exec sleep 5");
+        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let took = time_the_close(pty, output, MARKER);
+
+        assert!(
+            took < LIBRARY_STEP,
+            "closing a console whose program dies on hang-up took {took:?}, at least the \
+             {LIBRARY_STEP:?} between two looks of the library's poll: the close is waiting on a \
+             grid, not on the program"
+        );
+    }
+
+    /// **The other half: a program still gets its grace after the hang-up.** Killing outright on
+    /// close would pass the test above too, and it would take away the time a program that catches
+    /// the hang-up has to save its state. So a program that ignores the hang-up must be killed, and
+    /// **not before [`HANGUP_GRACE`]**: the floor is what tells a grace apart from an immediate kill.
+    ///
+    /// `trap '' HUP` sets the disposition to ignored, and an ignored signal survives `exec`, so it is
+    /// `sleep` itself that ignores it. The marker comes after the `trap` in the same `&&` chain, so it
+    /// proves the trap was set — without it the test would time a program that died at once and fail
+    /// on the floor for a reason that is not the grace. Unix only: elsewhere the close is the
+    /// library's immediate `kill`, with no grace to owe.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_ignores_the_hang_up_is_killed_after_its_grace() {
+        const MARKER: &str = "deaf";
+
+        let script = format!("trap '' HUP && printf {MARKER} && exec sleep 5");
+        let (pty, output) = Pty::spawn("sh", &["-c", &script], Size::default()).expect("launch sh");
+        let took = time_the_close(pty, output, MARKER);
+
+        assert!(
+            took >= HANGUP_GRACE,
+            "a program that ignores the hang-up was gone after {took:?}, before the \
+             {HANGUP_GRACE:?} of grace it is owed: it was killed outright"
+        );
+    }
+
+    /// **A program that catches the hang-up to save its state gets to finish saving, as long as the
+    /// save fits in the library's grace.** The test above measures its floor against
+    /// [`HANGUP_GRACE`] itself, so shortening the constant moves the floor with it and nothing goes
+    /// red — measured: a 50 ms grace passed the whole suite. This one states the grace from the
+    /// program's side instead, with a save that takes a literal 100 ms: comfortably inside the
+    /// library's 200 ms, and past anything shorter than it by enough that a loaded machine is not
+    /// what decides it.
+    ///
+    /// The program's trap runs only once its foreground `sleep` returns, which is why that sleep is
+    /// ten milliseconds and not the whole wait. The save goes to a file, not to the console: the
+    /// reader is being stopped while it happens, so bytes on the pseudoterminal prove nothing. The
+    /// file's path reaches the script as `$0`, never spliced into it, so a temporary directory with a
+    /// space in its name is still the file the assertion reads.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_catches_the_hang_up_finishes_saving_before_it_is_killed() {
+        const MARKER: &str = "saving";
+
+        let saved = std::env::temp_dir().join(format!("term-core-hang-up-{}", std::process::id()));
+        let saved_path = saved.to_str().expect("a temporary path that is text");
+        let _ = std::fs::remove_file(&saved);
+        let script = format!(
+            "trap 'sleep 0.1 && printf done > \"$0\" && exit 0' HUP && printf {MARKER} && \
+             while :; do sleep 0.01; done"
+        );
+        let (pty, output) =
+            Pty::spawn("sh", &["-c", &script, saved_path], Size::default()).expect("launch sh");
+        // What the close cost is deliberately not asserted: the save alone takes some 110 ms of a
+        // 200 ms grace, and a ceiling with less than two-fold headroom on a loaded machine would fail
+        // for reasons that are not the grace.
+        time_the_close(pty, output, MARKER);
+
+        let finished = std::fs::read_to_string(&saved).is_ok_and(|body| body == "done");
+        let _ = std::fs::remove_file(&saved);
+        assert!(
+            finished,
+            "a program that needed 100 ms after the hang-up to save its state was killed before it \
+             finished: the grace it is owed is shorter than the library's 200 ms"
         );
     }
 }

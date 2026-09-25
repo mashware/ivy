@@ -1727,7 +1727,8 @@ behind it:
   inside ignores the hang-up signal— and it can hang it
   ([#62](https://github.com/mashware/agent-terminal/issues/62)). Saving only on the way out would
   have lost the whole session in the normal case. **The «can hang it» half stopped being true with
-  D32**, which bounds the wait; the freeze this annex measures is the other half and is still paid.
+  D32**, which bounds the wait; the freeze this annex measures is the other half, and **D55** took it
+  from ~50 ms per console to 1.20–1.37 ms.
 - **The identity is new because keeping it would be deducing the state.** A panel restored with
   yesterday's `panel.json` would paint **as current** the last state of an agent that no longer
   exists: «compiling» from a build that died last night. The app does not deduce the state (**D6**),
@@ -4999,9 +5000,12 @@ wait itself.
 
 ### What it left open
 
-- **The ~101 ms that was already being paid** is untouched: it is `portable-pty`'s fixed 50 ms poll per
+- ~~**The ~101 ms that was already being paid** is untouched: it is `portable-pty`'s fixed 50 ms poll per
   console, and it needs a different change — SIGHUP then an immediate SIGKILL, or moving the close off
-  the interface pass. Confirmed with ten samples in the work's diagnosis.
+  the interface pass. Confirmed with ten samples in the work's diagnosis.~~ **Closed by D55**, and by
+  neither of the two changes named here: the cost was the poll's *grid*, not its grace, so this crate
+  hangs up the program itself and looks every millisecond. An ordinary close went from 50.88 ms to
+  1.20–1.37 ms.
 - ~~**Nobody is told.**~~ **Answered, and the answer is «nothing».** The question was what the window
   tells somebody whose console left a thread behind, and it was carried by **#192**, whose own body
   offered four candidate answers. The first was chosen: nothing, and the trade stays a comment in the
@@ -7044,3 +7048,57 @@ in a knowledge card — and was fixed the day it was met in use.
   so it points here — but a rule with no number cannot be cited from a review or from another
   decision, and it would carry neither its reason nor what was discarded, which is what this file
   asks of every entry.
+
+## D55 — Closing a console hangs up its program itself, looking every millisecond, and keeps the library's grace
+
+**Decided on 25 September 2026** ([#196](https://github.com/mashware/agent-terminal/issues/196)).
+`Drop for Pty` no longer calls `portable-pty`'s `kill` on Unix. It sends SIGHUP to the child's pid,
+looks with `try_wait` every **1 ms** for up to **200 ms**, and sends SIGKILL if the program is still
+there. Windows keeps the library's `kill`, which is `TerminateProcess` at once and never had a grid.
+
+**Why.** The library's Unix `kill` looks once right after the SIGHUP and then **sleeps 50 ms** between
+four more looks. Every live program needs *some* time to die, so every one missed the first look and
+paid the whole step: 50.72 ms median per console, paid inside the interface pass, and in series for
+the consoles of a tab (~101 ms for two, ~200 for four). What the programs actually need was measured
+on a real pseudoterminal with the same session and controlling-terminal setup the library uses: bash
+with its rc files 1.30 ms, zsh with its rc files 1.84 ms (max 2.14), a Node program in raw mode
+1.16 ms, `vim -u NONE` through this crate's own `Pty` 3.4 ms. So about 48 ms of every close was
+sleep. **After**, with `examples/closing.rs` over three runs: a live program 1.20–1.37 ms (was
+50.88), a survivor with echo off 101.35–101.68 ms (was 151.01 — D32's deadline, untouched), a program
+ignoring SIGHUP 201.54–201.99 ms (was 201.94 — the grace, untouched).
+
+**The grace is kept at the library's 200 ms on purpose.** A program that catches the hang-up to save
+its state is owed that time, and nothing measured here says how much of it a real program needs — so
+the number stays the one the library chose rather than one invented here. What changed is only how
+often somebody looks.
+
+**The signals go to the pid, never the group**, exactly as before: who else closing a console should
+reach is **#193**'s question, and this does not answer it. And a signal follows a `try_wait` that said
+the child is still unreaped, because a reaped pid can belong to somebody else's process by the next
+instruction.
+
+| Discarded | Why |
+|---|---|
+| **SIGHUP then an immediate SIGKILL** — the cheapest, and the issue's first option | It takes away the grace a program uses to save its state on hang-up. The cost was never the grace: it was the grid |
+| **Moving the close off the interface pass** — a thread, or a queue of dying consoles | Nothing joins at process exit, so a program being closed as the window goes could outlive the app instead of being killed; and `Pane` drops its `Pty` before its panel directory, so a deferred kill lets the directory be deleted with the program still alive and able to write `panel.json`. D32 had discarded it for its own reason too: the abandonment becomes unbounded and invisible |
+| **Asking `portable-pty` for a non-polling kill** | It fixes nobody here until a release ships it, and the whole change this crate needs is twenty lines over two system calls the library already makes |
+| **A blocking wait with a deadline** instead of looking every millisecond | Unix offers none for a child: `waitpid` either blocks without a bound or does not block, and a timer signal or a `pidfd` would be more machinery than a loop that costs two hundred non-blocking calls in the worst case |
+| **Looking less often as the grace goes on** (1, 2, 4, 8… ms), which a review argued for against D32's own objection to a poll inside the interface pass | D32 objected to *waking a hundred times where a blocking wait existed*: `recv_timeout` wakes on the event. Here none exists, the window is frozen for the program's dying either way, and every step of backoff after the first is added straight onto the common case — a shell dying at 1.3 ms would be reaped at 3. The worst case is two hundred non-blocking calls, in a close that is already paying 200 ms |
+
+**One hole it does not close, and did not open.** If the system refuses the SIGHUP, nothing
+further is sent and the `wait` that follows is unbounded — exactly as behind the library's `kill`,
+which returned at the same refusal. **Reasoned from the source, not observed, and no fix
+attempted.** The kernel lets a process signal another when their user identities match on the real
+or saved side. The first candidate a review named, `su`, was withdrawn: its waiting parent keeps the
+user's real identity. The second, **`sudo` once authenticated**, is widely reported to refuse a plain
+`kill` from the user who ran it, and it would be the pane's direct child in `sudo vim …` — **not
+measured**, because `sudo` asks for a password on the machine this was written on. So the case has a
+plausible subject, and it is tracked as work of its own rather than as a curiosity. The bounded
+alternative a review proposed — look with `try_wait` up to a deadline and then abandon the child, as
+D32 abandons the reader — belongs to that work, because abandoning a live child is a trade D32 only
+accepted with its survivor measured.
+
+**Still paid, and declared.** A program that ignores the hang-up — or a stopped one — still costs the
+whole 200 ms, and a survivor holding the pseudoterminal still costs D32's 100 ms on top of the dying.
+Both are paid on the interface pass and both are already declared into the frame's separately-timed
+work (**D13**). No batch closes a console by hand, so no published frame figure moves.
