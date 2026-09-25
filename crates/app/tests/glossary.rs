@@ -96,6 +96,7 @@ const GLOSSARY_CLEAN_FILES: &[&str] = &[
     "app/examples/leak.rs",
     "app/examples/fonts.rs",
     "app/examples/screen_demo.rs",
+    "app/tests/waits.rs",
 ];
 
 /// Files covered by the complete citations manifest but not yet declared glossary-clean.
@@ -201,6 +202,7 @@ const CITATIONS_CHECKED: &[(&str, &str)] = &[
     ("app/tests/scripts.rs", "app"),
     ("app/tests/batches.rs", "app"),
     ("app/tests/vendor_patch.rs", "app"),
+    ("app/tests/waits.rs", "app"),
 ];
 
 /// How much each shape of the annex has to yield for this test to mean anything.
@@ -1127,6 +1129,12 @@ fn no_file_of_a_finished_crate_is_still_named_in_spanish() {
 /// it closed is what makes the guard below safe to break the build with — and the failure message
 /// says so, because the fix for a genuine foreign name is to add it here, not to widen the rule.
 const NOT_OURS: &[&str] = &[
+    // **Standard-library waits, not names of this tree.** `waits.rs` cites the ones it judges and the
+    // ones it deliberately does not.
+    "wait_while",
+    "wait_timeout_while",
+    "recv_deadline",
+    "accept",
     // **terminfo capability names and the escape they describe.** The keyboard cites the entries of
     // the `TERM` it advertises to say which sequence each key sends; they are names in
     // `xterm-256color`'s terminfo entry, not identifiers of this tree.

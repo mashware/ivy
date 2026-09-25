@@ -452,6 +452,9 @@ impl Pty {
         let input_for_thread = Arc::clone(&input);
         let stop_for_writer = Arc::clone(&stop);
         let writer = thread::spawn(move || {
+            // Bounded: the only sender lives in `Pty`, and its destructor drops it right after
+            // raising the stop flag. What this thread may never leave is the `write_all` below,
+            // which is why it is not joined (#159).
             while let Ok(bytes) = waiting.recv() {
                 // **Abandoned on close, not drained into a pseudoterminal that is being killed.**
                 // The sender is dropped first and the child killed right after, so without this the
@@ -879,11 +882,15 @@ impl Drop for Pty {
             #[cfg(not(unix))]
             let left = hang_up(child.as_mut());
             match left {
-                // Bounded: after its grace the hang-up falls through to a real `SIGKILL`, which
-                // nobody holds — not even a stopped process, the shape that would otherwise never be
-                // reaped. When `try_wait` failed instead, there is no child of ours left to wait for
-                // and this fails at once.
                 HangUp::Waitable => {
+                    // Bounded: on Unix, after its grace the hang-up falls through to a real
+                    // `SIGKILL`, which nobody holds — not even a stopped process, the shape that
+                    // would otherwise never be reaped. A program in uninterruptible sleep (a hung
+                    // network mount) dies only when its system call returns, and until then this
+                    // waits with it. When `try_wait` failed instead, there is no
+                    // child of ours left to wait for and this fails at once. **Not on Windows**,
+                    // nor on the Unix path with no pid, reasoned unreachable: there a refused kill
+                    // is not seen, and this waits for as long as the program lives (#273).
                     let _ = child.wait();
                 }
                 // **Left running, and waited for somewhere that paints nothing** (D56). Measured:
@@ -901,6 +908,8 @@ impl Drop for Pty {
                         .name("left-running".to_owned())
                         .stack_size(64 * 1024)
                         .spawn(move || {
+                            // Abandoned on purpose: this thread is never joined, and it waits for
+                            // as long as a program nothing here can end chooses to live (D56).
                             let _ = child.wait();
                         });
                     // **Not `eprintln!`**, which panics when standard error is a closed pipe
@@ -939,6 +948,7 @@ impl Drop for Pty {
                 // in that closure **outside** the reading itself, which is why it stays a `let _`
                 // rather than becoming a claim.
                 Err(RecvTimeoutError::Disconnected) => {
+                    // Bounded: the channel only disconnects once the thread has ended.
                     let _ = reader.join();
                 }
                 // **Abandoned on purpose, and it costs a thread and a descriptor for as long as the

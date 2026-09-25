@@ -7193,3 +7193,62 @@ forges the refusal — an unprivileged test cannot create a child it may not sig
 against a real program. The real window was checked by hand on the same day, with the build before
 and the build after: the one before froze until the program's minute ran out, the one after closed
 the console at once, kept answering, and printed the line.
+
+## D57 — Every blocking wait in production code is bounded or declared abandoned, and a test enforces it
+
+**Decided on 25 September 2026** ([#190](https://github.com/mashware/agent-terminal/issues/190)).
+`crates/app/tests/waits.rs` walks the production source of **every crate** under `crates/` and fails
+on any call named `recv`, `wait` or `wait_while`, and on any argument-less `join`. Such a call passes
+only when a comment **opens** with one of two cases, its reason on the same line. That comment is
+either a paragraph of the block ending right above the call (its first line, or the first after an
+empty `//`), or a comment trailing on the call's own line. Only the first wait on a line can be
+declared, so a line with two waits has to be split:
+
+- «Bounded:» — what ends the wait.
+- «Abandoned on purpose:» — who is left behind, and why that trade is better than waiting.
+
+Deadline forms (`recv_timeout`, `wait_timeout`) have other names and are never judged. The number of
+declared waits is pinned as an equality, five on the day it was decided. The walk has floors of its
+own on the crates, files and lines it reaches.
+
+**Why.** A thread that waits is not looking at the thing that would normally wake it, so every wait
+needs its own way out. The rule was in the knowledge store before this, and `term-core` broke it
+twice anyway. The first was the writer thread, which can block for ever and so is never joined
+(#159). The second was the reader thread: it had its stop flag and still hung the window, because it
+was parked inside a `read` where the flag is never consulted (D32). A comment is read once, so a
+third reminder would not hold. The three guards that already walk source and break the build
+(`shape.rs`, `prose.rs`, `glossary.rs`) are what showed this can be enforced.
+
+**The scope is every crate, not the one that broke it**, and the user decided it at the design. A
+guard that watched one crate is the mistake the scripts guard nearly repeated (D30). The cost on the
+day was one declaration outside `term-core`: the condition wait in `app`'s control channel.
+
+| Discarded | Why |
+|---|---|
+| **One phrase for both cases** («Unbounded on purpose:») | Four of the five waits it was written for are bounded: the writer's receive, ended when its only sender is dropped; the kill that follows a hang-up's grace; a join reached only after the thread ended; and reads that only touch memory. The declarations would have been false, and this project treats a mislabelled claim as worse than none |
+| **An allow-list of `file:line` inside the guard** | It goes stale with every line that moves, and nobody reading the call sees it. The declaration belongs where the wait is |
+| **Stopping at `mod tests`, like the line counters** | Production code written after a test module would be invisible, and `keyboard.rs` already has some. Test modules are removed by counting their braces instead, with literals and comments blanked first so a `"{"` cannot throw the count off |
+| **A floor on the declared count** | A floor also catches a matcher that stopped matching. But it goes stale the day a wait is removed, and an equality fires |
+| **Judging test code** | Out of the ticket. A test's unbounded wait hangs the suite, not the window |
+| **Clippy's `disallowed_methods`** with an `#[expect(…, reason = "Bounded: …")]` at each call — raised in review, and it resolves types, so it sees calls written as paths and aliases | Code behind `cfg(not(unix))` is never type-checked on Linux, so the lint would miss exactly the Windows paths F2.7 is about to exercise, which a walk over text reads. Every test module holding a wait would need an allowance of its own, about thirty waits' worth on the day. And the reason's wording would still need a test. It could complement this guard later; it does not replace it |
+
+**What it does not see, declared.** A lock held across a wait: a walk over text cannot see how long a
+guard lives, although a condition variable's `wait` is still caught by name. A wait it cannot name:
+a `for` over a receiver or its `iter()`, the listener's blocking `accept()`, a blocking channel
+`send` (unbounded channels use the same name and never block), and the pseudoterminal's own `read`,
+which is the parked side of D32. Nor waits under other names: running a command to completion
+(`output()`, `status()`, `wait_with_output()`), a thread scope that joins at its end, a call written
+as a path (`JoinHandle::join(h)`), or parking a thread. Turning a declared wait into one of those
+lowers the declared count, and the equality is what notices. Test modules are recognised in one
+shape only: a `#[cfg(test)]` line of its own, other attributes after it, then a `mod … {` header on
+one line. Any other shape is read as production: an undeclared wait in it fails the guard, and a
+declared one counts toward the pinned number. Nor does it see whether
+a declaration is true. It checks that a reason is written, and the pinned count is what makes every
+new declaration an edit that a reviewer reads.
+
+**One declaration is true only in part, and says so.** The close's `child.wait()` is bounded on Unix
+by the kill a hang-up falls through to, except for a program in uninterruptible sleep, which dies
+only when its system call returns. On Windows, and on the Unix path with no pid (reasoned
+unreachable), a refused kill is not seen and that wait lasts as long as the program lives. Its
+declaration states each case and points at
+[#273](https://github.com/mashware/agent-terminal/issues/273), which is the Windows one.

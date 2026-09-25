@@ -100,6 +100,8 @@ impl ReadActivity {
             state = self
                 .0
                 .finished
+                // Bounded: an admitted read only locks and serializes a document in memory, and
+                // `accepting` is already false, so no new one can start.
                 .wait(state)
                 .expect("document read metrics are changed only while completing a read");
         }
