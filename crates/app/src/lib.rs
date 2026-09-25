@@ -7275,7 +7275,7 @@ mod tests {
         // With a single tab the arrow belongs to the program, but **the batch itself may have
         // created another one**. Looking at how many there are just once, before walking through
         // it, the arrow was weighed against the old count, fell into the usual translation and got
-        // `\x1b[C` — exactly what the cut exists to prevent.
+        // to the program — exactly what the cut exists to prevent.
         let ctx = egui::Context::default();
         let mut pane = pane_with("sleep 30", 0);
         let mut modifiers = egui::Modifiers::NONE;
@@ -7334,7 +7334,7 @@ mod tests {
             "the arrow that followed the close was asked for as a change of tab"
         );
         assert_eq!(
-            pane.keystrokes, b"\x1b[C",
+            pane.keystrokes, b"\x1b[1;6C",
             "the arrow did not reach the program with a single tab left"
         );
     }
@@ -8361,10 +8361,9 @@ mod tests {
 
     #[test]
     fn the_chord_switches_tab_and_does_not_reach_the_program() {
-        // AC8. Without consuming the event the program would receive `\x1b[C`: with Ctrl and Shift
-        // held, the arrow falls into `keyboard::key`'s usual table —Shift does not change the
-        // control code, and Ctrl with something that is not a letter drops into that table—, so the
-        // cursor would move in the editor of the tab that has just been left.
+        // AC8. Without consuming the event the program would receive the arrow with its modifiers
+        // (`CSI 1;6C`, D52), so the cursor would move in the editor of the tab that has just been
+        // left.
         let ctx = egui::Context::default();
         let mut window = window_of_tabs([["sleep 30", "sleep 30"], ["sleep 30", "sleep 30"]]);
 
@@ -8431,8 +8430,8 @@ mod tests {
     fn with_a_single_tab_the_arrow_reaches_the_program() {
         // Consuming the arrow with a single tab would take it out of the way to do nothing —going
         // from the only tab to itself— and the program would stop receiving it. Before the
-        // shortcuts existed, `Ctrl+Shift+←` reached it as `\x1b[D`, and with one tab it still
-        // reaches it.
+        // shortcuts existed, `Ctrl+Shift+←` reached it, and with one tab it still reaches it — with
+        // its modifiers, as `xterm` sends it.
         let ctx = egui::Context::default();
         let mut window = window_with("sleep 30", "sleep 30");
 
@@ -8445,7 +8444,7 @@ mod tests {
         );
         assert_eq!(
             window.active().panes()[0].keystrokes,
-            b"\x1b[D",
+            b"\x1b[1;6D",
             "the chord swallowed the arrow instead of it reaching the program"
         );
     }
@@ -10187,13 +10186,14 @@ mod tests {
         // the editors there are. Taking away either of the two guards left the suite green —checked
         // by mutating the two separately— and it would have taken those keys away from everybody
         // with two tabs open.
-        for (modifiers, with_what) in [
+        for (modifiers, with_what, arrow) in [
             (
                 egui::Modifiers {
                     ctrl: true,
                     ..Default::default()
                 },
                 "Ctrl only",
+                &b"\x1b[1;5C"[..],
             ),
             (
                 egui::Modifiers {
@@ -10201,6 +10201,7 @@ mod tests {
                     ..Default::default()
                 },
                 "Shift only",
+                &b"\x1b[1;2C"[..],
             ),
         ] {
             let ctx = egui::Context::default();
@@ -10215,7 +10216,7 @@ mod tests {
             );
             assert_eq!(
                 window.active().panes()[0].keystrokes,
-                b"\x1b[C",
+                arrow,
                 "with {with_what} the arrow was swallowed by the chord instead of reaching the \
                  program"
             );
@@ -24197,7 +24198,7 @@ mod tests {
     }
 
     #[test]
-    fn the_six_navigation_keys_reach_a_real_program_in_the_form_it_asked_for() {
+    fn the_navigation_keys_and_the_arrows_reach_a_real_program_in_the_form_it_asked_for() {
         // The program itself turns application cursor keys on, so the mode Home and End are
         // translated against is the one the screen parsed from it — not one the test set by hand.
         // What is read back is what `cat -v` printed, in a mode the probe proved: with the echo on,
@@ -24225,8 +24226,10 @@ mod tests {
                 plain(egui::Key::PageDown),
                 plain(egui::Key::Home),
                 plain(egui::Key::End),
+                plain(egui::Key::ArrowUp),
                 egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
                 key_press(egui::Key::Delete, egui::Modifiers::CTRL),
+                key_press(egui::Key::ArrowLeft, egui::Modifiers::CTRL),
             ],
         );
         pane.send_keys(
@@ -24238,7 +24241,7 @@ mod tests {
             true,
         );
 
-        wait_for_this_console_to_say(&mut pane, "^[[2~^[[3~^[[5~^[[6~^[OH^[OF^[[3;5~");
+        wait_for_this_console_to_say(&mut pane, "^[[2~^[[3~^[[5~^[[6~^[OH^[OF^[OA^[[3;5~^[[1;5D");
     }
 
     /// Turns the wheel over that console, with whatever chord it is told.
@@ -24487,6 +24490,41 @@ mod tests {
             Some(0),
             "the wheel's arrows were counted as mouse reports"
         );
+    }
+
+    #[test]
+    fn under_application_cursor_keys_the_wheel_sends_the_arrows_the_program_asked_for() {
+        // `less` and `vim` send `smkx` on start, so on the alternate screen the wheel almost always
+        // meets DECCKM set: the arrows it sends have to be the keyboard's, in that mode.
+        let ctx = egui::Context::default();
+        let rects = two_wide_panes();
+        let metrics = with_metrics(|metrics| metrics.clone());
+        let mut window = window_with(
+            "stty -echo -icanon && printf '\\033[?1049h\\033[?1h' && echo ready && cat -v",
+            "sleep 30",
+        );
+        for (pane, rect) in window.active_mut().panes_mut().into_iter().zip(&rects) {
+            pane.measured = grid_of(*rect, &metrics);
+            pane.screen.resize(pane.measured);
+        }
+        wait_for_the_pane_to_say(&mut window, 0, "ready");
+        assert!(
+            window.active().panes()[0].screen.wheel_acts_as_arrows()
+                && window.active().panes()[0].screen.application_cursor_keys(),
+            "the test's program never reached the alternate screen in application cursor mode"
+        );
+        confirm_the_console_is_in_the_mode_it_asked_for(window.active_mut().panes_mut()[0]);
+
+        turn_the_wheel(
+            &mut window,
+            &ctx,
+            &rects,
+            rects[0].center(),
+            -2.0,
+            egui::Modifiers::NONE,
+        );
+
+        wait_for_the_pane_to_say(&mut window, 0, "^[OB^[OB");
     }
 
     #[test]

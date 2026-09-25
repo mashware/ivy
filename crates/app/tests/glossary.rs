@@ -1137,7 +1137,11 @@ const NOT_OURS: &[&str] = &[
     "knp",
     "khome",
     "kend",
+    "kcuu1",
+    "kcub1",
     "SS3",
+    // The curses call that sends `smkx`: what makes a program ask for application cursor keys.
+    "keypad",
     // **The three verbs of the control channel's wire format.** They are names on a wire and not
     // identifiers of the app crate: the channel's crate is what declares them, and the app cites
     // them where it explains what it does with each one.

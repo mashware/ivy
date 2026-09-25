@@ -6762,7 +6762,7 @@ in `W`, because outside every span it would be published as the framework's cost
 | Supporting `file:`, `mailto:` or producer-chosen schemes | The feature is web navigation; widening the scheme set widens the untrusted capability without a present requirement |
 | Dedicated nested timing spans from the first version | The existing panel and mouse spans already own the work; counters and batch `W` declare it without risking double subtraction |
 
-## D52 — Home, End, Insert, Delete, Page Up and Page Down go to the program in `xterm`'s form, modifiers included
+## D52 — Home, End, Insert, Delete, Page Up, Page Down and the arrows go to the program in `xterm`'s form, modifiers included
 
 **Status: taken.** The keyboard milestone (F1.3) translated Enter, Tab, Backspace, Escape and the
 four arrows, and every other named key went silent — held that way by a test. Six of them are on
@@ -6791,11 +6791,12 @@ the reason `key_bytes` already gives about Alt: for these keys the modifier chan
 the plain one is a different key (`Ctrl+Delete` would delete one character instead of a word). The
 macOS command key still silences them.
 
-**What that leaves inconsistent, said rather than implied:** after this decision `Ctrl+Home` carries
-its modifier and `Ctrl+Left` does not — the arrows keep sending the plain sequence with Ctrl and keep
-ignoring DECCKM, so word-jump does not work in a shell. It is the same mechanism and it is left out
-on purpose: the arrows also feed the wheel-as-arrows path of the alternate screen, and that widens
-the change past the six keys this decision is about.
+**What that left inconsistent, and how it was closed.** As first taken, `Ctrl+Home` carried its
+modifier and `Ctrl+Left` did not — the arrows kept sending the plain sequence with Ctrl and kept
+ignoring DECCKM, so word-jump did not work in a shell and a curses program that called `keypad()`
+was told by terminfo that Up is `SS3 A` (`kcuu1`) while it received `CSI A`. It was left out on
+purpose, because the arrows also feed the wheel-as-arrows path of the alternate screen; point 5
+closes it (#261).
 
 **4. The scrollback shortcuts keep the keys first.** The keymap is consulted before translation, so
 `Shift+PageUp`, `Shift+PageDown`, `Shift+Home` and `Shift+End` still move the scrollback and send
@@ -6824,13 +6825,35 @@ through, and that one does go out as `CSI 2;2~`. None of this is new with this d
 while these keys had no bytes of their own — and none of it can be seen from Linux, where the suite
 runs.
 
+**5. The four arrows follow the same two rules, and the wheel sends them in the program's mode.**
+Bare, an arrow is `CSI A..D` normally and `SS3 A..D` under DECCKM (`kcuu1`…`kcub1`); with any
+modifier it is `CSI 1;m A..D` in either mode — `Ctrl+Left` is `CSI 1;5D` — the same parameter and
+the same table as Home and End, so Alt stops silencing them too. The wheel on the alternate screen,
+which sends arrows to a program that did not ask for the mouse (**D23**), takes its bytes from that
+same translation, bare and in the mode the screen holds: `less` and `vim` switch DECCKM on as they
+start, so a wheel with a table of its own would send them the other shape on every notch. WezTerm
+does the same — its alternate scroll presses the arrow through its own key encoder. Alacritty does
+not: it always sends `SS3 A` / `SS3 B`, which in normal mode is a sequence the advertised terminfo
+never promised. The terminal's own chords are untouched — the keymap is consulted before
+translation, so `Ctrl+Shift+←/→` still switches tabs — and a chord given back with `none`, or
+pressed with a single tab, now reaches the program with its modifiers (`CSI 1;6D`) where before it
+arrived as the bare arrow.
+
+**What a person sees change in a shell.** A modified arrow the shell has no binding for is no longer
+a plain cursor move: the `/etc/inputrc` Debian and Ubuntu ship binds `CSI 1;5C/D` to word motion, but not
+`Shift+Up` (`CSI 1;2A`) or `Alt+Left` (`CSI 1;3D`), and readline answers an unbound sequence by
+inserting its tail (`;2A`) into the line. It is what the same key does in `xterm`, WezTerm and
+Alacritty, which send the same bytes, and the remedy is the shell's binding, not a plainer key.
+
 ### What was discarded, and why
 
 | Discarded | Why |
 |---|---|
 | `CSI 1~` / `CSI 4~` for Home and End (the VT220 «Find» and «Select» keys, what rxvt sends) | Not what `xterm-256color` describes, which is the `TERM` this terminal advertises |
-| Dropping the modifier and sending the plain key, as the arrows do | A different key: `Ctrl+Delete` deleting one character, `Shift+PageUp` given back and arriving as a bare `PageUp` |
+| Dropping the modifier and sending the plain key, as the arrows did until point 5 | A different key: `Ctrl+Delete` deleting one character, `Shift+PageUp` given back and arriving as a bare `PageUp` |
 | Silence under a modifier, as Alt gets for every other key | Six keys dead again as soon as a modifier is held, which is the defect this decision exists to remove |
 | A complete extended keyboard protocol (kitty's, `modifyOtherKeys`) | A protocol a program has to ask for, covering every key; the parameter form above is part of the plain PC-style function-key encoding and needs no request |
-| Moving the arrows to DECCKM and to the modifier parameter in the same change | The arrows are also what the wheel sends on the alternate screen; changing them is a change of its own |
+| Moving the arrows to DECCKM and to the modifier parameter in the same change | The arrows are also what the wheel sends on the alternate screen; changing them is a change of its own — made in point 5 |
+| The wheel keeping the plain `CSI A` / `CSI B` whatever the mode | A second table that contradicts the keyboard's, in the one mode the wheel's programs almost always hold |
+| The wheel carrying the chord held while turning it | The chord on the wheel already means something else here (`Shift` is the scrollback, **D23**) |
 | Reading the mode per key event | It cannot change inside a pass; one read, where bracketed paste is already read, is the established shape |

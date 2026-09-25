@@ -9,8 +9,8 @@
 //! file is at so the number can only go down.
 //!
 //! **Where this milestone stopped, and why.** Alt, the function keys and the numeric
-//! keypad were left out — Alt everywhere except on the six navigation keys, which **D52** later
-//! brought in with their modifiers. None of them is needed to type commands in a shell or to move around an editor,
+//! keypad were left out — Alt everywhere except on the six navigation keys and the arrows, which
+//! **D52** later brought in with their modifiers. None of them is needed to type commands in a shell or to move around an editor,
 //! which is what the milestone has to be able to demonstrate; and the three of them drag along a decision that is not
 //! the one to make here —Alt prepends an escape to what the key sends, and the other two change their bytes
 //! depending on the mode the program is in—. Adding them without being able to see them working would be writing
@@ -44,6 +44,34 @@ pub fn somebody_typed(input: &eframe::egui::InputState) -> bool {
 pub enum CursorKeys {
     Normal,
     Application,
+}
+
+impl CursorKeys {
+    /// The form the program on this screen asked for.
+    pub fn of(screen: &term_core::Screen) -> Self {
+        if screen.application_cursor_keys() {
+            Self::Application
+        } else {
+            Self::Normal
+        }
+    }
+}
+
+/// Up and Down bare, in each cursor mode. Shared by the keyboard's table and the wheel, so the two
+/// cannot disagree.
+const UP: (&[u8], &[u8]) = (b"\x1b[A", b"\x1bOA");
+const DOWN: (&[u8], &[u8]) = (b"\x1b[B", b"\x1bOB");
+
+/// The bare arrow the wheel sends on the alternate screen, in the form the program asked for.
+///
+/// **The keyboard's bytes, not a table of its own**: `less` and `vim` switch DECCKM on as they
+/// start, so a wheel with plain `CSI A` would send them the other shape on every notch.
+pub(crate) fn wheel_arrow(to_the_top: bool, cursor_keys: CursorKeys) -> &'static [u8] {
+    let (normal, application) = if to_the_top { UP } else { DOWN };
+    match cursor_keys {
+        CursorKeys::Normal => normal,
+        CursorKeys::Application => application,
+    }
 }
 
 /// The bytes that correspond to an event, or nothing if that event does not translate.
@@ -583,7 +611,7 @@ fn key_bytes(
     if modifiers.mac_cmd {
         return None;
     }
-    // Before the Alt silence below, because for these six keys Alt has a form of its own.
+    // Before the Alt silence below, because for these ten keys Alt has a form of its own.
     if let Some(bytes_out) = navigation_key(key, modifiers, cursor_keys) {
         return Some(bytes_out);
     }
@@ -613,24 +641,19 @@ fn key_bytes(
         // but many editors do not.
         Key::Backspace => &[0x7F],
         Key::Escape => &[0x1B],
-        // The four arrows in normal mode. A program can request application mode, in which
-        // they change form; that is out of this milestone and is written above.
-        Key::ArrowUp => b"\x1b[A",
-        Key::ArrowDown => b"\x1b[B",
-        Key::ArrowRight => b"\x1b[C",
-        Key::ArrowLeft => b"\x1b[D",
         _ => return None,
     };
     Some(Cow::Borrowed(bytes_out))
 }
 
-/// Insert, Delete, Page Up, Page Down, Home and End, in the form `xterm` sends them and the `TERM`
-/// this terminal advertises describes (`kich1`, `kdch1`, `kpp`, `knp`, `khome`, `kend`). **D52.**
+/// Insert, Delete, Page Up, Page Down, Home, End and the four arrows, in the form `xterm` sends them
+/// and the `TERM` this terminal advertises describes (`kich1`, `kdch1`, `kpp`, `knp`, `khome`,
+/// `kend`, `kcuu1`…`kcub1`). **D52.**
 ///
 /// **Every modifier goes into the sequence as xterm's parameter** — `1 + Shift + 2·Alt + 4·Ctrl`,
-/// so `Ctrl+Delete` is `CSI 3;5~` — instead of being dropped as it is for the arrows: for these keys
-/// the modifier changes the sequence, and the plain one would be a different key (`Ctrl+Delete`
-/// deleting one character instead of a word). With a parameter Home and End ignore DECCKM, as in
+/// so `Ctrl+Delete` is `CSI 3;5~` and `Ctrl+Left` is `CSI 1;5D`: for these keys the modifier
+/// changes the sequence, and the plain one would be a different key (`Ctrl+Left` moving one
+/// character instead of a word). With a parameter Home, End and the arrows ignore DECCKM, as in
 /// `xterm`; only the bare key switches to `SS3`.
 fn navigation_key(
     key: Key,
@@ -638,7 +661,7 @@ fn navigation_key(
     cursor_keys: CursorKeys,
 ) -> Option<Cow<'static, [u8]>> {
     // The bare key in each cursor mode, and the two bytes the parameter form wraps: `CSI n;m ~`
-    // for the tilde keys (Delete is `CSI 3;m ~`), `CSI 1;m H` / `CSI 1;m F` for Home and End.
+    // for the tilde keys (Delete is `CSI 3;m ~`), `CSI 1;m X` for Home, End and the arrows.
     let (normal, application, code, last): (&'static [u8], &'static [u8], u8, u8) = match key {
         Key::Insert => (b"\x1b[2~", b"\x1b[2~", b'2', b'~'),
         Key::Delete => (b"\x1b[3~", b"\x1b[3~", b'3', b'~'),
@@ -646,6 +669,10 @@ fn navigation_key(
         Key::PageDown => (b"\x1b[6~", b"\x1b[6~", b'6', b'~'),
         Key::Home => (b"\x1b[H", b"\x1bOH", b'1', b'H'),
         Key::End => (b"\x1b[F", b"\x1bOF", b'1', b'F'),
+        Key::ArrowUp => (UP.0, UP.1, b'1', b'A'),
+        Key::ArrowDown => (DOWN.0, DOWN.1, b'1', b'B'),
+        Key::ArrowRight => (b"\x1b[C", b"\x1bOC", b'1', b'C'),
+        Key::ArrowLeft => (b"\x1b[D", b"\x1bOD", b'1', b'D'),
         _ => return None,
     };
     let parameter =
@@ -750,11 +777,7 @@ impl crate::Pane {
         // as well —the two fields are disjoint borrows—, so this is a choice, not a wall.)
         let bracketed = self.screen.bracketed_paste();
         // Same reasoning as the one above: set by the program, so it cannot change within the pass.
-        let cursor_keys = if self.screen.application_cursor_keys() {
-            CursorKeys::Application
-        } else {
-            CursorKeys::Normal
-        };
+        let cursor_keys = CursorKeys::of(&self.screen);
         // **With a paste held, its answer is read before anything else.** The bytes are not written
         // and the question owns `Enter` and `Escape` until it is answered; everything else still
         // reaches the program, because a held paste is not a frozen console. It is composed against
@@ -1153,14 +1176,6 @@ mod tests {
     }
 
     #[test]
-    fn the_arrows_go_as_an_escape_sequence() {
-        assert_eq!(press(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
-        assert_eq!(press(Key::ArrowDown), Some(b"\x1b[B".to_vec()));
-        assert_eq!(press(Key::ArrowRight), Some(b"\x1b[C".to_vec()));
-        assert_eq!(press(Key::ArrowLeft), Some(b"\x1b[D".to_vec()));
-    }
-
-    #[test]
     fn the_twenty_six_letters_land_in_their_place_and_none_strays() {
         let letters = [
             Key::A,
@@ -1391,7 +1406,6 @@ mod tests {
         // terminal sends is exactly the same as without Ctrl.
         assert_eq!(press_with_ctrl(Key::Enter), Some(vec![0x0D]));
         assert_eq!(press_with_ctrl(Key::Backspace), Some(vec![0x7F]));
-        assert_eq!(press_with_ctrl(Key::ArrowUp), Some(b"\x1b[A".to_vec()));
         // And what is in neither of the two tables still sends nothing.
         assert_eq!(press_with_ctrl(Key::F1), None);
     }
@@ -1534,6 +1548,50 @@ mod tests {
         };
         assert_eq!(chord_of(Key::Home, command), None);
         assert_eq!(chord_of(Key::Delete, command), None);
+        assert_eq!(chord_of(Key::ArrowLeft, command), None);
+    }
+
+    #[test]
+    fn the_arrows_follow_the_cursor_key_mode_the_program_chose() {
+        // `kcuu1..kcub1` in the advertised terminfo: a curses program that called `keypad()` is
+        // told Up is `SS3 A`, and one that did not keeps getting `CSI A`.
+        let expected: [(Key, &[u8], &[u8]); 4] = [
+            (Key::ArrowUp, b"\x1b[A", b"\x1bOA"),
+            (Key::ArrowDown, b"\x1b[B", b"\x1bOB"),
+            (Key::ArrowRight, b"\x1b[C", b"\x1bOC"),
+            (Key::ArrowLeft, b"\x1b[D", b"\x1bOD"),
+        ];
+        for (key, normal, application) in expected {
+            assert_eq!(press(key).as_deref(), Some(normal), "{key:?}");
+            assert_eq!(
+                in_application_mode(key, Modifiers::NONE).as_deref(),
+                Some(application),
+                "{key:?} ignored application cursor keys"
+            );
+        }
+    }
+
+    #[test]
+    fn a_modifier_on_an_arrow_travels_as_xterms_parameter_in_either_mode() {
+        // `Ctrl+Left` is the word jump of every shell: sent as the bare arrow it moved one
+        // character. Each modifier alone, so a parameter that confused two bits fails here.
+        assert_eq!(
+            chord_of(Key::ArrowLeft, Modifiers::CTRL).as_deref(),
+            Some(&b"\x1b[1;5D"[..])
+        );
+        assert_eq!(
+            chord_of(Key::ArrowRight, Modifiers::ALT).as_deref(),
+            Some(&b"\x1b[1;3C"[..])
+        );
+        assert_eq!(
+            chord_of(Key::ArrowUp, Modifiers::SHIFT).as_deref(),
+            Some(&b"\x1b[1;2A"[..])
+        );
+        // With a parameter the arrow keeps the CSI form under DECCKM, as Home and End do.
+        assert_eq!(
+            in_application_mode(Key::ArrowDown, Modifiers::CTRL).as_deref(),
+            Some(&b"\x1b[1;5B"[..])
+        );
     }
 
     #[test]

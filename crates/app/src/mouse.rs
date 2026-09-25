@@ -21,6 +21,7 @@
 //!
 //! [`keyboard`]: crate::keyboard
 
+use crate::keyboard::{CursorKeys, wheel_arrow};
 use crate::{Cell, Scroll, WheelInput, WheelOutcome, WheelOwner};
 use eframe::egui;
 use eframe::egui::{Modifiers, PointerButton};
@@ -361,15 +362,12 @@ impl crate::Pane {
     fn send_wheel(&mut self, owner: WheelOwner, how_many: i32, at: Cell) -> Option<WheelOutcome> {
         let started = Instant::now();
         let to_the_top = how_many > 0;
+        let arrow = wheel_arrow(to_the_top, CursorKeys::of(&self.screen));
         let mut bytes = Vec::new();
         for _ in 0..how_many.unsigned_abs() {
             match owner {
                 WheelOwner::ArrowKeys => {
-                    // **The same table as the keys, and it inherits its declared cut**: application
-                    // mode —the one where the arrows change shape— is left out of the milestone,
-                    // and that is written in the keyboard module. Writing it here in another way
-                    // would leave two tables contradicting each other.
-                    bytes.extend_from_slice(if to_the_top { b"\x1b[A" } else { b"\x1b[B" });
+                    bytes.extend_from_slice(arrow);
                 }
                 _ => {
                     let gesture = if to_the_top {
