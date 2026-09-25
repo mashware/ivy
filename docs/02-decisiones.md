@@ -6871,3 +6871,81 @@ Alacritty, which send the same bytes, and the remedy is the shell's binding, not
 | The wheel keeping the plain `CSI A` / `CSI B` whatever the mode | A second table that contradicts the keyboard's, in the one mode the wheel's programs almost always hold |
 | The wheel carrying the chord held while turning it | The chord on the wheel already means something else here (`Shift` is the scrollback, **D23**) |
 | Reading the mode per key event | It cannot change inside a pass; one read, where bracketed paste is already read, is the established shape |
+
+## D53 — The stretch from the desktop's key to the framework's event is verified by hand, on every platform the change reaches
+
+**Decided.** Nothing in this repository tests what happens between the operating system's key event
+and the `egui::Event` the terminal receives, and that stays so on purpose. A change that can alter
+that stretch is verified **by hand**, on **each platform it can reach**, by pressing the list below
+and reading what arrives in the program. The pull request says, under «How to test it», which
+platforms it was pressed on and what came out; a platform nobody could press on is named as
+unverified, never left out.
+
+**What counts as touching that stretch.** Any change to the copy in `vendor/egui-winit` (**D33**); a
+version change of `egui`, `eframe`, `egui-winit` or `winit`, the patch section of the workspace
+manifest included; and a change to the keyboard translation that rests on what the desktop does or
+does not deliver — which chord arrives as a key, which one arrives as a clipboard request, which
+one arrives at all. A change to the bytes a key produces once it has arrived as an event is **not**
+this: that half is the terminal's own translation and is tested in the ordinary way, the asymmetry
+of the two paste chords being the example (**D33**).
+
+**Why it is not tested, said once so nobody has to find it again.** Two walls of `winit`'s own, and
+either one is enough:
+
+1. `KeyEvent` carries a `pub(crate)` field and has no constructor, no `Default` and no builder, so
+   no crate but `winit` can build one. Being inside the vendored `egui-winit` does not help: the
+   privacy is `winit`'s.
+2. `on_window_event` demands a real `Window`, which `winit` creates only from a running event loop
+   bound to a compositor, and `on_keyboard_input` — where the branch that failed in **D33** lives —
+   is private and reachable only through that method.
+
+`egui_winit::State::new` is **not** a wall — it takes a display handle, and a dummy one can be
+built — which is exactly the trap: getting a `State` looks like progress and both walls stand
+behind it. So every keyboard test in `crates/app` builds `egui::Event` by hand, and its green says
+nothing about delivery. That is the third disguise of **D30** in the variant a library imposes:
+**#203** lived below that line for **26 days**, with `Ctrl+V` promised by **D11**, tests all around
+it, and the key reaching the program as nothing at all.
+
+**The list.** Each chord, the situation it is pressed in, and what the program has to receive. The
+observer is a program that prints the bytes it gets: `cat -v` on Linux. **D30** already records
+that `stty` and `cat -v` are a Linux assumption the other two platforms do not share in that shape,
+so F2.7 names the observer it uses on each of them.
+
+| Chord | Situation | The program receives |
+|---|---|---|
+| `Ctrl+V` | text on the clipboard | `0x16` (`cat -v`: the first press prints `^`, the second completes `^V` — the line discipline's literal-next, **D33**) |
+| `Ctrl+V` | an **image** on the clipboard, and then an empty one | the same `0x16` |
+| `Ctrl+Shift+V` | text on the clipboard | the text, pasted, and no `0x16` |
+| `Ctrl+Shift+V` | an image on the clipboard | nothing at all (**D33**: the terminal's own shortcut never reaches the program) |
+| `Ctrl+Shift+C` | text marked | nothing; the marked text is on the clipboard (**D22**, **D26**) |
+| a letter, `Enter`, `Ctrl+C` | a shell prompt | the letter, `\r`, `0x03` |
+| `Ctrl+Left`, `Ctrl+Delete`, `Shift+Insert` | `cat -v` | `CSI 1;5D`, `CSI 3;5~`, `CSI 2;2~` (**D52**) |
+
+**Where the list is expected to disagree, which is what F2.7 comes to decide.**
+
+- **macOS**: the framework's «command» is ⌘ there, so ⌘+V would produce the paste request and
+  `Ctrl+V` arrive as a key; the two shortcuts of **D11** stop being what this table says. The copy
+  row goes the same way: `Ctrl+Shift+C` is not a copy request there, it arrives as a key, and
+  `key_bytes` lets Shift through with Ctrl, so it reaches the program as `0x03` — the terminal's
+  copy chord interrupting instead of copying. F2.7 rewrites the paste and copy rows for that
+  platform rather than reading them as failures.
+- **Windows**: the vendored `egui-winit` turns chords over Insert and Delete into clipboard requests
+  before they are keys, and what reaches the program is `0x03` for a copy and `0x18` for a cut
+  (**D52**, last point). The `Shift+Insert` row is expected to fail there today — with text on the
+  clipboard it pastes instead — and `Ctrl+Insert` and `Shift+Delete` would send `0x03` and `0x18`
+  if pressed; those three are the ones F2.7 has to decide.
+
+**What was discarded, and why.**
+
+| Discarded | Why |
+|---|---|
+| An integration test under a virtual display (Xvfb, or a headless Wayland compositor) with operating-system key injection (`xdotool`, `ydotool`) | It is the one route that exists — `winit` builds the event itself from a real platform event, and the virtual display supplies the window — and it covers **only Linux**, while what makes the hand check expensive is macOS and Windows, where the injection is a different tool on each. It would also be the first test here that needs a display, on a machine that has neither tool installed and a repository with no continuous integration to run it; and tests of that kind are slow and flaky, which is why they get ignored rather than fixed |
+| Leaving the question open until F2.7 | F2.7 is where it gets expensive, and arriving there without a list means deciding on the day which chords matter, on two unfamiliar machines |
+| Building a `KeyEvent` some other way, or testing through `egui_winit::State` | The two walls above; `State::new` constructs and leads nowhere |
+| Driving our own `winit` loop, so the translation becomes ours and testable | The same rewrite of the application's shell that **D33** discarded for the fix, now for a test |
+
+**What reopens it.** A regression on this stretch that the list would not have caught, or the
+repository gaining continuous integration with a display; the first says the list is incomplete, the
+second removes most of what the virtual-display test costs. Either one is the new signal, and the
+question it reopens is the one #206 asked: one hand check per platform per change, against building
+the machinery once.
