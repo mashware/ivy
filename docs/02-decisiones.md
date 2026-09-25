@@ -3,6 +3,8 @@
 Each one with its reason and what was discarded. If a decision changes, it is edited here and the
 why is stated.
 
+A decision that accepts a limit instead of fixing it writes that limit down the way **D54** says.
+
 ---
 
 ## D1 — Real cross-platform (Linux, macOS, Windows)
@@ -6949,3 +6951,53 @@ repository gaining continuous integration with a display; the first says the lis
 second removes most of what the virtual-display test costs. Either one is the new signal, and the
 question it reopens is the one #206 asked: one hand check per platform per change, against building
 the machinery once.
+
+## D54 — A limit is written down with the evidence for it: «it cannot be fixed» names the attempt, and «it is rare» names who meets it
+
+**Decided.** A decision often ends by accepting something it does not fix, and two kinds of sentence
+close that question for everyone who reads it afterwards — whoever wrote it included. So both carry
+more than the sentence itself, from here on:
+
+1. **«It cannot be fixed» names what was read or measured to reach it, or says «not attempted».**
+   The second form is honest and perfectly acceptable. The first is a claim, and it needs its
+   evidence like any number in this file: the routes looked at and why each one fails — the
+   function, the hook, the option — or the measurement that ruled the fix out, and whether the
+   conclusion was **observed** on the running application or only reasoned from the source.
+2. **«It is rare» names the technical condition, the situation of the person using the terminal
+   that reaches it, and how it is known that this situation is the only one.** Naming the situation
+   is not enough on its own, and D11 is the proof: it did name one. What is judged rare is the
+   situation, so the claim stands only if no other ordinary situation reaches the same condition —
+   and that is the half that gets skipped, so it is the half that has to be written.
+
+**Where both came from.** **D11** recorded that with an empty clipboard `Ctrl+V` sends nothing, that
+this is barely noticeable *because an empty clipboard is rare*, that it means `vim`'s visual block
+does not open in a freshly started session with nothing copied, and that *it cannot be fixed from
+here*. Both halves were wrong, each in its own way:
+
+1. **The unfixability was reasoned, never tested.** **D33** read four routes and ruled them out —
+   `eframe`'s `raw_input_hook`, `on_window_event` and `event_loop_builder`, and `egui-winit`'s
+   `clipboard` feature — and watched the defect on a running window with an image on the clipboard,
+   which showed something the reading had not predicted: the key's release survives. The fix was
+   then checked by hand with `cat -v`. None of that had been done when the sentence was written.
+2. **The rarity was judged against the wrong condition.** D11 named a situation — a session with
+   nothing copied — and never asked whether it was the only one. It was not: the real condition is
+   a clipboard that **holds no text**, and a clipboard holding a screenshot for an agent is an
+   ordinary state in a terminal built to host agents.
+
+It sat filed as a limitation for **26 days** — from 13 August to 8 September 2026, in this file and
+in a knowledge card — and was fixed the day it was met in use.
+
+**What was discarded.**
+
+- **Re-auditing every existing decision against the two rules.** The rules apply from here on; an
+  existing decision is looked at when something else brings you to it, which is exactly how D11 got
+  corrected.
+- **A guard that checks the rule.** «Not attempted» and «rare in what» are judgements about prose,
+  and a test that looked for the words would be satisfied by the words — the same disguise **D30**
+  names, in a document instead of a terminal.
+- **Two decisions, one per rule.** They come from the same failure, one sentence each; split, each
+  reads as half an argument.
+- **Only the header of this file, unnumbered.** It is where a writer of a new decision looks first,
+  so it points here — but a rule with no number cannot be cited from a review or from another
+  decision, and it would carry neither its reason nor what was discarded, which is what this file
+  asks of every entry.
